@@ -256,7 +256,7 @@ export function StatsPage() {
         icon={<img src="/static/trans2.png" alt="" />}
         title="Listening Stats"
         actions={
-          <>
+          <div className={styles.headerPrimaryActions}>
             {/* The story is a listening fact, so it does not belong on the
                 Library tab where nothing else is about the person. */}
             {tab === 'listening' ? (
@@ -266,6 +266,9 @@ export function StatsPage() {
                 onClick={openStory}
                 data-testid="stats-year-button"
               >
+                <span className={styles.yearSparkle} aria-hidden="true">
+                  ✨
+                </span>
                 Your Year
               </button>
             ) : null}
@@ -305,51 +308,59 @@ export function StatsPage() {
                 </button>
               ))}
             </div>
-            <div className={styles.statsSyncControls}>
-              {isImportCardYours(lastfmImportQuery.data) ? (
-                <LastfmImportControl
-                  status={lastfmImportQuery.data}
-                  onRun={() => lastfmMutation.mutate()}
-                  running={lastfmMutation.isPending}
-                />
-              ) : null}
-              {isImportCardYours(listenbrainzImportQuery.data) ? (
-                <ListenbrainzImportControl
-                  status={listenbrainzImportQuery.data}
-                  onRun={() => listenbrainzMutation.mutate()}
-                  running={listenbrainzMutation.isPending}
-                />
-              ) : null}
-              {isStandalone ? (
-                <span
-                  className={styles.statsStandaloneNotice}
-                  role="note"
-                  title="SoulSync standalone does not use an external media server, so manual listening stats sync is unavailable."
-                >
-                  Standalone mode: manual sync unavailable
-                </span>
-              ) : (
-                <>
-                  <span className={styles.statsLastSynced}>
-                    {lastSynced ? `Last synced: ${lastSynced}` : 'Not synced yet'}
-                  </span>
-                  <button
-                    id="stats-sync-btn"
-                    type="button"
-                    className={`${styles.statsSyncButton} ${syncing ? styles.statsSyncButtonSyncing : ''}`}
-                    onClick={() => syncMutation.mutate()}
-                    disabled={syncing}
-                    aria-label="Sync listening stats"
-                    title="Sync now"
-                  >
-                    <span aria-hidden="true">↻</span>
-                  </button>
-                </>
-              )}
-            </div>
-          </>
+          </div>
         }
       />
+
+      {/* Dedicated Executive Data Sources & Sync Bar */}
+      <div className={styles.statsSyncBar}>
+        <div className={styles.statsServerSync}>
+          {isStandalone ? (
+            <span
+              className={styles.statsStandaloneNotice}
+              role="note"
+              title="SoulSync standalone does not use an external media server, so manual listening stats sync is unavailable."
+            >
+              Standalone mode: manual sync unavailable
+            </span>
+          ) : (
+            <div className={styles.statsServerSyncGroup}>
+              <span className={styles.statsSyncStatusDot} aria-hidden="true" />
+              <span className={styles.statsLastSynced}>
+                {lastSynced ? `Last synced: ${lastSynced}` : 'Not synced yet'}
+              </span>
+              <button
+                id="stats-sync-btn"
+                type="button"
+                className={`${styles.statsSyncButton} ${syncing ? styles.statsSyncButtonSyncing : ''}`}
+                onClick={() => syncMutation.mutate()}
+                disabled={syncing}
+                aria-label="Sync listening stats"
+                title="Sync now"
+              >
+                <span aria-hidden="true">↻</span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className={styles.statsSyncControls}>
+          {isImportCardYours(lastfmImportQuery.data) ? (
+            <LastfmImportControl
+              status={lastfmImportQuery.data}
+              onRun={() => lastfmMutation.mutate()}
+              running={lastfmMutation.isPending}
+            />
+          ) : null}
+          {isImportCardYours(listenbrainzImportQuery.data) ? (
+            <ListenbrainzImportControl
+              status={listenbrainzImportQuery.data}
+              onRun={() => listenbrainzMutation.mutate()}
+              running={listenbrainzMutation.isPending}
+            />
+          ) : null}
+        </div>
+      </div>
 
       {story === 'year' ? <YearStory onClose={closeStory} /> : null}
 
@@ -361,7 +372,7 @@ export function StatsPage() {
         /* Operational facts. Deliberately NOT range-scoped — disk usage and
            database size are what they are right now, so the range picker is
            hidden on this tab rather than sitting there doing nothing. */
-        <>
+        <div className={styles.statsLibraryGrid}>
           <StatsSectionCard title="Library Health" fullWidth>
             <StatsLibraryHealth health={cachedStats?.health ?? {}} />
           </StatsSectionCard>
@@ -373,7 +384,7 @@ export function StatsPage() {
           <StatsSectionCard title="Database Storage" fullWidth>
             <StatsDbStorage payload={dbStorageQuery.data} error={dbStorageQuery.error} />
           </StatsSectionCard>
-        </>
+        </div>
       ) : hasData ? (
         <>
           <OverviewCards
@@ -382,7 +393,16 @@ export function StatsPage() {
             periodLabel={PREVIOUS_PERIOD_LABEL[range] ?? null}
           />
           <div className={styles.statsMainGrid}>
-            <div className={styles.statsLeftCol}>
+            {/* Tier 1: Listening Activity & Habit Clock */}
+            <div className={styles.statsActivityRow}>
+              <StatsSectionCard title="Listening Activity">
+                <div id="stats-timeline-chart" className={styles.chartContainer}>
+                  <StatsActivityChart
+                    timeline={cachedStats?.timeline ?? []}
+                    onDateSelect={(date) => setListeningDetailFilter({ type: 'date', date })}
+                  />
+                </div>
+              </StatsSectionCard>
               <StatsSectionCard title="When You Listen">
                 <StatsListeningClock
                   clock={cachedStats?.clock}
@@ -393,14 +413,27 @@ export function StatsPage() {
                   }
                 />
               </StatsSectionCard>
-              <StatsSectionCard title="Listening Activity">
-                <div id="stats-timeline-chart" className={styles.chartContainer}>
-                  <StatsActivityChart
-                    timeline={cachedStats?.timeline ?? []}
-                    onDateSelect={(date) => setListeningDetailFilter({ type: 'date', date })}
-                  />
-                </div>
+            </div>
+
+            {/* Tier 2: Top Music Showcase (3 Columns) */}
+            <div className={styles.statsTopShowcase}>
+              <StatsSectionCard title="Top Artists">
+                <TopArtistsVisual artists={cachedStats?.top_artists ?? []} />
+                <StatsRankedArtists artists={cachedStats?.top_artists ?? []} />
               </StatsSectionCard>
+              <StatsSectionCard title="Top Albums">
+                <StatsRankedAlbums albums={cachedStats?.top_albums ?? []} />
+              </StatsSectionCard>
+              <StatsSectionCard title="Top Tracks">
+                <StatsRankedTracks
+                  tracks={cachedStats?.top_tracks ?? []}
+                  onPlay={(track) => playStatsTrack(bridge, track)}
+                />
+              </StatsSectionCard>
+            </div>
+
+            {/* Tier 3: Insights & Recents */}
+            <div className={styles.statsInsightsRow}>
               <StatsSectionCard title="Own vs Play">
                 <StatsOwnVsPlayCard
                   rows={cachedStats?.own_vs_play ?? []}
@@ -418,21 +451,6 @@ export function StatsPage() {
               <StatsSectionCard title="Recently Played">
                 <StatsRecentPlays
                   tracks={cachedStats?.recent ?? []}
-                  onPlay={(track) => playStatsTrack(bridge, track)}
-                />
-              </StatsSectionCard>
-            </div>
-            <div className={styles.statsRightCol}>
-              <StatsSectionCard title="Top Artists">
-                <TopArtistsVisual artists={cachedStats?.top_artists ?? []} />
-                <StatsRankedArtists artists={cachedStats?.top_artists ?? []} />
-              </StatsSectionCard>
-              <StatsSectionCard title="Top Albums">
-                <StatsRankedAlbums albums={cachedStats?.top_albums ?? []} />
-              </StatsSectionCard>
-              <StatsSectionCard title="Top Tracks">
-                <StatsRankedTracks
-                  tracks={cachedStats?.top_tracks ?? []}
                   onPlay={(track) => playStatsTrack(bridge, track)}
                 />
               </StatsSectionCard>
@@ -619,27 +637,120 @@ function OverviewCards({
   previous: OverviewShape | null;
 }) {
   const cards = [
-    { key: 'total_plays', label: 'Total Plays', value: formatCompactNumber(overview.total_plays) },
+    {
+      key: 'total_plays',
+      label: 'Total Plays',
+      value: formatCompactNumber(overview.total_plays),
+      icon: (
+        <svg
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <polygon points="5 3 19 12 5 21 5 3" />
+        </svg>
+      ),
+    },
     {
       key: 'total_time_ms',
       label: 'Listening Time',
       value: formatListeningTime(overview.total_time_ms),
+      icon: (
+        <svg
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </svg>
+      ),
     },
     {
       key: 'unique_artists',
       label: 'Artists',
       value: formatCompactNumber(overview.unique_artists),
+      icon: (
+        <svg
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+          <line x1="12" x2="12" y1="19" y2="22" />
+        </svg>
+      ),
     },
-    { key: 'unique_albums', label: 'Albums', value: formatCompactNumber(overview.unique_albums) },
-    { key: 'unique_tracks', label: 'Tracks', value: formatCompactNumber(overview.unique_tracks) },
+    {
+      key: 'unique_albums',
+      label: 'Albums',
+      value: formatCompactNumber(overview.unique_albums),
+      icon: (
+        <svg
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+      ),
+    },
+    {
+      key: 'unique_tracks',
+      label: 'Tracks',
+      value: formatCompactNumber(overview.unique_tracks),
+      icon: (
+        <svg
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M9 18V5l12-2v13" />
+          <circle cx="6" cy="18" r="3" />
+          <circle cx="18" cy="16" r="3" />
+        </svg>
+      ),
+    },
   ] as const;
 
   return (
     <div id="stats-overview" className={styles.statsOverview}>
       {cards.map((card) => (
         <div key={card.label} className={styles.statsCard}>
+          <div className={styles.statsCardHeader}>
+            <span className={styles.statsCardLabel}>{card.label}</span>
+            <span className={styles.statsCardIconWrap} aria-hidden="true">
+              {card.icon}
+            </span>
+          </div>
           <div className={styles.statsCardValue}>{card.value}</div>
-          <div className={styles.statsCardLabel}>{card.label}</div>
           <StatsCardDelta
             current={overview[card.key]}
             previous={previous?.[card.key]}
@@ -891,20 +1002,26 @@ function StatsActivityChart({
 }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={timeline} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+      <BarChart data={timeline} margin={{ top: 8, right: 6, bottom: 0, left: -10 }}>
+        <defs>
+          <linearGradient id="statsPlaysBarGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgb(var(--accent-rgb))" stopOpacity={0.9} />
+            <stop offset="100%" stopColor="rgb(var(--accent-rgb))" stopOpacity={0.35} />
+          </linearGradient>
+        </defs>
         <CartesianGrid stroke="rgba(255,255,255,0.04)" vertical={false} />
         <XAxis
           dataKey="date"
-          tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }}
+          tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
           axisLine={false}
           tickLine={false}
         />
         <YAxis
-          tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }}
+          tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
           axisLine={false}
           tickLine={false}
           allowDecimals={false}
-          width={28}
+          width={30}
         />
         <Tooltip
           contentStyle={STATS_TOOLTIP_STYLE}
@@ -913,9 +1030,10 @@ function StatsActivityChart({
         />
         <Bar
           dataKey="plays"
-          radius={[4, 4, 0, 0]}
-          fill="rgba(var(--accent-rgb), 0.55)"
-          stroke="rgba(var(--accent-rgb), 0.8)"
+          radius={[6, 6, 0, 0]}
+          fill="url(#statsPlaysBarGrad)"
+          stroke="rgba(var(--accent-rgb), 0.75)"
+          strokeWidth={1}
           cursor="pointer"
           onClick={(data: unknown) => {
             const row = data as { date?: string; payload?: { date?: string; plays?: number } };

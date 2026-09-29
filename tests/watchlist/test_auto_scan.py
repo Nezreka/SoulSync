@@ -115,6 +115,7 @@ def _build_deps(
     activity_log = activity_log if activity_log is not None else []
     auto_flag = [flag_set]
     auto_ts = [0.0]
+    auto_hb = [0.0]
     state_ref = [{}]
 
     deps = autosc.WatchlistAutoScanDeps(
@@ -131,6 +132,8 @@ def _build_deps(
         _set_auto_scanning=lambda v: auto_flag.__setitem__(0, v),
         _get_auto_scanning_timestamp=lambda: auto_ts[0],
         _set_auto_scanning_timestamp=lambda v: auto_ts.__setitem__(0, v),
+        _get_auto_scanning_heartbeat=lambda: auto_hb[0],
+        _set_auto_scanning_heartbeat=lambda v: auto_hb.__setitem__(0, v),
         _get_watchlist_scan_state=lambda: state_ref[0],
         _set_watchlist_scan_state=lambda v: state_ref.__setitem__(0, v),
     )

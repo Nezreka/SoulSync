@@ -96,6 +96,9 @@
     <!-- Automations visual redesign — a pure reskin loaded after style/mobile so it
          wins by cascade; no JS-referenced selectors change (see file header). -->
     <link rel="stylesheet" href="{{ url_for('static', filename='automations-redesign.css', v=static_v) }}">
+    <!-- Automations navigation overhaul — sidebar + overview + library; loaded
+         after the redesign so it wins where they meet (see file header). -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='automations-overhaul.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-side.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-overlay-editor.css', v=static_v) }}">
@@ -104,6 +107,12 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='discover-premier.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='watchlist-premier.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='chat-overhaul.css', v=static_v) }}">
+    <!-- Wishlist premier redesign — pure reskin + additive wlp-* markup; every
+         JS-referenced hook (.wl-*, #wishlist-*, data-testid) is untouched. -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='wishlist-premier.css', v=static_v) }}">
+    <!-- Dashboard premier redesign — pure reskin of the music dashboard hero,
+         rails and right column; orb strip and library-card markup untouched. -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard-premier.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='profiles.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='docs.css', v=static_v) }}">
     <style id="soulsync-initial-appearance">
@@ -6388,6 +6397,26 @@
                                                             you see padded/silent files slip through. Applies to all
                                                             download sources.</div>
                                                     </div>
+                                                    <div class="form-group">
+                                                        <div class="setting-row">
+                                                            <label class="checkbox-label">
+                                                                <input type="checkbox" id="verify-flac-decode">
+                                                                Verify FLAC decode with flac -t
+                                                            </label>
+                                                            <span class="info-icon" role="button" tabindex="0"
+                                                                title="What's this?" onclick="toggleSettingHelp(this)"
+                                                                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                        </div>
+                                                        <div class="setting-help-body" hidden>Opt-in second integrity
+                                                            tier: a FLAC that passes the size/parse/duration checks is
+                                                            fully decoded with <code>flac -t</code>, which also verifies
+                                                            the STREAMINFO MD5. A file that fails is quarantined and
+                                                            the next candidate is tried, so a damaged replacement can
+                                                            never take the place of a good file. <strong>Off by
+                                                                default.</strong> Fails open — if the flac binary is
+                                                            missing or the check times out, the file is left alone
+                                                            rather than quarantined.</div>
+                                                    </div>
                                                 </div>
                                             </div><!-- end Audio Verification body -->
 
@@ -7053,6 +7082,23 @@
                                                 </div>
 
                                                 <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="auto-disambiguation" checked>
+                                                        Automatically add release disambiguation to the album folder
+                                                    </label>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>When a
+                                                        release carries a MusicBrainz disambiguation (edition note)
+                                                        and your template doesn't place
+                                                        <code>$disambiguation</code> itself, it is added to the
+                                                        album folder automatically. This keeps same-named releases
+                                                        in their own folders — turn it off and your template is
+                                                        respected exactly as written.</small>
+                                                </div>
+
+                                                <div class="form-group">
                                                     <label>Album Path Template:</label>
                                                     <input type="text" id="template-album-path"
                                                         placeholder="$albumartist/$albumartist - $album/$track - $title">
@@ -7068,7 +7114,9 @@
                                                         <code>$year</code>, <code>$quality</code> (filename only),
                                                         <code>$disambiguation</code> (the release's edition note, like
                                                         &ldquo;baby punk version&rdquo;; added to the album folder
-                                                        automatically when your template leaves it out). The
+                                                        automatically when your template leaves it out, unless
+                                                        &ldquo;Automatically add release disambiguation&rdquo;
+                                                        above is turned off). The
                                                         three disc variables work in a folder segment as well as in the
                                                         filename and are empty on a single-disc album, so
                                                         <code>$albumartist/$album/Disc $discnum/$track - $title</code>
@@ -10145,6 +10193,90 @@
                                     <div class="chat-want-results" data-chat-want-results></div>
                                 </div>
                             </div>
+                            <!-- Sharer Confirmation Modal: Direct P2P Share -->
+                            <div class="chat-peer-backdrop chat-share-backdrop" data-chat-share-backdrop hidden></div>
+                            <div class="chat-share-modal-overlay" data-chat-share-confirm-modal hidden>
+                                <div class="chat-share-modal">
+                                    <div class="chat-share-modal-head">
+                                        <div class="chat-share-modal-title">
+                                            <span class="chat-share-icon">⚡</span>
+                                            <div>
+                                                <div class="chat-share-heading">Direct P2P Share</div>
+                                                <div class="chat-share-sub">Offer your library files directly to <span class="chat-share-target-user" data-chat-share-target>@User</span></div>
+                                            </div>
+                                        </div>
+                                        <button type="button" class="chat-peer-close" data-chat-share-close title="Close (Esc)">&times;</button>
+                                    </div>
+                                    <div class="chat-share-hero">
+                                        <div class="chat-share-hero-bg" data-chat-share-bg></div>
+                                        <div class="chat-share-hero-images">
+                                            <div class="chat-share-cover-wrap" data-chat-share-thumb>💿</div>
+                                            <img class="chat-share-artist-avatar" data-chat-share-artist-img src="" alt="Artist" hidden>
+                                        </div>
+                                        <div class="chat-share-hero-meta">
+                                            <div class="chat-share-hero-title" data-chat-share-title>Album Title</div>
+                                            <div class="chat-share-hero-artist" data-chat-share-artist>
+                                                <span class="chat-share-artist-name" data-chat-share-artist-name>Artist Name</span>
+                                                <span class="chat-share-hero-year" data-chat-share-year></span>
+                                            </div>
+                                            <div class="chat-share-pills" data-chat-share-pills>
+                                                <span class="chat-share-pill chat-share-pill--type" data-chat-share-type>ALBUM</span>
+                                                <span class="chat-share-pill" data-chat-share-cnt>0 tracks</span>
+                                                <span class="chat-share-pill" data-chat-share-size>0 MB</span>
+                                                <span class="chat-share-pill chat-share-pill--format" data-chat-share-format>FLAC</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="chat-share-tracklist-label">Tracks in your share:</div>
+                                    <div class="chat-share-tracklist" data-chat-share-tracks></div>
+                                    <div class="chat-share-modal-foot">
+                                        <button type="button" class="chat-card-btn" data-chat-share-cancel>Cancel</button>
+                                        <button type="button" class="chat-card-btn chat-card-btn--share chat-card-btn--glow" data-chat-share-send-btn>🚀 Send Share Offer</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Recipient Incoming Share Modal -->
+                            <div class="chat-peer-backdrop chat-incoming-backdrop" data-chat-incoming-backdrop hidden></div>
+                            <div class="chat-share-modal-overlay" data-chat-incoming-share-modal hidden>
+                                <div class="chat-share-modal chat-share-modal--incoming">
+                                    <div class="chat-share-modal-head">
+                                        <div class="chat-share-modal-title">
+                                            <span class="chat-share-icon">🎁</span>
+                                            <div>
+                                                <div class="chat-share-heading">Direct Share Offer</div>
+                                                <div class="chat-share-sub"><span class="chat-share-target-user" data-chat-incoming-sender>@User</span> is sharing their library copy with you!</div>
+                                            </div>
+                                        </div>
+                                        <button type="button" class="chat-peer-close" data-chat-incoming-close title="Close (Esc)">&times;</button>
+                                    </div>
+                                    <div class="chat-share-hero">
+                                        <div class="chat-share-hero-bg" data-chat-incoming-bg></div>
+                                        <div class="chat-share-hero-images">
+                                            <div class="chat-share-cover-wrap" data-chat-incoming-thumb>💿</div>
+                                            <img class="chat-share-artist-avatar" data-chat-incoming-artist-img src="" alt="Artist" hidden>
+                                        </div>
+                                        <div class="chat-share-hero-meta">
+                                            <div class="chat-share-hero-title" data-chat-incoming-title>Album Title</div>
+                                            <div class="chat-share-hero-artist" data-chat-incoming-artist>
+                                                <span class="chat-share-artist-name" data-chat-incoming-artist-name>Artist Name</span>
+                                                <span class="chat-share-hero-year" data-chat-incoming-year></span>
+                                            </div>
+                                            <div class="chat-share-pills" data-chat-incoming-pills>
+                                                <span class="chat-share-pill chat-share-pill--type" data-chat-incoming-type>ALBUM</span>
+                                                <span class="chat-share-pill" data-chat-incoming-cnt>0 tracks</span>
+                                                <span class="chat-share-pill" data-chat-incoming-size>0 MB</span>
+                                                <span class="chat-share-pill chat-share-pill--format" data-chat-incoming-format>FLAC</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="chat-share-tracklist-label">Offered tracks:</div>
+                                    <div class="chat-share-tracklist" data-chat-incoming-tracks></div>
+                                    <div class="chat-share-modal-foot">
+                                        <button type="button" class="chat-card-btn" data-chat-incoming-decline>Decline</button>
+                                        <button type="button" class="chat-card-btn chat-card-btn--success chat-card-btn--glow" data-chat-incoming-accept>📥 Accept &amp; Start Download</button>
+                                    </div>
+                                </div>
+                            </div>
                             <!-- jukebox YouTube search: rich pop-in, search-page video-card look -->
                             <div class="chat-settings-overlay" data-chat-jbx-search-modal hidden>
                                 <div class="chat-settings-modal chat-jbx-search-modal">
@@ -10241,6 +10373,17 @@
                                                         <div class="chat-set-desc" data-chat-avwho></div>
                                                     </div>
                                                 </div>
+                                                <div class="chat-set-h">Badge
+                                                    <span class="chat-set-h-note">shows next to your name in the room</span>
+                                                </div>
+                                                <label class="chat-set-field">
+                                                    <span class="chat-set-row-title">Flair badge</span>
+                                                    <input class="chat-input" data-chat-set-badge type="text" maxlength="24"
+                                                        placeholder="e.g. vinyl nerd" autocomplete="off">
+                                                    <span class="chat-set-desc">A short tag shown next to your name.
+                                                        Plain text only — staff words like "admin" or "dev", and
+                                                        profanity, aren't allowed.</span>
+                                                </label>
                                                 <div class="chat-set-h">Avatar
                                                     <span class="chat-set-h-note">saves as soon as you pick one</span>
                                                 </div>
@@ -10264,6 +10407,14 @@
                                                             see it. This browser only.</span>
                                                     </span>
                                                     <input type="checkbox" class="chat-set-switch" data-chat-set-np>
+                                                </label>
+                                                <div class="chat-set-h">P2P Transfers</div>
+                                                <label class="chat-set-row">
+                                                    <span class="chat-set-row-text">
+                                                        <span class="chat-set-row-title">Auto-accept Wanted shares</span>
+                                                        <span class="chat-set-desc">Automatically download files shared to you for your Wanted / ISO requests without confirmation prompt.</span>
+                                                    </span>
+                                                    <input type="checkbox" class="chat-set-switch" data-chat-set-autoshare>
                                                 </label>
                                             </section>
                                             <section class="chat-set-panel" data-chat-setpanel="room" hidden>
@@ -10302,6 +10453,15 @@
                                                     </span>
                                                     <input type="checkbox" class="chat-set-switch"
                                                         data-chat-set-autoprove>
+                                                </label>
+                                                <div class="chat-set-h">History</div>
+                                                <label class="chat-set-field">
+                                                    <span class="chat-set-row-title">Keep chat history (days)</span>
+                                                    <input class="chat-input" data-chat-set-retention type="number"
+                                                        min="0" max="3650" step="1" placeholder="30" autocomplete="off">
+                                                    <span class="chat-set-desc">Room messages older than this are
+                                                        pruned daily. 0 = keep everything (up to 5,000 messages per
+                                                        room).</span>
                                                 </label>
                                             </section>
                                             <section class="chat-set-panel" data-chat-setpanel="integrations" hidden>

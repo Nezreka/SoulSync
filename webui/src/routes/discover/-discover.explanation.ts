@@ -22,6 +22,10 @@ export interface Explanation {
   kind: string;
   seeds?: ExplanationSeed[];
   confidence?: number | null;
+  /** Per-seed shares of the score (name → 0..1), when the server sends them. */
+  components?: Record<string, number>;
+  /** Where the tracks came from (source → share), when the server sends it. */
+  source_mix?: Record<string, number>;
 }
 
 const LEAD: Record<ExplanationKind, string> = {
@@ -72,9 +76,44 @@ export function explanationLine(explanation: Explanation | null | undefined): st
   return `${LEAD[explanation.kind]} ${nameList(names)}`;
 }
 
-/** Every seed, for the tooltip the truncated line hides. */
+/** Every seed, for the tooltip the truncated line hides — with each seed's
+ * share of the score when the server sent components. */
 export function explanationTitle(explanation: Explanation | null | undefined): string {
   if (!explanation || !known(explanation.kind)) return '';
   const names = seedNames(explanation);
-  return names.length ? `${TITLE_LEAD[explanation.kind]}: ${names.join(', ')}` : '';
+  if (!names.length) return '';
+  const shares = explanation.components;
+  const shown = names.map((n) => {
+    const share = shares?.[n];
+    return typeof share === 'number' && Number.isFinite(share)
+      ? `${n} (${Math.round(share * 100)}%)`
+      : n;
+  });
+  return `${TITLE_LEAD[explanation.kind]}: ${shown.join(', ')}`;
+}
+
+const SOURCE_LABEL: Record<string, string> = {
+  library: 'your library',
+  discovery: 'discovery',
+  trending: "what's trending",
+  direct: 'similar artists',
+  genre: 'the genre',
+  owned: 'artists you own',
+};
+
+/** Where most of it came from, when the server says: 'More from your library'. */
+export function sourceMixLine(explanation: Explanation | null | undefined): string {
+  const mix = explanation?.source_mix;
+  if (!mix) return '';
+  let top = '';
+  let share = 0;
+  for (const [source, value] of Object.entries(mix)) {
+    if (typeof value === 'number' && Number.isFinite(value) && value > share) {
+      top = source;
+      share = value;
+    }
+  }
+  if (!top) return '';
+  const label = SOURCE_LABEL[top] ?? top;
+  return share >= 0.5 ? `More from ${label}` : `Some from ${label}`;
 }

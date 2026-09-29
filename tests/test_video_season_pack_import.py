@@ -208,7 +208,7 @@ def _importer(db, organize, tmp_path, files):
 def test_every_episode_in_the_pack_is_imported(tmp_path):
     seen = []
 
-    def organize(dl, src):
+    def organize(dl, src, *, _pre_persist_dest=False):
         seen.append((json.loads(dl["search_ctx"])["episode"], os.path.basename(src)))
         return {"status": "completed", "dest_path": "/tv/" + os.path.basename(src),
                 "quality_label": "1080p"}
@@ -230,7 +230,7 @@ def test_each_episode_carries_its_own_identity_not_the_packs(tmp_path):
     silently switches the gate off — exactly how E04 ends up in E03's slot."""
     rows = []
 
-    def organize(dl, src):
+    def organize(dl, src, *, _pre_persist_dest=False):
         rows.append(dl)
         return {"status": "completed", "dest_path": "/tv/x.mkv"}
 
@@ -249,7 +249,7 @@ def test_each_imported_episode_gets_its_own_completed_row(tmp_path):
     bundle stages and the per-track rows do the importing. Without a row per
     episode the Downloads page shows one entry for ten files."""
     db = _DB()
-    imp, root = _importer(db, lambda dl, src: {"status": "completed", "dest_path": "/tv/" + os.path.basename(src)},
+    imp, root = _importer(db, lambda dl, src, *, _pre_persist_dest=False: {"status": "completed", "dest_path": "/tv/" + os.path.basename(src)},
                           tmp_path, [("S.S01E01.mkv", 40 << 20), ("S.S01E02.mkv", 40 << 20)])
     imp(_pack_row(), root, None)
     assert len(db.added) == 2
@@ -259,7 +259,7 @@ def test_each_imported_episode_gets_its_own_completed_row(tmp_path):
 
 def test_the_wishlist_row_is_cleared_per_episode(tmp_path):
     db = _DB()
-    imp, root = _importer(db, lambda dl, src: {"status": "completed", "dest_path": "/tv/x.mkv",
+    imp, root = _importer(db, lambda dl, src, *, _pre_persist_dest=False: {"status": "completed", "dest_path": "/tv/x.mkv",
                                                "quality_label": "1080p"},
                           tmp_path, [("S.S01E01.mkv", 40 << 20), ("S.S01E02.mkv", 40 << 20)])
     imp(_pack_row(), root, None)
@@ -271,14 +271,14 @@ def test_episodes_the_pack_did_not_supply_keep_their_wishlist_rows(tmp_path):
     """A partial pack must not look complete. Their rows stay, so the ordinary
     hourly drain chases them — one click never becomes twenty instant searches."""
     db = _DB()
-    imp, root = _importer(db, lambda dl, src: {"status": "completed", "dest_path": "/tv/x.mkv"},
+    imp, root = _importer(db, lambda dl, src, *, _pre_persist_dest=False: {"status": "completed", "dest_path": "/tv/x.mkv"},
                           tmp_path, [("S.S01E01.mkv", 40 << 20), ("S.S01E09.mkv", 40 << 20)])
     imp(_pack_row(), root, None)
     assert [kw["episode_number"] for _k, kw in db.removed] == [1, 9]
 
 
 def test_one_refused_episode_does_not_abandon_the_rest(tmp_path):
-    def organize(dl, src):
+    def organize(dl, src, *, _pre_persist_dest=False):
         if "E02" in src:
             return {"status": "import_failed", "error": "not an upgrade"}
         return {"status": "completed", "dest_path": "/tv/" + os.path.basename(src)}
@@ -293,7 +293,7 @@ def test_one_refused_episode_does_not_abandon_the_rest(tmp_path):
 
 
 def test_an_episode_whose_import_raises_does_not_take_down_the_pack(tmp_path):
-    def organize(dl, src):
+    def organize(dl, src, *, _pre_persist_dest=False):
         if "E01" in src:
             raise RuntimeError("ffprobe fell over")
         return {"status": "completed", "dest_path": "/tv/x.mkv"}
@@ -309,7 +309,7 @@ def test_a_pack_of_junk_fails_the_row_with_a_countable_reason(tmp_path):
     """It must NOT report success. The old behaviour's real cost was a download
     that looked finished while nothing had been filed."""
     db = _DB()
-    imp, root = _importer(db, lambda dl, src: pytest.fail("nothing should import"),
+    imp, root = _importer(db, lambda dl, src, *, _pre_persist_dest=False: pytest.fail("nothing should import"),
                           tmp_path, [("readme.nfo", 100), ("poster.jpg", 100)])
     out = imp(_pack_row(), root, None)
     assert out["status"] == "import_failed"
@@ -318,7 +318,7 @@ def test_a_pack_of_junk_fails_the_row_with_a_countable_reason(tmp_path):
 
 def test_a_pack_whose_every_episode_is_refused_is_not_reported_as_completed(tmp_path):
     db = _DB()
-    imp, root = _importer(db, lambda dl, src: {"status": "import_failed", "error": "already have better"},
+    imp, root = _importer(db, lambda dl, src, *, _pre_persist_dest=False: {"status": "import_failed", "error": "already have better"},
                           tmp_path, [("S.S01E01.mkv", 40 << 20)])
     out = imp(_pack_row(), root, None)
     assert out["status"] == "import_failed"
@@ -329,7 +329,7 @@ def test_the_sample_beside_the_real_file_is_not_imported(tmp_path):
     """The classic pack trap: a sample parses to the same SxxExx as the episode."""
     got = []
     db = _DB()
-    imp, root = _importer(db, lambda dl, src: (got.append(os.path.basename(src)) or
+    imp, root = _importer(db, lambda dl, src, *, _pre_persist_dest=False: (got.append(os.path.basename(src)) or
                                                {"status": "completed", "dest_path": "/tv/x.mkv"}),
                           tmp_path, [("S.S01E01.1080p.mkv", 60 << 20),
                                      ("Sample/S.S01E01.sample.mkv", 40 << 20)])
@@ -340,7 +340,7 @@ def test_the_sample_beside_the_real_file_is_not_imported(tmp_path):
 def test_a_stray_wrong_season_file_is_not_filed(tmp_path):
     got = []
     db = _DB()
-    imp, root = _importer(db, lambda dl, src: (got.append(os.path.basename(src)) or
+    imp, root = _importer(db, lambda dl, src, *, _pre_persist_dest=False: (got.append(os.path.basename(src)) or
                                                {"status": "completed", "dest_path": "/tv/x.mkv"}),
                           tmp_path, [("S.S02E01.mkv", 40 << 20), ("S.S01E09.mkv", 40 << 20)])
     imp(_pack_row(season=2), root, None)
@@ -351,7 +351,7 @@ def test_a_single_file_job_returns_none_so_the_caller_falls_back(tmp_path):
     p = tmp_path / "Some.Show.S01E01.mkv"
     p.write_bytes(b"\0" * (40 << 20))
     from core.video.download_monitor import _make_pack_importer
-    imp = _make_pack_importer(_DB(), lambda dl, src: pytest.fail("not reached"))
+    imp = _make_pack_importer(_DB(), lambda dl, src, *, _pre_persist_dest=False: pytest.fail("not reached"))
     assert imp(_pack_row(), str(p), None) is None
 
 
@@ -362,7 +362,7 @@ def test_every_skipped_file_is_logged_with_its_reason(tmp_path, caplog):
     import logging
     caplog.set_level(logging.INFO)
     db = _DB()
-    imp, root = _importer(db, lambda dl, src: {"status": "completed", "dest_path": "/tv/x.mkv"},
+    imp, root = _importer(db, lambda dl, src, *, _pre_persist_dest=False: {"status": "completed", "dest_path": "/tv/x.mkv"},
                           tmp_path, [("S.S01E01.mkv", 40 << 20), ("mystery.mkv", 40 << 20),
                                      ("notes.txt", 10)])
     imp(_pack_row(), root, None)

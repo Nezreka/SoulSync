@@ -348,12 +348,33 @@ def build_import_album_info(
         or album_ctx.get("image_url")
         or ""
     )
-    total_tracks = (
-        album_ctx.get("total_tracks")
-        or track_info.get("total_tracks")
-        or (album_info or {}).get("total_tracks")
-        or 0
-    )
+    # Total tracks: prefer the album-level count. A 0 means "unknown" — it
+    # must NOT fall through to track_info's count via `or` (0 is falsy).
+    # The track's total_tracks is per-track tag data (often 1), not the
+    # album's track count; using it here filed 6-track EPs as Single when
+    # the album list didn't carry a count (e.g. Deezer's /artist/albums
+    # endpoint omits nb_tracks). Only use track_info's count if the album
+    # context has no count at all (None), not when it's 0 (unknown).
+    def _as_count(v):
+        try:
+            iv = int(v)
+            return iv if iv > 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    album_total = album_ctx.get("total_tracks")
+    if album_total is None:
+        # No album-level count at all; try the other album-level sources,
+        # then track_info as a last resort.
+        total_tracks = (
+            _as_count((album_info or {}).get("total_tracks"))
+            or _as_count(track_info.get("total_tracks"))
+            or 0
+        )
+    else:
+        # Album context has a count (possibly 0=unknown); use it if valid,
+        # otherwise 0. Do NOT fall through to the per-track count.
+        total_tracks = _as_count(album_total) or 0
     album_type = (album_ctx.get("album_type") or track_info.get("album_type") or "album")
     source = get_import_source(context)
 

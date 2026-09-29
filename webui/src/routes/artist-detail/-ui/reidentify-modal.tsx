@@ -22,6 +22,8 @@ export function ReidentifyModal({
   artistName,
   albumTitle,
   imageUrl,
+  initialQuery,
+  onApplied,
   onClose,
 }: {
   trackId: unknown;
@@ -29,11 +31,15 @@ export function ReidentifyModal({
   artistName: string;
   albumTitle: string;
   imageUrl: string;
+  initialQuery?: string;
+  onApplied?: (message: string) => void;
   onClose: () => void;
 }) {
   const [sources, setSources] = useState<ReidentifySource[] | null>(null);
   const [source, setSource] = useState<string | null>(null);
-  const [query, setQuery] = useState(`${trackTitle || ''} ${artistName || ''}`.trim());
+  const [query, setQuery] = useState(
+    initialQuery?.trim() || `${trackTitle || ''} ${artistName || ''}`.trim(),
+  );
   const [state, setState] = useState<
     | { kind: 'idle' }
     | { kind: 'loading' }
@@ -95,6 +101,7 @@ export function ReidentifyModal({
     try {
       const message = await applyReidentifyRequest(trackId, selected, replace);
       window.showToast?.(message, 'success');
+      onApplied?.(message);
       onClose();
     } catch (error) {
       window.showToast?.((error as Error).message || 'Re-identify failed', 'error');

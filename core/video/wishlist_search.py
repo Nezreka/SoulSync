@@ -173,15 +173,17 @@ def search_all() -> Dict[str, str]:
             continue
 
         def _guarded(todo=todo, media_type=media_type):
-            # take the drain's own guard so the hourly tick skips while we work
-            if vpw._running.get(media_type):
+            # claim the drain's own guard atomically (S10): the old
+            # check-then-act on vpw._running raced both the hourly tick and a
+            # second search click — two bodies drained at once. H14's
+            # _try_claim is the shared atomic backstop.
+            if not vpw._try_claim(media_type):
                 _finish(todo, media_type)
                 return
-            vpw._running[media_type] = True
             try:
                 _run_batch(todo, media_type)
             finally:
-                vpw._running[media_type] = False
+                vpw._release(media_type)
 
         threading.Thread(target=_guarded, daemon=True, name="wishlist-search-all").start()
         out[media_type] = "started"

@@ -19,7 +19,8 @@ web_server = pytest.importorskip('web_server')
 
 def _row(title, album, path):
     return types.SimpleNamespace(id=title, title=title, album_title=album,
-                                 file_path=path, bitrate=900)
+                                 file_path=path, bitrate=900,
+                                 artist_name='A Perfect Circle', track_artist=None)
 
 
 @pytest.fixture

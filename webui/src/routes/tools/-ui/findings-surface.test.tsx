@@ -518,13 +518,46 @@ describe('the findings inbox', () => {
     renderSurface();
     await flush();
 
-    fireEvent.click(screen.getByText('Delete Folder…'));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Folder all (4)' }));
     await flush();
     expect(confirmSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         destructive: true,
         message: expect.stringContaining('deletes files on disk'),
       }),
+    );
+  });
+
+  it("uses the type's own confirmation when the generic warning would be wrong", async () => {
+    // Corrupt files are quarantined, not deleted: "cannot be undone" is untrue.
+    routes({
+      [GROUPS]: { groups: [group({ finding_type: 'corrupt_audio', pending: 2 })] },
+      [TYPES]: {
+        types: [
+          typeInfo({
+            type: 'corrupt_audio',
+            label: 'Corrupt Audio',
+            verb: 'Re-download',
+            destructive: true,
+            confirm: 'The damaged files move to the deleted-files folder.',
+          }),
+        ],
+      },
+      '/bulk-fix-start': { started: true, total: 2 },
+    });
+    renderSurface();
+    await flush();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Re-download all (2)' }));
+    await flush();
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destructive: true,
+        message: expect.stringContaining('The damaged files move to the deleted-files folder.'),
+      }),
+    );
+    expect(confirmSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('cannot be undone') }),
     );
   });
 
@@ -537,7 +570,7 @@ describe('the findings inbox', () => {
     renderSurface();
     await flush();
 
-    fireEvent.click(screen.getByText('Review & Move…'));
+    fireEvent.click(screen.getByRole('button', { name: 'Review & Move all (120)' }));
     await flush();
     clickPrompt('_orphan-delete');
     await flush();
@@ -1059,6 +1092,46 @@ describe('per-finding actions', () => {
     await flush();
     expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith('/8/dismiss'))).toBe(true);
     expect(onStatusChanged).toHaveBeenCalled();
+  });
+
+  it('opens the Re-identify modal when clicking fix on a suspect_album_tag finding', async () => {
+    routes({
+      [FINDINGS]: page([
+        finding({
+          id: 42,
+          finding_type: 'suspect_album_tag',
+          entity_id: '123',
+          title: 'Suspect album tag: "Song"',
+          details: {
+            track_id: 123,
+            track_title: 'Song',
+            artist_name: 'Artist',
+            album_title: 'Hitzone',
+            reidentify_query: 'Song Artist',
+          },
+        }),
+      ]),
+      '/api/reidentify/sources': {
+        success: true,
+        sources: [{ source: 'spotify', name: 'Spotify', active: true }],
+      },
+      '/api/reidentify/search?source=spotify&q=Song%20Artist': {
+        success: true,
+        results: [],
+      },
+    });
+    await renderList();
+    await flush();
+
+    const fixBtn = document.querySelector('.repair-finding-btn.fix') as HTMLElement;
+    expect(fixBtn).not.toBeNull();
+    expect(fixBtn.textContent).toBe('Re-identify');
+
+    fireEvent.click(fixBtn);
+    await flush();
+
+    expect(document.getElementById('reid-modal')).not.toBeNull();
+    expect(document.getElementById('reid-hero-title')?.textContent).toBe('Song');
   });
 });
 

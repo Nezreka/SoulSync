@@ -110,6 +110,36 @@ def test_small_orphan_set_still_surfaces(tmp_path: Path) -> None:
     assert all(f['finding_type'] == 'orphan_file' for f in findings)
 
 
+def test_appledouble_sidecars_are_not_scanned(tmp_path: Path) -> None:
+    """macOS AppleDouble sidecars ('._Track.flac') carry an audio extension but no
+    audio, so every match tier misses and each one used to land as a finding —
+    always right next to the real track, which matched fine.
+    """
+    db_path = tmp_path / "library.sqlite"
+    _seed_library(db_path)
+
+    music = tmp_path / "Stray" / "Files"
+    music.mkdir(parents=True)
+    (music / "00 - Stray 0.mp3").write_bytes(b"no DB match")
+    (music / "._00 - Stray 0.mp3").write_bytes(b"resource fork")
+
+    findings = []
+    context = JobContext(
+        db=_DB(db_path),
+        transfer_folder=str(tmp_path),
+        config_manager=None,
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    job = OrphanFileDetectorJob()
+    result = job.scan(context)
+
+    assert result.scanned == 1                 # only the real stray file
+    assert result.findings_created == 1
+    assert [f['file_path'] for f in findings] == [str(music / "00 - Stray 0.mp3")]
+    assert job.estimate_scope(context) == 1    # progress total agrees with the scan
+
+
 def test_orphan_detector_accepts_picard_albumartist_folder_match(tmp_path: Path) -> None:
     """Picard paths use albumartist/album (year)/track - title.
 

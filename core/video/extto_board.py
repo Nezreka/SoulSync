@@ -27,6 +27,7 @@ expensive one; every run after it is mostly free.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from typing import Any, Callable, Optional
 
@@ -55,6 +56,9 @@ MAX_NEW_DETAILS_PER_RUN = 80
 MAX_SECONDS_PER_RUN = 600
 
 _running = False
+_lock = threading.Lock()  # S9: check-and-set on _running must be atomic —
+# two board triggers landing in the check-then-act window both entered and
+# fetched in parallel (same pattern as rss_sync).
 
 
 def is_running() -> bool:
@@ -120,15 +124,19 @@ def refresh_board(db, *, timeout: int = 25, flaresolverr: Optional[str] = None,
     a summary; never raises, because both callers report rather than crash.
     """
     global _running
-    if _running:
-        return {"ok": False, "status": "skipped", "reason": "already_running"}
+    # S9: check-and-set the flag under the lock — the old check-then-act
+    # window let two triggers both pass and fetch the board in parallel
+    # (same pattern as rss_sync).
+    with _lock:
+        if _running:
+            return {"ok": False, "status": "skipped", "reason": "already_running"}
+        _running = True
 
     from core.video.extto_detail import fetch_detail
     from core.video.extto_fresh import extto_fresh_releases
 
     say = log or (lambda _m: None)
     tick = progress or (lambda _p, _m: None)
-    _running = True
     try:
         tick(10, "Pulling the EXT.to board…")
         board = extto_fresh_releases(timeout=max(timeout, 30), flaresolverr=flaresolverr)
@@ -210,7 +218,8 @@ def refresh_board(db, *, timeout: int = 25, flaresolverr: Optional[str] = None,
         logger.exception("EXT.to board refresh failed")
         return {"ok": False, "status": "failed", "error": str(exc)}
     finally:
-        _running = False
+        with _lock:
+            _running = False
 
 
 # ── persistence seams ────────────────────────────────────────────────────────

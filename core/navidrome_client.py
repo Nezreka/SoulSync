@@ -810,6 +810,7 @@ class NavidromeClient(MediaServerClient):
             album_ids = set()
             offset = 0
             page_size = 500
+            complete = True
             while True:
                 params = {
                     'type': 'alphabeticalByArtist',
@@ -819,6 +820,11 @@ class NavidromeClient(MediaServerClient):
                 }
                 response = self._make_request('getAlbumList2', params)
                 if not response:
+                    # A failed page means the index is PARTIAL — never cache
+                    # it: callers filter artists against this set, and a
+                    # partial set would silently drop real albums (and, in a
+                    # deep scan, their tracks) while looking fully trusted.
+                    complete = False
                     break
                 album_list = response.get('albumList2', {}).get('album', [])
                 if not album_list:
@@ -830,6 +836,9 @@ class NavidromeClient(MediaServerClient):
                 if len(album_list) < page_size:
                     break
                 offset += page_size
+            if not complete:
+                logger.warning("Music folder album index incomplete (page failed) — skipping folder filter this scan")
+                return None
             self._folder_album_ids = album_ids
             logger.info(f"Built music folder album index: {len(album_ids)} albums in selected folder")
             return album_ids
@@ -1770,6 +1779,10 @@ class NavidromeClient(MediaServerClient):
         self._artist_cache.clear()
         self._album_cache.clear()
         self._track_cache.clear()
+        # The music-folder album index is rebuilt per scan, not per process:
+        # a stale set silently filters newly added albums out of incremental
+        # scans (their IDs aren't in it yet), and only a restart rebuilt it.
+        self._folder_album_ids = None
         logger.info("Navidrome client cache cleared")
 
     def search_tracks(self, title: str, artist: str, limit: int = 15) -> List[TrackInfo]:

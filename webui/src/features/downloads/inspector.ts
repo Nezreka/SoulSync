@@ -28,7 +28,7 @@ export const DOWNLOAD_SERVICE_LABELS: Record<string, string> = {
   qobuz: 'Qobuz',
   hifi: 'HiFi',
   deezer_dl: 'Deezer',
-  hybrid: 'Auto',
+  hybrid: 'Automatic Search',
   lidarr: 'Lidarr',
   amazon: 'Amazon Music',
   soundcloud: 'SoundCloud',
@@ -69,6 +69,8 @@ export interface InspectorCandidate {
   blacklisted?: boolean;
   free_upload_slots?: number | null;
   decision?: CandidateDecision;
+  /** The rung this candidate reached on the ladder in effect for the search. */
+  policy?: InspectorPolicyFacet;
   _globalIdx: number;
 }
 
@@ -172,6 +174,25 @@ export function bestCandidateIndex(
  * land; rejected rows come separately and never join the selectable list.
  * Malformed lines are skipped, matching the vanilla reader.
  */
+/** Search provenance + candidate policy facet riding one NDJSON payload. */
+export interface InspectorSearchMeta {
+  provenance?: {
+    search_mode?: string;
+    searched_at?: string;
+    policy_run_id?: string;
+  };
+  policy?: InspectorPolicyFacet;
+}
+
+/** One candidate's rung on the quality ladder in effect for the search. */
+export interface InspectorPolicyFacet {
+  target_index?: number;
+  target_label?: string;
+  target_count?: number;
+  tier_score?: number | null;
+  fallback_enabled?: boolean;
+}
+
 export async function streamInspection(
   url: string,
   body: unknown,
@@ -180,6 +201,7 @@ export async function streamInspection(
     candidates: InspectorCandidate[],
     all: InspectorCandidate[],
     rejected: RejectedSummary,
+    meta?: InspectorSearchMeta,
   ) => void,
 ): Promise<InspectorCandidate[]> {
   const all: InspectorCandidate[] = [];
@@ -225,11 +247,20 @@ export async function streamInspection(
           ...c,
           _globalIdx: -1,
         }));
-        onSource(String(data.source), candidates, all, {
-          rows: rejectedRows,
-          total: Number(data.rejected_total) || rejectedRows.length,
-          counts: (data.rejected_counts || {}) as Record<string, number>,
-        });
+        onSource(
+          String(data.source),
+          candidates,
+          all,
+          {
+            rows: rejectedRows,
+            total: Number(data.rejected_total) || rejectedRows.length,
+            counts: (data.rejected_counts || {}) as Record<string, number>,
+          },
+          {
+            provenance: data.provenance as InspectorSearchMeta['provenance'],
+            policy: data.policy as InspectorSearchMeta['policy'],
+          },
+        );
       } catch {
         /* skip malformed lines */
       }

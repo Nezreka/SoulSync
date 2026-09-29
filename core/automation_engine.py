@@ -1312,7 +1312,12 @@ class AutomationEngine:
         handler_info = self._action_handlers.get(action_type)
         if not handler_info:
             logger.warning(f"No handler for action '{action_type}' on automation {automation_id}")
-            self.db.update_automation_run(automation_id, error=f"No handler for action: {action_type}")
+            # H18: an unknown action is not "done" — go through _finish_run so
+            # the error is recorded AND the timer is re-armed. Returning here
+            # dropped the schedule silently.
+            self._finish_run(auto, automation_id,
+                             {'status': 'error', 'error': f'No handler for action: {action_type}'},
+                             error=f"No handler for action: {action_type}")
             return
 
         try:

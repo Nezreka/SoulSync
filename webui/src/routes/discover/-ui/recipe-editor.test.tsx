@@ -25,6 +25,8 @@ const EDITING = {
     mix: { library: 0.6, discovery: 0.3, trending: 0.1 },
     length: 40,
     schedule: 'weekly' as const,
+    tags: [],
+    related_artists: [],
   },
 };
 

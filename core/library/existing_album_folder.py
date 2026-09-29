@@ -20,6 +20,12 @@ Safety rails:
   * Never reuses another release's folder. Two releases can share a title and
     differ only by musicbrainz's disambiguation (#1299); the album's release id
     (db row, else the files' own tags) has to agree before its folder is reused.
+  * Never lets a smaller release join a bigger edition's folder: when the
+    incoming release's own track total is known and the existing roster is
+    larger, it is a different edition (a 12-track standard vs a 16-track
+    deluxe) and the template path builds its own folder instead. A total of
+    1 doesn't count as known — it is album.py's unknown-fallback — so lone
+    thin-metadata tracks keep today's reuse.
   * Any failure returns None — the caller falls back to the normal template.
 """
 
@@ -201,6 +207,28 @@ def resolve_existing_album_folder(
     # or many (disc subfolders) → let the template decide.
     if len(folders) == 1:
         reuse = next(iter(folders))
+        # A smaller release never completes a bigger edition's folder. The
+        # incoming release's own track total is authoritative: when the
+        # existing album roster is LARGER, it is a different edition — a
+        # 12-track standard must not join a 16-track deluxe folder. (The
+        # edition-upgrade bonus in _calculate_album_confidence deliberately
+        # matches standard→deluxe for "already own" checks; right for
+        # existence, wrong for folder identity — and the DB row title is
+        # edition-blind, so _same_album_name can't see it either.) The
+        # reverse — fewer existing tracks than expected — is the normal
+        # multi-batch completion #829 exists for, so it still reuses. A total
+        # of 1 is not "known": album.py falls back to 1 when the source said
+        # nothing (a Soulseek single, say), so 1 means "unknown" as often as
+        # "single" — too ambiguous to judge an edition by, and refusing it
+        # would split thin-metadata tracks off their album under template
+        # drift. Totals of 2+ are never the fallback, so they judge.
+        if (expected_track_count and expected_track_count > 1
+                and len(tracks) > expected_track_count):
+            logger.info(
+                "[Existing Album Folder] '%s' holds %d tracks but the incoming "
+                "release has %d — a different edition, not reusing it",
+                reuse, len(tracks), expected_track_count)
+            return None
         if not _same_release(db, album, sample_file,
                              (musicbrainz_release_id or "").strip(),
                              (disambiguation or "").strip(), read_identity):

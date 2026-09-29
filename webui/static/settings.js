@@ -517,8 +517,8 @@ function validateFileOrganizationTemplates() {
 
     // Valid variables for each template type
     const validVars = {
-        album: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$track', '$disc', '$discnum', '$cdnum', '$year', '$quality', '$disambiguation'],
-        single: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$track', '$year', '$quality'],
+        album: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$disc', '$discnum', '$cdnum', '$year', '$quality', '$disambiguation'],
+        single: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$year', '$quality'],
         playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality'],
         video: ['$artist', '$artistletter', '$title', '$year'],
         podcast: ['$show', '$podcast', '$author', '$artist', '$title', '$season', '$seasonnum', '$episode', '$episodenum', '$year', '$date', '$type'],
@@ -3168,6 +3168,7 @@ async function loadSettingsData() {
         document.getElementById('lrclib-enabled').checked = settings.metadata_enhancement?.lrclib_enabled !== false;
         document.getElementById('replaygain-enabled').checked = settings.post_processing?.replaygain_enabled === true;
         document.getElementById('audio-completeness-check').checked = settings.post_processing?.audio_completeness_check === true;
+        document.getElementById('verify-flac-decode').checked = settings.post_processing?.verify_flac_decode === true;
         document.getElementById('duration-tolerance-seconds').value = settings.post_processing?.duration_tolerance_seconds ?? 0;
         document.getElementById('retry-next-candidate').checked = settings.post_processing?.retry_next_candidate_on_mismatch !== false;
         document.getElementById('retry-exhaustive').checked = settings.post_processing?.retry_exhaustive === true;
@@ -3280,6 +3281,9 @@ async function loadSettingsData() {
         // that has never saved this key must show it ON or the checkbox lies
         // about what the importer is doing.
         document.getElementById('detect-multi-artist-compilations').checked = settings.file_organization?.detect_multi_artist_compilations !== false;
+        // !== false, not === true: same default-ON convention — the importer
+        // auto-adds the disambiguation unless the key was explicitly saved off.
+        document.getElementById('auto-disambiguation').checked = settings.file_organization?.auto_disambiguation !== false;
         document.getElementById('artist-separator').value = settings.metadata_enhancement?.tags?.artist_separator || ', ';
         document.getElementById('write-multi-artist').checked = settings.metadata_enhancement?.tags?.write_multi_artist || false;
         document.getElementById('feat-in-title').checked = settings.metadata_enhancement?.tags?.feat_in_title || false;
@@ -6245,6 +6249,7 @@ async function saveSettings(quiet = false) {
         },
         file_organization: {
             enabled: document.getElementById('file-organization-enabled').checked,
+            auto_disambiguation: document.getElementById('auto-disambiguation').checked,
             disc_label: document.getElementById('disc-label').value,
             collab_artist_mode: document.getElementById('collab-artist-mode').value,
             artistletter_symbol_fallback: document.getElementById('artistletter-symbol-fallback').checked,
@@ -6279,6 +6284,7 @@ async function saveSettings(quiet = false) {
         post_processing: {
             replaygain_enabled: document.getElementById('replaygain-enabled').checked,
             audio_completeness_check: document.getElementById('audio-completeness-check').checked,
+            verify_flac_decode: document.getElementById('verify-flac-decode').checked,
             duration_tolerance_seconds: parseFloat(document.getElementById('duration-tolerance-seconds').value) || 0,
             retry_next_candidate_on_mismatch: document.getElementById('retry-next-candidate').checked,
             retry_exhaustive: document.getElementById('retry-exhaustive').checked,

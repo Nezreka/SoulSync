@@ -237,6 +237,34 @@ class WebScanManager:
                 }
             self._reset_scan_state()
 
+    def _server_still_scanning(self) -> bool:
+        """Ask the active media client whether its own library scan is still
+        running. The probe is the source of truth for completion; the
+        5-minute clock is only the fallback for clients without the probe.
+
+        Returns True (still scanning) when the probe errors — an unknown scan
+        state must not declare completion. The _max_scan_time timeout above
+        stays the backstop so a broken probe can't stall completion forever.
+        """
+        server_type = self._current_server_type
+        client = None
+        try:
+            if self._engine and server_type:
+                client = self._engine.client(server_type)
+        except Exception as e:
+            logger.warning(f"Web scan completion check: could not resolve media client ({e})")
+        probe = getattr(client, "is_library_scanning", None)
+        if probe is None:
+            # No probe on this client: fall back to the time heuristic.
+            return False
+        try:
+            return bool(probe())
+        except Exception as e:
+            logger.warning(
+                f"Web scan completion check: is_library_scanning() failed ({e}) — "
+                "assuming still scanning")
+            return True
+
     def _start_periodic_completion_check(self):
         """Start periodic checking for scan completion"""
         def check_completion():
@@ -255,10 +283,21 @@ class WebScanManager:
                     self._handle_scan_completion()
                     return
 
-                # Use simple time-based completion (5 minutes)
+                # Completion gate: the 5-minute mark only declares completion
+                # after asking the server. is_library_scanning() is the source
+                # of truth; the time heuristic is the fallback for clients
+                # without the probe, and a failing probe means "still
+                # scanning" (see _server_still_scanning).
                 elapsed_time = time.time() - self._scan_start_time if self._scan_start_time else 0
+                scan_done = False
                 if elapsed_time >= 300:  # 5 minutes
-                    logger.info(f"Web scan completion assumed after {elapsed_time:.0f} seconds")
+                    if self._server_still_scanning():
+                        logger.info(
+                            f"Web scan still running on the server after {elapsed_time:.0f} seconds — waiting")
+                    else:
+                        scan_done = True
+                if scan_done:
+                    logger.info(f"Web scan completion confirmed after {elapsed_time:.0f} seconds")
                     with self._lock:
                         self._scan_progress = {
                             "status": "completed",

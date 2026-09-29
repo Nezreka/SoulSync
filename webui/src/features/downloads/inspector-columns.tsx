@@ -1,6 +1,11 @@
 import { useState } from 'react';
 
-import type { GrabRule, InspectorCandidate, RejectedSummary } from './inspector';
+import type {
+  GrabRule,
+  InspectorCandidate,
+  InspectorPolicyFacet,
+  RejectedSummary,
+} from './inspector';
 
 import { decisionPill, rejectionSummary } from './decisions';
 import {
@@ -152,12 +157,18 @@ export function SourceColumn({
 
 function CandidateDetails({ row, source }: { row: InspectorCandidate; source: string }) {
   const dur = msClock(row.duration);
+  const rung = policyRung(row.policy);
   return (
     <div className="rdl-src-item-details">
       {row.quality ? <span className="rdl-src-fmt">{row.quality}</span> : null}
       {row.bitrate ? <span className="rdl-src-detail">{row.bitrate}k</span> : null}
       <span className="rdl-src-detail">{row.size_display}</span>
       {dur ? <span className="rdl-src-detail">{dur}</span> : null}
+      {rung ? (
+        <span className="rdl-src-detail" title={`Ladder rung: ${rung.label}`}>
+          {rung.short}
+        </span>
+      ) : null}
       {source === 'soulseek' ? (
         <span className="rdl-src-detail rdl-src-user">{row.username}</span>
       ) : null}
@@ -166,6 +177,20 @@ function CandidateDetails({ row, source }: { row: InspectorCandidate; source: st
       ) : null}
     </div>
   );
+}
+
+/**
+ * A candidate's rung on the quality ladder, from its per-row policy facet
+ * (core/downloads/candidate_pool.py). Rows from a search that predates the
+ * facet carry none and render as before.
+ */
+function policyRung(policy?: InspectorPolicyFacet): { short: string; label: string } | null {
+  const label = policy?.target_label;
+  if (!label) return null;
+  const index = typeof policy?.target_index === 'number' ? policy.target_index : null;
+  const count = typeof policy?.target_count === 'number' ? policy.target_count : null;
+  const short = index !== null && count !== null ? `rung ${index + 1}/${count}` : 'on ladder';
+  return { short, label };
 }
 
 function RejectedRow({

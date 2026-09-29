@@ -68,14 +68,17 @@ export function ListeningHistoryBand() {
   return (
     <article className="dash-card dash-card--rail" data-card="listening-history">
       <div className="dash-rail-head">
-        <div className="dash-band-tabs">
-          <button type="button" className="dash-band-tab active" onClick={openStats}>
-            Recently Played
-          </button>
+        <div className="dash-rail-titleblock">
+          <h2 className="dash-rail-title">
+            <button type="button" className="dash-rail-titlelink" onClick={openStats}>
+              Recently Played
+            </button>
+            <span className="dash-rail-count">{plays.length} songs</span>
+          </h2>
+          <span className="dash-rail-subtitle">
+            tap a song to play it again — the heading opens your full stats
+          </span>
         </div>
-        <span className="dash-rail-subtitle">
-          tap a song to play it again — the heading opens your full stats
-        </span>
       </div>
       <div className="dash-rail">
         {plays.map((play) => (

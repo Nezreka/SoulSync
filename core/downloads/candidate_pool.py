@@ -9,7 +9,7 @@ with the reason they lost, capped so a 400-hit Soulseek search doesn't ship
 from __future__ import annotations
 
 import os
-from typing import Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from core.downloads.decisions import Decision, reject, rejection_counts
 
@@ -70,14 +70,27 @@ def build_source_rows(
     *,
     source_name: str,
     is_blacklisted: Callable[[str, str], bool],
+    is_failed_blocked: Optional[Callable[[Any], bool]] = None,
     reject_cap: int = REJECTED_ROW_CAP,
+    provenance: Optional[dict] = None,
+    policy: Optional[dict] = None,
+    policy_profile: Optional[dict] = None,
 ) -> dict:
     """Turn ``[(query, [(candidate, Decision), ...]), ...]`` into the payload.
 
     The same file often comes back for both queries; one row per
     (username, filename), and an accepted sighting beats a rejected one.
     A blacklisted file is a rejection whatever validation said, since the
-    download worker skips it anyway.
+    download worker skips it anyway. A failed-blocklisted file (terminal
+    import give-up, core/downloads/failed_blocklist.py) is rejected the same
+    way, through the existing 'blacklisted' code.
+
+    ``provenance``/``policy`` (core/downloads/provenance.py) ride along when
+    given, so the UI can say which search produced these rows and under what
+    ladder. ``policy_profile`` (a quality-profile dict) additionally stamps
+    every row with its own candidate policy facet — the rung that candidate
+    reached on the ladder — while the run-level ``policy`` keeps describing
+    the ladder in effect.
     """
     picked: dict = {}
     order = []
@@ -96,24 +109,47 @@ def build_source_rows(
         candidate, decision, query = picked[key]
         if decision.accepted and _safe_blacklisted(is_blacklisted, *key):
             decision = reject('blacklisted', 'you blacklisted this file', decision.score)
+        elif (decision.accepted and is_failed_blocked is not None
+                and _safe_failed_blocked(is_failed_blocked, candidate)):
+            decision = reject('blacklisted', 'this file failed import before', decision.score)
         (accepted if decision.accepted else rejected).append((candidate, decision, query))
 
     accepted.sort(key=lambda t: -(t[1].score or 0))
     rejected.sort(key=lambda t: float('inf') if t[1].score is None else -t[1].score)
     counts = rejection_counts(d for _, d, _ in rejected)
     shown = rejected[:max(0, reject_cap)]
-    return {
-        'candidates': [candidate_row(c, d, source_name=source_name, query=q) for c, d, q in accepted],
-        'rejected': [candidate_row(c, d, source_name=source_name, query=q) for c, d, q in shown],
+
+    def _row(c, d, q):
+        row = candidate_row(c, d, source_name=source_name, query=q)
+        if policy_profile is not None:
+            from core.downloads.provenance import build_policy_facet
+            row['policy'] = build_policy_facet(policy_profile, c)
+        return row
+
+    out = {
+        'candidates': [_row(c, d, q) for c, d, q in accepted],
+        'rejected': [_row(c, d, q) for c, d, q in shown],
         'rejected_total': len(rejected),
         'rejected_counts': counts,
     }
+    if provenance is not None:
+        out['provenance'] = provenance
+    if policy is not None:
+        out['policy'] = policy
+    return out
 
 
 def _safe_blacklisted(is_blacklisted, username, filename) -> bool:
     try:
         return bool(is_blacklisted(username, filename))
     except Exception:  # noqa: BLE001 - a blacklist read must not sink the search
+        return False
+
+
+def _safe_failed_blocked(is_failed_blocked, candidate) -> bool:
+    try:
+        return bool(is_failed_blocked(candidate))
+    except Exception:  # noqa: BLE001 - a blocklist read must not sink the search
         return False
 
 
@@ -164,8 +200,13 @@ def summarize_pool(pairs: Iterable[tuple], chosen_key: Optional[tuple] = None,
     }
 
 
-def empty_source_rows(error: Optional[str] = None) -> dict:
+def empty_source_rows(error: Optional[str] = None, provenance: Optional[dict] = None,
+                      policy: Optional[dict] = None) -> dict:
     out = {'candidates': [], 'rejected': [], 'rejected_total': 0, 'rejected_counts': {}}
     if error:
         out['error'] = error
+    if provenance is not None:
+        out['provenance'] = provenance
+    if policy is not None:
+        out['policy'] = policy
     return out

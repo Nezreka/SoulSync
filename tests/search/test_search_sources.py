@@ -220,7 +220,9 @@ def test_search_source_partial_failure_does_not_break_others():
 def test_search_source_all_fail_returns_empty_lists():
     client = _Client(fail={'artists', 'albums', 'tracks', 'playlists'})
     result = sources.search_source('q', client, 'spotify')
-    assert result == {'artists': [], 'albums': [], 'tracks': [], 'playlists': [], 'available': True}
+    # M16: total provider outage — empty lists, and available=False so the
+    # outage isn't cached as a successful empty search.
+    assert result == {'artists': [], 'albums': [], 'tracks': [], 'playlists': [], 'available': False}
 
 
 def test_search_kind_playlists_returns_normalized_dicts():
@@ -284,3 +286,33 @@ def test_serialized_tracks_carry_real_artists_list():
     out = sources.search_kind(client, 'q', 'tracks', source_name='spotify')
     assert out[0]['artists'] == ['Artist A', 'Artist B']
     assert out[0]['artist'] == 'Artist A, Artist B'   # display string unchanged
+
+
+# ---------------------------------------------------------------------------
+# M16: provider outage must be distinguishable from an empty success
+# ---------------------------------------------------------------------------
+
+def test_search_source_all_kinds_failing_marks_unavailable():
+    """M16: when the provider fails every kind, search_source must report
+    available=False so callers don't cache the empty result as a success."""
+    client = _Client(fail={'artists', 'albums', 'tracks', 'playlists'})
+    result = sources.search_source('q', client, 'spotify')
+    assert result['artists'] == [] and result['albums'] == [] \
+        and result['tracks'] == [] and result['playlists'] == []
+    assert result['available'] is False
+
+
+def test_search_source_partial_failure_still_available():
+    """One dead kind must not sink the source: as long as something
+    succeeded, available stays True."""
+    client = _Client(artists=[_Artist('a', 'A')], fail={'tracks'})
+    result = sources.search_source('q', client, 'spotify')
+    assert result['available'] is True
+    assert [a['id'] for a in result['artists']] == ['a']
+    assert result['tracks'] == []
+
+
+def test_search_source_healthy_marks_available():
+    client = _Client(artists=[_Artist('a', 'A')])
+    result = sources.search_source('q', client, 'spotify')
+    assert result['available'] is True

@@ -117,6 +117,12 @@ export function YearStory({ onClose }: YearStoryProps) {
       aria-modal="true"
       aria-label="Your Year in Listening"
     >
+      <div className={styles.aurora} aria-hidden="true">
+        <div className={styles.auroraOrb1} />
+        <div className={styles.auroraOrb2} />
+        <div className={styles.auroraOrb3} />
+      </div>
+
       <div className={styles.pips} aria-hidden="true">
         {slides.map((slide, index) => (
           <span key={slide} className={`${styles.pip} ${index <= current ? styles.pipDone : ''}`} />
@@ -129,7 +135,10 @@ export function YearStory({ onClose }: YearStoryProps) {
 
       <div className={styles.stage}>
         {isPending ? (
-          <p className={styles.quiet}>Reading your year…</p>
+          <div className={styles.loadingWrap}>
+            <div className={styles.storySpinner} />
+            <p className={styles.quiet}>Reading your year…</p>
+          </div>
         ) : isError ? (
           <div className={styles.slide}>
             <p className={styles.quiet}>
@@ -770,17 +779,23 @@ function YearCard({ year }: { year: YearInListening }) {
   return (
     <div className={styles.slide}>
       <p className={styles.kicker}>That was your year</p>
+      <h2 className={styles.heroSmall}>Create Your Keepsake Card</h2>
+      <p className={styles.lede}>
+        Pick your layout, choose your favorite numbers, and export a card for your story.
+      </p>
 
       <div className={styles.cardLayout}>
         <div className={styles.cardStage}>
-          <canvas
-            ref={previewRef}
-            className={styles.cardPreview}
-            width={model.width}
-            height={model.height}
-            style={{ aspectRatio: `${model.width} / ${model.height}` }}
-            aria-label="Your year card preview"
-          />
+          <div className={styles.cardPedestal}>
+            <canvas
+              ref={previewRef}
+              className={styles.cardPreview}
+              width={model.width}
+              height={model.height}
+              style={{ aspectRatio: `${model.width} / ${model.height}` }}
+              aria-label="Your year card preview"
+            />
+          </div>
         </div>
 
         <div className={styles.cardControls}>

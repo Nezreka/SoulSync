@@ -289,6 +289,16 @@ def _default_move(src: str, dest: str, on_progress: Optional[Callable[[int], Non
                 if on_progress and total:
                     on_progress(min(99, int(copied * 100 / total)))   # 100 only once it's in place
         shutil.copystat(src, tmp)                   # preserve mtime, like shutil.move/copy2
+        # Verify the copy before the atomic rename — a silently short copy (SMB
+        # hiccup that didn't raise) must never be promoted to the real name.
+        if total > 0:
+            try:
+                tmp_size = os.path.getsize(tmp)
+            except OSError:
+                tmp_size = -1
+            if tmp_size != total:
+                raise OSError("short copy: %d of %d bytes for %s"
+                              % (tmp_size, total, os.path.basename(dest)))
         os.replace(tmp, dest)                       # atomic rename into the library (same fs now)
     except BaseException:
         try:

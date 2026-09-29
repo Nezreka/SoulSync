@@ -59,6 +59,7 @@ export const AUTOMATION_ICONS: Record<string, string> = {
   cleanup_wishlist: '🧹',
   update_discovery_pool: '🧭',
   start_quality_scan: '📊',
+  run_repair_job: '🔧',
   backup_database: '💾',
   refresh_beatport_cache: '🎵',
   clean_search_history: '🗑️',

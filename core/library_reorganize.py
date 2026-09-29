@@ -1364,6 +1364,12 @@ def _build_post_process_context(
             'disambiguation': str(api_album.get('disambiguation') or '').strip(),
             'album_type': eff_type or 'album',
             'record_type': eff_type or 'album',
+            # $atypes labels a folder with every qualifier the release carries,
+            # and Live/Soundtrack/Remix exist only as secondary types. Without
+            # them here a reorganize renders $atypes empty and RENAMES
+            # "[2017][EP][Live] Audiotree Live" to "[2017] Audiotree Live",
+            # stripping the labels the variable exists to preserve.
+            'secondary_types': list(api_album.get('secondary_types') or []),
             'is_compilation': is_comp,
             'artists': [{'name': album_artist_name}],
         },
@@ -2746,10 +2752,13 @@ def _has_remaining_audio(directory: str) -> bool:
     """Return True if `directory` contains any audio files. Used as the
     safety check before stripping album-level sidecars: if a track
     failed to move, leave its cover art and friends in place."""
+    from core.library.residual_files import is_appledouble
     if not os.path.isdir(directory):
         return False
     try:
         for name in os.listdir(directory):
+            if is_appledouble(name):
+                continue   # a macOS `._track.flac` splits to '.flac' but isn't audio
             full = os.path.join(directory, name)
             if not os.path.isfile(full):
                 continue

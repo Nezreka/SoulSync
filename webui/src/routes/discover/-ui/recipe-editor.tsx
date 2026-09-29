@@ -147,6 +147,30 @@ export function RecipeEditor({
               onChange={(e) => set('genres', e.target.value)}
             />
           </label>
+          <label className="recipe-field">
+            <span>Tags</span>
+            <input
+              type="text"
+              value={form.tags}
+              placeholder="progressive metal"
+              onChange={(e) => set('tags', e.target.value)}
+            />
+            <span className="recipe-hint">
+              Comma-separated. Only tracks tagged this way make the mix.
+            </span>
+          </label>
+          <label className="recipe-field">
+            <span>Related artists</span>
+            <input
+              type="text"
+              value={form.relatedArtists}
+              placeholder="Soen, Karnivool"
+              onChange={(e) => set('relatedArtists', e.target.value)}
+            />
+            <span className="recipe-hint">
+              Comma-separated names or artist IDs — an ID you have resolves to its artist.
+            </span>
+          </label>
           <div className="recipe-row">
             <label className="recipe-field">
               <span>From year</span>

@@ -2681,6 +2681,27 @@ class SoulseekClient(DownloadSourcePlugin):
         """A peer's info card (description, slots, queue) — best-effort."""
         return await self._make_request('GET', f'users/{self._quote(username)}/info')
 
+    async def get_share_directories(self) -> List[str]:
+        """Fetch the list of shared directory paths configured in slskd."""
+        if not self.base_url:
+            return []
+        try:
+            opts = await self._make_request('GET', 'options')
+            if isinstance(opts, dict):
+                shares = opts.get('shares') or opts.get('Shares') or {}
+                if isinstance(shares, dict):
+                    dirs = shares.get('directories') or shares.get('Directories') or []
+                    if isinstance(dirs, list):
+                        out = []
+                        for d in dirs:
+                            p = d.get('path') or d.get('Path') or '' if isinstance(d, dict) else (str(d) if d else '')
+                            if p:
+                                out.append(str(p).replace('\\', '/').rstrip('/'))
+                        return out
+        except Exception as e:
+            logger.debug("Failed to get slskd share directories: %s", e)
+        return []
+
     async def explore_api_endpoints(self) -> Dict[str, Any]:
         """Explore available API endpoints to find the correct download endpoint"""
         if not self.base_url:

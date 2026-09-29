@@ -248,6 +248,20 @@ const TRIGGER_LABELS: Record<string, string> = {
 };
 
 /**
+ * "Every hour" / "Every 6 hours" — the unit goes singular when the interval
+ * is 1, so the UI never reads "Every 1 hours".
+ */
+export function formatInterval(
+  interval: number | null | undefined,
+  unit: string | null | undefined,
+): string {
+  const n = Number(interval ?? 1);
+  const u = String(unit ?? 'hours');
+  const singular = u.endsWith('s') ? u.slice(0, -1) : u;
+  return n === 1 ? `Every ${singular}` : `Every ${n} ${u}`;
+}
+
+/**
  * Human label for a trigger.
  *
  * `blockLabel` supplies the label for anything not in the map — video triggers,
@@ -262,7 +276,7 @@ export function formatTrigger(
   const cfg = (config ?? {}) as Record<string, unknown>;
 
   if (type === 'schedule' && config) {
-    return `Every ${cfg.interval ?? 1} ${cfg.unit ?? 'hours'}`;
+    return formatInterval(cfg.interval as number | undefined, cfg.unit as string | undefined);
   }
   if (type === 'daily_time' && config) {
     return `Daily at ${cfg.time ?? '00:00'}`;
@@ -297,6 +311,7 @@ const ACTION_LABELS: Record<string, string> = {
   cleanup_wishlist: 'Clean Up Wishlist',
   update_discovery_pool: 'Update Discovery',
   start_quality_scan: 'Run Quality Scan',
+  run_repair_job: 'Run Maintenance Job',
   backup_database: 'Backup Database',
   refresh_beatport_cache: 'Refresh Beatport Cache',
   clean_search_history: 'Clean Search History',

@@ -220,6 +220,7 @@ export const FINDING_TYPE_LABELS: Record<string, string> = {
   genre_cleanup: 'Genres',
   genre_enrichment: 'Genre Enrichment',
   comma_artist_split: 'Comma Artist',
+  suspect_album_tag: 'Suspect Album',
 };
 
 /** Unknown types fall back to the raw id with underscores spaced out. */
@@ -252,6 +253,7 @@ export const FINDING_FIXABLE_TYPES: Record<string, string> = {
   genre_cleanup: 'Clean Genres',
   genre_enrichment: 'Apply Genres',
   comma_artist_split: 'Split Artists',
+  suspect_album_tag: 'Re-identify',
 };
 
 export function findingFixLabel(findingType: string): string | null {

@@ -916,6 +916,30 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
         </>
       );
 
+    case 'suspect_album_tag': {
+      pushIf(rows, d.track_title, 'Track');
+      pushIf(rows, d.artist_name, 'Artist');
+      pushIf(rows, d.album_title, 'Current Album');
+      const reasons = list<string>(d.reasons);
+      if (reasons.length) {
+        rows.push(['Reasons', reasons.join('; '), 'warning']);
+      }
+      if (d.full_track_count) {
+        rows.push(['Full Release Tracks', text(d.full_track_count)]);
+      }
+      pushIf(rows, d.reidentify_query, 'Search Query');
+      if (finding.file_path) {
+        rows.push(['File', finding.file_path, 'path']);
+      }
+      return (
+        <>
+          {media}
+          <DetailGrid rows={rows} />
+          <PlayButton finding={finding} />
+        </>
+      );
+    }
+
     default: {
       // Generic: every scalar detail key, then the file path.
       const generic = genericDetailRows(d);

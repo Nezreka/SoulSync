@@ -181,6 +181,47 @@ def get_recommended_stations():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@bp.route('/api/discover/layout', methods=['GET'])
+def get_discover_layout():
+    """The profile's discover page layout: saved rows merged over the
+    defaults, so newly shipped sections appear. Empty saved layout ==
+    exactly the current page order."""
+    try:
+        from core.discovery import layout as layout_mod
+        db = get_database()
+        saved = db.get_discovery_layout(get_current_profile_id())
+        response = jsonify({"success": True,
+                            "sections": layout_mod.merge_over_defaults(saved)})
+        # The user edits this in the layout modal: a cached copy would show
+        # the pre-save order until it expires.
+        response.headers['Cache-Control'] = 'no-store'
+        return response
+    except Exception as e:
+        logger.error(f"[Discover] layout read failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/layout', methods=['PUT'])
+def save_discover_layout():
+    """Replace the profile's discover page layout. Unknown section ids and
+    missing sections are 400s; duplicates are deduped; invalid zones fall
+    back to the section's default zone."""
+    try:
+        from core.discovery import layout as layout_mod
+        data = request.get_json(silent=True) or {}
+        try:
+            entries = layout_mod.sanitize(data.get('sections'))
+        except layout_mod.LayoutValidationError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
+        db = get_database()
+        if not db.save_discovery_layout(get_current_profile_id(), entries):
+            return jsonify({"success": False, "error": "could not save layout"}), 500
+        return jsonify({"success": True, "sections": entries})
+    except Exception as e:
+        logger.error(f"[Discover] layout save failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @bp.route('/api/discover/stations/<artist_id>/snapshot', methods=['POST'])
 @_hide_blocked({'snapshot.tracks': WORKS})
 def get_station_snapshot(artist_id):
@@ -630,6 +671,37 @@ def cancel_popularity_backfill():
     return jsonify({"success": True, "state": pb.get_state()})
 
 
+def _popularity_backfill_tick():
+    """Run one autostart popularity-backfill tick across EVERY profile.
+
+    S7: the old tick hardcoded profile 1 — every other profile's
+    similar-artist popularity gaps stayed empty forever. Extracted from
+    _autostart_popularity_backfill so tests can drive a single tick
+    without the sleeps.
+    """
+    from core.discovery import popularity_backfill as pb
+    database = get_database()
+    for profile in database.get_all_profiles() or []:
+        profile_id = profile.get('id') if isinstance(profile, dict) else getattr(profile, 'id', None)
+        if profile_id is None:
+            continue
+        if pb.is_running():
+            return
+        missing = database.count_similar_artists_missing_popularity(profile_id)
+        if missing <= 0:
+            continue
+        spotify_free, lastfm, deezer = _resolve_popularity_sources()
+        if not any([spotify_free, lastfm, deezer]):
+            logger.debug("Popularity backfill: %d missing for profile %s but no source configured",
+                         missing, profile_id)
+            continue
+        logger.info("Popularity backfill: filling %d artist(s) for profile %s in the background",
+                    missing, profile_id)
+        # run synchronously — the caller thread IS the background worker
+        pb.run_backfill(database, spotify_free=spotify_free, lastfm=lastfm,
+                        deezer=deezer, profile_id=profile_id)
+
+
 def _autostart_popularity_backfill():
     """Self-maintaining popularity fill — no button, no restart, no cost to scans.
 
@@ -641,19 +713,7 @@ def _autostart_popularity_backfill():
     _t.sleep(90)  # let the server finish its own startup work first
     while True:
         try:
-            from core.discovery import popularity_backfill as pb
-            if not pb.is_running():
-                database = get_database()
-                missing = database.count_similar_artists_missing_popularity(1)
-                if missing > 0:
-                    spotify_free, lastfm, deezer = _resolve_popularity_sources()
-                    if any([spotify_free, lastfm, deezer]):
-                        logger.info("Popularity backfill: filling %d artist(s) in the background", missing)
-                        # run synchronously — this thread IS the background worker
-                        pb.run_backfill(database, spotify_free=spotify_free, lastfm=lastfm,
-                                        deezer=deezer, profile_id=1)
-                    else:
-                        logger.debug("Popularity backfill: %d missing but no source configured", missing)
+            _popularity_backfill_tick()
         except Exception as e:
             logger.debug(f"popularity backfill tick skipped: {e}")
         _t.sleep(3600)  # re-check hourly; new artists fill within the hour
@@ -1760,8 +1820,11 @@ def get_seasonal_playlist(season_key):
         if not track_ids:
             return jsonify({"success": True, "tracks": []})
 
-        # Use source-appropriate ID column for lookups
-        track_id_col = 'spotify_track_id' if active_source == 'spotify' else 'itunes_track_id'
+        # Use source-appropriate ID column for lookups (deezer pool rows
+        # carry deezer_track_id — the old spotify/itunes binary choice
+        # missed them entirely)
+        from core.seasonal_vibes import seasonal_track_id_column
+        track_id_col = seasonal_track_id_column(active_source)
 
         # Fetch track details from seasonal tracks or discovery pool (filtered by source)
         tracks = []

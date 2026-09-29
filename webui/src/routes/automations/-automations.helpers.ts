@@ -1,9 +1,5 @@
-import {
-  AUTO_FILTER_BAR_MIN,
-  type Automation,
-  type AutomationsListResponse,
-  type AutomationsView,
-} from './-automations.types';
+import { isTimerTrigger, parseServerTime } from './-automations.format';
+import { type Automation, type AutomationsListResponse } from './-automations.types';
 
 /** `enabled` / `is_system` arrive as SQLite ints (0/1), not booleans. */
 function truthy(value: boolean | number | null | undefined): boolean {
@@ -34,39 +30,212 @@ export function forMusicSide(automations: Automation[]): Automation[] {
 }
 
 /**
- * Split the list the way the page renders it: System, then named groups in
- * name order, then the ungrouped remainder.
+ * Navigation collections for the library sidebar.
  *
- * Group order is `sort()` on the distinct names — the vanilla page sorted the
- * names, not the automations, so two groups keep API order internally.
+ * The page used to be one long scroll of sections — System, every group, then
+ * the ungrouped remainder — and finding anything meant scrolling. The sidebar
+ * turns those same families plus a few smart lenses into navigation, so each
+ * is one click away and the main pane only ever shows one collection.
+ *
+ * Smart keys are fixed; user groups ride as `group:<name>`; `guides` is the
+ * reference hub rather than a set of automations.
  */
-export function buildAutomationsView(automations: Automation[]): AutomationsView {
-  const system = automations.filter((a) => truthy(a.is_system));
-  const user = automations.filter((a) => !truthy(a.is_system));
+export type CollectionKind =
+  | 'all'
+  | 'attention'
+  | 'scheduled'
+  | 'events'
+  | 'off'
+  | 'system'
+  | 'ungrouped'
+  | 'guides'
+  | 'group';
 
-  const names = [...new Set(user.filter((a) => a.group_name).map((a) => a.group_name as string))];
+export interface CollectionDef {
+  key: string;
+  kind: CollectionKind;
+  /** User group name, only when kind === 'group'. */
+  groupName?: string;
+  label: string;
+  /** One line under the library header saying what lives here. */
+  description: string;
+}
+
+const SMART_COLLECTIONS: CollectionDef[] = [
+  {
+    key: 'all',
+    kind: 'all',
+    label: 'All automations',
+    description: 'Everything on this side, in one place',
+  },
+  {
+    key: 'attention',
+    kind: 'attention',
+    label: 'Needs attention',
+    description: 'Failing runs and automations that never fired',
+  },
+  {
+    key: 'scheduled',
+    kind: 'scheduled',
+    label: 'Scheduled',
+    description: 'Timer-driven automations and their cadences',
+  },
+  {
+    key: 'events',
+    kind: 'events',
+    label: 'Event-driven',
+    description: 'Automations that listen for things happening',
+  },
+  {
+    key: 'off',
+    kind: 'off',
+    label: 'Switched off',
+    description: 'Disabled automations, kept around but idle',
+  },
+  {
+    key: 'system',
+    kind: 'system',
+    label: 'System',
+    description: 'Built-in automations that keep SoulSync healthy',
+  },
+  {
+    key: 'ungrouped',
+    kind: 'ungrouped',
+    label: 'My Automations',
+    description: 'Your automations, not filed into a group yet',
+  },
+  {
+    key: 'guides',
+    kind: 'guides',
+    label: 'Guides & reference',
+    description: 'Pipelines, recipes and block reference',
+  },
+];
+
+function groupKey(name: string): string {
+  return `group:${name}`;
+}
+
+/** The user group behind a `group:<name>` key, or null for smart keys. */
+export function collectionGroupName(key: string): string | null {
+  return key.startsWith('group:') ? key.slice('group:'.length) : null;
+}
+
+/**
+ * Every collection the sidebar can show, in sidebar order: smart lenses,
+ * then System, then user groups by name, then the ungrouped remainder.
+ */
+export function buildCollections(automations: Automation[]): CollectionDef[] {
+  const names = [
+    ...new Set(automations.filter((a) => a.group_name).map((a) => a.group_name as string)),
+  ];
   names.sort();
-
-  const groups = names
-    .map((name) => ({ name, automations: user.filter((a) => a.group_name === name) }))
-    // A name only reaches here by being present on a row, so this cannot drop
-    // anything today; it mirrors the vanilla `if (groupAutos.length)` guard so
-    // the behaviour survives if grouping ever changes.
-    .filter((group) => group.automations.length > 0);
-
-  return {
-    system,
-    groups,
-    ungrouped: user.filter((a) => !a.group_name),
-    stats: {
-      active: automations.filter((a) => truthy(a.enabled)).length,
-      system: system.length,
-      custom: user.length,
-      total: automations.length,
+  return [
+    ...SMART_COLLECTIONS.filter((c) => c.key !== 'system' && c.key !== 'ungrouped'),
+    {
+      key: 'system',
+      kind: 'system',
+      label: 'System',
+      description: 'Built-in automations that keep SoulSync healthy',
     },
-    // Counted over the whole (music-side) list, not per section.
-    showFilterBar: automations.length >= AUTO_FILTER_BAR_MIN,
-  };
+    ...names.map((name) => ({
+      key: groupKey(name),
+      kind: 'group' as const,
+      groupName: name,
+      label: name,
+      description: `Automations filed under ${name}`,
+    })),
+    {
+      key: 'ungrouped',
+      kind: 'ungrouped',
+      label: 'My Automations',
+      description: 'Your automations, not filed into a group yet',
+    },
+  ];
+}
+
+/**
+ * The automations a collection holds, BEFORE any text/trigger/action filter.
+ * `guides` holds none — it renders reference content, not cards.
+ */
+export function collectionAutomations(automations: Automation[], key: string): Automation[] {
+  const groupName = collectionGroupName(key);
+  if (groupName !== null) {
+    return automations.filter((a) => !truthy(a.is_system) && a.group_name === groupName);
+  }
+  switch (key) {
+    case 'attention': {
+      // Worst first, matching the overview's attention queue; a row that both
+      // failed and never ran appears once, under its failure.
+      const failing = new Set(filterByHealth(automations, 'failing'));
+      return [...failing, ...filterByHealth(automations, 'never').filter((a) => !failing.has(a))];
+    }
+    case 'scheduled':
+      return automations.filter((a) => isTimerTrigger(a.trigger_type));
+    case 'events':
+      return automations.filter((a) => !isTimerTrigger(a.trigger_type));
+    case 'off':
+      return filterByHealth(automations, 'off');
+    case 'system':
+      return automations.filter((a) => truthy(a.is_system));
+    case 'ungrouped':
+      return automations.filter((a) => !truthy(a.is_system) && !a.group_name);
+    case 'guides':
+      return [];
+    case 'all':
+    default:
+      return automations;
+  }
+}
+
+/**
+ * A collection's health at a glance, for the sidebar dot.
+ * 'bad' = something failing, 'warn' = something off or never run, else 'ok'.
+ */
+export function collectionHealth(
+  automations: Automation[],
+  key: string,
+): 'bad' | 'warn' | 'ok' | 'none' {
+  const members = collectionAutomations(automations, key);
+  if (members.length === 0) return 'none';
+  if (members.some((a) => Boolean(a.last_error))) return 'bad';
+  if (members.some((a) => !truthy(a.enabled) || (truthy(a.enabled) && !a.last_run))) return 'warn';
+  return 'ok';
+}
+
+/** Count badge for a sidebar row. Attention shows its own count; guides none. */
+export function collectionCount(automations: Automation[], key: string): number | null {
+  if (key === 'guides') return null;
+  return collectionAutomations(automations, key).length;
+}
+
+/**
+ * What happens next: enabled timer automations with an armed next_run, soonest
+ * first. The overview's "Up next" timeline. Paused sides and disabled rows
+ * schedule nothing, so they are out; event-driven rows have no next run.
+ */
+export function upcomingRuns(automations: Automation[], paused: boolean): Automation[] {
+  if (paused) return [];
+  return automations
+    .filter((a) => truthy(a.enabled) && isTimerTrigger(a.trigger_type) && Boolean(a.next_run))
+    .sort((a, b) => parseServerTime(a.next_run as string) - parseServerTime(b.next_run as string));
+}
+
+/** Most recently run automations, newest first — the overview's activity feed. */
+export function recentRuns(automations: Automation[]): Automation[] {
+  return automations
+    .filter((a) => Boolean(a.last_run))
+    .sort((a, b) => parseServerTime(b.last_run as string) - parseServerTime(a.last_run as string));
+}
+
+/**
+ * The queue of things that want a human: failing runs first (they are broken),
+ * then enabled automations that never ran (they may be misconfigured).
+ */
+export function attentionQueue(automations: Automation[]): Automation[] {
+  const failing = automations.filter((a) => Boolean(a.last_error));
+  const neverRun = automations.filter((a) => !a.last_error && truthy(a.enabled) && !a.last_run);
+  return [...failing, ...neverRun];
 }
 
 /**
@@ -126,20 +295,15 @@ export function filterByHealth(automations: Automation[], lens: string): Automat
  */
 export function filterAutomations(
   automations: Automation[],
-  filters: { q?: string; trigger?: string; action?: string; health?: string },
+  filters: { q?: string; trigger?: string; action?: string },
   labelFor: (a: Automation) => { trigger: string; action: string },
 ): Automation[] {
   const q = (filters.q ?? '').toLowerCase().trim();
   const trigger = filters.trigger ?? '';
   const action = filters.action ?? '';
-  const health = filters.health ?? '';
-  if (!q && !trigger && !action && !health) return automations;
+  if (!q && !trigger && !action) return automations;
 
-  // The health lens runs first and through the same helper the counter uses,
-  // so a chip that says "3 failing" can never open onto a different three.
-  const scoped = health ? filterByHealth(automations, health) : automations;
-
-  return scoped.filter((a) => {
+  return automations.filter((a) => {
     const labels = labelFor(a);
     const matchesQuery =
       !q ||
@@ -164,52 +328,4 @@ export function filterOptions(automations: Automation[]): {
   triggers.sort();
   actions.sort();
   return { triggers, actions };
-}
-
-/**
- * A section's one-line status, so a COLLAPSED family still says something.
- *
- * Reads left to right in the order you would ask: is anything broken, is
- * anything running blind, is anything switched off. A family with none of
- * those says so rather than printing three zeros.
- */
-export function sectionSummary(automations: Automation[]): string {
-  if (automations.length === 0) return 'empty';
-  const failing = automations.filter((a) => Boolean(a.last_error)).length;
-  const off = automations.filter((a) => !truthy(a.enabled)).length;
-  const neverRun = automations.filter((a) => truthy(a.enabled) && !a.last_run).length;
-  const parts: string[] = [];
-  if (failing) parts.push(`${failing} failing`);
-  if (neverRun) parts.push(`${neverRun} never run`);
-  if (off) parts.push(`${off} off`);
-  if (parts.length === 0) parts.push('all healthy');
-  return parts.join(' · ');
-}
-
-/**
- * The glow a family carries, as `R,G,B` for `--tile-glow`.
- *
- * System and My Automations are fixed — they are the same two families on
- * every install, and a colour that moved between installs would be noise.
- * User groups hash their NAME into the palette, so a group keeps its colour
- * across reloads and across machines without anything being stored.
- */
-const FAMILY_PALETTE = [
-  '56,189,248',
-  '168,85,247',
-  '34,197,94',
-  '245,158,11',
-  '244,114,182',
-  '20,184,166',
-];
-
-export function sectionGlow(kind: 'system' | 'ungrouped' | 'group', name = ''): string {
-  if (kind === 'system') return '148,163,184';
-  // Indirection is legal in a custom property: --tile-glow: var(--accent-rgb)
-  // resolves before rgba() reads it, so the user's own automations always
-  // carry the accent they picked.
-  if (kind === 'ungrouped') return 'var(--accent-rgb)';
-  let hash = 0;
-  for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
-  return FAMILY_PALETTE[hash % FAMILY_PALETTE.length];
 }

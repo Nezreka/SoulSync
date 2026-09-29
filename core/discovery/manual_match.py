@@ -103,6 +103,11 @@ def should_rediscover(extra_data: Optional[Dict[str, Any]]) -> bool:
       * discovered + incomplete -> redo   (backfill track_number / album fields)
       * unmatched_by_user       -> skip   (user deliberately removed the match)
       * never discovered        -> redo   (first-time discovery)
+
+    M12 exception to the incomplete rule: a fresh match that completed with
+    ``track_number=None`` because the provider doesn't know it carries
+    ``track_number_unknown_enrichment_attempted: True``; the track-number leg
+    is then treated as resolved so the match converges instead of looping.
     """
     extra = extra_data if isinstance(extra_data, dict) else {}
 
@@ -121,7 +126,20 @@ def should_rediscover(extra_data: Optional[Dict[str, Any]]) -> bool:
         has_track_num = matched.get('track_number')
         has_release = album.get('release_date')
         has_album_id = album.get('id')
-        return not (has_track_num and (has_release or has_album_id))
+        # M12: a fresh match can complete with track_number=None when the
+        # provider genuinely doesn't know it. The discovery worker persists
+        # a 'track_number_unknown_enrichment_attempted' marker in that case —
+        # treat the track-number leg as resolved so the match converges
+        # instead of being re-discovered (and rewritten identically) on
+        # every pipeline run. The marker only excuses the track-number leg:
+        # missing album metadata is still worth re-trying. Requiring the key
+        # to be present (the new always-include shape) keeps legacy rows —
+        # which omitted the key entirely — on the old re-discover path.
+        track_num_resolved = bool(has_track_num) or (
+            extra.get('track_number_unknown_enrichment_attempted')
+            and 'track_number' in matched
+        )
+        return not (track_num_resolved and (has_release or has_album_id))
 
     if extra.get('unmatched_by_user'):
         return False

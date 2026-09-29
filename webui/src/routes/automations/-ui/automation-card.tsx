@@ -8,6 +8,7 @@ import {
   automationMeta,
   automationSchedule,
   formatAction,
+  formatInterval,
   formatTrigger,
 } from '../-automations.format';
 import { automationIcon, formatNotify } from '../-automations.icons';
@@ -199,7 +200,7 @@ function TriggerCadence({
       window.showToast?.(
         daily
           ? `${a.name} now runs daily at ${time}`
-          : `${a.name} now runs every ${interval} ${unit}`,
+          : `${a.name} now runs ${formatInterval(interval, unit).replace(/^Every/, 'every')}`,
         'success',
       );
       setEditing(false);

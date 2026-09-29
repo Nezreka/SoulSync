@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.4.7"
+_SOULSYNC_BASE_VERSION = "3.4.8"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -1046,14 +1046,23 @@ def extract_filename(full_path):
     else:
         return full_path
 
-def _make_context_key(username, filename):
+def _make_context_key(username, filename, task_id=None):
     """Build a unique context key from username and full Soulseek path.
 
     Uses the full remote path (not just filename) to prevent collisions
     when different tracks from the same user share a filename
     (e.g., two albums both containing '01 - Intro.flac').
+
+    Pass ``task_id`` when the key identifies a post-processing context for
+    one specific download task: two tasks can legitimately download the same
+    peer/path (album redownloads, cross-batch duplicates), and without the
+    task id the second task's context silently overwrites the first's.
+    Live-transfer lookups and all legacy callers keep the two-part key —
+    only post-processing context writes pass a task id.
     """
     normalized = filename.replace('\\', '/').lstrip('/') if filename else ''
+    if task_id:
+        return f"{username}::{task_id}::{normalized}"
     return f"{username}::{normalized}"
 
 
@@ -1372,6 +1381,11 @@ wishlist_timer_lock = threading.Lock()
 
 watchlist_auto_scanning = False
 watchlist_auto_scanning_timestamp = 0
+# H7: refreshed by the scan thread while it is alive (see
+# core/watchlist/auto_scan.py::_start_scan_heartbeat). The stuck detector
+# only resets the flag above when THIS is stale — a healthy multi-hour scan
+# must never look stuck just because its start timestamp is old.
+watchlist_auto_scanning_heartbeat = 0
 watchlist_timer_lock = threading.Lock()
 
 # Beatport scrape cache + its accessors live in api/beatport.py now (lifted
@@ -1876,18 +1890,9 @@ from core.search.cache import (
     get_cache_key as _get_enhanced_search_cache_key_impl,
     get_cached_response as _get_cached_enhanced_search_response,
     set_cached_response as _set_cached_enhanced_search_response,
+    should_cache_enhanced_search_response,
 )
 from core.search.orchestrator import VALID_SOURCES as ENHANCED_SEARCH_VALID_SOURCES
-
-
-def _get_enhanced_search_cache_key(query, requested_source=None):
-    """Thin wrapper that wires live config providers into the cache-key builder."""
-    return _get_enhanced_search_cache_key_impl(
-        query, requested_source,
-        active_server_provider=config_manager.get_active_media_server,
-        fallback_source_provider=_get_metadata_fallback_source,
-        hydrabase_active_provider=_is_hydrabase_active,
-    )
 
 # --- Background Download Monitoring (GUI Parity) ---
 from core.downloads.monitor import (
@@ -2216,8 +2221,9 @@ def start_batch_healing_timer():
         # Schedule next healing cycle
         _schedule_batch_healing_timer(30.0)
 
-# Start the healing timer when the server starts
-start_batch_healing_timer()
+# NOTE: start_batch_healing_timer() is NOT called at module level — it is
+# started once per process from start_runtime_services(), so importers
+# (tests, CLI tools, workers) don't inherit a live 30s healing loop.
 
 # Cleanup handler for Flask shutdown/reload
 import atexit
@@ -3224,7 +3230,9 @@ def save_playlist_m3u():
 
         # Compute target folder using the template system
         transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-        m3u_folder = _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name, album_name, year)
+        m3u_folder = _compute_m3u_folder(
+            transfer_dir, context_type, playlist_name, artist_name, album_name, year,
+            sample_track_path=_first_m3u_entry(m3u_content))
         os.makedirs(m3u_folder, exist_ok=True)
 
         # Build M3U filename from playlist or album name
@@ -3387,7 +3395,9 @@ def generate_playlist_m3u():
         if save_to_disk and (force or config_manager.get('m3u_export.enabled', False)):
             transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
             m3u_folder = _compute_m3u_folder(transfer_dir, context_type, playlist_name,
-                                              artist_name_ctx, album_name, year)
+                                              artist_name_ctx, album_name, year,
+                                              sample_track_path=next(
+                                                  (p for p in file_path_map.values() if p), None))
             os.makedirs(m3u_folder, exist_ok=True)
             if context_type == 'album' and artist_name_ctx and album_name:
                 safe_fn = _sanitize_filename(f'{artist_name_ctx} - {album_name}')
@@ -5838,7 +5848,15 @@ def enhanced_search():
     if not query:
         return jsonify(_search_orchestrator.empty_response())
 
-    cache_key = _get_enhanced_search_cache_key(query, requested_source)
+    # The cached payload's db_artists are profile-scoped: the profile id is
+    # part of the key (H12) so profiles never read each other's results.
+    cache_key = _get_enhanced_search_cache_key_impl(
+        query, requested_source,
+        active_server_provider=config_manager.get_active_media_server,
+        fallback_source_provider=_get_metadata_fallback_source,
+        hydrabase_active_provider=_is_hydrabase_active,
+        profile_id_provider=get_current_profile_id,
+    )
     cached = _get_cached_enhanced_search_response(cache_key)
     if cached is not None:
         logger.info(f"Enhanced search cache hit for: '{query}'")
@@ -5849,7 +5867,10 @@ def enhanced_search():
     try:
         deps = _build_search_deps()
         response_data = _search_orchestrator.run_enhanced_search(query, requested_source, deps)
-        _set_cached_enhanced_search_response(cache_key, response_data)
+        # M16: a provider-outage response (source unavailable, empty
+        # payload) must not be cached as a successful empty search.
+        if should_cache_enhanced_search_response(response_data):
+            _set_cached_enhanced_search_response(cache_key, response_data)
         return jsonify(response_data)
     except Exception as e:
         logger.error(f"Enhanced search error: {e}")
@@ -7883,9 +7904,12 @@ def request_incremental_database_update():
             db_update_state.update({
                 "status": "running", "phase": "Initializing...",
                 "progress": 0, "current_item": "", "processed": 0, "total": 0, "error_message": "",
+                # H16: new run epoch — a stale worker from a watchdog-superseded
+                # run must not overwrite this run's terminal state.
+                "run_epoch": db_update_state.get("run_epoch", 0) + 1,
                 "last_progress_at": time.time(),  # seed heartbeat for the stall watchdog
             })
-        db_update_executor.submit(_run_db_update_task, False, active_server)
+        db_update_executor.submit(_run_db_update_task, False, active_server, db_update_state["run_epoch"])
 
         add_activity_item("", "Database Update", f"Incremental update started: {reason}", "Now")
         return jsonify({
@@ -8209,6 +8233,7 @@ def get_library_artists():
             profile_id=get_current_profile_id(),
             source_filter=source_filter,
             quality_filter=quality_filter,
+            sort=request.args.get('sort', ''),
         )
 
         # Fix image URLs for all artists
@@ -8238,6 +8263,72 @@ def get_library_artists():
                 "has_next": False
             }
         }), 500
+
+@app.route('/api/library/albums')
+def get_library_albums():
+    """Get albums for the library page's album view, with search and pagination"""
+    try:
+        result = get_database().get_library_albums(
+            search_query=request.args.get('search', ''),
+            letter=request.args.get('letter', 'all'),
+            page=int(request.args.get('page', 1)),
+            limit=int(request.args.get('limit', 75)),
+            profile_id=get_current_profile_id(),
+            source_filter=request.args.get('source_filter', ''),
+            sort=request.args.get('sort', ''),
+        )
+
+        # Media-server art is stored as a relative path; a browser cannot load it
+        for album in result['albums']:
+            if album.get('thumb_url'):
+                album['thumb_url'] = fix_artist_image_url(album['thumb_url'])
+
+        return jsonify({
+            "success": True,
+            **result
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching library albums: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "albums": [],
+            "pagination": {
+                "page": 1,
+                "limit": 75,
+                "total_count": 0,
+                "total_pages": 0,
+                "has_prev": False,
+                "has_next": False
+            }
+        }), 500
+
+@app.route('/api/library/albums/<album_id>/tracks')
+def get_library_album_tracks(album_id):
+    """The tracks of one owned album, for the album card's play button.
+
+    Not /api/album/<id>/tracks, which resolves a metadata SOURCE's tracklist
+    for the download-missing modal. This returns the rows that have a file, so
+    the player queues them rather than treating each as a miss to acquire.
+    """
+    try:
+        tracks = get_database().get_tracks_by_album(album_id)
+        return jsonify({
+            "success": True,
+            "tracks": [{
+                'id': t.id,
+                'title': t.title,
+                'track_number': t.track_number,
+                'file_path': t.file_path,
+                'duration': t.duration,
+                'bitrate': t.bitrate,
+            } for t in tracks if t.file_path]
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching tracks for library album {album_id}: {e}")
+        return jsonify({"success": False, "error": str(e), "tracks": []}), 500
 
 @app.route('/api/library/unmatched-summary')
 def get_library_unmatched_summary():
@@ -8454,6 +8545,24 @@ def library_check_tracks():
         # Single query: get ALL tracks by this artist from the DB
         db_tracks = db.search_tracks(artist=artist_name, limit=500, server_source=active_server)
 
+        # Ownership is per-artist. When the requested artist isn't in the
+        # library by name, search_tracks() degrades to a whole-table word-OR
+        # ("Black Rainbows" matches "Black Sabbath" on "black") and the title
+        # matcher below would credit a different artist's song as owned
+        # (Ktzenjammer follow-up to #1292: "Snowball" flagged owned via Black
+        # Sabbath's "Snowblind" — and mergeOwnership would then PLAY that
+        # wrong file). A track by another artist is never the same recording,
+        # so keep only rows credited to the requested artist, via the album
+        # artist or the per-track artist (compilations).
+        from core.text.normalize import normalize_key
+        _wanted_artist_key = normalize_key(artist_name)
+        if _wanted_artist_key:
+            db_tracks = [
+                t for t in db_tracks
+                if normalize_key(getattr(t, 'artist_name', '') or '') == _wanted_artist_key
+                or normalize_key(getattr(t, 'track_artist', '') or '') == _wanted_artist_key
+            ]
+
         if not db_tracks:
             # No tracks by this artist in DB — none owned
             owned_map = {t.get('name', ''): {"owned": False} for t in tracks if t.get('name')}
@@ -8492,7 +8601,7 @@ def library_check_tracks():
         target_album = data.get('album_name', '')
         target_album_norm = _normalize(target_album) if target_album else ''
 
-        def _match_title(search_norm, search_clean, candidates):
+        def _match_title(search_norm, search_clean, candidates, threshold=0.7):
             """Find best matching track from a list of (norm, clean, db_track) candidates."""
             from core.text.title_match import choose_best_title_candidate
             return choose_best_title_candidate(
@@ -8500,11 +8609,24 @@ def library_check_tracks():
                 search_clean,
                 candidates,
                 lambda left, right: SequenceMatcher(None, left, right).ratio(),
+                threshold=threshold,
             )
+
+        # A 0.7 title ratio is only safe inside one album's track list. The
+        # #808 fallback (and the album-less path) searches the artist's whole
+        # catalog, where different songs routinely share a stem: "Beyond I" /
+        # "Beyond Fate" = 0.74, "Solve" / "Solace" = 0.73, "Bestrafe mich" /
+        # "Heirate mich" = 0.72 (Ktzenjammer follow-up to #1292). Out there
+        # only near-identical titles may match — 0.85 is the same level
+        # titles_plausibly_same() accepts regardless of shared words, so
+        # typos ("Beleive"/"Believe" = 0.86) still match while stem-sharing
+        # different songs no longer do.
+        _WIDE_POOL_THRESHOLD = 0.85
 
         # Split DB tracks by album if album-aware matching is active
         album_entries = []
         other_entries = []
+        title_threshold = 0.7
         if target_album_norm:
             for entry in db_title_entries:
                 db_album = _normalize(getattr(entry[2], 'album_title', '') or '')
@@ -8518,11 +8640,17 @@ def library_check_tracks():
             # 'Champagne Supernova (OurVinyl Sessions)' scores ~0.5). Marking
             # every track unowned off a failed ALBUM-name comparison is wrong —
             # fall back to artist-wide title matching, which is exactly the
-            # pre-album-aware behavior and still holds the 0.7 title bar.
+            # pre-album-aware behavior, but under the near-identical bar.
             if not album_entries:
                 album_entries = other_entries
+                # ...but the wide pool only gets the near-identical bar: a 0.7
+                # ratio across the whole catalog is where the stem-sharing
+                # false positives live (see _WIDE_POOL_THRESHOLD above).
+                title_threshold = _WIDE_POOL_THRESHOLD
         else:
             other_entries = db_title_entries
+            # No album context at all: same wide pool, same near-identical bar.
+            title_threshold = _WIDE_POOL_THRESHOLD
 
         owned_map = {}
         for track in tracks:
@@ -8537,9 +8665,11 @@ def library_check_tracks():
             # prevents false positives where "Thriller" on Album A shows as owned
             # because it exists on Album B. Without album context, search all tracks.
             if target_album_norm:
-                matched_db_track = _match_title(search_norm, search_clean, album_entries)
+                matched_db_track = _match_title(search_norm, search_clean, album_entries,
+                                                threshold=title_threshold)
             else:
-                matched_db_track = _match_title(search_norm, search_clean, other_entries)
+                matched_db_track = _match_title(search_norm, search_clean, other_entries,
+                                                threshold=title_threshold)
 
             if matched_db_track:
                 import os
@@ -11239,7 +11369,30 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
     logger.info(f"[{log_tag}] Streaming search across {len(download_clients)} sources: {list(download_clients.keys())}")
 
     from core.downloads.candidate_pool import build_source_rows, empty_source_rows
+    from core.downloads.provenance import build_policy_facet, new_provenance
     from core.quality.source_map import quality_profile_context
+
+    # One provenance per interactive inspection: every streamed source payload
+    # carries the same search_mode/searched_at/policy_run_id. The run-level
+    # policy describes the ladder in effect; each candidate row gets its own
+    # facet (the rung it reached) via policy_profile.
+    _inspection_provenance = new_provenance('interactive')
+    _inspection_profile = None
+    try:
+        from core.quality.selection import load_profile_by_id
+        _inspection_profile = load_profile_by_id(quality_profile_id)
+        _inspection_policy = build_policy_facet(_inspection_profile)
+    except Exception:  # noqa: BLE001 - the search matters more than its facet
+        _inspection_policy = build_policy_facet(None)
+
+    def _is_failed_blocklisted(candidate, source_name):
+        """Files that terminally failed import skip the inspector too —
+        fail-open, a blocklist read never sinks the search."""
+        try:
+            from core.downloads.failed_blocklist import is_candidate_blocked
+            return is_candidate_blocked(database, candidate, source_name)
+        except Exception:  # noqa: BLE001
+            return False
 
     bar = None
     if upgrade:
@@ -11266,6 +11419,9 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
                 logger.debug(f"[{log_tag}] {source_name} search failed for query '{q}': {e}")
         return build_source_rows(
             evaluated, source_name=source_name, is_blacklisted=database.is_blacklisted,
+            is_failed_blocked=lambda c: _is_failed_blocklisted(c, source_name),
+            provenance=_inspection_provenance, policy=_inspection_policy,
+            policy_profile=_inspection_profile,
         )
 
     def generate_stream():
@@ -11276,7 +11432,9 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
                 try:
                     yield json.dumps({'source': source_name, **future.result()}) + '\n'
                 except Exception as e:
-                    yield json.dumps({'source': source_name, **empty_source_rows(str(e))}) + '\n'
+                    yield json.dumps({'source': source_name, **empty_source_rows(
+                        str(e), provenance=_inspection_provenance,
+                        policy=_inspection_policy)}) + '\n'
         yield json.dumps({'done': True}) + '\n'
 
     return app.response_class(generate_stream(), mimetype='application/x-ndjson', headers={'X-Accel-Buffering': 'no'})
@@ -14030,7 +14188,82 @@ def parse_youtube_playlist(url):
 # FILE ORGANIZATION TEMPLATE ENGINE
 # ===================================================================
 
-def _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name='', album_name='', year=''):
+def _first_m3u_entry(m3u_content):
+    """The first real path in an M3U body, skipping #EXTM3U/#EXTINF/#STATUS."""
+    for line in str(m3u_content or "").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            return line
+    return None
+
+
+def _existing_album_folder_ignoring_brackets(candidate):
+    """A sibling of ``candidate`` that differs only in its bracketed parts.
+
+    The template is rendered here with artist/album/year alone, so every
+    variable needing richer metadata comes out empty and the name is a
+    near-miss: "[2017] Audiotree Live" where the audio is really in
+    "[2017][EP][Live] Audiotree Live". Creating that near-miss leaves an empty
+    directory a media server indexes as a second album, so before falling back
+    to it, look for the folder it was trying to name.
+
+    Only an unambiguous single match counts — two siblings that both reduce to
+    the same stem mean the brackets are what tells them apart, and guessing
+    between them would be worse than not guessing.
+    """
+    try:
+        if os.path.isdir(candidate):
+            return candidate
+        parent = os.path.dirname(candidate)
+        if not os.path.isdir(parent):
+            return None
+
+        def stem(name):
+            return re.sub(r"\s+", " ", re.sub(r"\[[^\]]*\]", "", name)).strip().lower()
+
+        target = stem(os.path.basename(candidate))
+        if not target:
+            return None
+        hits = [d for d in os.listdir(parent)
+                if os.path.isdir(os.path.join(parent, d)) and stem(d) == target]
+        if len(hits) == 1:
+            return os.path.join(parent, hits[0])
+    except OSError as exc:
+        logger.debug("[M3U] could not look for an existing album folder: %s", exc)
+    return None
+
+
+def _album_folder_from_track_path(track_path):
+    """The directory holding a track, or None when it can't be established.
+
+    Resolves through the shared library path resolver first: stored paths are
+    whatever the media server reported (``/music/...`` on a split-mount Docker
+    setup), which is not necessarily a path this process can see.
+    """
+    if not track_path:
+        return None
+    try:
+        from core.library.path_resolver import resolve_library_file_path
+        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+        resolved = resolve_library_file_path(
+            str(track_path), transfer_folder=transfer_dir, config_manager=config_manager)
+        if resolved and os.path.isfile(resolved):
+            folder = os.path.dirname(os.path.abspath(resolved))
+            # Only inside the library. The resolver also probes the slskd
+            # download folder, and a track row still pointing there would put
+            # the playlist among the incoming files rather than in the library.
+            root = os.path.abspath(os.path.normpath(transfer_dir))
+            if folder == root or folder.startswith(root + os.sep):
+                return folder
+            logger.debug("[M3U] %s resolves outside the library (%s) — using the template",
+                         track_path, folder)
+    except Exception as exc:  # noqa: BLE001 - fall back to the template
+        logger.debug("[M3U] could not locate the album folder from %s: %s", track_path, exc)
+    return None
+
+
+def _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name='', album_name='', year='',
+                        sample_track_path=None):
     """
     Compute the target folder for an M3U file using the template system.
 
@@ -14040,6 +14273,20 @@ def _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name='
     Returns: absolute folder path
     """
     if context_type == 'album' and artist_name and album_name:
+        # Prefer the folder the album's audio is ACTUALLY in over re-deriving it
+        # from the template. The template is evaluated here with only
+        # artist/album/year — these callers are HTTP endpoints and hold nothing
+        # else — so any variable needing richer metadata renders empty and the
+        # M3U lands beside the album instead of inside it. $atypes is the live
+        # example: "[$year]$atypes $album" computes "[2017] Audiotree Live"
+        # while the audio sits in "[2017][EP][Live] Audiotree Live", and the
+        # os.makedirs below then CREATES the empty one, which a media server
+        # indexes as a second album. The tracks are already imported by the time
+        # an M3U is written, so their own directory is the answer, and it cannot
+        # drift from the template the way a re-derivation can.
+        located = _album_folder_from_track_path(sample_track_path)
+        if located:
+            return located
         template_context = {
             'artist': artist_name,
             'albumartist': artist_name,
@@ -14052,7 +14299,8 @@ def _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name='
         }
         folder_path, _ = _get_file_path_from_template(template_context, 'album_path')
         if folder_path:
-            return os.path.join(transfer_dir, folder_path)
+            templated = os.path.join(transfer_dir, folder_path)
+            return _existing_album_folder_ignoring_brackets(templated) or templated
         # Fallback
         artist_sanitized = _sanitize_filename(artist_name)
         album_sanitized = _sanitize_filename(album_name)
@@ -14175,8 +14423,6 @@ def _get_album_type_display(raw_type, track_count) -> str:
     # so both need to match here.
     if raw in ('compilation', 'compile'):
         return 'Compilation'
-    if raw == 'album':
-        return 'Album'
     if raw in ('single', 'ep'):
         # Match download-pipeline logic: Spotify labels both singles and EPs
         # as 'single', so final classification is by track count. Applying the
@@ -14188,7 +14434,10 @@ def _get_album_type_display(raw_type, track_count) -> str:
             return 'EP'
         return 'Album'
 
-    # Unknown/missing — infer from track count
+    # 'album', missing, or anything unrecognized: a bare 'album' is the
+    # default fallback at every upstream layer — not a signal. Verify
+    # against the track count when we have one; with no count, keep the
+    # "Album" default rather than guessing. Mirrors core/imports/paths.py.
     if tc <= 0:
         return 'Album'
     if tc <= 3:
@@ -14255,6 +14504,7 @@ def _apply_path_template(template: str, context: dict) -> str:
     _bracket_map = {
         'albumartist': album_artist_value,
         'albumtype': clean_context.get('albumtype', 'Album'),
+        'atypes': clean_context.get('atypes', ''),
         'playlist': clean_context.get('playlist_name', ''),
         'artistletter': _shared_artist_letter(clean_context.get('artist', 'U')),
         'artist': clean_context.get('artist', 'Unknown Artist'),
@@ -14274,6 +14524,11 @@ def _apply_path_template(template: str, context: dict) -> str:
     result = result.replace('$disambiguation', clean_context.get('disambiguation', ''))
     result = result.replace('$albumartist', album_artist_value)
     result = result.replace('$albumtype', clean_context.get('albumtype', 'Album'))
+    # This replacer is a hand-maintained copy of core.imports.paths, so a new
+    # variable has to be added here too or it survives into the folder name:
+    # an album template of "[$year]$atypes $album" put the M3U in a directory
+    # literally called "[2019]$atypes Tokyo".
+    result = result.replace('$atypes', clean_context.get('atypes', ''))
     result = result.replace('$playlist', clean_context.get('playlist_name', ''))
 
     # Medium length variables
@@ -14831,10 +15086,11 @@ def start_simple_background_monitor():
 def check_and_recover_stuck_flags():
     """
     Check if wishlist_auto_processing or watchlist_auto_scanning flags are stuck.
-    If a flag has been True for more than 2 hours (7200 seconds), reset it.
-    This prevents indefinite blocking when processes crash without cleanup.
+    If a flag has been True for more than 15 minutes (900 seconds) with no
+    sign of life, reset it. This prevents indefinite blocking when processes
+    crash without cleanup.
     """
-    global watchlist_auto_scanning, watchlist_auto_scanning_timestamp
+    global watchlist_auto_scanning, watchlist_auto_scanning_timestamp, watchlist_auto_scanning_heartbeat
 
     import time
     current_time = time.time()
@@ -14858,13 +15114,19 @@ def check_and_recover_stuck_flags():
 
     # Check watchlist flag
     if watchlist_auto_scanning:
-        time_stuck = current_time - watchlist_auto_scanning_timestamp
+        # H7: the scan thread heartbeats while alive — only treat the flag as
+        # stuck when the heartbeat itself is stale. A healthy multi-hour scan
+        # (mandatory per-artist sleeps exceed the 900s timeout) must never be
+        # reset mid-run; that is what started overlapping scans.
+        last_sign_of_life = max(watchlist_auto_scanning_timestamp, watchlist_auto_scanning_heartbeat)
+        time_stuck = current_time - last_sign_of_life
         if time_stuck > stuck_timeout:
             stuck_minutes = time_stuck / 60
             logger.info(f"[Stuck Detection] Watchlist auto-scanning flag has been stuck for {stuck_minutes:.1f} minutes - RESETTING")
             with watchlist_timer_lock:
                 watchlist_auto_scanning = False
                 watchlist_auto_scanning_timestamp = 0
+                watchlist_auto_scanning_heartbeat = 0
             return True
 
     return False
@@ -14889,16 +15151,21 @@ def is_wishlist_actually_processing():
 def is_watchlist_actually_scanning():
     """
     Check if watchlist is truly scanning (not just flag stuck).
-    Returns True only if flag is set AND timestamp is recent (< 15 minutes).
+    Returns True only if flag is set AND there has been a sign of life
+    (scan start or heartbeat) within the last 15 minutes.
     """
-    global watchlist_auto_scanning, watchlist_auto_scanning_timestamp
+    global watchlist_auto_scanning, watchlist_auto_scanning_timestamp, watchlist_auto_scanning_heartbeat
 
     if not watchlist_auto_scanning:
         return False
 
     import time
     current_time = time.time()
-    time_since_start = current_time - watchlist_auto_scanning_timestamp
+    # H7: heartbeat-aware — a live scan refreshes the heartbeat, so only a
+    # stale heartbeat means stuck (the start timestamp alone goes stale on
+    # every healthy multi-hour scan).
+    last_sign_of_life = max(watchlist_auto_scanning_timestamp, watchlist_auto_scanning_heartbeat)
+    time_since_start = current_time - last_sign_of_life
 
     # If more than 15 minutes, flag is stuck - auto-recover and return False
     if time_since_start > 900:  # 15 minutes
@@ -19671,6 +19938,13 @@ def _build_watchlist_auto_scan_deps():
         global watchlist_auto_scanning_timestamp
         watchlist_auto_scanning_timestamp = value
 
+    def _get_hb():
+        return watchlist_auto_scanning_heartbeat
+
+    def _set_hb(value):
+        global watchlist_auto_scanning_heartbeat
+        watchlist_auto_scanning_heartbeat = value
+
     def _get_state():
         return watchlist_scan_state
 
@@ -19692,6 +19966,8 @@ def _build_watchlist_auto_scan_deps():
         _set_auto_scanning=_set_flag,
         _get_auto_scanning_timestamp=_get_ts,
         _set_auto_scanning_timestamp=_set_ts,
+        _get_auto_scanning_heartbeat=_get_hb,
+        _set_auto_scanning_heartbeat=_set_hb,
         _get_watchlist_scan_state=_get_state,
         _set_watchlist_scan_state=_set_state,
         get_deezer_client=_get_deezer_client,
@@ -21592,6 +21868,13 @@ def _emit_chat_push_loop():
                                     out['av'] = _av2
                             except (TypeError, ValueError):
                                 pass
+                            # User flair badge ('bg') — validated on receive
+                            # like every other envelope tag, so a hostile
+                            # client can't smuggle a staff word through live
+                            # push either.
+                            _bg2 = chat_codec.badge_of(dec)
+                            if _bg2:
+                                out['badge'] = _bg2
                             _ed2 = chat_codec.edit_of(dec)
                             if _ed2:
                                 out['ed'] = _ed2
@@ -21647,6 +21930,20 @@ def _emit_chat_push_loop():
                     # clearing the flag must not), and never the boot baseline
                     'grew': prev >= 0 and unread > prev,
                 })
+            # Chat-archive retention: once a day at most, best-effort. The
+            # archive only grows while this loop runs (it does the archiving),
+            # so gating the sweep on the loop is no loss — and a setting
+            # change prunes immediately via /api/chat/settings anyway.
+            try:
+                import time as _t
+                if _t.time() - _chat_push_state.get('retention_pruned_at', 0) > 86400:
+                    _chat_push_state['retention_pruned_at'] = _t.time()
+                    _days = config_manager.get('soulseek.chat_history_retention_days', 30)
+                    _n = get_database().prune_chat_messages(_days)
+                    if _n:
+                        logger.info("chat: daily retention sweep pruned %d messages older than %s days", _n, _days)
+            except Exception:
+                logger.debug("chat retention sweep failed", exc_info=True)
         except Exception:
             logger.debug("chat push loop error", exc_info=True)
 
@@ -23243,6 +23540,12 @@ def start_runtime_services():
         # Start OAuth callback servers
         logger.info("Starting OAuth callback servers...")
         start_oauth_callback_servers()
+
+        # Batch state healing timer — started once per process here, so it
+        # runs under both direct execution and the WSGI entrypoint. (It used
+        # to fire at module import, which started the 30s loop in every
+        # importer — tests, workers, CLI tools.)
+        start_batch_healing_timer()
 
         # One-time repair: purge artist album-list cache entries poisoned by
         # partial watchlist probes (limit=5/max_pages=1 results stored in the

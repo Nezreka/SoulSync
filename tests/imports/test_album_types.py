@@ -1,0 +1,715 @@
+"""beets-compatible ``$atypes`` release-type labels.
+
+The point of the variable is what it does NOT emit: a plain album gets no
+marker, so ``[$year]$atypes $album`` produces ``[2019] Tokyo`` and not
+``[2019][Album] Tokyo``. That is the difference between reproducing a
+beets-organised library and drifting into a second convention beside it.
+"""
+
+from __future__ import annotations
+
+import os
+
+import core.imports.paths as paths
+from core.imports.album_types import (
+    DEFAULT_TYPES,
+    format_album_types,
+    normalize_types,
+    release_types,
+)
+
+
+BEETS_CONFIG = {
+    "types": {
+        "ep": "EP",
+        "single": "Single",
+        "soundtrack": "OST",
+        "live": "Live",
+        "compilation": "Anthology",
+        "remix": "Remix",
+    },
+    "bracket": "[]",
+    "ignore_va": ["compilation"],
+}
+
+
+# --- the emission rule --------------------------------------------------
+
+def test_a_plain_album_emits_nothing():
+    assert format_album_types({"album_type": "album"}, BEETS_CONFIG) == ""
+
+
+def test_an_unknown_type_emits_nothing():
+    assert format_album_types({"album_type": "broadcast"}, BEETS_CONFIG) == ""
+
+
+def test_no_album_context_emits_nothing():
+    assert format_album_types(None, BEETS_CONFIG) == ""
+    assert format_album_types({}, BEETS_CONFIG) == ""
+
+
+def test_a_single_qualifier_is_bracketed():
+    assert format_album_types({"album_type": "ep"}, BEETS_CONFIG) == "[EP]"
+
+
+def test_secondary_types_count_too():
+    """MusicBrainz puts Live/Compilation/Soundtrack in secondary-types, which is
+    where most qualifiers actually live."""
+    ctx = {"album_type": "album", "secondary_types": ["Live"]}
+    assert format_album_types(ctx, BEETS_CONFIG) == "[Live]"
+
+
+def test_multiple_qualifiers_concatenate_in_configured_order():
+    """A live EP is both things. Order follows the CONFIG, not the source, so
+    the same release always produces the same folder name."""
+    ctx = {"album_type": "ep", "secondary_types": ["Live"]}
+    assert format_album_types(ctx, BEETS_CONFIG) == "[EP][Live]"
+    # the source listing them the other way round must not change the output
+    ctx_reversed = {"album_type": "EP", "secondary_types": ["live"]}
+    assert format_album_types(ctx_reversed, BEETS_CONFIG) == "[EP][Live]"
+
+
+def test_real_library_shapes():
+    """Folder names taken from a library beets organised, reproduced exactly."""
+    cases = [
+        ({"album_type": "ep", "secondary_types": ["Live"]}, "[EP][Live]"),
+        ({"album_type": "album", "secondary_types": ["Live", "Compilation"]}, "[Live][Anthology]"),
+        ({"album_type": "album", "secondary_types": ["Compilation", "Remix"]}, "[Anthology][Remix]"),
+        ({"album_type": "ep", "secondary_types": ["Remix"]}, "[EP][Remix]"),
+        ({"album_type": "single"}, "[Single]"),
+        ({"album_type": "album", "secondary_types": ["Soundtrack"]}, "[OST]"),
+    ]
+    for ctx, expected in cases:
+        assert format_album_types(ctx, BEETS_CONFIG) == expected, ctx
+
+
+def test_ignore_va_drops_the_marker_for_a_various_artists_credit():
+    """A VA compilation already lives under Compilations/; repeating it is noise.
+    The same release NOT flagged as VA keeps its marker."""
+    ctx = {"album_type": "album", "secondary_types": ["Compilation"]}
+    assert format_album_types(ctx, BEETS_CONFIG, is_various_artists=True) == ""
+    assert format_album_types(ctx, BEETS_CONFIG, is_various_artists=False) == "[Anthology]"
+
+
+def test_ignore_va_only_drops_the_listed_types():
+    ctx = {"album_type": "album", "secondary_types": ["Live", "Compilation"]}
+    assert format_album_types(ctx, BEETS_CONFIG, is_various_artists=True) == "[Live]"
+
+
+# --- config shapes ------------------------------------------------------
+
+def test_beets_list_of_single_key_maps_is_accepted_verbatim():
+    """So a beets config block can be pasted across without translation."""
+    cfg = dict(BEETS_CONFIG, types=[{"ep": "EP"}, {"live": "Live"}])
+    assert format_album_types({"album_type": "ep", "secondary_types": ["Live"]}, cfg) == "[EP][Live]"
+
+
+def test_custom_bracket_and_no_bracket():
+    ctx = {"album_type": "ep"}
+    assert format_album_types(ctx, dict(BEETS_CONFIG, bracket="()")) == "(EP)"
+    assert format_album_types(ctx, dict(BEETS_CONFIG, bracket="")) == "EP"
+    assert format_album_types(ctx, dict(BEETS_CONFIG, bracket="_")) == "_EP_"
+
+
+def test_empty_types_disables_the_variable():
+    assert format_album_types({"album_type": "ep"}, dict(BEETS_CONFIG, types={})) == ""
+
+
+def test_absent_config_falls_back_to_the_documented_defaults():
+    assert normalize_types(None) == list(DEFAULT_TYPES)
+    assert format_album_types({"album_type": "ep"}, {}) == "[EP]"
+
+
+def test_malformed_config_does_not_raise():
+    for bad in ("nonsense", 42, {"types": "nope"}, {"types": [1, 2]}):
+        cfg = bad if isinstance(bad, dict) else {"types": bad}
+        assert isinstance(format_album_types({"album_type": "ep"}, cfg), str)
+
+
+def test_release_types_reads_every_key_a_source_might_use():
+    assert release_types({"primary_type": "EP"}) == {"ep"}
+    assert release_types({"record_type": "Single"}) == {"single"}
+    assert release_types({"album_type": "album", "secondary_type": "Live"}) == {"album", "live"}
+    assert release_types(None) == set()
+
+
+# --- the template itself ------------------------------------------------
+
+def _render(template, ctx):
+    return paths._replace_template_variables(template, ctx)
+
+
+def test_atypes_and_album_do_not_collide():
+    """They share only "$a", so neither can consume the other — unlike
+    $albumtype, which really does start with $album and has to be replaced
+    first. Pinned because a future variable named "$al..." would not be so
+    lucky, and this is where that breaks."""
+    out = _render("$albumartist/[$year]$atypes $album", {
+        "artist": "Slothrust", "album": "Audiotree Live", "year": "2017",
+        "atypes": "[EP][Live]", "title": "t",
+    })
+    assert out == "Slothrust/[2017][EP][Live] Audiotree Live"
+
+
+def test_braced_form_works_too():
+    out = _render("${atypes}${album}", {"artist": "A", "album": "X", "atypes": "[Live]", "title": "t"})
+    assert out == "[Live]X"
+
+
+def test_a_plain_album_leaves_no_double_space():
+    """With $atypes empty, "[$year]$atypes $album" must not render
+    "[2019]  Tokyo" — beets produces exactly one space."""
+    out = _render("$albumartist/[$year]$atypes $album", {
+        "artist": "Julien Baker", "album": "Tokyo", "year": "2019",
+        "atypes": "", "title": "t",
+    })
+    assert out == "Julien Baker/[2019] Tokyo"
+
+
+def test_missing_atypes_key_renders_empty_not_literal():
+    out = _render("[$year]$atypes $album", {"artist": "A", "album": "X", "year": "2020", "title": "t"})
+    assert "$atypes" not in out
+
+
+def test_an_empty_year_collapses_but_the_type_labels_survive():
+    """"[$year]$atypes $album" on a release with no year must drop the empty
+    brackets and keep the real ones — the segment cleaner strips "[]" by regex,
+    and a greedier rule would eat "[EP]" with it."""
+    part = paths._clean_folder_segment("[][EP][Live] Audiotree Live", "", "", False)
+    assert part == "[EP][Live] Audiotree Live"
+
+
+def test_an_empty_year_and_no_types_leaves_just_the_album():
+    assert paths._clean_folder_segment("[] Schmilco", "", "", False) == "Schmilco"
+
+
+def test_a_leaked_atypes_token_never_reaches_a_directory_name():
+    """Defensive: the global pass already substituted it, but a raw token in a
+    folder name is the one failure worth a spare replace."""
+    assert paths._clean_folder_segment("$atypes Album", "", "", False) == "Album"
+
+
+# --- review follow-ups (PR #1302) ---------------------------------------
+
+def test_a_single_artist_anthology_keeps_its_compilation_label():
+    """MusicBrainz gives Tool's Salival primary=Album, secondary=[Live,
+    Compilation], and map_release_group_type turns that into
+    album_type="compilation" — so keying ignore_va off the TYPE dropped
+    [Anthology] from a release that is not various artists at all.
+
+    Built from the real mapper's output, because the hand-written
+    album_type="album" contexts elsewhere in this file are a shape the
+    pipeline never actually produces."""
+    from core.metadata.release_type import map_release_group_type
+
+    album_type = map_release_group_type("Album", ["Live", "Compilation"])
+    assert album_type == "compilation", "guards the premise, not the fix"
+
+    salival = {"album_type": album_type, "secondary_types": ["Live", "Compilation"],
+               "artists": [{"name": "Tool"}]}
+    assert format_album_types(salival, BEETS_CONFIG, is_various_artists=False) == "[Live][Anthology]"
+
+
+def test_a_various_artists_compilation_still_drops_the_label():
+    """The rule still fires where it should: a release actually credited to
+    Various Artists is already under Compilations/."""
+    from core.metadata.release_type import map_release_group_type
+
+    va = {"album_type": map_release_group_type("Album", ["Compilation"]),
+          "secondary_types": ["Compilation"],
+          "artists": [{"name": "Various Artists"}]}
+    assert format_album_types(va, BEETS_CONFIG, is_various_artists=True) == ""
+
+
+def test_the_va_signal_reads_the_credit_not_the_type():
+    from core.imports.compilation import is_various_artists_credit
+    from core.metadata.release_type import map_release_group_type
+
+    assert is_various_artists_credit({"artists": [{"name": "Various Artists"}]}) is True
+    assert is_various_artists_credit({"artists": [{"name": "Tool"}]}) is False
+    # typed a compilation, credited to one artist -> not VA
+    assert is_various_artists_credit(
+        {"album_type": map_release_group_type("Album", ["Compilation"]),
+         "artists": [{"name": "Tool"}]}) is False
+
+
+def test_the_m3u_folder_uses_the_same_substitution():
+    """web_server keeps a hand-maintained copy of the template replacer, so a
+    new variable has to be added there too or the M3U lands in a directory
+    literally named "[2019]$atypes Tokyo"."""
+    import web_server
+
+    ctx = {"artist": "Julien Baker", "albumartist": "Julien Baker", "album": "Tokyo",
+           "title": "t", "track_number": 1, "disc_number": 1, "year": "2019", "quality": ""}
+    tmpl = "$albumartist/[$year]$atypes $album"
+    assert web_server._apply_path_template(tmpl, ctx) == "Julien Baker/[2019] Tokyo"
+    assert web_server._apply_path_template(
+        tmpl, dict(ctx, atypes="[EP][Live]", album="Audiotree Live", year="2017")
+    ) == "Julien Baker/[2017][EP][Live] Audiotree Live"
+
+
+def test_the_m3u_folder_follows_the_audio_not_the_template(tmp_path, monkeypatch):
+    """_compute_m3u_folder only receives artist/album/year from its HTTP
+    callers, so a template using $atypes renders it empty and the M3U would
+    land in "[2017] Audiotree Live" while the audio sits in
+    "[2017][EP][Live] Audiotree Live" — and os.makedirs would create the empty
+    one. Resolving from a real track path cannot drift from the template."""
+    import web_server
+
+    album = tmp_path / "Slothrust" / "[2017][EP][Live] Audiotree Live"
+    album.mkdir(parents=True)
+    track = album / "01 - Horseshoe Crab.flac"
+    track.write_bytes(b"AUDIO")
+
+    monkeypatch.setattr(web_server, "_album_folder_from_track_path",
+                        lambda p: str(album) if p else None)
+
+    assert web_server._compute_m3u_folder(
+        str(tmp_path), "album", "", "Slothrust", "Audiotree Live", "2017",
+        sample_track_path=str(track)) == str(album)
+
+
+def test_the_m3u_folder_falls_back_to_the_template_when_unlocatable(tmp_path, monkeypatch):
+    """No track path, or one that does not resolve, must not break export."""
+    import web_server
+
+    monkeypatch.setattr(web_server, "_album_folder_from_track_path", lambda p: None)
+    out = web_server._compute_m3u_folder(
+        str(tmp_path), "album", "", "Slothrust", "Audiotree Live", "2017")
+    assert out and str(tmp_path) in out
+
+
+def test_first_m3u_entry_skips_the_directives():
+    import web_server
+
+    body = "#EXTM3U\n#EXTINF:210,A - B\n#STATUS:FOUND_IN_LIBRARY\n/music/A/Album/01 - B.flac\n"
+    assert web_server._first_m3u_entry(body) == "/music/A/Album/01 - B.flac"
+    assert web_server._first_m3u_entry("#EXTM3U\n# NOT AVAILABLE: x\n") is None
+    assert web_server._first_m3u_entry("") is None
+
+
+# --- reorganize parity ---------------------------------------------------
+
+def test_reorganize_reads_a_multi_valued_releasetype_tag():
+    """beets and Picard write releasetype as a LIST. The reader used to run
+    str() over it, producing "['album', 'compilation', 'live']" — a string
+    matching no canonical token — so every such file read as having no type."""
+    from core.library.reorganize_tag_source import (
+        _normalize_album_type, _secondary_album_types)
+
+    tag = ["album", "compilation", "live"]
+    primary = _normalize_album_type(tag)
+    assert primary == "album", "MusicBrainz writes the primary FIRST"
+    assert _secondary_album_types(tag, primary) == ["compilation", "live"]
+
+
+def test_a_single_valued_tag_still_reads_as_before():
+    from core.library.reorganize_tag_source import _normalize_album_type
+
+    assert _normalize_album_type("compilation") == "compilation"
+    assert _normalize_album_type("album") == "album"
+    assert _normalize_album_type("nonsense") == ""
+    assert _normalize_album_type(None) == ""
+
+
+def test_slash_and_semicolon_separated_tags_split():
+    """Some taggers pack several values into one string."""
+    from core.library.reorganize_tag_source import _release_type_tokens
+
+    assert _release_type_tokens("album/compilation") == ["album", "compilation"]
+    assert _release_type_tokens("Album; Live") == ["album", "live"]
+
+
+def test_atypes_is_identical_at_import_and_at_reorganize():
+    """The whole point: reorganize is the convergence step, so if it renders
+    $atypes differently from import it RENAMES every labelled folder. Salival
+    through both routes must produce the same string."""
+    from core.library.reorganize_tag_source import (
+        _normalize_album_type, _secondary_album_types)
+
+    at_import = {"album_type": "compilation", "secondary_types": ["Live", "Compilation"]}
+
+    tag = ["album", "compilation", "live"]
+    primary = _normalize_album_type(tag)
+    at_reorganize = {"album_type": primary, "record_type": primary,
+                     "secondary_types": _secondary_album_types(tag, primary)}
+
+    assert format_album_types(at_reorganize, BEETS_CONFIG) == "[Live][Anthology]"
+    assert format_album_types(at_import, BEETS_CONFIG) == \
+        format_album_types(at_reorganize, BEETS_CONFIG)
+
+
+def test_the_tag_reader_surfaces_secondary_types(tmp_path):
+    """End to end through read_album_track_from_file, so the dict the
+    reorganize planner consumes really carries the field."""
+    from core.library.reorganize_tag_source import read_album_track_from_file
+
+    album_meta, _track_meta, err = read_album_track_from_file(
+        str(tmp_path / "x.flac"),
+        read_embedded_tags_fn=lambda _p: {"available": True, "duration": 300, "tags": {
+            "album": "Salival", "albumartist": "Tool", "artist": "Tool",
+            "title": "Third Eye", "tracknumber": "1",
+            "releasetype": ["album", "compilation", "live"],
+        }})
+    assert err is None
+    assert album_meta["album_type"] == "album"
+    assert album_meta["secondary_types"] == ["compilation", "live"]
+
+
+def test_reading_the_tag_does_not_change_where_reorganize_files_an_album():
+    """The regression this nearly shipped with. Teaching the reader about
+    multi-valued tags means reorganize now SEES a type where it used to see
+    nothing, and resolved_record_type routes 'compilation' to compilation_path.
+    Taking the most specific token would therefore have swept every
+    single-artist greatest-hits record into Compilations/ on the next
+    reorganize — 38 folders on the library this was written against.
+
+    The primary is the first token because that is the order MusicBrainz
+    writes; the qualifiers are the rest.
+    """
+    from core.library.reorganize_tag_source import _normalize_album_type
+
+    def routes_to(tag_album_type, raw_db_type="album"):
+        # mirrors resolved_record_type in core/library_reorganize.py
+        if raw_db_type in ("compilation",) or tag_album_type in ("compilation",):
+            return "compilation_path"
+        return "album_path"
+
+    # a single artist's anthology stays with the artist, as it did before
+    assert routes_to(_normalize_album_type(["album", "compilation"])) == "album_path"
+    assert routes_to(_normalize_album_type(["album", "compilation", "live"])) == "album_path"
+    # a release whose PRIMARY type is compilation still routes as it always did
+    assert routes_to(_normalize_album_type("compilation")) == "compilation_path"
+    assert routes_to(_normalize_album_type(["compilation"])) == "compilation_path"
+
+
+def test_the_beets_folders_this_was_built_for_round_trip():
+    """Real folder names from a beets-organised library, rebuilt from the tags
+    those files actually carry."""
+    from core.library.reorganize_tag_source import (
+        _normalize_album_type, _secondary_album_types)
+
+    cases = [
+        (["album", "compilation", "live"], "[Live][Anthology]"),   # Tool / Salival
+        (["album", "compilation"], "[Anthology]"),                 # 3 Doors Down / Greatest Hits
+        (["ep", "live"], "[EP][Live]"),                            # Slothrust / Audiotree Live
+        (["album"], ""),                                           # a plain album
+    ]
+    for tag, expected in cases:
+        primary = _normalize_album_type(tag)
+        ctx = {"album_type": primary, "record_type": primary,
+               "secondary_types": _secondary_album_types(tag, primary)}
+        assert format_album_types(ctx, BEETS_CONFIG) == expected, tag
+
+
+def test_the_m3u_folder_refuses_a_path_outside_the_library(tmp_path, monkeypatch):
+    """resolve_library_file_path also probes the slskd download folder. A track
+    row still pointing there must not drop the playlist among the incoming
+    files — fall back to the template instead."""
+    import web_server
+
+    library = tmp_path / "library"
+    downloads = tmp_path / "downloads" / "Artist - Album"
+    downloads.mkdir(parents=True)
+    library.mkdir()
+    stray = downloads / "01 - Song.flac"
+    stray.write_bytes(b"AUDIO")
+
+    monkeypatch.setattr(web_server, "docker_resolve_path", lambda p: str(library))
+    monkeypatch.setattr("core.library.path_resolver.resolve_library_file_path",
+                        lambda *a, **k: str(stray))
+
+    assert web_server._album_folder_from_track_path(str(stray)) is None
+
+
+def test_the_shipped_defaults_are_the_ones_the_code_falls_back_to():
+    """The setting only lands in a config file on a FRESH install; an existing
+    install falls back to the module constants. Two copies of the table would
+    let those two disagree about what $atypes emits, so settings.py builds its
+    default from these."""
+    import core.settings as settings_mod
+    from core.imports.album_types import album_types_config
+
+    assert settings_mod._ATYPE_DEFAULT_TYPES is DEFAULT_TYPES
+
+    class _NoStoredConfig:
+        def get(self, _key, _default=None):
+            return None
+
+    from_fallback = format_album_types({"album_type": "ep"}, album_types_config(_NoStoredConfig()))
+    from_shipped = format_album_types({"album_type": "ep"},
+                                      {"types": dict(DEFAULT_TYPES), "bracket": "[]"})
+    assert from_fallback == from_shipped == "[EP]"
+
+
+def test_the_reorganize_planner_carries_secondary_types_to_the_path_builder():
+    """The one line that actually delivers the labels. The tag reader producing
+    them and $atypes consuming them are both covered, but between those two the
+    planner has to put them on the album context the path builder reads — and a
+    refactor that dropped that line would silently strip every label from the
+    library on the next reorganize, with the rest of the suite still green."""
+    from core.library_reorganize import _build_post_process_context
+
+    ctx = _build_post_process_context(
+        api_album={
+            'id': 'a1', 'name': 'Salival', 'release_date': '2007',
+            'total_tracks': 8, 'secondary_types': ['compilation', 'live'],
+        },
+        api_track={'id': 't1', 'name': 'Third Eye', 'track_number': 1, 'disc_number': 1},
+        artist_name='Tool', album_title='Salival', total_discs=1,
+    )
+    assert ctx['spotify_album']['secondary_types'] == ['compilation', 'live']
+
+
+def test_a_reorganize_context_renders_the_labels_end_to_end():
+    """Reader -> planner -> $atypes, in one go, against the tags a beets file
+    actually carries. Any break in that chain silently renames folders."""
+    from core.library.reorganize_tag_source import (
+        _normalize_album_type, _secondary_album_types)
+    from core.library_reorganize import _build_post_process_context
+
+    tag = ["album", "compilation", "live"]            # as beets writes it
+    primary = _normalize_album_type(tag)
+    album_meta = {
+        'id': '', 'name': 'Salival', 'release_date': '2007', 'total_tracks': 8,
+        'album_type': primary,
+        'secondary_types': _secondary_album_types(tag, primary),
+    }
+    ctx = _build_post_process_context(
+        api_album=album_meta,
+        api_track={'id': '', 'name': 'Third Eye', 'track_number': 1, 'disc_number': 1},
+        artist_name='Tool', album_title='Salival', total_discs=1,
+        record_type=primary,
+    )
+    album_ctx = ctx['spotify_album']
+    assert format_album_types(album_ctx, BEETS_CONFIG) == "[Live][Anthology]"
+
+
+# --- the path builder actually emits the labels --------------------------
+
+def _atypes_path(tmp_path, monkeypatch, *, secondary, album="Salival", template=None):
+    """Drive the REAL path builder and hand back the album folder it chose."""
+    from core.library_reorganize import _build_album_info, _build_post_process_context
+
+    template = template or "$albumartist/[$year]$atypes $album/$track - $title"
+    monkeypatch.setattr(paths, "_get_config_manager", lambda: _Cfg({
+        "file_organization.templates": {"album_path": template},
+        "file_organization.album_types": dict(BEETS_CONFIG),
+        "file_organization.enabled": True,
+        "soulseek.transfer_path": str(tmp_path),
+    }))
+    ctx = _build_post_process_context(
+        {"id": "AL1", "name": album, "release_date": "2007-01-01", "total_tracks": 8,
+         "images": [{"url": ""}], "secondary_types": secondary},
+        {"name": "Third Eye", "track_number": 1, "disc_number": 1, "artists": [{"name": "Tool"}]},
+        "Tool", album, 1)
+    path, _ = paths.build_final_path_for_track(
+        ctx, ctx["spotify_artist"], _build_album_info(ctx), ".flac", create_dirs=False)
+    return os.path.basename(os.path.dirname(path))
+
+
+class _Cfg:
+    def __init__(self, vals):
+        self.vals = vals
+
+    def get(self, key, default=None):
+        return self.vals.get(key, default)
+
+
+def test_the_path_builder_puts_the_labels_in_the_folder(tmp_path, monkeypatch):
+    """End to end through build_final_path_for_track, not just the helpers.
+    The value has to be computed AND placed on the template context; a test of
+    each half separately would miss the wiring between them."""
+    assert _atypes_path(tmp_path, monkeypatch, secondary=["compilation", "live"]) == \
+        "[2007][Live][Anthology] Salival"
+
+
+def test_the_path_builder_leaves_a_plain_album_unlabelled(tmp_path, monkeypatch):
+    assert _atypes_path(tmp_path, monkeypatch, secondary=[], album="Lateralus") == \
+        "[2007] Lateralus"
+
+
+def test_the_single_path_gets_the_labels_too(tmp_path, monkeypatch):
+    """$atypes is offered for single_path in the settings UI, so the single
+    branch of the path builder has to populate it as well — it is a separate
+    context dict from the album branch and was previously uncovered."""
+    monkeypatch.setattr(paths, "_get_config_manager", lambda: _Cfg({
+        "file_organization.templates": {"single_path": "$albumartist/[$year]$atypes $title/$title"},
+        "file_organization.album_types": dict(BEETS_CONFIG),
+        "file_organization.enabled": True,
+        "soulseek.transfer_path": str(tmp_path),
+    }))
+    ctx = {
+        "source": "musicbrainz",
+        "artist": {"name": "Julien Baker", "id": "a1"},
+        "album": {"name": "Tokyo", "id": "al1", "album_type": "single",
+                  "release_date": "2019-01-01", "artists": [{"name": "Julien Baker"}]},
+        "track_info": {"name": "Tokyo", "id": "t1", "artists": [{"name": "Julien Baker"}]},
+        "original_search_result": {"title": "Tokyo"},
+    }
+    # album_info=None -> the builder takes its SINGLE branch
+    path, _ = paths.build_final_path_for_track(
+        ctx, ctx["artist"], None, ".flac", create_dirs=False)
+    assert "[Single]" in path, path
+
+
+def test_id3_packs_multiple_release_types_into_one_nul_separated_string():
+    """A FLAC gives mutagen a list; an mp3 gives one string with NUL between
+    the values. Splitting only on human separators leaves that blob as a single
+    unrecognised token, so every label the file carries is dropped — which on a
+    real library silently un-labelled the mp3-tagged albums while the FLAC ones
+    worked."""
+    from core.library.reorganize_tag_source import (
+        _normalize_album_type, _release_type_tokens, _secondary_album_types)
+
+    packed = "album\x00remix\x00soundtrack"
+    assert _release_type_tokens(packed) == ["album", "remix", "soundtrack"]
+    primary = _normalize_album_type(packed)
+    assert primary == "album"
+    assert format_album_types(
+        {"album_type": primary, "secondary_types": _secondary_album_types(packed, primary)},
+        BEETS_CONFIG) == "[OST][Remix]"
+
+    # and the mp3 and flac spellings of the same release agree
+    as_list = ["album", "remix", "soundtrack"]
+    assert _release_type_tokens(packed) == _release_type_tokens(as_list)
+
+
+def test_an_unmapped_qualifier_is_simply_not_labelled():
+    """'demo' has no entry in the types table, so an EP demo is [EP] and not
+    [EP][Demo] — matching what beets wrote for the same release."""
+    from core.library.reorganize_tag_source import (
+        _normalize_album_type, _secondary_album_types)
+
+    tag = "ep\x00demo"
+    primary = _normalize_album_type(tag)
+    assert format_album_types(
+        {"album_type": primary, "secondary_types": _secondary_album_types(tag, primary)},
+        BEETS_CONFIG) == "[EP]"
+
+
+# --- through the real tag reader -----------------------------------------
+
+def _minimal_flac(path):
+    """A FLAC header mutagen will open and write Vorbis comments to."""
+    path.write_bytes(
+        b'fLaC' + b'\x80\x00\x00\x22' + b'\x00\x10\x00\x10'
+        + b'\x00\x00\x00\x00\x00\x00' + b'\x0a\xc4\x42\xf0\x00\x00\x00\x00' + b'\x00' * 16
+    )
+    return str(path)
+
+
+def test_atypes_survives_the_real_tag_reader(tmp_path):
+    """The reorganize path reads tags through read_embedded_tags, which joins
+    every multi-value tag with ", " before the tokeniser sees it. Tests that
+    hand a list straight to the tokeniser skip that join and stay green while
+    the real path renames "[2007][Live][Anthology] Salival" to "[2007] Salival".
+
+    So this one writes a real file, reads it back through the real reader, and
+    asserts the label — no fake reader anywhere in the chain.
+    """
+    from mutagen.flac import FLAC
+    from core.library.file_tags import read_embedded_tags
+    from core.library.reorganize_tag_source import read_album_track_from_file
+
+    p = _minimal_flac(tmp_path / "01 - Third Eye.flac")
+    f = FLAC(p)
+    f["album"], f["artist"], f["albumartist"] = ["Salival"], ["Tool"], ["Tool"]
+    f["title"], f["tracknumber"] = ["Third Eye"], ["1"]
+    f["releasetype"] = ["album", "compilation", "live"]
+    f.save()
+
+    # the reader really does flatten it — if this stops being true the
+    # tokeniser's comma handling is no longer load-bearing and should be revisited
+    raw = (read_embedded_tags(p).get("tags") or {}).get("releasetype")
+    assert raw == "album, compilation, live", raw
+
+    album_meta, _track, err = read_album_track_from_file(p)
+    assert err is None, err
+    assert album_meta["album_type"] == "album"
+    assert album_meta["secondary_types"] == ["compilation", "live"]
+    assert format_album_types(album_meta, BEETS_CONFIG) == "[Live][Anthology]"
+
+
+def test_every_spelling_of_one_release_tokenises_the_same(tmp_path):
+    """FLAC gives a list, ID3 NUL-packs, read_embedded_tags comma-joins."""
+    from core.library.reorganize_tag_source import _release_type_tokens
+
+    expected = ["album", "compilation", "live"]
+    assert _release_type_tokens(["album", "compilation", "live"]) == expected
+    assert _release_type_tokens("album\x00compilation\x00live") == expected
+    assert _release_type_tokens("album, compilation, live") == expected
+    assert _release_type_tokens("album; compilation; live") == expected
+
+
+# --- spotify types every EP "single" --------------------------------------
+
+def test_a_spotify_ep_is_labelled_ep_not_single():
+    """Spotify has no EP type, so a five-track EP arrives as album_type
+    "single". $albumtype already recovers the real answer from the track
+    count; $atypes has to agree with it or one folder name contradicts the
+    other."""
+    from core.imports.paths import get_album_type_display
+
+    ctx = {"album_type": "single", "total_tracks": 5}
+    display = get_album_type_display("single", 5)
+    assert display == "EP"
+    assert format_album_types(ctx, BEETS_CONFIG) == "[Single]", "the raw source value"
+    assert format_album_types(ctx, BEETS_CONFIG, primary_override=display.lower()) == "[EP]"
+
+
+def test_a_long_spotify_single_is_an_album_and_gets_no_label():
+    from core.imports.paths import get_album_type_display
+
+    ctx = {"album_type": "single", "total_tracks": 10}
+    assert get_album_type_display("single", 10) == "Album"
+    assert format_album_types(ctx, BEETS_CONFIG, primary_override="album") == ""
+
+
+def test_a_real_single_is_still_a_single():
+    from core.imports.paths import get_album_type_display
+
+    ctx = {"album_type": "single", "total_tracks": 2}
+    assert format_album_types(
+        ctx, BEETS_CONFIG, primary_override=get_album_type_display("single", 2).lower()
+    ) == "[Single]"
+
+
+def test_a_silent_primary_is_not_invented_from_the_track_count():
+    """get_album_type_display infers a type from the count alone when the
+    source says nothing — correct for $albumtype, which must always produce a
+    word, and wrong here. A release tagged only [live] must not start claiming
+    [EP] because it happens to have five tracks."""
+    ctx = {"album_type": "", "secondary_types": ["live"], "total_tracks": 5}
+    assert format_album_types(ctx, BEETS_CONFIG) == "[Live]"
+
+
+def test_the_override_does_not_duplicate_a_matching_secondary():
+    """A release whose secondary list repeats the primary must still render
+    one label, not two."""
+    ctx = {"album_type": "ep", "secondary_types": ["ep", "live"], "total_tracks": 5}
+    assert format_album_types(ctx, BEETS_CONFIG, primary_override="ep") == "[EP][Live]"
+
+
+def test_the_path_builder_labels_a_spotify_ep_correctly(tmp_path, monkeypatch):
+    """Through the real builder, not just format_album_types: the resolved
+    primary has to actually reach it, or a five-track Spotify EP lands in a
+    folder saying [Single] while $albumtype in the same template says EP."""
+    from core.library_reorganize import _build_album_info, _build_post_process_context
+
+    monkeypatch.setattr(paths, "_get_config_manager", lambda: _Cfg({
+        "file_organization.templates": {"album_path": "$albumartist/$atypes $album/$track - $title"},
+        "file_organization.album_types": dict(BEETS_CONFIG),
+        "file_organization.enabled": True,
+        "soulseek.transfer_path": str(tmp_path),
+    }))
+    ctx = _build_post_process_context(
+        {"id": "AL1", "name": "Tokyo", "release_date": "2019-01-01",
+         "total_tracks": 5, "images": [{"url": ""}]},
+        {"name": "Tokyo", "track_number": 1, "disc_number": 1,
+         "artists": [{"name": "Julien Baker"}]},
+        "Julien Baker", "Tokyo", 1, record_type="single")
+    path, _ = paths.build_final_path_for_track(
+        ctx, ctx["spotify_artist"], _build_album_info(ctx), ".flac", create_dirs=False)
+    folder = os.path.basename(os.path.dirname(path))
+    assert folder == "[EP] Tokyo", folder

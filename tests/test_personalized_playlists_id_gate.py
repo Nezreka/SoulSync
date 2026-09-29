@@ -267,6 +267,55 @@ def test_discovery_helper_honors_extra_where(service):
     assert [t['track_name'] for t in tracks] == ['Pop60']
 
 
+def test_discovery_helper_excludes_owned_across_all_id_spaces(service):
+    """`exclude_owned=True` must filter pool rows whose IDs match a library
+    row in ANY of the three ID spaces (spotify / itunes / deezer)."""
+    svc, db = service
+    db.insert_discovery_track(source='spotify', spotify_track_id='sp-owned',
+                              track_name='OwnedSpotify', artist_name='A', album_name='X')
+    db.insert_discovery_track(source='spotify', itunes_track_id='it-owned',
+                              track_name='OwnedItunes', artist_name='B', album_name='X')
+    db.insert_discovery_track(source='deezer', deezer_track_id='dz-owned',
+                              track_name='OwnedDeezer', artist_name='C', album_name='X')
+    db.insert_discovery_track(source='spotify', spotify_track_id='sp-free',
+                              track_name='Free', artist_name='D', album_name='X')
+    db.insert_library_track(spotify_track_id='sp-owned')
+    db.insert_library_track(itunes_track_id='it-owned')
+    db.insert_library_track(deezer_id='dz-owned')
+
+    tracks = svc._select_discovery_tracks(
+        source='spotify', order_by='track_name', fetch_limit=100,
+    )
+    assert [t['track_name'] for t in tracks] == ['Free']
+
+
+def test_discovery_helper_exclude_owned_null_guard_keeps_unmatched(service):
+    """Regression for the #1350 rewrite: the NULL guard must not change
+    semantics. A deezer-only pool row (NULL spotify/itunes IDs) must NOT
+    be excluded just because the library has unrelated spotify/itunes rows,
+    and a library row with a NULL ID must never exclude anything."""
+    svc, db = service
+    db.insert_discovery_track(source='deezer', deezer_track_id='dz-keep',
+                              spotify_track_id=None, itunes_track_id=None,
+                              track_name='DeezerKeep', artist_name='A', album_name='X')
+    db.insert_discovery_track(source='deezer', deezer_track_id='dz-drop',
+                              spotify_track_id=None, itunes_track_id=None,
+                              track_name='DeezerDrop', artist_name='B', album_name='X')
+    # Unrelated library rows in other ID spaces + a row with all-NULL IDs
+    db.insert_library_track(spotify_track_id='sp-unrelated')
+    db.insert_library_track(itunes_track_id='it-unrelated')
+    db.insert_library_track(spotify_track_id=None, itunes_track_id=None, deezer_id=None)
+    db.insert_library_track(deezer_id='dz-drop')
+
+    with patch.object(
+            svc, '_get_active_source', return_value='deezer'):
+        tracks = svc._select_discovery_tracks(
+            source='deezer', order_by='track_name', fetch_limit=100,
+        )
+    assert [t['track_name'] for t in tracks] == ['DeezerKeep']
+
+
+
 # ---------------------------------------------------------------------------
 # Diversity filter
 # ---------------------------------------------------------------------------

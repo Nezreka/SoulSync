@@ -20,6 +20,7 @@ FIX_ACTIONS = {
     # music
     "wrong_track": ("reidentify", "Re-identify track"),
     "wrong_album": ("reidentify", "Re-identify"),
+    "suspect_album_tag": ("reidentify", "Re-identify track"),
     "wrong_artist": ("reidentify", "Re-identify"),
     "wrong_metadata": ("edit_metadata", "Edit details"),
     "wrong_cover": ("pick_art", "Pick new cover"),

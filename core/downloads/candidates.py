@@ -31,6 +31,7 @@ status updater, DB) all injected via `CandidatesDeps`.
 
 from __future__ import annotations
 
+import re
 from utils.logging_config import get_logger
 import os
 from dataclasses import dataclass
@@ -38,6 +39,7 @@ from typing import Any, Callable
 
 from core.downloads.track_metadata_backfill import hydrate_download_metadata
 from core.downloads.peer_observation import peer_availability_key, peer_speed
+from core.text.normalize import normalize_key
 from core.runtime_state import (
     download_tasks,
     matched_context_lock,
@@ -200,6 +202,85 @@ def _interleave_by_peer(rows):
     return ordered
 
 
+# Parenthesised/bracketed featuring credits: "(feat. X)", "[featuring Y]".
+_FEAT_PAREN_RE = re.compile(
+    r'\s*[\(\[]\s*(?:feat\.?|featuring)\b[^)\]]*[\)\]]?',
+    re.IGNORECASE,
+)
+# Trailing credits: "Song feat. Z". Stops at ( or [ so "(Live)" survives.
+_FEAT_TRAILING_RE = re.compile(
+    r'\s+(?:feat\.?|featuring)\b[^\(\[]*$',
+    re.IGNORECASE,
+)
+
+# The cross-source dedupe buckets peer-advertised durations (ms) into 10s
+# windows; peers round differently, and a 10s span never hides a different cut.
+_DEDUPE_DURATION_BUCKET_MS = 10000
+
+
+def _strip_featuring(text: str) -> str:
+    """Remove featuring credits from *text* for fingerprinting only.
+
+    Only `feat.` / `featuring` segments go — every other parenthetical stays,
+    because a ``(Live)`` or ``(Remix)`` suffix is still useful signal and the
+    edition distinction also rides on the ``version_type`` part of the key.
+    """
+    return _FEAT_TRAILING_RE.sub('', _FEAT_PAREN_RE.sub('', text or ''))
+
+
+def _identity_key(candidate):
+    """Fingerprint the recording a candidate claims to be, or None.
+
+    ``(normalized artist, normalized title, version/edition, 10s duration
+    bucket)``. Two rows with the same key are the same recording advertised
+    on two sources, so the later (worse-ranked) one is redundant.
+
+    Returns None when the candidate carries no usable identity — such rows
+    are never collapsed, whatever else they match.
+    """
+    artist = getattr(candidate, 'artist', None) or ''
+    title = getattr(candidate, 'title', None) or ''
+    try:
+        duration_ms = float(getattr(candidate, 'duration', 0) or 0)
+    except (TypeError, ValueError):
+        duration_ms = 0
+    if not artist or not title or duration_ms <= 0:
+        return None
+    norm_artist = normalize_key(_strip_featuring(artist))
+    norm_title = normalize_key(_strip_featuring(title))
+    if not norm_artist or not norm_title:
+        # A fingerprint of nothing would collapse distinct rows onto each
+        # other; treat it as missing identity instead.
+        return None
+    version = getattr(candidate, 'version_type', None) or 'original'
+    return (
+        norm_artist,
+        norm_title,
+        str(version).lower(),
+        int(duration_ms // _DEDUPE_DURATION_BUCKET_MS),
+    )
+
+
+def dedupe_cross_source_pool(ranked):
+    """Collapse same-recording sightings in an already-ranked pool.
+
+    Best-quality mode fans out across every chain source, so the same file
+    surfaces once per source. Ranking already put the best sighting first —
+    this only drops the redundant ones so the worker never retries the same
+    recording on a second source. Rows without a usable identity are always
+    kept. Ordering otherwise untouched.
+    """
+    seen = set()
+    out = []
+    for row in ranked:
+        key = _identity_key(row)
+        if key is None or key not in seen:
+            out.append(row)
+            if key is not None:
+                seen.add(key)
+    return out
+
+
 def order_candidates(candidates, *, quality_first=False, targets=None,
                      source_order=None, peer_speeds=None, peer_occupancy=None):
     """Return *candidates* ordered best-first for the download walk.
@@ -246,11 +327,15 @@ def order_candidates(candidates, *, quality_first=False, targets=None,
                 target_index, tier = len(targets), 0.0
             key = (_preferred_version_hit(row), -target_index, tier)
             groups.setdefault(key, []).append(row)
-        return [row for key in sorted(groups, reverse=True)
-                for row in order_candidates(
-                    groups[key], peer_speeds=peer_speeds,
-                    peer_occupancy=peer_occupancy,
-                )]
+        # Best-quality only: collapse the same recording across sources so
+        # the walk doesn't retry it once per source. Ranking (which sighting
+        # survives) is untouched.
+        return dedupe_cross_source_pool(
+            [row for key in sorted(groups, reverse=True)
+             for row in order_candidates(
+                 groups[key], peer_speeds=peer_speeds,
+                 peer_occupancy=peer_occupancy,
+             )])
     if all_soulseek and not use_quality:
         # Confidence differences smaller than a normal pathname's noise do
         # not justify ignoring a much better peer. Keep correctness bands in
@@ -281,9 +366,15 @@ def order_candidates(candidates, *, quality_first=False, targets=None,
             (_preferred_version_hit(r),)
             + _quality_first_sort_key(r, targets or [], source_order)
         )
+        ranked = sorted(rows, key=key, reverse=True)
+        if quality_first:
+            # STRICT gate on the best-quality flag: mixed-source priority
+            # pools also take use_quality but keep every source's sighting.
+            ranked = dedupe_cross_source_pool(ranked)
+        return ranked
     else:
         key = lambda r: (_preferred_version_hit(r),) + _priority_sort_key(r)
-    return sorted(rows, key=key, reverse=True)
+        return sorted(rows, key=key, reverse=True)
 
 
 @dataclass
@@ -294,7 +385,9 @@ class CandidatesDeps:
     run_async: Callable[..., Any]
     get_database: Callable[[], Any]
     update_task_status: Callable
-    make_context_key: Callable[[str, str], str]
+    # Builds context keys; accepts an optional task_id that scopes the key to
+    # one task (see _make_context_key in web_server.py).
+    make_context_key: Callable[..., str]
     on_download_completed: Callable
 
 
@@ -406,6 +499,16 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                 continue
         except Exception as e:
             logger.debug("blacklist check failed: %s", e)
+
+        # Failed-download blocklist — skip files that terminally failed import
+        # before (quarantine retries exhausted). Fail-open, like the check above.
+        try:
+            from core.downloads.failed_blocklist import is_candidate_blocked
+            if is_candidate_blocked(deps.get_database(), candidate):
+                logger.info(f"[Modal Worker] Skipping failed-blocklisted file: {source_key}")
+                continue
+        except Exception as e:
+            logger.debug("failed-blocklist check failed: %s", e)
         
         # CRITICAL: Add source to used_sources IMMEDIATELY to prevent race conditions
         # This must happen BEFORE starting download to prevent multiple retries from picking same source
@@ -567,6 +670,21 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                 # Store context for post-processing with complete Spotify metadata (GUI PARITY)
                 context_key = deps.make_context_key(username, filename)
                 with matched_context_lock:
+                    if context_key in matched_downloads_context:
+                        # Another task is already using this peer/path. Stamp
+                        # the key with this task's id so the two contexts can't
+                        # overwrite each other; readers try the task-scoped key
+                        # first and fall back to the legacy key.
+                        existing = matched_downloads_context[context_key]
+                        if not (isinstance(existing, dict)
+                                and existing.get('task_id') == task_id):
+                            context_key = deps.make_context_key(username, filename, task_id)
+                            logger.info(
+                                "[Context] Peer/path already claimed by task %s — "
+                                "storing task %s context under scoped key",
+                                existing.get('task_id') if isinstance(existing, dict) else '?',
+                                task_id,
+                            )
                     # Create WebUI equivalent of GUI's SpotifyBasedSearchResult data structure
                     enhanced_payload = download_payload.copy()
                     
@@ -704,22 +822,17 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                 
                 # Update task with successful download info
                 _cancelled_after_start = False
+                _cancel_after_start = None  # (download_id, username) to cancel outside the lock
                 with tasks_lock:
                     if task_id in download_tasks:
                         # PHASE 3: Final cancellation check after download started (GUI PARITY)
                         if download_tasks[task_id]['status'] == 'cancelled':
                             _cancelled_after_start = True
-                            logger.warning(f"[Modal Worker] Task {task_id} cancelled after download {download_id} started - attempting to cancel download")
-                            # Try to cancel the download immediately
-                            try:
-                                logger.info(
-                                    f"[CancelTrigger:candidates.worker_cancelled_during_download] "
-                                    f"download_id={download_id} username={username} task_id={task_id}"
-                                )
-                                deps.run_async(deps.download_orchestrator.cancel_download(download_id, username, remove=True))
-                                logger.warning(f"Successfully cancelled active download {download_id}")
-                            except Exception as cancel_error:
-                                logger.error(f"Failed to cancel active download {download_id}: {cancel_error}")
+                            # Capture the cancel intent under the lock; the actual
+                            # cancel call does slskd network I/O and must run
+                            # OUTSIDE tasks_lock (see below).
+                            _cancel_after_start = (download_id, username)
+                            logger.warning(f"[Modal Worker] Task {task_id} cancelled after download {download_id} started - will cancel download outside the lock")
                         else:
                             # Store download information - use real download ID from download_orchestrator
                             # CRITICAL FIX: Trust the download ID returned by download_orchestrator.download()
@@ -743,10 +856,22 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                                 logger.debug("picked_candidate detail failed: %s", _picked_exc)
 
                 if _cancelled_after_start:
-                    # Free the worker slot OUTSIDE tasks_lock: on_download_completed
-                    # re-acquires it and tasks_lock is non-reentrant, so calling it
-                    # in-lock deadlocked the worker WHILE HOLDING the global lock,
-                    # freezing all downloads. Idempotent, so it's safe here.
+                    # Cancel the download OUTSIDE tasks_lock: cancel_download
+                    # performs slskd network I/O, and holding the global lock
+                    # across it serialized the 1s monitor ticks behind every
+                    # cancellation. on_download_completed re-acquires the lock
+                    # and tasks_lock is non-reentrant, so it stays out too.
+                    if _cancel_after_start is not None:
+                        cancel_download_id, cancel_username = _cancel_after_start
+                        try:
+                            logger.info(
+                                f"[CancelTrigger:candidates.worker_cancelled_during_download] "
+                                f"download_id={cancel_download_id} username={cancel_username} task_id={task_id}"
+                            )
+                            deps.run_async(deps.download_orchestrator.cancel_download(cancel_download_id, cancel_username, remove=True))
+                            logger.warning(f"Successfully cancelled active download {cancel_download_id}")
+                        except Exception as cancel_error:
+                            logger.error(f"Failed to cancel active download {cancel_download_id}: {cancel_error}")
                     if batch_id:
                         deps.on_download_completed(batch_id, task_id, success=False)
                     return False

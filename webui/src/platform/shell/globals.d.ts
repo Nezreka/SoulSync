@@ -675,6 +675,7 @@ declare global {
           artistId?: string | number;
           artistSource?: string | null;
           artistName?: string;
+          focusAlbumId?: string | number;
           labelId?: string | number;
           labelName?: string;
         },

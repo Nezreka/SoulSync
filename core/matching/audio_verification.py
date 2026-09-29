@@ -80,6 +80,10 @@ def _normalized_readings(text: str) -> tuple:
     one. That is what stops the strip from being load-bearing: a wrong strip
     costs a few points instead of collapsing a real title to the artist name
     and quarantining a correct file.
+
+    When stripping would remove the entire string (a bracket-only title like
+    ``[untitled]``), the annotation IS the title, so the content is kept
+    (``untitled``) instead of collapsing to ``""`` (#1353).
     """
     if not text:
         return "", None
@@ -96,7 +100,15 @@ def _normalized_readings(text: str) -> tuple:
             _finish_normalization(s[:dash_qualifier.start()].rstrip()),
             _finish_normalization(s),
         )
-    return _finish_normalization(s), None
+    canonical = _finish_normalization(s)
+    if not canonical:
+        # #1353: stripping removed the entire title (e.g. "[untitled]") — the
+        # annotation IS the title, so keep its content instead of collapsing
+        # to an empty string. Without this, bracket-only titles score
+        # similarity 0.0 against an identical title and a correct file gets
+        # quarantined.
+        return _finish_normalization(text.lower().strip()), None
+    return canonical, None
 
 
 def normalize(text: str, *, strip_version_tail: bool = True) -> str:
@@ -106,7 +118,9 @@ def normalize(text: str, *, strip_version_tail: bool = True) -> str:
     performer credits like ``<Vocal: MIKA KOBAYASHI>``); strip trailing
     version / featuring tags; KEEP CJK characters (``\\w`` is unicode-aware) so
     Japanese/Chinese/Korean titles produce a comparable form instead of an empty
-    string; collapse whitespace.
+    string; collapse whitespace. When stripping would remove the whole string
+    (``[untitled]``), the bracket content is kept — the annotation is the title
+    (#1353).
 
     ``strip_version_tail=False`` keeps a ``' - <qualifier>'`` tail — the second
     reading :func:`similarity` scores, see :func:`_normalized_readings`.

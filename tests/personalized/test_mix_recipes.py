@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import random
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -40,6 +41,26 @@ def test_nonsense_is_not_a_recipe():
         Recipe.from_dict({'name': '', 'seeds': ['Tool']})
     with pytest.raises(ValueError):
         Recipe.from_dict({'name': 'Empty'})
+
+
+def test_tags_and_related_artists_are_cleaned_deduped_and_capped():
+    r = Recipe.from_dict({'name': 'x', 'tags': [' Prog ', 'prog', '', 't'],
+                          'related_artists': ['Soen', 'soen', '']})
+    assert r.tags == ['Prog', 't'] and r.related_artists == ['Soen']
+    capped = Recipe.from_dict({'name': 'x', 'seeds': ['a'],
+                               'tags': [f't{i}' for i in range(25)]})
+    assert capped.tags == [f't{i}' for i in range(10)]
+
+
+def test_tags_or_related_artists_alone_make_a_recipe():
+    assert Recipe.from_dict({'name': 'x', 'tags': ['metal']}).tags == ['metal']
+    assert Recipe.from_dict({'name': 'x', 'related_artists': ['Soen']}).related_artists == ['Soen']
+
+
+def test_tags_and_related_artists_survive_a_round_trip():
+    r = Recipe.from_dict({'name': 'x', 'tags': ['metal'], 'related_artists': ['Soen']})
+    again = Recipe.from_dict(r.to_dict())
+    assert (again.tags, again.related_artists) == (['metal'], ['Soen'])
 
 
 def test_quotas_sum_to_the_length():
@@ -192,6 +213,70 @@ def test_years_narrow_every_source(db):
     names = _names(R.get_or_build(db, 1, rid)['tracks'])
     assert 'Deftones' in names and 'Soen' in names
     assert 'Tool' not in names and 'Karnivool' not in names
+
+
+def test_years_narrow_the_library_pool(db):
+    r = Recipe.from_dict({'name': 'x', 'genres': ['metal'], 'year_from': 2020, 'year_to': 2022})
+    pool = R.library_pool(db, r, 1, [], random.Random(0))
+    assert set(_names(pool)) == {'Deftones'}    # only Deftones' LP sits in 2020
+
+
+def test_tags_narrow_every_source(db):
+    rid = _make(db, tags=['progressive metal'],
+                mix={'library': 0.5, 'discovery': 0.5, 'trending': 0})
+    names = set(_names(R.get_or_build(db, 1, rid)['tracks']))
+    assert names == {'Tool', 'Soen', 'Karnivool'}   # the only artists tagged that way
+
+
+def test_related_artists_feed_the_circle(db):
+    rid = _make(db, related_artists=['Deftones'],
+                mix={'library': 1.0, 'discovery': 0, 'trending': 0})
+    names = _names(R.get_or_build(db, 1, rid)['tracks'])
+    assert set(names) == {'Deftones'}    # related artists behave like seeds
+
+
+def test_related_artist_ids_resolve_to_names(db):
+    rid = _make(db, related_artists=['sp-def'],    # Deftones' local spotify id
+                mix={'library': 1.0, 'discovery': 0, 'trending': 0})
+    names = _names(R.get_or_build(db, 1, rid)['tracks'])
+    assert set(names) == {'Deftones'}
+    unknown = _make(db, related_artists=['sp-nobody'],
+                    mix={'library': 1.0, 'discovery': 0, 'trending': 0})
+    assert R.get_or_build(db, 1, unknown)['tracks'] == []   # unknown ids stay names
+
+
+def test_narrow_years_broaden_until_the_mix_fills(db):
+    rid = _make(db, seeds=['Tool'], year_from=2020, year_to=2020, length=10,
+                mix={'library': 1.0, 'discovery': 0, 'trending': 0})
+    payload = R.get_or_build(db, 1, rid)
+    assert _names(payload['tracks']) == ['Tool']   # 2019 sits outside 2020 until widened
+    assert payload['broadened'] == ['year_range']
+
+
+def test_broadening_serves_the_fullest_variant(db):
+    rid = _make(db, seeds=['Tool'], genres=['pop'], year_from=2020, year_to=2020, length=10,
+                mix={'library': 1.0, 'discovery': 0, 'trending': 0})
+    payload = R.get_or_build(db, 1, rid)
+    # widening the years finds Tool+Adele (2); dropping genres afterwards would
+    # shrink back to Tool alone (1) — the fuller variant wins
+    assert len(payload['tracks']) == 2
+    assert set(_names(payload['tracks'])) == {'Tool', 'Adele'}
+    assert payload['broadened'] == ['year_range']
+
+
+def test_recipe_explanations_carry_the_actual_source_mix(db):
+    rid = _make(db, seeds=['Tool'], mix={'library': 0.5, 'discovery': 0.5, 'trending': 0})
+    payload = R.get_or_build(db, 1, rid)
+    mix = payload['explanation']['source_mix']
+    assert mix == {'library': 0.5, 'discovery': 0.5, 'trending': 0.0}
+
+
+def test_a_recipe_saved_before_tags_existed_is_not_treated_as_edited(db):
+    rid = _make(db, seeds=['Tool'])
+    row = R.get_recipe(db, 1, rid)
+    legacy = {k: v for k, v in row['recipe'].items() if k not in ('tags', 'related_artists')}
+    payload = R.get_or_build(db, 1, rid)
+    assert not R.is_stale(dict(payload, recipe=legacy), row, R._fingerprints(db, 1))
 
 
 def test_blocked_artists_are_never_in_a_mix(db):

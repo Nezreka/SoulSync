@@ -4,7 +4,7 @@ import { LegacyRouteController } from '@/platform/shell/route-controllers';
 import { guardPageAccess } from '@/platform/shell/route-guard';
 import { getShellRouteByPageId } from '@/platform/shell/route-manifest';
 
-import { libraryArtistsQueryOptions } from './-library.api';
+import { libraryAlbumsQueryOptions, libraryArtistsQueryOptions } from './-library.api';
 import { librarySearchSchema } from './-library.types';
 import { LibraryPage } from './-ui/library-page';
 
@@ -36,9 +36,13 @@ export const Route = createFileRoute('/library')({
     // toasted and stayed usable (filters and the alphabet still work, and the
     // next click retries). The component's useQuery reads the same failure and
     // renders the error state itself.
-    await context.queryClient
-      .ensureQueryData(libraryArtistsQueryOptions(profile.profileId, deps))
-      .catch(() => undefined);
+    // Whichever grid is about to paint — warming the other one would fetch 75
+    // rows nothing is going to render.
+    await (
+      deps.view === 'albums'
+        ? context.queryClient.ensureQueryData(libraryAlbumsQueryOptions(profile.profileId, deps))
+        : context.queryClient.ensureQueryData(libraryArtistsQueryOptions(profile.profileId, deps))
+    ).catch(() => undefined);
   },
   component: LibraryRouteComponent,
 });

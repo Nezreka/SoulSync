@@ -297,7 +297,11 @@ describe('LibraryPage filters', () => {
   it('marks the active filter and letter', async () => {
     renderPage('/library?watchlist=unwatched&letter=c');
     await waitFor(() =>
-      expect(document.querySelector('.watchlist-filter-btn.active')?.textContent).toBe('Unwatched'),
+      // Scoped to the watchlist group: the view toggle wears the same chip
+      // classes, and it comes first in the toolbar.
+      expect(
+        document.querySelector('#watchlist-filter .watchlist-filter-btn.active')?.textContent,
+      ).toBe('Unwatched'),
     );
     expect(document.querySelector('.alphabet-btn.active')?.textContent).toBe('C');
   });
@@ -631,5 +635,45 @@ describe('LibraryPage unmatched-imports banner (#1202)', () => {
     await screen.findByText('Aphex Twin');
     await settled(queryClient);
     expect(banner()).toBeNull();
+  });
+});
+
+describe('Sort', () => {
+  it('offers only the sorts that make sense for artists', async () => {
+    renderPage('/library');
+    await screen.findByText('Aphex Twin');
+
+    const select = screen.getByLabelText('Sort library') as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(['', 'recent']);
+  });
+
+  it('sends the chosen sort to the API and keeps it in the URL', async () => {
+    const { router } = renderPage('/library');
+    await screen.findByText('Aphex Twin');
+
+    fireEvent.change(screen.getByLabelText('Sort library'), { target: { value: 'recent' } });
+    await waitFor(() => expect(lastQuery().get('sort')).toBe('recent'));
+    expect(router.state.location.search).toMatchObject({ sort: 'recent', page: 1 });
+  });
+
+  it('leaves the default sort off the wire while keeping it in the URL', async () => {
+    const { router } = renderPage('/library');
+    await screen.findByText('Aphex Twin');
+
+    expect(lastQuery().has('sort')).toBe(false);
+    expect(router.state.location.search).toMatchObject({ sort: '', page: 1 });
+  });
+
+  it('warms the albums grid when the pointer reaches its tab', async () => {
+    renderPage('/library');
+    await screen.findByText('Aphex Twin');
+    const before = requested.filter((u) => u.includes('/api/library/albums')).length;
+
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'Albums' }));
+    await waitFor(() =>
+      expect(requested.filter((u) => u.includes('/api/library/albums')).length).toBeGreaterThan(
+        before,
+      ),
+    );
   });
 });

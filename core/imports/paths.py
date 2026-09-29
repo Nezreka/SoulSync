@@ -13,6 +13,8 @@ from utils.logging_config import get_logger
 # Album grouping lives in core.imports.album_naming; this module keeps the
 # imported helper because the path builder still needs it.
 from core.imports.album_naming import resolve_album_group
+from core.imports.album_types import album_types_config, format_album_types
+from core.imports.compilation import is_various_artists_credit
 from core.library.case_folding import resolve_existing_case_dir
 from core.imports.context import (
     extract_artist_name,
@@ -300,6 +302,22 @@ def build_simple_download_destination(context, file_path: str):
     return destination_dir / filename, album_name, filename
 
 
+def _truncate_utf8_bytes(value: str, max_bytes: int) -> str:
+    """Truncate to at most ``max_bytes`` UTF-8 bytes without splitting a
+    code point. M8: filesystems limit names by BYTES (255), so a 200-char
+    CJK name (600 bytes) must be cut by byte length, not char count."""
+    encoded = value.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return value
+    truncated = encoded[:max_bytes]
+    while truncated:
+        try:
+            return truncated.decode("utf-8")
+        except UnicodeDecodeError:
+            truncated = truncated[:-1]
+    return value[:1] if value else value
+
+
 def sanitize_filename(filename: str) -> str:
     """Sanitize filename for file system compatibility."""
     sanitized = re.sub(r'[<>:"/\\|?*]', "_", filename)
@@ -311,7 +329,9 @@ def sanitize_filename(filename: str) -> str:
     sanitized = sanitized.strip(". ") or "_"
     if re.match(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)", sanitized, re.IGNORECASE):
         sanitized = "_" + sanitized
-    return sanitized[:200]
+    # M8: truncate by UTF-8 BYTES (filesystem limits are byte-based), never
+    # splitting a code point. Plain [:200] kept 200 CJK chars = 600 bytes.
+    return _truncate_utf8_bytes(sanitized, 200)
 
 
 def sanitize_context_values(context: dict) -> dict:
@@ -385,8 +405,6 @@ def get_album_type_display(raw_type, track_count) -> str:
 
     if raw in ("compilation", "compile"):
         return "Compilation"
-    if raw == "album":
-        return "Album"
     if raw in ("single", "ep"):
         # Unknown track count must not collapse to Single: an EP whose count
         # was lost in a handoff kept getting filed as [Single] (#1064). With
@@ -399,6 +417,12 @@ def get_album_type_display(raw_type, track_count) -> str:
             return "EP"
         return "Album"
 
+    # 'album', missing, or anything unrecognized: a bare 'album' is the
+    # default fallback at every upstream layer (wishlist payloads,
+    # album_grouping, import context) — not a signal. Deezer's track-level
+    # responses hardcode album_type='album', so trusting it files every
+    # Deezer single/EP under Album/. Verify against the track count when we
+    # have one; with no count, keep the "Album" default rather than guessing.
     if tc <= 0:
         return "Album"
     if tc <= 3:
@@ -448,6 +472,7 @@ def _replace_template_variables(template: str, context: dict) -> str:
     bracket_map = {
         "albumartist": album_artist_value,
         "albumtype": clean_context.get("albumtype", "Album"),
+        "atypes": clean_context.get("atypes", ""),
         "playlist": clean_context.get("playlist_name", ""),
         "artistletter": artist_letter(clean_context.get("artist", "U")),
         "artist": clean_context.get("artist", "Unknown Artist"),
@@ -469,6 +494,10 @@ def _replace_template_variables(template: str, context: dict) -> str:
     result = result.replace("$disambiguation", clean_context.get("disambiguation", ""))
     result = result.replace("$albumartist", album_artist_value)
     result = result.replace("$albumtype", clean_context.get("albumtype", "Album"))
+    # Order is not load-bearing here — "$atypes" and "$album" share only "$a",
+    # so neither can consume the other. ($albumtype above genuinely does start
+    # with $album, which is why THAT one has to come first.)
+    result = result.replace("$atypes", clean_context.get("atypes", ""))
     result = result.replace("$playlist", clean_context.get("playlist_name", ""))
     result = result.replace("$artistletter", artist_letter(clean_context.get("artist", "U")))
     result = result.replace("$artist", clean_context.get("artist", "Unknown Artist"))
@@ -502,6 +531,9 @@ def album_name_carries(album_name: str, disambiguation: str) -> bool:
 def with_disambiguation(template: str, disambiguation: str, album_name: str = "") -> str:
     """Give the album folder the release's disambiguation when the template doesn't.
 
+    Callers gate this behind ``file_organization.auto_disambiguation`` (#1352):
+    it only runs when the user left the automatic suffix on.
+
     two releases can share a title, artist and release group and differ only by
     musicbrainz's disambiguation ("baby punk version"). without it in the folder
     they land in one directory and their same-named tracks collide (#1299). so
@@ -524,6 +556,21 @@ def with_disambiguation(template: str, disambiguation: str, album_name: str = ""
         return template
     end = matches[-1].end()
     return folder[:end] + " ($disambiguation)" + folder[end:] + sep + filename
+
+
+def _auto_disambiguation_enabled() -> bool:
+    """Should the album folder get the release's disambiguation unasked?
+
+    #1352: ``with_disambiguation`` rewrites the user's template to keep
+    same-named releases in their own folders (#1299). That rewrite is only
+    wanted when the user opts in — otherwise the template is respected
+    exactly and $disambiguation renders only where explicitly placed.
+    Default True: existing installs keep the #1299 behavior.
+    """
+    try:
+        return bool(_get_config_manager().get("file_organization.auto_disambiguation", True))
+    except Exception:
+        return True
 
 
 def apply_path_template(template: str, context: dict) -> str:
@@ -571,6 +618,10 @@ def _clean_folder_segment(part: str, disc_value: str, disc_value_raw: str,
     part = part.replace("$discnum", disc_value_raw)
     part = part.replace("$disc", disc_value)
     part = part.replace("$cdnum", "")
+    # Same no-op guard, same reason: $atypes is substituted in the global pass
+    # above, and a raw token leaking into a directory name is the failure worth
+    # spending one replace to prevent.
+    part = part.replace("$atypes", "")
     part = re.sub(r"\s*\[\s*\]", "", part)
     part = re.sub(r"\s*\(\s*\)", "", part)
     part = re.sub(r"\s*\{\s*\}", "", part)
@@ -584,7 +635,9 @@ def _clean_folder_segment(part: str, disc_value: str, disc_value_raw: str,
 
 def get_file_path_from_template_raw(template: str, context: dict) -> tuple[str, str]:
     """Build file path using a user-provided template string directly."""
-    template = with_disambiguation(template, context.get("disambiguation", ""), context.get("album", ""))
+    # #1352: the auto-suffix rewrites the template; only do it when enabled.
+    if _auto_disambiguation_enabled():
+        template = with_disambiguation(template, context.get("disambiguation", ""), context.get("album", ""))
     _template_has_disc = template_uses_disc_variable(template)
     full_path = apply_path_template(template, context)
 
@@ -662,7 +715,9 @@ def get_file_path_from_template(context: dict, template_type: str = "album_path"
         }
         template = default_templates.get(template_type, "$artist/$album/$track - $title")
 
-    template = with_disambiguation(template, context.get("disambiguation", ""), context.get("album", ""))
+    # #1352: the auto-suffix rewrites the template; only do it when enabled.
+    if _auto_disambiguation_enabled():
+        template = with_disambiguation(template, context.get("disambiguation", ""), context.get("album", ""))
     _template_has_disc = template_uses_disc_variable(template)
     full_path = apply_path_template(template, context)
 
@@ -906,8 +961,47 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
     if is_explicit_comp:
         raw_album_type = "compilation"
 
-    total_tracks = (album_context.get("total_tracks", 0) or 0) if album_context else 0
+    # L2: resolve the track count from the same chain import album building
+    # uses (core/imports/context.py): album_context -> track_info ->
+    # album_info -> 0. Reading only album_context left $albumtype blind
+    # when the count arrived on track_info or album_info.
+    total_tracks = (
+        (album_context.get("total_tracks") if album_context else None)
+        or track_info.get("total_tracks")
+        or (album_info.get("total_tracks") if isinstance(album_info, dict) else None)
+        or 0
+    )
     album_type_display = get_album_type_display(raw_album_type, total_tracks)
+
+    # $atypes: every qualifier the release actually carries, bracketed, and
+    # nothing at all for a plain album — the beets convention, so a library
+    # organised by beets before SoulSync keeps one layout instead of two.
+    # Computed here so the album and single contexts below cannot disagree.
+    try:
+        # Only single<->ep is resolved from the track count, and only when the
+        # source actually said one of them. get_album_type_display infers a
+        # type from the count alone when the source is silent, which is right
+        # for $albumtype — it must always produce a word — and wrong here: a
+        # release tagged only [live] would start claiming [EP] off a five-track
+        # count that nobody called an EP. $atypes says nothing when the source
+        # says nothing; that is the whole point of it.
+        _raw_primary = str(
+            (album_context or {}).get("album_type")
+            or (album_context or {}).get("record_type")
+            or ""
+        ).strip().lower()
+        _atypes_primary = (
+            album_type_display.strip().lower() if _raw_primary in ("single", "ep") else None
+        )
+        atypes_value = format_album_types(
+            album_context,
+            album_types_config(_get_config_manager()),
+            is_various_artists=is_various_artists_credit(album_context),
+            primary_override=_atypes_primary,
+        )
+    except Exception as _at_err:  # noqa: BLE001 - a label must never fail an import
+        logger.debug("[atypes] could not build release-type labels: %s", _at_err)
+        atypes_value = ""
 
     if album_info and album_info.get("is_album"):
         clean_track_name = get_import_clean_title(context, album_info=album_info, default=original_search.get("title", "Unknown Track"))
@@ -992,6 +1086,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             "year": year,
             "quality": context.get("_audio_quality", ""),
             "albumtype": album_type_display,
+            "atypes": atypes_value,
             "_artists_list": _album_artists_for_collab if _album_artists_for_collab else _artists,
             "_itunes_artist_id": _itunes_aid,
             # #1299: the one thing telling same-named releases apart.
@@ -1174,6 +1269,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         "year": year,
         "quality": context.get("_audio_quality", ""),
         "albumtype": album_type_display,
+        "atypes": atypes_value,
         "_artists_list": _artists,
         "_itunes_artist_id": _itunes_aid,
     }

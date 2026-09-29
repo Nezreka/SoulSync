@@ -57,6 +57,7 @@ _JOB_MODULES = [
     'core.repair_jobs.genre_cleanup',
     'core.repair_jobs.genre_enrichment',
     'core.repair_jobs.comma_artist_splitter',
+    'core.repair_jobs.suspect_album_tag',
 ]
 
 

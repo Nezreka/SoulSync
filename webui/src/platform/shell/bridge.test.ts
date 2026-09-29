@@ -82,6 +82,41 @@ describe('bindWindowWebRouter', () => {
     });
   });
 
+  it('preserves ?album= so album-grid deep links open the focused album', async () => {
+    const navigate = vi.fn().mockResolvedValue(undefined);
+
+    bindWindowWebRouter({ navigate } as never);
+
+    await window.SoulSyncWebRouter?.navigateToPage('artist-detail', {
+      artistId: '570658',
+      artistSource: 'library',
+      focusAlbumId: '123',
+    });
+
+    expect(navigate).toHaveBeenCalledWith({
+      href: '/artist-detail/library/570658?album=123',
+      replace: false,
+    });
+  });
+
+  it('combines ?name= and ?album= when both travel with the click', async () => {
+    const navigate = vi.fn().mockResolvedValue(undefined);
+
+    bindWindowWebRouter({ navigate } as never);
+
+    await window.SoulSyncWebRouter?.navigateToPage('artist-detail', {
+      artistId: '3957198221',
+      artistSource: 'bandcamp',
+      artistName: 'Radiohead',
+      focusAlbumId: '123',
+    });
+
+    expect(navigate).toHaveBeenCalledWith({
+      href: '/artist-detail/bandcamp/3957198221?name=Radiohead&album=123',
+      replace: false,
+    });
+  });
+
   it('falls back artist detail URLs to library source when none is supplied', async () => {
     const navigate = vi.fn().mockResolvedValue(undefined);
 

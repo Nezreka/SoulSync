@@ -20,6 +20,7 @@
 import { apiClient, readJson } from '@/app/api-client';
 
 import type { InboxPayload, InboxView } from './-discover.inbox';
+import type { DiscoverLayoutSection } from './-discover.layout';
 import type { SectionOutcome } from './-discover.section-state';
 import type {
   DiscoverAlbum,
@@ -323,6 +324,24 @@ export function fetchAdventurousness(): Promise<DiscoverResult & { value?: numbe
 
 export function setAdventurousness(value: number): Promise<DiscoverResult & { value?: number }> {
   return readJson(apiClient.post('discover/adventurousness', { json: { value } }));
+}
+
+// ── Page layout ───────────────────────────────────────────────────────────
+
+export interface DiscoverLayoutResponse extends DiscoverResult {
+  sections?: DiscoverLayoutSection[];
+}
+
+/** The profile's layout: saved rows merged over the defaults by the server. */
+export function fetchDiscoverLayout(): Promise<DiscoverLayoutResponse> {
+  return readJson(apiClient.get('discover/layout'));
+}
+
+/** Replace the profile's layout. The server validates every entry. */
+export function saveDiscoverLayout(
+  sections: DiscoverLayoutSection[],
+): Promise<DiscoverLayoutResponse> {
+  return readJson(apiClient.put('discover/layout', { json: { sections } }));
 }
 
 // ── Artist blacklist ──────────────────────────────────────────────────────

@@ -19,8 +19,8 @@ import {
 
 /**
  * The inbox on the Discover page: what's new since you looked (releases from
- * artists you watch, what's coming out, concerts) and what you saved for
- * later. Save and dismiss are the triage; opening a release is the same
+ * artists you watch, what's coming out, concerts, artist news) and what you
+ * saved for later. Save and dismiss are the triage; opening a release is the same
  * album flow as Recent Releases. The nav badge counts what's new.
  */
 
@@ -29,6 +29,7 @@ const KIND_GLYPH: Record<string, string> = {
   upcoming: '📅',
   saved_rec: '🔖',
   concert: '🎟️',
+  artist_news: '📰',
 };
 
 function refreshBadge() {
@@ -163,6 +164,7 @@ function InboxRow({
   const [broken, setBroken] = useState(false);
   const cover = item.image_url && !broken ? browserSafeImageUrl(item.image_url) : '';
   const ticketUrl = item.kind === 'concert' ? item.payload?.url : '';
+  const newsUrl = item.kind === 'artist_news' ? item.payload?.url : '';
   return (
     <li className={`discover-inbox-item discover-inbox-item--${item.kind}`}>
       <span className="discover-inbox-art" aria-hidden="true">
@@ -200,6 +202,10 @@ function InboxRow({
             rel="noreferrer"
           >
             Tickets
+          </a>
+        ) : newsUrl ? (
+          <a className="btn btn--sm btn--secondary" href={newsUrl} target="_blank" rel="noreferrer">
+            Read
           </a>
         ) : artistPath ? (
           <a className="btn btn--sm btn--secondary" href={artistPath}>

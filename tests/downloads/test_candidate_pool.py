@@ -135,3 +135,68 @@ def test_empty_rows_shape():
     assert empty_source_rows() == {'candidates': [], 'rejected': [],
                                    'rejected_total': 0, 'rejected_counts': {}}
     assert empty_source_rows('boom')['error'] == 'boom'
+
+
+# ── per-candidate policy facets ──────────────────────────────────────────────
+
+def _ladder_profile():
+    return {
+        'ranked_targets': [
+            {'label': 'FLAC 24-bit/96kHz', 'format': 'flac', 'bit_depth': 24,
+             'min_sample_rate': 96000},
+            {'label': 'FLAC 16-bit', 'format': 'flac', 'bit_depth': 16},
+            {'label': 'MP3 320kbps', 'format': 'mp3', 'min_bitrate': 320},
+        ],
+        'fallback_enabled': True,
+    }
+
+
+def test_rows_carry_no_policy_without_a_profile():
+    out = build_source_rows(
+        [('q', [(_row(), accept(0.9))])],
+        source_name='soulseek', is_blacklisted=_never,
+    )
+    assert 'policy' not in out['candidates'][0]
+
+
+def test_rows_carry_their_own_ladder_rung_with_a_profile():
+    flac24 = _row(filename='hires', quality='flac', bitrate=4608, bit_depth=24,
+                  sample_rate=96_000)
+    mp3 = _row(filename='lossy', quality='mp3', bitrate=320, bit_depth=16,
+               sample_rate=44_100)
+    out = build_source_rows(
+        [('q', [(flac24, accept(0.9)), (mp3, accept(0.8))])],
+        source_name='soulseek', is_blacklisted=_never,
+        policy_profile=_ladder_profile(),
+    )
+    facets = {r['filename']: r['policy'] for r in out['candidates']}
+    assert facets['hires']['target_index'] == 0
+    assert facets['hires']['target_label'] == 'FLAC 24-bit/96kHz'
+    assert facets['lossy']['target_index'] == 2
+    assert facets['lossy']['target_label'] == 'MP3 320kbps'
+    assert all(f['target_count'] == 3 for f in facets.values())
+
+
+def test_run_level_policy_and_row_facets_coexist():
+    run_policy = {'target_index': 3, 'target_label': '', 'target_count': 3,
+                  'tier_score': None, 'fallback_enabled': True}
+    out = build_source_rows(
+        [('q', [(_row(), accept(0.9))])],
+        source_name='soulseek', is_blacklisted=_never,
+        policy=run_policy, policy_profile=_ladder_profile(),
+    )
+    assert out['policy'] == run_policy
+    assert out['candidates'][0]['policy']['target_index'] == 0
+
+
+def test_a_candidate_below_every_rung_reports_no_rung():
+    weak = _row(filename='weak', quality='mp3', bitrate=128, bit_depth=16,
+                sample_rate=44_100)
+    out = build_source_rows(
+        [('q', [(weak, reject('match_weak', score=0.3))])],
+        source_name='soulseek', is_blacklisted=_never,
+        policy_profile=_ladder_profile(),
+    )
+    facet = out['rejected'][0]['policy']
+    assert facet['target_index'] == 3
+    assert facet['target_label'] == ''

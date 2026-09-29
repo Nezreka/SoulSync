@@ -44,6 +44,123 @@ def init(engine, download_orchestrator_obj, sweep_fn):
     _sweep_empty_download_directories = sweep_fn
 
 
+def add_failed_tracks_to_wishlist(batch, permanently_failed_tracks, wishlist_service):
+    """STEP 2 of failed-track wishlist processing: stamp + re-add failed tracks.
+
+    M11: the attempt stamp (``_record_failed_attempt`` — retry_count + 1, the
+    retry/backoff signal) used to live inside the 50-capped add loop, so every
+    failed track past the cap kept its retry_count frozen: it never escalated
+    backoff and burned a full search every cycle forever. The stamp now also
+    runs for the tracks past the cap (add-then-stamp order is preserved inside
+    the cap so a fresh add still becomes attempt 1). The expensive wishlist-add
+    keeps its 50-track safety cap; the skipped names are logged at warning.
+    """
+    failed_count = len(permanently_failed_tracks)
+    wishlist_added_count = 0
+    error_count = 0
+
+    # Create source_context identical to sync.py
+    source_context = _build_wishlist_source_context(batch)
+    batch_source_type = _resolve_wishlist_source_type_for_batch(batch)
+    owner_profile_id = batch.get('profile_id', 1)
+
+    # Process each failed track (matching sync.py's loop) with safety limit
+    max_failed_tracks = min(failed_count, 50)  # Safety limit on the expensive add
+    wing_it_skipped = 0
+    for i, failed_track_info in enumerate(permanently_failed_tracks[:max_failed_tracks]):
+        try:
+            track_name = failed_track_info.get('track_name', f'Track {i+1}')
+
+            # Wing-it stubs had no catalogue match, so re-adding them just
+            # retries the same raw data — unless wishlist.wing_it_guesses is
+            # on, which is exactly the choice to search the guess anyway.
+            # Check the track ID prefix since the wishlist payload helper overwrites source.
+            track_data = failed_track_info.get('track_data') or failed_track_info.get('spotify_track', {})
+            sp_id = track_data.get('id', '') if isinstance(track_data, dict) else ''
+            _artists = track_data.get('artists') if isinstance(track_data, dict) else None
+            _artist = (_artists or [None])[0] if isinstance(_artists, list) else _artists
+            if isinstance(_artist, dict):
+                _artist = _artist.get('name')
+            # Use the source's own title for the predicate, not track_name's
+            # "Track {i+1}" logging fallback — that placeholder isn't a
+            # placeholder should_wishlist_stub recognizes, so it would read
+            # as a real title and let a nameless stub through.
+            _source_title = track_data.get('name', '') if isinstance(track_data, dict) else ''
+            if is_stub_id(sp_id) and not should_wishlist_stub(_artist, _source_title):
+                wing_it_skipped += 1
+                logger.info(f"[Wishlist Processing] Skipping wing-it track: {track_name}")
+                continue
+
+            logger.error(f"[Wishlist Processing] Adding track {i+1}/{max_failed_tracks}: {track_name}")
+
+            success = wishlist_service.add_failed_track_from_modal(
+                track_info=failed_track_info,
+                source_type=batch_source_type,
+                source_context=source_context,
+                profile_id=owner_profile_id,
+            )
+            # Count the attempt EITHER way — a fresh add becomes
+            # attempt 1; a duplicate-skip (track already wishlisted,
+            # i.e. it failed again this cycle) accumulates. This is
+            # what feeds the failing badge + retry backoff.
+            _record_failed_attempt(
+                wishlist_service, track_data,
+                failed_track_info.get('failure_reason', ''),
+                owner_profile_id)
+
+            if success:
+                wishlist_added_count += 1
+                logger.info(f"[Wishlist Processing] Added {track_name} to wishlist")
+                try:
+                    if automation_engine:
+                        automation_engine.emit('wishlist_item_added', {
+                            'artist': failed_track_info.get('artist_name', ''),
+                            'title': track_name,
+                            'reason': failed_track_info.get('failure_reason', ''),
+                        })
+                except Exception as e:
+                    logger.debug("emit wishlist_item_added failed: %s", e)
+            else:
+                logger.error(f"[Wishlist Processing] Failed to add {track_name} to wishlist")
+
+        except Exception as e:
+            error_count += 1
+            logger.error(f"[Wishlist Processing] Exception adding track to wishlist: {e}")
+
+    # M11: tracks past the add cap still failed this cycle — stamp their
+    # attempt so backoff sees them. The add loop above already stamped the
+    # first 50 (add-then-stamp), so only the remainder needs it here.
+    capped_tracks = permanently_failed_tracks[max_failed_tracks:]
+    if capped_tracks:
+        skipped_names = []
+        for failed_track_info in capped_tracks:
+            skipped_names.append(str(failed_track_info.get('track_name', 'Unknown Track')))
+            try:
+                _record_failed_attempt(
+                    wishlist_service,
+                    failed_track_info.get('track_data') or failed_track_info.get('spotify_track', {}),
+                    failed_track_info.get('failure_reason', ''),
+                    owner_profile_id)
+            except Exception:
+                logger.debug("[Wishlist Processing] attempt stamp failed for %r",
+                             failed_track_info.get('track_name'), exc_info=True)
+        logger.warning(
+            f"[Wishlist Processing] {len(capped_tracks)} failed track(s) past the "
+            f"50-track wishlist-add cap — attempt stamped, not re-added this run: "
+            f"{', '.join(skipped_names)}")
+
+    if wing_it_skipped:
+        logger.warning(f"[Wishlist Processing] Skipped {wing_it_skipped} wing-it fallback tracks")
+    logger.error(f"[Wishlist Processing] Added {wishlist_added_count}/{failed_count} failed tracks to wishlist (errors: {error_count})")
+
+    return {
+        'tracks_added': wishlist_added_count,
+        'errors': error_count,
+        'total_failed': failed_count,
+        'wishlist_capped_skips': len(capped_tracks),
+    }
+
+
 def _process_failed_tracks_to_wishlist_exact(batch_id):
     """
     Process failed and cancelled tracks to wishlist - EXACT replication of sync.py's on_all_downloads_complete() logic.
@@ -114,84 +231,15 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
         failed_count = len(permanently_failed_tracks)
         wishlist_added_count = 0
         error_count = 0
-        
+
         logger.error(f"[Wishlist Processing] Processing {failed_count} failed tracks for wishlist")
-        
+
         if permanently_failed_tracks:
             try:
                 wishlist_service = get_wishlist_service()
-
-                # Create source_context identical to sync.py
-                source_context = _build_wishlist_source_context(batch)
-                batch_source_type = _resolve_wishlist_source_type_for_batch(batch)
-
-                # Process each failed track (matching sync.py's loop) with safety limit
-                max_failed_tracks = min(len(permanently_failed_tracks), 50)  # Safety limit
-                wing_it_skipped = 0
-                for i, failed_track_info in enumerate(permanently_failed_tracks[:max_failed_tracks]):
-                    try:
-                        track_name = failed_track_info.get('track_name', f'Track {i+1}')
-
-                        # Wing-it stubs had no catalogue match, so re-adding them just
-                        # retries the same raw data — unless wishlist.wing_it_guesses is
-                        # on, which is exactly the choice to search the guess anyway.
-                        # Check the track ID prefix since the wishlist payload helper overwrites source.
-                        track_data = failed_track_info.get('track_data') or failed_track_info.get('spotify_track', {})
-                        sp_id = track_data.get('id', '') if isinstance(track_data, dict) else ''
-                        _artists = track_data.get('artists') if isinstance(track_data, dict) else None
-                        _artist = (_artists or [None])[0] if isinstance(_artists, list) else _artists
-                        if isinstance(_artist, dict):
-                            _artist = _artist.get('name')
-                        # Use the source's own title for the predicate, not track_name's
-                        # "Track {i+1}" logging fallback — that placeholder isn't a
-                        # placeholder should_wishlist_stub recognizes, so it would read
-                        # as a real title and let a nameless stub through.
-                        _source_title = track_data.get('name', '') if isinstance(track_data, dict) else ''
-                        if is_stub_id(sp_id) and not should_wishlist_stub(_artist, _source_title):
-                            wing_it_skipped += 1
-                            logger.info(f"[Wishlist Processing] Skipping wing-it track: {track_name}")
-                            continue
-
-                        logger.error(f"[Wishlist Processing] Adding track {i+1}/{max_failed_tracks}: {track_name}")
-
-                        success = wishlist_service.add_failed_track_from_modal(
-                            track_info=failed_track_info,
-                            source_type=batch_source_type,
-                            source_context=source_context,
-                            profile_id=batch.get('profile_id', 1)
-                        )
-                        # Count the attempt EITHER way — a fresh add becomes
-                        # attempt 1; a duplicate-skip (track already wishlisted,
-                        # i.e. it failed again this cycle) accumulates. This is
-                        # what feeds the failing badge + retry backoff.
-                        _record_failed_attempt(
-                            wishlist_service, track_data,
-                            failed_track_info.get('failure_reason', ''),
-                            batch.get('profile_id', 1))
-
-                        if success:
-                            wishlist_added_count += 1
-                            logger.info(f"[Wishlist Processing] Added {track_name} to wishlist")
-                            try:
-                                if automation_engine:
-                                    automation_engine.emit('wishlist_item_added', {
-                                        'artist': failed_track_info.get('artist_name', ''),
-                                        'title': track_name,
-                                        'reason': failed_track_info.get('failure_reason', ''),
-                                    })
-                            except Exception as e:
-                                logger.debug("emit wishlist_item_added failed: %s", e)
-                        else:
-                            logger.error(f"[Wishlist Processing] Failed to add {track_name} to wishlist")
-                            
-                    except Exception as e:
-                        error_count += 1
-                        logger.error(f"[Wishlist Processing] Exception adding track to wishlist: {e}")
-                
-                if wing_it_skipped:
-                    logger.warning(f"[Wishlist Processing] Skipped {wing_it_skipped} wing-it fallback tracks")
-                logger.error(f"[Wishlist Processing] Added {wishlist_added_count}/{failed_count} failed tracks to wishlist (errors: {error_count})")
-                        
+                step2 = add_failed_tracks_to_wishlist(batch, permanently_failed_tracks, wishlist_service)
+                wishlist_added_count = step2['tracks_added']
+                error_count = step2['errors']
             except Exception as e:
                 error_count = len(permanently_failed_tracks)
                 logger.error(f"[Wishlist Processing] Critical error adding failed tracks to wishlist: {e}")

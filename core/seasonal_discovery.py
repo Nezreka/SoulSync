@@ -455,8 +455,12 @@ class SeasonalDiscoveryService:
             config = SEASONAL_CONFIG[season_key]
             keywords = config['keywords']
 
-            # Use the right track ID column based on source
-            track_id_col = 'spotify_track_id' if source == 'spotify' else 'itunes_track_id'
+            # Use the right track ID column based on source (deezer pool rows
+            # carry deezer_track_id — the old spotify/itunes binary choice
+            # returned nothing for deezer users)
+            from core.seasonal_vibes import seasonal_track_id_column, seasonal_track_id_key
+            track_id_col = seasonal_track_id_column(source)
+            track_id_key = seasonal_track_id_key(source)
 
             seasonal_tracks = []
 
@@ -498,6 +502,8 @@ class SeasonalDiscoveryService:
                             track_data_json = {}
 
                     seasonal_tracks.append({
+                        # legacy generic slot (seasonal_tracks.spotify_track_id
+                        # + frontend read this), always paired with ``source``
                         'spotify_track_id': row['track_id'],
                         'track_name': row['track_name'],
                         'artist_name': row['artist_name'],
@@ -507,6 +513,9 @@ class SeasonalDiscoveryService:
                         'popularity': row['popularity'],
                         'track_data_json': track_data_json
                     })
+                    if track_id_key != 'spotify_track_id':
+                        # provider-correct label for the id
+                        seasonal_tracks[-1][track_id_key] = row['track_id']
 
                 return seasonal_tracks
 
