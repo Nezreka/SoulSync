@@ -2211,6 +2211,10 @@ function startGlobalDownloadPolling() {
             console.debug(`📊 [Global Polling] Received batched update for ${Object.keys(data.batches).length} processes`);
 
             // Process each batch's status data using existing logic
+            // a batch the server dropped is over: end it here too (#1384)
+            _vanishedBatchIds(activeBatchIds, data.batches, _batchMissCounts)
+                .forEach((batchId) => _endVanishedProcess(batchToPlaylistMap[batchId]));
+
             Object.entries(data.batches).forEach(([batchId, statusData]) => {
                 const playlistId = batchToPlaylistMap[batchId];
                 if (!playlistId || statusData.error) {
@@ -2320,6 +2324,10 @@ function startGlobalDownloadPollingWithInterval(interval) {
 
             const data = await response.json();
             console.debug(`📊 [Global Polling] Received batched update for ${Object.keys(data.batches).length} processes`);
+
+            // a batch the server dropped is over: end it here too (#1384)
+            _vanishedBatchIds(activeBatchIds, data.batches, _batchMissCounts)
+                .forEach((batchId) => _endVanishedProcess(batchToPlaylistMap[batchId]));
 
             Object.entries(data.batches).forEach(([batchId, statusData]) => {
                 const playlistId = batchToPlaylistMap[batchId];
@@ -3904,6 +3912,47 @@ function updateTrackSelectionCount(playlistId) {
     const wishlistBtn = document.getElementById(`add-to-wishlist-btn-${playlistId}`);
     if (wishlistBtn) {
         wishlistBtn.disabled = selected === 0;
+    }
+}
+
+// a batch the server no longer has is over: cancelled from the downloads
+// page, or cleaned up as stale. the modal only hears about an end through a
+// status update and a deleted batch never sends one, so it read "running"
+// for good and the global poller asked for it every 2s (#1384). two misses
+// in a row, so a batch caught mid-handover doesn't end early.
+const _batchMissCounts = {};
+
+function _vanishedBatchIds(requested, returned, misses) {
+    const gone = [];
+    for (const id of requested) {
+        if (Object.prototype.hasOwnProperty.call(returned || {}, id)) {
+            delete misses[id];
+            continue;
+        }
+        misses[id] = (misses[id] || 0) + 1;
+        if (misses[id] >= 2) {
+            gone.push(id);
+            delete misses[id];
+        }
+    }
+    return gone;
+}
+
+function _endVanishedProcess(playlistId) {
+    const process = playlistId ? activeDownloadProcesses[playlistId] : null;
+    if (!process) return;
+    process.status = 'cancelled';
+    if (process.poller) {
+        clearInterval(process.poller);
+        process.poller = null;
+    }
+    const hidden = !process.modalElement || process.modalElement.style.display === 'none';
+    if (hidden) {
+        // nobody's looking: drop it, so reopening the playlist starts fresh
+        cleanupDownloadProcess(playlistId);
+    } else {
+        // closing the modal now does the full cleanup
+        showToast(`${(process.playlist && process.playlist.name) || 'This download'} is no longer running.`, 'info');
     }
 }
 
