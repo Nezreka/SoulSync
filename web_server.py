@@ -582,6 +582,12 @@ def _enforce_login():
     reach the page shell + the login flow + the key-authed public API."""
     if not _require_login_enabled():
         return
+    # API keys are admin-minted: a valid key gets the same trust as the
+    # /api/v1/* path exemption, so key-authed callers without cookie sessions
+    # (e.g. the Companion extension's <img> tags on /api/image-proxy) pass.
+    from api.auth import request_has_valid_api_key
+    if request_has_valid_api_key():
+        return
     from core.security.login_gate import login_request_is_blocked
     from core.security.launch_lock import is_html_navigation
     if login_request_is_blocked(
@@ -619,6 +625,10 @@ def _enforce_launch_pin():
     except Exception:
         require_pin = False
     if not require_pin:
+        return
+    # Same API-key trust as the login gate above.
+    from api.auth import request_has_valid_api_key
+    if request_has_valid_api_key():
         return
     from core.security.launch_lock import request_is_locked, is_html_navigation
     # An auth proxy (Authelia/Authentik/oauth2-proxy) that already authenticated the
