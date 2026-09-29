@@ -499,7 +499,8 @@ function resetFileOrganizationTemplates() {
         playlist: '$playlist/$artist - $title',
         video: '$artist/$title-video',
         podcast: '$show/Season $season/$title',
-        audiobook: '$author/$series/$seriespos - $title'
+        audiobook: '$author/$series/$seriespos - $title',
+        sample: '$artist/$track - $chop'
     };
 
     document.getElementById('template-album-path').value = defaults.album;
@@ -508,6 +509,7 @@ function resetFileOrganizationTemplates() {
     document.getElementById('template-video-path').value = defaults.video;
     document.getElementById('template-podcast-path').value = defaults.podcast;
     document.getElementById('template-audiobook-path').value = defaults.audiobook;
+    document.getElementById('template-sample-path').value = defaults.sample;
 
     debouncedAutoSaveSettings();
 }
@@ -522,7 +524,8 @@ function validateFileOrganizationTemplates() {
         playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality'],
         video: ['$artist', '$artistletter', '$title', '$year'],
         podcast: ['$show', '$podcast', '$author', '$artist', '$title', '$season', '$seasonnum', '$episode', '$episodenum', '$year', '$date', '$type'],
-        audiobook: ['$author', '$authorletter', '$narrator', '$title', '$series', '$seriespos', '$year', '$asin']
+        audiobook: ['$author', '$authorletter', '$narrator', '$title', '$series', '$seriespos', '$year', '$asin'],
+        sample: ['$artist', '$track', '$album', '$chop', '$stem']
     };
 
     // Get template values
@@ -530,6 +533,7 @@ function validateFileOrganizationTemplates() {
     const singlePath = document.getElementById('template-single-path').value.trim();
     const playlistPath = document.getElementById('template-playlist-path').value.trim();
     const podcastPath = document.getElementById('template-podcast-path').value.trim();
+    const samplePath = document.getElementById('template-sample-path').value.trim();
 
     // Validate album template
     if (albumPath) {
@@ -637,6 +641,31 @@ function validateFileOrganizationTemplates() {
             if (!isValid) {
                 errors.push(`Invalid variable "${normalized}" in podcast template. Valid: ${validVars.podcast.join(', ')}`);
             } else if (normalized !== lowerVar && validVars.podcast.includes(lowerVar)) {
+                errors.push(`Variable "${normalized}" should be lowercase: "${lowerVar}"`);
+            }
+        });
+    }
+
+    // Validate sample template
+    if (samplePath) {
+        if (samplePath.endsWith('/')) {
+            errors.push('Sample template cannot end with /');
+        }
+        if (samplePath.startsWith('/')) {
+            errors.push('Sample template cannot start with /');
+        }
+        if (samplePath.includes('//')) {
+            errors.push('Sample template cannot have consecutive slashes //');
+        }
+        const sampleVarPattern = /\$\{([a-zA-Z]+)\}|\$([a-zA-Z]+)/g;
+        const foundVars = samplePath.match(sampleVarPattern) || [];
+        foundVars.forEach(v => {
+            const normalized = v.startsWith('${') ? '$' + v.slice(2, -1) : v;
+            const lowerVar = normalized.toLowerCase();
+            const isValid = validVars.sample.some(validVar => validVar.toLowerCase() === lowerVar);
+            if (!isValid) {
+                errors.push(`Invalid variable "${normalized}" in sample template. Valid: ${validVars.sample.join(', ')}`);
+            } else if (normalized !== lowerVar && validVars.sample.includes(lowerVar)) {
                 errors.push(`Variable "${normalized}" should be lowercase: "${lowerVar}"`);
             }
         });
@@ -3219,6 +3248,7 @@ async function loadSettingsData() {
         document.getElementById('template-video-path').value = settings.file_organization?.templates?.video_path || '$artist/$title-video';
         document.getElementById('template-podcast-path').value = settings.file_organization?.templates?.podcast_path || '$show/Season $season/$title';
         document.getElementById('template-audiobook-path').value = settings.file_organization?.templates?.audiobook_path || '$author/$series/$seriespos - $title';
+        document.getElementById('template-sample-path').value = settings.file_organization?.templates?.sample_path || '$artist/$track - $chop';
         const podcastFormatEl = document.getElementById('podcast-media-format');
         if (podcastFormatEl) {
             podcastFormatEl.value = settings.podcasts?.media_format || 'audio';
@@ -3327,6 +3357,12 @@ async function loadSettingsData() {
         // Populate Music Library Paths
         const _musicPaths = settings.library?.music_paths || [];
         renderMusicPaths(_musicPaths);
+
+        // Populate Sample Studio folders (first = default destination).
+        // Configs predating the key get the Docker-aware default row.
+        const _samplePaths = settings.library?.sample_paths || [];
+        const _defaultSamplePath = isDocker ? '/app/samples' : './samples';
+        renderSamplePaths(_samplePaths.length ? _samplePaths : [_defaultSamplePath]);
 
         // Library Organize: preserve the user's casing (default on)
         const _pcEl = document.getElementById('reorganize-preserve-casing');
@@ -5309,6 +5345,66 @@ function collectMusicPaths() {
     return paths;
 }
 
+// ── Sample Studio folders ──
+// Mirrors the additional-music-folders UI above: a dynamic list of output
+// folders for saved chops. The first entry is the default destination.
+
+function renderSamplePaths(paths) {
+    const container = document.getElementById('sample-paths-list');
+    if (!container) return;
+    if (!paths || paths.length === 0) {
+        container.innerHTML = '<div style="color: rgba(255,255,255,0.3); font-size: 0.85em; padding: 4px 0;">No sample folders configured. Saved chops fall back to the default folder.</div>';
+        return;
+    }
+    container.innerHTML = paths.map((p, i) => `
+        <div class="form-group sample-path-row" style="margin-bottom: 4px;">
+            <input type="text" class="sample-path-input" value="${escapeHtml(p)}" placeholder="/samples or C:\\Samples" style="flex:1;">
+            ${i === 0 ? '<span style="color: rgba(255,255,255,0.4); font-size: 0.8em; padding: 8px 4px;">default</span>' : ''}
+            <button class="test-button" onclick="_removeSamplePathRow(this)" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
+        </div>
+    `).join('');
+    // Attach auto-save to dynamically rendered inputs
+    container.querySelectorAll('.sample-path-input').forEach(input => {
+        input.addEventListener('change', () => { if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings(); });
+    });
+}
+
+function addSamplePathRow() {
+    const container = document.getElementById('sample-paths-list');
+    if (!container) return;
+    // Clear the "no folders" message if present
+    const placeholder = container.querySelector('div[style*="color: rgba"]');
+    if (placeholder && !container.querySelector('.sample-path-row')) placeholder.remove();
+    const row = document.createElement('div');
+    row.className = 'form-group sample-path-row';
+    row.style.marginBottom = '4px';
+    row.innerHTML = `
+        <input type="text" class="sample-path-input" value="" placeholder="/samples or C:\\Samples" style="flex:1;">
+        <button class="test-button" onclick="_removeSamplePathRow(this)" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
+    `;
+    container.appendChild(row);
+    const input = row.querySelector('input');
+    input.focus();
+    // Auto-save when the user finishes typing a path
+    input.addEventListener('change', () => { if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings(); });
+}
+
+function _removeSamplePathRow(btn) {
+    btn.closest('.sample-path-row').remove();
+    // Auto-save after removing a path
+    if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
+}
+
+function collectSamplePaths() {
+    const inputs = document.querySelectorAll('.sample-path-input');
+    const paths = [];
+    inputs.forEach(input => {
+        const val = input.value.trim();
+        if (val) paths.push(val);
+    });
+    return paths;
+}
+
 // ── Genre Whitelist ──
 let _genreWhitelistCache = [];
 
@@ -6261,7 +6357,8 @@ async function saveSettings(quiet = false) {
                 playlist_item: document.getElementById('template-playlist-item').value,
                 video_path: document.getElementById('template-video-path').value,
                 podcast_path: document.getElementById('template-podcast-path').value,
-                audiobook_path: document.getElementById('template-audiobook-path').value
+                audiobook_path: document.getElementById('template-audiobook-path').value,
+                sample_path: document.getElementById('template-sample-path').value
             }
         },
         wishlist: {
@@ -6294,6 +6391,7 @@ async function saveSettings(quiet = false) {
         },
         library: {
             music_paths: collectMusicPaths(),
+            sample_paths: collectSamplePaths(),
             music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos',
             podcasts_path: _cfgStr('podcasts-path', { fallback: './podcasts' }),
             audiobooks_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),
