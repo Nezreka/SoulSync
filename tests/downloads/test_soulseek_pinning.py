@@ -1339,3 +1339,64 @@ def test_search_keeps_polling_an_active_search_through_a_quiet_period():
 
     assert counts['responses'] >= 25
     assert {track.filename for track in tracks} == {'Artist - First.flac', 'Artist - Late.flac'}
+
+
+# ---------------------------------------------------------------------------
+# Issue #1387: background pollers back off while slskd is unreachable
+# ---------------------------------------------------------------------------
+
+
+def test_unreachable_slskd_starts_a_backoff_that_doubles_and_caps(configured_client):
+    """one failed connection holds pollers off 15s, each further one doubles
+    it, up to 5 minutes. the chat loops check this so a user who isn't
+    running slskd isn't polled every 6 seconds forever."""
+    StubSession = _build_unreachable_session()
+    assert configured_client.unreachable_backoff_active() is False
+    with patch('aiohttp.ClientSession', return_value=StubSession()):
+        _run_async(configured_client._make_request('GET', 'conversations'))
+    failed_at = configured_client._conn_failed_at
+    assert configured_client.unreachable_backoff_active(now=failed_at + 14) is True
+    assert configured_client.unreachable_backoff_active(now=failed_at + 16) is False
+    with patch('aiohttp.ClientSession', return_value=StubSession()):
+        for _ in range(9):
+            _run_async(configured_client._make_request('GET', 'conversations'))
+    failed_at = configured_client._conn_failed_at
+    assert configured_client.unreachable_backoff_active(now=failed_at + 299) is True
+    assert configured_client.unreachable_backoff_active(now=failed_at + 301) is False
+
+
+def test_any_answer_from_slskd_ends_the_backoff(configured_client):
+    """slskd came back: even a 404 proves it's reachable."""
+    configured_client._conn_failures = 3
+    configured_client._conn_failed_at = __import__('time').time()
+    assert configured_client.unreachable_backoff_active() is True
+
+    class _NotFoundCm:
+        async def __aenter__(self_inner):
+            class _Resp:
+                status = 404
+                reason = 'Not Found'
+                async def text(self_resp):
+                    return ''
+            return _Resp()
+        async def __aexit__(self_inner, *args):
+            return None
+
+    class _Session:
+        def request(self, *args, **kwargs):
+            return _NotFoundCm()
+        async def close(self):
+            return None
+
+    with patch('aiohttp.ClientSession', return_value=_Session()):
+        _run_async(configured_client._make_request('GET', 'conversations'))
+    assert configured_client.unreachable_backoff_active() is False
+
+
+def test_chat_loops_skip_slskd_while_it_is_unreachable():
+    from pathlib import Path
+    ws = (Path(__file__).resolve().parents[2] / "web_server.py").read_text(
+        encoding="utf-8", errors="replace")
+    for name in ("_emit_chat_push_loop", "_chat_auto_prove_loop"):
+        loop = ws.split(f"def {name}")[1].split("\ndef ")[0]
+        assert "unreachable_backoff_active()" in loop, name

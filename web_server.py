@@ -22109,7 +22109,8 @@ def _emit_chat_push_loop():
             if not _has_connected_clients():
                 continue
             _slsk = download_orchestrator.client("soulseek") if download_orchestrator else None
-            if not _slsk or not _slsk.base_url:
+            # slskd down or never started: back off, don't poll it every 6s (#1387)
+            if not _slsk or not _slsk.base_url or _slsk.unreachable_backoff_active():
                 continue
             room = str(config_manager.get('soulseek.chat_room', 'SoulSync') or 'SoulSync')
             if room != _chat_push_state['room']:
@@ -22285,7 +22286,7 @@ def _chat_auto_prove_loop():
             if not config_manager.get('soulseek.chat_auto_prove', True):
                 continue
             _slsk = download_orchestrator.client("soulseek") if download_orchestrator else None
-            if not _slsk or not _slsk.base_url:
+            if not _slsk or not _slsk.base_url or _slsk.unreachable_backoff_active():
                 continue
             replies = chat_autoprove.scan_and_respond(_slsk, run_async, state=state)
             for r in replies:
