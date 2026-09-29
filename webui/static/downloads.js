@@ -2161,7 +2161,7 @@ function startGlobalDownloadPolling() {
         Object.entries(activeDownloadProcesses).forEach(([playlistId, process]) => {
             // Include running AND recently-completed batches — ensures late task
             // status updates still reach the modal so rows don't freeze mid-download
-            if (process.batchId && (process.status === 'running' || process.status === 'complete')) {
+            if (process.batchId && !process.batchGone && (process.status === 'running' || process.status === 'complete')) {
                 activeBatchIds.push(process.batchId);
                 batchToPlaylistMap[process.batchId] = playlistId;
             }
@@ -2277,7 +2277,7 @@ function startGlobalDownloadPollingWithInterval(interval) {
         let hasOpenWishlistModal = false;
 
         Object.entries(activeDownloadProcesses).forEach(([playlistId, process]) => {
-            if (process.batchId && (process.status === 'running' || process.status === 'complete')) {
+            if (process.batchId && !process.batchGone && (process.status === 'running' || process.status === 'complete')) {
                 activeBatchIds.push(process.batchId);
                 batchToPlaylistMap[process.batchId] = playlistId;
             }
@@ -3941,6 +3941,14 @@ function _vanishedBatchIds(requested, returned, misses) {
 function _endVanishedProcess(playlistId) {
     const process = playlistId ? activeDownloadProcesses[playlistId] : null;
     if (!process) return;
+    // either way the poller stops asking for it
+    process.batchGone = true;
+    // a finished download the server reaped after its 5 minutes: nothing is
+    // wrong, the modal stays viewable as it was
+    if (process.status !== 'running') return;
+    // still "running" with no batch behind it: it ended somewhere this page
+    // never heard about (cancelled elsewhere, or finished while the tab was
+    // hidden and the poller paused)
     process.status = 'cancelled';
     if (process.poller) {
         clearInterval(process.poller);
@@ -3948,10 +3956,10 @@ function _endVanishedProcess(playlistId) {
     }
     const hidden = !process.modalElement || process.modalElement.style.display === 'none';
     if (hidden) {
-        // nobody's looking: drop it, so reopening the playlist starts fresh
-        cleanupDownloadProcess(playlistId);
+        // the normal close: drops the process and its search/artist/discover
+        // bubble, so reopening the playlist starts fresh
+        closeDownloadMissingModal(playlistId);
     } else {
-        // closing the modal now does the full cleanup
         showToast(`${(process.playlist && process.playlist.name) || 'This download'} is no longer running.`, 'info');
     }
 }

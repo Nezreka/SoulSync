@@ -40,7 +40,7 @@ beforeEach(() => {
         toasts: [],
         cleared: [],
     };
-    sb.cleanupDownloadProcess = (id) => { sb.cleaned.push(id); delete sb.activeDownloadProcesses[id]; };
+    sb.closeDownloadMissingModal = (id) => { sb.cleaned.push(id); delete sb.activeDownloadProcesses[id]; };
     sb.showToast = (msg) => sb.toasts.push(msg);
     sb.clearInterval = (h) => sb.cleared.push(h);
     vm.createContext(sb);
@@ -75,7 +75,7 @@ describe('_vanishedBatchIds', () => {
 });
 
 describe('_endVanishedProcess', () => {
-    test('with the modal closed, the process is dropped so reopening starts fresh', () => {
+    test('a stuck running process with its modal closed is closed properly, so reopening starts fresh', () => {
         sb.activeDownloadProcesses.p1 = {
             status: 'running', poller: 7, modalElement: { style: { display: 'none' } },
             playlist: { name: 'Road Trip' },
@@ -94,8 +94,23 @@ describe('_endVanishedProcess', () => {
         sb.activeDownloadProcesses.p1 = process;
         sb._endVanishedProcess('p1');
         assert.equal(process.status, 'cancelled');
+        assert.equal(process.batchGone, true);
         assert.equal(sb.cleaned.length, 0);
         assert.match(sb.toasts[0], /Road Trip is no longer running/);
+    });
+
+    test('a finished download the server reaped stays viewable, it just stops being polled', () => {
+        const process = {
+            status: 'complete', modalElement: { style: { display: 'none' } },
+            playlist: { name: 'Road Trip' },
+        };
+        sb.activeDownloadProcesses.p1 = process;
+        sb._endVanishedProcess('p1');
+        assert.equal(process.status, 'complete');
+        assert.equal(process.batchGone, true);
+        assert.equal(sb.cleaned.length, 0);
+        assert.equal(sb.toasts.length, 0);
+        assert.equal(sb.activeDownloadProcesses.p1, process);
     });
 
     test('an unknown playlist is a no-op', () => {
@@ -105,7 +120,9 @@ describe('_endVanishedProcess', () => {
     });
 });
 
-test('both global pollers run the check', () => {
+test('both global pollers run the check and skip a batch that is gone', () => {
     const calls = SOURCE.split('_vanishedBatchIds(activeBatchIds, data.batches, _batchMissCounts)').length - 1;
     assert.equal(calls, 2);
+    const skips = SOURCE.split('process.batchId && !process.batchGone &&').length - 1;
+    assert.equal(skips, 2);
 });
