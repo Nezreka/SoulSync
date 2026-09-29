@@ -189,8 +189,18 @@ describe('playback history', () => {
     'npv2HistoryPush',
   ]);
 
-  const trackA = { title: 'Blue in Green', artist: 'Miles Davis', album: 'Kind of Blue', id: '1' };
-  const trackB = { title: 'So What', artist: 'Miles Davis', album: 'Kind of Blue', id: '2' };
+  const trackA = {
+    title: 'Blue in Green',
+    artist: 'Miles Davis',
+    album: 'Kind of Blue',
+    id: '1',
+  };
+  const trackB = {
+    title: 'So What',
+    artist: 'Miles Davis',
+    album: 'Kind of Blue',
+    id: '2',
+  };
 
   it('identifies a track case-insensitively', () => {
     expect(npv2TrackIdentity(trackA)).toBe(
@@ -312,7 +322,18 @@ describe('equalizer presets', () => {
 
 describe('visualization themes', () => {
   const lifted = v2Harness(
-    ['npv2ThemeList', 'npv2ThemeIds', 'npv2ThemeState', 'npv2Bin', 'npv2Css'],
+    [
+      'npv2ThemeList',
+      'npv2ThemeIds',
+      'npv2ThemeState',
+      'npv2Bin',
+      'npv2Css',
+      'npv2Css2',
+      'npv2PalA',
+      'npv2Pal2',
+      'npv2Q',
+      'npv2BeatAmp',
+    ],
     ['NPV2_PAINT', 'NPV2_THEME_STATE'],
   );
   const { npv2ThemeList, npv2ThemeIds, NPV2_PAINT } = lifted;
@@ -383,6 +404,124 @@ describe('visualization themes', () => {
         `painter ${id} idle`,
       ).not.toThrow();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Visual options (quality, energy, palettes, autocycle, dim)
+// ---------------------------------------------------------------------------
+
+describe('visual option helpers', () => {
+  const {
+    npv2QualitySpec,
+    npv2AutocycleSeconds,
+    npv2ClampVizEnergy,
+    npv2ClampVizDim,
+    npv2PaletteList,
+    NPV2_PALETTES,
+  } = v2Harness(
+    [
+      'npv2QualitySpec',
+      'npv2AutocycleSeconds',
+      'npv2ClampVizEnergy',
+      'npv2ClampVizDim',
+      'npv2PaletteList',
+    ],
+    ['NPV2_PALETTES'],
+  );
+
+  it('quality specs give a bounded dpr and a particle factor', () => {
+    expect(npv2QualitySpec('auto')).toEqual({ dpr: 1.5, q: 1 });
+    expect(npv2QualitySpec('high')).toEqual({ dpr: 2, q: 1.25 });
+    expect(npv2QualitySpec('balanced')).toEqual({ dpr: 1.25, q: 0.8 });
+    expect(npv2QualitySpec('lite')).toEqual({ dpr: 1, q: 0.5 });
+    expect(npv2QualitySpec('nonsense')).toEqual({ dpr: 1.5, q: 1 });
+  });
+
+  it('autocycle parses track mode and positive intervals', () => {
+    expect(npv2AutocycleSeconds('off')).toBe(0);
+    expect(npv2AutocycleSeconds('track')).toBe(-1);
+    expect(npv2AutocycleSeconds('30')).toBe(30);
+    expect(npv2AutocycleSeconds('60')).toBe(60);
+    expect(npv2AutocycleSeconds('300')).toBe(300);
+    expect(npv2AutocycleSeconds('bogus')).toBe(0);
+    expect(npv2AutocycleSeconds('0')).toBe(0);
+  });
+
+  it('clamps energy to 0.5–1.5 and dim to 0–0.6', () => {
+    expect(npv2ClampVizEnergy(1)).toBe(1);
+    expect(npv2ClampVizEnergy(0.1)).toBe(0.5);
+    expect(npv2ClampVizEnergy(9)).toBe(1.5);
+    expect(npv2ClampVizEnergy('loud')).toBe(1);
+    expect(npv2ClampVizDim(0.3)).toBe(0.3);
+    expect(npv2ClampVizDim(-2)).toBe(0);
+    expect(npv2ClampVizDim(0.9)).toBe(0.6);
+    expect(npv2ClampVizDim('dim')).toBe(0);
+  });
+
+  it('every palette has r/g/b and the list has an album-art default', () => {
+    const list = npv2PaletteList();
+    expect(list[0].id).toBe('auto');
+    for (const p of list) {
+      if (p.id === 'auto') continue;
+      const c = NPV2_PALETTES[p.id];
+      expect(c).toBeTruthy();
+      expect(c.r).toBeGreaterThanOrEqual(0);
+      expect(c.r).toBeLessThanOrEqual(255);
+      expect(c.g).toBeGreaterThanOrEqual(0);
+      expect(c.g).toBeLessThanOrEqual(255);
+      expect(c.b).toBeGreaterThanOrEqual(0);
+      expect(c.b).toBeLessThanOrEqual(255);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Theme cycling: manual offers Off, automatic rotation skips it
+// ---------------------------------------------------------------------------
+
+describe('theme cycling', () => {
+  const make = () => {
+    const seen: string[] = [];
+    const factory = new Function(
+      'seen',
+      [
+        extractConst('NPV2', v2),
+        'function npv2SetTheme(id) { seen.push(id); NPV2.theme = id; }',
+        extractFunction('npv2ThemeList', v2),
+        extractFunction('npv2ThemeIds', v2),
+        extractFunction('npv2CycleTheme', v2),
+        'return { npv2CycleTheme, NPV2 };',
+      ].join('\n'),
+    );
+    return { api: factory(seen) as any, seen };
+  };
+
+  it('manual cycling includes the Off theme', () => {
+    const { api, seen } = make();
+    api.NPV2.theme = 'bloom';
+    api.npv2CycleTheme();
+    expect(seen).toEqual(['none']);
+  });
+
+  it('automatic cycling (skipOff) never lands on Off', () => {
+    const { api, seen } = make();
+    api.NPV2.theme = 'bloom';
+    api.npv2CycleTheme(true);
+    expect(seen).toEqual(['barscope']);
+    // a full rotation visits every theme except none
+    const { api: api2, seen: seen2 } = make();
+    api2.NPV2.theme = 'barscope';
+    for (let i = 0; i < 20; i++) api2.npv2CycleTheme(true);
+    expect(seen2).not.toContain('none');
+    expect(new Set(seen2).size).toBe(17);
+  });
+
+  it('automatic cycling from Off moves to the first visual', () => {
+    const { api, seen } = make();
+    api.NPV2.theme = 'none';
+    api.npv2CycleTheme(true);
+    expect(seen).toEqual(['barscope']);
   });
 });
 
@@ -476,7 +615,11 @@ describe('v1 sleep timer', () => {
       h.npCycleSleepTimer();
       expect(h.label()).toBe(label);
     }
-    expect(h.state()).toEqual({ npSleepMinutes: 0, npSleepEndOfTrack: false, hasTimer: false });
+    expect(h.state()).toEqual({
+      npSleepMinutes: 0,
+      npSleepEndOfTrack: false,
+      hasTimer: false,
+    });
     expect(h.btnActive()).toBe(false);
   });
 
@@ -501,7 +644,11 @@ describe('v1 sleep timer', () => {
     const h = sleepHarness();
     for (let i = 0; i < 7; i++) h.npCycleSleepTimer();
     expect(h.label()).toBe('Sleep: track end');
-    expect(h.state()).toEqual({ npSleepMinutes: 0, npSleepEndOfTrack: true, hasTimer: false });
+    expect(h.state()).toEqual({
+      npSleepMinutes: 0,
+      npSleepEndOfTrack: true,
+      hasTimer: false,
+    });
   });
 
   it('firing pauses instead of stopping (queue survives)', () => {
@@ -533,5 +680,346 @@ describe('v1 sleep timer', () => {
     expect(fakeXfade.pause).toHaveBeenCalled();
     expect(h.xfadeActive()).toBe(false);
     expect(h.audioPlayer.pause).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Minimal fake DOM for the DOM-touching v2 controls
+// ---------------------------------------------------------------------------
+
+function npv2FakeClassList() {
+  const s = new Set<string>();
+  return {
+    add: (...c: string[]) => {
+      c.forEach((x) => s.add(x));
+    },
+    remove: (...c: string[]) => {
+      c.forEach((x) => s.delete(x));
+    },
+    toggle: (c: string, force?: boolean) => {
+      const want = force === undefined ? !s.has(c) : !!force;
+      if (want) s.add(c);
+      else s.delete(c);
+      return want;
+    },
+    contains: (c: string) => s.has(c),
+  };
+}
+
+function npv2FakeEl(id: string): any {
+  const el: any = {
+    id,
+    classList: npv2FakeClassList(),
+    children: [] as any[],
+    parentNode: null as any,
+    textContent: '',
+    attrs: {} as Record<string, string>,
+    setAttribute(k: string, v: string) {
+      el.attrs[k] = v;
+    },
+    getAttribute(k: string) {
+      return el.attrs[k] ?? null;
+    },
+    querySelector() {
+      return null;
+    },
+    querySelectorAll() {
+      return [];
+    },
+    appendChild(child: any) {
+      if (child.parentNode) child.parentNode.removeChild(child);
+      child.parentNode = el;
+      el.children.push(child);
+      return child;
+    },
+    insertBefore(child: any, ref: any) {
+      if (child.parentNode) child.parentNode.removeChild(child);
+      child.parentNode = el;
+      const i = el.children.indexOf(ref);
+      if (i < 0) el.children.push(child);
+      else el.children.splice(i, 0, child);
+      return child;
+    },
+    removeChild(child: any) {
+      el.children = el.children.filter((c: any) => c !== child);
+      child.parentNode = null;
+      return child;
+    },
+  };
+  Object.defineProperty(el, 'nextSibling', {
+    get() {
+      if (!el.parentNode) return null;
+      const sibs = el.parentNode.children;
+      const i = sibs.indexOf(el);
+      return i >= 0 && i + 1 < sibs.length ? sibs[i + 1] : null;
+    },
+  });
+  return el;
+}
+
+function npv2FakeDocument(els: Record<string, any>): any {
+  return {
+    _els: els,
+    fullscreenElement: null as any,
+    getElementById(id: string) {
+      return els[id] ?? null;
+    },
+    querySelector() {
+      return null;
+    },
+    querySelectorAll() {
+      return [];
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Visuals side panel (immersive overlay keeps the show running)
+// ---------------------------------------------------------------------------
+
+describe('visuals side panel', () => {
+  const build = () => {
+    const home = npv2FakeEl('np-tabpanels');
+    const historyPanel = npv2FakeEl('np-v2-history-panel');
+    const sibling = npv2FakeEl('np-v2-details-panel');
+    home.appendChild(historyPanel);
+    home.appendChild(sibling);
+    const els: Record<string, any> = {
+      'np-tabpanels': home,
+      'np-v2-history-panel': historyPanel,
+      'np-v2-details-panel': sibling,
+      'np-v2-sidepanel-body': npv2FakeEl('np-v2-sidepanel-body'),
+      'np-v2-visuals-sidepanel': npv2FakeEl('np-v2-visuals-sidepanel'),
+      'np-v2-sidepanel-title': npv2FakeEl('np-v2-sidepanel-title'),
+      'np-v2-visuals-drawer': npv2FakeEl('np-v2-visuals-drawer'),
+      'np-v2-visuals-panels': npv2FakeEl('np-v2-visuals-panels'),
+      'np-queue-panel': npv2FakeEl('np-queue-panel'),
+      'np-lyrics-panel': npv2FakeEl('np-lyrics-panel'),
+      'np-v2-settings-panel': npv2FakeEl('np-v2-settings-panel'),
+    };
+    els['np-v2-visuals-sidepanel'].classList.add('hidden');
+    const doc = npv2FakeDocument(els);
+    const factory = new Function(
+      'document',
+      [
+        extractConst('NPV2', v2),
+        extractConst('NPV2_SIDE_PANELS', v2),
+        extractConst('NPV2_TABS', v2),
+        'let npv2SidePanelHome = null;',
+        'let npv2SidePanelTab = null;',
+        'function npv2RenderHistory() {}',
+        'function npv2RenderDetails() {}',
+        'function npv2VisualsModeOn() { return true; }',
+        'function npv2VisualsClearIdle() {}',
+        extractFunction('npv2OpenVisualsPanel', v2),
+        extractFunction('npv2CloseVisualsPanel', v2),
+        extractFunction('npv2SidePanelOpen', v2),
+        extractFunction('npv2ToggleVisualsDrawer', v2),
+        extractFunction('npv2SelectTab', v2),
+        extractFunction('npv2VisualsWakeUI', v2),
+        'return { npv2OpenVisualsPanel, npv2CloseVisualsPanel, npv2SidePanelOpen, NPV2 };',
+      ].join('\n'),
+    );
+    return { api: factory(doc) as any, els, home, historyPanel, sibling };
+  };
+
+  it('opens the history panel into the side overlay', () => {
+    const { api, els, historyPanel } = build();
+    api.npv2OpenVisualsPanel('history');
+    expect(api.npv2SidePanelOpen()).toBe(true);
+    expect(historyPanel.parentNode).toBe(els['np-v2-sidepanel-body']);
+    expect(historyPanel.classList.contains('hidden')).toBe(false);
+    expect(els['np-v2-visuals-sidepanel'].classList.contains('hidden')).toBe(false);
+    expect(els['np-v2-sidepanel-title'].textContent).toBe('History');
+    expect(api.NPV2.tab).toBe('history');
+  });
+
+  it('toggling the same tab closes the panel', () => {
+    const { api } = build();
+    api.npv2OpenVisualsPanel('history');
+    api.npv2OpenVisualsPanel('history');
+    expect(api.npv2SidePanelOpen()).toBe(false);
+  });
+
+  it('closing restores the node to its original home and spot', () => {
+    const { api, els, home, historyPanel, sibling } = build();
+    api.npv2OpenVisualsPanel('history');
+    api.npv2CloseVisualsPanel();
+    expect(api.npv2SidePanelOpen()).toBe(false);
+    expect(historyPanel.parentNode).toBe(home);
+    expect(home.children[0]).toBe(historyPanel);
+    expect(home.children[1]).toBe(sibling);
+    expect(els['np-v2-visuals-sidepanel'].classList.contains('hidden')).toBe(true);
+  });
+
+  it('switching tabs moves the panel without a close round-trip', () => {
+    const { api, els, historyPanel } = build();
+    api.npv2OpenVisualsPanel('queue');
+    api.npv2OpenVisualsPanel('history');
+    expect(historyPanel.parentNode).toBe(els['np-v2-sidepanel-body']);
+    expect(els['np-v2-sidepanel-title'].textContent).toBe('History');
+  });
+
+  it('ignores unknown tabs', () => {
+    const { api } = build();
+    api.npv2OpenVisualsPanel('nope');
+    expect(api.npv2SidePanelOpen()).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fullscreen (true browser fullscreen, separate from immersive)
+// ---------------------------------------------------------------------------
+
+describe('fullscreen', () => {
+  const build = (reject = false) => {
+    const overlay = npv2FakeEl('np-modal-overlay');
+    const btn = npv2FakeEl('np-v2-fullscreen-btn');
+    const toasts: Array<{ msg: string; kind: string }> = [];
+    const doc: any = npv2FakeDocument({
+      'np-modal-overlay': overlay,
+      'np-v2-fullscreen-btn': btn,
+    });
+    doc.fullscreenElement = null;
+    doc.exitFullscreen = () => {
+      doc.fullscreenElement = null;
+      return Promise.resolve();
+    };
+    overlay.requestFullscreen = () => {
+      if (reject) return Promise.reject(new Error('denied'));
+      doc.fullscreenElement = overlay;
+      return Promise.resolve();
+    };
+    const factory = new Function(
+      'document',
+      'showToast',
+      [
+        extractFunction('npv2Toast', v2),
+        extractFunction('npv2SetFullscreen', v2),
+        extractFunction('npv2SyncFullscreenBtn', v2),
+        'return { npv2SetFullscreen, npv2SyncFullscreenBtn };',
+      ].join('\n'),
+    );
+    const api = factory(doc, (msg: string, kind = 'info') => toasts.push({ msg, kind }));
+    return { api, doc, overlay, btn, toasts };
+  };
+
+  it('enters fullscreen and syncs the button state', async () => {
+    const { api, doc, overlay, btn } = build();
+    api.npv2SetFullscreen(true);
+    await Promise.resolve();
+    expect(doc.fullscreenElement).toBe(overlay);
+    api.npv2SyncFullscreenBtn();
+    expect(btn.classList.contains('active')).toBe(true);
+    expect(btn.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('exits fullscreen', async () => {
+    const { api, doc, overlay, btn } = build();
+    doc.fullscreenElement = overlay;
+    api.npv2SetFullscreen(false);
+    await Promise.resolve();
+    expect(doc.fullscreenElement).toBe(null);
+    api.npv2SyncFullscreenBtn();
+    expect(btn.classList.contains('active')).toBe(false);
+    expect(btn.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('toasts when the browser blocks fullscreen', async () => {
+    const { api, doc, toasts } = build(true);
+    api.npv2SetFullscreen(true);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(doc.fullscreenElement).toBe(null);
+    expect(toasts.length).toBe(1);
+    expect(toasts[0].msg).toMatch(/blocked/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Button behaviors: EQ toggle, speed stepping
+// ---------------------------------------------------------------------------
+
+describe('EQ toggle button', () => {
+  const build = () => {
+    const btn = npv2FakeEl('np-v2-eq-btn');
+    const doc = npv2FakeDocument({ 'np-v2-eq-btn': btn });
+    const factory = new Function(
+      'document',
+      [
+        extractConst('NPV2', v2),
+        'function npv2AttachAudioGraph() { return true; }',
+        'function npv2ApplyEq() {}',
+        'function npv2PersistEq() {}',
+        'function npv2RenderEqUI() {}',
+        extractFunction('npv2SetEqOn', v2),
+        extractFunction('npv2SyncEqBtn', v2),
+        'return { npv2SetEqOn, NPV2 };',
+      ].join('\n'),
+    );
+    return { api: factory(doc) as any, btn };
+  };
+
+  it('toggles EQ state and syncs the button active/aria state', () => {
+    const { api, btn } = build();
+    expect(api.NPV2.eq.on).toBe(false);
+    api.npv2SetEqOn(true);
+    expect(api.NPV2.eq.on).toBe(true);
+    expect(btn.classList.contains('active')).toBe(true);
+    expect(btn.getAttribute('aria-pressed')).toBe('true');
+    api.npv2SetEqOn(false);
+    expect(api.NPV2.eq.on).toBe(false);
+    expect(btn.classList.contains('active')).toBe(false);
+    expect(btn.getAttribute('aria-pressed')).toBe('false');
+  });
+});
+
+describe('speed stepping ([ and ])', () => {
+  const build = () => {
+    const btn = npv2FakeEl('np-v2-speed-btn');
+    const doc = npv2FakeDocument({ 'np-v2-speed-btn': btn });
+    const factory = new Function(
+      'document',
+      [
+        extractConst('NPV2', v2),
+        extractConst('NPV2_SPEED_PRESETS', v2),
+        extractFunction('npv2ClampSpeed', v2),
+        extractFunction('npv2FormatSpeed', v2),
+        'function npv2Set(k, v) {}',
+        'function npv2AudioEl() { return null; }',
+        'function npv2Toast() {}',
+        extractFunction('npv2SetSpeed', v2),
+        extractFunction('npv2CycleSpeed', v2),
+        'return { npv2SetSpeed, npv2CycleSpeed, NPV2 };',
+      ].join('\n'),
+    );
+    return { api: factory(doc) as any, btn };
+  };
+
+  it('steps through presets and clamps at the endpoints', () => {
+    const { api, btn } = build();
+    api.npv2SetSpeed(1, { silent: true });
+    api.npv2CycleSpeed(1);
+    expect(api.NPV2.speed).toBe(1.25);
+    api.npv2CycleSpeed(-1);
+    expect(api.NPV2.speed).toBe(1);
+    expect(btn.classList.contains('active')).toBe(false);
+    api.npv2CycleSpeed(1);
+    api.npv2CycleSpeed(1);
+    expect(api.NPV2.speed).toBe(1.5);
+    expect(btn.classList.contains('active')).toBe(true);
+    api.npv2SetSpeed(2, { silent: true });
+    api.npv2CycleSpeed(1);
+    expect(api.NPV2.speed).toBe(2);
+    api.npv2SetSpeed(0.5, { silent: true });
+    api.npv2CycleSpeed(-1);
+    expect(api.NPV2.speed).toBe(0.5);
+  });
+
+  it('marks the button active only when speed differs from 1x', () => {
+    const { api, btn } = build();
+    api.npv2SetSpeed(1.5, { silent: true });
+    expect(btn.classList.contains('active')).toBe(true);
+    api.npv2SetSpeed(1, { silent: true });
+    expect(btn.classList.contains('active')).toBe(false);
   });
 });

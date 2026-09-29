@@ -450,7 +450,7 @@
 
 /* Static preview gradients for each visualization theme */
 .theme-barscope   { background: linear-gradient(180deg, #ff5e62 0%, #7b2ff7 55%, #1a0533 100%); }
-.theme-oscilloscope { background: radial-gradient(circle at 50% 60%, #39ff6a 0%, #063 45%, #010603 100%); }
+.theme-scope      { background: radial-gradient(circle at 50% 60%, #39ff6a 0%, #063 45%, #010603 100%); }
 .theme-waves      { background: linear-gradient(135deg, #0b486b 0%, #3b8686 50%, #79bd9a 100%); }
 .theme-plasma     { background: radial-gradient(circle at 30% 30%, #ff9a3c 0%, #ff2e93 45%, #2b0a4e 100%); }
 .theme-spikes     { background: conic-gradient(from 0deg, #f9d423, #ff4e50, #7b2ff7, #00c9ff, #f9d423); }
@@ -458,6 +458,14 @@
 .theme-stardust   { background: radial-gradient(circle at 70% 20%, #e0c3fc 0%, #4a3b8c 50%, #050510 100%); }
 .theme-vinyl      { background: radial-gradient(circle at 50% 50%, #f5d020 0 18%, #111 19% 100%); }
 .theme-tunnel     { background: radial-gradient(circle at 50% 50%, #00f5d4 0%, #5a189a 55%, #03030a 100%); }
+.theme-battery    { background: linear-gradient(180deg, #0a0a14 0%, #3b1d0a 55%, #ffb347 78%, #0a0a14 100%); }
+.theme-dotplane   { background: radial-gradient(circle at 50% 50%, #7b2ff7 0 4%, transparent 5%), repeating-linear-gradient(0deg, transparent 0 8px, rgba(123,47,247,.25) 8px 10px), repeating-linear-gradient(90deg, transparent 0 8px, rgba(123,47,247,.25) 8px 10px), #080810; }
+.theme-alchemy    { background: radial-gradient(circle at 30% 40%, #00c9ff 0%, transparent 45%), radial-gradient(circle at 70% 60%, #ff4e50 0%, transparent 45%), radial-gradient(circle at 50% 80%, #7b2ff7 0%, transparent 50%), #06060f; }
+.theme-fountain   { background: linear-gradient(180deg, #0b0b18 0%, #1b2a4a 60%, #4fc3f7 85%, #0b0b18 100%); }
+.theme-kaleido    { background: conic-gradient(from 20deg, #ff5e62, #f9d423, #39ff6a, #00c9ff, #7b2ff7, #ff4e50, #ff5e62); }
+.theme-warp       { background: radial-gradient(circle at 50% 50%, #ffffff 0 2%, transparent 3%), radial-gradient(circle at 50% 50%, rgba(123,47,247,.6) 0%, transparent 55%), #04040c; }
+.theme-nebula     { background: radial-gradient(circle at 25% 30%, #7b2ff7 0%, transparent 40%), radial-gradient(circle at 75% 65%, #00c9ff 0%, transparent 40%), radial-gradient(circle at 55% 85%, #ff4e50 0%, transparent 35%), #050510; }
+.theme-bloom      { background: radial-gradient(circle at 50% 50%, transparent 0 30%, #7b2ff7 38%, transparent 46%), radial-gradient(circle at 50% 50%, transparent 0 55%, #00c9ff 62%, transparent 70%), #08080f; }
 .theme-none       { background: linear-gradient(135deg, #2a2d3a, #12131a); }
 
 .np-v2-setting-row {
@@ -483,6 +491,63 @@
 }
 
 .np-v2-select option { color: #111; }
+
+/* Range slider (visual energy / dim) */
+.np-v2-range-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 170px;
+    justify-content: flex-end;
+}
+
+.np-v2-range {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 120px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.18);
+    outline: none;
+    cursor: pointer;
+}
+
+.np-v2-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    border: none;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+.np-v2-range::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    border: none;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+.np-v2-range-val {
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.75);
+    min-width: 40px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* True browser fullscreen: the modal goes edge to edge */
+#np-modal-overlay:fullscreen .np-modal {
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: none !important;
+    max-height: none !important;
+    border-radius: 0;
+}
 
 /* Toggle switch */
 .np-v2-switch {
@@ -634,6 +699,12 @@
     white-space: nowrap;
 }
 
+.np-v2-short-hint {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 0.74rem;
+    text-align: right;
+}
+
 .np-v2-shorts-close {
     position: absolute;
     top: 10px;
@@ -739,6 +810,7 @@
     opacity: 1;
     -webkit-mask-image: none;
     mask-image: none;
+    pointer-events: auto; /* empty-area clicks reach the canvas: dblclick = fullscreen */
 }
 
 /* Legibility scrims over the visuals, under the chrome */
@@ -757,6 +829,7 @@
     display: block;
     padding: 0 !important;
     overflow: visible;
+    pointer-events: none; /* clicks on empty visuals fall through to the canvas (dblclick = fullscreen); chrome re-enables below */
 }
 .np-modal.npv2-visuals-on .np-left {
     display: none;
@@ -812,6 +885,167 @@
 /* ---- Visuals header: track identity + theme switcher (top) ---- */
 #np-v2-visuals-header {
     display: none;
+}
+
+/* Panels drawer: reachable from visuals mode without leaving the show */
+#np-v2-visuals-drawer {
+    display: flex;
+    gap: 8px;
+    position: absolute;
+    top: 74px;
+    right: 36px;
+    z-index: 5;
+    background: rgba(8, 10, 18, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+    padding: 10px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
+
+/* Out-specificity the app's generic `.np-modal > *` stacking rule so the
+   drawer and side panel actually sit above the immersive chrome. */
+#np-modal-overlay .np-modal.npv2-visuals-on > #np-v2-visuals-drawer {
+    position: absolute;
+    top: 74px;
+    right: 36px;
+    z-index: 8;
+}
+
+#np-modal-overlay .np-modal.npv2-visuals-on > #np-v2-visuals-sidepanel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9;
+}
+
+#np-modal-overlay .np-modal:not(.npv2-visuals-on) > #np-v2-visuals-drawer {
+    display: none;
+}
+
+/* Side panel: a tab's content docked over the visuals (right side) */
+#np-v2-visuals-sidepanel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(400px, 88vw);
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    background: rgba(6, 8, 16, 0.88);
+    border-left: 1px solid rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: -18px 0 50px rgba(0, 0, 0, 0.55);
+}
+
+#np-modal-overlay .np-modal:not(.npv2-visuals-on) > #np-v2-visuals-sidepanel {
+    display: none;
+}
+
+.np-v2-sidepanel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 10px;
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.95rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    flex: 0 0 auto;
+}
+
+#np-v2-sidepanel-close {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #fff;
+    border-radius: 8px;
+    width: 30px;
+    height: 30px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    line-height: 1;
+}
+
+#np-v2-sidepanel-close:hover {
+    background: rgba(255, 255, 255, 0.16);
+}
+
+.np-v2-sidepanel-body {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 12px 14px 20px;
+    color: #e8e8ef;
+}
+
+/* docked tab panels fill the side panel */
+.np-v2-sidepanel-body > div {
+    height: 100%;
+    max-height: none;
+}
+
+@media (max-width: 640px) {
+    #np-v2-visuals-sidepanel {
+        width: 100vw;
+        border-left: none;
+    }
+}
+
+/* ---- Speed preset picker ---- */
+.np-v2-speed-menu {
+    position: fixed;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 88px;
+    background: rgba(8, 10, 18, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 10px;
+    padding: 6px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.55);
+}
+
+.np-v2-speed-item {
+    background: transparent;
+    border: none;
+    color: #dfe0ea;
+    border-radius: 7px;
+    padding: 8px 12px;
+    font-size: 0.85rem;
+    text-align: left;
+    cursor: pointer;
+}
+
+.np-v2-speed-item:hover {
+    background: rgba(255, 255, 255, 0.10);
+}
+
+.np-v2-speed-item.active {
+    background: rgba(138, 76, 246, 0.28);
+    color: #fff;
+    font-weight: 700;
+}
+
+.np-v2-drawer-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #fff;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 0.82rem;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.np-v2-drawer-btn:hover {
+    background: rgba(255, 255, 255, 0.16);
 }
 #np-modal-overlay .np-modal.npv2-visuals-on > #np-v2-visuals-header {
     display: flex;
