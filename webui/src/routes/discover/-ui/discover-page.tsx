@@ -915,6 +915,7 @@ export function DiscoverPage() {
       // before there is a single mix
       if (id === 'your-mixes-section') return true;
       if (id === 'year-mixes-section') return mixes.decadeMixes.length > 0;
+      if (id === 'mood-mixes-section') return mixes.moodMixes.length > 0;
       if (id === 'discover-bylt-sections') return byltRows.length > 0;
       return page.hasContent(id);
     },
@@ -962,6 +963,20 @@ export function DiscoverPage() {
                 + Build a mix
               </button>
             }
+            onOpenMix={modal.open}
+            onPlayMix={playMixFromCard}
+            playingKey={playingMixKey}
+          />
+        );
+      case 'mood-mixes-section':
+        return (
+          <MixShelf
+            id={id}
+            title="Moods"
+            subtitle="A mix for how you feel, from your own albums. Plays straight away."
+            mixes={mixes.moodMixes}
+            loaded={true}
+            gridId="mood-mixes-grid"
             onOpenMix={modal.open}
             onPlayMix={playMixFromCard}
             playingKey={playingMixKey}

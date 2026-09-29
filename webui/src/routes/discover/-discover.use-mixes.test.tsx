@@ -7,7 +7,7 @@ import { server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 
 import { fetchDiscoveryWeekly, fetchReleaseRadar, fetchSeasonalPlaylist } from './-discover.api';
-import { useDiscoverMixes } from './-discover.use-mixes';
+import { moodMixesFrom, useDiscoverMixes } from './-discover.use-mixes';
 
 /**
  * The Your Mixes registry hook.
@@ -70,6 +70,7 @@ function stub({
       '/api/discover/personalized/listening-mix',
     ].map((path) => http.get(path, () => json({ tracks: personalized }))),
     http.get('/api/discover/personalized/daily-mixes', () => json({ mixes: daily })),
+    http.get('/api/discover/moods', () => json({ mixes: [] })),
     http.get('/api/discover/decades/available', () => {
       hits.push('decades');
       return json({ decades });
@@ -88,6 +89,29 @@ function mount(belowFoldReady = true) {
 
 afterEach(() => {
   server.resetHandlers();
+});
+
+describe('moodMixesFrom', () => {
+  it('turns the moods payload into play-only cards that say what they are', () => {
+    const mixes = moodMixesFrom({
+      mixes: [
+        {
+          key: 'mood_chill',
+          name: 'Chill',
+          subtitle: 'Downtempo, lo-fi and chillout',
+          tracks: [track('c')],
+        },
+        { key: 'mood_empty', name: 'Empty', tracks: [] },
+        { name: 'no key', tracks: [track('x')] },
+      ],
+    });
+    expect(mixes.map((m) => m.key)).toEqual(['mood_chill']);
+    expect(mixes[0]).toMatchObject({ title: 'Chill', blurb: 'Downtempo, lo-fi and chillout' });
+    // owned tracks: no syncKey, so the modal offers Play and nothing else
+    expect(mixes[0].syncKey).toBeUndefined();
+    expect(moodMixesFrom(undefined)).toEqual([]);
+    expect(moodMixesFrom({ mixes: 'nope' })).toEqual([]);
+  });
 });
 
 describe('useDiscoverMixes', () => {

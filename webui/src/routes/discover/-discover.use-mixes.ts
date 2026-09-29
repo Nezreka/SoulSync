@@ -11,6 +11,7 @@ import {
   fetchHiddenGems,
   fetchListeningMix,
   fetchDailyMixes,
+  fetchMoodMixes,
   fetchPopularPicks,
   fetchReleaseRadar,
   fetchSeasonalCurrent,
@@ -78,6 +79,8 @@ export interface DiscoverMixesController {
   registry: Record<string, DiscoverMix>;
   /** Your mix recipes, for the editor (their cards are in `mixes`). */
   recipes: RecipeMixCard[];
+  /** the moods shelf: chill, focus, energy... built from your own albums' tags. */
+  moodMixes: DiscoverMix[];
 }
 
 /**
@@ -87,6 +90,27 @@ export interface DiscoverMixesController {
  * would fire those fetches at mount and defeat the tiering the page hook
  * exists to preserve. The slow-external feeders stay ungated on purpose.
  */
+/**
+ * the moods payload as cards. every track is owned, so there's nothing to
+ * download or sync-match: no syncKey, which leaves Play as the one action.
+ */
+export function moodMixesFrom(payload: Record<string, unknown> | undefined): DiscoverMix[] {
+  if (!payload || !Array.isArray(payload.mixes)) return [];
+  const out: DiscoverMix[] = [];
+  for (const raw of payload.mixes as Record<string, unknown>[]) {
+    const tracks = Array.isArray(raw.tracks) ? raw.tracks : [];
+    if (!tracks.length || typeof raw.key !== 'string') continue;
+    out.push({
+      key: raw.key,
+      title: typeof raw.name === 'string' && raw.name ? raw.name : raw.key,
+      subtitle: typeof raw.subtitle === 'string' ? raw.subtitle : undefined,
+      blurb: typeof raw.subtitle === 'string' ? raw.subtitle : undefined,
+      tracks,
+    });
+  }
+  return out;
+}
+
 export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController {
   // Same keys as useDiscoverPage → served from cache, no second request.
   const popularPicks = useQuery(mixQuery('popular-picks', fetchPopularPicks));
@@ -118,6 +142,8 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
   // Slow external — enabled from mount, awaited by nothing.
   const releaseRadar = useQuery(mixQuery('release-radar', fetchReleaseRadar));
   const daily = useQuery(mixQuery('daily-mixes', fetchDailyMixes));
+  // below the fold, and built once a day server side
+  const moodsQuery = useQuery(mixQuery('moods', fetchMoodMixes, belowFoldReady));
   // your recipes: server-built, renewed on their own schedule
   const recipeQuery = useQuery(mixQuery('recipes', fetchRecipes));
   const weekly = useQuery(mixQuery('discovery-weekly', fetchDiscoveryWeekly));
@@ -240,8 +266,11 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
       : [];
   const decadeMixes = availableDecades.map((d) => decadeMix(d));
 
-  const registry: Record<string, DiscoverMix> = {};
-  for (const m of [...mixes, ...decadeMixes]) registry[m.key] = m;
+  const moodOutcome = moodsQuery.data as SectionOutcome<Record<string, unknown>> | undefined;
+  const moodMixes = moodMixesFrom(moodOutcome?.kind === 'ok' ? moodOutcome.data : undefined);
 
-  return { mixes, decadeMixes, registry, recipes };
+  const registry: Record<string, DiscoverMix> = {};
+  for (const m of [...mixes, ...decadeMixes, ...moodMixes]) registry[m.key] = m;
+
+  return { mixes, decadeMixes, registry, recipes, moodMixes };
 }

@@ -2941,3 +2941,24 @@
     .dsc-week-top-name { grid-area: name; }
     .dsc-week-top-plays { grid-area: plays; }
 }
+
+/* ── 14. Moods: the album mosaic under the mood's own colour ─────────────── */
+.discover-mix-card[data-mix-key^="mood_"] .mix-card-cover::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background: linear-gradient(160deg, rgba(var(--mood-rgb), 0.78) 0%, rgba(var(--mood-rgb), 0.35) 55%, rgba(var(--mood-rgb), 0.1) 100%);
+    mix-blend-mode: normal;
+}
+
+.discover-mix-card[data-mix-key^="mood_"] .mix-card-play {
+    z-index: 5 !important;
+}
+
+.discover-mix-card[data-mix-key="mood_chill"] { --mood-rgb: 45, 170, 220; }
+.discover-mix-card[data-mix-key="mood_focus"] { --mood-rgb: 99, 102, 241; }
+.discover-mix-card[data-mix-key="mood_energy"] { --mood-rgb: 244, 96, 32; }
+.discover-mix-card[data-mix-key="mood_feel_good"] { --mood-rgb: 234, 179, 8; }
+.discover-mix-card[data-mix-key="mood_late_night"] { --mood-rgb: 124, 58, 237; }

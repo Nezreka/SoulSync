@@ -21571,6 +21571,7 @@ def _start_discover_warmer():
         '/api/discover/deep-cuts',
         '/api/discover/seasonal/current',
         '/api/discover/decades/available',
+        '/api/discover/moods',
     ]
 
     def loop():

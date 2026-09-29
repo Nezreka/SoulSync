@@ -63,12 +63,13 @@ describe('DiscoverNav', () => {
   it('scrolls to the zone a chip names and lights that chip', () => {
     const target = document.createElement('section');
     target.id = 'zone-b';
-    target.scrollIntoView = vi.fn();
+    const scrollIntoView = vi.fn();
+    target.scrollIntoView = scrollIntoView;
     document.body.appendChild(target);
     try {
       render(<DiscoverNav items={ITEMS} onOpenLayout={() => {}} />);
       fireEvent.click(screen.getByText('New & Missing'));
-      expect(target.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
       expect(screen.getByText('New & Missing').getAttribute('aria-current')).toBe('true');
       expect(screen.getByText('For You').getAttribute('aria-current')).toBeNull();
     } finally {

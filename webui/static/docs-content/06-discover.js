@@ -8,12 +8,12 @@ registerDocsSection({
             title: 'Featured Artists',
             lede: 'A rotating showcase of recommended artists based on your watchlist — jump into any of them with one click.',
             body: `
-The hero slider showcases **recommended artists** based on your watchlist. Each slide shows the artist's image, name, popularity score, genres, and similarity context. Use the arrows or dots to navigate, or click:
+The hero showcases **recommended artists** based on your library. Each slide says why it was picked (the artists of yours that point to it), how well known the artist is, its genres, and whether you own anything by them. The row of faces along the bottom is the whole rotation: click one to jump to it. The rotation pauses while your pointer is on the hero.
 
-- **View Discography** — browse the artist's albums and download
-- **Add to Watchlist** — follow this artist for new release scanning
-- **Watch All** — add all featured artists to your watchlist at once
-- **View Recommended** — see 50+ similar artists with enrichment data
+- **Add to Watchlist**: follow this artist for new release scanning
+- **View discography**: browse the artist's albums and download
+- **Watch all**: add every featured artist to your watchlist at once
+- **See all picks**: see 50+ similar artists with enrichment data
 
 ![Featured artist hero slider](disc-hero.jpg)
 `
@@ -42,6 +42,16 @@ SoulSync auto-generates playlists from your **discovery pool** (similar artists 
 
 Each playlist can be played in the media player, downloaded, or synced to your media server.
 
+## Moods
+
+Chill, Focus, Energy, Feel Good and Late Night mixes, built from **your own albums**: an album whose Last.fm tags (or AudioDB mood) say chill puts its tracks in the chill pool. Every track is one you own, so a mood plays straight away. Picks lean on what you play, spread across artists, and change once a day. Moods fill out as more of your albums get Last.fm tags.
+
+## Your week, and what your collection is missing
+
+Under the hero, **Your week in music** shows your plays over the last 7 days (and the change on the week before), a bar per day, your streak, and who was on repeat, with one tap to play your top tracks. **Your collection is missing** names the genre you play most out of proportion to what you own, with a button into that genre.
+
+Further down, a **spotlight** puts one new release from the artist you've played most this week across the full width of the page.
+
 ## Genre Explorer
 
 A row of genre pills in the **Explore & Build** zone near the bottom of the Discover page. Each pill shows an artist count and whether the genre has been explored — click one to open a **Genre Deep Dive** of that genre's artists.
@@ -54,10 +64,14 @@ One shelf per seed artist — "Because You Listen To X" shows tracks related to 
 
 ## Recommended Stations
 
-Stations turn an artist into endless radio with two distinct actions:
+Stations turn an artist into endless radio. **Library Radio**, the first card, does the same for your whole collection.
 
-- **Play radio** — starts non-stop playback that keeps refilling itself
-- **View station** — takes a finite snapshot (up to 40 library tracks) that stays fixed, so you can Download or Sync it without the track list shifting under you
+- **The play button on the photo**: starts non-stop playback that keeps refilling itself
+- **The name**: opens a finite snapshot (up to 40 library tracks) that stays fixed, so you can Download or Sync it without the track list shifting under you
+
+## Inbox
+
+New & Missing opens with your inbox: new releases from artists you watch, what's coming out, and concerts. Concerts need a Ticketmaster key; set **Concerts near you** in Settings > Concerts (two letters, like US) to keep them to your country.
 
 ## ListenBrainz Playlists
 

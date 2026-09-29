@@ -7,6 +7,7 @@ import {
   blacklistArtist,
   dismissAllInbox,
   fetchInbox,
+  fetchMoodMixes,
   fetchWeekStats,
   setInboxState,
   postDiscoverFeedback,
@@ -304,6 +305,19 @@ describe('the inbox', () => {
     await setInboxState(7, 'saved');
     expect((await dismissAllInbox()).dismissed).toBe(4);
     expect(seen).toEqual(['GET saved', 'STATE 7 {"state":"saved"}', 'DISMISS']);
+  });
+});
+
+describe('moods', () => {
+  it('reads the mood mixes as a section outcome', async () => {
+    server.use(
+      http.get('*/api/discover/moods', () =>
+        HttpResponse.json({ success: true, mixes: [{ key: 'mood_chill' }] }),
+      ),
+    );
+    const out = await fetchMoodMixes();
+    expect(out.kind).toBe('ok');
+    expect(out.kind === 'ok' && (out.data.mixes as unknown[])).toHaveLength(1);
   });
 });
 

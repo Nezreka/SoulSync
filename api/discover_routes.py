@@ -2037,6 +2037,22 @@ def get_daily_mixes():
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
+@bp.route('/api/discover/moods', methods=['GET'])
+@_hide_blocked({'mixes[].tracks': WORKS})
+def get_mood_mixes():
+    """chill / focus / energy / feel good / late night, from the owned tracks
+    on albums tagged that way. built once a day per profile (?refresh=1
+    forces it)."""
+    try:
+        from core.discovery.moods import get_or_build_mood_mixes
+        force = request.args.get('refresh') in ('1', 'true')
+        payload = get_or_build_mood_mixes(get_database(), get_current_profile_id(), force=force)
+        return jsonify({"success": True, "mixes": payload.get("mixes", []),
+                        "generated_at": payload.get("generated_at")})
+    except Exception as e:
+        logger.error(f"Error building mood mixes: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @bp.route('/api/discover/personalized/discovery-shuffle', methods=['GET'])
 @_hide_blocked({'tracks': WORKS})
 def get_discovery_shuffle():
