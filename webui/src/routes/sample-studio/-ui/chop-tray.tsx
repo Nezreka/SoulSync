@@ -46,6 +46,17 @@ export function ChopTray({
     [analysisReady, bpm, durationS, peaks, onsets],
   );
 
+  // "Loudest 8 bars": the single top pick of the same energy × transient
+  // scorer, stretched over 8 bars — an honest jump-to-the-action button, not
+  // musicology. Needs the bar grid, so it stays disabled without a tempo.
+  const loudest = useMemo(
+    () =>
+      analysisReady
+        ? suggestChops({ bpm, durationS, peaks, onsets, count: 1, barsPerChop: 8 })[0]
+        : undefined,
+    [analysisReady, bpm, durationS, peaks, onsets],
+  );
+
   const slices = useMemo(
     () => slicesFromOnsets(onsets, inPoint, outPoint),
     [onsets, inPoint, outPoint],
@@ -77,6 +88,21 @@ export function ChopTray({
           {suggestions.length > 0 && (
             <span className={styles.resultCount}>{suggestions.length}</span>
           )}
+        </span>
+        <span className={styles.chopActions}>
+          <button
+            type="button"
+            className={styles.transportBtn}
+            disabled={!loudest || bpm == null}
+            onClick={() => loudest && onUseSuggestion(loudest.start, loudest.end)}
+            title={
+              bpm == null
+                ? 'Needs the track’s tempo to count bars'
+                : 'Top pick by energy × transient density — the loudest 8-bar stretch, not a music-theory verdict'
+            }
+          >
+            ⚡ Loudest 8 bars
+          </button>
         </span>
       </div>
       {!analysisReady ? (
@@ -115,7 +141,7 @@ export function ChopTray({
                     e.stopPropagation();
                     onAuditionSlice(s.start, s.end);
                   }}
-                  title={`Audition ${s.label}`}
+                  title={`Audition ${s.label} with current pitch/tempo`}
                 >
                   ▶
                 </button>
@@ -123,7 +149,8 @@ export function ChopTray({
             ))}
           </div>
           <div className={styles.emptyHint}>
-            Click a suggestion to make it the loop region, or audition it with ▶ first.
+            Click a suggestion to make it the loop region, or audition it with ▶ first — auditions
+            use your current pitch/tempo.
           </div>
         </>
       )}
@@ -192,7 +219,7 @@ export function ChopTray({
                       e.stopPropagation();
                       onAuditionSlice(s.start, s.end);
                     }}
-                    title={`Audition ${formatTime(s.start)} → ${formatTime(s.end)}`}
+                    title={`Audition ${formatTime(s.start)} → ${formatTime(s.end)} with current pitch/tempo`}
                   >
                     ▶
                   </button>
@@ -201,8 +228,8 @@ export function ChopTray({
             </div>
           )}
           <div className={styles.emptyHint}>
-            Slices follow the detected transients. Audition with ▶, select several, then merge them
-            into the loop.
+            Slices follow the detected transients. Audition with ▶ (uses your current pitch/tempo),
+            select several, then merge them into the loop.
           </div>
         </>
       )}

@@ -272,12 +272,24 @@ def separate_track(track_id: int, backend: Optional[SeparatorBackend] = None) ->
     return paths
 
 
-def _default_backend_name() -> str:
-    """'demucs' when torch looks importable, else 'stub' — never crash."""
+def stems_available() -> bool:
+    """True when the real Demucs separator can run.
+
+    Checks every heavy import the separator needs (torch, torchaudio,
+    demucs) — a partial install (e.g. demucs without torchaudio) still
+    fails at separation time, so it must not count as available.
+    Never raises.
+    """
     try:
         import torch  # noqa: F401
+        import torchaudio  # noqa: F401
         import demucs  # noqa: F401
 
-        return "demucs"
+        return True
     except ImportError:
-        return "stub"
+        return False
+
+
+def _default_backend_name() -> str:
+    """'demucs' when the full torch stack is importable, else 'stub'."""
+    return "demucs" if stems_available() else "stub"

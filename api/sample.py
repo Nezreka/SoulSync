@@ -537,9 +537,14 @@ def separate_stems(track_id: int, backend: str | None = None) -> tuple:
     _require_track(track_id)
     try:
         from core.sample import stems_worker as sw
+        from core.sample import stems as stems_mod
 
         status = sw.enqueue_separation(track_id, backend=backend)
-        payload: dict = {"track_id": track_id, "status": status}
+        payload: dict = {
+            "track_id": track_id,
+            "status": status,
+            "stems_available": stems_mod.stems_available(),
+        }
         if status == "done":
             from core.sample import store as sample_store
 
@@ -561,9 +566,14 @@ def stems_status(track_id: int) -> tuple:
     try:
         from core.sample import stems_worker as sw
         from core.sample import store as sample_store
+        from core.sample import stems as stems_mod
 
         status = sw.get_status(track_id)
-        payload: dict = {"track_id": track_id, "status": status}
+        payload: dict = {
+            "track_id": track_id,
+            "status": status,
+            "stems_available": stems_mod.stems_available(),
+        }
         if status == "done":
             info = sample_store.get_stems(track_id)
             if info:

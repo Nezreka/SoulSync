@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type {
   PreviewResult,
+  RenderFx,
   SampleAnalysis,
   SamplePeaks,
   StashEntry,
@@ -14,6 +15,7 @@ import {
   requestPreview,
   stemAudioUrl,
   studioStreamUrl,
+  trimSilence,
 } from '../-sample-studio.api';
 import {
   barBeatAt,
@@ -21,10 +23,14 @@ import {
   beatInterval,
   clamp,
   downsamplePeaks,
+  formatKeyBpm,
   formatTime,
+  fxFromStashEntry,
   visiblePeakSlice,
 } from '../-sample-studio.helpers';
+import { DEFAULT_FX } from '../-sample-studio.types';
 import { ChopTray } from './chop-tray';
+import { FxPanel } from './fx-panel';
 import { PitchTempoPanel } from './pitch-tempo-panel';
 import styles from './sample-studio-page.module.css';
 import { SaveDialog } from './save-dialog';
@@ -39,6 +45,8 @@ interface WaveformEditorProps {
   /** Which stem to edit/chop from — null means the full mix. */
   stemSource: StemName | null;
   onSavedStashEntry: (entry: StashEntry) => void;
+  /** A stash entry to re-open: restores its full recipe into the editor. */
+  restore: { entry: StashEntry; nonce: number } | null;
 }
 
 const WAVE_HEIGHT = 220;
@@ -64,6 +72,7 @@ export function WaveformEditor({
   peaks,
   stemSource,
   onSavedStashEntry,
+  restore,
 }: WaveformEditorProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -74,6 +83,9 @@ export function WaveformEditor({
   const lastBeatRef = useRef(-1);
   const dragHandleRef = useRef<'in' | 'out' | null>(null);
   const previewTimerRef = useRef<number | null>(null);
+  /** Set while a stash-restore is applying: the in/out retire effect below
+   *  must not undo the restore's own mode/region switch. */
+  const restoringRef = useRef(false);
 
   /** The unprocessed source: the selected stem, or the full mix. */
   const originalAudioUrl = useCallback(() => {
@@ -94,10 +106,15 @@ export function WaveformEditor({
   // Phase 3: pitch/tempo audition + slice audition + save flow.
   const [pitchSt, setPitchSt] = useState(0);
   const [targetBpm, setTargetBpm] = useState<number | null>(null);
+  // Delay is beat-synced: it needs the target BPM or the analyzed one.
+  const bpmKnown = targetBpm != null || bpm != null;
   const [mode, setMode] = useState<'original' | 'preview'>('original');
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [previewRendering, setPreviewRendering] = useState(false);
   const [previewErr, setPreviewErr] = useState<string | null>(null);
+  // Render-funnel FX (normalize/reverse/fade/space/delay) — flows identically
+  // to preview and save.
+  const [fx, setFx] = useState<RenderFx>(DEFAULT_FX);
   const [slicePreview, setSlicePreview] = useState<{
     id: string;
     duration: number;
@@ -105,10 +122,12 @@ export function WaveformEditor({
   } | null>(null);
   const [saveOpen, setSaveOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [trimming, setTrimming] = useState(false);
   // Progressive disclosure: the common path (play, loop, save) stays up
   // front; edit tools and pitch/tempo tuck behind toggles.
   const [toolsOpen, setToolsOpen] = useState(false);
   const [fxOpen, setFxOpen] = useState(false);
+  const [fxPanelOpen, setFxPanelOpen] = useState(false);
 
   // Refs mirror state for the rAF draw loop (avoids stale closures).
   const viewRef = useRef(view);
@@ -123,6 +142,7 @@ export function WaveformEditor({
   const pitchRef = useRef(pitchSt);
   const targetBpmRef = useRef(targetBpm);
   const stemRef = useRef(stemSource);
+  const fxRef = useRef(fx);
   viewRef.current = view;
   inRef.current = inPoint;
   outRef.current = outPoint;
@@ -135,6 +155,7 @@ export function WaveformEditor({
   pitchRef.current = pitchSt;
   targetBpmRef.current = targetBpm;
   stemRef.current = stemSource;
+  fxRef.current = fx;
 
   /** Current local bounds for the <audio> element, given mode/slice state. */
   const playbackBounds = useCallback((): PlaybackBounds => {
@@ -164,6 +185,8 @@ export function WaveformEditor({
     setPreviewRendering(false);
     setSlicePreview(null);
     setSaveOpen(false);
+    setFx(DEFAULT_FX);
+    setTrimming(false);
     if (previewTimerRef.current) window.clearTimeout(previewTimerRef.current);
     lastBeatRef.current = -1;
     const audio = audioRef.current;
@@ -179,6 +202,52 @@ export function WaveformEditor({
     analysis?.duration_s,
     track.duration,
   ]);
+
+  /** Re-open a stash entry: restore its full recipe (region, pitch, tempo,
+   *  FX) into the editor. Runs after the track-change reset above. */
+  const restoreNonce = restore?.nonce ?? 0;
+  useEffect(() => {
+    if (restoreNonce === 0 || !restore) return;
+    const entry = restore.entry;
+    const nextFx = fxFromStashEntry(entry);
+    restoringRef.current = true;
+    // Refs first so the debounced preview renders the restored recipe.
+    inRef.current = entry.start_s;
+    outRef.current = entry.end_s;
+    pitchRef.current = entry.pitch_st;
+    targetBpmRef.current = entry.target_bpm;
+    fxRef.current = nextFx;
+    setInPoint(entry.start_s);
+    setOutPoint(Math.max(entry.end_s, entry.start_s + 0.05));
+    setPitchSt(entry.pitch_st);
+    setTargetBpm(entry.target_bpm);
+    setFx(nextFx);
+    setPreview(null);
+    setSlicePreview(null);
+    sliceRef.current = null;
+    setMode('preview');
+    setPreviewErr(null);
+    if (previewTimerRef.current) window.clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = window.setTimeout(() => void renderPreviewNow(), 600);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restoreNonce]);
+
+  // Delay is beat-synced: without a known BPM the backend 409s, so a stale
+  // delay recipe can't survive the tempo going unknown. The panel explains
+  // why the toggle is disabled.
+  useEffect(() => {
+    if (!bpmKnown && fxRef.current.delay != null) {
+      const next = { ...fxRef.current, delay: null };
+      fxRef.current = next;
+      setFx(next);
+      setSlicePreview(null);
+      sliceRef.current = null;
+      setMode('preview');
+      if (previewTimerRef.current) window.clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = window.setTimeout(() => void renderPreviewNow(), 600);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bpmKnown]);
 
   /** Point the <audio> element at the right source for the current mode. */
   const applyAudioSrc = useCallback(() => {
@@ -219,6 +288,7 @@ export function WaveformEditor({
         pitchSt: pitchRef.current,
         targetBpm: targetBpmRef.current,
         stem: stemRef.current,
+        fx: fxRef.current,
       });
       setPreview(pv);
     } catch (e) {
@@ -231,7 +301,12 @@ export function WaveformEditor({
   }, [track.id, track.file_path]);
 
   // A preview is a render of the old region — moving in/out retires it.
+  // Skipped once when a stash restore moves the handles itself.
   useEffect(() => {
+    if (restoringRef.current) {
+      restoringRef.current = false;
+      return;
+    }
     setPreview(null);
     setPreviewErr(null);
     setSlicePreview(null);
@@ -239,6 +314,18 @@ export function WaveformEditor({
     if (modeRef.current === 'preview') setMode('original');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inPoint, outPoint]);
+
+  /** FX change: hop to processed mode and debounce the re-render. */
+  const onFxChange = (next: RenderFx) => {
+    setFx(next);
+    fxRef.current = next;
+    setSlicePreview(null);
+    sliceRef.current = null;
+    setMode('preview');
+    setPreviewErr(null);
+    if (previewTimerRef.current) window.clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = window.setTimeout(() => void renderPreviewNow(), 600);
+  };
 
   /** Pitch/tempo change: hop to processed mode and debounce the re-render. */
   const onFxParamsChange = (nextPitch: number, nextBpm: number | null) => {
@@ -262,7 +349,7 @@ export function WaveformEditor({
     if (next === 'preview' && !previewRef.current) void renderPreviewNow();
   };
 
-  /** One-shot audition of a chop-tray slice (neutral pitch/tempo). */
+  /** One-shot audition of a chop-tray slice, with the current pitch/tempo/FX. */
   const auditionSlice = (start: number, end: number) => {
     if (!(end > start) || !track.file_path) return;
     audioRef.current?.pause();
@@ -272,9 +359,10 @@ export function WaveformEditor({
         const pv = await requestPreview(track.id, {
           start,
           end,
-          pitchSt: 0,
-          targetBpm: null,
+          pitchSt: pitchRef.current,
+          targetBpm: targetBpmRef.current,
           stem: stemSource,
+          fx: fxRef.current,
         });
         setSlicePreview({ id: pv.preview_id, duration: pv.duration_s, start });
         // The src-sync effect swaps the <audio> source on re-render; start it after.
@@ -298,6 +386,27 @@ export function WaveformEditor({
     setInPoint(start);
     setOutPoint(end);
     // The in/out effect retires the preview and slice.
+  };
+
+  /** Tighten the in/out region to its sounding audio (server-side trim). */
+  const trimSelection = () => {
+    const start = inRef.current;
+    const end = outRef.current;
+    if (!(end > start) || !track.file_path || trimming) return;
+    setTrimming(true);
+    setPreviewErr(null);
+    void (async () => {
+      try {
+        const bounds = await trimSilence(track.id, start, end);
+        setInPoint(bounds.start_s);
+        setOutPoint(Math.max(bounds.end_s, bounds.start_s + 0.05));
+        // The in/out effect retires the preview and slice.
+      } catch (e) {
+        setPreviewErr(e instanceof Error ? e.message : 'Trim failed');
+      } finally {
+        setTrimming(false);
+      }
+    })();
   };
 
   /** A suggested chop becomes the loop region (the guided happy path). */
@@ -651,6 +760,7 @@ export function WaveformEditor({
   const outPct = viewSpan > 0 ? ((outPoint - view.start) / viewSpan) * 100 : 0;
   const bb = barBeatAt(playhead, bpm);
   const analysisReady = !!analysis && analysis.status === 'done';
+  const keyBpm = formatKeyBpm(analysis?.key, bpm);
 
   // Contextual one-liner: a first-time user always knows the next step.
   const guideText = analysisError
@@ -661,16 +771,23 @@ export function WaveformEditor({
         ? 'Waveform’s ready — finding the tempo and chop points…'
         : !(outPoint > inPoint)
           ? 'Mark your chop: drag the amber handles, or press I and O while playing.'
-          : 'Audition a suggested chop below — or press Save chop to stash this region.';
+          : 'Audition a suggested chop below — sweeten it in the FX section — or press Save chop to stash this region.';
   const fxActive = Math.abs(pitchSt) > 0.01 || targetBpm != null || mode === 'preview';
+  const renderFxActive =
+    fx.normalize ||
+    fx.reverse ||
+    fx.fadeMs !== DEFAULT_FX.fadeMs ||
+    fx.space != null ||
+    fx.delay != null;
 
   return (
     <div className={styles.column}>
       <div className={styles.columnHeader}>
         <span>Editor</span>
-        {bpm ? (
+        {keyBpm ? (
           <span className={styles.resultCount}>
-            {bpm.toFixed(1)} BPM{bb ? ` · bar ${bb.bar} beat ${bb.beat}` : ''}
+            {keyBpm}
+            {bb ? ` · bar ${bb.bar} beat ${bb.beat}` : ''}
           </span>
         ) : analysisPending ? (
           <span className={styles.listening}>Listening…</span>
@@ -775,6 +892,15 @@ export function WaveformEditor({
               title="Zoom out (−)"
             >
               －
+            </button>
+            <button
+              type="button"
+              className={styles.transportBtn}
+              onClick={trimSelection}
+              disabled={trimming || !(outPoint > inPoint) || !track.file_path}
+              title="Tighten the in/out points to the sounding audio (cuts leading/trailing silence)"
+            >
+              {trimming ? 'Trimming…' : '✂ Trim silence'}
             </button>
             <button
               type="button"
@@ -890,6 +1016,27 @@ export function WaveformEditor({
           )}
         </div>
 
+        <div className={styles.section}>
+          <button
+            type="button"
+            className={styles.sectionToggle}
+            onClick={() => setFxPanelOpen((v) => !v)}
+            aria-expanded={fxPanelOpen}
+          >
+            <span>FX</span>
+            {renderFxActive && <span className={styles.fxBadge}>active</span>}
+            <span className={styles.chev}>{fxPanelOpen ? '▾' : '▸'}</span>
+          </button>
+          {fxPanelOpen && (
+            <FxPanel
+              fx={fx}
+              onChange={onFxChange}
+              bpmKnown={bpmKnown}
+              disabled={!track.file_path || !duration}
+            />
+          )}
+        </div>
+
         <ChopTray
           onsets={analysis?.onsets ?? []}
           inPoint={inPoint}
@@ -915,6 +1062,7 @@ export function WaveformEditor({
         pitchSt={pitchSt}
         targetBpm={targetBpm}
         stem={stemSource}
+        fx={fx}
         onSaved={onSavedStashEntry}
       />
 

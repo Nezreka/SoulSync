@@ -7,6 +7,7 @@ import type { StashEntry, StemName, StudioFilters, StudioTrack } from '../-sampl
 
 import {
   deleteStashEntry,
+  lookupStudioTrack,
   SAMPLE_STUDIO_QUERY_KEY,
   stashAudioUrl,
   studioAnalysisQueryOptions,
@@ -35,6 +36,10 @@ export function SampleStudioPage() {
   // Bumped by Try again: re-fires the analysis query with ?retry=1 so a
   // sticky worker error is cleared and the track re-queues.
   const [analysisRetryNonce, setAnalysisRetryNonce] = useState(0);
+  // Handed to the editor when a stash entry is re-opened: the full recipe
+  // (region, pitch, tempo, FX) to restore. The nonce re-fires restores of
+  // the same entry.
+  const [restore, setRestore] = useState<{ entry: StashEntry; nonce: number } | null>(null);
   const debounceRef = useRef(0);
   const stashAudioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -97,6 +102,34 @@ export function SampleStudioPage() {
     });
   };
 
+  /** Re-open a stash entry: find its source track, select it, and hand the
+   *  full recipe to the editor. */
+  const restoreStashEntry = (entry: StashEntry) => {
+    setStashError(null);
+    if (selected?.id === entry.track_id) {
+      setStemSource(entry.stem ?? null);
+      setRestore({ entry, nonce: Date.now() });
+      return;
+    }
+    void (async () => {
+      try {
+        const track = await lookupStudioTrack(entry.track_id, entry.track_title, entry.artist_name);
+        if (!track) {
+          setStashError(
+            `Couldn’t find “${entry.track_title}” in your library — it may have been removed.`,
+          );
+          return;
+        }
+        // selectTrack clears the stem source; the entry's source wins.
+        selectTrack(track);
+        setStemSource(entry.stem ?? null);
+        setRestore({ entry, nonce: Date.now() });
+      } catch (e) {
+        setStashError(e instanceof Error ? e.message : 'Could not re-open that chop');
+      }
+    })();
+  };
+
   return (
     <div className={styles.page}>
       <LibraryPanel
@@ -121,6 +154,7 @@ export function SampleStudioPage() {
             peaks={peaksQuery.data}
             stemSource={stemSource}
             onSavedStashEntry={refreshStash}
+            restore={restore}
           />
           <StemsPanel trackId={selected.id} activeStem={stemSource} onSelectStem={setStemSource} />
         </div>
@@ -158,6 +192,7 @@ export function SampleStudioPage() {
         error={(stashQuery.error as Error | null) ?? (stashError ? new Error(stashError) : null)}
         onPlay={playStashEntry}
         onDelete={removeStashEntry}
+        onRestore={restoreStashEntry}
       />
       <audio ref={stashAudioRef} preload="none" style={{ display: 'none' }} />
     </div>

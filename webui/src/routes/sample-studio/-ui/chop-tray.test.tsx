@@ -68,6 +68,25 @@ describe('ChopTray', () => {
     expect(screen.queryByTitle(/click to make it the loop region/)).not.toBeInTheDocument();
   });
 
+  it('offers the loudest 8 bars and gates it honestly without a tempo', () => {
+    const { props } = renderTray();
+    const btn = screen.getByRole('button', { name: /Loudest 8 bars/ });
+    expect(btn).not.toBeDisabled();
+    fireEvent.click(btn);
+    expect(props.onUseSuggestion).toHaveBeenCalledTimes(1);
+    const [start, end] = vi.mocked(props.onUseSuggestion).mock.calls[0];
+    // 120 BPM -> 2s bars -> 8 bars = 16s
+    expect(end - start).toBeCloseTo(16, 5);
+    expect(btn).toHaveAttribute('title', expect.stringContaining('energy × transient density'));
+  });
+
+  it('disables loudest 8 bars without a tempo', () => {
+    renderTray({ bpm: null });
+    const btn = screen.getByRole('button', { name: /Loudest 8 bars/ });
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute('title', expect.stringContaining('tempo'));
+  });
+
   it('hides the transient firehose behind a toggle', () => {
     renderTray();
     // onsets 0.5/1.0/1.5/2.0 inside 0..2.5 -> 5 slices, but hidden at first
