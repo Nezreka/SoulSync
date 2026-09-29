@@ -403,7 +403,12 @@
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     border: none !important;
-    padding: 0 !important;
+    /* flex-start, never center: a centred row that overflows pushes the
+       first face off the left edge, where no scroll can reach it */
+    justify-content: flex-start !important;
+    /* room for the active face's ring, which a scroller would clip */
+    padding: 6px !important;
+    margin: -6px !important;
     border-radius: 0 !important;
     min-width: 0 !important;
     overflow-x: auto;
@@ -1746,13 +1751,23 @@
         padding: 12px 14px 72px !important;
     }
 
+    /* never a fixed height: 290px with overflow hidden clipped the title off
+       the top and stacked the actions on the faces the moment a name wrapped */
     .discover-hero {
-        height: 290px !important;
+        height: auto !important;
+        min-height: 0 !important;
         border-radius: 18px !important;
     }
 
-    .discover-hero-content {
-        padding: 20px 20px 14px !important;
+    /* on a phone the text sits over the photo, so the scrim darkens top to bottom */
+    .discover-hero-overlay {
+        background: linear-gradient(180deg, rgba(10, 13, 20, 0.55) 0%, rgba(10, 13, 20, 0.85) 45%, #0a0d14 100%) !important;
+    }
+
+    .discover-hero-content,
+    .discover-command-hero .discover-hero-content {
+        max-width: 100% !important;
+        padding: 22px 20px 6px !important;
     }
 
     .discover-hero-title {
@@ -1775,8 +1790,36 @@
         font-size: 0.82rem !important;
     }
 
+    /* mobile.css stacks these headers into a column; flex-end in a column
+       means "hug the right edge", which is where their titles ended up */
+    .discovery-zone-head,
+    .discover-section-header {
+        align-items: flex-start !important;
+    }
+
     .discover-hero-controls {
-        padding: 6px 20px 14px !important;
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 8px !important;
+        padding: 10px 20px 16px !important;
+    }
+
+    .discover-hero-indicators {
+        max-width: 100% !important;
+        flex-wrap: nowrap !important;
+    }
+
+    .hero-indicator-face {
+        width: 30px;
+        height: 30px;
+    }
+
+    .discover-hero-bottom-actions {
+        margin-left: -12px !important;
+    }
+
+    .discover-hero-nav {
+        display: none !important;
     }
 
     /* On mobile, collapse the command analytics panel to prioritize music discovery shelves */
@@ -2781,6 +2824,9 @@
     .dsc-week-figure strong {
         font-size: 2.1rem;
     }
+    .dsc-pulse {
+        padding: 18px;
+    }
     .dsc-spotlight {
         flex-direction: column;
         align-items: flex-start;
@@ -2865,4 +2911,33 @@
             "button button";
         row-gap: 6px;
     }
+}
+
+/* a phone: the week reads top to bottom, and who was on repeat is one line */
+@media (max-width: 520px) {
+    .dsc-week {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .dsc-week-chart {
+        grid-row: auto;
+    }
+    .dsc-week-top {
+        display: grid;
+        grid-template-columns: 48px minmax(0, 1fr);
+        grid-template-areas: "img label" "img name" "img plays";
+        align-items: center;
+        column-gap: 12px;
+        row-gap: 0;
+        width: auto;
+        text-align: left;
+    }
+    .dsc-week-top-img {
+        grid-area: img;
+        width: 48px;
+        height: 48px;
+        margin: 0;
+    }
+    .dsc-week-top-label { grid-area: label; }
+    .dsc-week-top-name { grid-area: name; }
+    .dsc-week-top-plays { grid-area: plays; }
 }
