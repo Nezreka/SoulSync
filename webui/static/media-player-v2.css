@@ -1,0 +1,948 @@
+/* ==========================================================================
+   SoulSync Player Theater (media-player-v2.css)
+   Immersive Now Playing overlay: full-bleed animated visual backdrop,
+   enlarged artwork, tabbed side panel (queue / history / lyrics / details /
+   settings), 10-band EQ, playback utilities. Additive — v1 styles keep
+   working underneath; this file only overrides and extends.
+   ========================================================================== */
+
+/* ---- Theater shell: much bigger than the old 880px modal ----------------- */
+
+#np-modal-overlay .np-modal {
+    /* v1 pins width/background with !important — the theater intentionally
+       overrides them here (this file loads for the theater only). */
+    width: min(1280px, 96vw) !important;
+    height: min(920px, 94vh);
+    max-width: 96vw !important;
+    max-height: 94vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    background:
+        radial-gradient(120% 90% at 50% 0%, rgba(40, 44, 72, 0.55) 0%, rgba(16, 17, 26, 0.92) 62%),
+        #10111a !important;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    box-shadow:
+        0 40px 120px rgba(0, 0, 0, 0.65),
+        0 0 0 1px rgba(0, 0, 0, 0.4),
+        0 0 90px rgba(90, 120, 255, 0.08);
+}
+
+/* Animated visual backdrop (canvas painted by media-player-v2.js) */
+#np-v2-bg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.62;
+    -webkit-mask-image: radial-gradient(115% 100% at 50% 40%, #000 55%, transparent 100%);
+    mask-image: radial-gradient(115% 100% at 50% 40%, #000 55%, transparent 100%);
+}
+
+/* Vignette + grain on top of the canvas, under the content */
+#np-modal-overlay .np-modal::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background:
+        radial-gradient(120% 105% at 50% 45%, transparent 52%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+#np-modal-overlay .np-modal > *:not(#np-v2-bg):not(.np-v2-shorts-overlay) {
+    position: relative;
+    z-index: 2;
+}
+
+/* ---- Body: stage (art + info) | panel (transport + tabs) ------------------ */
+
+#np-modal-overlay .np-body {
+    display: grid;
+    grid-template-columns: minmax(300px, 400px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr); /* single row locked to the body height —
+        the tab panel region scrolls internally instead of the whole body */
+    /* v1 forces padding/gap/align with !important — match it. */
+    gap: 28px !important;
+    flex: 1;
+    min-height: 0;
+    padding: 28px 30px 24px !important;
+    align-items: stretch !important;
+    overflow: hidden; /* v1 had overflow-y:auto — the tab panels scroll instead */
+}
+
+#np-modal-overlay .np-left {
+    min-height: 0;
+    max-height: 100%;
+    align-self: start;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+
+#np-modal-overlay .np-right {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+    gap: 14px;
+    overflow: hidden;
+    /* v1 centers this column; the theater's tabbed content is taller than the
+       container, so centering pushes the utility row up past the parent's top
+       (on mobile it overlapped the artist buttons). Anchor to the top instead. */
+    justify-content: flex-start !important;
+}
+
+/* Bigger, bolder artwork with glow frame (v1 pins 340px with !important) */
+#np-modal-overlay .np-album-art-container {
+    width: min(100%, 340px) !important;
+    height: auto !important;
+    aspect-ratio: 1;
+    border-radius: 18px;
+    box-shadow:
+        0 24px 70px rgba(0, 0, 0, 0.55),
+        0 0 60px rgba(var(--np-ambient-r, 60), var(--np-ambient-g, 120), var(--np-ambient-b, 255), 0.22);
+}
+
+#np-modal-overlay .np-track-title {
+    font-size: 1.9rem;
+    line-height: 1.25;
+    font-weight: 750;
+    letter-spacing: -0.01em;
+}
+
+#np-modal-overlay .np-artist-name {
+    font-size: 1.15rem;
+    opacity: 0.92;
+}
+
+#np-modal-overlay .np-album-name {
+    font-size: 0.95rem;
+    opacity: 0.7;
+}
+
+/* ---- Transport utility buttons (v2 additions reuse .np-util-btn) --------- */
+
+/* v1 keeps the util row on one line right-aligned; the theater has more
+   buttons, so let them wrap instead of clipping off the left edge. */
+#np-modal-overlay .np-util-row {
+    flex-wrap: wrap;
+    row-gap: 8px;
+}
+
+.np-util-btn.active {
+    background: rgba(var(--np-ambient-r, 60), var(--np-ambient-g, 120), var(--np-ambient-b, 255), 0.28);
+    border-color: rgba(255, 255, 255, 0.28);
+    color: #fff;
+}
+
+.np-util-btn.looping {
+    background: rgba(46, 204, 113, 0.25);
+    border-color: rgba(46, 204, 113, 0.5);
+    color: #bff3d4;
+}
+
+.np-util-btn span {
+    font-size: 0.72rem;
+}
+
+/* A-B loop indicator next to the progress bar */
+#np-v2-ab-indicator {
+    font-size: 0.72rem;
+    color: #bff3d4;
+    background: rgba(46, 204, 113, 0.14);
+    border: 1px solid rgba(46, 204, 113, 0.35);
+    border-radius: 999px;
+    padding: 2px 10px;
+    white-space: nowrap;
+}
+
+/* ---- Tab bar ------------------------------------------------------------ */
+
+.np-v2-tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 2px;
+    flex-shrink: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.np-v2-tabs::-webkit-scrollbar { display: none; }
+
+.np-v2-tab {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 8px 14px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -3px;
+    white-space: nowrap;
+    transition: color 0.15s ease;
+}
+
+.np-v2-tab:hover { color: #fff; }
+
+.np-v2-tab.active {
+    color: #fff;
+    border-bottom-color: rgb(var(--np-ambient-r, 60), var(--np-ambient-g, 120), var(--np-ambient-b, 255));
+}
+
+/* ---- Tab panels: the scrollable region ----------------------------------- */
+
+.np-v2-tabpanels {
+    flex: 1;
+    min-height: 0;
+    min-width: 0; /* flex children default to min-width:auto — wide grids
+                     (theme swatches) would otherwise force horizontal overflow */
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    padding-right: 4px;
+}
+
+/* v1 panels keep their look; when tabbed they fill the panel region */
+#np-modal-overlay #np-queue-panel,
+#np-modal-overlay #np-lyrics-panel {
+    max-height: none;
+    overflow: visible;
+}
+
+#np-modal-overlay #np-lyrics-panel.collapsed {
+    display: block;
+}
+
+/* ---- Queue extras -------------------------------------------------------- */
+
+.np-queue-item-playnext {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.45);
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.np-queue-item-playnext:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.np-queue-item-playnext:focus-visible {
+    outline: 2px solid rgb(var(--np-ambient-r, 60), var(--np-ambient-g, 120), var(--np-ambient-b, 255));
+    outline-offset: 1px;
+}
+
+#np-modal-overlay .np-queue-header {
+    flex-wrap: wrap;
+    row-gap: 8px;
+}
+
+.np-queue-header-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 8px;
+}
+
+/* ---- History panel ------------------------------------------------------- */
+
+.np-v2-history-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 2px 0 10px;
+}
+
+.np-v2-history-head h3 {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 650;
+}
+
+.np-v2-history-head h3 span { opacity: 0.55; font-weight: 500; }
+
+.np-v2-ghost-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 0.75rem;
+    padding: 5px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+}
+
+.np-v2-ghost-btn:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+
+.np-v2-history-empty {
+    text-align: center;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 0.85rem;
+    padding: 36px 12px;
+}
+
+.np-v2-history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.np-v2-history-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    background: none;
+    border: none;
+    border-radius: 10px;
+    padding: 7px 9px;
+    cursor: pointer;
+    text-align: left;
+    color: inherit;
+}
+
+.np-v2-history-item:hover { background: rgba(255, 255, 255, 0.07); }
+
+.np-v2-history-art {
+    width: 42px;
+    height: 42px;
+    border-radius: 8px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.np-v2-history-art-fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.np-v2-history-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 2px;
+}
+
+.np-v2-history-title {
+    font-size: 0.86rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.np-v2-history-sub {
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.55);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ---- Details panel ------------------------------------------------------- */
+
+.np-v2-details-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 2px 0 10px;
+}
+
+.np-v2-details-head h3 {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 650;
+}
+
+.np-v2-details-actions { display: flex; gap: 8px; }
+
+.np-v2-detail-row {
+    display: grid;
+    grid-template-columns: 110px minmax(0, 1fr);
+    gap: 12px;
+    padding: 7px 2px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 0.83rem;
+}
+
+.np-v2-detail-k {
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    padding-top: 2px;
+}
+
+.np-v2-detail-v {
+    color: rgba(255, 255, 255, 0.92);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ---- Settings panel ------------------------------------------------------ */
+
+.np-v2-settings h3 {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(255, 255, 255, 0.5);
+    margin: 20px 0 10px;
+    font-weight: 650;
+}
+
+.np-v2-settings h3:first-child { margin-top: 2px; }
+
+.np-v2-theme-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    gap: 8px;
+}
+
+.npv2-theme-sw {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 8px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    align-items: stretch;
+    color: inherit;
+}
+
+.npv2-theme-sw:hover { background: rgba(255, 255, 255, 0.08); }
+
+.npv2-theme-sw.selected {
+    border-color: rgb(var(--np-ambient-r, 60), var(--np-ambient-g, 120), var(--np-ambient-b, 255));
+    box-shadow: 0 0 0 1px rgb(var(--np-ambient-r, 60), var(--np-ambient-g, 120), var(--np-ambient-b, 255));
+}
+
+.npv2-theme-swatch {
+    height: 44px;
+    border-radius: 8px;
+}
+
+.npv2-theme-name {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+/* Static preview gradients for each visualization theme */
+.theme-barscope   { background: linear-gradient(180deg, #ff5e62 0%, #7b2ff7 55%, #1a0533 100%); }
+.theme-oscilloscope { background: radial-gradient(circle at 50% 60%, #39ff6a 0%, #063 45%, #010603 100%); }
+.theme-waves      { background: linear-gradient(135deg, #0b486b 0%, #3b8686 50%, #79bd9a 100%); }
+.theme-plasma     { background: radial-gradient(circle at 30% 30%, #ff9a3c 0%, #ff2e93 45%, #2b0a4e 100%); }
+.theme-spikes     { background: conic-gradient(from 0deg, #f9d423, #ff4e50, #7b2ff7, #00c9ff, #f9d423); }
+.theme-aurora     { background: linear-gradient(135deg, #0f2027 0%, #203a43 45%, #2c5364 100%); }
+.theme-stardust   { background: radial-gradient(circle at 70% 20%, #e0c3fc 0%, #4a3b8c 50%, #050510 100%); }
+.theme-vinyl      { background: radial-gradient(circle at 50% 50%, #f5d020 0 18%, #111 19% 100%); }
+.theme-tunnel     { background: radial-gradient(circle at 50% 50%, #00f5d4 0%, #5a189a 55%, #03030a 100%); }
+.theme-none       { background: linear-gradient(135deg, #2a2d3a, #12131a); }
+
+.np-v2-setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 8px 2px;
+    font-size: 0.85rem;
+}
+
+.np-v2-setting-row .np-v2-setting-label { display: flex; flex-direction: column; gap: 2px; }
+.np-v2-setting-row .np-v2-setting-label small { color: rgba(255, 255, 255, 0.5); font-size: 0.72rem; }
+
+.np-v2-select {
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #fff;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 0.82rem;
+    max-width: 190px;
+}
+
+.np-v2-select option { color: #111; }
+
+/* Toggle switch */
+.np-v2-switch {
+    position: relative;
+    display: inline-block;
+    width: 40px;
+    height: 22px;
+    flex-shrink: 0;
+}
+
+.np-v2-switch input { opacity: 0; width: 0; height: 0; }
+
+.np-v2-slider {
+    position: absolute;
+    inset: 0;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    transition: background 0.18s ease;
+}
+
+.np-v2-slider::before {
+    content: "";
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    left: 3px;
+    top: 3px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.18s ease;
+}
+
+.np-v2-switch input:checked + .np-v2-slider {
+    background: rgb(var(--np-ambient-r, 60), var(--np-ambient-g, 120), var(--np-ambient-b, 255));
+}
+
+.np-v2-switch input:checked + .np-v2-slider::before { transform: translateX(18px); }
+
+.np-v2-switch input:focus-visible + .np-v2-slider {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+
+/* Equalizer */
+.np-v2-eq-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+}
+
+#np-v2-eq-sliders { display: flex; flex-direction: column; gap: 2px; }
+
+#np-v2-eq-sliders.disabled { opacity: 0.45; }
+
+.npv2-eq-row {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+    align-items: center;
+    gap: 10px;
+    padding: 3px 0;
+}
+
+.npv2-eq-freq {
+    font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.6);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.npv2-eq-val {
+    font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.75);
+    font-variant-numeric: tabular-nums;
+}
+
+.npv2-eq-slider {
+    width: 100%;
+    accent-color: rgb(var(--np-ambient-r, 60), var(--np-ambient-g, 120), var(--np-ambient-b, 255));
+    cursor: pointer;
+}
+
+.np-v2-danger-zone { margin-top: 26px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+
+/* ---- Shortcuts overlay --------------------------------------------------- */
+
+.np-v2-shorts-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    background: rgba(8, 9, 14, 0.88);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.np-v2-shorts-card {
+    background: rgba(22, 24, 34, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    padding: 26px 30px;
+    max-width: 560px;
+    width: 100%;
+    max-height: 100%;
+    overflow-y: auto;
+    position: relative;
+}
+
+.np-v2-shorts-card h3 {
+    margin: 0 0 4px;
+    font-size: 1.05rem;
+}
+
+.np-v2-shorts-card > p {
+    margin: 0 0 16px;
+    font-size: 0.82rem;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.np-v2-shorts-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 22px;
+}
+
+.np-v2-short {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 0.82rem;
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.np-v2-short kbd {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-bottom-width: 2px;
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-family: inherit;
+    font-size: 0.74rem;
+    white-space: nowrap;
+}
+
+.np-v2-shorts-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 1.3rem;
+    cursor: pointer;
+    padding: 6px 10px;
+    border-radius: 8px;
+}
+
+.np-v2-shorts-close:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
+
+/* ---- Responsive: narrow / short viewports -------------------------------- */
+
+@media (max-width: 860px) {
+    #np-modal-overlay .np-modal {
+        width: 100vw;
+        height: 100dvh;
+        max-width: 100vw;
+        max-height: 100dvh;
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+    }
+
+    #np-modal-overlay .np-body {
+        /* Stack like v1's mobile flex column — the desktop grid overlaps
+           items at narrow widths. */
+        display: flex;
+        flex-direction: column;
+        gap: 16px !important;
+        padding: 18px 18px 16px !important;
+        overflow-y: auto;
+    }
+
+    #np-modal-overlay .np-left { overflow: visible; }
+
+    #np-modal-overlay .np-album-art-container {
+        width: min(56vw, 240px) !important;
+        height: auto !important;
+        margin: 0 auto;
+    }
+
+    #np-modal-overlay .np-track-info { text-align: center; }
+    #np-modal-overlay .np-track-title { font-size: 1.35rem; }
+    #np-modal-overlay .np-action-buttons { justify-content: center; }
+
+    #np-modal-overlay .np-right { overflow: visible; }
+
+    .np-v2-tabpanels {
+        overflow: visible;
+        max-height: 46vh;
+        overflow-y: auto;
+    }
+
+    .np-v2-shorts-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-height: 640px) and (min-width: 861px) {
+    #np-modal-overlay .np-album-art-container { width: min(100%, 200px) !important; }
+    #np-modal-overlay .np-track-title { font-size: 1.35rem; }
+    #np-modal-overlay .np-body { padding: 16px 22px 14px !important; gap: 18px !important; }
+    /* Short windows: the up-next card is a nice-to-have — hide it so the
+       tabbed panels keep usable height instead of being squeezed out. */
+    #np-modal-overlay .np-upnext { display: none; }
+    #np-modal-overlay .np-right { gap: 10px; }
+}
+
+/* ---- Motion preferences --------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+    #np-v2-bg { display: none; }
+}
+
+/* ---- v1 panels when tabbed into the right column --------------------------- */
+/* v1 styled lyrics/queue as full-width bottom sections (40px padding,
+   top border). Inside the tabbed panel region they are plain panels. */
+#np-modal-overlay #np-queue-panel,
+#np-modal-overlay #np-lyrics-panel {
+    padding: 0;
+    border-top: none;
+}
+
+/* A-B loop indicator row under the time display */
+.np-v2-ab-row {
+    display: flex;
+    justify-content: flex-end;
+    min-height: 18px;
+    margin-top: -6px;
+}
+
+/* ================= Full-modal visuals mode =================
+   The WMP/Plexamp-style takeover: the animated background covers the entire
+   modal, and the transport + features float over it as minimal chrome that
+   auto-hides after 3s idle. Enter via album-art click, the expand button, or
+   F. Exit via Esc, F, or the exit button. */
+
+/* Canvas goes full-bleed: no mask, full opacity */
+.np-modal.npv2-visuals-on #np-v2-bg {
+    opacity: 1;
+    -webkit-mask-image: none;
+    mask-image: none;
+}
+
+/* Legibility scrims over the visuals, under the chrome */
+.np-modal.npv2-visuals-on::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background:
+        linear-gradient(to bottom, rgba(0, 0, 0, 0.50), transparent 24%, transparent 58%, rgba(0, 0, 0, 0.62));
+}
+
+/* Collapse the stage/panel grid — the right column becomes the overlay */
+.np-modal.npv2-visuals-on .np-body {
+    display: block;
+    padding: 0 !important;
+    overflow: visible;
+}
+.np-modal.npv2-visuals-on .np-left {
+    display: none;
+}
+.np-modal.npv2-visuals-on .np-right {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 96px 40px 30px;
+    pointer-events: none;
+    overflow: visible;
+}
+.np-modal.npv2-visuals-on .np-right > * {
+    pointer-events: auto;
+}
+
+/* Hide the panels that don't belong in the immersive view */
+.np-modal.npv2-visuals-on .np-upnext,
+.np-modal.npv2-visuals-on .np-stop-row,
+.np-modal.npv2-visuals-on .np-visualizer,
+.np-modal.npv2-visuals-on .np-v2-tabs,
+.np-modal.npv2-visuals-on .np-v2-tabpanels {
+    display: none;
+}
+
+/* Bottom cluster order: progress, transport, volume, utility pills */
+.np-modal.npv2-visuals-on .np-progress-section { order: 1; }
+.np-modal.npv2-visuals-on .np-controls-row { order: 2; }
+.np-modal.npv2-visuals-on .np-util-row { order: 4; }
+
+/* Volume row: slim and centered in the cluster */
+.np-modal.npv2-visuals-on .np-volume-row,
+.np-modal.npv2-visuals-on .np-volume {
+    order: 3;
+    max-width: 280px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+/* Transport buttons float over the visuals */
+.np-modal.npv2-visuals-on .np-controls-row button {
+    filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.6));
+}
+.np-modal.npv2-visuals-on .np-progress-section,
+.np-modal.npv2-visuals-on .np-util-row {
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7);
+}
+
+/* ---- Visuals header: track identity + theme switcher (top) ---- */
+#np-v2-visuals-header {
+    display: none;
+}
+#np-modal-overlay .np-modal.npv2-visuals-on > #np-v2-visuals-header {
+    display: flex;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 76px; /* clear of the exit button */
+    z-index: 4;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 26px 8px 0 36px;
+    pointer-events: none;
+}
+.np-modal.npv2-visuals-on #np-v2-visuals-header > * {
+    pointer-events: auto;
+}
+#np-v2-visuals-title {
+    margin: 0;
+    font-size: 2rem;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+    color: #fff;
+    text-shadow: 0 2px 18px rgba(0, 0, 0, 0.75);
+    line-height: 1.15;
+}
+#np-v2-visuals-artist {
+    margin: 4px 0 0;
+    font-size: 1.05rem;
+    color: rgba(255, 255, 255, 0.82);
+    text-shadow: 0 1px 10px rgba(0, 0, 0, 0.75);
+}
+#np-v2-visuals-theme-switch {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    padding-top: 6px;
+}
+#np-v2-visuals-theme-name {
+    min-width: 110px;
+    text-align: center;
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.9);
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
+}
+.np-v2-visuals-arrow {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    background: rgba(10, 10, 16, 0.45);
+    color: #fff;
+    font-size: 1rem;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    transition: background 0.15s ease, transform 0.15s ease;
+}
+.np-v2-visuals-arrow:hover {
+    background: rgba(255, 255, 255, 0.18);
+    transform: scale(1.08);
+}
+
+/* ---- Exit button (top-right) ---- */
+#np-v2-visuals-exit {
+    display: none;
+}
+#np-modal-overlay .np-modal.npv2-visuals-on > #np-v2-visuals-exit {
+    display: block;
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    z-index: 5;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    background: rgba(10, 10, 16, 0.55);
+    color: #fff;
+    font-size: 1.15rem;
+    line-height: 1;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    transition: background 0.15s ease, transform 0.15s ease;
+}
+#np-v2-visuals-exit:hover {
+    background: rgba(255, 255, 255, 0.20);
+    transform: scale(1.08);
+}
+
+/* ---- Expand button lives in the normal theater util row ---- */
+#np-v2-visuals-expand {
+    white-space: nowrap;
+}
+
+/* ---- Auto-hide: chrome fades, cursor vanishes for full immersion ---- */
+.np-modal.npv2-visuals-on .np-right,
+.np-modal.npv2-visuals-on #np-v2-visuals-header,
+.np-modal.npv2-visuals-on #np-v2-visuals-exit {
+    transition: opacity 0.45s ease;
+}
+.np-modal.npv2-visuals-on.npv2-ui-hidden .np-right,
+.np-modal.npv2-visuals-on.npv2-ui-hidden #np-v2-visuals-header,
+.np-modal.npv2-visuals-on.npv2-ui-hidden #np-v2-visuals-exit {
+    opacity: 0;
+    pointer-events: none;
+}
+.np-modal.npv2-visuals-on.npv2-ui-hidden {
+    cursor: none;
+}
+
+/* ---- Visuals mode on small screens ---- */
+@media (max-width: 640px) {
+    .np-modal.npv2-visuals-on .np-right {
+        padding: 84px 18px 22px;
+    }
+    .np-modal.npv2-visuals-on #np-v2-visuals-header {
+        padding: 20px 4px 0 20px;
+        right: 64px;
+    }
+    #np-v2-visuals-title {
+        font-size: 1.4rem;
+    }
+    #np-v2-visuals-artist {
+        font-size: 0.9rem;
+    }
+    #np-v2-visuals-theme-name {
+        min-width: 0;
+        font-size: 0.72rem;
+    }
+}
