@@ -518,7 +518,7 @@ describe('the findings inbox', () => {
     renderSurface();
     await flush();
 
-    fireEvent.click(screen.getByText('Delete Folder…'));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Folder all (4)' }));
     await flush();
     expect(confirmSpy).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -548,7 +548,7 @@ describe('the findings inbox', () => {
     renderSurface();
     await flush();
 
-    fireEvent.click(screen.getByText('Re-download…'));
+    fireEvent.click(screen.getByRole('button', { name: 'Re-download all (2)' }));
     await flush();
     expect(confirmSpy).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -570,7 +570,7 @@ describe('the findings inbox', () => {
     renderSurface();
     await flush();
 
-    fireEvent.click(screen.getByText('Review & Move…'));
+    fireEvent.click(screen.getByRole('button', { name: 'Review & Move all (120)' }));
     await flush();
     clickPrompt('_orphan-delete');
     await flush();
