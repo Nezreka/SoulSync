@@ -387,9 +387,10 @@ describe('visualization themes', () => {
         },
       );
     const frame = (idle: boolean) => ({
-      freq: Uint8Array.from({ length: 32 }, (_, i) => (i * 37) % 256),
+      freq: Uint8Array.from({ length: 64 }, (_, i) => (i * 37) % 256),
       wave: Uint8Array.from({ length: 64 }, (_, i) => 128 + Math.round(100 * Math.sin(i / 4))),
       energy: idle ? 0.2 : 0.65,
+      beat: 0,
       t: 2.5,
       idle,
       pal: { r: 120, g: 80, b: 200 },
@@ -404,6 +405,47 @@ describe('visualization themes', () => {
         () => NPV2_PAINT[id](stubCtx(), 1280, 800, frame(true)),
         `painter ${id} idle`,
       ).not.toThrow();
+    }
+  });
+
+  it('every painter handles bass/mid/treble-heavy spectra and beat hits', () => {
+    const grad = { addColorStop: () => {} };
+    const stubCtx = () =>
+      new Proxy(
+        {},
+        {
+          get(_t, p) {
+            if (p === 'createLinearGradient' || p === 'createRadialGradient') return () => grad;
+            return () => {};
+          },
+          set() {
+            return true;
+          },
+        },
+      );
+    const shaped = (hotFrom: number, hotTo: number, beat: number) => ({
+      freq: Uint8Array.from({ length: 64 }, (_, i) => (i >= hotFrom && i <= hotTo ? 230 : 15)),
+      wave: Uint8Array.from({ length: 64 }, (_, i) => 128 + Math.round(100 * Math.sin(i / 4))),
+      energy: beat > 0 ? 0.9 : 0.6,
+      beat,
+      t: 2.5,
+      idle: false,
+      pal: { r: 120, g: 80, b: 200 },
+    });
+    const cases: Array<[string, ReturnType<typeof shaped>]> = [
+      ['bass-heavy', shaped(0, 7, 0)],
+      ['mid-heavy', shaped(20, 35, 0)],
+      ['treble-heavy', shaped(50, 63, 0)],
+      ['beat-hit', shaped(0, 15, 1)],
+    ];
+    for (const id of npv2ThemeIds()) {
+      if (id === 'none') continue;
+      for (const [label, S] of cases) {
+        expect(
+          () => NPV2_PAINT[id](stubCtx(), 1280, 800, S),
+          `painter ${id} ${label}`,
+        ).not.toThrow();
+      }
     }
   });
 });
@@ -1265,5 +1307,132 @@ describe('smoothed spectrum bins', () => {
     setAll(0);
     const fresh = api.npv2BinS(S, 'b', 0, 8);
     expect(fresh).toBe(0);
+  });
+});
+
+describe('song-accurate analysis: log bands + spectral-flux beat', () => {
+  const build = () => {
+    const factory = new Function(
+      [
+        extractConst('NPV2_VIZ_BANDS', v2),
+        extractConst('NPV2_VIZ_FMIN', v2),
+        extractConst('NPV2_VIZ_FMAX', v2),
+        extractConst('NPV2_VIZ_FFT', v2),
+        extractFunction('npv2LogBandRanges', v2),
+        extractFunction('npv2MapLogBands', v2),
+        extractFunction('npv2FluxBeat', v2),
+        'return { npv2LogBandRanges, npv2MapLogBands, npv2FluxBeat, NPV2_VIZ_BANDS, NPV2_VIZ_FMIN, NPV2_VIZ_FMAX, NPV2_VIZ_FFT };',
+      ].join('\n'),
+    );
+    return factory() as any;
+  };
+
+  it('covers 40 Hz–16 kHz with contiguous, ordered bands', () => {
+    const api = build();
+    const ranges = api.npv2LogBandRanges(48000, 2048, 64, 40, 16000);
+    expect(ranges).toHaveLength(64);
+    // Band 0 starts at bin 1 because bin 0 is DC. At 48 kHz one 2048-point
+    // bin is ~23 Hz, so the 40 Hz target is below FFT resolution and low
+    // bands necessarily share/repeat bins; that is expected, not a bug.
+    expect(ranges[0][0]).toBeGreaterThanOrEqual(1);
+    expect(ranges[0][0] * (48000 / 2048)).toBeLessThan(60);
+    // Last band reaches up toward 16 kHz.
+    const lastHiHz = ranges[63][1] * (48000 / 2048);
+    expect(lastHiHz).toBeGreaterThan(12000);
+    expect(lastHiHz).toBeLessThanOrEqual(24000);
+    // Ordered and gap-free: each band starts at/after the previous start and
+    // not far past the previous end. Adjacent low bands may overlap because
+    // they can share the same FFT bin(s).
+    for (let b = 1; b < 64; b++) {
+      expect(ranges[b][0]).toBeGreaterThanOrEqual(ranges[b - 1][0]);
+      expect(ranges[b][1]).toBeGreaterThanOrEqual(ranges[b][0]);
+      expect(ranges[b][0]).toBeLessThanOrEqual(ranges[b - 1][1] + 2);
+    }
+  });
+
+  it('puts a 440 Hz tone in the right band and nowhere else', () => {
+    const api = build();
+    const sr = 48000,
+      fft = 2048;
+    const ranges = api.npv2LogBandRanges(sr, fft, 64, 40, 16000);
+    const raw = new Array(fft / 2).fill(0);
+    const toneBin = Math.round(440 / (sr / fft)); // ≈ 19
+    raw[toneBin] = 255;
+    const out = new Array(64).fill(0);
+    api.npv2MapLogBands(raw, ranges, out);
+    // The band(s) containing bin 19 read hot. (A tone can sit on a shared
+    // boundary bin, lighting two adjacent bands — never more.)
+    const hot = out.map((v: number, i: number) => (v > 0 ? i : -1)).filter((i: number) => i >= 0);
+    expect(hot.length).toBeGreaterThanOrEqual(1);
+    expect(hot.length).toBeLessThanOrEqual(2);
+    for (const h of hot) {
+      expect(ranges[h][0]).toBeLessThanOrEqual(toneBin);
+      expect(ranges[h][1]).toBeGreaterThanOrEqual(toneBin);
+    }
+    // …and a 440 Hz tone does not leak into the bass or the top octave.
+    expect(out[0]).toBe(0);
+    expect(out[63]).toBe(0);
+  });
+
+  it('bass and treble land in opposite ends of the band array', () => {
+    const api = build();
+    const sr = 48000,
+      fft = 2048;
+    const ranges = api.npv2LogBandRanges(sr, fft, 64, 40, 16000);
+    const raw = new Array(fft / 2).fill(0);
+    raw[Math.round(55 / (sr / fft))] = 255; // A1, low bass
+    raw[Math.round(12000 / (sr / fft))] = 255; // high treble
+    const out = new Array(64).fill(0);
+    api.npv2MapLogBands(raw, ranges, out);
+    // Wide high bands average a pure tone down, so any positive reading counts.
+    const bassBand = out.findIndex((v: number) => v > 0);
+    const trebBand = out.findLastIndex((v: number) => v > 0);
+    expect(bassBand).toBeLessThan(8);
+    expect(trebBand).toBeGreaterThan(50);
+    expect(trebBand).toBeGreaterThan(bassBand);
+  });
+
+  it('fires the beat on a sudden onset and not on a steady drone', () => {
+    const api = build();
+    const st = { prev: new Float32Array(64), hist: [], beat: 0 };
+    const dt = 1 / 60;
+    const quiet = new Array(64).fill(40);
+    // Settle the history on a quiet drone — no false beats.
+    for (let f = 0; f < 60; f++) api.npv2FluxBeat(st, quiet, dt);
+    expect(st.beat).toBeLessThan(0.4);
+    // Sudden broadband onset (a kick / snare hit): beat fires.
+    const hit = quiet.map((v) => v + 120);
+    const beat = api.npv2FluxBeat(st, hit, dt);
+    expect(beat).toBeGreaterThan(0.9);
+  });
+
+  it('does not pin the beat on a constant loud bassline', () => {
+    const api = build();
+    const st = { prev: new Float32Array(64), hist: [], beat: 0 };
+    const dt = 1 / 60;
+    // Loud from the start: flux adapts, beat stays down after the attack.
+    const loud = new Array(64).fill(200);
+    for (let f = 0; f < 120; f++) api.npv2FluxBeat(st, loud, dt);
+    expect(st.beat).toBeLessThan(0.4);
+    // …but a *new* hit on top still registers.
+    const hit = loud.map((v, i) => (i < 8 ? 255 : v));
+    const beat = api.npv2FluxBeat(st, hit, dt);
+    expect(beat).toBeGreaterThan(0.9);
+  });
+
+  it('decays the beat envelope back to zero', () => {
+    const api = build();
+    const st = { prev: new Float32Array(64), hist: [], beat: 1 };
+    const flat = new Array(64).fill(40);
+    for (let f = 0; f < 120; f++) api.npv2FluxBeat(st, flat, 1 / 60);
+    expect(st.beat).toBe(0);
+  });
+
+  it('keeps digital silence from self-triggering', () => {
+    const api = build();
+    const st = { prev: new Float32Array(64), hist: [], beat: 0 };
+    const silent = new Array(64).fill(0);
+    for (let f = 0; f < 120; f++) api.npv2FluxBeat(st, silent, 1 / 60);
+    expect(st.beat).toBe(0);
   });
 });

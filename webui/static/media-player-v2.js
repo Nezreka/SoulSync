@@ -172,10 +172,11 @@ function npv2ClampDb(v) {
 // Visual themes — the Windows Media Player throwback collection + modern vibes
 //
 // Every painter receives (ctx, w, h, S) where S = {
-//   freq: Uint8Array(32) 0..255 frequency magnitudes,
+//   freq: Uint8Array(64) 0..255 log-spaced bands, 40 Hz–16 kHz,
 //   wave: Uint8Array(64) 0..255 time-domain samples,
 //   energy: 0..1 overall level, t: seconds, idle: bool (no real audio),
-//   pal: {r,g,b} album-art palette, css: 'r,g,b' string }
+//   beat: 0..1 onset envelope (spectral flux), pal: {r,g,b} album-art palette,
+//   css: 'r,g,b' string }
 // Painters must be defensive: ctx may be a stub in tests.
 // ---------------------------------------------------------------------------
 
@@ -266,10 +267,10 @@ function npv2ThemeState(id, init) {
 }
 
 function npv2Bin(S, i, count) {
-    // Average a slice of the analyser bins into `count` segments. The slice
-    // start is proportional so painters with more segments than analyser
-    // bins (e.g. 56 bars over 32 bins) still spread across the spectrum
-    // instead of clamping every high segment onto the last bin.
+    // Average a slice of the analyser bands into `count` segments. The slice
+    // start is proportional so painters with more segments than bands
+    // (e.g. 110 spikes over 64 bands) still spread across the spectrum
+    // instead of clamping every high segment onto the last band.
     const n = S.freq.length;
     const per = Math.max(1, Math.floor(n / count));
     let sum = 0;
@@ -293,6 +294,124 @@ function npv2BinS(S, key, i, count) {
 
 function npv2Css(S, alpha) {
     return 'rgba(' + S.pal.r + ',' + S.pal.g + ',' + S.pal.b + ',' + alpha + ')';
+}
+
+// ---------------------------------------------------------------------------
+// Song-accurate analysis — dedicated analyser + log bands + spectral-flux beat
+//
+// v1's shared analyser runs fftSize 64 (32 bins, each ~750 Hz wide at 48 kHz:
+// kick, bass guitar and low toms all land in bin 0). That is fine for v1's
+// mini spectrum, but a visualizer that should *reflect the song* needs real
+// frequency resolution. So the v2 engine taps a dedicated analyser
+// (fftSize 2048, gentle built-in smoothing — v2 does its own musical
+// smoothing) off the shared one and maps its 1024 bins onto 64 log-spaced
+// bands from 40 Hz to 16 kHz. Log spacing matches how we hear: each band is
+// roughly a constant musical interval, so a vocal and a cymbal get the same
+// visual weight as a kick.
+//
+// Beat detection is spectral flux, not a bass threshold: it measures how
+// much the spectrum *rose* since the last frame and fires when that rise
+// clearly exceeds its recent average. A fingerpicked guitar triggers it as
+// reliably as a four-on-the-floor kick; a constant loud bassline does not
+// pin it.
+// ---------------------------------------------------------------------------
+
+const NPV2_VIZ_BANDS = 64;
+const NPV2_VIZ_FMIN = 40;     // Hz — below this is rumble, not music
+const NPV2_VIZ_FMAX = 16000;  // Hz — above this is air few speakers reproduce
+const NPV2_VIZ_FFT = 2048;
+
+let npv2VizAnalyser = null;    // dedicated analyser, created lazily
+let npv2VizBandRanges = null;  // [[loBin, hiBin]] per band for the current sr
+let npv2VizSr = 0;
+let npv2VizRaw = null;         // Uint8Array(1024) scratch
+let npv2VizBeatSt = null;      // spectral-flux state
+
+function npv2EnsureVizAnalyser() {
+    if (npv2VizAnalyser) return npv2VizAnalyser;
+    let AC = null, analyser = null;
+    try {
+        AC = (typeof npAudioContext !== 'undefined' && npAudioContext) || null;
+        analyser = (typeof npAnalyser !== 'undefined' && npAnalyser) || null;
+    } catch (e) { return null; }
+    if (!AC || !analyser) return null;
+    try {
+        const va = AC.createAnalyser();
+        va.fftSize = NPV2_VIZ_FFT;
+        // Gentle built-in smoothing: v2 does its own fast-attack /
+        // slow-release smoothing per painter, so the raw feed stays lively.
+        va.smoothingTimeConstant = 0.5;
+        // Tap after the shared analyser. An analyser node analyses whatever
+        // flows into it — it needs no output connection to produce data.
+        // Deliberately NOT connected to destination: the shared analyser
+        // already feeds destination, so forwarding through this tap would
+        // sum a second copy of the signal there (~+6 dB louder). This also
+        // survives v2's EQ rewire (which only touches source->…->analyser).
+        analyser.connect(va);
+        npv2VizAnalyser = va;
+        return va;
+    } catch (e) { return null; }
+}
+
+// Log-spaced band edges over the FFT bins. Pure — tested in vitest.
+// With a 2048-point FFT the low bands are narrower than one FFT bin, so
+// adjacent low bands can share/repeat bins; that limited low-frequency
+// resolution is expected and the mapping still stays ordered/gap-free.
+function npv2LogBandRanges(sr, fftSize, bandCount, fMin, fMax) {
+    const binHz = sr / fftSize;
+    const maxBin = fftSize / 2 - 1;
+    const ratio = Math.pow(fMax / fMin, 1 / bandCount);
+    const ranges = [];
+    for (let b = 0; b < bandCount; b++) {
+        // Bin 0 is DC — start at 1 so silence stays silent.
+        const lo = Math.min(maxBin, Math.max(1, Math.floor(fMin * Math.pow(ratio, b) / binHz)));
+        const hi = Math.min(maxBin, Math.max(lo, Math.ceil(fMin * Math.pow(ratio, b + 1) / binHz) - 1));
+        ranges.push([lo, hi]);
+    }
+    return ranges;
+}
+
+// Average the raw FFT bins into the log bands. Pure — tested in vitest.
+function npv2MapLogBands(raw, ranges, out) {
+    for (let b = 0; b < ranges.length; b++) {
+        const lo = ranges[b][0], hi = ranges[b][1];
+        let sum = 0, n = 0;
+        for (let k = lo; k <= hi && k < raw.length; k++) { sum += raw[k]; n++; }
+        out[b] = n ? Math.round(sum / n) : 0;
+    }
+    return out;
+}
+
+// Spectral-flux onset detection. `st` is {prev: Float32Array, hist: [], beat}
+// and is resized defensively so tests can use any band count. Returns the
+// 0..1 beat envelope. Pure apart from the state object — tested in vitest.
+function npv2FluxBeat(st, bands, dt) {
+    if (!st.prev || st.prev.length !== bands.length) st.prev = new Float32Array(bands.length);
+    if (!Array.isArray(st.hist)) st.hist = [];
+    // Flux: how much the spectrum rose since the last frame, 0..~1.
+    let flux = 0;
+    for (let i = 0; i < bands.length; i++) {
+        const d = bands[i] - st.prev[i];
+        if (d > 0) flux += d;
+        st.prev[i] = bands[i];
+    }
+    flux /= bands.length * 255;
+    st.hist.push(flux);
+    if (st.hist.length > 86) st.hist.shift(); // ~1.4 s of context at 60 fps
+    let mean = 0;
+    for (let h = 0; h < st.hist.length; h++) mean += st.hist[h];
+    mean /= Math.max(1, st.hist.length);
+    // Onset when the rise clearly exceeds its recent average. The floor
+    // keeps digital silence from self-triggering.
+    if (st.beat < 0.35 && flux > Math.max(0.012, mean * 1.6)) st.beat = 1;
+    st.beat = Math.max(0, st.beat - dt * 2.4);
+    if (typeof st.beat !== 'number' || !isFinite(st.beat)) st.beat = 0;
+    return st.beat;
+}
+
+function npv2VizBeatState() {
+    if (!npv2VizBeatSt) npv2VizBeatSt = { prev: new Float32Array(NPV2_VIZ_BANDS), hist: [], beat: 0 };
+    return npv2VizBeatSt;
 }
 
 // ---------------------------------------------------------------------------
@@ -734,8 +853,13 @@ const NPV2_PAINT = {
             const pts = [];
             for (let i = 0; i <= steps; i++) {
                 const x = (i / steps) * w;
+                // The melody shapes the curtain: smoothed spectrum across the
+                // sky, so a bright synth line visibly lifts the edge where it
+                // sits in the mix and a bass drop lets it sink.
+                const sv = npv2BinS(S, 'aurora' + ri, i, steps);
                 const y = h * R.y + Math.sin(i * 0.11 + S.t * R.speed * 2 + ri * 2.1) * h * R.amp * (0.6 + S.energy * 0.8)
-                    + Math.sin(i * 0.031 - S.t * R.speed) * h * R.amp * 0.5;
+                    + Math.sin(i * 0.031 - S.t * R.speed) * h * R.amp * 0.5
+                    - (sv - 0.30) * h * 0.20;
                 pts.push([x, y]);
                 if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
             }
@@ -752,7 +876,9 @@ const NPV2_PAINT = {
                 const fx = (k + 0.5) / rays + st['rayJ' + ri + '_' + k] * 0.04;
                 const py = pts[Math.min(steps, Math.max(0, Math.round(fx * steps)))][1];
                 const breathe = 0.7 + 0.3 * Math.sin(S.t * 1.3 + k * 2.4 + ri * 1.7);
-                const rayLen = h * (0.08 + R.amp * 2.4) * breathe * (0.75 + st['rayJ' + ri + '_' + k] * 0.5);
+                // Rays grow where the spectrum is hot at their position.
+                const rv = npv2BinS(S, 'aurora-ray' + ri, k, rays);
+                const rayLen = h * (0.08 + R.amp * 2.4) * breathe * (0.75 + st['rayJ' + ri + '_' + k] * 0.5) * (0.55 + rv * 0.9);
                 const tilt = (st['rayT' + ri + '_' + k] - 0.5) * rayLen * 0.35;
                 const rg = ctx.createLinearGradient(0, py, 0, py - rayLen);
                 rg.addColorStop(0, npv2PalA(pal, (R.alpha * 0.9 * breathe).toFixed(3)));
@@ -1053,7 +1179,7 @@ const NPV2_PAINT = {
         // faint depth haze above the horizon
         const haze = ctx.createLinearGradient(0, horizon - h * 0.25, 0, horizon);
         haze.addColorStop(0, npv2Css(S, 0));
-        haze.addColorStop(1, npv2Css(S, (0.10 + S.energy * 0.12).toFixed(3)));
+        haze.addColorStop(1, npv2Css(S, (0.20 + S.energy * 0.18).toFixed(3)));
         ctx.fillStyle = haze;
         ctx.fillRect(0, horizon - h * 0.25, w, h * 0.25);
         // smoke wisps: large soft blobs rising slowly, barely there — depth
@@ -1072,7 +1198,7 @@ const NPV2_PAINT = {
         }
         ctx.restore();
         // rising sparks, two depth layers
-        const spawn = Math.round((2 + Math.floor(S.energy * 7) + (beat > 0.7 ? 30 : 0)) * q);
+        const spawn = Math.round((4 + Math.floor(S.energy * 10) + (beat > 0.7 ? 30 : 0)) * q);
         for (let i = 0; i < spawn; i++) {
             if (st.parts.length > Math.round(460 * q)) break;
             const far = Math.random() < 0.45;
@@ -1106,6 +1232,17 @@ const NPV2_PAINT = {
             ctx.beginPath();
             ctx.arc(p.x, p.y, r, 0, 6.2832);
             ctx.fill();
+            // motion trail on near sparks: streaks read as rising, dots read as noise
+            if (!p.far && p.life > 0.25) {
+                ctx.strokeStyle = ctx.fillStyle;
+                ctx.globalAlpha = 0.35 * Math.min(1, p.life);
+                ctx.lineWidth = Math.max(1, r * 0.6);
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y + r * 0.5);
+                ctx.lineTo(p.x - p.vx * 1.5, p.y - p.vy * 0.055);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+            }
             // hot core dot on near sparks
             if (!p.far && p.life > 0.5 && r > 1.6) {
                 ctx.fillStyle = 'rgba(255,255,255,' + (a * 0.8).toFixed(3) + ')';
@@ -1353,81 +1490,109 @@ const NPV2_PAINT = {
         const st = npv2ThemeState('kaleido', () => ({ dir: 1 }));
         if (beat > 0.9) st.dir *= -1; // flip spin on hard beats
         const bass = npv2Bin(S, 0, 8);
-        const R = Math.min(w, h) * 0.48 * (1 + bass * 0.08 + Math.sin(S.t * 1.1) * 0.02);
-        const segs = 16, N = 20;
+        const R = Math.min(w, h) * 0.46 * (1 + bass * 0.06);
         const rot = S.t * 0.12 * st.dir;
-        const pulse = 1 + beat * 0.12;
-        ctx.fillStyle = 'rgba(2,3,9,0.5)';
+        const pulse = 1 + beat * 0.10;
+        // deep backdrop + soft glow bed so the jewels bloom on darkness
+        ctx.fillStyle = 'rgba(2,3,9,0.55)';
         ctx.fillRect(0, 0, w, h);
-        // soft glow bed under the mandala so colors have something to bloom on
-        const kg = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.35);
-        kg.addColorStop(0, npv2Css(S, (0.10 + bass * 0.10).toFixed(3)));
+        const kg = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.5);
+        kg.addColorStop(0, npv2Css(S, (0.12 + bass * 0.10).toFixed(3)));
         kg.addColorStop(1, npv2Css(S, 0));
         ctx.fillStyle = kg;
         ctx.fillRect(0, 0, w, h);
-        // faint counter-rotating outer halo of wedges for complexity
-        ctx.save();
-        ctx.globalAlpha = 0.35;
-        const hrot = -S.t * 0.05 * st.dir;
-        for (let sgm = 0; sgm < segs; sgm++) {
-            const a0 = hrot + (sgm / segs) * 6.2832;
-            const a1 = hrot + ((sgm + 1) / segs) * 6.2832;
-            const v = npv2BinS(S, 'kaleido-halo', sgm, segs);
-            ctx.beginPath();
-            ctx.arc(cx, cy, R * 1.28 * pulse, a0, a1);
-            ctx.arc(cx, cy, R * 1.02 * pulse, a1, a0, true);
-            ctx.closePath();
-            ctx.fillStyle = sgm % 2 ? npv2Css(S, (0.03 + v * 0.25).toFixed(3)) : npv2Css2(S, (0.03 + v * 0.25).toFixed(3));
-            ctx.fill();
+
+        // Jeweled spiral mandala: each wedge holds a spiral arm of glowing
+        // dots — radius = frequency (bass near the core, treble near the
+        // rim), size/brightness = the smoothed band value — mirrored around
+        // the circle for true kaleidoscope symmetry. A second, dimmer
+        // counter-rotating layer interleaves for depth.
+        const p1 = S.pal, p2 = npv2Pal2(S);
+        const segs = 12, bands = 30;
+        const wedge = (Math.PI * 2) / segs;
+        // color ramp palette -> accent across the spectrum, premixed once
+        const ramp = [];
+        for (let i = 0; i < bands; i++) {
+            const t = i / (bands - 1);
+            ramp.push('rgba(' +
+                Math.round(p1.r + (p2.r - p1.r) * t) + ',' +
+                Math.round(p1.g + (p2.g - p1.g) * t) + ',' +
+                Math.round(p1.b + (p2.b - p1.b) * t) + ',');
         }
-        ctx.restore();
-        for (let sgm = 0; sgm < segs; sgm++) {
-            const mirror = sgm % 2 === 1;
-            const a0 = rot + (sgm / segs) * 6.2832;
-            const a1 = rot + ((sgm + 1) / segs) * 6.2832;
-            for (let i = 0; i < N; i++) {
-                const src = mirror ? N - 1 - i : i;
-                const v = npv2BinS(S, 'kaleido', src, N);
-                const r0 = (i / N) * R * pulse;
-                const r1 = ((i + 1) / N) * R * pulse;
-                ctx.beginPath();
-                ctx.arc(cx, cy, r1, a0, a1);
-                ctx.arc(cx, cy, Math.max(r0, 1), a1, a0, true);
-                ctx.closePath();
-                const accent = (sgm + i) % 5 === 0;
-                // edge fade: outer wedges dissolve instead of hard-clipping
-                const edge = 1 - Math.pow(i / N, 3) * 0.85;
-                ctx.fillStyle = accent ? npv2Css2(S, ((0.18 + v * 0.9) * edge).toFixed(3)) : npv2Css(S, ((0.18 + v * 0.95) * edge).toFixed(3));
-                ctx.fill();
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.globalCompositeOperation = 'lighter';
+        for (let layer = 0; layer < 2; layer++) {
+            const lrot = layer === 0 ? rot : -rot * 1.6;
+            const lr = layer === 0 ? 1 : 0.82; // inner layer sits slightly in
+            const ldim = layer === 0 ? 1 : 0.45;
+            for (let sgm = 0; sgm < segs; sgm++) {
+                ctx.save();
+                ctx.rotate(lrot + (sgm / segs) * Math.PI * 2);
+                if (sgm % 2 === 1) ctx.scale(1, -1); // mirror
+                let px = 0, py = 0, pv = 0;
+                for (let i = 0; i < bands; i++) {
+                    const v = npv2BinS(S, 'kaleido' + layer, i, bands);
+                    // the music bends the spiral: hot bands swing outward
+                    const ang = (i / bands) * wedge * 0.92 +
+                        Math.sin(S.t * 0.9 + i * 0.55 + layer * 2.1) * 0.05 * v;
+                    const rr = (0.10 + 0.84 * (i / bands)) * R * pulse * lr;
+                    const x = Math.cos(ang) * rr, y = Math.sin(ang) * rr;
+                    // filament connecting the jewels along the arm
+                    if (i > 0 && (pv > 0.03 || v > 0.03)) {
+                        const fa = Math.min(pv, v) * 0.5 * ldim * (1 + beat * 0.4);
+                        if (fa > 0.02) {
+                            ctx.strokeStyle = ramp[i] + fa.toFixed(3) + ')';
+                            ctx.lineWidth = 1 + Math.min(pv, v) * 3;
+                            ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(x, y); ctx.stroke();
+                        }
+                    }
+                    if (v > 0.03) {
+                        let a = (0.15 + v * 0.85) * ldim * (1 + beat * 0.5);
+                        if (a > 1) a = 1;
+                        const jr = (0.8 + v * 3.4) * (layer === 0 ? 1 : 0.7);
+                        // halo + jewel core; hottest go white-hot
+                        ctx.fillStyle = (v > 0.72 ? 'rgba(255,255,255,' : ramp[i]) + (a * 0.20).toFixed(3) + ')';
+                        ctx.beginPath(); ctx.arc(x, y, jr * 2.4, 0, 6.2832); ctx.fill();
+                        ctx.fillStyle = (v > 0.72 ? 'rgba(255,255,255,' : ramp[i]) + a.toFixed(3) + ')';
+                        ctx.beginPath(); ctx.arc(x, y, jr, 0, 6.2832); ctx.fill();
+                        // pinpoint sparkle on the brightest jewels
+                        if (v > 0.6 && layer === 0) {
+                            const tw = 0.5 + 0.5 * Math.sin(S.t * 4 + i * 1.7 + sgm);
+                            ctx.fillStyle = 'rgba(255,255,255,' + (tw * v * 0.85).toFixed(3) + ')';
+                            ctx.beginPath(); ctx.arc(x, y, jr * 0.45, 0, 6.2832); ctx.fill();
+                        }
+                    }
+                    px = x; py = y; pv = v;
+                }
+                ctx.restore();
             }
         }
-        // bright cell dividers: the classic kaleidoscope lattice
-        ctx.strokeStyle = 'rgba(255,255,255,' + (0.10 + beat * 0.30).toFixed(3) + ')';
-        ctx.lineWidth = 1;
+        ctx.restore();
+        // rim of beat-pulsing accent jewels framing the mandala
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.rotate(-rot * 0.6);
+        const jr2 = 2 + beat * 5;
         for (let sgm = 0; sgm < segs; sgm++) {
-            const a = rot + (sgm / segs) * 6.2832;
-            ctx.beginPath();
-            ctx.moveTo(cx + Math.cos(a) * R * 0.06, cy + Math.sin(a) * R * 0.06);
-            ctx.lineTo(cx + Math.cos(a) * R * pulse, cy + Math.sin(a) * R * pulse);
-            ctx.stroke();
+            const a = (sgm / segs) * Math.PI * 2;
+            const x = Math.cos(a) * R * 1.02 * pulse, y = Math.sin(a) * R * 1.02 * pulse;
+            ctx.fillStyle = npv2Css2(S, (0.25 + beat * 0.65).toFixed(3));
+            ctx.beginPath(); ctx.arc(x, y, jr2 * 2.2, 0, 6.2832); ctx.fill();
+            ctx.fillStyle = 'rgba(255,255,255,' + (0.35 + beat * 0.5).toFixed(3) + ')';
+            ctx.beginPath(); ctx.arc(x, y, jr2 * 0.8, 0, 6.2832); ctx.fill();
         }
-        // beat flash wash
-        if (beat > 0.05) {
-            ctx.fillStyle = npv2Css(S, (beat * 0.10).toFixed(3));
-            ctx.beginPath(); ctx.arc(cx, cy, R * pulse, 0, 6.2832); ctx.fill();
-        }
-        // breathing core with orbit rings
-        ctx.fillStyle = npv2Css(S, (0.5 + bass * 0.4).toFixed(3));
+        ctx.restore();
+        // breathing luminous core
+        const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 0.20 * pulse);
+        core.addColorStop(0, 'rgba(255,255,255,' + (0.55 + bass * 0.35).toFixed(3) + ')');
+        core.addColorStop(0.4, npv2Css(S, (0.45 + bass * 0.30).toFixed(3)));
+        core.addColorStop(1, npv2Css(S, 0));
+        ctx.fillStyle = core;
         ctx.beginPath();
-        ctx.arc(cx, cy, (3 + bass * 10) * pulse, 0, 6.2832);
+        ctx.arc(cx, cy, R * 0.20 * pulse, 0, 6.2832);
         ctx.fill();
-        ctx.strokeStyle = npv2Css2(S, 0.4);
-        ctx.lineWidth = 1.5;
-        for (let k = 1; k <= 2; k++) {
-            ctx.beginPath();
-            ctx.arc(cx, cy, (14 + bass * 22) * k * pulse + Math.sin(S.t * 2 + k) * 4, 0, 6.2832);
-            ctx.stroke();
-        }
     },
 
     // --- Warp: starfield rushing past, speed tied to energy -------------------------
@@ -1637,17 +1802,22 @@ const NPV2_PAINT = {
             const fillCol = (layer === 1 ? npv2Css2(S, (la * 0.30).toFixed(3)) : npv2Css(S, (la * 0.30).toFixed(3)));
             const seg = 6.2832 / petals;
             for (let p = 0; p < petals; p++) {
-                // petal: filled ellipse body plus outline, long axis radial
+                // petal: luminous gradient body (bright heart, soft fade) plus outline, long axis radial
                 const a0 = rot + p * seg;
                 const px = cx + Math.cos(a0) * lr, py = cy + Math.sin(a0) * lr;
-                ctx.fillStyle = fillCol;
+                const pr = lr * 0.30;
+                const pg = ctx.createRadialGradient(px, py, 0, px, py, pr * 1.15);
+                pg.addColorStop(0, lineCol);
+                pg.addColorStop(0.5, fillCol);
+                pg.addColorStop(1, npv2Css(S, 0));
+                ctx.fillStyle = pg;
                 ctx.beginPath();
-                ctx.ellipse(px, py, lr * 0.30, lr * 0.17, a0, 0, 6.2832);
+                ctx.ellipse(px, py, pr, lr * 0.17, a0, 0, 6.2832);
                 ctx.fill();
                 ctx.strokeStyle = lineCol;
                 ctx.lineWidth = 1.4;
                 ctx.beginPath();
-                ctx.ellipse(px, py, lr * 0.30, lr * 0.17, a0, 0, 6.2832);
+                ctx.ellipse(px, py, pr, lr * 0.17, a0, 0, 6.2832);
                 ctx.stroke();
             }
         }
@@ -1775,12 +1945,12 @@ function npv2Toast(msg, kind) {
 // ---------------------------------------------------------------------------
 
 const NPV2_VIZ = {
-    freq: new Uint8Array(32),
+    freq: new Uint8Array(NPV2_VIZ_BANDS), // 64 log-spaced bands, 40 Hz–16 kHz
     wave: new Uint8Array(64),
     energy: 0,
     idle: true,
     title: '',
-    beat: 0,        // 0..1 beat envelope, set from the bass bins each frame
+    beat: 0,        // 0..1 beat envelope, set from spectral flux each frame
     pal: { r: 29, g: 185, b: 84 },
     pal2: { r: 185, g: 84, b: 29 }, // accent palette: channel-rotated
     q: 1,           // quality factor for particle counts
@@ -1796,19 +1966,51 @@ function npv2IdleSynth(S, t) {
     }
 }
 
-function npv2ReadAudio(S, t) {
+function npv2ReadAudio(S, t, dt) {
+    if (typeof dt !== 'number' || !isFinite(dt) || dt <= 0) dt = 0.016;
     let idle = true;
     try {
         if (typeof npAnalyser !== 'undefined' && npAnalyser && npv2IsPlaying()) {
-            npAnalyser.getByteFrequencyData(S.freq);
-            npAnalyser.getByteTimeDomainData(S.wave);
+            const va = npv2EnsureVizAnalyser();
+            if (va) {
+                // Song-accurate path: 2048-point FFT mapped to log bands.
+                let sr = 48000;
+                try { sr = npAudioContext.sampleRate || 48000; } catch (e) {}
+                if (!npv2VizBandRanges || npv2VizSr !== sr) {
+                    npv2VizBandRanges = npv2LogBandRanges(sr, NPV2_VIZ_FFT, S.freq.length, NPV2_VIZ_FMIN, NPV2_VIZ_FMAX);
+                    npv2VizSr = sr;
+                    npv2VizRaw = new Uint8Array(NPV2_VIZ_FFT / 2);
+                }
+                va.getByteFrequencyData(npv2VizRaw);
+                va.getByteTimeDomainData(S.wave);
+                npv2MapLogBands(npv2VizRaw, npv2VizBandRanges, S.freq);
+                let sum = 0;
+                for (let i = 0; i < S.freq.length; i++) sum += S.freq[i];
+                S.energy = sum / S.freq.length / 255;
+                S.beat = npv2FluxBeat(npv2VizBeatState(), S.freq, dt);
+            } else {
+                // Fallback: the shared 32-bin analyser. Zero the tail first —
+                // getByteFrequencyData only fills the first 32 bins.
+                S.freq.fill(0);
+                npAnalyser.getByteFrequencyData(S.freq);
+                npAnalyser.getByteTimeDomainData(S.wave);
+                let sum = 0;
+                for (let i = 1; i < 32 && i < S.freq.length; i++) sum += S.freq[i];
+                S.energy = sum / 31 / 255;
+                // Legacy bass-threshold onset (only used when the dedicated
+                // analyser could not be created).
+                const bass = (S.freq[0] + S.freq[1] + S.freq[2]) / 3 / 255;
+                if (bass > 0.55 && S.beat < 0.35) S.beat = 1;
+                S.beat = Math.max(0, S.beat - dt * 2.4);
+            }
             idle = false;
         }
     } catch (e) { /* analyser unavailable — idle synth below */ }
-    if (idle) npv2IdleSynth(S, t);
-    let sum = 0;
-    for (let i = 1; i < S.freq.length; i++) sum += S.freq[i];
-    S.energy = idle ? 0.22 : sum / (S.freq.length - 1) / 255;
+    if (idle) {
+        npv2IdleSynth(S, t);
+        S.energy = 0.22;
+        S.beat = Math.max(0, (S.beat || 0) - dt * 2.4);
+    }
     S.idle = idle;
 }
 
@@ -1837,7 +2039,7 @@ function npv2VizFrame(now) {
     if (!npv2SizeCanvas()) return;
     const w = NPV2.canvas.width, h = NPV2.canvas.height;
     const S = NPV2_VIZ;
-    npv2ReadAudio(S, NPV2.vizT);
+    npv2ReadAudio(S, NPV2.vizT, dt);
     // energy scaled by the user's visual energy; capped in reduce-motion
     S.energy = Math.min(1, S.energy * NPV2.vizEnergy);
     if (NPV2.reduceMotion) S.energy = Math.min(S.energy, 0.45);
