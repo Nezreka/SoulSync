@@ -23,10 +23,16 @@ Absence is not evidence here; a staging path is.
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from typing import Any, Optional, Tuple
 
 from core.downloads.atomic_album_publish import contains_staging_segment
 from core.imports.context import extract_artist_name
+from core.text.title_match import (
+    strip_redundant_context_qualifiers,
+    strip_subtitle_qualifiers,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("wishlist.library_match")
@@ -45,8 +51,46 @@ def artist_names(artists: Any) -> list:
     return [name for name in (extract_artist_name(a) for a in (artists or [])) if name]
 
 
+def _identity_key(value: str) -> str:
+    """Ignore spelling punctuation while retaining recording/version words."""
+    decomposed = unicodedata.normalize('NFKD', value or '')
+    unaccented = ''.join(c for c in decomposed if not unicodedata.combining(c))
+    # Apostrophes do not separate words ("Don't" and "Dont"); underscores do.
+    unaccented = re.sub(r"['’]", '', unaccented)
+    return re.sub(r'[\W_]+', ' ', unaccented.casefold()).strip()
+
+
+def _same_title(requested: str, owned: str, album_context: str = '') -> bool:
+    """Accept metadata wording without discarding a distinct recording version."""
+    if _identity_key(requested) == _identity_key(owned):
+        return True
+    requested_context = strip_redundant_context_qualifiers(requested, album_context, owned)
+    owned_context = strip_redundant_context_qualifiers(owned, album_context, requested)
+    requested_context = strip_subtitle_qualifiers(requested_context, owned_context)
+    owned_context = strip_subtitle_qualifiers(owned_context, requested_context)
+    key = _identity_key(requested_context)
+    return bool(key and key == _identity_key(owned_context))
+
+
+def _same_artist(requested: str, db_track: Any) -> bool:
+    """Guard the database matcher's album fallback, which scores title alone."""
+    # A per-track credit is more specific than the album artist. Checking both
+    # would mistake a different performer's song on an artist compilation for
+    # the requested artist's recording.
+    credit = getattr(db_track, 'track_artist', None) or getattr(db_track, 'artist_name', None)
+    if not credit:
+        return True  # Older database adapters do not expose artist credits.
+    target = _identity_key(requested)
+    parts = re.split(
+        r'\s*(?:[,;&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b|\bx\b)\s*',
+        credit, flags=re.I,
+    )
+    return any(_identity_key(part) == target for part in [credit, *parts])
+
+
 def find_owned_match(music_database, track_name: str, artists: Any, album: Optional[str],
                      active_server: str, *, confidence_threshold: float = 0.7,
+                     strict_identity: bool = False, require_album: bool = False,
                      log=None, log_prefix: str = "[Wishlist]"
                      ) -> Optional[Tuple[Any, float, str]]:
     """``(db_track, confidence, matched_artist)`` for a track the library owns.
@@ -69,6 +113,23 @@ def find_owned_match(music_database, track_name: str, artists: Any, album: Optio
 
         if not db_track or confidence < confidence_threshold:
             continue
+
+        if strict_identity:
+            # check_track_exists can return a same-artist song with a merely
+            # similar title ("Runaway Train" -> "The Sun Maid" at 0.74).
+            # That is useful for search suggestions, but is not proof that a
+            # wishlist request has been fulfilled. Keep version words, too:
+            # an acoustic/demo/live recording may be a distinct target.
+            matched_title = getattr(db_track, 'title', None)
+            matched_album = getattr(db_track, 'album_title', None)
+            if require_album:
+                if not album or not matched_album or _identity_key(album) != _identity_key(matched_album):
+                    continue
+            album_context = matched_album if album and matched_album and _identity_key(album) == _identity_key(matched_album) else ''
+            if not matched_title or not _same_title(track_name, matched_title, album_context):
+                continue
+            if not _same_artist(artist_name, db_track):
+                continue
 
         file_path = getattr(db_track, 'file_path', None)
         if contains_staging_segment(file_path or ''):

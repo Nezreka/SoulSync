@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from core.wishlist import processing
 
 
@@ -42,7 +44,9 @@ class _FakeMusicDatabase:
     def check_track_exists(self, track_name, artist_name, confidence_threshold=0.7, server_source=None, album=None):
         self.track_checks.append((track_name, artist_name, server_source, album))
         if (track_name, artist_name) in self.owned_matches:
-            return {"id": "db-track"}, 0.9
+            return SimpleNamespace(id='db-track', title=track_name,
+                                   artist_name=artist_name, album_title=album,
+                                   file_path='/music/owned.flac'), 0.9
         return None, 0.0
 
 

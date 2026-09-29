@@ -829,6 +829,7 @@ def add_album_track_to_wishlist(
                 _match = find_owned_match(
                     _db, track.get('name', ''), [artist], album.get('name', ''),
                     runtime.active_server,
+                    strict_identity=True, require_album=True,
                     log=runtime.logger, log_prefix='[Wishlist Add]')
                 if _match:
                     runtime.logger.info(
