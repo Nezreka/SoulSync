@@ -84,12 +84,21 @@ def test_different_subtitles_cannot_clear_one_another():
     ) is None
 
 
-def test_single_nonversion_subtitle_can_match_bare_title():
+def test_unknown_subtitle_is_not_proof_of_the_same_recording():
     assert find_owned_match(
         _db('Song', 'Album'), 'Song (Serenade From the Stars)',
         [{'name': 'Soul Asylum'}], 'Album', 'navidrome',
         strict_identity=True, require_album=True,
-    ) is not None
+    ) is None
+
+
+def test_foreign_language_version_qualifiers_are_not_dropped():
+    for requested in ('Song (Versión Acústica)', 'Song (ライブ)'):
+        assert find_owned_match(
+            _db('Song', 'Album'), requested,
+            [{'name': 'Soul Asylum'}], 'Album', 'navidrome',
+            strict_identity=True, require_album=True,
+        ) is None
 
 
 def test_artist_punctuation_uses_existing_library_identity_key():

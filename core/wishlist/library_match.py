@@ -30,10 +30,7 @@ from typing import Any, Optional, Tuple
 from core.downloads.atomic_album_publish import contains_staging_segment
 from core.imports.context import extract_artist_name
 from core.text.normalize import normalize_key
-from core.text.title_match import (
-    strip_redundant_context_qualifiers,
-    strip_subtitle_qualifiers,
-)
+from core.text.title_match import strip_redundant_context_qualifiers
 from utils.logging_config import get_logger
 
 logger = get_logger("wishlist.library_match")
@@ -76,11 +73,6 @@ def _same_title(requested: str, owned: str, album_context: str = '') -> bool:
     # evidence of ownership ("Song (Verse)" is not "Song (Chorus)").
     if requested_context != requested and owned_context != owned:
         return False
-    requested_subtitle = strip_subtitle_qualifiers(requested_context, owned_context)
-    owned_subtitle = strip_subtitle_qualifiers(owned_context, requested_context)
-    if requested_subtitle != requested_context and owned_subtitle != owned_context:
-        return False
-    requested_context, owned_context = requested_subtitle, owned_subtitle
     key = _identity_key(requested_context)
     return bool(key and key == _identity_key(owned_context))
 
