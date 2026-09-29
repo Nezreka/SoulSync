@@ -190,6 +190,14 @@ function npv2ThemeList() {
         { id: 'stardust', name: 'Stardust', blurb: 'Beat-reactive particles' },
         { id: 'vinyl', name: 'Vinyl', blurb: 'Spinning wax, tonearm and all' },
         { id: 'tunnel', name: 'Tunnel', blurb: 'Spectrum wormhole' },
+        { id: 'battery', name: 'Battery', blurb: 'WMP Battery sparks rising' },
+        { id: 'dotplane', name: 'Dot Plane', blurb: 'WMP dot grid pulsing' },
+        { id: 'alchemy', name: 'Alchemy', blurb: 'WMP morphing blobs' },
+        { id: 'fountain', name: 'Fountain', blurb: 'Particle fountain, beat-fed' },
+        { id: 'kaleido', name: 'Kaleidoscope', blurb: 'Mirrored spectrum bloom' },
+        { id: 'warp', name: 'Warp', blurb: 'Starfield at light speed' },
+        { id: 'nebula', name: 'Nebula', blurb: 'Drifting deep-space clouds' },
+        { id: 'bloom', name: 'Bloom', blurb: 'Beat rings expanding out' },
         { id: 'none', name: 'Off', blurb: 'Just the ambient glow' },
     ];
 }
@@ -500,6 +508,270 @@ const NPV2_PAINT = {
 
     // --- Off ----------------------------------------------------------------------
     none() { /* the CSS ambient glow carries the vibe */ },
+
+    // --- WMP Battery: sparks rise, beat kicks burst them -------------------------
+    battery(ctx, w, h, S) {
+        const st = npv2ThemeState('battery', () => ({ parts: [] }));
+        const cx = w / 2;
+        // spawn rate follows the music's energy
+        const spawn = 1 + Math.floor(S.energy * 6);
+        for (let i = 0; i < spawn; i++) {
+            if (st.parts.length > 420) break;
+            st.parts.push({
+                x: cx + (Math.random() - 0.5) * w * 0.5,
+                y: h + 8,
+                vy: -(h * (0.25 + Math.random() * 0.5)) * (0.4 + S.energy),
+                vx: (Math.random() - 0.5) * w * 0.06,
+                life: 1,
+                decay: 0.004 + Math.random() * 0.01,
+                sz: 1 + Math.random() * 2.6,
+                hue: Math.random(),
+            });
+        }
+        ctx.fillStyle = 'rgba(4,6,14,0.28)';
+        ctx.fillRect(0, 0, w, h);
+        for (let i = st.parts.length - 1; i >= 0; i--) {
+            const p = st.parts[i];
+            p.x += p.vx + Math.sin(S.t * 3 + p.y * 0.01) * 0.6;
+            p.y += p.vy * 0.016;
+            p.life -= p.decay * (1 + S.energy * 2);
+            if (p.life <= 0 || p.y < -12) { st.parts.splice(i, 1); continue; }
+            const a = Math.min(1, p.life * 1.4);
+            // sparks tint toward white-hot at the core, palette at the edges
+            ctx.fillStyle = p.hue > 0.82
+                ? 'rgba(255,255,255,' + (a * 0.9) + ')'
+                : npv2Css(S, a * 0.85);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.sz * (0.5 + p.life), 0, 6.2832);
+            ctx.fill();
+        }
+        // ground glow
+        const g = ctx.createLinearGradient(0, h * 0.7, 0, h);
+        g.addColorStop(0, npv2Css(S, 0));
+        g.addColorStop(1, npv2Css(S, 0.30 + S.energy * 0.3));
+        ctx.fillStyle = g;
+        ctx.fillRect(0, h * 0.7, w, h * 0.3);
+    },
+
+    // --- WMP Dot Plane: grid of dots breathing with the spectrum ------------------
+    dotplane(ctx, w, h, S) {
+        const cols = 28, rows = 16;
+        const cw = w / cols, rh = h / rows;
+        const maxR = Math.min(cw, rh) * 0.42;
+        for (let gy = 0; gy < rows; gy++) {
+            for (let gx = 0; gx < cols; gx++) {
+                // each column reads a spectrum slice; rows phase-shift in time
+                const v = npv2Bin(S, gx, cols);
+                const wave = 0.5 + 0.5 * Math.sin(S.t * 1.7 + gx * 0.35 + gy * 0.5);
+                const r = Math.max(0.6, (v * 0.75 + wave * 0.25) * maxR * 2);
+                const x = gx * cw + cw / 2, y = gy * rh + rh / 2;
+                const a = 0.10 + v * 0.75;
+                ctx.fillStyle = npv2Css(S, a);
+                ctx.beginPath();
+                ctx.arc(x, y, Math.min(r, maxR * 2), 0, 6.2832);
+                ctx.fill();
+            }
+        }
+    },
+
+    // --- WMP Alchemy: slow morphing metaball blobs --------------------------------
+    alchemy(ctx, w, h, S) {
+        const st = npv2ThemeState('alchemy', () => ({ seed: Math.random() * 100 }));
+        const blobs = 7;
+        ctx.fillStyle = 'rgba(3,5,12,0.35)';
+        ctx.fillRect(0, 0, w, h);
+        for (let i = 0; i < blobs; i++) {
+            const v = npv2Bin(S, i, blobs);
+            const px = st.seed + i * 13.7;
+            const x = w * (0.5 + 0.38 * Math.sin(S.t * 0.21 + px) * Math.sin(S.t * 0.13 + px * 2));
+            const y = h * (0.5 + 0.36 * Math.cos(S.t * 0.17 + px * 1.3));
+            const r = Math.min(w, h) * (0.10 + v * 0.22 + S.energy * 0.06);
+            const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+            g.addColorStop(0, npv2Css(S, 0.55));
+            g.addColorStop(0.6, npv2Css(S, 0.22));
+            g.addColorStop(1, npv2Css(S, 0));
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, 6.2832);
+            ctx.fill();
+        }
+    },
+
+    // --- Particle fountain: beat-fed spray from the bottom ------------------------
+    fountain(ctx, w, h, S) {
+        const st = npv2ThemeState('fountain', () => ({ parts: [], beat: 0 }));
+        const bass = npv2Bin(S, 0, 8) * 0.6 + npv2Bin(S, 1, 8) * 0.4;
+        if (bass > 0.55 && st.beat <= 0) st.beat = 1;
+        st.beat = Math.max(0, st.beat - 0.06);
+        const cx = w / 2;
+        const spawn = 2 + Math.floor(bass * 10) + (st.beat > 0 ? 14 : 0);
+        for (let i = 0; i < spawn && st.parts.length < 700; i++) {
+            const ang = -Math.PI / 2 + (Math.random() - 0.5) * 0.9;
+            const sp = h * (0.35 + Math.random() * 0.55) * (0.5 + bass);
+            st.parts.push({
+                x: cx + (Math.random() - 0.5) * w * 0.04,
+                y: h * 0.98,
+                vx: Math.cos(ang) * sp,
+                vy: Math.sin(ang) * sp,
+                life: 1,
+                decay: 0.008 + Math.random() * 0.012,
+                sz: 1 + Math.random() * 2.2,
+            });
+        }
+        ctx.fillStyle = 'rgba(3,5,12,0.30)';
+        ctx.fillRect(0, 0, w, h);
+        for (let i = st.parts.length - 1; i >= 0; i--) {
+            const p = st.parts[i];
+            p.vy += h * 0.9 * 0.016; // gravity
+            p.x += p.vx * 0.016;
+            p.y += p.vy * 0.016;
+            p.life -= p.decay;
+            if (p.life <= 0 || p.y > h + 10) { st.parts.splice(i, 1); continue; }
+            ctx.fillStyle = npv2Css(S, Math.min(1, p.life) * 0.8);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.sz, 0, 6.2832);
+            ctx.fill();
+        }
+    },
+
+    // --- Kaleidoscope: mirrored spectrum wedges ------------------------------------
+    kaleido(ctx, w, h, S) {
+        const cx = w / 2, cy = h / 2;
+        const R = Math.min(w, h) * 0.48;
+        const segs = 12, N = 20;
+        const rot = S.t * 0.12;
+        ctx.fillStyle = 'rgba(2,3,9,0.5)';
+        ctx.fillRect(0, 0, w, h);
+        for (let sgm = 0; sgm < segs; sgm++) {
+            const a0 = rot + (sgm / segs) * 6.2832;
+            const a1 = rot + ((sgm + 1) / segs) * 6.2832;
+            for (let i = 0; i < N; i++) {
+                const v = npv2Bin(S, i, N);
+                const r0 = (i / N) * R;
+                const r1 = ((i + 1) / N) * R;
+                ctx.beginPath();
+                ctx.arc(cx, cy, r1, a0, a1);
+                ctx.arc(cx, cy, Math.max(r0, 1), a1, a0, true);
+                ctx.closePath();
+                ctx.fillStyle = npv2Css(S, 0.05 + v * 0.6);
+                ctx.fill();
+            }
+        }
+        // breathing core
+        const bass = npv2Bin(S, 0, 8);
+        ctx.fillStyle = npv2Css(S, 0.5 + bass * 0.4);
+        ctx.beginPath();
+        ctx.arc(cx, cy, 3 + bass * 10, 0, 6.2832);
+        ctx.fill();
+    },
+
+    // --- Warp: starfield rushing past, speed tied to energy -------------------------
+    warp(ctx, w, h, S) {
+        const st = npv2ThemeState('warp', () => ({
+            stars: Array.from({ length: 240 }, () => ({
+                x: Math.random() * 2 - 1, y: Math.random() * 2 - 1, z: Math.random(),
+            })),
+        }));
+        const cx = w / 2, cy = h / 2;
+        const speed = 0.008 + S.energy * 0.05 + (S.idle ? 0.004 : 0);
+        ctx.fillStyle = 'rgba(2,3,9,0.42)';
+        ctx.fillRect(0, 0, w, h);
+        for (const s of st.stars) {
+            s.z -= speed * (0.4 + s.z);
+            if (s.z <= 0.02) { s.x = Math.random() * 2 - 1; s.y = Math.random() * 2 - 1; s.z = 1; }
+            const sx = cx + (s.x / s.z) * cx;
+            const sy = cy + (s.y / s.z) * cy;
+            const px = cx + (s.x / (s.z + speed * 3)) * cx;
+            const py = cy + (s.y / (s.z + speed * 3)) * cy;
+            const bright = 1 - s.z;
+            ctx.strokeStyle = 'rgba(255,255,255,' + (bright * 0.85).toFixed(3) + ')';
+            ctx.lineWidth = Math.max(1, bright * 2.4);
+            ctx.beginPath();
+            ctx.moveTo(px, py);
+            ctx.lineTo(sx, sy);
+            ctx.stroke();
+        }
+        // palette nebula wash behind the streaks
+        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(w, h) * 0.5);
+        g.addColorStop(0, npv2Css(S, 0.20));
+        g.addColorStop(1, npv2Css(S, 0));
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, h);
+    },
+
+    // --- Nebula: slow deep-space clouds ----------------------------------------------
+    nebula(ctx, w, h, S) {
+        const st = npv2ThemeState('nebula', () => ({ seed: Math.random() * 40 }));
+        ctx.fillStyle = '#020309';
+        ctx.fillRect(0, 0, w, h);
+        const layers = [
+            { n: 5, sp: 0.05, al: 0.30, sz: 0.42 },
+            { n: 7, sp: 0.09, al: 0.20, sz: 0.30 },
+            { n: 9, sp: 0.14, al: 0.14, sz: 0.20 },
+        ];
+        for (const L of layers) {
+            for (let i = 0; i < L.n; i++) {
+                const px = st.seed + i * 31.7 + L.sp * 57;
+                const x = w * (0.5 + 0.45 * Math.sin(S.t * L.sp + px));
+                const y = h * (0.5 + 0.45 * Math.cos(S.t * L.sp * 0.8 + px * 1.7));
+                const r = Math.min(w, h) * L.sz * (0.8 + 0.4 * Math.sin(S.t * 0.3 + px));
+                const v = npv2Bin(S, i, L.n);
+                const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+                g.addColorStop(0, npv2Css(S, L.al * (0.5 + v)));
+                g.addColorStop(1, npv2Css(S, 0));
+                ctx.fillStyle = g;
+                ctx.beginPath();
+                ctx.arc(x, y, r, 0, 6.2832);
+                ctx.fill();
+            }
+        }
+        // sparse stars
+        const sst = npv2ThemeState('nebula-stars', () => ({
+            pts: Array.from({ length: 130 }, () => ({ x: Math.random(), y: Math.random(), p: Math.random() * 6.28 })),
+        }));
+        for (const p of sst.pts) {
+            const tw = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(S.t * 1.4 + p.p));
+            ctx.fillStyle = 'rgba(255,255,255,' + tw.toFixed(3) + ')';
+            ctx.fillRect(p.x * w, p.y * h, 1.4, 1.4);
+        }
+    },
+
+    // --- Bloom: beat rings expanding from center --------------------------------------
+    bloom(ctx, w, h, S) {
+        const st = npv2ThemeState('bloom', () => ({ rings: [], beat: 0 }));
+        const cx = w / 2, cy = h / 2;
+        const bass = npv2Bin(S, 0, 10) * 0.7 + npv2Bin(S, 1, 10) * 0.3;
+        if (bass > 0.5 && st.beat <= 0) {
+            st.beat = 1;
+            st.rings.push({ r: 10, w: 3 + bass * 5 });
+            if (st.rings.length > 26) st.rings.shift();
+        }
+        st.beat = Math.max(0, st.beat - 0.05);
+        ctx.fillStyle = 'rgba(3,4,10,0.34)';
+        ctx.fillRect(0, 0, w, h);
+        const maxR = Math.hypot(w, h) / 2;
+        for (let i = st.rings.length - 1; i >= 0; i--) {
+            const rg = st.rings[i];
+            rg.r += (4 + bass * 14) * 0.9;
+            const a = Math.max(0, 1 - rg.r / maxR);
+            if (a <= 0) { st.rings.splice(i, 1); continue; }
+            ctx.strokeStyle = npv2Css(S, a * 0.7);
+            ctx.lineWidth = rg.w * a + 0.6;
+            ctx.beginPath();
+            ctx.arc(cx, cy, rg.r, 0, 6.2832);
+            ctx.stroke();
+        }
+        // breathing core
+        const core = 26 + bass * 60 + Math.sin(S.t * 2.2) * 8;
+        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, core * 2.4);
+        g.addColorStop(0, 'rgba(255,255,255,' + (0.35 + bass * 0.4).toFixed(3) + ')');
+        g.addColorStop(0.4, npv2Css(S, 0.5));
+        g.addColorStop(1, npv2Css(S, 0));
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(cx, cy, core * 2.4, 0, 6.2832);
+        ctx.fill();
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -522,6 +794,8 @@ const NPV2 = {
     vizT: 0,
     canvas: null,
     ctx: null,
+    visualsMode: false,
+    uiHideTimer: 0,
 };
 
 function npv2GetG(name, fallback) {
@@ -656,6 +930,7 @@ function npv2SetTheme(id, opts) {
     const meta = npv2ThemeList().find((t) => t.id === next);
     if (!opts || !opts.silent) npv2Toast('Visuals: ' + (meta ? meta.name : next), 'info');
     npv2SyncVisualBtn();
+    npv2SyncVisualsHeader();
 }
 
 function npv2CycleTheme() {
@@ -682,6 +957,107 @@ function npv2SyncVisualBtn() {
         b.title = 'Visuals: ' + (meta ? meta.name + ' — ' + meta.blurb : NPV2.theme) + ' (click to change)';
         const label = b.querySelector('span');
         if (label) label.textContent = meta ? meta.name : 'Visuals';
+    } catch (e) {}
+}
+
+function npv2PrevTheme() {
+    const ids = npv2ThemeIds();
+    const i = ids.indexOf(NPV2.theme);
+    npv2SetTheme(ids[(i - 1 + ids.length) % ids.length]);
+}
+
+// ---------------------------------------------------------------------------
+// Full-modal visuals mode — the WMP/Plexamp-style takeover. The animated
+// background covers the whole modal; transport + features float over it.
+// Enter: click the album art, the expand button, or F. Exit: Esc, F, or the
+// exit button. The chrome auto-hides after 3s idle.
+// ---------------------------------------------------------------------------
+
+function npv2VisualsModeOn() {
+    return !!(NPV2.visualsMode && npv2ModalOpen());
+}
+
+function npv2SetVisualsMode(on) {
+    const want = !!on;
+    if (want === NPV2.visualsMode) return;
+    NPV2.visualsMode = want;
+    try {
+        const modal = document.querySelector('.np-modal');
+        if (modal) modal.classList.toggle('npv2-visuals-on', want);
+        const exit = document.getElementById('np-v2-visuals-exit');
+        if (exit) exit.classList.toggle('hidden', !want);
+        if (want) {
+            // entering: make sure the background is actually painting
+            if (!NPV2.bgOn) npv2SetBgOn(true);
+            if (NPV2.theme === 'none') npv2SetTheme('aurora', { silent: true });
+            npv2SyncVisualsHeader();
+            npv2VizStart();
+            npv2VisualsWakeUI();
+        } else {
+            npv2VisualsClearIdle();
+            if (modal) modal.classList.remove('npv2-ui-hidden');
+        }
+    } catch (e) {}
+}
+
+function npv2VisualsClearIdle() {
+    try {
+        if (NPV2.uiHideTimer) { clearTimeout(NPV2.uiHideTimer); NPV2.uiHideTimer = 0; }
+    } catch (e) {}
+}
+
+// Any pointer activity wakes the chrome and restarts the 3s auto-hide.
+function npv2VisualsWakeUI() {
+    try {
+        const modal = document.querySelector('.np-modal');
+        if (!npv2VisualsModeOn() || !modal) return;
+        modal.classList.remove('npv2-ui-hidden');
+        npv2VisualsClearIdle();
+        NPV2.uiHideTimer = setTimeout(() => {
+            try {
+                if (npv2VisualsModeOn()) modal.classList.add('npv2-ui-hidden');
+            } catch (e) {}
+        }, 3000);
+    } catch (e) {}
+}
+
+function npv2SyncVisualsHeader() {
+    try {
+        const t = npv2CurrentTrack() || {};
+        const title = document.getElementById('np-v2-visuals-title');
+        const sub = document.getElementById('np-v2-visuals-artist');
+        const theme = document.getElementById('np-v2-visuals-theme-name');
+        if (title) title.textContent = t.title || NPV2_VIZ.title || 'Unknown Track';
+        if (sub) {
+            const bits = [t.artist, t.album].filter(Boolean);
+            sub.textContent = bits.join(' — ') || 'Unknown Artist';
+        }
+        const meta = npv2ThemeList().find((x) => x.id === NPV2.theme);
+        if (theme) theme.textContent = meta ? meta.name : NPV2.theme;
+    } catch (e) {}
+}
+
+// Clicking the album art enters visuals mode (instead of v1's small bars
+// overlay). Capture on the overlay so we run before v1's own art handler.
+function npv2InterceptArtClick() {
+    try {
+        const overlay = document.getElementById('np-modal-overlay');
+        if (!overlay || overlay.__npv2ArtHook) return;
+        overlay.__npv2ArtHook = true;
+        overlay.addEventListener('click', (e) => {
+            try {
+                if (!npv2ModalOpen() || npv2VisualsModeOn()) return;
+                const art = e.target && e.target.closest ? e.target.closest('#np-album-art-container') : null;
+                if (!art) return;
+                e.stopPropagation();
+                e.preventDefault();
+                npv2SetVisualsMode(true);
+            } catch (err) {}
+        }, true);
+        // pointer activity keeps the visuals chrome awake
+        const wake = () => npv2VisualsWakeUI();
+        overlay.addEventListener('pointermove', wake, { passive: true });
+        overlay.addEventListener('pointerdown', wake, { passive: true });
     } catch (e) {}
 }
 
@@ -737,7 +1113,13 @@ function npv2AttachAudioGraph() {
         NPV2.eq.comp = comp;
         npv2ApplyEq();
         return true;
-    } catch (e) { return false; }
+    } catch (e) {
+        // If we disconnected the source but failed to rebuild the chain,
+        // restore v1's direct source->analyser wiring so audio never goes silent.
+        try { src.disconnect(); } catch (e2) {}
+        try { src.connect(analyser); } catch (e3) {}
+        return false;
+    }
 }
 
 function npv2ApplyEq() {
@@ -1322,6 +1704,7 @@ function npv2OnTrackChanged(track) {
         NPV2_VIZ.title = (track && track.title) || '';
         npv2PushHistory(track);
         npv2RenderDetails();
+        npv2SyncVisualsHeader();
         npv2AbReset();
         npv2SetSpeed(NPV2.speed, { silent: true }); // re-stamp playbackRate (covers the xfade element too)
         // The Web Audio context is created lazily on first play; if EQ was
@@ -1364,6 +1747,8 @@ function npv2WatchModal() {
                 npv2VizStop();
                 npv2ToggleShortcuts(false);
                 npv2UpdateWakeLock();
+                // closing the theater backs out of immersive mode too
+                if (NPV2.visualsMode) npv2SetVisualsMode(false);
             }
         }).observe(overlay, { attributes: true, attributeFilter: ['class'] });
     } catch (e) {}
@@ -1440,6 +1825,19 @@ function npv2WireTransport() {
     bindToggle('np-v2-normalize-toggle', (on) => npv2SetNormalize(on));
     bindToggle('np-v2-wake-toggle', (on) => npv2SetWake(on));
 
+    // Full-modal visuals mode wiring
+    try {
+        npv2InterceptArtClick();
+        const exit = document.getElementById('np-v2-visuals-exit');
+        if (exit) exit.addEventListener('click', () => npv2SetVisualsMode(false));
+        const tp = document.getElementById('np-v2-visuals-theme-prev');
+        if (tp) tp.addEventListener('click', () => npv2PrevTheme());
+        const tn = document.getElementById('np-v2-visuals-theme-next');
+        if (tn) tn.addEventListener('click', () => npv2CycleTheme());
+        const expand = document.getElementById('np-v2-visuals-expand');
+        if (expand) expand.addEventListener('click', () => npv2SetVisualsMode(true));
+    } catch (e) {}
+
     try {
         const preset = document.getElementById('np-v2-eq-preset');
         if (preset) preset.addEventListener('change', () => npv2SetEqPreset(preset.value));
@@ -1471,6 +1869,13 @@ function npv2HandleKeys(event) {
                 npv2ToggleShortcuts(false);
                 return;
             }
+            // Esc backs out of full visuals mode before anything else.
+            if (npv2VisualsModeOn()) {
+                event.stopPropagation();
+                event.preventDefault();
+                npv2SetVisualsMode(false);
+                return;
+            }
         } catch (e) {}
         return;
     }
@@ -1498,7 +1903,12 @@ function npv2HandleKeys(event) {
         case 'v':
         case 'V':
             event.preventDefault();
-            npv2CycleTheme();
+            if (event.shiftKey) npv2PrevTheme(); else npv2CycleTheme();
+            break;
+        case 'f':
+        case 'F':
+            event.preventDefault();
+            npv2SetVisualsMode(!npv2VisualsModeOn());
             break;
         default:
             return;
@@ -1583,11 +1993,14 @@ function npv2Init() {
             version: 2,
             setTheme: npv2SetTheme,
             cycleTheme: npv2CycleTheme,
+            prevTheme: npv2PrevTheme,
             setSpeed: npv2SetSpeed,
             setEqPreset: npv2SetEqPreset,
             selectTab: npv2SelectTab,
             attachAudioGraph: npv2AttachAudioGraph,
             themeIds: npv2ThemeIds,
+            setVisualsMode: npv2SetVisualsMode,
+            visualsModeOn: npv2VisualsModeOn,
         };
     } catch (e) {
         // The theater must never break the underlying player.

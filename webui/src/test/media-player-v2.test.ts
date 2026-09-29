@@ -317,9 +317,9 @@ describe('visualization themes', () => {
   );
   const { npv2ThemeList, npv2ThemeIds, NPV2_PAINT } = lifted;
 
-  it('lists 10 themes with names and blurbs', () => {
+  it('lists 18 themes with names and blurbs', () => {
     const list = npv2ThemeList();
-    expect(list).toHaveLength(10);
+    expect(list).toHaveLength(18);
     for (const t of list) {
       expect(t.id).toBeTruthy();
       expect(t.name).toBeTruthy();
@@ -327,6 +327,19 @@ describe('visualization themes', () => {
     }
     expect(npv2ThemeIds()).toContain('aurora');
     expect(npv2ThemeIds()).toContain('none');
+    // the new WMP-oldschool + modern set
+    for (const id of [
+      'battery',
+      'dotplane',
+      'alchemy',
+      'fountain',
+      'kaleido',
+      'warp',
+      'nebula',
+      'bloom',
+    ]) {
+      expect(npv2ThemeIds()).toContain(id);
+    }
   });
 
   it('every theme except "none" has a painter', () => {

@@ -727,3 +727,222 @@
     min-height: 18px;
     margin-top: -6px;
 }
+
+/* ================= Full-modal visuals mode =================
+   The WMP/Plexamp-style takeover: the animated background covers the entire
+   modal, and the transport + features float over it as minimal chrome that
+   auto-hides after 3s idle. Enter via album-art click, the expand button, or
+   F. Exit via Esc, F, or the exit button. */
+
+/* Canvas goes full-bleed: no mask, full opacity */
+.np-modal.npv2-visuals-on #np-v2-bg {
+    opacity: 1;
+    -webkit-mask-image: none;
+    mask-image: none;
+}
+
+/* Legibility scrims over the visuals, under the chrome */
+.np-modal.npv2-visuals-on::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background:
+        linear-gradient(to bottom, rgba(0, 0, 0, 0.50), transparent 24%, transparent 58%, rgba(0, 0, 0, 0.62));
+}
+
+/* Collapse the stage/panel grid — the right column becomes the overlay */
+.np-modal.npv2-visuals-on .np-body {
+    display: block;
+    padding: 0 !important;
+    overflow: visible;
+}
+.np-modal.npv2-visuals-on .np-left {
+    display: none;
+}
+.np-modal.npv2-visuals-on .np-right {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 96px 40px 30px;
+    pointer-events: none;
+    overflow: visible;
+}
+.np-modal.npv2-visuals-on .np-right > * {
+    pointer-events: auto;
+}
+
+/* Hide the panels that don't belong in the immersive view */
+.np-modal.npv2-visuals-on .np-upnext,
+.np-modal.npv2-visuals-on .np-stop-row,
+.np-modal.npv2-visuals-on .np-visualizer,
+.np-modal.npv2-visuals-on .np-v2-tabs,
+.np-modal.npv2-visuals-on .np-v2-tabpanels {
+    display: none;
+}
+
+/* Bottom cluster order: progress, transport, volume, utility pills */
+.np-modal.npv2-visuals-on .np-progress-section { order: 1; }
+.np-modal.npv2-visuals-on .np-controls-row { order: 2; }
+.np-modal.npv2-visuals-on .np-util-row { order: 4; }
+
+/* Volume row: slim and centered in the cluster */
+.np-modal.npv2-visuals-on .np-volume-row,
+.np-modal.npv2-visuals-on .np-volume {
+    order: 3;
+    max-width: 280px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+/* Transport buttons float over the visuals */
+.np-modal.npv2-visuals-on .np-controls-row button {
+    filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.6));
+}
+.np-modal.npv2-visuals-on .np-progress-section,
+.np-modal.npv2-visuals-on .np-util-row {
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7);
+}
+
+/* ---- Visuals header: track identity + theme switcher (top) ---- */
+#np-v2-visuals-header {
+    display: none;
+}
+#np-modal-overlay .np-modal.npv2-visuals-on > #np-v2-visuals-header {
+    display: flex;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 76px; /* clear of the exit button */
+    z-index: 4;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 26px 8px 0 36px;
+    pointer-events: none;
+}
+.np-modal.npv2-visuals-on #np-v2-visuals-header > * {
+    pointer-events: auto;
+}
+#np-v2-visuals-title {
+    margin: 0;
+    font-size: 2rem;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+    color: #fff;
+    text-shadow: 0 2px 18px rgba(0, 0, 0, 0.75);
+    line-height: 1.15;
+}
+#np-v2-visuals-artist {
+    margin: 4px 0 0;
+    font-size: 1.05rem;
+    color: rgba(255, 255, 255, 0.82);
+    text-shadow: 0 1px 10px rgba(0, 0, 0, 0.75);
+}
+#np-v2-visuals-theme-switch {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    padding-top: 6px;
+}
+#np-v2-visuals-theme-name {
+    min-width: 110px;
+    text-align: center;
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.9);
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
+}
+.np-v2-visuals-arrow {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    background: rgba(10, 10, 16, 0.45);
+    color: #fff;
+    font-size: 1rem;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    transition: background 0.15s ease, transform 0.15s ease;
+}
+.np-v2-visuals-arrow:hover {
+    background: rgba(255, 255, 255, 0.18);
+    transform: scale(1.08);
+}
+
+/* ---- Exit button (top-right) ---- */
+#np-v2-visuals-exit {
+    display: none;
+}
+#np-modal-overlay .np-modal.npv2-visuals-on > #np-v2-visuals-exit {
+    display: block;
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    z-index: 5;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    background: rgba(10, 10, 16, 0.55);
+    color: #fff;
+    font-size: 1.15rem;
+    line-height: 1;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    transition: background 0.15s ease, transform 0.15s ease;
+}
+#np-v2-visuals-exit:hover {
+    background: rgba(255, 255, 255, 0.20);
+    transform: scale(1.08);
+}
+
+/* ---- Expand button lives in the normal theater util row ---- */
+#np-v2-visuals-expand {
+    white-space: nowrap;
+}
+
+/* ---- Auto-hide: chrome fades, cursor vanishes for full immersion ---- */
+.np-modal.npv2-visuals-on .np-right,
+.np-modal.npv2-visuals-on #np-v2-visuals-header,
+.np-modal.npv2-visuals-on #np-v2-visuals-exit {
+    transition: opacity 0.45s ease;
+}
+.np-modal.npv2-visuals-on.npv2-ui-hidden .np-right,
+.np-modal.npv2-visuals-on.npv2-ui-hidden #np-v2-visuals-header,
+.np-modal.npv2-visuals-on.npv2-ui-hidden #np-v2-visuals-exit {
+    opacity: 0;
+    pointer-events: none;
+}
+.np-modal.npv2-visuals-on.npv2-ui-hidden {
+    cursor: none;
+}
+
+/* ---- Visuals mode on small screens ---- */
+@media (max-width: 640px) {
+    .np-modal.npv2-visuals-on .np-right {
+        padding: 84px 18px 22px;
+    }
+    .np-modal.npv2-visuals-on #np-v2-visuals-header {
+        padding: 20px 4px 0 20px;
+        right: 64px;
+    }
+    #np-v2-visuals-title {
+        font-size: 1.4rem;
+    }
+    #np-v2-visuals-artist {
+        font-size: 0.9rem;
+    }
+    #np-v2-visuals-theme-name {
+        min-width: 0;
+        font-size: 0.72rem;
+    }
+}

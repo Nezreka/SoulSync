@@ -10824,6 +10824,19 @@
         <div class="np-modal">
             <!-- Player theater backdrop: animated visuals painted by media-player-v2.js -->
             <canvas id="np-v2-bg" aria-hidden="true"></canvas>
+            <!-- Full-modal visuals mode: exit + track/theme header (shown only in visuals mode) -->
+            <button id="np-v2-visuals-exit" class="hidden" title="Exit visuals mode (Esc)">✕</button>
+            <div id="np-v2-visuals-header" aria-hidden="true">
+                <div>
+                    <h2 id="np-v2-visuals-title">Unknown Track</h2>
+                    <p id="np-v2-visuals-artist">Unknown Artist</p>
+                </div>
+                <div id="np-v2-visuals-theme-switch">
+                    <button class="np-v2-visuals-arrow" id="np-v2-visuals-theme-prev" title="Previous visual (Shift+V)">‹</button>
+                    <span id="np-v2-visuals-theme-name">Aurora</span>
+                    <button class="np-v2-visuals-arrow" id="np-v2-visuals-theme-next" title="Next visual (V)">›</button>
+                </div>
+            </div>
             <button class="np-close-btn" id="np-close-btn" title="Minimize">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
                     stroke-linecap="round" stroke-linejoin="round">
@@ -10944,6 +10957,13 @@
                                 <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
                             </svg>
                             <span>Visuals</span>
+                        </button>
+                        <button class="np-util-btn" id="np-v2-visuals-expand" title="Full-screen visuals mode (F)">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                            </svg>
+                            <span>Immersive</span>
                         </button>
                         <button class="np-util-btn" id="np-v2-shorts-btn" title="Keyboard shortcuts (?)">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -11244,6 +11264,8 @@
                         <div class="np-v2-short"><span>A-B loop</span><kbd>L</kbd></div>
                         <div class="np-v2-short"><span>Speed down / up</span><kbd>[ ]</kbd></div>
                         <div class="np-v2-short"><span>Change visuals</span><kbd>V</kbd></div>
+                        <div class="np-v2-short"><span>Previous visual</span><kbd>Shift V</kbd></div>
+                        <div class="np-v2-short"><span>Immersive visuals mode</span><kbd>F</kbd></div>
                         <div class="np-v2-short"><span>This panel</span><kbd>?</kbd></div>
                         <div class="np-v2-short"><span>Minimize player</span><kbd>Esc</kbd></div>
                     </div>
