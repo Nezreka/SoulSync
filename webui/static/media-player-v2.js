@@ -172,10 +172,11 @@ function npv2ClampDb(v) {
 // Visual themes — the Windows Media Player throwback collection + modern vibes
 //
 // Every painter receives (ctx, w, h, S) where S = {
-//   freq: Uint8Array(32) 0..255 frequency magnitudes,
+//   freq: Uint8Array(64) 0..255 log-spaced bands, 40 Hz–16 kHz,
 //   wave: Uint8Array(64) 0..255 time-domain samples,
 //   energy: 0..1 overall level, t: seconds, idle: bool (no real audio),
-//   pal: {r,g,b} album-art palette, css: 'r,g,b' string }
+//   beat: 0..1 onset envelope (spectral flux), pal: {r,g,b} album-art palette,
+//   css: 'r,g,b' string }
 // Painters must be defensive: ctx may be a stub in tests.
 // ---------------------------------------------------------------------------
 
@@ -266,10 +267,10 @@ function npv2ThemeState(id, init) {
 }
 
 function npv2Bin(S, i, count) {
-    // Average a slice of the analyser bins into `count` segments. The slice
-    // start is proportional so painters with more segments than analyser
-    // bins (e.g. 56 bars over 32 bins) still spread across the spectrum
-    // instead of clamping every high segment onto the last bin.
+    // Average a slice of the analyser bands into `count` segments. The slice
+    // start is proportional so painters with more segments than bands
+    // (e.g. 110 spikes over 64 bands) still spread across the spectrum
+    // instead of clamping every high segment onto the last band.
     const n = S.freq.length;
     const per = Math.max(1, Math.floor(n / count));
     let sum = 0;
@@ -293,6 +294,122 @@ function npv2BinS(S, key, i, count) {
 
 function npv2Css(S, alpha) {
     return 'rgba(' + S.pal.r + ',' + S.pal.g + ',' + S.pal.b + ',' + alpha + ')';
+}
+
+// ---------------------------------------------------------------------------
+// Song-accurate analysis — dedicated analyser + log bands + spectral-flux beat
+//
+// v1's shared analyser runs fftSize 64 (32 bins, each ~750 Hz wide at 48 kHz:
+// kick, bass guitar and low toms all land in bin 0). That is fine for v1's
+// mini spectrum, but a visualizer that should *reflect the song* needs real
+// frequency resolution. So the v2 engine taps a dedicated analyser
+// (fftSize 2048, gentle built-in smoothing — v2 does its own musical
+// smoothing) off the shared one and maps its 1024 bins onto 64 log-spaced
+// bands from 40 Hz to 16 kHz. Log spacing matches how we hear: each band is
+// roughly a constant musical interval, so a vocal and a cymbal get the same
+// visual weight as a kick.
+//
+// Beat detection is spectral flux, not a bass threshold: it measures how
+// much the spectrum *rose* since the last frame and fires when that rise
+// clearly exceeds its recent average. A fingerpicked guitar triggers it as
+// reliably as a four-on-the-floor kick; a constant loud bassline does not
+// pin it.
+// ---------------------------------------------------------------------------
+
+const NPV2_VIZ_BANDS = 64;
+const NPV2_VIZ_FMIN = 40;     // Hz — below this is rumble, not music
+const NPV2_VIZ_FMAX = 16000;  // Hz — above this is air few speakers reproduce
+const NPV2_VIZ_FFT = 2048;
+
+let npv2VizAnalyser = null;    // dedicated analyser, created lazily
+let npv2VizBandRanges = null;  // [[loBin, hiBin]] per band for the current sr
+let npv2VizSr = 0;
+let npv2VizRaw = null;         // Uint8Array(1024) scratch
+let npv2VizBeatSt = null;      // spectral-flux state
+
+function npv2EnsureVizAnalyser() {
+    if (npv2VizAnalyser) return npv2VizAnalyser;
+    let AC = null, analyser = null;
+    try {
+        AC = (typeof npAudioContext !== 'undefined' && npAudioContext) || null;
+        analyser = (typeof npAnalyser !== 'undefined' && npAnalyser) || null;
+    } catch (e) { return null; }
+    if (!AC || !analyser) return null;
+    try {
+        const va = AC.createAnalyser();
+        va.fftSize = NPV2_VIZ_FFT;
+        // Gentle built-in smoothing: v2 does its own fast-attack /
+        // slow-release smoothing per painter, so the raw feed stays lively.
+        va.smoothingTimeConstant = 0.5;
+        // Tap after the shared analyser. An analyser passes audio through
+        // untouched, so this disturbs nothing upstream or downstream, and it
+        // survives v2's EQ rewire (which only touches source->…->analyser).
+        analyser.connect(va);
+        va.connect(AC.destination);
+        npv2VizAnalyser = va;
+        return va;
+    } catch (e) { return null; }
+}
+
+// Log-spaced band edges over the FFT bins. Pure — tested in vitest.
+// With a 2048-point FFT the low bands are narrower than one FFT bin, so
+// adjacent low bands can share/repeat bins; that limited low-frequency
+// resolution is expected and the mapping still stays ordered/gap-free.
+function npv2LogBandRanges(sr, fftSize, bandCount, fMin, fMax) {
+    const binHz = sr / fftSize;
+    const maxBin = fftSize / 2 - 1;
+    const ratio = Math.pow(fMax / fMin, 1 / bandCount);
+    const ranges = [];
+    for (let b = 0; b < bandCount; b++) {
+        // Bin 0 is DC — start at 1 so silence stays silent.
+        const lo = Math.min(maxBin, Math.max(1, Math.floor(fMin * Math.pow(ratio, b) / binHz)));
+        const hi = Math.min(maxBin, Math.max(lo, Math.ceil(fMin * Math.pow(ratio, b + 1) / binHz) - 1));
+        ranges.push([lo, hi]);
+    }
+    return ranges;
+}
+
+// Average the raw FFT bins into the log bands. Pure — tested in vitest.
+function npv2MapLogBands(raw, ranges, out) {
+    for (let b = 0; b < ranges.length; b++) {
+        const lo = ranges[b][0], hi = ranges[b][1];
+        let sum = 0, n = 0;
+        for (let k = lo; k <= hi && k < raw.length; k++) { sum += raw[k]; n++; }
+        out[b] = n ? Math.round(sum / n) : 0;
+    }
+    return out;
+}
+
+// Spectral-flux onset detection. `st` is {prev: Float32Array, hist: [], beat}
+// and is resized defensively so tests can use any band count. Returns the
+// 0..1 beat envelope. Pure apart from the state object — tested in vitest.
+function npv2FluxBeat(st, bands, dt) {
+    if (!st.prev || st.prev.length !== bands.length) st.prev = new Float32Array(bands.length);
+    if (!Array.isArray(st.hist)) st.hist = [];
+    // Flux: how much the spectrum rose since the last frame, 0..~1.
+    let flux = 0;
+    for (let i = 0; i < bands.length; i++) {
+        const d = bands[i] - st.prev[i];
+        if (d > 0) flux += d;
+        st.prev[i] = bands[i];
+    }
+    flux /= bands.length * 255;
+    st.hist.push(flux);
+    if (st.hist.length > 86) st.hist.shift(); // ~1.4 s of context at 60 fps
+    let mean = 0;
+    for (let h = 0; h < st.hist.length; h++) mean += st.hist[h];
+    mean /= Math.max(1, st.hist.length);
+    // Onset when the rise clearly exceeds its recent average. The floor
+    // keeps digital silence from self-triggering.
+    if (st.beat < 0.35 && flux > Math.max(0.012, mean * 1.6)) st.beat = 1;
+    st.beat = Math.max(0, st.beat - dt * 2.4);
+    if (typeof st.beat !== 'number' || !isFinite(st.beat)) st.beat = 0;
+    return st.beat;
+}
+
+function npv2VizBeatState() {
+    if (!npv2VizBeatSt) npv2VizBeatSt = { prev: new Float32Array(NPV2_VIZ_BANDS), hist: [], beat: 0 };
+    return npv2VizBeatSt;
 }
 
 // ---------------------------------------------------------------------------
@@ -734,8 +851,13 @@ const NPV2_PAINT = {
             const pts = [];
             for (let i = 0; i <= steps; i++) {
                 const x = (i / steps) * w;
+                // The melody shapes the curtain: smoothed spectrum across the
+                // sky, so a bright synth line visibly lifts the edge where it
+                // sits in the mix and a bass drop lets it sink.
+                const sv = npv2BinS(S, 'aurora' + ri, i, steps);
                 const y = h * R.y + Math.sin(i * 0.11 + S.t * R.speed * 2 + ri * 2.1) * h * R.amp * (0.6 + S.energy * 0.8)
-                    + Math.sin(i * 0.031 - S.t * R.speed) * h * R.amp * 0.5;
+                    + Math.sin(i * 0.031 - S.t * R.speed) * h * R.amp * 0.5
+                    - (sv - 0.30) * h * 0.20;
                 pts.push([x, y]);
                 if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
             }
@@ -752,7 +874,9 @@ const NPV2_PAINT = {
                 const fx = (k + 0.5) / rays + st['rayJ' + ri + '_' + k] * 0.04;
                 const py = pts[Math.min(steps, Math.max(0, Math.round(fx * steps)))][1];
                 const breathe = 0.7 + 0.3 * Math.sin(S.t * 1.3 + k * 2.4 + ri * 1.7);
-                const rayLen = h * (0.08 + R.amp * 2.4) * breathe * (0.75 + st['rayJ' + ri + '_' + k] * 0.5);
+                // Rays grow where the spectrum is hot at their position.
+                const rv = npv2BinS(S, 'aurora-ray' + ri, k, rays);
+                const rayLen = h * (0.08 + R.amp * 2.4) * breathe * (0.75 + st['rayJ' + ri + '_' + k] * 0.5) * (0.55 + rv * 0.9);
                 const tilt = (st['rayT' + ri + '_' + k] - 0.5) * rayLen * 0.35;
                 const rg = ctx.createLinearGradient(0, py, 0, py - rayLen);
                 rg.addColorStop(0, npv2PalA(pal, (R.alpha * 0.9 * breathe).toFixed(3)));
@@ -1775,12 +1899,12 @@ function npv2Toast(msg, kind) {
 // ---------------------------------------------------------------------------
 
 const NPV2_VIZ = {
-    freq: new Uint8Array(32),
+    freq: new Uint8Array(NPV2_VIZ_BANDS), // 64 log-spaced bands, 40 Hz–16 kHz
     wave: new Uint8Array(64),
     energy: 0,
     idle: true,
     title: '',
-    beat: 0,        // 0..1 beat envelope, set from the bass bins each frame
+    beat: 0,        // 0..1 beat envelope, set from spectral flux each frame
     pal: { r: 29, g: 185, b: 84 },
     pal2: { r: 185, g: 84, b: 29 }, // accent palette: channel-rotated
     q: 1,           // quality factor for particle counts
@@ -1796,19 +1920,51 @@ function npv2IdleSynth(S, t) {
     }
 }
 
-function npv2ReadAudio(S, t) {
+function npv2ReadAudio(S, t, dt) {
+    if (typeof dt !== 'number' || !isFinite(dt) || dt <= 0) dt = 0.016;
     let idle = true;
     try {
         if (typeof npAnalyser !== 'undefined' && npAnalyser && npv2IsPlaying()) {
-            npAnalyser.getByteFrequencyData(S.freq);
-            npAnalyser.getByteTimeDomainData(S.wave);
+            const va = npv2EnsureVizAnalyser();
+            if (va) {
+                // Song-accurate path: 2048-point FFT mapped to log bands.
+                let sr = 48000;
+                try { sr = npAudioContext.sampleRate || 48000; } catch (e) {}
+                if (!npv2VizBandRanges || npv2VizSr !== sr) {
+                    npv2VizBandRanges = npv2LogBandRanges(sr, NPV2_VIZ_FFT, S.freq.length, NPV2_VIZ_FMIN, NPV2_VIZ_FMAX);
+                    npv2VizSr = sr;
+                    npv2VizRaw = new Uint8Array(NPV2_VIZ_FFT / 2);
+                }
+                va.getByteFrequencyData(npv2VizRaw);
+                va.getByteTimeDomainData(S.wave);
+                npv2MapLogBands(npv2VizRaw, npv2VizBandRanges, S.freq);
+                let sum = 0;
+                for (let i = 0; i < S.freq.length; i++) sum += S.freq[i];
+                S.energy = sum / S.freq.length / 255;
+                S.beat = npv2FluxBeat(npv2VizBeatState(), S.freq, dt);
+            } else {
+                // Fallback: the shared 32-bin analyser. Zero the tail first —
+                // getByteFrequencyData only fills the first 32 bins.
+                S.freq.fill(0);
+                npAnalyser.getByteFrequencyData(S.freq);
+                npAnalyser.getByteTimeDomainData(S.wave);
+                let sum = 0;
+                for (let i = 1; i < 32 && i < S.freq.length; i++) sum += S.freq[i];
+                S.energy = sum / 31 / 255;
+                // Legacy bass-threshold onset (only used when the dedicated
+                // analyser could not be created).
+                const bass = (S.freq[0] + S.freq[1] + S.freq[2]) / 3 / 255;
+                if (bass > 0.55 && S.beat < 0.35) S.beat = 1;
+                S.beat = Math.max(0, S.beat - dt * 2.4);
+            }
             idle = false;
         }
     } catch (e) { /* analyser unavailable — idle synth below */ }
-    if (idle) npv2IdleSynth(S, t);
-    let sum = 0;
-    for (let i = 1; i < S.freq.length; i++) sum += S.freq[i];
-    S.energy = idle ? 0.22 : sum / (S.freq.length - 1) / 255;
+    if (idle) {
+        npv2IdleSynth(S, t);
+        S.energy = 0.22;
+        S.beat = Math.max(0, (S.beat || 0) - dt * 2.4);
+    }
     S.idle = idle;
 }
 
@@ -1837,7 +1993,7 @@ function npv2VizFrame(now) {
     if (!npv2SizeCanvas()) return;
     const w = NPV2.canvas.width, h = NPV2.canvas.height;
     const S = NPV2_VIZ;
-    npv2ReadAudio(S, NPV2.vizT);
+    npv2ReadAudio(S, NPV2.vizT, dt);
     // energy scaled by the user's visual energy; capped in reduce-motion
     S.energy = Math.min(1, S.energy * NPV2.vizEnergy);
     if (NPV2.reduceMotion) S.energy = Math.min(S.energy, 0.45);
