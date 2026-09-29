@@ -3203,6 +3203,33 @@ function processModalStatusUpdate(playlistId, data) {
     _patchOverlayActive();
 
 
+    // a batch cancelled on the server (downloads page, a card, anywhere but
+    // this modal's own Cancel All) ends here. no phase branch below took
+    // 'cancelled', and the one that tried sat inside the complete/error
+    // check, so it could never run: the modal read "running" until the
+    // server reaped the batch five minutes later, then polled it forever
+    // (#1384). first, too, so a cancel never reads as "Download complete!"
+    if (data.phase === 'cancelled') {
+        if (process.status !== 'cancelled') {
+            process.status = 'cancelled';
+            const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
+            if (cancelBtn) cancelBtn.style.display = 'none';
+            updatePlaylistCardUI(playlistId);
+
+            // Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist on cancel
+            if (playlistId.startsWith('youtube_')) {
+                const urlHash = playlistId.replace('youtube_', '');
+                updateYouTubeCardPhase(urlHash, 'discovered');
+                if (urlHash.startsWith('mirrored_')) {
+                    updateMirroredCardPhase(urlHash, 'discovered');
+                }
+            }
+
+            showToast(`Process cancelled for ${(process.playlist && process.playlist.name) || 'this download'}.`, 'info');
+        }
+        return;
+    }
+
     if (data.phase === 'queued') {
         // Submitted to the executor but no worker has picked it up yet.
         // ``missing_download_executor`` is bounded (max_workers=3 by
@@ -3602,22 +3629,7 @@ function processModalStatusUpdate(playlistId, data) {
 
             // Note: Auto-show logic removed - wishlist modal visibility managed by user interaction only
 
-            if (data.phase === 'cancelled') {
-                if (process.status !== 'cancelled') {
-                    process.status = 'cancelled';
-
-                    // Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist on cancel
-                    if (playlistId.startsWith('youtube_')) {
-                        const urlHash = playlistId.replace('youtube_', '');
-                        updateYouTubeCardPhase(urlHash, 'discovered');
-                        if (urlHash.startsWith('mirrored_')) {
-                            updateMirroredCardPhase(urlHash, 'discovered');
-                        }
-                    }
-
-                    showToast(`Process cancelled for ${process.playlist.name}.`, 'info');
-                }
-            } else if (data.phase === 'error') {
+            if (data.phase === 'error') {
                 if (process.status !== 'complete') {
                     process.status = 'complete';
                     updatePlaylistCardUI(playlistId); // Update card to show ready for review

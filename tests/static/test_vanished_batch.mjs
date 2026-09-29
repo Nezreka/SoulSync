@@ -7,7 +7,10 @@
 // playlist's download modal showed the process still running with nothing
 // downloading, and the log repeated "Returning status for 0 batches" every
 // poll. The batch had been deleted server-side; the modal only learns a batch
-// ended through a status update, and a deleted batch never sends one.
+// ended through a status update, and a deleted batch never sends one. the
+// status update itself never handled a server-side cancel either: no phase
+// branch took 'cancelled', so the modal read "running" until the batch was
+// reaped.
 
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -125,4 +128,62 @@ test('both global pollers run the check and skip a batch that is gone', () => {
     assert.equal(calls, 2);
     const skips = SOURCE.split('process.batchId && !process.batchGone &&').length - 1;
     assert.equal(skips, 2);
+});
+
+describe('processModalStatusUpdate with a batch cancelled on the server', () => {
+    function setup(playlistId = 'p1') {
+        const elements = {};
+        const ctx = {
+            activeDownloadProcesses: {},
+            toasts: [],
+            cards: [],
+            youtube: [],
+            console: { debug() {}, log() {}, warn() {}, error() {} },
+            _patchOverlayActive() {},
+            updatePlaylistCardUI(id) { ctx.cards.push(id); },
+            updateYouTubeCardPhase(hash, phase) { ctx.youtube.push([hash, phase]); },
+            updateMirroredCardPhase() {},
+            showToast(msg) { ctx.toasts.push(msg); },
+            document: {
+                getElementById(id) {
+                    elements[id] = elements[id] || { style: { display: 'inline-block' } };
+                    return elements[id];
+                },
+            },
+        };
+        ctx.activeDownloadProcesses[playlistId] = {
+            status: 'running', batchId: 'b1', playlist: { name: 'Road Trip' },
+        };
+        vm.createContext(ctx);
+        vm.runInContext(lift('processModalStatusUpdate'), ctx);
+        return { ctx, elements, process: ctx.activeDownloadProcesses[playlistId] };
+    }
+
+    test('ends the process once, hides cancel, resets the card (#1384)', () => {
+        const { ctx, elements, process } = setup();
+        ctx.processModalStatusUpdate('p1', { phase: 'cancelled', tasks: [] });
+        assert.equal(process.status, 'cancelled');
+        assert.equal(elements['cancel-all-btn-p1'].style.display, 'none');
+        assert.deepEqual([...ctx.cards], ['p1']);
+        assert.equal(ctx.toasts.length, 1);
+        assert.match(ctx.toasts[0], /Process cancelled for Road Trip/);
+        // a later poll that still says cancelled doesn't toast again
+        ctx.processModalStatusUpdate('p1', { phase: 'cancelled', tasks: [] });
+        assert.equal(ctx.toasts.length, 1);
+    });
+
+    test('a cancelled youtube playlist goes back to discovered', () => {
+        const { ctx } = setup('youtube_abc');
+        ctx.processModalStatusUpdate('youtube_abc', { phase: 'cancelled', tasks: [] });
+        assert.deepEqual(ctx.youtube.map((x) => [...x]), [['abc', 'discovered']]);
+    });
+
+    test('never reads as "Download complete!" even when every task is cancelled', () => {
+        const { ctx } = setup();
+        ctx.processModalStatusUpdate('p1', {
+            phase: 'cancelled',
+            tasks: [{ track_index: 0, status: 'cancelled' }, { track_index: 1, status: 'cancelled' }],
+        });
+        assert.ok(ctx.toasts.every((t) => !/complete/i.test(t)), ctx.toasts.join(' | '));
+    });
 });
