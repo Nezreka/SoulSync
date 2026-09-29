@@ -342,6 +342,59 @@ def test_fuzzy_rejects_low_similarity(tmp_path):
     assert found is None
 
 
+# ---------------------------------------------------------------------------
+# Issue #1366 — an extensionless ``id||title`` dispatch key never matched
+# the file on disk. Streaming clients encode ``track_id||artist - title``
+# with NO extension (e.g. Deezer), so the finder compared the extensionless
+# target 'PRYVT - ANGEL' against the full on-disk name 'PRYVT - ANGEL.flac':
+# 0.839, under the 0.85 floor. slskd reported the download complete, the
+# 50 MB file sat in the downloads folder, and post-processing retried 5x
+# then failed it as "never appeared under the download folder".
+# The fuzzy tier now also compares against the stem, so the extensionless
+# target scores 1.0. The full-name comparison is unchanged.
+# ---------------------------------------------------------------------------
+
+
+def test_finds_file_for_extensionless_encoded_title(tmp_path):
+    """#1366: '353882896||PRYVT - ANGEL' must find 'PRYVT - ANGEL.flac'."""
+    downloads = tmp_path / 'downloads'
+    target = downloads / 'PRYVT - ANGEL.flac'
+    _touch(target)
+
+    found, location = find_completed_audio_file(
+        str(downloads), '353882896||PRYVT - ANGEL',
+    )
+
+    assert found == str(target)
+    assert location == 'downloads'
+
+
+def test_extensionless_encoded_title_still_rejects_unrelated_file(tmp_path):
+    """The stem comparison must not drag in unrelated audio files."""
+    downloads = tmp_path / 'downloads'
+    _touch(downloads / 'random-unrelated-file.flac')
+
+    found, _ = find_completed_audio_file(
+        str(downloads), '353882896||PRYVT - ANGEL',
+    )
+
+    assert found is None
+
+
+def test_extensionless_encoded_title_prefers_closest_stem(tmp_path):
+    """Two similar stems: the closer one wins, deterministically."""
+    downloads = tmp_path / 'downloads'
+    _touch(downloads / 'PRYVT - ANGEL (Live).flac')
+    target = downloads / 'PRYVT - ANGEL.flac'
+    _touch(target)
+
+    found, _ = find_completed_audio_file(
+        str(downloads), '353882896||PRYVT - ANGEL',
+    )
+
+    assert found == str(target)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
 
