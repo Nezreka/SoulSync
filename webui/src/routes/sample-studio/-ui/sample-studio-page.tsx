@@ -32,6 +32,9 @@ export function SampleStudioPage() {
   const [selected, setSelected] = useState<StudioTrack | null>(null);
   const [stemSource, setStemSource] = useState<StemName | null>(null);
   const [stashError, setStashError] = useState<string | null>(null);
+  // Bumped by Try again: re-fires the analysis query with ?retry=1 so a
+  // sticky worker error is cleared and the track re-queues.
+  const [analysisRetryNonce, setAnalysisRetryNonce] = useState(0);
   const debounceRef = useRef(0);
   const stashAudioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -43,7 +46,9 @@ export function SampleStudioPage() {
   };
 
   const tracksQuery = useQuery(studioTrackSearchQueryOptions(debouncedQuery));
-  const analysisQuery = useQuery(studioAnalysisQueryOptions(selected?.id ?? null));
+  const analysisQuery = useQuery(
+    studioAnalysisQueryOptions(selected?.id ?? null, analysisRetryNonce),
+  );
   const peaksQuery = useQuery(studioPeaksQueryOptions(selected?.id ?? null, 1500, stemSource));
   const stashQuery = useQuery(studioStashQueryOptions());
 
@@ -53,18 +58,21 @@ export function SampleStudioPage() {
   const analysisError =
     selected && analysis && isAnalysisError(analysis.status)
       ? analysisErrorMessage(analysis.status)
-      : null;
+      : selected && analysisQuery.error
+        ? 'Could not load the analysis for this track. Check your connection and try again.'
+        : null;
 
   const retryAnalysis = () => {
-    void queryClient.invalidateQueries({
-      queryKey: [...SAMPLE_STUDIO_QUERY_KEY, 'analysis', selected?.id] as const,
-    });
+    // New query key -> refetch with ?retry=1: clears the sticky worker
+    // error server-side and queues the track again.
+    setAnalysisRetryNonce((n) => n + 1);
   };
 
   // A stem only makes sense for the track it was separated from.
   const selectTrack = (track: StudioTrack | null) => {
     setSelected(track);
     setStemSource(null);
+    setAnalysisRetryNonce(0);
   };
 
   const refreshStash = () => {

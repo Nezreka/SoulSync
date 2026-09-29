@@ -189,6 +189,56 @@ describe('studioTrackSearchQueryOptions', () => {
     expect(calls[0].url).toContain('q=rock');
   });
 
+  it('converts track duration from milliseconds to seconds', async () => {
+    // serialize_track ships the tracks.duration DB unit (ms); the panel's
+    // length filter and the editor header work in seconds. 206000ms -> 206s,
+    // not the "3433:20.0" a raw pass-through produced.
+    routes['library/tracks'] = ok({
+      success: true,
+      data: {
+        tracks: [
+          { id: 2, duration: 206000 },
+          { id: 3, duration: null },
+        ],
+      },
+      error: null,
+    });
+    const opts = studioTrackSearchQueryOptions('rock');
+    const tracks = await opts.queryFn!({} as never);
+    expect(tracks).toEqual([
+      { id: 2, duration: 206 },
+      { id: 3, duration: null },
+    ]);
+  });
+
+  it('converts recently-added durations from milliseconds to seconds', async () => {
+    routes['recently-added'] = ok({
+      success: true,
+      data: { items: [{ id: 1, duration: 120000 }], type: 'tracks' },
+      error: null,
+    });
+    const opts = studioTrackSearchQueryOptions('   ');
+    const tracks = await opts.queryFn!({} as never);
+    expect(tracks).toEqual([{ id: 1, duration: 120 }]);
+  });
+
+  it('analysis retry nonce adds ?retry=1 to clear a sticky worker error', async () => {
+    routes['/api/sample/analysis'] = ok({
+      success: true,
+      data: { track_id: 7, status: 'pending' },
+      error: null,
+    });
+    const plain = studioAnalysisQueryOptions(7);
+    await plain.queryFn!({} as never);
+    expect(calls[0].url).not.toContain('retry=');
+    expect(plain.queryKey).toContain(0);
+
+    const retry = studioAnalysisQueryOptions(7, 1);
+    await retry.queryFn!({} as never);
+    expect(calls[1].url).toContain('retry=1');
+    expect(retry.queryKey).toContain(1);
+  });
+
   it('normalizes a missing analysis payload', async () => {
     routes['/api/sample/analysis'] = ok({
       success: true,

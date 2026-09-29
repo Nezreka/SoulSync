@@ -98,10 +98,84 @@ def _resolve_source_path(track_id: int, stem: str | None) -> str:
     return path
 
 
-def fetch_analysis(track_id: int):
+def _is_artist_page(rows, q):
+    """True when every row genuinely belongs to the named artist.
+
+    The free-text artist interpretation (`artist=q`) stays on the indexed
+    artist scope only when q names a library artist. Otherwise it falls
+    through to the unscoped fuzzy stage, which can fill the page with junk
+    (any common word like "track" matches every title) — trusting that page
+    would suppress the title interpretation entirely.
+    """
+    want = (q or "").strip().casefold()
+    if not rows or not want:
+        return False
+    for r in rows:
+        name = (r.get("artist_name") or "").strip().casefold()
+        credit = (r.get("track_artist") or "").strip().casefold()
+        if name != want and credit != want:
+            return False
+    return True
+
+
+def _merge_track_rows(passes, limit):
+    """Merge pass results in order, deduped, capped at `limit`."""
+    from api.serializers import serialize_track
+
+    seen = set()
+    tracks = []
+    for rows in passes:
+        for row in rows:
+            if len(tracks) >= limit:
+                break
+            row_id = row.get("id")
+            if row_id in seen:
+                continue
+            seen.add(row_id)
+            tracks.append(serialize_track(row))
+        if len(tracks) >= limit:
+            break
+    return tracks
+
+
+def search_library_tracks(q=None, title="", artist="", limit=50):
+    """Track search backing the Sample Studio library panel.
+
+    Free-text `q` tries the ARTIST interpretation first: when q names a
+    library artist the cascade stays on the indexed artist scope (no
+    full-table fuzzy scan). If that page is full AND every row really
+    belongs to the artist, the title cascade is skipped — its fuzzy stage
+    would otherwise burn a full-table scan just to re-find the same rows.
+    In every other case both interpretations run and merge exactly as
+    before (title first), so result sets are unchanged. Returns serialized
+    tracks, merged/deduped, capped at `limit`.
+    """
+    q = (q or "").strip()
+    title = (title or "").strip()
+    artist = (artist or "").strip()
+    if not q and not (title or artist):
+        raise SampleHttpError("BAD_REQUEST", "q, title, or artist is required", 400)
+    limit = max(1, min(int(limit or 50), 200))
+
+    db = get_database()
+    if q:
+        artist_rows = db.api_search_tracks(title="", artist=q, limit=limit)
+        if len(artist_rows) >= limit and _is_artist_page(artist_rows, q):
+            return _merge_track_rows([artist_rows], limit)
+        title_rows = db.api_search_tracks(title=q, artist="", limit=limit)
+        return _merge_track_rows([title_rows, artist_rows], limit)
+    return _merge_track_rows(
+        [db.api_search_tracks(title=title, artist=artist, limit=limit)], limit
+    )
+
+
+def fetch_analysis(track_id: int, retry: bool = False):
     """Cached analysis row, or enqueue + return pending status.
 
     Returns (payload_dict, http_status). Never raises except SampleHttpError.
+    Worker-recorded errors are sticky (see core.sample.worker) so a polling
+    client actually observes the failure; pass retry=True to clear a recorded
+    error and queue the track again.
     """
     _require_track(track_id)
     try:
@@ -111,7 +185,7 @@ def fetch_analysis(track_id: int):
         row = sample_store.get_analysis(track_id)
         if row is not None:
             return {**row, "status": "done"}, 200
-        status = sample_worker.enqueue_analysis(track_id)
+        status = sample_worker.enqueue_analysis(track_id, retry=retry)
         return {"track_id": track_id, "status": status}, 202
     except SampleHttpError:
         raise
@@ -121,12 +195,18 @@ def fetch_analysis(track_id: int):
 
 
 def enqueue_track_analysis(track_id: int):
-    """Enqueue background analysis for a track. Idempotent."""
+    """Enqueue background analysis for a track. Idempotent.
+
+    A sticky worker error is surfaced as a 422 failure envelope rather than
+    a 200 "success" — the caller needs to know the track did NOT queue.
+    """
     _require_track(track_id)
     try:
         from core.sample import worker as sample_worker
 
         status = sample_worker.enqueue_analysis(track_id)
+        if status.startswith("error:"):
+            return {"track_id": track_id, "status": status}, 422
         return {"track_id": track_id, "status": status}, 200
     except SampleHttpError:
         raise
@@ -553,13 +633,16 @@ def register_routes(bp):
 
         This is the lazy backfill path: opening a never-analyzed track in
         Studio enqueues it and the client polls until status == done.
+        Worker-recorded errors are sticky so the poll observes them;
+        pass ?retry=1 to clear a recorded error and queue again.
         """
         try:
             track_id = int(request.args.get("track_id") or 0)
         except (TypeError, ValueError):
             return api_error("BAD_REQUEST", "track_id is required", 400)
         try:
-            payload, status = fetch_analysis(track_id)
+            retry = (request.args.get("retry") or "") == "1"
+            payload, status = fetch_analysis(track_id, retry=retry)
             return api_success(payload, status=status)
         except SampleHttpError as e:
             return _handle_service_error(e)
@@ -575,6 +658,10 @@ def register_routes(bp):
             return api_error("BAD_REQUEST", "track_id is required", 400)
         try:
             payload, status = enqueue_track_analysis(track_id)
+            if status != 200:
+                # Sticky worker error: the track did NOT queue. Report the
+                # failure honestly instead of a 200 "success".
+                return api_error("ANALYSIS_ERROR", payload["status"], status)
             return api_success(payload, status=status)
         except SampleHttpError as e:
             return _handle_service_error(e)
