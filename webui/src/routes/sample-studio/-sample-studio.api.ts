@@ -62,16 +62,28 @@ export function studioTrackSearchQueryOptions(query: string) {
             searchParams: { type: 'tracks', limit: 50 },
           }),
         );
-        return payload.data.items;
+        return payload.data.items.map(toStudioTrack);
       }
       const payload = await readJson<Envelope<TrackSearchResponse>>(
         apiClient.get('library/tracks', {
           searchParams: { q, limit: 50 },
         }),
       );
-      return payload.data.tracks;
+      return payload.data.tracks.map(toStudioTrack);
     },
   });
+}
+
+/**
+ * serialize_track ships `duration` in MILLISECONDS (the tracks.duration DB
+ * unit); every Sample Studio consumer (length filter, editor header,
+ * waveform fallback) works in seconds. Convert once here — the search
+ * queryFn above is the single choke point both the search and the browse
+ * view flow through, so every StudioTrack in the app carries seconds.
+ */
+function toStudioTrack(row: StudioTrack): StudioTrack {
+  const ms = row.duration;
+  return { ...row, duration: typeof ms === 'number' ? ms / 1000 : ms };
 }
 
 function normalizeAnalysis(payload: AnalysisPayload): SampleAnalysis {
@@ -88,15 +100,22 @@ function normalizeAnalysis(payload: AnalysisPayload): SampleAnalysis {
  * Track analysis. Refetches on an interval while the status isn't done —
  * this is the lazy-backfill poll: opening a never-analyzed track enqueues it
  * server-side (202) and we poll until the worker finishes.
+ *
+ * Worker-recorded errors are sticky server-side so the poll observes them
+ * (then refetchInterval stops and the UI shows Try again). Bumping
+ * `retryNonce` re-fires the query with ?retry=1, which clears the recorded
+ * error and queues the track again.
  */
-export function studioAnalysisQueryOptions(trackId: number | null) {
+export function studioAnalysisQueryOptions(trackId: number | null, retryNonce = 0) {
   return queryOptions({
-    queryKey: [...SAMPLE_STUDIO_QUERY_KEY, 'analysis', trackId] as const,
+    queryKey: [...SAMPLE_STUDIO_QUERY_KEY, 'analysis', trackId, retryNonce] as const,
     enabled: trackId !== null,
     queryFn: async (): Promise<SampleAnalysis> => {
       if (trackId === null) throw new Error('trackId is required');
+      const searchParams: Record<string, string | number> = { track_id: trackId };
+      if (retryNonce > 0) searchParams.retry = 1;
       const payload = await readJson<Envelope<AnalysisPayload>>(
-        apiClient.get('sample/analysis', { searchParams: { track_id: trackId } }),
+        apiClient.get('sample/analysis', { searchParams }),
       );
       return normalizeAnalysis(payload.data);
     },

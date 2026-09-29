@@ -115,6 +115,35 @@ describe('LibraryPanel', () => {
     expect(screen.queryByText('Hi-Res Song')).not.toBeInTheDocument(); // 90s = short
   });
 
+  it('length buckets use second boundaries (119 short, 120 medium, 300 long)', () => {
+    // Guard against the old millisecond pass-through: 119000ms/120000ms were
+    // both "long". Durations here are seconds (toStudioTrack normalizes).
+    const boundary: StudioTrack[] = [
+      { id: 1, title: 'Just under two', duration: 119 },
+      { id: 2, title: 'Two minutes', duration: 120 },
+      { id: 3, title: 'Five minutes', duration: 300 },
+    ];
+    const short: StudioFilters = { ...DEFAULT_FILTERS, length: 'short' };
+    const medium: StudioFilters = { ...DEFAULT_FILTERS, length: 'medium' };
+    const long: StudioFilters = { ...DEFAULT_FILTERS, length: 'long' };
+    const { rerender, props } = renderPanel({ tracks: boundary });
+    rerender(
+      <LibraryPanel {...props} tracks={boundary} filters={short} onFiltersChange={vi.fn()} />,
+    );
+    expect(screen.queryByText('Just under two')).toBeInTheDocument();
+    expect(screen.queryByText('Two minutes')).not.toBeInTheDocument();
+    rerender(
+      <LibraryPanel {...props} tracks={boundary} filters={medium} onFiltersChange={vi.fn()} />,
+    );
+    expect(screen.queryByText('Two minutes')).toBeInTheDocument();
+    expect(screen.queryByText('Five minutes')).not.toBeInTheDocument();
+    rerender(
+      <LibraryPanel {...props} tracks={boundary} filters={long} onFiltersChange={vi.fn()} />,
+    );
+    expect(screen.queryByText('Five minutes')).toBeInTheDocument();
+    expect(screen.queryByText('Two minutes')).not.toBeInTheDocument();
+  });
+
   it('selects a track and marks it selected', () => {
     const { props, unmount } = renderPanel();
     fireEvent.click(screen.getByText('MP3 Song'));

@@ -129,8 +129,10 @@
   text-align: left;
   background: none;
   border: none;
+  border-left: 2px solid transparent;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  padding: 10px 14px;
+  padding: 9px 14px 9px 12px;
+  min-height: 52px;
   color: #e8e6e1;
   cursor: pointer;
 }
@@ -141,24 +143,32 @@
 
 .trackRow[data-selected='true'] {
   background: rgba(245, 185, 66, 0.1);
-  border-left: 2px solid #f5b942;
+  border-left-color: #f5b942;
 }
 
 .trackMeta {
   min-width: 0;
-  flex: 1;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
 }
 
 .trackTitle {
+  display: block;
   font-size: 13px;
   font-weight: 500;
+  line-height: 1.3;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .trackSub {
+  display: block;
   font-size: 12px;
+  line-height: 1.3;
   color: #8a877f;
   white-space: nowrap;
   overflow: hidden;
@@ -167,9 +177,11 @@
 
 .qualityBadge {
   flex: none;
+  align-self: center;
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.03em;
+  white-space: nowrap;
   border-radius: 4px;
   padding: 2px 6px;
   border: 1px solid;

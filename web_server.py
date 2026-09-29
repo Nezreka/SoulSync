@@ -1698,8 +1698,7 @@ def library_tracks_web():
     /api/v1/library/tracks route.
     """
     try:
-        from database.music_database import get_database
-        from api.serializers import serialize_track
+        from api.sample import SampleHttpError, search_library_tracks
 
         q = (request.args.get('q') or '').strip()
         title = (request.args.get('title') or '').strip()
@@ -1708,28 +1707,10 @@ def library_tracks_web():
             limit = min(100, max(1, int(request.args.get('limit') or 50)))
         except (TypeError, ValueError):
             limit = 50
-        if q:
-            # Free text: search the title column, then the artist column,
-            # and merge/dedupe so "aphex" finds both titles and artists.
-            searches = [(q, ''), ('', q)]
-        elif title or artist:
-            searches = [(title, artist)]
-        else:
-            return jsonify({"success": False, "data": None, "error": "q, title, or artist is required"}), 400
-        db = get_database()
-        seen = set()
-        tracks = []
-        for t, a in searches:
-            for row in db.api_search_tracks(title=t, artist=a, limit=limit):
-                row_id = row.get('id')
-                if row_id in seen:
-                    continue
-                seen.add(row_id)
-                tracks.append(serialize_track(row))
-                if len(tracks) >= limit:
-                    break
-            if len(tracks) >= limit:
-                break
+        try:
+            tracks = search_library_tracks(q=q, title=title, artist=artist, limit=limit)
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
         return jsonify({"success": True, "data": {"tracks": tracks}, "error": None})
     except Exception as e:
         logger.error(f"web /api/library/tracks failed: {e}")
@@ -1745,7 +1726,8 @@ def sample_analysis_web():
         except (TypeError, ValueError):
             return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
         try:
-            payload, status = fetch_analysis(track_id)
+            retry = (request.args.get('retry') or '') == '1'
+            payload, status = fetch_analysis(track_id, retry=retry)
             return jsonify({"success": True, "data": payload, "error": None}), status
         except SampleHttpError as e:
             return jsonify({"success": False, "data": None, "error": e.message}), e.status
@@ -1765,6 +1747,10 @@ def sample_analyze_web():
             return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
         try:
             payload, status = enqueue_track_analysis(track_id)
+            if status != 200:
+                # Sticky worker error: the track did NOT queue. Report the
+                # failure honestly instead of a 200 "success".
+                return jsonify({"success": False, "data": payload, "error": payload["status"]}), status
             return jsonify({"success": True, "data": payload, "error": None}), status
         except SampleHttpError as e:
             return jsonify({"success": False, "data": None, "error": e.message}), e.status

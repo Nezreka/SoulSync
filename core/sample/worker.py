@@ -97,10 +97,18 @@ def _ensure_started() -> None:
             logger.info("Sample analysis worker started")
 
 
-def enqueue_analysis(track_id: int) -> str:
+def enqueue_analysis(track_id: int, retry: bool = False) -> str:
     """Queue a track for background analysis. Idempotent; returns the status.
 
     Never raises — analysis must never break imports or HTTP handlers.
+
+    Error statuses are STICKY: once the worker records ``"error: …"``, further
+    enqueues return it unchanged instead of silently re-queueing. The old
+    behavior reset the status to ``"pending"`` on every status poll, so a
+    failure (e.g. librosa not installed) was unobservable — the client polled
+    every 2.5s, each poll re-queued the track, and the UI spun on
+    "Analyzing…" forever. Pass ``retry=True`` to clear a recorded error and
+    queue the track again (the Studio "Try again" button).
     """
     try:
         track_id = int(track_id)
@@ -113,6 +121,14 @@ def enqueue_analysis(track_id: int) -> str:
             return "done"
         _ensure_started()
         with _lock:
+            current = _status.get(track_id)
+            if current and current.startswith("error"):
+                if not retry:
+                    return current
+                # Explicit retry: clear the recorded failure so the track
+                # actually re-queues instead of deduping onto the error.
+                _status.pop(track_id, None)
+                _pending.discard(track_id)
             if track_id in _pending:
                 return _status.get(track_id, "pending")
             _pending.add(track_id)

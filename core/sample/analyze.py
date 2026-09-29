@@ -51,14 +51,23 @@ def _load_soundfile():
 
 
 def _decode_via_ffmpeg(file_path: str, target_sr: int = 44100) -> Tuple[Any, int]:
-    """Decode any format ffmpeg understands to mono float32 via a wav pipe."""
+    """Decode any format ffmpeg understands to mono float32 via a wav pipe.
+
+    The timeout is load-bearing: the analysis worker is a single FIFO thread,
+    so a hung ffmpeg would wedge analysis for every track behind it. A
+    timeout surfaces as a normal worker error (sticky status + Try again).
+    """
     sf = _load_soundfile()
-    proc = subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", file_path, "-ac", "1", "-ar", str(target_sr), "-f", "wav", "-"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", file_path, "-ac", "1", "-ar", str(target_sr), "-f", "wav", "-"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=180,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"ffmpeg timed out decoding {file_path}") from exc
     if proc.returncode != 0 or not proc.stdout:
         raise RuntimeError(f"ffmpeg could not decode {file_path}: {proc.stderr.decode(errors='replace')[:300]}")
     data, sr = sf.read(io.BytesIO(proc.stdout), dtype="float32", always_2d=False)
