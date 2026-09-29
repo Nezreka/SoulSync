@@ -20,7 +20,12 @@ logger = get_logger("sample.analyze")
 
 # Bump when the analysis algorithm changes; the worker skips tracks already
 # analyzed at the current version.
-ANALYZER_VERSION = 1
+ANALYZER_VERSION = 2
+
+# Analysis runs at 22050 Hz (librosa's canonical rate): ~4x fewer samples
+# through the STFT than 44.1k source audio, with no measurable BPM loss
+# (99.4 vs 99.4 on the real 100-BPM spike fixture; <=1.6% on synthetic).
+_ANALYSIS_SR = 22050
 
 # soundfile cannot decode these — go straight to ffmpeg for them.
 _LOSSY_EXTS = {".mp3", ".m4a", ".aac", ".opus", ".ogg", ".wma"}
@@ -28,7 +33,10 @@ _LOSSY_EXTS = {".mp3", ".m4a", ".aac", ".opus", ".ogg", ".wma"}
 # Tuned on the Phase-1 spike fixture (12s @100 BPM, 40 ground-truth onsets):
 # precision 0.951 / recall 0.975 vs 0.736 / 0.975 for librosa defaults.
 # See ~/workspace/sampler-spike/SPIKE_REPORT.md.
-_PEAK_PICK_KWARGS = dict(pre_max=5, post_max=5, pre_avg=30, post_avg=30, delta=0.25, wait=8)
+# v2: windows rescaled to the analysis frame rate (hop 512 @22050 Hz =
+# 23.2ms/frame vs 11.6ms @44100) to preserve the tuned ~time constants
+# (pre_max ~60ms, pre_avg ~350ms, wait ~90ms).
+_PEAK_PICK_KWARGS = dict(pre_max=3, post_max=3, pre_avg=15, post_avg=15, delta=0.25, wait=4)
 
 
 def _load_librosa():
@@ -100,6 +108,11 @@ def analyze_track(file_path: str) -> Dict[str, Any]:
 
     Returns {"bpm": float, "onsets": [seconds...], "duration_s": float,
              "analyzer_version": int}.
+
+    Performance: the audio is downsampled to 22050 Hz once, and the onset
+    envelope is computed ONCE and shared with beat tracking (beat_track's
+    internal onset_strength used to double the STFT cost). Measured on a
+    4:34 track: 6.9s -> 0.8s with no BPM loss on real audio.
     """
     librosa = _load_librosa()
     import numpy as np
@@ -107,11 +120,21 @@ def analyze_track(file_path: str) -> Dict[str, Any]:
     mono, sr = decode_mono(file_path)
     duration_s = float(len(mono) / sr)
 
-    onset_envelope = librosa.onset.onset_strength(y=mono, sr=sr)
+    y = (
+        librosa.resample(mono, orig_sr=sr, target_sr=_ANALYSIS_SR)
+        if sr != _ANALYSIS_SR
+        else mono
+    )
+    onset_envelope = librosa.onset.onset_strength(y=y, sr=_ANALYSIS_SR)
     peak_frames = librosa.util.peak_pick(onset_envelope, **_PEAK_PICK_KWARGS)
-    onsets = [round(float(t), 3) for t in librosa.frames_to_time(peak_frames, sr=sr)]
+    onsets = [
+        round(float(t), 3)
+        for t in librosa.frames_to_time(peak_frames, sr=_ANALYSIS_SR)
+    ]
 
-    tempo_raw, _ = librosa.beat.beat_track(y=mono, sr=sr)
+    tempo_raw, _ = librosa.beat.beat_track(
+        onset_envelope=onset_envelope, sr=_ANALYSIS_SR
+    )
     bpm = round(float(np.atleast_1d(tempo_raw)[0]), 1)
 
     return {
@@ -120,6 +143,26 @@ def analyze_track(file_path: str) -> Dict[str, Any]:
         "duration_s": round(duration_s, 3),
         "analyzer_version": ANALYZER_VERSION,
     }
+
+
+def warm_dsp() -> None:
+    """Pay the librosa import + numba JIT cost off the critical path.
+
+    Fire-and-forget from the worker at boot: the first real track then skips
+    the cold-start stall (import + JIT can dwarf the DSP itself on slow
+    machines). Never raises — a missing librosa must still surface as the
+    honest per-track ImportError, not a dead warmup thread.
+    """
+    try:
+        librosa = _load_librosa()
+        import numpy as np
+
+        y = np.zeros(_ANALYSIS_SR, dtype=np.float32)
+        y[::_ANALYSIS_SR // 10] = 0.5  # 10 Hz clicks: non-degenerate envelope
+        env = librosa.onset.onset_strength(y=y, sr=_ANALYSIS_SR)
+        librosa.beat.beat_track(onset_envelope=env, sr=_ANALYSIS_SR)
+    except Exception:
+        logger.debug("DSP warmup skipped", exc_info=True)
 
 
 def compute_peaks(file_path: str, buckets: int = 1500) -> Dict[str, Any]:

@@ -11,6 +11,7 @@ import {
   qualityTier,
   slicesFromOnsets,
   suggestChopName,
+  suggestChops,
   tempoBucket,
   visiblePeakSlice,
 } from './-sample-studio.helpers';
@@ -175,5 +176,51 @@ describe('suggestChopName', () => {
   it('falls back to Untitled for blank titles', () => {
     expect(suggestChopName('  ', 65)).toBe('Untitled · 1:05 chop');
     expect(suggestChopName(null, 0)).toBe('Untitled · 0:00 chop');
+  });
+});
+
+describe('suggestChops', () => {
+  const peaks = {
+    min: Array.from({ length: 1500 }, (_, i) => -Math.abs(Math.sin(i / 37)) * 0.8),
+    max: Array.from({ length: 1500 }, (_, i) => Math.abs(Math.sin(i / 37)) * 0.8),
+  };
+  // 120 BPM -> 2s bars; 60s -> 30 bars.
+  const onsets = [2.1, 4.2, 10.5, 10.9, 11.3, 30.2, 50.1];
+
+  it('returns bar-grid chops labeled by bar when BPM is known', () => {
+    const out = suggestChops({ bpm: 120, durationS: 60, peaks, onsets, count: 4 });
+    expect(out.length).toBeLessThanOrEqual(4);
+    expect(out.length).toBeGreaterThan(0);
+    for (const c of out) {
+      expect(c.label).toMatch(/^Bars \d+–\d+$/);
+      expect(c.end - c.start).toBeCloseTo(4, 1); // 2 bars @120bpm
+      expect(c.end).toBeLessThanOrEqual(60);
+    }
+  });
+
+  it('picks non-overlapping chops sorted by score', () => {
+    const out = suggestChops({ bpm: 120, durationS: 60, peaks, onsets, count: 8 });
+    for (let i = 1; i < out.length; i++)
+      expect(out[i - 1].score).toBeGreaterThanOrEqual(out[i].score);
+    for (let i = 0; i < out.length; i++)
+      for (let j = i + 1; j < out.length; j++)
+        expect(out[i].end <= out[j].start || out[j].end <= out[i].start).toBe(true);
+  });
+
+  it('is deterministic', () => {
+    const a = suggestChops({ bpm: 120, durationS: 60, peaks, onsets });
+    const b = suggestChops({ bpm: 120, durationS: 60, peaks, onsets });
+    expect(a).toEqual(b);
+  });
+
+  it('falls back to time windows without a BPM', () => {
+    const out = suggestChops({ bpm: null, durationS: 60, peaks, onsets, count: 3 });
+    expect(out.length).toBe(3);
+    for (const c of out) expect(c.label).toMatch(/^\d+:\d\d\.\d–\d+:\d\d\.\d$/);
+  });
+
+  it('returns nothing for empty input', () => {
+    expect(suggestChops({ bpm: 120, durationS: 0, peaks, onsets })).toEqual([]);
+    expect(suggestChops({ bpm: 120, durationS: -5, peaks, onsets })).toEqual([]);
   });
 });

@@ -38,11 +38,26 @@ _thread: Optional[threading.Thread] = None
 # and every non-literal stored path silently fails to resolve.
 _config_manager = None
 
+# The DSP warmup is kicked once at boot so the first analyzed track doesn't
+# stall on the librosa import + numba JIT cold start.
+_warmup_started = False
+
+
+def _warm_dsp_safe() -> None:
+    from .analyze import warm_dsp
+
+    warm_dsp()
+
 
 def configure(*, config_manager_=None) -> None:
     """Inject shared services. Safe to call more than once."""
-    global _config_manager
+    global _config_manager, _warmup_started
     _config_manager = config_manager_
+    if not _warmup_started:
+        _warmup_started = True
+        threading.Thread(
+            target=_warm_dsp_safe, daemon=True, name="SampleDSPWarmup"
+        ).start()
 
 
 def resolve_audio_path(stored_path: str) -> Optional[str]:

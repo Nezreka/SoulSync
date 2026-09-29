@@ -899,3 +899,124 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ── UX pass: guide bar, progressive disclosure, suggested chops ────── */
+
+.guideBar {
+  margin: 8px 18px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(245, 185, 66, 0.07);
+  border: 1px solid rgba(245, 185, 66, 0.25);
+  color: #d8cfae;
+  font-size: 12.5px;
+  line-height: 1.5;
+  flex: none;
+}
+
+.listening {
+  font-size: 12px;
+  color: #f5b942;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.transportBar[data-kind='secondary'] {
+  padding-top: 0;
+  padding-bottom: 4px;
+}
+
+.primaryBtn {
+  background: rgba(245, 185, 66, 0.22) !important;
+  border-color: #f5b942 !important;
+  color: #ffd98a !important;
+  font-weight: 600;
+}
+
+.primaryBtn:hover {
+  background: rgba(245, 185, 66, 0.32) !important;
+}
+
+.primaryBtn:disabled {
+  opacity: 0.4;
+}
+
+.section {
+  margin: 4px 18px 0;
+  flex: none;
+}
+
+.sectionToggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  color: #c9c5ba;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 2px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sectionToggle:hover {
+  color: #f5b942;
+}
+
+.sectionToggle .chev {
+  margin-left: auto;
+  color: #8a877f;
+}
+
+.fxBadge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #f5b942;
+  border: 1px solid #f5b942;
+  border-radius: 20px;
+  padding: 1px 8px;
+}
+
+.section .pitchPanel {
+  margin: 0;
+}
+
+.disclosureToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  background: none;
+  border: none;
+  color: #8a877f;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.disclosureToggle:hover {
+  color: #f5b942;
+}
+
+.chopChip[data-kind='suggested'] {
+  border-color: rgba(245, 185, 66, 0.45);
+  color: #d8cfae;
+}
+
+.chopChip[data-kind='suggested']:hover {
+  border-color: #f5b942;
+  color: #f5b942;
+}
