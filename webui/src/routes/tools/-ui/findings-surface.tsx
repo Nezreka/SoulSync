@@ -137,6 +137,19 @@ const SORT_OPTIONS = [
   { value: 'path', label: 'File path' },
 ] as const;
 
+/**
+ * the newest finished run, as a key. the run history reloads when a job
+ * finishes (#1144); when this changes, a job just landed findings.
+ */
+export function latestRunKey(runs: readonly RepairJobRun[]): string {
+  let newest: RepairJobRun | null = null;
+  for (const run of runs) {
+    if (!run.finished_at) continue;
+    if (!newest || String(run.finished_at) > String(newest.finished_at)) newest = run;
+  }
+  return newest ? `${newest.id ?? ''}@${newest.finished_at}` : '';
+}
+
 export interface FindingsSurfaceProps {
   /** The job list, for the job filter. */
   jobs: RepairJob[];
@@ -323,6 +336,21 @@ export function FindingsSurface({
     void loadFindings();
     onStatusChanged();
   }, [loadCounts, loadFindings, loadGroups, onStatusChanged]);
+
+  // a job finished: its findings only showed after a page refresh (#1386).
+  // any change after the first render counts, even from no runs at all (a
+  // fresh install's first job); the history arriving on open costs one
+  // extra small reload
+  const [refreshToken, setRefreshToken] = useState(0);
+  const runKey = latestRunKey(runs);
+  const seenRunKey = useRef<string | null>(null);
+  useEffect(() => {
+    const previous = seenRunKey.current;
+    seenRunKey.current = runKey;
+    if (previous === null || previous === runKey) return;
+    refreshAll();
+    setRefreshToken((token) => token + 1);
+  }, [runKey, refreshAll]);
 
   // ── The background Fix All run ─────────────────────────────────────────────
 
@@ -1041,6 +1069,7 @@ export function FindingsSurface({
         groupBy={groupView}
         status={statusFilter}
         findingType={openType}
+        refreshToken={refreshToken}
         onOpen={(group) => {
           const needle = groupView === 'artist' ? group.artist : group.album;
           if (needle) setQuery(needle);
@@ -1382,6 +1411,7 @@ export function FindingsSurface({
             findingType={listType || undefined}
             q={query.trim() || undefined}
             selectedGroupKey={selectedAlbum?.key}
+            refreshToken={refreshToken}
             onOpen={(group) => setSelectedAlbum(group)}
           />
         </div>
