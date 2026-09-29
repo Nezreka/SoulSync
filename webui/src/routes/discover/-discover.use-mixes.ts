@@ -135,8 +135,30 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
 
   const mixes: DiscoverMix[] = [];
 
-  // LIVE_MIX_FEEDERS order: release_radar, discovery_weekly, seasonal_playlist,
-  // popular_picks, hidden_gems, listening_mix, discovery_shuffle.
+  // Daily Mixes lead. they're the most personal thing on the shelf (clustered
+  // from what you actually play, mostly owned so they play instantly) and
+  // they used to come ninth, after every generic feeder.
+  const dailyOutcome = daily.data as SectionOutcome<Record<string, unknown>> | undefined;
+  const dailyPayload = dailyOutcome?.kind === 'ok' ? dailyOutcome.data : undefined;
+  if (dailyPayload && Array.isArray(dailyPayload.mixes)) {
+    for (const raw of dailyPayload.mixes as Record<string, unknown>[]) {
+      const tracks = Array.isArray(raw.tracks) ? raw.tracks : [];
+      if (!tracks.length || typeof raw.key !== 'string') continue;
+      mixes.push({
+        key: raw.key,
+        title: String(raw.name || raw.key),
+        subtitle:
+          explanationLine(raw.explanation as Explanation | undefined) || String(raw.subtitle || ''),
+        // the card says who's in it, the way a daily mix should
+        blurb: typeof raw.subtitle === 'string' && raw.subtitle ? raw.subtitle : undefined,
+        tracks,
+      });
+    }
+  }
+
+  // then the LIVE_MIX_FEEDERS order: release_radar, discovery_weekly,
+  // seasonal_playlist, popular_picks, hidden_gems, listening_mix,
+  // discovery_shuffle.
   const radarTracks = outcomeTracks(releaseRadar.data);
   if (radarTracks.length > 0) {
     mixes.push({
@@ -206,24 +228,7 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
     }
   }
 
-  // Daily Mixes - one card per taste cluster, subtitled by why it exists.
-  const dailyOutcome = daily.data as SectionOutcome<Record<string, unknown>> | undefined;
-  const dailyPayload = dailyOutcome?.kind === 'ok' ? dailyOutcome.data : undefined;
-  if (dailyPayload && Array.isArray(dailyPayload.mixes)) {
-    for (const raw of dailyPayload.mixes as Record<string, unknown>[]) {
-      const tracks = Array.isArray(raw.tracks) ? raw.tracks : [];
-      if (!tracks.length || typeof raw.key !== 'string') continue;
-      mixes.push({
-        key: raw.key,
-        title: String(raw.name || raw.key),
-        subtitle:
-          explanationLine(raw.explanation as Explanation | undefined) || String(raw.subtitle || ''),
-        tracks,
-      });
-    }
-  }
-
-  // Your recipe mixes, after the daily ones. A new recipe shows even before
+  // Your recipe mixes, last. A new recipe shows even before
   // it has tracks, so it can be edited.
   const recipes = (recipeQuery.data as { mixes?: RecipeMixCard[] } | undefined)?.mixes ?? [];
   for (const card of recipes) mixes.push(recipeMix(card));

@@ -111,8 +111,23 @@ describe('the shared card', () => {
     expect(card.chips[0].icon).toBeTruthy();
   });
 
-  it('chips REPLACE the reason line, they do not sit alongside it', () => {
-    // They are the reason, just clearer — rendering both duplicates the claim.
+  it('keeps the reason line whenever it names your artists, chips or not', () => {
+    const named = { kind: 'similar_to', seeds: [{ name: 'Tool' }] };
+    const card = recommendedCard(
+      artist({ why: [{ type: 'consensus', label: '3 of your artists' }], explanation: named }),
+      'spotify',
+    );
+    expect(card.showReason).toBe(true);
+    expect(card.showChips).toBe(true);
+    // no names to give: the chips stand in for the line
+    expect(
+      recommendedCard(artist({ why: [{ type: 'genre', label: 'x' }] }), 'spotify').showReason,
+    ).toBe(false);
+    // and with neither, the plain line still says what it can
+    expect(recommendedCard(artist(), 'spotify').showReason).toBe(true);
+  });
+
+  it('shows chips only when there are some', () => {
     expect(
       recommendedCard(artist({ why: [{ type: 'genre', label: 'x' }] }), 'spotify').showChips,
     ).toBe(true);

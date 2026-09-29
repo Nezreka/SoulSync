@@ -1221,6 +1221,10 @@ export function DiscoverPage() {
           onPlayRadio={playStationRadio}
           pendingId={stationPreview.pendingId}
           cardErrors={stationPreview.cardErrors}
+          onPlayLibraryRadio={() => {
+            if (window.startLibraryRadio) void window.startLibraryRadio();
+            else toast('The player is not ready yet. Try again in a moment.', 'error');
+          }}
         />
         {renderZoneSections(after)}
       </>
@@ -1404,24 +1408,6 @@ export function DiscoverPage() {
                   onOpenExplorer={() => setExplorerPromptOpen(true)}
                 />
                 <ArtistWebHub onOpenLens={(lens) => setWebRequest({ lens })} />
-              </div>
-            </div>
-            <div className="discovery-zone-section" id="library-radio-section">
-              <div className="discover-library-radio-card">
-                <div className="discover-library-radio-copy">
-                  <div className="discover-library-radio-title">📻 Library Radio</div>
-                  <div className="discover-library-radio-sub">
-                    Endless smart shuffle of your whole collection — play-count weighted, refills
-                    itself by similarity.
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="modal-btn modal-btn-primary"
-                  onClick={() => void window.startLibraryRadio?.()}
-                >
-                  ▶ Start radio
-                </button>
               </div>
             </div>
             {renderZoneSections(zoneSections('tools'))}

@@ -168,8 +168,11 @@ function RecommendedMiniCard({
         <div className="ya-card-gradient" />
         <div className="ya-card-info">
           <div className="ya-card-name">{card.artistName}</div>
-          {/* The chips REPLACE the reason line when present — they are the same
-              reason, said more clearly. */}
+          {card.showReason ? (
+            <div className="ya-card-sub" title={card.reasonTitle}>
+              {card.reason}
+            </div>
+          ) : null}
           {card.showChips ? (
             <div className="ya-card-why">
               {card.chips.map((chip) => (
@@ -178,11 +181,7 @@ function RecommendedMiniCard({
                 </span>
               ))}
             </div>
-          ) : (
-            <div className="ya-card-sub" title={card.reasonTitle}>
-              {card.reason}
-            </div>
-          )}
+          ) : null}
         </div>
       </a>
       <button

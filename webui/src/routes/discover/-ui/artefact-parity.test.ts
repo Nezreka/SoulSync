@@ -83,8 +83,6 @@ const NEW_IDS = [
   'discover-zone-library',
   'discover-zone-new-missing',
   'discover-zone-tools',
-  // the play-now bridge (aug 25): library radio's discover card
-  'library-radio-section',
   // recommended stations row (aug 25)
   'recommended-stations-section',
   // M05: the dial is a native range input now, and aria-labelledby /

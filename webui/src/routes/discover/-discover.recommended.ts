@@ -17,7 +17,12 @@
 
 import type { FeedbackEntity } from './-discover.api';
 
-import { type Explanation, explanationLine, explanationTitle } from './-discover.explanation';
+import {
+  type Explanation,
+  explanationLine,
+  explanationParts,
+  explanationTitle,
+} from './-discover.explanation';
 import { whyIcon } from './-discover.helpers';
 
 /** `items.slice(0, 18)` in both sections (1052, 1092). */
@@ -106,11 +111,17 @@ export interface RecommendedCard {
   filterName: string;
   source: string;
   image: string | null;
-  /** Chips REPLACE the reason line when present; they are the reason, clearer. */
   chips: WhyChip[];
   reason: string;
   reasonTitle: string;
   showChips: boolean;
+  /**
+   * the reason line shows whenever it NAMES your artists ("because you have
+   * Tool & Deftones"), chips or not. a count like "27 of your artists" is not
+   * the same reason said more clearly, it's the same reason with the names
+   * taken out. with no names to give, the chips stand in for it as before.
+   */
+  showReason: boolean;
   /** What the ⋯ menu answers about, and the explanation it was shown with. */
   feedbackEntity: FeedbackEntity;
   explanation?: Explanation;
@@ -174,6 +185,7 @@ export function recommendedCard(artist: RecommendedArtist, sectionSource: string
     },
     explanation: artist.explanation,
     showChips: chips.length > 0,
+    showReason: explanationParts(artist.explanation) !== null || chips.length === 0,
   };
 }
 

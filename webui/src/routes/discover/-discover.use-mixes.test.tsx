@@ -112,6 +112,25 @@ describe('useDiscoverMixes', () => {
     const byKey = Object.fromEntries(result.current.mixes.map((m) => [m.key, m.subtitle]));
     expect(byKey.daily_mix_1).toBe('Because you listen to Tool & Deftones');
     expect(byKey.daily_mix_2).toBe('Soen');
+    // the card names who's in it; the reason stays for the modal
+    expect(result.current.mixes.find((m) => m.key === 'daily_mix_1')?.blurb).toBe('Tool, Deftones');
+  });
+
+  it('leads the shelf with the daily mixes, ahead of every generic feeder', async () => {
+    stub({
+      radar: [track('r')],
+      personalized: [track('p')],
+      daily: [{ key: 'daily_mix_1', name: 'Daily Mix 1', tracks: [track('d')] }],
+    });
+    const { result } = mount();
+    await waitFor(() => expect(result.current.mixes.map((m) => m.key)).toContain('release_radar'));
+    await waitFor(() => expect(result.current.mixes[0]?.key).toBe('daily_mix_1'));
+    expect(result.current.mixes.map((m) => m.key).slice(0, 2)).toEqual([
+      'daily_mix_1',
+      'release_radar',
+    ]);
+    // no subtitle stored, no blurb invented
+    expect(result.current.mixes[0].blurb).toBeUndefined();
   });
 
   it('holds the SHARED below-fold queries until tier 1 settles', async () => {

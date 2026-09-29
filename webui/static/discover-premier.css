@@ -794,6 +794,16 @@
     transform: translateY(0) scale(0.96) !important;
 }
 
+/* fewer than four real covers: one full-bleed cover, not a mosaic with holes */
+.mix-card-cover.mix-card-cover--single {
+    display: block !important;
+}
+
+.mix-card-tile--full {
+    width: 100%;
+    height: 100%;
+}
+
 /* Mix Title & Meta */
 .mix-card-name {
     font-size: 0.94rem !important;
@@ -801,6 +811,17 @@
     color: #ffffff !important;
     margin-top: 12px !important;
     line-height: 1.3 !important;
+}
+
+.mix-card-blurb {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin-top: 4px;
+    font-size: 0.8rem;
+    line-height: 1.35;
+    color: rgba(255, 255, 255, 0.62);
 }
 
 .mix-card-meta {
@@ -985,6 +1006,16 @@
     margin-bottom: 6px !important;
 }
 
+/* the reason names your artists; cutting it at one line cut the names off */
+.ya-card.recommended-artist-card .ya-card-sub {
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    white-space: normal !important;
+    line-height: 1.35 !important;
+    color: rgba(255, 255, 255, 0.62) !important;
+}
+
 .ya-card.recommended-artist-card .ya-card-why {
     display: flex !important;
     justify-content: center !important;
@@ -1089,41 +1120,140 @@
     }
 }
 
-/* ── 7. Stations Row & Live Avatars ──────────────────────────────────────── */
-.stations-row-wrap {
-    margin: 16px 0 28px !important;
+/* ── 7. Stations: a face with a play button, and a name that opens it ───── */
+.discover-stations-row {
+    grid-auto-columns: 176px !important;
+    gap: 16px !important;
+    padding: 4px 2px 14px !important;
 }
 
-.station-card {
+.discover-station-card {
+    align-items: stretch !important;
+    gap: 12px !important;
+    padding: 16px 16px 14px !important;
     border-radius: 18px !important;
     background: rgba(22, 27, 38, 0.6) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    padding: 20px 16px !important;
-    transition: all 220ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    transition: background 200ms ease, border-color 200ms ease, transform 220ms cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
-.station-card:hover {
-    transform: translateY(-5px) !important;
-    border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.35) !important;
-    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5) !important;
+.discover-station-card:hover {
+    background: rgba(30, 36, 50, 0.9) !important;
+    border-color: rgba(255, 255, 255, 0.14) !important;
+    transform: translateY(-4px) !important;
 }
 
-.station-avatar {
-    border-radius: 50% !important;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
-    border: 2px solid rgba(255, 255, 255, 0.1) !important;
+/* library radio leads the row, so it wears the accent */
+.discover-station-card.discover-station-card--library {
+    background: linear-gradient(160deg, rgba(var(--accent-rgb, 29, 185, 84), 0.16), rgba(22, 27, 38, 0.6) 70%) !important;
 }
 
-.station-card:hover .station-avatar {
-    border-color: var(--accent-color, #1db954) !important;
-    transform: scale(1.04) !important;
+.discover-station-art-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1;
 }
 
-.station-play-btn {
-    border-radius: 9999px !important;
-    font-weight: 700 !important;
-    background: var(--accent-color, #1db954) !important;
-    color: #000000 !important;
+.discover-station-art {
+    width: 100% !important;
+    height: 100% !important;
+    font-size: 2.4rem !important;
+    font-weight: 800;
+    color: rgba(255, 255, 255, 0.85);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45) !important;
+}
+
+.discover-station-art--library {
+    color: #fff;
+    background:
+        radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.28), transparent 55%),
+        linear-gradient(145deg, var(--accent-color, #1db954), #0c5a2b) !important;
+}
+
+.discover-station-play {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: var(--accent-color, #1db954);
+    color: #05130a;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+    cursor: pointer;
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity 180ms ease, transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.discover-station-card:hover .discover-station-play,
+.discover-station-card:focus-within .discover-station-play,
+.discover-station-play[aria-busy='true'] {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.discover-station-play:hover:not(:disabled) {
+    transform: scale(1.06);
+}
+
+.discover-station-play:focus-visible,
+.discover-station-open:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb, 29, 185, 84), 0.9);
+    outline-offset: 2px;
+}
+
+.discover-station-spinner {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid rgba(5, 19, 10, 0.3);
+    border-top-color: #05130a;
+    animation: dsc-spin 0.8s linear infinite;
+}
+
+@keyframes dsc-spin {
+    to { transform: rotate(360deg); }
+}
+
+.discover-station-open {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    width: 100%;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.discover-station-open:disabled {
+    cursor: progress;
+}
+
+.discover-station-open:hover .discover-station-name {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+@media (hover: none) {
+    .discover-station-play {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .discover-station-spinner {
+        animation: none;
+    }
 }
 
 /* ── 8. Taste Dial (Adventurousness Wave) ─────────────────────────────────── */
@@ -1284,7 +1414,7 @@
     background: rgba(255, 255, 255, 0.12) !important;
 }
 
-.dz-ed-genre.active {
+.dz-ed-genre.is-active {
     color: #ffffff !important;
     background: linear-gradient(135deg, #a238ff, #7928ca) !important;
     border-color: #a238ff !important;
@@ -2622,5 +2752,79 @@
     .dsc-spotlight-cover {
         width: 140px;
         height: 140px;
+    }
+}
+
+/* ── 13. Not-connected and unreachable states stay one line tall ─────────── */
+/* a feature you haven't set up is an invitation, not a 300px dashed box */
+.discovery-zone .lb-empty-state {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+        "icon title button"
+        "icon copy button"
+        "icon help button";
+    align-items: center;
+    column-gap: 16px;
+    row-gap: 2px;
+    text-align: left;
+    padding: 16px 20px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.discovery-zone .lb-empty-state .lb-empty-icon {
+    grid-area: icon;
+    margin: 0;
+    font-size: 28px;
+}
+
+.discovery-zone .lb-empty-state h3 {
+    grid-area: title;
+    margin: 0;
+    font-size: 0.95rem;
+}
+
+.discovery-zone .lb-empty-state p {
+    grid-area: copy;
+    margin: 0;
+    max-width: none;
+    font-size: 0.84rem;
+}
+
+.discovery-zone .lb-empty-state .lb-empty-help {
+    grid-area: help;
+    font-size: 0.76rem;
+}
+
+.discovery-zone .lb-empty-state .lb-connect-btn {
+    grid-area: button;
+    margin: 0;
+    white-space: nowrap;
+}
+
+/* deezer unreachable / loading / no match: a line, not a panel */
+[id="deezer-editorial"] .discover-empty {
+    padding: 14px 0 4px;
+    min-height: 0;
+    text-align: left;
+}
+
+[id="deezer-editorial"] .discover-empty p {
+    margin: 0;
+    font-size: 0.88rem;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+@media (max-width: 640px) {
+    .discovery-zone .lb-empty-state {
+        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-areas:
+            "icon title"
+            "icon copy"
+            "icon help"
+            "button button";
+        row-gap: 6px;
     }
 }
