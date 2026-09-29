@@ -700,6 +700,14 @@ def _set_profile_context():
     g.request_start_monotonic = time.perf_counter()
     g.request_start_cpu = time.thread_time()
 
+    # API keys are admin-minted: a valid key acts with admin rights (the same
+    # trust as /api/v1/*), so key-authed callers without a cookie session
+    # never reach the profile-picker logic below and its 401
+    # profile_required. Grants no more than the v1 exemption already does.
+    from api.auth import apply_api_key_request_context
+    if apply_api_key_request_context():
+        return
+
     # 1. Login mode: unauthenticated sessions have NO profile or admin rights (#GHSA-j7g5-8j44-jqhm).
     if _require_login_enabled() and not session.get('login_authenticated', False):
         g.profile_id = None
@@ -22805,12 +22813,6 @@ app.register_blueprint(_bp_mc())
 from api.deleted_files import configure as _cfg_df, create_blueprint as _bp_df
 _cfg_df(config_manager_=config_manager, docker_resolve_path_=docker_resolve_path)
 app.register_blueprint(_bp_df())
-# Sample Studio: the analysis/stem workers resolve stored audio paths through
-# the shared library path resolver, which needs the config manager to read
-# library.music_paths / transfer folders. Without this, container-style
-# stored paths (/mnt/musicBackup/...) never resolve on native installs.
-from core.sample import worker as _sample_worker
-_sample_worker.configure(config_manager_=config_manager)
 # Review-queue verification endpoints (api/verification.py).
 from api.verification import configure as _cfg_verif, create_blueprint as _bp_verif
 _cfg_verif(get_database_=get_database, config_manager_=config_manager,
