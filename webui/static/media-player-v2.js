@@ -179,6 +179,57 @@ function npv2ClampDb(v) {
 // Painters must be defensive: ctx may be a stub in tests.
 // ---------------------------------------------------------------------------
 
+// Curated palettes. 'auto' means "use the album-art palette".
+const NPV2_PALETTES = {
+    ultraviolet: { r: 138, g: 76, b: 246 },
+    ocean: { r: 56, g: 150, b: 255 },
+    ember: { r: 255, g: 112, b: 67 },
+    forest: { r: 52, g: 199, b: 123 },
+    rose: { r: 244, g: 63, b: 140 },
+    mono: { r: 208, g: 210, b: 216 },
+};
+
+function npv2PaletteList() {
+    return [
+        { id: 'auto', name: 'Album art' },
+        { id: 'ultraviolet', name: 'Ultraviolet' },
+        { id: 'ocean', name: 'Ocean' },
+        { id: 'ember', name: 'Ember' },
+        { id: 'forest', name: 'Forest' },
+        { id: 'rose', name: 'Rose' },
+        { id: 'mono', name: 'Mono' },
+    ];
+}
+
+// Canvas spec per quality setting. Pure — tested in vitest.
+function npv2QualitySpec(name) {
+    switch (name) {
+        case 'high': return { dpr: 2, q: 1.25 };
+        case 'balanced': return { dpr: 1.25, q: 0.8 };
+        case 'lite': return { dpr: 1, q: 0.5 };
+        default: return { dpr: 1.5, q: 1 }; // 'auto'
+    }
+}
+
+// Autocycle interval in seconds. 'track' = -1 (change per track). Pure.
+function npv2AutocycleSeconds(v) {
+    if (v === 'track') return -1;
+    const n = parseInt(v, 10);
+    return isFinite(n) && n > 0 ? n : 0;
+}
+
+function npv2ClampVizEnergy(v) {
+    v = parseFloat(v);
+    if (!isFinite(v)) return 1;
+    return Math.min(1.5, Math.max(0.5, v));
+}
+
+function npv2ClampVizDim(v) {
+    v = parseFloat(v);
+    if (!isFinite(v)) return 0;
+    return Math.min(0.6, Math.max(0, v));
+}
+
 function npv2ThemeList() {
     return [
         { id: 'barscope', name: 'Barscope', blurb: 'WMP Bars, resurrected' },
@@ -228,6 +279,38 @@ function npv2Css(S, alpha) {
     return 'rgba(' + S.pal.r + ',' + S.pal.g + ',' + S.pal.b + ',' + alpha + ')';
 }
 
+// ---------------------------------------------------------------------------
+// Painter helpers — defensive: the vitest stub only provides
+// {freq, wave, energy, t, idle, pal}, so every extra S field has a fallback.
+// ---------------------------------------------------------------------------
+
+function npv2Q(S) {
+    const q = S && S.q;
+    return (typeof q === 'number' && isFinite(q) && q > 0) ? q : 1;
+}
+
+function npv2BeatAmp(S) {
+    const b = S && S.beat;
+    return (typeof b === 'number' && isFinite(b) && b > 0) ? Math.min(1, b) : 0;
+}
+
+function npv2Pal2(S) {
+    if (S && S.pal2 && isFinite(S.pal2.r) && isFinite(S.pal2.g) && isFinite(S.pal2.b)) return S.pal2;
+    return { r: 160, g: 140, b: 255 };
+}
+
+function npv2Css2(S, alpha) {
+    const p = npv2Pal2(S);
+    return 'rgba(' + Math.round(p.r) + ',' + Math.round(p.g) + ',' + Math.round(p.b) + ',' + alpha + ')';
+}
+
+// Format a palette object {r,g,b} as rgba() with the given alpha — lets
+// painters reuse one palette color at several alphas without regex hacks.
+function npv2PalA(p, alpha) {
+    const c = (p && isFinite(p.r) && isFinite(p.g) && isFinite(p.b)) ? p : { r: 120, g: 80, b: 200 };
+    return 'rgba(' + Math.round(c.r) + ',' + Math.round(c.g) + ',' + Math.round(c.b) + ',' + alpha + ')';
+}
+
 const NPV2_PAINT = {
     // --- WMP Bars: mirrored bars firing from the center line ----------------
     barscope(ctx, w, h, S) {
@@ -235,106 +318,175 @@ const NPV2_PAINT = {
         const N = 56;
         const cy = h * 0.52;
         const maxH = h * 0.42;
+        const beat = npv2BeatAmp(S);
         while (st.peaks.length < N) st.peaks.push(0);
+        // faint backdrop wash so the bars sit in something
+        const wash = ctx.createLinearGradient(0, 0, 0, h);
+        wash.addColorStop(0, npv2Css(S, 0));
+        wash.addColorStop(0.52, npv2Css(S, 0.10 + S.energy * 0.08));
+        wash.addColorStop(1, npv2Css(S, 0));
+        ctx.fillStyle = wash;
+        ctx.fillRect(0, 0, w, h);
         const bw = w / N;
         for (let i = 0; i < N; i++) {
             const v = npv2Bin(S, i, N);
-            st.peaks[i] = Math.max(v, st.peaks[i] - 0.012);
+            st.peaks[i] = Math.max(v, st.peaks[i] - 0.008);
             const bh = Math.max(2, v * maxH);
             const x = i * bw + bw * 0.18;
             const g = ctx.createLinearGradient(0, cy - bh, 0, cy + bh);
-            g.addColorStop(0, npv2Css(S, 0.95));
-            g.addColorStop(0.5, npv2Css(S, 0.45));
-            g.addColorStop(1, npv2Css(S, 0.12));
+            g.addColorStop(0, npv2Css2(S, 0.95));
+            g.addColorStop(0.45, npv2Css(S, 0.85));
+            g.addColorStop(1, npv2Css(S, 0.10));
             ctx.fillStyle = g;
             ctx.fillRect(x, cy - bh, bw * 0.64, bh * 2);
-            // falling peak cap, pure WMP
+            // falling peak cap, pure WMP — flashes on the beat
             const py = st.peaks[i] * maxH;
-            ctx.fillStyle = 'rgba(255,255,255,' + (0.25 + st.peaks[i] * 0.5) + ')';
+            ctx.fillStyle = 'rgba(255,255,255,' + (0.22 + st.peaks[i] * 0.45 + beat * 0.3).toFixed(3) + ')';
             ctx.fillRect(x, cy - py - 2, bw * 0.64, 2);
             ctx.fillRect(x, cy + py, bw * 0.64, 2);
         }
-        ctx.fillStyle = 'rgba(255,255,255,0.08)';
+        ctx.fillStyle = 'rgba(255,255,255,' + (0.10 + beat * 0.15).toFixed(3) + ')';
         ctx.fillRect(0, cy - 0.5, w, 1);
     },
 
     // --- WMP Scope: phosphor waveform ---------------------------------------
     scope(ctx, w, h, S) {
         const cy = h * 0.52;
+        const beat = npv2BeatAmp(S);
+        ctx.fillStyle = 'rgba(2,6,4,0.55)';
+        ctx.fillRect(0, 0, w, h);
         ctx.strokeStyle = 'rgba(255,255,255,0.05)';
         ctx.lineWidth = 1;
         for (let gy = 0.2; gy < 1; gy += 0.2) {
             ctx.beginPath(); ctx.moveTo(0, h * gy); ctx.lineTo(w, h * gy); ctx.stroke();
         }
-        const traces = [
-            { amp: h * 0.30, alpha: 0.16, width: 7, off: 0 },
-            { amp: h * 0.30, alpha: 0.85, width: 2, off: 0 },
-        ];
-        for (const tr of traces) {
+        ctx.beginPath(); ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h); ctx.stroke();
+        const n = S.wave.length;
+        const trace = (ampScale, alpha, width, glow) => {
             ctx.beginPath();
-            const n = S.wave.length;
             for (let i = 0; i < n; i++) {
                 const x = (i / (n - 1)) * w;
-                // gentle smoothing across neighbors to kill the 64-sample chunk
                 const a = S.wave[Math.max(0, i - 1)] / 255 - 0.5;
                 const b = S.wave[i] / 255 - 0.5;
                 const c = S.wave[Math.min(n - 1, i + 1)] / 255 - 0.5;
-                const y = cy - ((a + b * 2 + c) / 4) * 2 * tr.amp * (0.35 + S.energy * 1.3);
+                const y = cy - ((a + b * 2 + c) / 4) * 2 * h * 0.30 * ampScale * (0.35 + S.energy * 1.3);
                 if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
             }
-            ctx.strokeStyle = npv2Css(S, tr.alpha);
-            ctx.lineWidth = tr.width;
+            ctx.strokeStyle = npv2Css(S, alpha);
+            ctx.lineWidth = width;
             ctx.lineJoin = 'round';
             ctx.shadowColor = npv2Css(S, 0.8);
-            ctx.shadowBlur = tr.width > 2 ? 18 : 0;
+            ctx.shadowBlur = glow;
             ctx.stroke();
             ctx.shadowBlur = 0;
+        };
+        trace(1, 0.14, 7, 0);                    // soft phosphor halo
+        trace(1, 0.85, 2, 16);                   // hot core with bloom
+        trace(1.35, 0.20, 1, 0);                 // faint overtone shimmer
+        // beat tick: a bright dot riding the trace start
+        if (beat > 0.05) {
+            ctx.fillStyle = 'rgba(255,255,255,' + (beat * 0.8).toFixed(3) + ')';
+            ctx.beginPath(); ctx.arc(6, cy, 2 + beat * 3, 0, 6.2832); ctx.fill();
         }
     },
 
     // --- WMP Waves: layered translucent ribbons ------------------------------
     waves(ctx, w, h, S) {
+        const beat = npv2BeatAmp(S);
         const layers = [
-            { amp: 0.16, speed: 0.7, alpha: 0.30, yOff: 0.42 },
-            { amp: 0.22, speed: 0.45, alpha: 0.20, yOff: 0.55 },
-            { amp: 0.12, speed: 1.1, alpha: 0.38, yOff: 0.62 },
+            { amp: 0.10, speed: 0.9, alpha: 0.16, yOff: 0.38, accent: true },
+            { amp: 0.16, speed: 0.7, alpha: 0.30, yOff: 0.46, accent: false },
+            { amp: 0.22, speed: 0.45, alpha: 0.22, yOff: 0.56, accent: true },
+            { amp: 0.13, speed: 1.15, alpha: 0.40, yOff: 0.64, accent: false },
         ];
         layers.forEach((L, li) => {
-            const e = 0.35 + S.energy * 1.4;
-            ctx.beginPath();
+            const e = (0.35 + S.energy * 1.4) * (1 + beat * 0.25);
             const steps = 90;
+            const pts = [];
             for (let i = 0; i <= steps; i++) {
                 const x = (i / steps) * w;
                 const ph = i * 0.09 + S.t * L.speed * (li % 2 ? -1 : 1) * 2;
                 const mod = 0.6 + 0.4 * npv2Bin(S, i % 32, 32);
                 const y = h * L.yOff + Math.sin(ph) * h * L.amp * e * mod
-                    + Math.sin(ph * 2.7 + li) * h * L.amp * 0.35 * e;
-                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                    + Math.sin(ph * 2.7 + li * 1.7) * h * L.amp * 0.35 * e;
+                pts.push([x, y]);
             }
-            ctx.strokeStyle = npv2Css(S, L.alpha);
-            ctx.lineWidth = 26 - li * 6;
+            ctx.beginPath();
+            pts.forEach(([x, y], i) => { if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+            ctx.strokeStyle = L.accent ? npv2Css2(S, L.alpha) : npv2Css(S, L.alpha);
+            ctx.lineWidth = 30 - li * 6;
             ctx.lineCap = 'round';
+            if (li === 3) { ctx.shadowColor = npv2Css(S, 0.7); ctx.shadowBlur = 14; }
             ctx.stroke();
+            ctx.shadowBlur = 0;
+            // crest foam on the front ribbon
+            if (li === 3) {
+                ctx.beginPath();
+                pts.forEach(([x, y], i) => { if (i === 0) ctx.moveTo(x, y - 8); else ctx.lineTo(x, y - 8); });
+                ctx.strokeStyle = 'rgba(255,255,255,' + (0.10 + S.energy * 0.12).toFixed(3) + ')';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
         });
     },
 
     // --- WMP Plasma: drifting energy blobs, additive --------------------------
     plasma(ctx, w, h, S) {
-        const st = npv2ThemeState('plasma', () => ({ seeds: [0.7, 1.9, 3.1, 4.4, 5.6, 0.3] }));
+        const st = npv2ThemeState('plasma', () => ({ seeds: [0.7, 1.9, 3.1, 4.4, 5.6, 0.3, 2.5, 5.1] }));
+        const beat = npv2BeatAmp(S);
+        ctx.fillStyle = '#04040c';
+        ctx.fillRect(0, 0, w, h);
         ctx.globalCompositeOperation = 'lighter';
         const R = Math.max(w, h) * 0.30;
+        ctx.save();
+        ctx.translate(w / 2, h / 2);
+        ctx.rotate(Math.sin(S.t * 0.05) * 0.35);
+        ctx.translate(-w / 2, -h / 2);
         st.seeds.forEach((sd, i) => {
-            const sp = 0.22 + i * 0.07;
+            const accent = i % 3 === 2;
+            const sp = 0.22 + i * 0.06;
             const x = w / 2 + Math.cos(S.t * sp + sd * 2.1) * w * 0.30 * (0.5 + S.energy * 0.7);
             const y = h / 2 + Math.sin(S.t * sp * 1.3 + sd * 3.7) * h * 0.28;
-            const r = R * (0.55 + 0.45 * npv2Bin(S, i * 5, 32) + S.energy * 0.25);
+            const r = R * (0.55 + 0.45 * npv2Bin(S, i * 5, 32) + S.energy * 0.25) * (1 + beat * 0.35);
+            const col = accent ? npv2Css2(S, 0.30) : npv2Css(S, 0.34);
+            const clear = accent ? npv2Css2(S, 0) : npv2Css(S, 0);
+            // soft halo
             const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-            g.addColorStop(0, npv2Css(S, 0.34));
-            g.addColorStop(1, npv2Css(S, 0));
+            g.addColorStop(0, col);
+            g.addColorStop(1, clear);
             ctx.fillStyle = g;
             ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.fill();
+            // hot core: tight, brighter — this is what reads as plasma
+            const core = accent ? npv2Css2(S, 0.55 + beat * 0.3) : npv2Css(S, 0.55 + beat * 0.3);
+            const coreClear = accent ? npv2Css2(S, 0) : npv2Css(S, 0);
+            const cg = ctx.createRadialGradient(x, y, 0, x, y, r * 0.38);
+            cg.addColorStop(0, core);
+            cg.addColorStop(1, coreClear);
+            ctx.fillStyle = cg;
+            ctx.beginPath(); ctx.arc(x, y, r * 0.38, 0, 6.2832); ctx.fill();
+            st['p' + i] = { x, y };
         });
+        // electric filaments between near neighbors
+        ctx.lineWidth = 1.2;
+        for (let i = 0; i < st.seeds.length; i++) {
+            for (let j = i + 1; j < st.seeds.length; j++) {
+                const a = st['p' + i], b = st['p' + j];
+                if (!a || !b) continue;
+                const d = Math.hypot(a.x - b.x, a.y - b.y);
+                if (d > R * 2.2) continue;
+                const al = (1 - d / (R * 2.2)) * (0.10 + beat * 0.22);
+                ctx.strokeStyle = (i + j) % 3 === 0 ? npv2Css2(S, al.toFixed(3)) : npv2Css(S, al.toFixed(3));
+                ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+            }
+        }
+        ctx.restore();
         ctx.globalCompositeOperation = 'source-over';
+        // vignette to keep the edges cinematic
+        const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.75);
+        vg.addColorStop(0, 'rgba(0,0,0,0)');
+        vg.addColorStop(1, 'rgba(0,0,0,0.45)');
+        ctx.fillStyle = vg;
+        ctx.fillRect(0, 0, w, h);
     },
 
     // --- WMP Spikes: radial burst ---------------------------------------------
@@ -343,53 +495,104 @@ const NPV2_PAINT = {
         const N = 110;
         const base = Math.min(w, h) * 0.10;
         const maxL = Math.min(w, h) * 0.36;
+        const beat = npv2BeatAmp(S);
+        ctx.fillStyle = 'rgba(3,3,8,0.6)';
+        ctx.fillRect(0, 0, w, h);
+        // faint outer guide ring
+        ctx.strokeStyle = npv2Css(S, 0.12);
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(cx, cy, base + maxL, 0, 6.2832); ctx.stroke();
         ctx.save();
         ctx.translate(cx, cy);
-        ctx.rotate(S.t * 0.12);
+        ctx.rotate(S.t * 0.10 + beat * 0.15);
         for (let i = 0; i < N; i++) {
             const v = npv2Bin(S, i, N);
             const len = base + v * maxL * (0.4 + S.energy);
             const a = (i / N) * 6.2832;
             const x2 = Math.cos(a) * len, y2 = Math.sin(a) * len;
             const x1 = Math.cos(a) * base, y1 = Math.sin(a) * base;
-            ctx.strokeStyle = npv2Css(S, 0.18 + v * 0.65);
-            ctx.lineWidth = 2.5;
+            const hot = v > 0.75;
+            ctx.strokeStyle = hot ? npv2Css2(S, 0.9) : npv2Css(S, 0.18 + v * 0.6);
+            ctx.lineWidth = hot ? 3 : 2;
             ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+            if (v > 0.55) {
+                ctx.fillStyle = 'rgba(255,255,255,' + (v * 0.5).toFixed(3) + ')';
+                ctx.beginPath(); ctx.arc(x2, y2, 1.6, 0, 6.2832); ctx.fill();
+            }
         }
         ctx.restore();
-        ctx.fillStyle = npv2Css(S, 0.5);
-        ctx.beginPath(); ctx.arc(cx, cy, base * 0.8, 0, 6.2832); ctx.fill();
+        // core: solid disc + beat shockwave ring
+        const coreR = base * (0.7 + beat * 0.5);
+        const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR * 2);
+        cg.addColorStop(0, 'rgba(255,255,255,0.85)');
+        cg.addColorStop(0.4, npv2Css(S, 0.7));
+        cg.addColorStop(1, npv2Css(S, 0));
+        ctx.fillStyle = cg;
+        ctx.beginPath(); ctx.arc(cx, cy, coreR * 2, 0, 6.2832); ctx.fill();
+        if (beat > 0.1) {
+            ctx.strokeStyle = npv2Css(S, (beat * 0.6).toFixed(3));
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(cx, cy, base + (1 - beat) * maxL * 0.9, 0, 6.2832); ctx.stroke();
+        }
     },
 
     // --- Aurora: starfield + drifting light ribbons ---------------------------
     aurora(ctx, w, h, S) {
         const st = npv2ThemeState('aurora', () => {
             const stars = [];
-            for (let i = 0; i < 130; i++) {
-                stars.push({ x: Math.random(), y: Math.random() * 0.7, r: Math.random() * 1.4 + 0.3, p: Math.random() * 6.28 });
+            for (let i = 0; i < 150; i++) {
+                stars.push({ x: Math.random(), y: Math.random() * 0.75, r: Math.random() * 1.4 + 0.3, p: Math.random() * 6.28, far: Math.random() < 0.4 });
             }
-            return { stars };
+            return { stars, shoot: 0, shootX: 0, shootY: 0, nextShoot: 4 };
         });
+        const beat = npv2BeatAmp(S);
+        // night-sky gradient
+        const sky = ctx.createLinearGradient(0, 0, 0, h);
+        sky.addColorStop(0, '#02030a');
+        sky.addColorStop(0.6, '#060818');
+        sky.addColorStop(1, '#0a0a18');
+        ctx.fillStyle = sky;
+        ctx.fillRect(0, 0, w, h);
         for (const s of st.stars) {
-            const tw = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(S.t * 1.4 + s.p));
-            ctx.fillStyle = 'rgba(255,255,255,' + (tw * 0.5).toFixed(3) + ')';
+            const tw = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(S.t * (s.far ? 0.7 : 1.4) + s.p));
+            ctx.fillStyle = 'rgba(255,255,255,' + (tw * (s.far ? 0.3 : 0.55)).toFixed(3) + ')';
             ctx.beginPath(); ctx.arc(s.x * w, s.y * h, s.r, 0, 6.2832); ctx.fill();
         }
+        // occasional shooting star
+        st.nextShoot -= 0.016;
+        if (st.nextShoot <= 0 && st.shoot <= 0) {
+            st.shoot = 1; st.shootX = Math.random() * w * 0.7 + w * 0.15; st.shootY = Math.random() * h * 0.25;
+            st.nextShoot = 5 + Math.random() * 8;
+        }
+        if (st.shoot > 0) {
+            st.shoot -= 0.03;
+            const sx = st.shootX + (1 - st.shoot) * w * 0.18;
+            const sy = st.shootY + (1 - st.shoot) * h * 0.10;
+            const tg = ctx.createLinearGradient(sx, sy, sx - w * 0.12, sy - h * 0.07);
+            tg.addColorStop(0, 'rgba(255,255,255,' + (st.shoot * 0.9).toFixed(3) + ')');
+            tg.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.strokeStyle = tg;
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx - w * 0.12, sy - h * 0.07); ctx.stroke();
+        }
         const ribbons = [
-            { y: 0.30, amp: 0.10, speed: 0.35, alpha: 0.34 },
-            { y: 0.44, amp: 0.14, speed: 0.22, alpha: 0.22 },
+            { y: 0.28, amp: 0.09, speed: 0.35, alpha: 0.30, accent: false },
+            { y: 0.42, amp: 0.13, speed: 0.22, alpha: 0.24, accent: true },
+            { y: 0.55, amp: 0.08, speed: 0.5, alpha: 0.16, accent: false },
         ];
         ribbons.forEach((R, ri) => {
+            const pal = R.accent ? npv2Pal2(S) : (S && S.pal);
             const grad = ctx.createLinearGradient(0, h * (R.y - R.amp * 2), 0, h * (R.y + R.amp * 2));
-            grad.addColorStop(0, npv2Css(S, 0));
-            grad.addColorStop(0.5, npv2Css(S, R.alpha * (0.5 + S.energy)));
-            grad.addColorStop(1, 'rgba(140,120,255,' + (R.alpha * 0.7).toFixed(3) + ')');
+            const aMid = (R.alpha * (0.5 + S.energy) * (1 + beat * 0.5)).toFixed(3);
+            grad.addColorStop(0, npv2PalA(pal, 0));
+            grad.addColorStop(0.5, npv2PalA(pal, aMid));
+            grad.addColorStop(1, npv2PalA(pal, 0));
             ctx.fillStyle = grad;
             ctx.beginPath();
             const steps = 70;
             for (let i = 0; i <= steps; i++) {
                 const x = (i / steps) * w;
-                const y = h * R.y + Math.sin(i * 0.11 + S.t * R.speed * 2 + ri * 2) * h * R.amp * (0.6 + S.energy * 0.8)
+                const y = h * R.y + Math.sin(i * 0.11 + S.t * R.speed * 2 + ri * 2.1) * h * R.amp * (0.6 + S.energy * 0.8)
                     + Math.sin(i * 0.031 - S.t * R.speed) * h * R.amp * 0.5;
                 if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
             }
@@ -397,53 +600,105 @@ const NPV2_PAINT = {
             ctx.lineTo(0, h * (R.y + R.amp * 3));
             ctx.closePath(); ctx.fill();
         });
+        // horizon glow
+        const hg = ctx.createLinearGradient(0, h * 0.75, 0, h);
+        hg.addColorStop(0, npv2Css(S, 0));
+        hg.addColorStop(1, npv2Css(S, 0.16 + S.energy * 0.1));
+        ctx.fillStyle = hg;
+        ctx.fillRect(0, h * 0.75, w, h * 0.25);
     },
 
     // --- Stardust: beat-reactive particle field --------------------------------
     stardust(ctx, w, h, S) {
+        const q = npv2Q(S);
         const st = npv2ThemeState('stardust', () => {
             const ps = [];
-            for (let i = 0; i < 190; i++) {
+            for (let i = 0; i < 300; i++) {
                 ps.push({
                     x: Math.random(), y: Math.random(),
                     vx: (Math.random() - 0.5) * 0.0006, vy: (Math.random() - 0.5) * 0.0006,
                     r: Math.random() * 1.8 + 0.4, p: Math.random() * 6.28,
+                    depth: 0.3 + Math.random() * 0.7,
                 });
             }
-            return { ps, beat: 0 };
+            return { ps, rings: [] };
         });
-        // beat flash: energy spikes kick every particle outward a touch
-        st.beat = Math.max(S.energy > 0.72 ? 1 : 0, st.beat - 0.03);
-        for (const p of st.ps) {
-            p.x = (p.x + p.vx * (1 + S.energy * 3 + st.beat * 4) + 1) % 1;
-            p.y = (p.y + p.vy * (1 + S.energy * 3 + st.beat * 4) + 1) % 1;
-            const tw = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(S.t * 2 + p.p));
-            const a = (0.25 + S.energy * 0.55) * tw + st.beat * 0.25;
-            ctx.fillStyle = 'rgba(255,255,255,' + Math.min(1, a).toFixed(3) + ')';
-            ctx.beginPath(); ctx.arc(p.x * w, p.y * h, p.r * (1 + S.energy * 1.2), 0, 6.2832); ctx.fill();
+        const beat = npv2BeatAmp(S);
+        ctx.fillStyle = '#030309';
+        ctx.fillRect(0, 0, w, h);
+        // faint nebula wash so the field has depth, not void
+        const wash = (fx, fy, fr, accent, al) => {
+            const g = ctx.createRadialGradient(w * fx, h * fy, 0, w * fx, h * fy, Math.max(w, h) * fr);
+            g.addColorStop(0, accent ? npv2Css2(S, al) : npv2Css(S, al));
+            g.addColorStop(1, accent ? npv2Css2(S, 0) : npv2Css(S, 0));
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, w, h);
+        };
+        wash(0.25 + 0.1 * Math.sin(S.t * 0.05), 0.35, 0.55, false, (0.10 + S.energy * 0.08).toFixed(3));
+        wash(0.75 + 0.1 * Math.cos(S.t * 0.04), 0.65, 0.6, true, (0.08 + S.energy * 0.07).toFixed(3));
+        // beat shockwave
+        if (beat > 0.85 && st.rings.length < 3) {
+            st.rings.push({ r: 20, x: 0.3 + Math.random() * 0.4, y: 0.3 + Math.random() * 0.4 });
         }
-        // a few palette-tinted motes for color
+        for (let i = st.rings.length - 1; i >= 0; i--) {
+            const rg = st.rings[i];
+            rg.r += 9 * q;
+            const a = Math.max(0, 0.5 - rg.r / (Math.max(w, h) * 0.6));
+            if (a <= 0) { st.rings.splice(i, 1); continue; }
+            ctx.strokeStyle = npv2Css(S, a.toFixed(3));
+            ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.arc(rg.x * w, rg.y * h, rg.r, 0, 6.2832); ctx.stroke();
+        }
+        for (const p of st.ps) {
+            const sp = (1 + S.energy * 3 + beat * 5) * p.depth;
+            p.x = (p.x + p.vx * sp + 1) % 1;
+            p.y = (p.y + p.vy * sp + 1) % 1;
+            const tw = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(S.t * 2 * p.depth + p.p));
+            const a = ((0.45 + S.energy * 0.55) * tw + beat * 0.35 * p.depth) * (0.4 + p.depth * 0.6);
+            const rr = p.r * (1 + S.energy * 1.2) * p.depth;
+            ctx.fillStyle = 'rgba(255,255,255,' + Math.min(1, a).toFixed(3) + ')';
+            ctx.beginPath(); ctx.arc(p.x * w, p.y * h, rr, 0, 6.2832); ctx.fill();
+            // the brightest few get a cross sparkle
+            if (p.r > 1.9 && tw > 0.85) {
+                ctx.strokeStyle = 'rgba(255,255,255,' + (a * 0.5).toFixed(3) + ')';
+                ctx.lineWidth = 1;
+                const L = rr * 4;
+                ctx.beginPath();
+                ctx.moveTo(p.x * w - L, p.y * h); ctx.lineTo(p.x * w + L, p.y * h);
+                ctx.moveTo(p.x * w, p.y * h - L); ctx.lineTo(p.x * w, p.y * h + L);
+                ctx.stroke();
+            }
+        }
+        // palette-tinted motes drifting against the flow
         for (let i = 0; i < 26; i++) {
             const p = st.ps[(i * 7) % st.ps.length];
-            ctx.fillStyle = npv2Css(S, 0.5);
+            ctx.fillStyle = (i % 3 === 0 ? npv2Css2(S, 0.5) : npv2Css(S, 0.5));
             ctx.beginPath(); ctx.arc(p.x * w, p.y * h, p.r * 2.1, 0, 6.2832); ctx.fill();
         }
     },
 
     // --- Vinyl: spinning wax ----------------------------------------------------
     vinyl(ctx, w, h, S) {
-        const cx = w / 2, cy = h / 2;
+        const cx = w / 2, cy = h / 2 + Math.sin(S.t * 0.8) * 3;
         const R = Math.min(w, h) * 0.34;
         const st = npv2ThemeState('vinyl', () => ({ rot: 0 }));
-        if (!S.idle) st.rot += 0.008 + S.energy * 0.012;
+        const beat = npv2BeatAmp(S);
+        if (!S.idle) st.rot += 0.008 + S.energy * 0.014;
         else st.rot += 0.002;
+        // drop shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.beginPath(); ctx.ellipse(cx, cy + R * 1.02, R * 1.02, R * 0.12, 0, 0, 6.2832); ctx.fill();
         // record body
         const body = ctx.createRadialGradient(cx, cy, R * 0.1, cx, cy, R);
         body.addColorStop(0, '#0a0a0a');
-        body.addColorStop(0.85, '#111');
-        body.addColorStop(1, '#1c1c1c');
+        body.addColorStop(0.85, '#101010');
+        body.addColorStop(1, '#1e1e1e');
         ctx.fillStyle = body;
         ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.2832); ctx.fill();
+        // edge highlight
+        ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(cx, cy, R - 1, 0, 6.2832); ctx.stroke();
         // grooves
         ctx.save();
         ctx.strokeStyle = 'rgba(255,255,255,0.055)';
@@ -451,20 +706,31 @@ const NPV2_PAINT = {
         for (let r = R * 0.36; r < R * 0.96; r += 5) {
             ctx.beginPath(); ctx.arc(cx, cy, r, 0, 6.2832); ctx.stroke();
         }
-        // light sweep that rides the energy
+        // energy highlight arc sweeping the grooves
+        const hl = st.rot % 6.2832;
+        ctx.strokeStyle = npv2Css(S, (0.25 + S.energy * 0.4).toFixed(3));
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(cx, cy, R * 0.66, hl, hl + 1.1); ctx.stroke();
+        // light sweep that rides the energy (rotates around the record center)
+        ctx.save();
+        ctx.translate(cx, cy);
         ctx.rotate(st.rot);
-        const sweep = ctx.createLinearGradient(cx - R, cy - R, cx + R, cy + R);
+        const sweep = ctx.createLinearGradient(-R, -R, R, R);
         sweep.addColorStop(0.42, 'rgba(255,255,255,0)');
-        sweep.addColorStop(0.5, 'rgba(255,255,255,' + (0.05 + S.energy * 0.10).toFixed(3) + ')');
+        sweep.addColorStop(0.5, 'rgba(255,255,255,' + (0.05 + S.energy * 0.10 + beat * 0.06).toFixed(3) + ')');
         sweep.addColorStop(0.58, 'rgba(255,255,255,0)');
         ctx.fillStyle = sweep;
-        ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.2832); ctx.fill();
+        ctx.beginPath(); ctx.arc(0, 0, R, 0, 6.2832); ctx.fill();
         ctx.restore();
-        // label
+        ctx.restore();
+        // label: palette disc, dark ring, initial
         ctx.fillStyle = npv2Css(S, 0.92);
         ctx.beginPath(); ctx.arc(cx, cy, R * 0.32, 0, 6.2832); ctx.fill();
-        ctx.fillStyle = 'rgba(0,0,0,0.75)';
-        ctx.font = '600 ' + Math.round(R * 0.22) + 'px system-ui, sans-serif';
+        ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(cx, cy, R * 0.32, 0, 6.2832); ctx.stroke();
+        ctx.fillStyle = 'rgba(0,0,0,0.78)';
+        ctx.font = '700 ' + Math.round(R * 0.22) + 'px system-ui, sans-serif';
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         const initial = (S.title || '♪').trim().charAt(0).toUpperCase() || '♪';
         ctx.fillText(initial, cx, cy + 1);
@@ -473,20 +739,36 @@ const NPV2_PAINT = {
         ctx.beginPath(); ctx.arc(cx, cy, R * 0.035, 0, 6.2832); ctx.fill();
         // tonearm
         const ax = cx + R * 1.55, ay = cy - R * 1.35;
-        ctx.strokeStyle = 'rgba(220,220,220,0.75)';
-        ctx.lineWidth = Math.max(3, R * 0.03);
+        ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+        ctx.lineWidth = Math.max(4, R * 0.045);
         ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(ax + 3, ay + 4);
+        ctx.lineTo(cx + R * 0.42 + 3, cy - R * 0.30 + 4); ctx.stroke();
+        ctx.strokeStyle = 'rgba(220,220,220,0.8)';
+        ctx.lineWidth = Math.max(3, R * 0.03);
         ctx.beginPath(); ctx.moveTo(ax, ay);
         ctx.lineTo(cx + R * 0.42, cy - R * 0.30); ctx.stroke();
         ctx.fillStyle = 'rgba(220,220,220,0.9)';
         ctx.beginPath(); ctx.arc(ax, ay, R * 0.07, 0, 6.2832); ctx.fill();
+        ctx.fillStyle = 'rgba(120,120,120,0.9)';
+        ctx.beginPath(); ctx.arc(ax, ay, R * 0.028, 0, 6.2832); ctx.fill();
     },
 
     // --- Tunnel: spectrum wormhole ----------------------------------------------
     tunnel(ctx, w, h, S) {
         const cx = w / 2, cy = h / 2;
         const st = npv2ThemeState('tunnel', () => ({ z: 0 }));
-        st.z = (st.z + 0.012 + S.energy * 0.03) % 1;
+        const beat = npv2BeatAmp(S);
+        st.z = (st.z + 0.012 + S.energy * 0.03 + beat * 0.05) % 1;
+        ctx.fillStyle = '#020208';
+        ctx.fillRect(0, 0, w, h);
+        // core glow the rings fly out of
+        const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(w, h) * 0.16);
+        core.addColorStop(0, 'rgba(255,255,255,' + (0.25 + beat * 0.5).toFixed(3) + ')');
+        core.addColorStop(0.5, npv2Css(S, 0.35 + beat * 0.3));
+        core.addColorStop(1, npv2Css(S, 0));
+        ctx.fillStyle = core;
+        ctx.beginPath(); ctx.arc(cx, cy, Math.min(w, h) * 0.16, 0, 6.2832); ctx.fill();
         const RINGS = 22, SEGS = 42;
         for (let r = 0; r < RINGS; r++) {
             const z = ((r / RINGS) + st.z) % 1;         // 0 = far, 1 = near
@@ -494,10 +776,13 @@ const NPV2_PAINT = {
             const alpha = Math.pow(z, 1.6) * 0.85;
             for (let sgi = 0; sgi < SEGS; sgi++) {
                 const v = npv2Bin(S, sgi, SEGS);
-                const a0 = (sgi / SEGS) * 6.2832;
-                const a1 = ((sgi + 0.72) / SEGS) * 6.2832;
+                const a0 = (sgi / SEGS) * 6.2832 + S.t * 0.05 * z;
+                const a1 = ((sgi + 0.72) / SEGS) * 6.2832 + S.t * 0.05 * z;
                 const rr = rad * (0.92 + v * 0.35);
-                ctx.strokeStyle = npv2Css(S, (alpha * (0.25 + v * 0.75)).toFixed(3));
+                const accent = (r + sgi) % 7 === 0;
+                ctx.strokeStyle = accent
+                    ? npv2Css2(S, (alpha * (0.25 + v * 0.75)).toFixed(3))
+                    : npv2Css(S, (alpha * (0.25 + v * 0.75)).toFixed(3));
                 ctx.lineWidth = 1 + z * 3.2;
                 ctx.beginPath();
                 ctx.arc(cx, cy, rr, a0, a1);
@@ -511,46 +796,100 @@ const NPV2_PAINT = {
 
     // --- WMP Battery: sparks rise, beat kicks burst them -------------------------
     battery(ctx, w, h, S) {
-        const st = npv2ThemeState('battery', () => ({ parts: [] }));
-        const cx = w / 2;
-        // spawn rate follows the music's energy
-        const spawn = 1 + Math.floor(S.energy * 6);
+        const q = npv2Q(S);
+        const st = npv2ThemeState('battery', () => ({ parts: [], arcs: [], seed: Math.random() * 100 }));
+        const beat = npv2BeatAmp(S);
+        const cx = w / 2, horizon = h * 0.78;
+        // full clear: no ghost bleed from the previous theme
+        ctx.fillStyle = '#04060e';
+        ctx.fillRect(0, 0, w, h);
+        // faint depth haze above the horizon
+        const haze = ctx.createLinearGradient(0, horizon - h * 0.25, 0, horizon);
+        haze.addColorStop(0, npv2Css(S, 0));
+        haze.addColorStop(1, npv2Css(S, (0.10 + S.energy * 0.12).toFixed(3)));
+        ctx.fillStyle = haze;
+        ctx.fillRect(0, horizon - h * 0.25, w, h * 0.25);
+        // rising sparks, two depth layers
+        const spawn = Math.round((2 + Math.floor(S.energy * 7) + (beat > 0.7 ? 30 : 0)) * q);
         for (let i = 0; i < spawn; i++) {
-            if (st.parts.length > 420) break;
+            if (st.parts.length > Math.round(460 * q)) break;
+            const far = Math.random() < 0.45;
+            const big = Math.random() < 0.06;
             st.parts.push({
-                x: cx + (Math.random() - 0.5) * w * 0.5,
-                y: h + 8,
-                vy: -(h * (0.25 + Math.random() * 0.5)) * (0.4 + S.energy),
-                vx: (Math.random() - 0.5) * w * 0.06,
+                x: cx + (Math.random() - 0.5) * w * 0.62,
+                y: horizon + Math.random() * 6,
+                vy: -(h * (0.22 + Math.random() * 0.5)) * (0.35 + S.energy),
+                vx: (Math.random() - 0.5) * w * 0.05,
                 life: 1,
-                decay: 0.004 + Math.random() * 0.01,
-                sz: 1 + Math.random() * 2.6,
-                hue: Math.random(),
+                decay: 0.005 + Math.random() * 0.011,
+                sz: far ? 0.7 + Math.random() * 1.1 : (big ? 3.2 : 1) + Math.random() * 2.4,
+                far: far,
+                ph: Math.random() * 6.28,
             });
         }
-        ctx.fillStyle = 'rgba(4,6,14,0.28)';
-        ctx.fillRect(0, 0, w, h);
         for (let i = st.parts.length - 1; i >= 0; i--) {
             const p = st.parts[i];
-            p.x += p.vx + Math.sin(S.t * 3 + p.y * 0.01) * 0.6;
+            p.x += p.vx + Math.sin(S.t * 2.6 + p.ph + p.y * 0.008) * 0.7;
             p.y += p.vy * 0.016;
             p.life -= p.decay * (1 + S.energy * 2);
             if (p.life <= 0 || p.y < -12) { st.parts.splice(i, 1); continue; }
-            const a = Math.min(1, p.life * 1.4);
-            // sparks tint toward white-hot at the core, palette at the edges
-            ctx.fillStyle = p.hue > 0.82
-                ? 'rgba(255,255,255,' + (a * 0.9) + ')'
-                : npv2Css(S, a * 0.85);
+            const a = Math.min(1, p.life * 1.5) * (p.far ? 0.45 : 1);
+            // ember ramp: white-hot core -> accent -> palette as it cools
+            ctx.fillStyle = p.life > 0.66
+                ? 'rgba(255,255,255,' + (a * 0.95).toFixed(3) + ')'
+                : p.life > 0.33
+                    ? npv2Css2(S, (a * 0.9).toFixed(3))
+                    : npv2Css(S, (a * 0.9).toFixed(3));
+            const r = p.sz * (0.5 + p.life * 0.9);
             ctx.beginPath();
-            ctx.arc(p.x, p.y, p.sz * (0.5 + p.life), 0, 6.2832);
+            ctx.arc(p.x, p.y, r, 0, 6.2832);
             ctx.fill();
+            // hot core dot on near sparks
+            if (!p.far && p.life > 0.5 && r > 1.6) {
+                ctx.fillStyle = 'rgba(255,255,255,' + (a * 0.8).toFixed(3) + ')';
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, r * 0.35, 0, 6.2832);
+                ctx.fill();
+            }
         }
-        // ground glow
-        const g = ctx.createLinearGradient(0, h * 0.7, 0, h);
+        // electric arcs on hard beats: jagged discharge rising from the horizon
+        if (beat > 0.72 && st.arcs.length < 4) {
+            const segs = 7 + Math.floor(Math.random() * 5);
+            const pts = [{ x: cx + (Math.random() - 0.5) * w * 0.5, y: horizon }];
+            for (let s2 = 1; s2 <= segs; s2++) {
+                const prev = pts[s2 - 1];
+                pts.push({
+                    x: prev.x + (Math.random() - 0.5) * w * 0.035,
+                    y: horizon - (h * 0.34 * s2) / segs,
+                });
+            }
+            st.arcs.push({ pts: pts, life: 1 });
+        }
+        ctx.lineWidth = Math.max(1, w * 0.0016);
+        for (let i = st.arcs.length - 1; i >= 0; i--) {
+            const arc = st.arcs[i];
+            arc.life -= 0.09;
+            if (arc.life <= 0) { st.arcs.splice(i, 1); continue; }
+            ctx.strokeStyle = 'rgba(255,255,255,' + (arc.life * 0.85).toFixed(3) + ')';
+            ctx.beginPath();
+            ctx.moveTo(arc.pts[0].x, arc.pts[0].y);
+            for (let s2 = 1; s2 < arc.pts.length; s2++) ctx.lineTo(arc.pts[s2].x, arc.pts[s2].y);
+            ctx.stroke();
+            ctx.strokeStyle = npv2Css2(S, (arc.life * 0.5).toFixed(3));
+            ctx.lineWidth = Math.max(2.5, w * 0.004);
+            ctx.stroke();
+            ctx.lineWidth = Math.max(1, w * 0.0016);
+        }
+        // horizon: crisp line + tight glow + reflection shimmer
+        const flick = 0.35 + S.energy * 0.35 + Math.sin(S.t * 9 + st.seed) * 0.05 + beat * 0.3;
+        const g = ctx.createLinearGradient(0, horizon - 26, 0, horizon + 40);
         g.addColorStop(0, npv2Css(S, 0));
-        g.addColorStop(1, npv2Css(S, 0.30 + S.energy * 0.3));
+        g.addColorStop(0.62, npv2Css(S, Math.max(0, flick * 0.5).toFixed(3)));
+        g.addColorStop(0.72, 'rgba(255,255,255,' + Math.max(0, flick * 0.55).toFixed(3) + ')');
+        g.addColorStop(0.82, npv2Css(S, Math.max(0, flick * 0.4).toFixed(3)));
+        g.addColorStop(1, npv2Css(S, 0));
         ctx.fillStyle = g;
-        ctx.fillRect(0, h * 0.7, w, h * 0.3);
+        ctx.fillRect(0, horizon - 26, w, 66);
     },
 
     // --- WMP Dot Plane: grid of dots breathing with the spectrum ------------------
@@ -558,17 +897,24 @@ const NPV2_PAINT = {
         const cols = 28, rows = 16;
         const cw = w / cols, rh = h / rows;
         const maxR = Math.min(cw, rh) * 0.42;
+        const beat = npv2BeatAmp(S);
+        ctx.fillStyle = '#040409';
+        ctx.fillRect(0, 0, w, h);
+        const bcx = w / 2, bcy = h / 2;
+        const maxD = Math.hypot(bcx, bcy);
         for (let gy = 0; gy < rows; gy++) {
             for (let gx = 0; gx < cols; gx++) {
-                // each column reads a spectrum slice; rows phase-shift in time
                 const v = npv2Bin(S, gx, cols);
-                const wave = 0.5 + 0.5 * Math.sin(S.t * 1.7 + gx * 0.35 + gy * 0.5);
-                const r = Math.max(0.6, (v * 0.75 + wave * 0.25) * maxR * 2);
                 const x = gx * cw + cw / 2, y = gy * rh + rh / 2;
+                // beat wavefront radiating from the center
+                const d = Math.hypot(x - bcx, y - bcy) / maxD;
+                const wave = 0.5 + 0.5 * Math.sin(S.t * 1.7 + gx * 0.35 + gy * 0.5 - d * 6 + beat * 4);
+                const r = Math.max(0.6, (v * 0.75 + wave * 0.25) * maxR * 1.15);
                 const a = 0.10 + v * 0.75;
-                ctx.fillStyle = npv2Css(S, a);
+                const hot = v > 0.8;
+                ctx.fillStyle = hot ? npv2Css2(S, Math.min(1, a + 0.2).toFixed(3)) : npv2Css(S, a.toFixed(3));
                 ctx.beginPath();
-                ctx.arc(x, y, Math.min(r, maxR * 2), 0, 6.2832);
+                ctx.arc(x, y, Math.min(r, maxR * 1.15), 0, 6.2832);
                 ctx.fill();
             }
         }
@@ -577,92 +923,133 @@ const NPV2_PAINT = {
     // --- WMP Alchemy: slow morphing metaball blobs --------------------------------
     alchemy(ctx, w, h, S) {
         const st = npv2ThemeState('alchemy', () => ({ seed: Math.random() * 100 }));
-        const blobs = 7;
+        const beat = npv2BeatAmp(S);
+        const blobs = Math.max(4, Math.round(7 * npv2Q(S)));
         ctx.fillStyle = 'rgba(3,5,12,0.35)';
         ctx.fillRect(0, 0, w, h);
+        ctx.globalCompositeOperation = 'lighter';
         for (let i = 0; i < blobs; i++) {
+            const accent = i % 3 === 2;
             const v = npv2Bin(S, i, blobs);
             const px = st.seed + i * 13.7;
             const x = w * (0.5 + 0.38 * Math.sin(S.t * 0.21 + px) * Math.sin(S.t * 0.13 + px * 2));
             const y = h * (0.5 + 0.36 * Math.cos(S.t * 0.17 + px * 1.3));
-            const r = Math.min(w, h) * (0.10 + v * 0.22 + S.energy * 0.06);
+            const r = Math.min(w, h) * (0.10 + v * 0.22 + S.energy * 0.06) * (1 + beat * 0.3);
+            const pal = accent ? npv2Pal2(S) : (S && S.pal);
             const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-            g.addColorStop(0, npv2Css(S, 0.55));
-            g.addColorStop(0.6, npv2Css(S, 0.22));
-            g.addColorStop(1, npv2Css(S, 0));
+            g.addColorStop(0, npv2PalA(pal, 0.5));
+            g.addColorStop(0.6, npv2PalA(pal, 0.2));
+            g.addColorStop(1, npv2PalA(pal, 0));
             ctx.fillStyle = g;
             ctx.beginPath();
             ctx.arc(x, y, r, 0, 6.2832);
             ctx.fill();
         }
+        ctx.globalCompositeOperation = 'source-over';
     },
 
     // --- Particle fountain: beat-fed spray from the bottom ------------------------
     fountain(ctx, w, h, S) {
-        const st = npv2ThemeState('fountain', () => ({ parts: [], beat: 0 }));
+        const q = npv2Q(S);
+        const st = npv2ThemeState('fountain', () => ({ parts: [] }));
+        const beat = npv2BeatAmp(S);
         const bass = npv2Bin(S, 0, 8) * 0.6 + npv2Bin(S, 1, 8) * 0.4;
-        if (bass > 0.55 && st.beat <= 0) st.beat = 1;
-        st.beat = Math.max(0, st.beat - 0.06);
         const cx = w / 2;
-        const spawn = 2 + Math.floor(bass * 10) + (st.beat > 0 ? 14 : 0);
-        for (let i = 0; i < spawn && st.parts.length < 700; i++) {
+        const spawn = Math.round((2 + Math.floor(bass * 10) + (beat > 0.6 ? 26 : 0)) * q);
+        for (let i = 0; i < spawn && st.parts.length < Math.round(700 * q); i++) {
             const ang = -Math.PI / 2 + (Math.random() - 0.5) * 0.9;
-            const sp = h * (0.35 + Math.random() * 0.55) * (0.5 + bass);
+            const sp = h * (0.35 + Math.random() * 0.55) * (0.5 + bass) * (1 + beat * 0.6);
             st.parts.push({
                 x: cx + (Math.random() - 0.5) * w * 0.04,
                 y: h * 0.98,
+                px: 0, py: 0,
                 vx: Math.cos(ang) * sp,
                 vy: Math.sin(ang) * sp,
                 life: 1,
                 decay: 0.008 + Math.random() * 0.012,
                 sz: 1 + Math.random() * 2.2,
             });
+            const p = st.parts[st.parts.length - 1];
+            p.px = p.x; p.py = p.y;
         }
         ctx.fillStyle = 'rgba(3,5,12,0.30)';
         ctx.fillRect(0, 0, w, h);
+        ctx.lineCap = 'round';
         for (let i = st.parts.length - 1; i >= 0; i--) {
             const p = st.parts[i];
+            p.px = p.x; p.py = p.y;
             p.vy += h * 0.9 * 0.016; // gravity
             p.x += p.vx * 0.016;
             p.y += p.vy * 0.016;
             p.life -= p.decay;
             if (p.life <= 0 || p.y > h + 10) { st.parts.splice(i, 1); continue; }
-            ctx.fillStyle = npv2Css(S, Math.min(1, p.life) * 0.8);
+            const a = Math.min(1, p.life) * 0.85;
+            // white-hot head, palette tail
+            ctx.strokeStyle = p.life > 0.7
+                ? 'rgba(255,255,255,' + a.toFixed(3) + ')'
+                : npv2Css(S, a.toFixed(3));
+            ctx.lineWidth = p.sz;
             ctx.beginPath();
-            ctx.arc(p.x, p.y, p.sz, 0, 6.2832);
-            ctx.fill();
+            ctx.moveTo(p.px, p.py);
+            ctx.lineTo(p.x, p.y);
+            ctx.stroke();
         }
+        // splash glow where the spray lands
+        const sg = ctx.createLinearGradient(0, h * 0.9, 0, h);
+        sg.addColorStop(0, npv2Css(S, 0));
+        sg.addColorStop(1, npv2Css(S, (0.25 + bass * 0.4 + beat * 0.2).toFixed(3)));
+        ctx.fillStyle = sg;
+        ctx.fillRect(0, h * 0.9, w, h * 0.1);
     },
 
     // --- Kaleidoscope: mirrored spectrum wedges ------------------------------------
     kaleido(ctx, w, h, S) {
         const cx = w / 2, cy = h / 2;
         const R = Math.min(w, h) * 0.48;
-        const segs = 12, N = 20;
-        const rot = S.t * 0.12;
+        const segs = 16, N = 20;
+        const beat = npv2BeatAmp(S);
+        const st = npv2ThemeState('kaleido', () => ({ dir: 1 }));
+        if (beat > 0.9) st.dir *= -1; // flip spin on hard beats
+        const rot = S.t * 0.12 * st.dir;
+        const pulse = 1 + beat * 0.12;
         ctx.fillStyle = 'rgba(2,3,9,0.5)';
         ctx.fillRect(0, 0, w, h);
         for (let sgm = 0; sgm < segs; sgm++) {
+            const mirror = sgm % 2 === 1;
             const a0 = rot + (sgm / segs) * 6.2832;
             const a1 = rot + ((sgm + 1) / segs) * 6.2832;
             for (let i = 0; i < N; i++) {
-                const v = npv2Bin(S, i, N);
-                const r0 = (i / N) * R;
-                const r1 = ((i + 1) / N) * R;
+                const src = mirror ? N - 1 - i : i;
+                const v = npv2Bin(S, src, N);
+                const r0 = (i / N) * R * pulse;
+                const r1 = ((i + 1) / N) * R * pulse;
                 ctx.beginPath();
                 ctx.arc(cx, cy, r1, a0, a1);
                 ctx.arc(cx, cy, Math.max(r0, 1), a1, a0, true);
                 ctx.closePath();
-                ctx.fillStyle = npv2Css(S, 0.05 + v * 0.6);
+                const accent = (sgm + i) % 5 === 0;
+                ctx.fillStyle = accent ? npv2Css2(S, (0.05 + v * 0.55).toFixed(3)) : npv2Css(S, (0.05 + v * 0.6).toFixed(3));
                 ctx.fill();
             }
         }
-        // breathing core
+        // beat flash wash
+        if (beat > 0.05) {
+            ctx.fillStyle = npv2Css(S, (beat * 0.10).toFixed(3));
+            ctx.beginPath(); ctx.arc(cx, cy, R * pulse, 0, 6.2832); ctx.fill();
+        }
+        // breathing core with orbit rings
         const bass = npv2Bin(S, 0, 8);
-        ctx.fillStyle = npv2Css(S, 0.5 + bass * 0.4);
+        ctx.fillStyle = npv2Css(S, (0.5 + bass * 0.4).toFixed(3));
         ctx.beginPath();
-        ctx.arc(cx, cy, 3 + bass * 10, 0, 6.2832);
+        ctx.arc(cx, cy, (3 + bass * 10) * pulse, 0, 6.2832);
         ctx.fill();
+        ctx.strokeStyle = npv2Css2(S, 0.4);
+        ctx.lineWidth = 1.5;
+        for (let k = 1; k <= 2; k++) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, (14 + bass * 22) * k * pulse + Math.sin(S.t * 2 + k) * 4, 0, 6.2832);
+            ctx.stroke();
+        }
     },
 
     // --- Warp: starfield rushing past, speed tied to energy -------------------------
@@ -673,8 +1060,15 @@ const NPV2_PAINT = {
             })),
         }));
         const cx = w / 2, cy = h / 2;
-        const speed = 0.008 + S.energy * 0.05 + (S.idle ? 0.004 : 0);
+        const beat = npv2BeatAmp(S);
+        const speed = 0.008 + S.energy * 0.05 + beat * 0.03 + (S.idle ? 0.004 : 0);
         ctx.fillStyle = 'rgba(2,3,9,0.42)';
+        ctx.fillRect(0, 0, w, h);
+        // palette nebula wash behind the streaks
+        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(w, h) * 0.5);
+        g.addColorStop(0, npv2Css(S, 0.20 + beat * 0.15));
+        g.addColorStop(1, npv2Css(S, 0));
+        ctx.fillStyle = g;
         ctx.fillRect(0, 0, w, h);
         for (const s of st.stars) {
             s.z -= speed * (0.4 + s.z);
@@ -684,85 +1078,149 @@ const NPV2_PAINT = {
             const px = cx + (s.x / (s.z + speed * 3)) * cx;
             const py = cy + (s.y / (s.z + speed * 3)) * cy;
             const bright = 1 - s.z;
-            ctx.strokeStyle = 'rgba(255,255,255,' + (bright * 0.85).toFixed(3) + ')';
+            const near = bright > 0.75;
+            ctx.strokeStyle = near
+                ? npv2Css2(S, (bright * 0.9).toFixed(3))
+                : 'rgba(255,255,255,' + (bright * 0.85).toFixed(3) + ')';
             ctx.lineWidth = Math.max(1, bright * 2.4);
             ctx.beginPath();
             ctx.moveTo(px, py);
             ctx.lineTo(sx, sy);
             ctx.stroke();
         }
-        // palette nebula wash behind the streaks
-        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(w, h) * 0.5);
-        g.addColorStop(0, npv2Css(S, 0.20));
-        g.addColorStop(1, npv2Css(S, 0));
-        ctx.fillStyle = g;
-        ctx.fillRect(0, 0, w, h);
+        // jump flash on the beat
+        if (beat > 0.15) {
+            const fg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(w, h) * 0.3);
+            fg.addColorStop(0, 'rgba(255,255,255,' + (beat * 0.35).toFixed(3) + ')');
+            fg.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = fg;
+            ctx.fillRect(0, 0, w, h);
+        }
     },
 
     // --- Nebula: slow deep-space clouds ----------------------------------------------
     nebula(ctx, w, h, S) {
-        const st = npv2ThemeState('nebula', () => ({ seed: Math.random() * 40 }));
+        const st = npv2ThemeState('nebula', () => ({ seed: Math.random() * 40, spark: 0, sx: 0, sy: 0 }));
+        const beat = npv2BeatAmp(S);
         ctx.fillStyle = '#020309';
         ctx.fillRect(0, 0, w, h);
         const layers = [
-            { n: 5, sp: 0.05, al: 0.30, sz: 0.42 },
-            { n: 7, sp: 0.09, al: 0.20, sz: 0.30 },
-            { n: 9, sp: 0.14, al: 0.14, sz: 0.20 },
+            { n: 5, sp: 0.05, al: 0.30, sz: 0.42, accent: false },
+            { n: 4, sp: 0.07, al: 0.22, sz: 0.34, accent: true },
+            { n: 7, sp: 0.09, al: 0.20, sz: 0.30, accent: false },
+            { n: 9, sp: 0.14, al: 0.14, sz: 0.20, accent: true },
         ];
         for (const L of layers) {
             for (let i = 0; i < L.n; i++) {
-                const px = st.seed + i * 31.7 + L.sp * 57;
+                const px = st.seed + i * 31.7 + L.sp * 57 + (L.accent ? 91 : 0);
                 const x = w * (0.5 + 0.45 * Math.sin(S.t * L.sp + px));
                 const y = h * (0.5 + 0.45 * Math.cos(S.t * L.sp * 0.8 + px * 1.7));
-                const r = Math.min(w, h) * L.sz * (0.8 + 0.4 * Math.sin(S.t * 0.3 + px));
+                const r = Math.min(w, h) * L.sz * (0.8 + 0.4 * Math.sin(S.t * 0.3 + px)) * (1 + beat * 0.2);
                 const v = npv2Bin(S, i, L.n);
+                const pal = L.accent ? npv2Pal2(S) : (S && S.pal);
+                const aMid = (L.al * (0.5 + v)).toFixed(3);
                 const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-                g.addColorStop(0, npv2Css(S, L.al * (0.5 + v)));
-                g.addColorStop(1, npv2Css(S, 0));
+                g.addColorStop(0, npv2PalA(pal, aMid));
+                g.addColorStop(1, npv2PalA(pal, 0));
                 ctx.fillStyle = g;
                 ctx.beginPath();
                 ctx.arc(x, y, r, 0, 6.2832);
                 ctx.fill();
             }
         }
-        // sparse stars
+        // two depths of stars
         const sst = npv2ThemeState('nebula-stars', () => ({
-            pts: Array.from({ length: 130 }, () => ({ x: Math.random(), y: Math.random(), p: Math.random() * 6.28 })),
+            pts: Array.from({ length: 150 }, () => ({ x: Math.random(), y: Math.random(), p: Math.random() * 6.28, far: Math.random() < 0.5 })),
         }));
         for (const p of sst.pts) {
-            const tw = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(S.t * 1.4 + p.p));
-            ctx.fillStyle = 'rgba(255,255,255,' + tw.toFixed(3) + ')';
-            ctx.fillRect(p.x * w, p.y * h, 1.4, 1.4);
+            const tw = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(S.t * (p.far ? 0.8 : 1.4) + p.p));
+            ctx.fillStyle = 'rgba(255,255,255,' + (tw * (p.far ? 0.4 : 0.8)).toFixed(3) + ')';
+            const sz = p.far ? 1.2 : 1.8;
+            ctx.fillRect(p.x * w, p.y * h, sz, sz);
+        }
+        // occasional bright star with a cross sparkle
+        st.spark -= 0.016;
+        if (st.spark <= 0) {
+            st.spark = 4 + Math.random() * 7;
+            st.sx = Math.random(); st.sy = Math.random() * 0.8;
+        }
+        if (st.spark > 0 && st.spark < 1.2) {
+            const a = Math.min(1, st.spark);
+            const x = st.sx * w, y = st.sy * h;
+            ctx.strokeStyle = 'rgba(255,255,255,' + (a * 0.8).toFixed(3) + ')';
+            ctx.lineWidth = 1.5;
+            const L = 9 * a + 2;
+            ctx.beginPath();
+            ctx.moveTo(x - L, y); ctx.lineTo(x + L, y);
+            ctx.moveTo(x, y - L); ctx.lineTo(x, y + L);
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(255,255,255,' + (a * 0.9).toFixed(3) + ')';
+            ctx.beginPath(); ctx.arc(x, y, 2, 0, 6.2832); ctx.fill();
         }
     },
 
     // --- Bloom: beat rings expanding from center --------------------------------------
     bloom(ctx, w, h, S) {
-        const st = npv2ThemeState('bloom', () => ({ rings: [], beat: 0 }));
+        const q = npv2Q(S);
+        const st = npv2ThemeState('bloom', () => ({ rings: [], idleT: 0 }));
         const cx = w / 2, cy = h / 2;
+        const beat = npv2BeatAmp(S);
         const bass = npv2Bin(S, 0, 10) * 0.7 + npv2Bin(S, 1, 10) * 0.3;
-        if (bass > 0.5 && st.beat <= 0) {
-            st.beat = 1;
-            st.rings.push({ r: 10, w: 3 + bass * 5 });
-            if (st.rings.length > 26) st.rings.shift();
+        if (beat > 0.75 && st.rings.length < Math.round(26 * q)) {
+            // staggered echo: three rings per beat, petals offset
+            for (let k = 0; k < 3; k++) {
+                st.rings.push({ r: 8 - k * 7, w: 3 + bass * 5, rot: Math.random() * 6.28, petals: 10 + k * 4, accent: k === 1 });
+            }
         }
-        st.beat = Math.max(0, st.beat - 0.05);
-        ctx.fillStyle = 'rgba(3,4,10,0.34)';
+        // idle breathing: a soft ring every few seconds even with no beats
+        st.idleT += 0.016;
+        if (st.idleT > 4) {
+            st.idleT = 0;
+            st.rings.push({ r: 8, w: 2, rot: 0, petals: 12, accent: false, gentle: true });
+        }
+        ctx.fillStyle = 'rgba(3,4,10,0.4)';
         ctx.fillRect(0, 0, w, h);
         const maxR = Math.hypot(w, h) / 2;
+        // ambient rosette: layered petals always turning, so the frame is never empty
+        const baseR = Math.min(w, h) * 0.16 * (1 + bass * 0.35 + Math.sin(S.t * 1.4) * 0.04);
+        for (let layer = 0; layer < 3; layer++) {
+            const petals = 8 + layer * 4;
+            const lr = baseR * (1 + layer * 0.55);
+            const rot = S.t * (0.10 + layer * 0.05) * (layer % 2 ? -1 : 1);
+            const la = (0.16 - layer * 0.035 + bass * 0.12).toFixed(3);
+            ctx.strokeStyle = layer === 1 ? npv2Css2(S, la) : npv2Css(S, la);
+            ctx.lineWidth = 1.4;
+            const seg = 6.2832 / petals;
+            for (let p = 0; p < petals; p++) {
+                // petal: arc bulging outward from the ring
+                const a0 = rot + p * seg;
+                const px = cx + Math.cos(a0) * lr, py = cy + Math.sin(a0) * lr;
+                const pr = lr * 0.42;
+                ctx.beginPath();
+                ctx.arc(px, py, pr, a0 - 1.25, a0 + 1.25);
+                ctx.stroke();
+            }
+        }
         for (let i = st.rings.length - 1; i >= 0; i--) {
             const rg = st.rings[i];
-            rg.r += (4 + bass * 14) * 0.9;
+            rg.r += (4 + bass * 14) * 0.9 * (rg.gentle ? 0.6 : 1);
+            rg.rot += 0.004 * (i % 2 ? 1 : -1);
             const a = Math.max(0, 1 - rg.r / maxR);
             if (a <= 0) { st.rings.splice(i, 1); continue; }
-            ctx.strokeStyle = npv2Css(S, a * 0.7);
+            const alpha = (a * (rg.gentle ? 0.35 : 0.7)).toFixed(3);
+            ctx.strokeStyle = rg.accent ? npv2Css2(S, alpha) : npv2Css(S, alpha);
             ctx.lineWidth = rg.w * a + 0.6;
-            ctx.beginPath();
-            ctx.arc(cx, cy, rg.r, 0, 6.2832);
-            ctx.stroke();
+            // petal ring: arc segments with gaps, slowly counter-rotating
+            const seg = 6.2832 / rg.petals;
+            for (let p = 0; p < rg.petals; p++) {
+                const a0 = rg.rot + p * seg;
+                ctx.beginPath();
+                ctx.arc(cx, cy, rg.r, a0, a0 + seg * 0.62);
+                ctx.stroke();
+            }
         }
         // breathing core
-        const core = 26 + bass * 60 + Math.sin(S.t * 2.2) * 8;
+        const core = 26 + bass * 60 + Math.sin(S.t * 2.2) * 8 + beat * 22;
         const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, core * 2.4);
         g.addColorStop(0, 'rgba(255,255,255,' + (0.35 + bass * 0.4).toFixed(3) + ')');
         g.addColorStop(0.4, npv2Css(S, 0.5));
@@ -774,6 +1232,7 @@ const NPV2_PAINT = {
     },
 };
 
+
 // ---------------------------------------------------------------------------
 // Runtime state
 // ---------------------------------------------------------------------------
@@ -781,6 +1240,13 @@ const NPV2_PAINT = {
 const NPV2 = {
     theme: 'aurora',
     bgOn: true,
+    vizLastCycle: 0,        // NPV2.vizT at the last manual/auto theme change
+    vizQuality: 'auto',     // auto | high | balanced | lite
+    vizEnergy: 1,           // 0.5..1.5 visual responsiveness multiplier
+    vizPalette: 'auto',     // auto (from album art) or a palette id
+    vizDim: 0,              // 0..0.6 background dim for legibility
+    vizAutocycle: 'off',    // off | track | 30 | 60 | 300 (seconds)
+    reduceMotion: false,    // slow the visuals down for sensitive viewers
     speed: 1,
     loop: { mode: 'off', a: 0, b: 0 },
     eq: { attached: false, bands: null, comp: null, on: false, gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], preset: 'Flat', normalize: false },
@@ -842,6 +1308,10 @@ const NPV2_VIZ = {
     energy: 0,
     idle: true,
     title: '',
+    beat: 0,        // 0..1 beat envelope, set from the bass bins each frame
+    pal: { r: 29, g: 185, b: 84 },
+    pal2: { r: 185, g: 84, b: 29 }, // accent palette: channel-rotated
+    q: 1,           // quality factor for particle counts
 };
 
 function npv2IdleSynth(S, t) {
@@ -873,10 +1343,12 @@ function npv2ReadAudio(S, t) {
 function npv2SizeCanvas() {
     const c = NPV2.canvas;
     if (!c) return false;
-    const dpr = Math.min(1.5, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
+    const spec = npv2QualitySpec(NPV2.vizQuality);
+    const dpr = Math.min(spec.dpr, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
     const w = Math.max(2, Math.floor(c.clientWidth * dpr));
     const h = Math.max(2, Math.floor(c.clientHeight * dpr));
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    NPV2_VIZ.q = spec.q;
     return true;
 }
 
@@ -888,13 +1360,27 @@ function npv2VizFrame(now) {
     if (!ctx) return;
     const dt = Math.min(0.1, (now - NPV2.vizLast) / 1000 || 0.016);
     NPV2.vizLast = now;
-    NPV2.vizT += dt;
+    // reduce-motion slows the visual clock; painters read S.t
+    NPV2.vizT += dt * (NPV2.reduceMotion ? 0.3 : 1);
     if (!npv2SizeCanvas()) return;
     const w = NPV2.canvas.width, h = NPV2.canvas.height;
     const S = NPV2_VIZ;
     npv2ReadAudio(S, NPV2.vizT);
+    // energy scaled by the user's visual energy; capped in reduce-motion
+    S.energy = Math.min(1, S.energy * NPV2.vizEnergy);
+    if (NPV2.reduceMotion) S.energy = Math.min(S.energy, 0.45);
+    // beat envelope: a hard bass onset sets it to 1, it decays from there
+    const bass = (S.freq[0] + S.freq[1] + S.freq[2]) / 3 / 255;
+    if (!S.idle && bass > 0.55 && S.beat < 0.35) S.beat = 1;
+    S.beat = Math.max(0, S.beat - dt * 2.4);
     S.t = NPV2.vizT;
-    S.pal = NPV2.palette;
+    // palette: album art by default, or a curated override
+    const pal = (NPV2.vizPalette !== 'auto' && NPV2_PALETTES[NPV2.vizPalette]) ? NPV2_PALETTES[NPV2.vizPalette] : NPV2.palette;
+    S.pal = pal;
+    S.pal2 = { r: pal.g, g: pal.b, b: pal.r };
+    // automatic theme rotation
+    const ac = npv2AutocycleSeconds(NPV2.vizAutocycle);
+    if (ac > 0 && NPV2.vizT - NPV2.vizLastCycle >= ac) npv2CycleTheme(true);
     const paint = NPV2_PAINT[NPV2.theme];
     ctx.clearRect(0, 0, w, h);
     try { if (typeof paint === 'function') paint(ctx, w, h, S); } catch (e) { /* a bad frame is not a broken player */ }
@@ -920,6 +1406,7 @@ function npv2SetTheme(id, opts) {
     const ids = npv2ThemeIds();
     const next = ids.indexOf(id) >= 0 ? id : 'aurora';
     NPV2.theme = next;
+    NPV2.vizLastCycle = NPV2.vizT; // autocycle restarts from a manual change
     npv2SetG('theme', next);
     try {
         document.querySelectorAll('#np-v2-theme-grid [data-theme]').forEach((b) => {
@@ -933,9 +1420,15 @@ function npv2SetTheme(id, opts) {
     npv2SyncVisualsHeader();
 }
 
-function npv2CycleTheme() {
-    const ids = npv2ThemeIds();
-    npv2SetTheme(ids[(ids.indexOf(NPV2.theme) + 1) % ids.length]);
+function npv2CycleTheme(skipOff) {
+    let ids = npv2ThemeIds();
+    // automatic rotation never lands on the Off theme — a black screen
+    // mid-rotation looks broken. Manual cycling still offers Off.
+    if (skipOff) ids = ids.filter((id) => id !== 'none');
+    if (!ids.length) return;
+    let idx = ids.indexOf(NPV2.theme);
+    if (idx < 0) idx = 0; else idx = (idx + 1) % ids.length;
+    npv2SetTheme(ids[idx]);
 }
 
 function npv2SetBgOn(on) {
@@ -946,6 +1439,75 @@ function npv2SetBgOn(on) {
         if (c) c.style.display = NPV2.bgOn && NPV2.theme !== 'none' ? '' : 'none';
         const t = document.getElementById('np-v2-bg-toggle');
         if (t) { t.checked = NPV2.bgOn; }
+    } catch (e) {}
+}
+
+// --- Visual options: every one of these changes what the painters do --------
+
+function npv2SetVizQuality(v) {
+    const ok = ['auto', 'high', 'balanced', 'lite'].indexOf(v) >= 0 ? v : 'auto';
+    NPV2.vizQuality = ok;
+    npv2SetG('viz-quality', ok);
+    try {
+        const s = document.getElementById('np-v2-viz-quality');
+        if (s) s.value = ok;
+    } catch (e) {}
+    npv2SizeCanvas(); // re-size immediately so the dpr change is visible
+}
+
+function npv2SetVizEnergy(v) {
+    NPV2.vizEnergy = npv2ClampVizEnergy(v);
+    npv2SetG('viz-energy', String(NPV2.vizEnergy));
+    npv2SyncVizRange('np-v2-viz-energy', 'np-v2-viz-energy-val', NPV2.vizEnergy, (x) => x.toFixed(1) + '×');
+}
+
+function npv2SetVizPalette(v) {
+    const ok = npv2PaletteList().some((p) => p.id === v) ? v : 'auto';
+    NPV2.vizPalette = ok;
+    npv2SetG('viz-palette', ok);
+    try {
+        const s = document.getElementById('np-v2-viz-palette');
+        if (s) s.value = ok;
+    } catch (e) {}
+}
+
+function npv2SetVizDim(v) {
+    NPV2.vizDim = npv2ClampVizDim(v);
+    npv2SetG('viz-dim', String(NPV2.vizDim));
+    try {
+        const c = document.getElementById('np-v2-bg');
+        if (c) c.style.opacity = String(1 - NPV2.vizDim);
+    } catch (e) {}
+    npv2SyncVizRange('np-v2-viz-dim', 'np-v2-viz-dim-val', NPV2.vizDim, (x) => Math.round(x * 100) + '%');
+}
+
+function npv2SetVizAutocycle(v) {
+    const ok = ['off', 'track', '30', '60', '300'].indexOf(v) >= 0 ? v : 'off';
+    NPV2.vizAutocycle = ok;
+    NPV2.vizLastCycle = NPV2.vizT;
+    npv2SetG('viz-autocycle', ok);
+    try {
+        const s = document.getElementById('np-v2-viz-autocycle');
+        if (s) s.value = ok;
+    } catch (e) {}
+}
+
+function npv2SetReduceMotion(on) {
+    NPV2.reduceMotion = !!on;
+    npv2SetG('reduce-motion', NPV2.reduceMotion ? '1' : '0');
+    try {
+        const t = document.getElementById('np-v2-reduce-motion');
+        if (t) t.checked = NPV2.reduceMotion;
+    } catch (e) {}
+}
+
+// Sync a range slider + its value label.
+function npv2SyncVizRange(rangeId, valId, value, fmt) {
+    try {
+        const r = document.getElementById(rangeId);
+        if (r) r.value = String(value);
+        const l = document.getElementById(valId);
+        if (l) l.textContent = fmt(value);
     } catch (e) {}
 }
 
@@ -996,6 +1558,8 @@ function npv2SetVisualsMode(on) {
         } else {
             npv2VisualsClearIdle();
             if (modal) modal.classList.remove('npv2-ui-hidden');
+            npv2CloseVisualsPanel();
+            npv2ToggleVisualsDrawer(false);
         }
     } catch (e) {}
 }
@@ -1037,6 +1601,101 @@ function npv2SyncVisualsHeader() {
     } catch (e) {}
 }
 
+// True browser fullscreen for the player modal. This is separate from the
+// immersive visuals mode (which only fills the modal): fullscreen fills the
+// screen. The two compose — immersive visuals + fullscreen is the full show.
+function npv2SetFullscreen(on) {
+    const want = typeof on === 'boolean' ? on : !document.fullscreenElement;
+    try {
+        if (want && !document.fullscreenElement) {
+            const el = document.getElementById('np-modal-overlay') || document.documentElement;
+            const p = el.requestFullscreen && el.requestFullscreen();
+            if (p && p.catch) p.catch(() => npv2Toast('Fullscreen was blocked by the browser', 'error'));
+        } else if (!want && document.fullscreenElement) {
+            const p = document.exitFullscreen && document.exitFullscreen();
+            if (p && p.catch) p.catch(() => {});
+        }
+    } catch (e) {}
+}
+
+function npv2SyncFullscreenBtn() {
+    try {
+        const b = document.getElementById('np-v2-fullscreen-btn');
+        if (!b) return;
+        const on = !!document.fullscreenElement;
+        b.classList.toggle('active', on);
+        b.title = on ? 'Exit fullscreen (Esc)' : 'Fullscreen (fills the screen)';
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    } catch (e) {}
+}
+
+// Panels drawer for visuals mode: queue / history / lyrics / details /
+// settings stay reachable while the visuals keep playing behind a side
+// panel. The panel node is temporarily re-homed into the overlay and put
+// back where it came from when the panel closes.
+const NPV2_SIDE_PANELS = {
+    queue: 'np-queue-panel',
+    history: 'np-v2-history-panel',
+    lyrics: 'np-lyrics-panel',
+    details: 'np-v2-details-panel',
+    settings: 'np-v2-settings-panel',
+};
+let npv2SidePanelHome = null;   // { tab, parent, next }
+let npv2SidePanelTab = null;
+
+function npv2OpenVisualsPanel(tab) {
+    try {
+        if (!NPV2_SIDE_PANELS[tab]) return;
+        // toggling the same tab closes it
+        if (npv2SidePanelTab === tab) { npv2CloseVisualsPanel(); return; }
+        npv2CloseVisualsPanel();
+        const node = document.getElementById(NPV2_SIDE_PANELS[tab]);
+        const body = document.getElementById('np-v2-sidepanel-body');
+        const panel = document.getElementById('np-v2-visuals-sidepanel');
+        if (!node || !body || !panel) return;
+        npv2SidePanelHome = { tab, parent: node.parentNode, next: node.nextSibling };
+        npv2SidePanelTab = tab;
+        body.appendChild(node);
+        node.classList.remove('hidden');
+        npv2SelectTab(tab);
+        const names = { queue: 'Queue', history: 'History', lyrics: 'Lyrics', details: 'Details', settings: 'Settings' };
+        const t = document.getElementById('np-v2-sidepanel-title');
+        if (t) t.textContent = names[tab] || tab;
+        panel.classList.remove('hidden');
+        npv2ToggleVisualsDrawer(false);
+        npv2VisualsWakeUI();
+    } catch (e) {}
+}
+
+function npv2CloseVisualsPanel() {
+    try {
+        if (!npv2SidePanelHome) return;
+        const node = document.getElementById(NPV2_SIDE_PANELS[npv2SidePanelHome.tab]);
+        const home = npv2SidePanelHome;
+        npv2SidePanelHome = null;
+        npv2SidePanelTab = null;
+        if (node && home.parent) {
+            if (home.next && home.next.parentNode === home.parent) home.parent.insertBefore(node, home.next);
+            else home.parent.appendChild(node);
+        }
+        const panel = document.getElementById('np-v2-visuals-sidepanel');
+        if (panel) panel.classList.add('hidden');
+    } catch (e) {}
+}
+
+function npv2SidePanelOpen() { return !!npv2SidePanelHome; }
+
+function npv2ToggleVisualsDrawer(open) {
+    try {
+        const d = document.getElementById('np-v2-visuals-drawer');
+        if (!d) return;
+        const want = typeof open === 'boolean' ? open : d.classList.contains('hidden');
+        d.classList.toggle('hidden', !want);
+        const b = document.getElementById('np-v2-visuals-panels');
+        if (b) b.classList.toggle('active', want);
+    } catch (e) {}
+}
+
 // Clicking the album art enters visuals mode (instead of v1's small bars
 // overlay). Capture on the overlay so we run before v1's own art handler.
 function npv2InterceptArtClick() {
@@ -1058,6 +1717,14 @@ function npv2InterceptArtClick() {
         const wake = () => npv2VisualsWakeUI();
         overlay.addEventListener('pointermove', wake, { passive: true });
         overlay.addEventListener('pointerdown', wake, { passive: true });
+        // double-click the visuals goes true fullscreen
+        const c = document.getElementById('np-v2-bg');
+        if (c && !c.__npv2FsHook) {
+            c.__npv2FsHook = true;
+            c.addEventListener('dblclick', () => {
+                if (npv2VisualsModeOn()) npv2SetFullscreen();
+            });
+        }
     } catch (e) {}
 }
 
@@ -1229,7 +1896,7 @@ function npv2SetSpeed(v, opts) {
             const label = btn.querySelector('span');
             if (label) label.textContent = npv2FormatSpeed(NPV2.speed);
             btn.classList.toggle('active', NPV2.speed !== 1);
-            btn.title = 'Playback speed: ' + npv2FormatSpeed(NPV2.speed) + ' ([ / ] to adjust)';
+            btn.title = 'Playback speed: ' + npv2FormatSpeed(NPV2.speed) + ' ([ / ] or shift+click to go slower)';
         }
         const sel = document.getElementById('np-v2-speed-select');
         if (sel) sel.value = String(NPV2.speed);
@@ -1241,6 +1908,58 @@ function npv2CycleSpeed(dir) {
     const i = NPV2_SPEED_PRESETS.indexOf(NPV2.speed);
     const next = NPV2_SPEED_PRESETS[Math.max(0, Math.min(NPV2_SPEED_PRESETS.length - 1, i + dir))];
     npv2SetSpeed(next);
+}
+
+// Speed preset picker: one click on the speed button opens the full list so
+// any speed is one tap away; the button no longer dead-ends at the presets.
+function npv2ToggleSpeedMenu() {
+    try {
+        let m = document.getElementById('np-v2-speed-menu');
+        if (m && !m.classList.contains('hidden')) { m.classList.add('hidden'); return; }
+        if (!m) {
+            m = document.createElement('div');
+            m.id = 'np-v2-speed-menu';
+            m.className = 'np-v2-speed-menu hidden';
+            m.setAttribute('role', 'menu');
+            m.setAttribute('aria-label', 'Playback speed');
+            document.body.appendChild(m);
+            m.addEventListener('click', (e) => {
+                const b = e.target && e.target.closest ? e.target.closest('[data-speed]') : null;
+                if (!b) return;
+                npv2SetSpeed(parseFloat(b.getAttribute('data-speed')));
+                m.classList.add('hidden');
+            });
+            document.addEventListener('click', (e) => {
+                try {
+                    const open = document.getElementById('np-v2-speed-menu');
+                    if (!open || open.classList.contains('hidden')) return;
+                    if (open.contains(e.target)) return;
+                    const btn = document.getElementById('np-v2-speed-btn');
+                    if (btn && btn.contains(e.target)) return;
+                    open.classList.add('hidden');
+                } catch (err) {}
+            });
+        }
+        m.innerHTML = '';
+        NPV2_SPEED_PRESETS.forEach((p) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.setAttribute('data-speed', String(p));
+            b.setAttribute('role', 'menuitemradio');
+            const cur = p === NPV2.speed;
+            b.setAttribute('aria-checked', cur ? 'true' : 'false');
+            b.className = 'np-v2-speed-item' + (cur ? ' active' : '');
+            b.textContent = p + '×';
+            m.appendChild(b);
+        });
+        const btn = document.getElementById('np-v2-speed-btn');
+        if (btn) {
+            const r = btn.getBoundingClientRect();
+            m.style.left = Math.max(8, Math.min(window.innerWidth - 96, r.left)) + 'px';
+            m.style.top = (r.bottom + 6) + 'px';
+        }
+        m.classList.remove('hidden');
+    } catch (e) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -1707,6 +2426,8 @@ function npv2OnTrackChanged(track) {
         npv2SyncVisualsHeader();
         npv2AbReset();
         npv2SetSpeed(NPV2.speed, { silent: true }); // re-stamp playbackRate (covers the xfade element too)
+        // Per-track visual rotation: a fresh visual for a fresh song.
+        if (NPV2.vizAutocycle === 'track' && npv2ModalOpen() && NPV2.bgOn) npv2CycleTheme(true);
         // The Web Audio context is created lazily on first play; if EQ was
         // switched on before that, this is where the graph finally exists.
         if (NPV2.eq.on || NPV2.eq.normalize) npv2AttachAudioGraph();
@@ -1771,16 +2492,29 @@ function npv2WireTransport() {
     const on = (id, fn) => {
         try {
             const el = document.getElementById(id);
-            if (el) el.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+            if (el) el.addEventListener('click', (e) => { e.stopPropagation(); fn(e); });
         } catch (e) {}
     };
-    on('np-v2-speed-btn', () => {
-        // click cycles forward; the settings tab has the full list
-        npv2CycleSpeed(1);
+    on('np-v2-speed-btn', (e) => {
+        // click opens the preset picker; shift+click steps down quickly
+        if (e && e.shiftKey) { npv2CycleSpeed(-1); return; }
+        npv2ToggleSpeedMenu();
     });
-    on('np-v2-eq-btn', () => { npv2SelectTab('settings'); });
+    on('np-v2-eq-btn', (e) => {
+        // click toggles the EQ; shift+click opens Settings for fine-tuning
+        if (e && e.shiftKey) { npv2SelectTab('settings'); return; }
+        npv2SetEqOn(!NPV2.eq.on);
+    });
     on('np-v2-ab-btn', npv2AbToggle);
-    on('np-v2-visual-btn', npv2CycleTheme);
+    on('np-v2-visual-btn', (e) => {
+        // click opens the visual chooser in Settings; shift+click quick-cycles
+        if (e && e.shiftKey) { npv2CycleTheme(); return; }
+        npv2SelectTab('settings');
+        try {
+            const g = document.getElementById('np-v2-theme-grid');
+            if (g) g.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        } catch (err) {}
+    });
     on('np-v2-shorts-btn', () => npv2ToggleShortcuts());
     on('np-v2-shorts-close', () => npv2ToggleShortcuts(false));
     on('np-queue-clear-played', npv2ClearPlayed);
@@ -1824,6 +2558,7 @@ function npv2WireTransport() {
     bindToggle('np-v2-eq-toggle', (on) => npv2SetEqOn(on));
     bindToggle('np-v2-normalize-toggle', (on) => npv2SetNormalize(on));
     bindToggle('np-v2-wake-toggle', (on) => npv2SetWake(on));
+    bindToggle('np-v2-reduce-motion', (on) => npv2SetReduceMotion(on));
 
     // Full-modal visuals mode wiring
     try {
@@ -1836,6 +2571,20 @@ function npv2WireTransport() {
         if (tn) tn.addEventListener('click', () => npv2CycleTheme());
         const expand = document.getElementById('np-v2-visuals-expand');
         if (expand) expand.addEventListener('click', () => npv2SetVisualsMode(true));
+        const fsb = document.getElementById('np-v2-fullscreen-btn');
+        if (fsb) fsb.addEventListener('click', () => npv2SetFullscreen());
+        // Immersive-mode drawer: panels without leaving the visuals
+        const pv = document.getElementById('np-v2-visuals-panels');
+        if (pv) pv.addEventListener('click', () => npv2ToggleVisualsDrawer());
+        const vf = document.getElementById('np-v2-visuals-fullscreen');
+        if (vf) vf.addEventListener('click', () => npv2SetFullscreen());
+        document.querySelectorAll('#np-v2-visuals-drawer [data-tab]').forEach((b) => {
+            b.addEventListener('click', () => {
+                npv2OpenVisualsPanel(b.getAttribute('data-tab'));
+            });
+        });
+        const spc = document.getElementById('np-v2-sidepanel-close');
+        if (spc) spc.addEventListener('click', () => npv2CloseVisualsPanel());
     } catch (e) {}
 
     try {
@@ -1854,6 +2603,32 @@ function npv2WireTransport() {
             spd.value = String(NPV2.speed);
             spd.addEventListener('change', () => npv2SetSpeed(Number(spd.value)));
         }
+        // Visual option controls
+        const vizq = document.getElementById('np-v2-viz-quality');
+        if (vizq) {
+            vizq.value = NPV2.vizQuality;
+            vizq.addEventListener('change', () => npv2SetVizQuality(vizq.value));
+        }
+        const vize = document.getElementById('np-v2-viz-energy');
+        if (vize) {
+            vize.value = String(NPV2.vizEnergy);
+            vize.addEventListener('input', () => npv2SetVizEnergy(vize.value));
+        }
+        const vizp = document.getElementById('np-v2-viz-palette');
+        if (vizp) {
+            vizp.value = NPV2.vizPalette;
+            vizp.addEventListener('change', () => npv2SetVizPalette(vizp.value));
+        }
+        const vizd = document.getElementById('np-v2-viz-dim');
+        if (vizd) {
+            vizd.value = String(NPV2.vizDim);
+            vizd.addEventListener('input', () => npv2SetVizDim(vizd.value));
+        }
+        const vizac = document.getElementById('np-v2-viz-autocycle');
+        if (vizac) {
+            vizac.value = NPV2.vizAutocycle;
+            vizac.addEventListener('change', () => npv2SetVizAutocycle(vizac.value));
+        }
     } catch (e) {}
 }
 
@@ -1862,6 +2637,9 @@ function npv2HandleKeys(event) {
     // space/arrows/m/n/p set). '?' overlay gets Esc-first-close via capture.
     if (event.type === 'keydown' && event.key === 'Escape') {
         try {
+            // In browser fullscreen the browser owns Esc: let it exit
+            // fullscreen natively and don't swallow the key.
+            if (document.fullscreenElement) return;
             const o = document.getElementById('np-v2-shorts-overlay');
             if (o && !o.classList.contains('hidden') && npv2ModalOpen()) {
                 event.stopPropagation();
@@ -1873,6 +2651,16 @@ function npv2HandleKeys(event) {
             if (npv2VisualsModeOn()) {
                 event.stopPropagation();
                 event.preventDefault();
+                // Close the side panel first, then the drawer, then the mode.
+                if (npv2SidePanelOpen()) {
+                    npv2CloseVisualsPanel();
+                    return;
+                }
+                const d = document.getElementById('np-v2-visuals-drawer');
+                if (d && !d.classList.contains('hidden')) {
+                    npv2ToggleVisualsDrawer(false);
+                    return;
+                }
                 npv2SetVisualsMode(false);
                 return;
             }
@@ -1929,6 +2717,13 @@ function npv2Init() {
         NPV2.bgOn = npv2GetG('bg', '1') !== '0';
         NPV2.speed = npv2ClampSpeed(parseFloat(npv2Get('speed', '1')));
         NPV2.wake = npv2Get('wake', '0') === '1';
+        // Visual options (all profile-scoped via npv2GetG, like theme/bg)
+        NPV2.vizQuality = npv2GetG('viz-quality', 'auto');
+        NPV2.vizEnergy = npv2ClampVizEnergy(npv2GetG('viz-energy', '1'));
+        NPV2.vizPalette = npv2GetG('viz-palette', 'auto');
+        NPV2.vizDim = npv2ClampVizDim(npv2GetG('viz-dim', '0'));
+        NPV2.vizAutocycle = npv2GetG('viz-autocycle', 'off');
+        NPV2.reduceMotion = npv2GetG('reduce-motion', '0') === '1';
         npv2LoadEqSettings();
 
         npv2BuildThemePicker();
@@ -1937,6 +2732,12 @@ function npv2Init() {
         npv2WireTransport();
         npv2SelectTab('queue');
         npv2SetBgOn(NPV2.bgOn);
+        npv2SetVizQuality(NPV2.vizQuality);
+        npv2SetVizEnergy(NPV2.vizEnergy);
+        npv2SetVizPalette(NPV2.vizPalette);
+        npv2SetVizDim(NPV2.vizDim);
+        npv2SetVizAutocycle(NPV2.vizAutocycle);
+        npv2SetReduceMotion(NPV2.reduceMotion);
         npv2SyncVisualBtn();
         npv2SyncEqBtn();
         npv2SetSpeed(NPV2.speed, { silent: true });
@@ -1952,6 +2753,8 @@ function npv2Init() {
         // Keyboard: capture phase so Esc can close the shortcuts overlay
         // before v1's bubble-phase handler closes the whole modal.
         document.addEventListener('keydown', npv2HandleKeys, true);
+        // Fullscreen state sync: the browser owns Esc, so track it here.
+        document.addEventListener('fullscreenchange', npv2SyncFullscreenBtn);
 
         // Media loop hooks (own listeners — v1's stay untouched)
         const el = npv2AudioEl();
@@ -2000,6 +2803,13 @@ function npv2Init() {
             attachAudioGraph: npv2AttachAudioGraph,
             themeIds: npv2ThemeIds,
             setVisualsMode: npv2SetVisualsMode,
+        setFullscreen: npv2SetFullscreen,
+        setVizQuality: npv2SetVizQuality,
+        setVizEnergy: npv2SetVizEnergy,
+        setVizPalette: npv2SetVizPalette,
+        setVizDim: npv2SetVizDim,
+        setVizAutocycle: npv2SetVizAutocycle,
+        setReduceMotion: npv2SetReduceMotion,
             visualsModeOn: npv2VisualsModeOn,
         };
     } catch (e) {

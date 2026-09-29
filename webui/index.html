@@ -10846,7 +10846,23 @@
                     <button class="np-v2-visuals-arrow" id="np-v2-visuals-theme-prev" title="Previous visual (Shift+V)">‹</button>
                     <span id="np-v2-visuals-theme-name">Aurora</span>
                     <button class="np-v2-visuals-arrow" id="np-v2-visuals-theme-next" title="Next visual (V)">›</button>
+                    <button class="np-v2-visuals-arrow" id="np-v2-visuals-panels" title="Panels: queue, history, lyrics, details, settings">☰</button>
+                    <button class="np-v2-visuals-arrow" id="np-v2-visuals-fullscreen" title="Fullscreen">⛶</button>
                 </div>
+            </div>
+            <div id="np-v2-visuals-drawer" class="hidden" role="dialog" aria-label="Panels">
+                <button type="button" class="np-v2-drawer-btn" data-tab="queue">Queue</button>
+                <button type="button" class="np-v2-drawer-btn" data-tab="history">History</button>
+                <button type="button" class="np-v2-drawer-btn" data-tab="lyrics">Lyrics</button>
+                <button type="button" class="np-v2-drawer-btn" data-tab="details">Details</button>
+                <button type="button" class="np-v2-drawer-btn" data-tab="settings">Settings</button>
+            </div>
+            <div id="np-v2-visuals-sidepanel" class="hidden" role="dialog" aria-label="Panel">
+                <div class="np-v2-sidepanel-head">
+                    <span id="np-v2-sidepanel-title">Queue</span>
+                    <button type="button" id="np-v2-sidepanel-close" title="Close panel (Esc)">✕</button>
+                </div>
+                <div id="np-v2-sidepanel-body" class="np-v2-sidepanel-body"></div>
             </div>
             <button class="np-close-btn" id="np-close-btn" title="Minimize">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
@@ -10929,7 +10945,7 @@
                             </svg>
                             <span>Crossfade</span>
                         </button>
-                        <button class="np-util-btn" id="np-v2-speed-btn" title="Playback speed: 1× (click to cycle, [ / ] to adjust)">
+                        <button class="np-util-btn" id="np-v2-speed-btn" title="Playback speed (click to pick, Shift+click steps down, [ / ] adjust)">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M12 14l4-4" />
@@ -10937,7 +10953,7 @@
                             </svg>
                             <span>1×</span>
                         </button>
-                        <button class="np-util-btn" id="np-v2-eq-btn" title="Equalizer (opens Settings tab)">
+                        <button class="np-util-btn" id="np-v2-eq-btn" title="Equalizer on/off (Shift+click opens Settings)">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <line x1="4" y1="21" x2="4" y2="14" />
@@ -10962,19 +10978,26 @@
                             </svg>
                             <span>A-B</span>
                         </button>
-                        <button class="np-util-btn" id="np-v2-visual-btn" title="Visuals: Aurora (click to change, V)">
+                        <button class="np-util-btn" id="np-v2-visual-btn" title="Choose a visual (Shift+click quick-cycles, V cycles)">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
                             </svg>
                             <span>Visuals</span>
                         </button>
-                        <button class="np-util-btn" id="np-v2-visuals-expand" title="Full-screen visuals mode (F)">
+                        <button class="np-util-btn" id="np-v2-visuals-expand" title="Immersive visuals mode (F)">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
                             </svg>
                             <span>Immersive</span>
+                        </button>
+                        <button class="np-util-btn" id="np-v2-fullscreen-btn" title="Fullscreen (fills the screen)" aria-pressed="false">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" />
+                            </svg>
+                            <span>Fullscreen</span>
                         </button>
                         <button class="np-util-btn" id="np-v2-shorts-btn" title="Keyboard shortcuts (?)">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -11201,6 +11224,67 @@
                                 </div>
                                 <label class="np-v2-switch"><input type="checkbox" id="np-v2-bg-toggle" checked><span class="np-v2-slider"></span></label>
                             </div>
+                            <div class="np-v2-setting-row">
+                                <div class="np-v2-setting-label">Auto-cycle visuals
+                                    <small>Change the visual automatically.</small>
+                                </div>
+                                <select class="np-v2-select" id="np-v2-viz-autocycle" aria-label="Auto-cycle visuals">
+                                    <option value="off">Off</option>
+                                    <option value="track">Every track</option>
+                                    <option value="30">Every 30 seconds</option>
+                                    <option value="60">Every minute</option>
+                                    <option value="300">Every 5 minutes</option>
+                                </select>
+                            </div>
+                            <div class="np-v2-setting-row">
+                                <div class="np-v2-setting-label">Visual energy
+                                    <small>How strongly the visuals react to the music.</small>
+                                </div>
+                                <div class="np-v2-range-wrap">
+                                    <input type="range" class="np-v2-range" id="np-v2-viz-energy" min="0.5" max="1.5" step="0.1" value="1" aria-label="Visual energy">
+                                    <span class="np-v2-range-val" id="np-v2-viz-energy-val">1.0&times;</span>
+                                </div>
+                            </div>
+                            <div class="np-v2-setting-row">
+                                <div class="np-v2-setting-label">Color palette
+                                    <small>Album art by default, or a curated palette.</small>
+                                </div>
+                                <select class="np-v2-select" id="np-v2-viz-palette" aria-label="Visual color palette">
+                                    <option value="auto">Album art</option>
+                                    <option value="ultraviolet">Ultraviolet</option>
+                                    <option value="ocean">Ocean</option>
+                                    <option value="ember">Ember</option>
+                                    <option value="forest">Forest</option>
+                                    <option value="rose">Rose</option>
+                                    <option value="mono">Mono</option>
+                                </select>
+                            </div>
+                            <div class="np-v2-setting-row">
+                                <div class="np-v2-setting-label">Dim background
+                                    <small>Darken the visuals for easier reading.</small>
+                                </div>
+                                <div class="np-v2-range-wrap">
+                                    <input type="range" class="np-v2-range" id="np-v2-viz-dim" min="0" max="0.6" step="0.05" value="0" aria-label="Dim background">
+                                    <span class="np-v2-range-val" id="np-v2-viz-dim-val">0%</span>
+                                </div>
+                            </div>
+                            <div class="np-v2-setting-row">
+                                <div class="np-v2-setting-label">Visual quality
+                                    <small>Lower it if the animation stutters.</small>
+                                </div>
+                                <select class="np-v2-select" id="np-v2-viz-quality" aria-label="Visual quality">
+                                    <option value="auto">Auto</option>
+                                    <option value="high">High</option>
+                                    <option value="balanced">Balanced</option>
+                                    <option value="lite">Lite</option>
+                                </select>
+                            </div>
+                            <div class="np-v2-setting-row">
+                                <div class="np-v2-setting-label">Reduce motion
+                                    <small>Slows the visuals down.</small>
+                                </div>
+                                <label class="np-v2-switch"><input type="checkbox" id="np-v2-reduce-motion"><span class="np-v2-slider"></span></label>
+                            </div>
                             <h3>Equalizer</h3>
                             <div class="np-v2-eq-head">
                                 <select class="np-v2-select" id="np-v2-eq-preset" aria-label="Equalizer preset"></select>
@@ -11216,7 +11300,7 @@
                             <h3>Playback</h3>
                             <div class="np-v2-setting-row">
                                 <div class="np-v2-setting-label">Speed
-                                    <small>Sticks for the rest of the session.</small>
+                                    <small>Saved, and restored next time you open the theater.</small>
                                 </div>
                                 <select class="np-v2-select" id="np-v2-speed-select" aria-label="Playback speed">
                                     <option value="0.5">0.5×</option>
@@ -11277,8 +11361,10 @@
                         <div class="np-v2-short"><span>Change visuals</span><kbd>V</kbd></div>
                         <div class="np-v2-short"><span>Previous visual</span><kbd>Shift V</kbd></div>
                         <div class="np-v2-short"><span>Immersive visuals mode</span><kbd>F</kbd></div>
+                        <div class="np-v2-short"><span>Fullscreen</span><span class="np-v2-short-hint">button or double-click the visuals</span></div>
+                        <div class="np-v2-short"><span>Slower speed</span><span class="np-v2-short-hint">shift+click the speed button</span></div>
                         <div class="np-v2-short"><span>This panel</span><kbd>?</kbd></div>
-                        <div class="np-v2-short"><span>Minimize player</span><kbd>Esc</kbd></div>
+                        <div class="np-v2-short"><span>Back: exit visuals, close panel, minimize</span><kbd>Esc</kbd></div>
                     </div>
                 </div>
             </div>
