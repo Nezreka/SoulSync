@@ -32,20 +32,44 @@ _status: Dict[int, str] = {}  # track_id -> pending|running|done|error: ...
 _lock = threading.Lock()
 _thread: Optional[threading.Thread] = None
 
+# Injected by configure() at boot (web_server.py). The path resolver needs
+# it to read library.music_paths / transfer paths: without it the
+# container<->host fallback below has no base directories to walk against
+# and every non-literal stored path silently fails to resolve.
+_config_manager = None
 
-def _resolve_existing_path(stored_path: str) -> Optional[str]:
-    """Best-effort: stored DB path -> a file that exists on disk."""
+
+def configure(*, config_manager_=None) -> None:
+    """Inject shared services. Safe to call more than once."""
+    global _config_manager
+    _config_manager = config_manager_
+
+
+def resolve_audio_path(stored_path: str) -> Optional[str]:
+    """Best-effort: stored DB path -> a file that exists on disk.
+
+    Tries the raw path first, then the shared library path resolver
+    (suffix-walk against the configured music/transfer folders), which is
+    what translates container-style stored paths (``/mnt/musicBackup/…``)
+    to the host layout on native installs and vice versa.
+    """
     if stored_path and os.path.isfile(stored_path):
         return stored_path
     try:
         from core.library.path_resolver import resolve_library_file_path
 
-        resolved = resolve_library_file_path(stored_path)
+        resolved = resolve_library_file_path(
+            stored_path, config_manager=_config_manager
+        )
         if resolved and os.path.isfile(resolved):
             return resolved
     except Exception as exc:
         logger.debug("path_resolver failed for %s: %s", stored_path, exc)
     return None
+
+
+# Backwards-compatible alias (core/sample/stems.py imports the old name).
+_resolve_existing_path = resolve_audio_path
 
 
 def _process_one(track_id: int) -> None:
