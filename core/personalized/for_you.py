@@ -131,7 +131,7 @@ def ranked(counts: Dict[str, int], owned: Dict[str, Dict[str, Any]], size: int,
 def weighted_sample(rows: Sequence[Dict[str, Any]], weights: Sequence[float], k: int,
                     rng: random.Random) -> List[Dict[str, Any]]:
     """k rows without replacement, heavier weights more likely (u^(1/w) keys)."""
-    keyed = [(rng.random() ** (1.0 / w), r) for r, w in zip(rows, weights) if w > 0]
+    keyed = [(rng.random() ** (1.0 / w), r) for r, w in zip(rows, weights, strict=True) if w > 0]
     keyed.sort(key=lambda kv: kv[0], reverse=True)
     return [r for _, r in keyed[:k]]
 
