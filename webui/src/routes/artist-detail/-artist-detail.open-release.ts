@@ -69,6 +69,30 @@ export function releaseToAlbumData(release: DiscographyRelease) {
 }
 
 /**
+ * Reconcile the download modal's album context with the album-tracks fetch.
+ *
+ * The release card often carries no track count (Deezer's artist-albums
+ * endpoint omits nb_tracks), so releaseToAlbumData falls back to a
+ * fabricated total_tracks of 1. The /api/album/<id>/tracks fetch just
+ * returned the real release — take its type/count as truth. Without this,
+ * a 6-track EP files under Single/ and embeds track=N/1 in every file:
+ * get_album_type_display('ep', 1) is Single.
+ */
+export function reconcileAlbumWithTracksResponse(
+  cardAlbum: ReturnType<typeof releaseToAlbumData>,
+  data: {
+    album?: { album_type?: string | null; total_tracks?: number | null } | null;
+    tracks?: unknown[];
+  },
+): ReturnType<typeof releaseToAlbumData> {
+  return {
+    ...cardAlbum,
+    album_type: data.album?.album_type || cardAlbum.album_type,
+    total_tracks: data.album?.total_tracks || data.tracks?.length || cardAlbum.total_tracks,
+  };
+}
+
+/**
  * Query string for the album-tracks lookup.
  *
  * `source` comes from the ARTIST, except for a gap-fill card (#1067) which
