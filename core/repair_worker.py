@@ -3068,8 +3068,27 @@ class RepairWorker:
                 # Clean up empty parent directories
                 self._cleanup_empty_parents(resolved)
 
+                # Nudge the auto-import worker so the file doesn't sit in
+                # staging until the next poll cycle. When auto-import is
+                # disabled the worker isn't running and this is a safe
+                # no-op — the message below says so honestly instead of
+                # promising an import that will never come (Specialmed:
+                # "moved to staging... not automatically added to the
+                # database... ss wants to redownload the track").
+                self._trigger_auto_import_scan()
+                auto_import_on = bool(
+                    self._config_manager
+                    and self._config_manager.get('auto_import.enabled', False)
+                )
+                if auto_import_on:
+                    message = 'Moved to staging folder — auto-import will pick it up'
+                else:
+                    message = ('Moved to staging folder. Auto-import is off, so it '
+                               'will NOT be imported automatically — import it from '
+                               'the Import page, or enable auto-import in Settings.')
+
                 return {'success': True, 'action': 'moved_to_staging',
-                        'message': 'Moved to staging folder for import'}
+                        'message': message}
 
             elif fix_action == 'delete':
                 os.remove(resolved)
@@ -3080,14 +3099,55 @@ class RepairWorker:
         except OSError as e:
             return {'success': False, 'error': f'Failed to handle orphan file: {e}'}
 
-    def _cleanup_empty_parents(self, file_path):
-        """Remove empty parent directories up to 3 levels, never removing the transfer folder."""
+    def _protected_root_dirs(self):
+        """Configured roots that must never be auto-removed as 'empty'.
+
+        The transfer folder plus everything ``protected_root_dirs()`` knows
+        (staging / download / transfer from settings) — issue #976 / the
+        Specialmed report: a staging folder nested under the transfer folder
+        (UnRaid single-share) was rmdir'd when a repair fix emptied it.
+        All paths in canonical ``config_root_path`` form, normpath'd.
+        """
         try:
-            transfer_norm = os.path.normpath(self.transfer_folder)
+            from core.imports.file_ops import protected_root_dirs
+            roots = {os.path.normpath(p) for p in protected_root_dirs() if p}
+        except Exception:
+            roots = set()
+        roots.add(os.path.normpath(self.transfer_folder))
+        return roots
+
+    def _trigger_auto_import_scan(self):
+        """Nudge the auto-import worker to scan the staging folder now.
+
+        Best effort: the worker handle lives in ``api.import_routes`` (deferred
+        import — the repair worker must not depend on the API layer at module
+        load). ``trigger_scan()`` on a non-running worker is a safe no-op, so
+        this never starts background processing the user didn't ask for; it
+        only shortens the wait when the worker is actually running.
+        """
+        try:
+            from api.import_routes import auto_import_worker
+        except Exception as e:
+            logger.debug("Could not reach auto-import worker: %s", e)
+            return
+        try:
+            if auto_import_worker is not None:
+                auto_import_worker.trigger_scan()
+        except Exception as e:
+            logger.debug("Could not trigger auto-import scan: %s", e)
+
+    def _cleanup_empty_parents(self, file_path):
+        """Remove empty parent directories up to 3 levels.
+
+        Never removes the transfer folder or any configured root (staging /
+        download / transfer) — even when nested and empty.
+        """
+        try:
+            protected = self._protected_root_dirs()
             parent = os.path.dirname(file_path)
             for _ in range(3):
                 if (parent and os.path.isdir(parent)
-                        and os.path.normpath(parent) != transfer_norm
+                        and os.path.normpath(parent) not in protected
                         and not os.listdir(parent)):
                     os.rmdir(parent)
                     parent = os.path.dirname(parent)
@@ -3681,7 +3741,6 @@ class RepairWorker:
         download_folder = None
         if self._config_manager:
             download_folder = self._config_manager.get('soulseek.download_path', '')
-        transfer_norm = os.path.normpath(self.transfer_folder)
 
         # Never move the file the keeper points at. Two rows can carry the same
         # path (#1210), and when they did, "remove the other copy" moved the only
@@ -3780,20 +3839,9 @@ class RepairWorker:
                     "PUID/PGID permission mismatch on the media volume.", resolved, e)
                 continue
             # Clean up empty parent directories (best effort, cosmetic; never remove
-            # the transfer folder itself). A failure here must not count as a failed
-            # removal — the file WAS moved out.
-            try:
-                parent = os.path.dirname(resolved)
-                for _ in range(3):
-                    if (parent and os.path.isdir(parent)
-                            and os.path.normpath(parent) != transfer_norm
-                            and not os.listdir(parent)):
-                        os.rmdir(parent)
-                        parent = os.path.dirname(parent)
-                    else:
-                        break
-            except OSError:
-                pass
+            # the transfer folder or a configured root). A failure here must not
+            # count as a failed removal — the file WAS moved out.
+            self._cleanup_empty_parents(resolved)
 
         removed = 0
         if db_remove_ids:
@@ -3891,20 +3939,8 @@ class RepairWorker:
                 if resolved and os.path.exists(resolved):
                     os.remove(resolved)
                     file_deleted = True
-                    # Clean up empty parent directories
-                    transfer_norm = os.path.normpath(self.transfer_folder)
-                    parent = os.path.dirname(resolved)
-                    for _ in range(3):
-                        try:
-                            if (parent and os.path.isdir(parent)
-                                    and os.path.normpath(parent) != transfer_norm
-                                    and not os.listdir(parent)):
-                                os.rmdir(parent)
-                                parent = os.path.dirname(parent)
-                            else:
-                                break
-                        except OSError:
-                            break
+                    # Clean up empty parent directories (never a configured root)
+                    self._cleanup_empty_parents(resolved)
             except OSError as e:
                 return {'success': False,
                         'error': f'Could not delete {os.path.basename(single_path)}: {e} — library entry kept'}
@@ -3954,20 +3990,8 @@ class RepairWorker:
                 if resolved and os.path.exists(resolved):
                     os.remove(resolved)
                     file_deleted = True
-                    # Clean up empty parent directories
-                    transfer_norm = os.path.normpath(self.transfer_folder)
-                    parent = os.path.dirname(resolved)
-                    for _ in range(3):
-                        try:
-                            if (parent and os.path.isdir(parent)
-                                    and os.path.normpath(parent) != transfer_norm
-                                    and not os.listdir(parent)):
-                                os.rmdir(parent)
-                                parent = os.path.dirname(parent)
-                            else:
-                                break
-                        except OSError:
-                            break
+                    # Clean up empty parent directories (never a configured root)
+                    self._cleanup_empty_parents(resolved)
             except OSError as e:
                 return {'success': False,
                         'error': f'Could not delete {os.path.basename(track_path)}: {e} — library entry kept'}
@@ -5150,14 +5174,18 @@ class RepairWorker:
             return {'success': False, 'error': str(e)}
 
     def _cleanup_empty_dirs(self, directory):
-        """Remove empty parent directories up to 3 levels, never removing transfer folder."""
+        """Remove empty parent directories up to 3 levels.
+
+        Never removes the transfer folder or any configured root (staging /
+        download / transfer) — even when nested and empty.
+        """
         if not directory:
             return
-        transfer_norm = os.path.normpath(self.transfer_folder)
+        protected = self._protected_root_dirs()
         parent = directory
         for _ in range(3):
             if (parent and os.path.isdir(parent)
-                    and os.path.normpath(parent) != transfer_norm
+                    and os.path.normpath(parent) not in protected
                     and not os.listdir(parent)):
                 try:
                     os.rmdir(parent)
@@ -5399,11 +5427,13 @@ class RepairWorker:
                 if conn:
                     conn.close()
 
-            # Clean up empty source directories
+            # Clean up empty source directories (never a configured root, even
+            # when nested under the transfer folder — #976 / Specialmed)
+            protected = self._protected_root_dirs()
             parent = os.path.dirname(src)
             for _ in range(5):
                 if (parent and os.path.isdir(parent)
-                        and os.path.normpath(parent) != transfer_norm
+                        and os.path.normpath(parent) not in protected
                         and not os.listdir(parent)):
                     os.rmdir(parent)
                     parent = os.path.dirname(parent)

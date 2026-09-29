@@ -262,10 +262,18 @@ class Album:
         # expects it). A bare 'album'/missing type is verified against the
         # track count like the Spotify converter; the filler problem isn't
         # Spotify-specific.
+        # Also accept the normalized shape (album_type/total_tracks): the
+        # metadata layer sometimes passes already-normalized dicts through
+        # _build_album_info, and re-applying the raw-key extraction to them
+        # loses the type and count (verified: ep/6 → album/0, which then
+        # files EPs under Album/ and starves the count-based derivation).
+        if not record_type:
+            record_type = _str(raw.get('album_type'), default='').lower()
         _type_map = {'single': 'single', 'ep': 'ep',
                      'compile': 'compilation', 'compilation': 'compilation'}
         album_type = _type_map.get(
-            record_type, _infer_type_from_count(_int(raw.get('nb_tracks'))))
+            record_type, _infer_type_from_count(
+                _int(raw.get('nb_tracks') or raw.get('total_tracks'))))
 
         external_ids = {}
         if raw.get('id'):
@@ -284,7 +292,7 @@ class Album:
             name=_str(raw.get('title')),
             artists=[artist_name],
             release_date=_str(raw.get('release_date')),
-            total_tracks=_int(raw.get('nb_tracks')),
+            total_tracks=_int(raw.get('nb_tracks') or raw.get('total_tracks')),
             album_type=album_type,
             image_url=image_url,
             artist_id=artist_id or None,

@@ -124,13 +124,13 @@ export function FindingsInbox({
                     disabled={busy}
                     title={
                       destructive
-                        ? `${info?.verb || 'Fix'} — asks before touching any file`
+                        ? `${info?.verb || 'Fix'} all ${group.pending.toLocaleString()} — asks before touching any file`
                         : `${info?.verb || 'Fix'} all ${group.pending.toLocaleString()}`
                     }
                     onClick={() => onFixGroup(group, info)}
                   >
                     {info?.verb || 'Fix'}
-                    {destructive ? '…' : ` all (${group.pending.toLocaleString()})`}
+                    {` all (${group.pending.toLocaleString()})`}
                   </button>
                 ) : null}
                 {group.pending > 0 ? (
