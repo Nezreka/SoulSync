@@ -113,8 +113,10 @@ def _is_transient_musicbrainz_error(exc: Exception) -> bool:
         return True
     response = getattr(exc, 'response', None)
     status_code = getattr(response, 'status_code', None)
-    if status_code in TRANSIENT_STATUS_CODES:
-        return True
+    # An HTTP response is authoritative. Searching the exception text below
+    # can mistake 429/503 inside a release ID in the URL for the HTTP status.
+    if status_code is not None:
+        return status_code in TRANSIENT_STATUS_CODES
     message = str(exc).lower()
     return 'rate limit' in message or 'read timed out' in message or '503' in message or '429' in message
 
