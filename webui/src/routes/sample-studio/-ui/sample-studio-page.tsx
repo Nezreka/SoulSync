@@ -102,6 +102,7 @@ export function SampleStudioPage() {
       <LibraryPanel
         tracks={tracksQuery.data ?? []}
         isLoading={tracksQuery.isLoading}
+        searchError={tracksQuery.isError}
         query={query}
         onQueryChange={onQueryChange}
         filters={filters}

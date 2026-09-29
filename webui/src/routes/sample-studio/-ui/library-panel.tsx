@@ -8,6 +8,7 @@ import styles from './sample-studio-page.module.css';
 interface LibraryPanelProps {
   tracks: StudioTrack[];
   isLoading: boolean;
+  searchError: boolean;
   query: string;
   onQueryChange: (q: string) => void;
   filters: StudioFilters;
@@ -49,6 +50,7 @@ function lengthBucket(duration: number | null | undefined): 'short' | 'medium' |
 export function LibraryPanel({
   tracks,
   isLoading,
+  searchError,
   query,
   onQueryChange,
   filters,
@@ -146,6 +148,10 @@ export function LibraryPanel({
             <div className={styles.shimmer} />
             <div className={styles.shimmer} />
           </>
+        ) : searchError && !isLoading ? (
+          <div className={styles.emptyHint}>
+            Search failed — check your connection and try again.
+          </div>
         ) : filtered.length === 0 ? (
           <div className={styles.emptyHint}>
             {query.trim()

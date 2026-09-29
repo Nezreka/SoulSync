@@ -254,12 +254,11 @@ def separate_track(track_id: int, backend: Optional[SeparatorBackend] = None) ->
     Raises on any failure — the worker records it as the job status.
     """
     from . import store
-    from .worker import _resolve_existing_path
-
+    from .worker import resolve_audio_path
     stored = store.get_track_file_path(track_id)
     if not stored:
         raise RuntimeError(f"unknown track_id {track_id}")
-    path = _resolve_existing_path(stored)
+    path = resolve_audio_path(stored)
     if not path:
         raise RuntimeError(f"audio file not reachable on disk: {stored}")
     backend = backend or get_backend(_default_backend_name())

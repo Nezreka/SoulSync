@@ -85,37 +85,18 @@ def _resolve_source_path(track_id: int, stem: str | None) -> str:
     stored = sample_store.get_track_file_path(track_id)
     if not stored:
         raise SampleHttpError("NOT_FOUND", f"no file path for track {track_id}", 404)
-    path = stored if os.path.isfile(stored) else None
-    if path is None:
-        try:
-            from core.library.path_resolver import resolve_library_file_path
+    # One shared choke point (core.sample.worker): raw path first, then the
+    # library path resolver with the injected config manager, which is what
+    # translates container-style stored paths (/mnt/musicBackup/…) to the
+    # host layout on native installs.
+    from core.sample import worker as sample_worker
 
-            path = resolve_library_file_path(stored)
-        except Exception:
-            path = None
-    if not path or not os.path.isfile(path):
-        raise SampleHttpError("FILE_MISSING", "audio file is not reachable on disk", 409)
+    path = sample_worker.resolve_audio_path(stored)
+    if not path:
+        raise SampleHttpError(
+            "FILE_MISSING", f"audio file not reachable on disk: {stored}", 409
+        )
     return path
-
-
-def _is_artist_page(rows, q):
-    """True when every row genuinely belongs to the named artist.
-
-    The free-text artist interpretation (`artist=q`) stays on the indexed
-    artist scope only when q names a library artist. Otherwise it falls
-    through to the unscoped fuzzy stage, which can fill the page with junk
-    (any common word like "track" matches every title) — trusting that page
-    would suppress the title interpretation entirely.
-    """
-    want = (q or "").strip().casefold()
-    if not rows or not want:
-        return False
-    for r in rows:
-        name = (r.get("artist_name") or "").strip().casefold()
-        credit = (r.get("track_artist") or "").strip().casefold()
-        if name != want and credit != want:
-            return False
-    return True
 
 
 def _merge_track_rows(passes, limit):
@@ -141,14 +122,15 @@ def _merge_track_rows(passes, limit):
 def search_library_tracks(q=None, title="", artist="", limit=50):
     """Track search backing the Sample Studio library panel.
 
-    Free-text `q` tries the ARTIST interpretation first: when q names a
-    library artist the cascade stays on the indexed artist scope (no
-    full-table fuzzy scan). If that page is full AND every row really
-    belongs to the artist, the title cascade is skipped — its fuzzy stage
-    would otherwise burn a full-table scan just to re-find the same rows.
-    In every other case both interpretations run and merge exactly as
-    before (title first), so result sets are unchanged. Returns serialized
-    tracks, merged/deduped, capped at `limit`.
+    One normalized free-text query matched against title, artist name and
+    per-track artist credit in a single statement
+    (MusicDatabase.search_tracks_interactive): exact title hits first, then
+    title prefixes, then artist hits. The old artist-then-title double
+    cascade (up to six full-table scans per keystroke on a big library) is
+    what made this search feel stuck. An explicit title/artist pair (no q)
+    keeps the matcher's dual-constraint semantics. Returns serialized
+    tracks, capped at `limit`. Errors propagate so the web wrapper can
+    return a 500 and the UI can tell "search failed" from "no matches".
     """
     q = (q or "").strip()
     title = (title or "").strip()
@@ -159,14 +141,12 @@ def search_library_tracks(q=None, title="", artist="", limit=50):
 
     db = get_database()
     if q:
-        artist_rows = db.api_search_tracks(title="", artist=q, limit=limit)
-        if len(artist_rows) >= limit and _is_artist_page(artist_rows, q):
-            return _merge_track_rows([artist_rows], limit)
-        title_rows = db.api_search_tracks(title=q, artist="", limit=limit)
-        return _merge_track_rows([title_rows, artist_rows], limit)
-    return _merge_track_rows(
-        [db.api_search_tracks(title=title, artist=artist, limit=limit)], limit
-    )
+        rows = db.search_tracks_interactive(q, limit=limit)
+    else:
+        # explicit title/artist pair keeps the matcher's dual-constraint
+        # semantics (title must match AND artist must match)
+        rows = db.api_search_tracks(title=title, artist=artist, limit=limit)
+    return _merge_track_rows([rows], limit)
 
 
 def fetch_analysis(track_id: int, retry: bool = False):

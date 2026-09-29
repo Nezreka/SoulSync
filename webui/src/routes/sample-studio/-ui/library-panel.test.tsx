@@ -40,6 +40,7 @@ function renderPanel(over: Partial<Parameters<typeof LibraryPanel>[0]> = {}) {
   const props = {
     tracks,
     isLoading: false,
+    searchError: false,
     query: '',
     onQueryChange: vi.fn(),
     filters: DEFAULT_FILTERS,
@@ -78,6 +79,12 @@ describe('LibraryPanel', () => {
   it('shows the no-match hint when a query finds nothing', () => {
     renderPanel({ tracks: [], query: 'zzz' });
     expect(screen.getByText(/No tracks match/)).toBeInTheDocument();
+  });
+
+  it('shows a failure hint instead of no-match when the search errors', () => {
+    renderPanel({ tracks: [], query: 'zzz', searchError: true });
+    expect(screen.getByText(/Search failed/)).toBeInTheDocument();
+    expect(screen.queryByText(/No tracks match/)).not.toBeInTheDocument();
   });
 
   it('reports search input changes', () => {

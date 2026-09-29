@@ -153,7 +153,10 @@ def test_ffmpeg_timeout_surfaces_as_error(monkeypatch):
         analyze_mod._decode_via_ffmpeg("/music/x.flac")
 
 
-# ── Symptom 3: artist-first free-text search ─────────────────────────────
+# ── Symptom 3: slow free-text search ──────────────────────────────────
+# The old artist-first double cascade (api_search_tracks twice, each with
+# basic + base-title + fuzzy passes) is gone: one normalized query hits
+# MusicDatabase.search_tracks_interactive in a single statement.
 
 
 @pytest.fixture
@@ -161,8 +164,12 @@ def fake_db(monkeypatch):
     calls = []
 
     class FakeDB:
+        def search_tracks_interactive(self, query, limit=50):
+            calls.append(("interactive", query, limit))
+            return list(self.rows.pop(0))
+
         def api_search_tracks(self, title="", artist="", limit=50):
-            calls.append((title, artist, limit))
+            calls.append(("dual", title, artist, limit))
             return list(self.rows.pop(0))
 
         rows = []
@@ -179,49 +186,48 @@ def _row(track_id, title="T", artist="A", track_artist=None):
     return row
 
 
-def test_free_text_exact_artist_page_skips_title_scan(fake_db):
-    """q names a library artist and the roster fills the page: the title
-    cascade's full-table fuzzy scan is skipped entirely."""
+def test_free_text_single_db_call_no_double_cascade(fake_db):
+    """q is one normalized query: exactly one DB call, no artist-then-title
+    double cascade (the old second cascade's full-table fuzzy scan is what
+    made library search feel stuck)."""
     db, calls = fake_db
     db.rows = [[_row(i, artist="Virtual Mage") for i in range(50)]]
     tracks = sample_api.search_library_tracks(q="Virtual Mage")
-    assert calls == [("", "Virtual Mage", 50)], f"title cascade ran needlessly: {calls}"
+    assert calls == [("interactive", "Virtual Mage", 50)], f"extra DB calls: {calls}"
     assert len(tracks) == 50
     assert all(t["id"] == i for i, t in enumerate(tracks))
 
 
-def test_free_text_short_roster_merges_both_passes(fake_db):
-    """q names a library artist but the roster doesn't fill the page: the
-    title interpretation still tops up, merged title-first exactly as before."""
+def test_free_text_result_order_is_db_order(fake_db):
+    """Rows come back in the DB's relevance order (exact title first, then
+    prefixes, then artist hits) — no client-side re-merge."""
     db, calls = fake_db
-    db.rows = [
-        [_row(1, artist="Virtual Mage"), _row(2, artist="Virtual Mage")],  # artist pass
-        [_row(2, title="Virtual Mage Anthem"), _row(3, title="Virtual Mage Dub")],  # title pass
-    ]
-    tracks = sample_api.search_library_tracks(q="Virtual Mage", limit=50)
-    assert [c[:2] for c in calls] == [("", "Virtual Mage"), ("Virtual Mage", "")]
-    assert [t["id"] for t in tracks] == [2, 3, 1]  # title rows first, then deduped artist rows
-
-
-def test_free_text_title_query_keeps_original_result_order(fake_db):
-    """q is NOT an artist (fuzzy fallback fills the page with mixed artists):
-    the title interpretation is not suppressed — result order is identical to
-    the old title-first behavior."""
-    db, calls = fake_db
-    db.rows = [
-        [_row(1, artist="Virtual Mage"), _row(2, artist="Artist 0007")],  # artist pass: junk
-        [_row(9, title="Track 0007-03", artist="Artist 0007")],  # title pass: exact hit
-    ]
+    db.rows = [[_row(9, title="Track 0007-03"), _row(1), _row(2)]]
     tracks = sample_api.search_library_tracks(q="Track 0007-03", limit=50)
-    assert [c[:2] for c in calls] == [("", "Track 0007-03"), ("Track 0007-03", "")]
-    assert [t["id"] for t in tracks] == [9, 1, 2]  # title hit first, as before
+    assert calls == [("interactive", "Track 0007-03", 50)]
+    assert [t["id"] for t in tracks] == [9, 1, 2]
+
+
+def test_free_text_dedupes_and_caps_at_limit(fake_db):
+    db, _ = fake_db
+    db.rows = [[_row(1), _row(1), _row(2), _row(3)]]
+    tracks = sample_api.search_library_tracks(q="x", limit=2)
+    assert [t["id"] for t in tracks] == [1, 2]
 
 
 def test_search_title_artist_params(fake_db):
     db, calls = fake_db
     db.rows = [[_row(9)]]
     tracks = sample_api.search_library_tracks(title="Windowlicker", artist="")
-    assert calls == [("Windowlicker", "", 50)]
+    assert calls == [("dual", "Windowlicker", "", 50)]
+    assert [t["id"] for t in tracks] == [9]
+
+
+def test_search_title_and_artist_keeps_dual_constraint(fake_db):
+    db, calls = fake_db
+    db.rows = [[_row(9)]]
+    tracks = sample_api.search_library_tracks(title="Windowlicker", artist="Aphex Twin")
+    assert calls == [("dual", "Windowlicker", "Aphex Twin", 50)]
     assert [t["id"] for t in tracks] == [9]
 
 
