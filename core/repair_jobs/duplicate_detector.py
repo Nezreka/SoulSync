@@ -26,6 +26,15 @@ from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.duplicates")
 
+_ROMAN_SEQUENCE = re.compile(
+    r'\b(?:pt|pts|part|parts|movement|movements|segue|interlude|chapter|act)\s*([ivx]+)\b'
+)
+_ROMAN_VALUES = dict(zip(
+    'i ii iii iv v vi vii viii ix x xi xii xiii xiv xv xvi xvii xviii xix xx'.split(),
+    range(1, 21),
+    strict=True,
+))
+
 
 @register_job
 class DuplicateDetectorJob(RepairJob):
@@ -514,9 +523,19 @@ def _conflicting_title_numbers(title1: str, title2: str) -> bool:
     Only a conflict between two present numbers is decisive. A numberless
     title may be an incomplete tag for the same recording.
     """
-    numbers1 = tuple(int(number) for number in re.findall(r'\d+', title1))
-    numbers2 = tuple(int(number) for number in re.findall(r'\d+', title2))
+    numbers1 = _title_numbers(title1)
+    numbers2 = _title_numbers(title2)
     return bool(numbers1 and numbers2 and numbers1 != numbers2)
+
+
+def _title_numbers(title: str) -> tuple[int, ...]:
+    """Read decimal numbers and Roman part labels in title order."""
+    numbers = [(match.start(), int(match.group())) for match in re.finditer(r'\d+', title)]
+    for match in _ROMAN_SEQUENCE.finditer(title):
+        value = _ROMAN_VALUES.get(match.group(1))
+        if value is not None:
+            numbers.append((match.start(1), value))
+    return tuple(value for _, value in sorted(numbers))
 
 
 def _credit_names(artist: str) -> list:

@@ -27,7 +27,9 @@ def _findings(tracks, *, metadata_match=True):
 
 
 @pytest.mark.parametrize(('first', 'second'), [
-    ('Ultima Esperanza, Pt. 1', 'Ultima Esperanza, Pt. 2'),
+    ('Ultima Esperanza, Pt. I', 'Ultima Esperanza, Pt. II'),
+    ('Simulacra, Pt. II', 'Simulacra, Pt. III'),
+    ('Encom, Part I', 'Encom, Part II'),
     ('Segue 1', 'Segue 2'),
     ('Riddle of Steel Pt.1', 'Riddle of Steel Pt.2'),
 ])
@@ -61,5 +63,6 @@ def test_conflicting_tag_numbers_override_shared_filename():
 def test_numberless_or_provenance_number_does_not_create_conflict():
     assert not _conflicting_title_numbers(_normalize('Segue'), _normalize('Segue 1'))
     assert not _conflicting_title_numbers(_normalize('Segue 01'), _normalize('Segue 1'))
+    assert not _conflicting_title_numbers(_normalize('Ultima Esperanza, Pt. I'), _normalize('Ultima Esperanza, Pt. 1'))
     assert not _conflicting_title_numbers(
         _normalize('Rabbit Run'), _normalize('Rabbit Run - From "8 Mile" Soundtrack'))
