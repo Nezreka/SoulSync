@@ -545,6 +545,40 @@ def inject_webui_assets():
         'vite_assets': build_webui_vite_assets,
     }
 
+
+# --- CORS for the JSON API (browser extensions, cross-origin clients) ---
+# Firefox doesn't apply host-permission CORS bypass to extension page fetches
+# the way Chrome does, so the Companion extension's fetch() calls fail with
+# NetworkError unless the server answers preflights and marks API responses.
+# The preflight handler is registered BEFORE the login/launch-PIN gates on
+# purpose: a preflight carries no credentials and returns no data (204), so
+# it must not be gated — the real request still goes through auth.
+from core.security.cors import preflight_headers as _cors_preflight_headers
+from core.security.cors import response_headers as _cors_response_headers
+
+
+@app.before_request
+def _cors_preflight():
+    headers = _cors_preflight_headers(request.path, request.method)
+    if headers is None:
+        return None
+    return "", 204, headers
+
+
+@app.after_request
+def _add_cors_headers(response):
+    """Stamp Access-Control-Allow-Origin on API responses (browser extensions).
+
+    Endpoints that set their own Access-Control-Allow-Origin win — we don't
+    override an explicit choice.
+    """
+    try:
+        for key, value in _cors_response_headers(request.path).items():
+            response.headers.setdefault(key, value)
+    except Exception as e:
+        logger.debug("CORS response headers failed: %s", e)
+    return response
+
 # Brute-force limiter for every PIN check: the launch unlock and picking a
 # pinned profile. keyed by (ip, profile) so a correct pin on your own card
 # doesn't wipe the failures on someone else's.
