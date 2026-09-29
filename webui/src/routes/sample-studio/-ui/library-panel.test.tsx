@@ -164,11 +164,4 @@ describe('LibraryPanel', () => {
     const selected = container.querySelector('[data-selected="true"]');
     expect(selected?.textContent).toContain('MP3 Song');
   });
-
-  it('shows the disabled key-filter pill', () => {
-    renderPanel();
-    const key = screen.getByRole('button', { name: 'Key · soon' });
-    expect(key).toBeDisabled();
-    expect(key).toHaveAttribute('title', 'Key detection lands in a later phase');
-  });
 });

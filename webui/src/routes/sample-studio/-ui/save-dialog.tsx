@@ -1,7 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 
-import type { StashEntry, StashFormat, StemName, StudioTrack } from '../-sample-studio.types';
+import type {
+  RenderFx,
+  StashEntry,
+  StashFormat,
+  StemName,
+  StudioTrack,
+} from '../-sample-studio.types';
 
 import {
   previewAudioUrl,
@@ -9,7 +15,7 @@ import {
   saveChop,
   studioSampleFoldersQueryOptions,
 } from '../-sample-studio.api';
-import { formatTime, suggestChopName } from '../-sample-studio.helpers';
+import { describeRenderParams, formatTime, suggestChopName } from '../-sample-studio.helpers';
 import { STEM_LABEL, STASH_FORMAT_LABEL } from '../-sample-studio.types';
 import styles from './sample-studio-page.module.css';
 
@@ -23,6 +29,8 @@ interface SaveDialogProps {
   targetBpm: number | null;
   /** Which stem the chop is cut from — null means the full mix. */
   stem: StemName | null;
+  /** FX to bake into the save — same render params as the preview. */
+  fx: RenderFx;
   onSaved: (entry: StashEntry) => void;
 }
 
@@ -41,6 +49,7 @@ export function SaveDialog({
   pitchSt,
   targetBpm,
   stem,
+  fx,
   onSaved,
 }: SaveDialogProps) {
   const [name, setName] = useState('');
@@ -100,6 +109,7 @@ export function SaveDialog({
         pitchSt,
         targetBpm,
         stem,
+        fx,
       });
       const url = previewAudioUrl(preview.preview_id);
       setAuditionUrl(url);
@@ -123,6 +133,7 @@ export function SaveDialog({
         pitchSt,
         targetBpm,
         stem,
+        fx,
         name: name.trim(),
         tags,
         format,
@@ -141,6 +152,8 @@ export function SaveDialog({
   if (stem) fxBits.push(`${STEM_LABEL[stem]} stem`);
   if (Math.abs(pitchSt) >= 0.01) fxBits.push(`${pitchSt > 0 ? '+' : ''}${pitchSt} st`);
   if (targetBpm != null) fxBits.push(`→ ${targetBpm} BPM`);
+  const renderBits = describeRenderParams(fx);
+  if (renderBits.length > 0) fxBits.push(...renderBits);
 
   return (
     <div className={styles.dialogOverlay} onClick={onClose}>

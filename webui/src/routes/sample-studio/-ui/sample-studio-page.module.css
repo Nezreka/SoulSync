@@ -1020,3 +1020,10 @@
   border-color: #f5b942;
   color: #f5b942;
 }
+
+.stashActions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: none;
+}

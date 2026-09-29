@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   deleteStashEntry,
+  lookupStudioTrack,
   previewAudioUrl,
   requestPreview,
   requestStems,
@@ -13,7 +14,9 @@ import {
   studioStemsStatusQueryOptions,
   studioStreamUrl,
   studioTrackSearchQueryOptions,
+  trimSilence,
 } from './-sample-studio.api';
+import { DEFAULT_FX } from './-sample-studio.types';
 
 interface RecordedCall {
   url: string;
@@ -112,6 +115,46 @@ describe('requestPreview', () => {
     expect(calls[0].body).toMatchObject({ stem: null, target_bpm: null });
   });
 
+  it('sends the full FX recipe on preview', async () => {
+    routes['/api/sample/preview'] = ok({
+      success: true,
+      data: { preview_id: 'p7_x.wav', engine: 'librosa', duration_s: 2.5 },
+      error: null,
+    });
+    await requestPreview(7, {
+      start: 0,
+      end: 2.5,
+      pitchSt: 0,
+      targetBpm: null,
+      fx: {
+        ...DEFAULT_FX,
+        normalize: true,
+        reverse: true,
+        fadeMs: 10,
+        space: 0.5,
+        delay: { time: '1/8', feedback: 0.35, mix: 0.2 },
+      },
+    });
+    expect(calls[0].body).toMatchObject({
+      normalize: 'peak',
+      fade_ms: 10,
+      reverse: true,
+      space: 0.5,
+      delay: { time: '1/8', feedback: 0.35, mix: 0.2 },
+    });
+  });
+
+  it('omits normalize and nulls space/delay on preview when FX are off', async () => {
+    routes['/api/sample/preview'] = ok({
+      success: true,
+      data: { preview_id: 'p7_x.wav', engine: 'librosa', duration_s: 1 },
+      error: null,
+    });
+    await requestPreview(7, { start: 0, end: 1, pitchSt: 0, targetBpm: null, fx: DEFAULT_FX });
+    expect(calls[0].body).not.toHaveProperty('normalize');
+    expect(calls[0].body).toMatchObject({ fade_ms: 5, reverse: false, space: null, delay: null });
+  });
+
   it('throws the server message on failure', async () => {
     routes['/api/sample/preview'] = ok({ success: false, error: 'slice too long' }, 400);
     await expect(
@@ -130,6 +173,7 @@ describe('saveChop', () => {
       pitchSt: -2,
       targetBpm: null,
       stem: null,
+      fx: { ...DEFAULT_FX, normalize: true, reverse: true },
       name: 'break',
       tags: ['a'],
       format: 'flac',
@@ -141,19 +185,56 @@ describe('saveChop', () => {
       end_s: 3,
       pitch_st: -2,
       format: 'flac',
+      normalize: 'peak',
+      reverse: true,
+      fade_ms: 5,
+      space: null,
+      delay: null,
     });
   });
 });
 
 describe('stems + stash requests', () => {
-  it('requestStems posts the track id', async () => {
+  it('requestStems posts the track id and method', async () => {
     routes['/api/sample/stems'] = ok(
       { success: true, data: { track_id: 7, status: 'queued', stems: [] }, error: null },
       202,
     );
     const info = await requestStems(7);
     expect(info.status).toBe('queued');
-    expect(calls[0].body).toMatchObject({ track_id: 7 });
+    expect(calls[0].body).toMatchObject({ track_id: 7, method: 'demucs' });
+
+    const rough = await requestStems(7, 'rough-drums');
+    expect(rough.status).toBe('queued');
+    expect(calls[1].body).toMatchObject({ track_id: 7, method: 'rough-drums' });
+  });
+
+  it('trimSilence posts the region and returns the adjusted bounds', async () => {
+    routes['/api/sample/trim'] = ok({
+      success: true,
+      data: { track_id: 7, start_s: 0.12, end_s: 3.4 },
+      error: null,
+    });
+    const bounds = await trimSilence(7, 0, 3.5);
+    expect(bounds).toEqual({ track_id: 7, start_s: 0.12, end_s: 3.4 });
+    expect(calls[0].body).toMatchObject({ track_id: 7, start_s: 0, end_s: 3.5 });
+  });
+
+  it('lookupStudioTrack resolves by exact track id', async () => {
+    routes['library/tracks'] = ok({
+      success: true,
+      data: {
+        tracks: [
+          { id: 7, title: 'Midnight Groove', artist_name: 'Test Artist' },
+          { id: 9, title: 'Other Song', artist_name: 'Test Artist' },
+        ],
+      },
+      error: null,
+    });
+    const track = await lookupStudioTrack(7, 'Midnight Groove', 'Test Artist');
+    expect(track?.id).toBe(7);
+    const missing = await lookupStudioTrack(42, 'Midnight Groove', 'Test Artist');
+    expect(missing).toBeNull();
   });
 
   it('deleteStashEntry issues a DELETE', async () => {
@@ -252,9 +333,36 @@ describe('studioTrackSearchQueryOptions', () => {
       track_id: 7,
       status: 'done',
       bpm: null,
+      key: null,
       onsets: [],
       duration_s: null,
     });
+  });
+
+  it('normalizes the key from analysis — confident, uncertain, and missing', async () => {
+    const opts = studioAnalysisQueryOptions(7);
+    const fetchAnalysis = async (key: unknown) => {
+      routes['/api/sample/analysis'] = ok({
+        success: true,
+        data: { track_id: 7, status: 'done', bpm: 99.4, key, onsets: [], duration_s: 206 },
+        error: null,
+      });
+      return opts.queryFn!({} as never);
+    };
+
+    const confident = await fetchAnalysis({ name: 'C minor', confidence: 0.87 });
+    expect(confident.key).toEqual({ name: 'C minor', confidence: 0.87 });
+
+    // The confidence floor lives in display (formatKeyBpm shows "key
+    // uncertain" below 0.5) — normalization keeps the raw key.
+    const uncertain = await fetchAnalysis({ name: 'C minor', confidence: 0.3 });
+    expect(uncertain.key).toEqual({ name: 'C minor', confidence: 0.3 });
+
+    const missing = await fetchAnalysis(null);
+    expect(missing.key).toBeNull();
+
+    const malformed = await fetchAnalysis({ name: 42 });
+    expect(malformed.key).toBeNull();
   });
 });
 

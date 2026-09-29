@@ -1,8 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { requestStems, stemAudioUrl, studioStemsStatusQueryOptions } from '../-sample-studio.api';
-import { STEM_LABEL, STEM_NAMES, type StemName, type StemsInfo } from '../-sample-studio.types';
+import {
+  STEM_LABEL,
+  isSeparationMethod,
+  type SeparationMethod,
+  type StemName,
+  type StemsInfo,
+} from '../-sample-studio.types';
 import styles from './stems-panel.module.css';
 
 interface StemsPanelProps {
@@ -12,13 +18,24 @@ interface StemsPanelProps {
   onSelectStem: (stem: StemName | null) => void;
 }
 
+const METHOD_LABEL: Record<SeparationMethod, string> = {
+  demucs: 'Demucs stems',
+  'rough-drums': 'Drums / Music (rough)',
+  'rough-center': 'Center (rough)',
+};
+
+function isRoughMethod(method: SeparationMethod | null): boolean {
+  return method === 'rough-drums' || method === 'rough-center';
+}
+
 /** Map TanStack's error shape to a human message. */
-function stemsStatusMessage(info: StemsInfo | undefined, isFetching: boolean): string {
+function separationStatusMessage(info: StemsInfo | undefined, isFetching: boolean): string {
   if (!info) return 'Ready to separate';
   const s = info.status;
-  if (s === 'done') return 'Stems ready';
+  const rough = isSeparationMethod(info.method) && isRoughMethod(info.method);
+  if (s === 'done') return rough ? 'Split ready' : 'Stems ready';
   if (s.startsWith('error')) return s.slice('error:'.length).trim() || 'Separation failed';
-  if (s === 'running') return 'Separating…';
+  if (s === 'running') return rough ? 'Splitting…' : 'Separating…';
   if (s === 'queued') return 'Queued…';
   if (isFetching) return 'Checking…';
   return 'Ready to separate';
@@ -66,13 +83,14 @@ function useStemMixer(trackId: number | null, stems: StemName[]) {
     setPlaying(false);
   };
 
-  // Reset the mixer whenever the track changes or stems arrive.
+  // Reset the mixer whenever the track changes or a different method's
+  // outputs arrive.
   useEffect(() => {
     stop();
     setSolo(null);
     setMuted(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trackId]);
+  }, [trackId, stems]);
 
   // Live solo/mute: retarget each stem's gain node as state changes.
   useEffect(() => {
@@ -150,16 +168,24 @@ function useStemMixer(trackId: number | null, stems: StemName[]) {
 export default function StemsPanel({ trackId, activeStem, onSelectStem }: StemsPanelProps) {
   const [separating, setSeparating] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
+  // Methods that finished for this track, so the results can switch between
+  // them — the backend only reports the most recent request.
+  const [doneMethods, setDoneMethods] = useState<SeparationMethod[]>([]);
 
   const statusQuery = useQuery(studioStemsStatusQueryOptions(trackId, separating));
   const info: StemsInfo | undefined = statusQuery.data;
-  const stems: StemName[] = info?.stems ?? [];
+  const method: SeparationMethod | null = isSeparationMethod(info?.method) ? info.method : null;
+  // Referentially stable so the mixer's reset effect doesn't loop.
+  const stems = useMemo<StemName[]>(() => info?.stems ?? [], [info?.stems]);
   const done = info?.status === 'done';
   const failed = info?.status.startsWith('error:') ?? false;
   const busy = separating && (info?.status === 'queued' || info?.status === 'running');
   // Unknown until the first status poll lands — assume available so the
   // panel doesn't flash the setup note on every track change.
   const stemsAvailable = info?.stems_available ?? true;
+  const roughBusy =
+    busy && isRoughMethod(method) && (info?.status === 'queued' || info?.status === 'running');
+  const roughFailed = failed && isRoughMethod(method);
 
   // Stop the "separating" poll flag once the worker settles.
   useEffect(() => {
@@ -167,14 +193,29 @@ export default function StemsPanel({ trackId, activeStem, onSelectStem }: StemsP
     if (info.status === 'done' || info.status.startsWith('error')) setSeparating(false);
   }, [info]);
 
+  // Remember finished methods for the results switcher.
+  useEffect(() => {
+    if (done && method) {
+      setDoneMethods((prev) => (prev.includes(method) ? prev : [...prev, method]));
+    }
+  }, [done, method]);
+
+  // A separation only makes sense for the track it ran on.
+  useEffect(() => {
+    setDoneMethods([]);
+    setSeparating(false);
+    setRequestError(null);
+  }, [trackId]);
+
   const mixer = useStemMixer(trackId, stems);
 
-  const startSeparation = async () => {
+  const startSeparation = async (next: SeparationMethod) => {
     if (trackId === null) return;
     setRequestError(null);
     setSeparating(true);
+    mixer.stop();
     try {
-      const result = await requestStems(trackId);
+      const result = await requestStems(trackId, next);
       if (result.status === 'done' || result.status.startsWith('error')) setSeparating(false);
       void statusQuery.refetch();
     } catch (err) {
@@ -183,7 +224,8 @@ export default function StemsPanel({ trackId, activeStem, onSelectStem }: StemsP
     }
   };
 
-  const message = stemsStatusMessage(info, statusQuery.isFetching);
+  const labelFor = (slug: StemName): string => info?.labels?.[slug] ?? STEM_LABEL[slug] ?? slug;
+  const message = separationStatusMessage(info, statusQuery.isFetching);
 
   return (
     <section className={styles.stemsPanel} aria-label="Stem separation">
@@ -200,7 +242,11 @@ export default function StemsPanel({ trackId, activeStem, onSelectStem }: StemsP
               of them. Runs on your server with Demucs — about a minute for a full song, and it's
               saved forever once done.
             </p>
-            <button type="button" className={styles.primary} onClick={startSeparation}>
+            <button
+              type="button"
+              className={styles.primary}
+              onClick={() => void startSeparation('demucs')}
+            >
               Separate stems
             </button>
           </>
@@ -208,24 +254,78 @@ export default function StemsPanel({ trackId, activeStem, onSelectStem }: StemsP
 
         {!done && !busy && !failed && !stemsAvailable && <StemsSetupNote />}
 
-        {busy && (
+        <div className={styles.roughSection}>
+          <p className={styles.roughTitle}>Rough splits (built-in)</p>
+          <p className={styles.hint}>
+            No setup, no downloads — a quick approximate split for finding drum breaks. Rough on
+            purpose: it guesses, it doesn&apos;t isolate. Use Demucs above for the real thing when
+            it&apos;s installed.
+          </p>
+          <div className={styles.roughActions}>
+            <button
+              type="button"
+              className={styles.primary}
+              disabled={busy || trackId === null}
+              onClick={() => void startSeparation('rough-drums')}
+              title="Split into drums-ish and everything-else-ish (built-in DSP)"
+            >
+              Drums / Music (rough)
+            </button>
+            <button
+              type="button"
+              className={styles.primary}
+              disabled={busy || trackId === null}
+              onClick={() => void startSeparation('rough-center')}
+              title="Keep just the center of the stereo image (built-in DSP)"
+            >
+              Center (rough)
+            </button>
+          </div>
+          {roughBusy && (
+            <div className={styles.progress} role="status" aria-live="polite">
+              <div className={styles.spinner} aria-hidden="true" />
+              <span>{message} — quick, stay here.</span>
+            </div>
+          )}
+          {roughFailed && (
+            <div className={styles.error} role="alert">
+              <p className={styles.errorTitle}>Rough split failed</p>
+              <p className={styles.errorDetail}>{message}</p>
+              <button
+                type="button"
+                className={styles.primary}
+                onClick={() => void startSeparation(method ?? 'rough-drums')}
+              >
+                Try again
+              </button>
+            </div>
+          )}
+        </div>
+
+        {busy && !roughBusy && (
           <div className={styles.progress} role="status" aria-live="polite">
             <div className={styles.spinner} aria-hidden="true" />
             <span>{message} — this takes a while, feel free to keep editing.</span>
           </div>
         )}
 
-        {failed && stemsAvailable && (
+        {failed && !roughFailed && (method === null || method === 'demucs') && stemsAvailable && (
           <div className={styles.error} role="alert">
             <p className={styles.errorTitle}>Separation failed</p>
             <p className={styles.errorDetail}>{message}</p>
-            <button type="button" className={styles.primary} onClick={startSeparation}>
+            <button
+              type="button"
+              className={styles.primary}
+              onClick={() => void startSeparation('demucs')}
+            >
               Try again
             </button>
           </div>
         )}
 
-        {failed && !stemsAvailable && <StemsSetupNote />}
+        {failed && !roughFailed && (method === null || method === 'demucs') && !stemsAvailable && (
+          <StemsSetupNote />
+        )}
 
         {requestError && (
           <div className={styles.error} role="alert">
@@ -246,42 +346,58 @@ export default function StemsPanel({ trackId, activeStem, onSelectStem }: StemsP
                 {mixer.playing ? '⏹ Stop' : '▶ Play all'}
               </button>
               <span className={styles.hint}>
-                Solo or mute stems live, then tap one to chop from it.
+                {isRoughMethod(method)
+                  ? 'Solo or mute the rough outputs live, then tap one to chop from it.'
+                  : 'Solo or mute stems live, then tap one to chop from it.'}
               </span>
             </div>
+            {doneMethods.length > 1 && (
+              <div className={styles.methodSwitch}>
+                <span className={styles.hint}>Also ready:</span>
+                {doneMethods
+                  .filter((m) => m !== method)
+                  .map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      className={styles.ghost}
+                      onClick={() => void startSeparation(m)}
+                      title={`Show ${METHOD_LABEL[m]}`}
+                    >
+                      {METHOD_LABEL[m]}
+                    </button>
+                  ))}
+              </div>
+            )}
             <ul className={styles.stemList}>
-              {STEM_NAMES.map((stem) => {
-                const available = stems.includes(stem);
+              {stems.map((stem) => {
                 const selected = activeStem === stem;
                 return (
                   <li key={stem} className={`${styles.stemRow} ${selected ? styles.selected : ''}`}>
                     <button
                       type="button"
                       className={styles.stemName}
-                      disabled={!available}
                       onClick={() => onSelectStem(selected ? null : stem)}
-                      title={selected ? 'Back to the full mix' : `Chop from ${STEM_LABEL[stem]}`}
+                      title={selected ? 'Back to the full mix' : `Chop from ${labelFor(stem)}`}
                     >
-                      {selected ? '◉' : '○'} {STEM_LABEL[stem]}
+                      {selected ? '◉' : '○'} {labelFor(stem)}
                     </button>
                     <div className={styles.stemControls}>
                       <button
                         type="button"
                         className={`${styles.mini} ${mixer.solo === stem ? styles.soloOn : ''}`}
-                        disabled={!available}
                         onClick={() => mixer.toggleSolo(stem)}
                         aria-pressed={mixer.solo === stem}
-                        title={`Solo ${STEM_LABEL[stem]}`}
+                        title={`Solo ${labelFor(stem)}`}
                       >
                         S
                       </button>
                       <button
                         type="button"
                         className={`${styles.mini} ${mixer.muted.has(stem) ? styles.muteOn : ''}`}
-                        disabled={!available}
                         onClick={() => mixer.toggleMute(stem)}
                         aria-pressed={mixer.muted.has(stem)}
-                        title={`Mute ${STEM_LABEL[stem]}`}
+                        title={`Mute ${labelFor(stem)}`}
                       >
                         M
                       </button>

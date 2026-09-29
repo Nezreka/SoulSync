@@ -268,3 +268,33 @@
   word-break: break-all;
   user-select: all;
 }
+
+/* Rough splits: always-available built-in DSP, visually distinct from Demucs. */
+.roughSection {
+  border-top: 1px solid #2a2620;
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.roughTitle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #b5b0a4;
+}
+
+.roughActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Switcher between finished separation methods. */
+.methodSwitch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
