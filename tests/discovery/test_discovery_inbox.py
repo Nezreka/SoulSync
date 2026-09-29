@@ -74,6 +74,38 @@ def test_concerts_keep_the_artists_that_answered(db):
     assert item['payload']['url'] == 'https://tm/1'
 
 
+def _gig(venue, code):
+    return {'datetime': f'{_days(30)}T20:00:00Z', 'venue': venue, 'city': venue,
+            'country_code': code, 'tickets_url': 'https://tm/' + venue}
+
+
+def test_concerts_keep_to_your_country_when_you_set_one(db):
+    """sept 29 2026: boulder's inbox was 24 shows in brisbane, perth and des
+    moines, because ticketmaster was asked by keyword only."""
+    events = {'Tool': [_gig('Forum', 'US'), _gig('Langley Park', 'AU')]}
+    assert inbox.collect_concerts(db, 1, lambda n: {'events': events.get(n, [])},
+                                  country='US') == 1
+    assert [i['title'] for i in inbox.list_items(db, 1)] == ['Forum · Forum']
+
+
+def test_setting_a_country_clears_the_far_away_ones_but_not_the_saved(db):
+    events = {'Tool': [_gig('Forum', 'US'), _gig('Langley Park', 'AU'), _gig('Old Row', '')]}
+    inbox.collect_concerts(db, 1, lambda n: {'events': events.get(n, [])}, country='')
+    assert len(inbox.list_items(db, 1)) == 3
+    kept = next(i for i in inbox.list_items(db, 1) if i['title'].startswith('Langley'))
+    inbox.set_state(db, 1, kept['id'], 'saved')
+    # the country goes in; the next refresh finds nothing new
+    inbox.collect_concerts(db, 1, lambda n: {'events': []}, country='US')
+    assert [i['title'] for i in inbox.list_items(db, 1)] == ['Forum · Forum']
+    assert [t for _, t in _titles(db, 'saved')] == ['Langley Park · Langley Park']
+
+
+def test_no_country_means_anywhere(db):
+    events = {'Tool': [_gig('Forum', 'US'), _gig('Langley Park', 'AU')]}
+    assert inbox.collect_concerts(db, 1, lambda n: {'events': events.get(n, [])},
+                                  country='') == 2
+
+
 def test_a_source_that_does_not_answer_is_reported_and_the_rest_still_land(db):
     _album(db, 'Tool', 'Fear Inoculum', _days(-3))
     result = inbox.refresh(db, 1, today=TODAY,

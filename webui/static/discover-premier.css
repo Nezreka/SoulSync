@@ -2101,19 +2101,57 @@
     text-decoration: none;
 }
 
-.discover-inbox-dismiss {
-    width: 28px;
-    height: 28px;
+/* save and dismiss: quiet icons, brighter when the row is hovered */
+.discover-inbox-icon {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
     border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: none;
     background: transparent;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.4);
     cursor: pointer;
+    transition: color 150ms ease, background 150ms ease;
 }
 
-.discover-inbox-dismiss:hover {
+.discover-inbox-item:hover .discover-inbox-icon {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.discover-inbox-icon:hover {
+    color: #fff !important;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.discover-inbox-icon:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb, 29, 185, 84), 0.9);
+    outline-offset: 1px;
+}
+
+/* a concert's art is its date */
+.discover-inbox-date {
+    flex-direction: column;
+    gap: 0;
+    background: rgba(255, 255, 255, 0.08);
+    line-height: 1;
+}
+
+.discover-inbox-date-month {
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgb(var(--accent-light-rgb, 30, 215, 96));
+}
+
+.discover-inbox-date-day {
+    margin-top: 3px;
+    font-size: 1.15rem;
+    font-weight: 800;
     color: #fff;
-    border-color: rgba(255, 255, 255, 0.3);
+    font-variant-numeric: tabular-nums;
 }
 
 .discover-inbox-more {

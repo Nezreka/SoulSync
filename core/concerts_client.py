@@ -26,6 +26,7 @@ does not move fast: a tour announcement is news over days, not seconds.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -196,6 +197,16 @@ def ticketmaster_configured() -> bool:
     return bool(_cfg("concerts.ticketmaster_api_key"))
 
 
+def concert_country() -> str:
+    """the two-letter country discovery keeps concerts to, or '' for anywhere.
+
+    only discovery reads this. an artist page still lists every date, since
+    you went there to see the whole tour. the inbox is different: it's news
+    for you, and a show in perth is not news for someone in ohio."""
+    code = _cfg("concerts.country").strip().upper()
+    return code if re.fullmatch(r"[A-Z]{2}", code) else ""
+
+
 def _norm(name: Any) -> str:
     """Loose compare key for artist names: case, accents and punctuation off."""
     import re
@@ -222,8 +233,9 @@ def _event_is_for_artist(event: Dict[str, Any], artist: str) -> bool:
 
 
 def ticketmaster_upcoming(artist_name: str, *, limit: int = 10,
-                          timeout: int = 12) -> Dict[str, Any]:
-    """Upcoming dates for an artist, soonest first."""
+                          timeout: int = 12, country_code: str = "") -> Dict[str, Any]:
+    """Upcoming dates for an artist, soonest first. ``country_code`` (ISO
+    3166 alpha-2) keeps it to one country; empty means anywhere."""
     key = _cfg("concerts.ticketmaster_api_key")
     if not key:
         return {"configured": False, "events": []}
@@ -231,7 +243,8 @@ def ticketmaster_upcoming(artist_name: str, *, limit: int = 10,
     if not name:
         return {"configured": True, "events": []}
 
-    cache_key = "tm:%s:%s" % (name.lower(), limit)
+    country_code = (country_code or "").strip().upper()
+    cache_key = "tm:%s:%s:%s" % (name.lower(), limit, country_code)
     hit = _cached(cache_key)
     if hit is not None:
         return hit
@@ -248,6 +261,7 @@ def ticketmaster_upcoming(artist_name: str, *, limit: int = 10,
                 # keyword search, so asking for exactly `limit` would routinely
                 # return two or three real dates
                 "size": min(100, max(20, int(limit) * 5)),
+                **({"countryCode": country_code} if country_code else {}),
             },
             headers={"Accept": "application/json"},
             timeout=timeout,
@@ -284,6 +298,7 @@ def ticketmaster_upcoming(artist_name: str, *, limit: int = 10,
             "city": (venue.get("city") or {}).get("name") or "",
             "region": (venue.get("state") or {}).get("name") or "",
             "country": (venue.get("country") or {}).get("name") or "",
+            "country_code": (venue.get("country") or {}).get("countryCode") or "",
             "url": ev.get("url") or "",
             "tickets_url": ev.get("url") or "",
             "lineup": [a.get("name") for a in
