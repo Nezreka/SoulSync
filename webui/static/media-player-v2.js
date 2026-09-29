@@ -341,11 +341,13 @@ function npv2EnsureVizAnalyser() {
         // Gentle built-in smoothing: v2 does its own fast-attack /
         // slow-release smoothing per painter, so the raw feed stays lively.
         va.smoothingTimeConstant = 0.5;
-        // Tap after the shared analyser. An analyser passes audio through
-        // untouched, so this disturbs nothing upstream or downstream, and it
+        // Tap after the shared analyser. An analyser node analyses whatever
+        // flows into it — it needs no output connection to produce data.
+        // Deliberately NOT connected to destination: the shared analyser
+        // already feeds destination, so forwarding through this tap would
+        // sum a second copy of the signal there (~+6 dB louder). This also
         // survives v2's EQ rewire (which only touches source->…->analyser).
         analyser.connect(va);
-        va.connect(AC.destination);
         npv2VizAnalyser = va;
         return va;
     } catch (e) { return null; }
