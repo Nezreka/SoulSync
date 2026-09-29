@@ -327,6 +327,7 @@ describe('visualization themes', () => {
       'npv2ThemeIds',
       'npv2ThemeState',
       'npv2Bin',
+      'npv2BinS',
       'npv2Css',
       'npv2Css2',
       'npv2PalA',
@@ -1021,5 +1022,248 @@ describe('speed stepping ([ and ])', () => {
     expect(btn.classList.contains('active')).toBe(true);
     api.npv2SetSpeed(1, { silent: true });
     expect(btn.classList.contains('active')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Immersive mode toggle: the expand button must work in BOTH directions
+// ---------------------------------------------------------------------------
+
+describe('immersive mode toggle', () => {
+  const build = () => {
+    const modal = npv2FakeEl('np-modal');
+    const overlay = npv2FakeEl('np-modal-overlay');
+    const exit = npv2FakeEl('np-v2-visuals-exit');
+    const expand = npv2FakeEl('np-v2-visuals-expand');
+    const drawer = npv2FakeEl('np-v2-visuals-drawer');
+    const panels = npv2FakeEl('np-v2-visuals-panels');
+    exit.classList.add('hidden');
+    drawer.classList.add('hidden');
+    const els: Record<string, any> = {
+      'np-modal-overlay': overlay,
+      'np-v2-visuals-exit': exit,
+      'np-v2-visuals-expand': expand,
+      'np-v2-visuals-drawer': drawer,
+      'np-v2-visuals-panels': panels,
+    };
+    const doc: any = {
+      _els: els,
+      getElementById: (id: string) => els[id] ?? null,
+      querySelector: (sel: string) => (sel === '.np-modal' ? modal : null),
+      querySelectorAll: () => [],
+    };
+    const factory = new Function(
+      'document',
+      [
+        extractConst('NPV2', v2),
+        'function npv2SetBgOn() {}',
+        'function npv2SetTheme() {}',
+        'function npv2SyncVisualsHeader() {}',
+        'function npv2VizStart() {}',
+        'function npv2VisualsWakeUI() {}',
+        'function npv2VisualsClearIdle() {}',
+        'function npv2CloseVisualsPanel() {}',
+        extractFunction('npv2ModalOpen', v2),
+        extractFunction('npv2VisualsModeOn', v2),
+        extractFunction('npv2SetVisualsMode', v2),
+        extractFunction('npv2ToggleVisualsDrawer', v2),
+        'return { NPV2, npv2VisualsModeOn, npv2SetVisualsMode, npv2ToggleVisualsDrawer };',
+      ].join('\n'),
+    );
+    return { api: factory(doc) as any, els, modal, overlay, exit, expand, drawer, panels };
+  };
+
+  it('entering syncs the expand button to the pressed state', () => {
+    const { api, expand, exit } = build();
+    api.npv2SetVisualsMode(true);
+    expect(api.NPV2.visualsMode).toBe(true);
+    expect(expand.classList.contains('active')).toBe(true);
+    expect(expand.getAttribute('aria-pressed')).toBe('true');
+    expect(expand.title).toContain('Exit immersive');
+    expect(exit.classList.contains('hidden')).toBe(false);
+  });
+
+  it('exiting from the same button path clears the state again', () => {
+    const { api, expand, exit } = build();
+    api.npv2SetVisualsMode(true);
+    // this is exactly what the expand button's click handler does
+    api.npv2SetVisualsMode(!api.npv2VisualsModeOn());
+    expect(api.NPV2.visualsMode).toBe(false);
+    expect(api.npv2VisualsModeOn()).toBe(false);
+    expect(expand.classList.contains('active')).toBe(false);
+    expect(expand.getAttribute('aria-pressed')).toBe('false');
+    expect(expand.title).toContain('Immersive visuals mode');
+    expect(exit.classList.contains('hidden')).toBe(true);
+  });
+
+  it('the toggle expression flips both ways, repeatedly', () => {
+    const { api } = build();
+    expect(api.npv2VisualsModeOn()).toBe(false);
+    api.npv2SetVisualsMode(!api.npv2VisualsModeOn());
+    expect(api.npv2VisualsModeOn()).toBe(true);
+    api.npv2SetVisualsMode(!api.npv2VisualsModeOn());
+    expect(api.npv2VisualsModeOn()).toBe(false);
+    api.npv2SetVisualsMode(!api.npv2VisualsModeOn());
+    expect(api.npv2VisualsModeOn()).toBe(true);
+  });
+
+  it('visuals mode requires the modal to be open', () => {
+    const { api, overlay } = build();
+    overlay.classList.add('hidden'); // modal closed
+    api.npv2SetVisualsMode(true);
+    expect(api.npv2VisualsModeOn()).toBe(false);
+    overlay.classList.remove('hidden');
+    expect(api.npv2VisualsModeOn()).toBe(true);
+  });
+
+  it('exiting also closes the immersive drawer', () => {
+    const { api, drawer } = build();
+    api.npv2ToggleVisualsDrawer(true);
+    expect(drawer.classList.contains('hidden')).toBe(false);
+    api.npv2SetVisualsMode(true);
+    api.npv2SetVisualsMode(false);
+    expect(drawer.classList.contains('hidden')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Drawer outside click: clicks inside the modal but outside the drawer close it
+// ---------------------------------------------------------------------------
+
+describe('drawer outside click', () => {
+  const build = () => {
+    const drawer = npv2FakeEl('np-v2-visuals-drawer');
+    const panels = npv2FakeEl('np-v2-visuals-panels');
+    const inner = npv2FakeEl('np-v2-drawer-inner');
+    const hamburgerIcon = npv2FakeEl('np-v2-panels-icon');
+    const elsewhere = npv2FakeEl('np-v2-bg');
+    drawer.appendChild(inner);
+    panels.appendChild(hamburgerIcon);
+    drawer.classList.add('hidden');
+    // parentNode-chain contains(), like the DOM
+    for (const root of [drawer, panels]) {
+      root.contains = (node: any) => {
+        let n = node;
+        while (n) {
+          if (n === root) return true;
+          n = n.parentNode;
+        }
+        return false;
+      };
+    }
+    const els: Record<string, any> = {
+      'np-v2-visuals-drawer': drawer,
+      'np-v2-visuals-panels': panels,
+    };
+    const doc = npv2FakeDocument(els);
+    const factory = new Function(
+      'document',
+      [
+        extractFunction('npv2ToggleVisualsDrawer', v2),
+        extractFunction('npv2DrawerOutsideClick', v2),
+        'return { npv2ToggleVisualsDrawer, npv2DrawerOutsideClick };',
+      ].join('\n'),
+    );
+    return { api: factory(doc) as any, drawer, panels, inner, hamburgerIcon, elsewhere };
+  };
+
+  it('opens and closes via the toggle', () => {
+    const { api, drawer, panels } = build();
+    api.npv2ToggleVisualsDrawer(true);
+    expect(drawer.classList.contains('hidden')).toBe(false);
+    expect(panels.classList.contains('active')).toBe(true);
+    api.npv2ToggleVisualsDrawer(false);
+    expect(drawer.classList.contains('hidden')).toBe(true);
+    expect(panels.classList.contains('active')).toBe(false);
+  });
+
+  it('a click inside the drawer keeps it open', () => {
+    const { api, drawer, inner } = build();
+    api.npv2ToggleVisualsDrawer(true);
+    api.npv2DrawerOutsideClick({ target: inner });
+    expect(drawer.classList.contains('hidden')).toBe(false);
+  });
+
+  it('a click on the hamburger keeps it open (it toggles itself)', () => {
+    const { api, drawer, hamburgerIcon } = build();
+    api.npv2ToggleVisualsDrawer(true);
+    api.npv2DrawerOutsideClick({ target: hamburgerIcon });
+    expect(drawer.classList.contains('hidden')).toBe(false);
+  });
+
+  it('a click elsewhere inside the modal closes it', () => {
+    const { api, drawer, panels, elsewhere } = build();
+    api.npv2ToggleVisualsDrawer(true);
+    api.npv2DrawerOutsideClick({ target: elsewhere });
+    expect(drawer.classList.contains('hidden')).toBe(true);
+    expect(panels.classList.contains('active')).toBe(false);
+  });
+
+  it('does nothing when the drawer is already closed', () => {
+    const { api, drawer } = build();
+    expect(() => api.npv2DrawerOutsideClick({ target: drawer })).not.toThrow();
+    expect(drawer.classList.contains('hidden')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Smoothed spectrum bins: fast attack, slow release
+// ---------------------------------------------------------------------------
+
+describe('smoothed spectrum bins', () => {
+  const build = () => {
+    const factory = new Function(
+      [
+        extractConst('NPV2_THEME_STATE', v2),
+        extractFunction('npv2ThemeState', v2),
+        extractFunction('npv2Bin', v2),
+        extractFunction('npv2BinS', v2),
+        'return { npv2BinS };',
+      ].join('\n'),
+    );
+    const api = factory() as any;
+    const freq = new Array(32).fill(0);
+    const S = { freq, energy: 0.5, t: 0 };
+    const setAll = (v: number) => freq.fill(Math.round(v * 255));
+    return { api, S, setAll };
+  };
+
+  it('starts at zero and rises toward the target', () => {
+    const { api, S, setAll } = build();
+    setAll(1);
+    const first = api.npv2BinS(S, 't1', 0, 8);
+    expect(first).toBeGreaterThan(0);
+    expect(first).toBeLessThan(1);
+    const second = api.npv2BinS(S, 't1', 0, 8);
+    expect(second).toBeGreaterThan(first);
+  });
+
+  it('attacks fast on rising energy', () => {
+    const { api, S, setAll } = build();
+    setAll(0.2);
+    for (let i = 0; i < 10; i++) api.npv2BinS(S, 't2', 0, 8);
+    setAll(1);
+    const before = api.npv2BinS(S, 't2', 0, 8);
+    // 0.55 attack: one frame covers more than half the remaining distance
+    expect(before).toBeGreaterThan(0.2 + (1 - 0.2) * 0.5);
+  });
+
+  it('releases slowly on falling energy', () => {
+    const { api, S, setAll } = build();
+    setAll(1);
+    for (let i = 0; i < 10; i++) api.npv2BinS(S, 't3', 0, 8);
+    setAll(0);
+    const after = api.npv2BinS(S, 't3', 0, 8);
+    // 0.10 release: one frame keeps most of the value
+    expect(after).toBeGreaterThan(0.8);
+  });
+
+  it('keeps independent state per key', () => {
+    const { api, S, setAll } = build();
+    setAll(1);
+    api.npv2BinS(S, 'a', 0, 8);
+    setAll(0);
+    const fresh = api.npv2BinS(S, 'b', 0, 8);
+    expect(fresh).toBe(0);
   });
 });
