@@ -34,6 +34,7 @@ import {
   albumTracksParams,
   isReleaseClickable,
   openReleaseArtist,
+  reconcileAlbumWithTracksResponse,
   releasePlaylistName,
   releaseToAlbumData,
   releaseVirtualPlaylistId,
@@ -313,20 +314,26 @@ export function ArtistDetailPage() {
       return;
     }
 
-    const album = releaseToAlbumData(release);
-    const virtualId = releaseVirtualPlaylistId(artist, album);
+    const cardAlbum = releaseToAlbumData(release);
+    const virtualId = releaseVirtualPlaylistId(artist, cardAlbum);
     // checked before the fetch, so an album mid-download just comes back up
     if (window.reopenActiveDownloadModal?.(virtualId)) return;
 
     window.showLoadingOverlay?.('Loading album...');
     try {
       const params = new URLSearchParams(albumTracksParams(release, artist));
-      const response = await fetch(`/api/album/${album.id}/tracks?${params}`);
+      const response = await fetch(`/api/album/${cardAlbum.id}/tracks?${params}`);
       if (!response.ok) throw new Error(`Failed to load album tracks: ${response.status}`);
 
       const data = await response.json();
       if (!data.success || !data.tracks?.length)
         throw new Error('No tracks found for this release');
+
+      // The release card's count is often fabricated (see
+      // reconcileAlbumWithTracksResponse) — take the type/count from the
+      // release the fetch just returned so $albumtype and embedded tags
+      // are correct.
+      const album = reconcileAlbumWithTracksResponse(cardAlbum, data);
 
       // #1297 the download modal, same as an album in search: pick tracks,
       // download them, or add the picked ones to the wishlist from there.

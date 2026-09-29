@@ -1,6 +1,7 @@
 """Duplicate Track Detector Job — finds potential duplicate tracks in the library."""
 
 import os
+import re
 from collections import defaultdict
 from difflib import SequenceMatcher
 
@@ -485,10 +486,19 @@ def _normalize(text: str) -> str:
     keeping any-script alphanumerics fixes every non-Latin script at once and
     needs no per-range maintenance. Dedup compares two library rows, so unlike
     matching_engine we don't transliterate — the native script is kept as-is.)
+
+    Dash-form provenance tails are stripped: ``Rabbit Run - From "8 Mile"
+    Soundtrack`` names the source release, not the song, so differently-tagged
+    copies of one recording still match (#1315 follow-up — kevin2xk's 8 Mile
+    pair scored 0.45 and was never flagged). Mirrors the rule
+    audio_verification has long applied. Dash-form only: parenthesized content
+    is still kept, so ``title`` vs ``title (from the vault)`` keep
+    distinguishing as the paragraph above requires.
     """
     if not text:
         return ""
     t = text.lower()
+    t = re.sub(r'\s*-\s*from\s+.+$', '', t)
     return ''.join(c for c in t if c.isalnum() or c in '() ').strip()
 
 

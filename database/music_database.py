@@ -14406,6 +14406,19 @@ class MusicDatabase:
                     (profile_id, track_id, track_name, artist_name, reason, created_at)
                     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """, (profile_id, key, track_name or "", artist_name or "", reason or "removed"))
+                # S12: opportunistic prune — expired rows otherwise accumulate
+                # forever for users who never open the ignore-list UI (the
+                # only other place that purges). Same TTL the read gate uses.
+                try:
+                    from datetime import datetime, timedelta
+                    from core.wishlist.ignore import configured_ttl_days
+                    cutoff = (datetime.now() - timedelta(days=configured_ttl_days())).strftime(
+                        "%Y-%m-%d %H:%M:%S")
+                    cursor.execute(
+                        "DELETE FROM wishlist_ignore WHERE profile_id = ? AND created_at < ?",
+                        (profile_id, cutoff))
+                except Exception as _prune_err:
+                    logger.debug("wishlist ignore prune failed (housekeeping): %s", _prune_err)
                 conn.commit()
                 logger.info("Added track to wishlist ignore-list (%s): '%s' [%s]",
                             reason or "removed", track_name or key, key)
@@ -15416,15 +15429,61 @@ class MusicDatabase:
             return 0
     
     def clear_wishlist(self, profile_id: int = 1) -> bool:
-        """Clear all tracks from the wishlist for the given profile"""
+        """Clear all tracks from the wishlist for the given profile.
+
+        S4: the cleared tracks get ignore-list entries (#874) in the SAME
+        transaction as the delete — without them the next automatic cycle
+        (watchlist scan, failed-track capture) re-adds exactly the tracks
+        the user just cleared, and the clear never sticks. One transaction
+        also closes the race where a producer re-adds a track after the
+        delete commits but before the ignore lands, and it means a failed
+        ignore write rolls the delete back instead of leaving a silent
+        half-clear (the clear reports failure and is retryable).
+        """
         try:
+            from datetime import datetime, timedelta
+            from core.wishlist.ignore import (
+                REASON_REMOVED, configured_ttl_days, extract_display,
+                normalize_ignore_id,
+            )
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT spotify_track_id, spotify_data FROM wishlist_tracks WHERE profile_id = ?",
+                    (profile_id,))
+                rows = cursor.fetchall()
+                ignored = 0
+                for row in rows:
+                    try:
+                        spotify_data = json.loads(row['spotify_data']) if row['spotify_data'] else {}
+                    except (json.JSONDecodeError, TypeError):
+                        spotify_data = {}
+                    name, artist = extract_display(spotify_data)
+                    key = normalize_ignore_id(row['spotify_track_id'])
+                    if not key:
+                        continue
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO wishlist_ignore
+                        (profile_id, track_id, track_name, artist_name, reason, created_at)
+                        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (profile_id, key, name or "", artist or "", REASON_REMOVED))
+                    ignored += 1
+                # S12: prune this profile's expired ignores once per clear
+                # (not once per row) so the table can't grow unbounded.
+                try:
+                    cutoff = (datetime.now() - timedelta(days=configured_ttl_days())).strftime(
+                        "%Y-%m-%d %H:%M:%S")
+                    cursor.execute(
+                        "DELETE FROM wishlist_ignore WHERE profile_id = ? AND created_at < ?",
+                        (profile_id, cutoff))
+                except Exception as _prune_err:
+                    logger.debug("wishlist ignore prune failed (housekeeping): %s", _prune_err)
                 cursor.execute("DELETE FROM wishlist_tracks WHERE profile_id = ?", (profile_id,))
                 cleared_count = cursor.rowcount
                 conn.commit()
-                logger.info(f"Cleared {cleared_count} tracks from wishlist (profile: {profile_id})")
-                return True
+                logger.info(f"Cleared {cleared_count} tracks from wishlist (profile: {profile_id}); "
+                            f"wrote {ignored} ignore-list entries")
+            return True
         except Exception as e:
             logger.error(f"Error clearing wishlist: {e}")
             return False

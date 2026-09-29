@@ -574,12 +574,19 @@ class UnknownArtistFixerJob(RepairJob):
                         except Exception as e:
                             logger.debug("copy cover.jpg: %s", e)
 
-                    # Clean up empty directories
+                    # Clean up empty directories — never a configured root (staging /
+                    # download / transfer), even when nested and empty (#976).
+                    try:
+                        from core.imports.file_ops import protected_root_dirs
+                        protected = {os.path.normpath(p) for p in protected_root_dirs() if p}
+                    except Exception:
+                        protected = set()
                     parent = os.path.dirname(current_norm)
                     transfer_norm = os.path.normpath(transfer)
+                    protected.add(transfer_norm)
                     for _ in range(5):
                         if (parent and os.path.isdir(parent)
-                                and os.path.normpath(parent) != transfer_norm
+                                and os.path.normpath(parent) not in protected
                                 and not os.listdir(parent)):
                             os.rmdir(parent)
                             parent = os.path.dirname(parent)

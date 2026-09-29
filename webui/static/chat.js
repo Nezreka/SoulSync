@@ -3049,7 +3049,7 @@
                 devBadge(user) +
                 userBadge(m) +
                 (!self && isFriend(user) ? '<span class="chat-friend-badge" title="Friend">⭐ Friend</span>' : '') +
-                (ext ? '<span class="chat-peer-badge chat-ext-tag" title="Sent from another Soulseek client — not SoulSync">via Soulseek</span>' : '<span class="chat-peer-badge chat-peer-badge--soulsync">SoulSync</span>') +
+                (ext ? '<span class="chat-peer-badge chat-ext-tag" title="Sent from another Soulseek client — not SoulSync">via Soulseek</span>' : '<span class="chat-peer-badge chat-peer-badge--soulsync-logo" title="Sent from SoulSync"><img src="/static/favicon.png" alt="SoulSync"></span>') +
                 '<span class="chat-msg-time">' + esc(fmtTime(m.timestamp)) + '</span>' +
                 '</div>' + _lineHtml(m) };
         }

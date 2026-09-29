@@ -5,8 +5,10 @@ from __future__ import annotations
 import errno
 import os
 import re
+import threading
 import time
 import urllib.request
+from collections import OrderedDict
 from ipaddress import ip_address
 from urllib.parse import parse_qs, quote, urlparse
 
@@ -399,6 +401,47 @@ _caa_original_down_until = 0.0
 _CAA_ORIGINAL_COOLDOWN_S = 600
 
 
+# L3: bounded album-scoped artwork byte cache. Enhancement embeds art per
+# track, so without this a 12-track album fetched the identical cover 12
+# times. Entries are keyed by (album identity, URL): bounded (FIFO eviction
+# at _ART_FETCH_CACHE_MAX) so memory stays small; failures are NEVER cached
+# so a transient 404/timeout doesn't poison the rest of the batch; and one
+# album's bytes are never served to another album.
+_art_fetch_cache: "OrderedDict[tuple, tuple[bytes, str]]" = OrderedDict()
+_ART_FETCH_CACHE_MAX = 64
+_art_fetch_cache_lock = threading.Lock()
+
+
+def _art_cache_key_for(metadata: dict) -> tuple:
+    """Stable album identity for the L3 art cache, from the fields that are
+    constant across an album's tracks."""
+    md = metadata if isinstance(metadata, dict) else {}
+    artist = str(md.get("album_artist") or md.get("artist") or "").strip().lower()
+    album = str(md.get("album") or "").strip().lower()
+    release = str(md.get("musicbrainz_release_id") or "").strip().lower()
+    art_url = str(md.get("album_art_url") or "").strip().lower()
+    return (artist, album, release, art_url)
+
+
+def _cached_fetch_art_bytes(art_url: str, album_key: tuple):
+    """URL->bytes fetch scoped to one album's batch (see _art_fetch_cache).
+    Cache hits skip the network; misses delegate to _fetch_art_bytes and
+    only successes are stored."""
+    key = (album_key, art_url)
+    with _art_fetch_cache_lock:
+        if key in _art_fetch_cache:
+            _art_fetch_cache.move_to_end(key)
+            return _art_fetch_cache[key]
+    # Call the module global by name so tests can stub _fetch_art_bytes.
+    data, mime = _fetch_art_bytes(art_url)
+    if data:
+        with _art_fetch_cache_lock:
+            _art_fetch_cache[key] = (data, mime)
+            while len(_art_fetch_cache) > _ART_FETCH_CACHE_MAX:
+                _art_fetch_cache.popitem(last=False)
+    return data, mime
+
+
 def _fetch_art_bytes(art_url: str):
     """Fetch artwork bytes at the highest resolution the source serves.
 
@@ -447,7 +490,7 @@ def _fetch_art_bytes(art_url: str):
     return None, None
 
 
-def _min_size_art_validator(min_px):
+def _min_size_art_validator(min_px, fetch_fn=None):
     """Build a ``(validate, cache)`` pair for the preferred-art resolver.
 
     ``validate(source, url)`` fetches the candidate cover, caches its bytes (so
@@ -457,11 +500,15 @@ def _min_size_art_validator(min_px):
     next source instead of letting it win on priority alone. Images whose
     dimensions can't be read are accepted (don't over-reject; the fallback is
     still today's art). ``min_px <= 0`` disables the size gate entirely.
+
+    ``fetch_fn`` defaults to :func:`_fetch_art_bytes`; pass the L3
+    album-scoped cached fetch so validation hits don't re-download per track.
     """
     cache = {}
+    _fetch = fetch_fn or _fetch_art_bytes
 
     def validate(_source, url):
-        res = _fetch_art_bytes(url)
+        res = _fetch(url)
         cache[url] = res
         data = res[0] if res else None
         if not data:
@@ -489,6 +536,13 @@ def embed_album_art_metadata(audio_file, metadata: dict):
         if metadata.get("_manual"):
             return _embed_manual_art(audio_file, metadata, symbols)
 
+        # L3: album-scoped URL->bytes fetch shared across this album's
+        # per-track calls, so the same cover isn't re-downloaded per track.
+        _album_key = _art_cache_key_for(metadata)
+
+        def _album_fetch(url):
+            return _cached_fetch_art_bytes(url, _album_key)
+
         # User-preferred cover-art source. When album_art_order is a non-empty
         # list it is the SOLE authority for preferred art (put 'caa' in it to use
         # Cover Art Archive), and the legacy prefer_caa_art toggle below is
@@ -498,7 +552,8 @@ def embed_album_art_metadata(audio_file, metadata: dict):
         try:
             from core.metadata.art_lookup import select_preferred_art_url
             _validate, _art_cache = _min_size_art_validator(
-                cfg.get("metadata_enhancement.min_art_size", 1000))
+                cfg.get("metadata_enhancement.min_art_size", 1000),
+                fetch_fn=_album_fetch)
             preferred_url = select_preferred_art_url(
                 metadata.get("album_artist") or metadata.get("artist"),
                 metadata.get("album"),
@@ -508,7 +563,7 @@ def embed_album_art_metadata(audio_file, metadata: dict):
             )
             if preferred_url:
                 cached = _art_cache.get(preferred_url)
-                image_data, mime_type = cached if (cached and cached[0]) else _fetch_art_bytes(preferred_url)
+                image_data, mime_type = cached if (cached and cached[0]) else _album_fetch(preferred_url)
         except Exception as exc:
             logger.debug("Preferred art-source selection failed: %s", exc)
 
@@ -534,7 +589,7 @@ def embed_album_art_metadata(audio_file, metadata: dict):
             # with cover.jpg (same preference + fetch).
             from core.metadata.caa_art import fetch_release_preferred_art
             image_data, mime_type, used_url = fetch_release_preferred_art(
-                release_mbid, art_url, fetch_fn=_fetch_art_bytes)
+                release_mbid, art_url, fetch_fn=_album_fetch)
             if not image_data:
                 if not art_url and not release_mbid:
                     logger.warning("No album art URL available for embedding.")

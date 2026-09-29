@@ -19,6 +19,10 @@ from typing import Any, Callable, Dict, List
 
 
 DISCOVERY_TIMEOUT_SECONDS = 3600
+# Grace period after a discovery timeout: the worker runs on a daemon thread
+# and can't be force-cancelled, so the phase joins it for this long before
+# handing off to sync. Tests shrink both constants via monkeypatch.
+DISCOVERY_TIMEOUT_GRACE_SECONDS = 120
 
 
 RefreshFn = Callable[[Dict[str, Any], Any], Dict[str, Any]]
@@ -100,7 +104,7 @@ def run_mirrored_playlist_pipeline(
             refresh_fn=refresh_fn,
         )
 
-        _run_discovery_phase(
+        discovery_phase = _run_discovery_phase(
             deps,
             automation_id,
             db=db,
@@ -108,6 +112,15 @@ def run_mirrored_playlist_pipeline(
             process_all=process_all,
             profile_id=owner_profile_id,
         )
+        # M13/M14: the discovery outcome is honest, not always 'completed'.
+        discovery_status = discovery_phase.get('status', 'completed')
+        discovery_error = discovery_phase.get('error', '')
+        if discovery_status == 'completed':
+            tracks_discovered = 'completed'
+        elif discovery_status == 'timed_out':
+            tracks_discovered = f'timed_out: {discovery_error}'
+        else:
+            tracks_discovered = f'failed: {discovery_error}'
 
         sync_summary = sync_and_wishlist_fn(
             deps,
@@ -128,20 +141,30 @@ def run_mirrored_playlist_pipeline(
         )
 
         duration = int(time.time() - pipeline_start)
+        # M13/M14: the final status reflects a failed/timed-out discovery
+        # phase instead of claiming a clean success.
+        if discovery_status == 'completed':
+            final_log_line = f'Pipeline finished in {duration // 60}m {duration % 60}s'
+            final_log_type = 'success'
+        else:
+            final_log_line = (f'Pipeline finished in {duration // 60}m {duration % 60}s '
+                              f'— discovery {discovery_status}: {discovery_error}')
+            final_log_type = 'warning'
         deps.update_progress(
             automation_id,
             status='finished',
             progress=100,
             phase='Pipeline complete',
-            log_line=f'Pipeline finished in {duration // 60}m {duration % 60}s',
-            log_type='success',
+            log_line=final_log_line,
+            log_type=final_log_type,
         )
 
         result = {
             'status': 'completed',
             '_manages_own_progress': True,
             'playlists_refreshed': str(refreshed),
-            'tracks_discovered': 'completed',
+            'tracks_discovered': tracks_discovered,
+            'discovery_error': discovery_error,
             'tracks_synced': str(sync_summary['synced']),
             'sync_skipped': str(sync_summary['skipped']),
             'wishlist_queued': str(sync_summary['wishlist_queued']),
@@ -338,7 +361,16 @@ def _run_discovery_phase(
     playlist_id: Any,
     process_all: bool,
     profile_id: Any = None,
-) -> None:
+) -> Dict[str, Any]:
+    """Run the discovery phase; returns a phase-result dict.
+
+    ``status`` is one of ``'completed'``, ``'timed_out'``, ``'failed'``.
+    On timeout the phase joins the (daemon) worker for
+    ``DISCOVERY_TIMEOUT_GRACE_SECONDS`` before returning — sync must not
+    start while discovery can still be mutating playlist metadata. A worker
+    exception is recorded in the result and logged at error level, never
+    reported as success.
+    """
     deps.update_progress(
         automation_id,
         progress=26,
@@ -353,22 +385,26 @@ def _run_discovery_phase(
     disc_playlists = [p for p in disc_playlists if p]
 
     disc_done = threading.Event()
+    disc_errors: List[str] = []
 
     def _disc_wrapper(pls):
         try:
             deps.run_playlist_discovery_worker(pls, automation_id=None)
-        except Exception as e:  # noqa: BLE001 - logged into pipeline progress
+        except Exception as e:  # noqa: BLE001 - recorded into the phase result below
             deps.logger.error(f"[Pipeline] Discovery error: {e}")
+            disc_errors.append(str(e))
         finally:
             disc_done.set()
 
-    threading.Thread(
+    worker = threading.Thread(
         target=_disc_wrapper,
         args=(disc_playlists,),
         daemon=True,
         name='pipeline-discover',
-    ).start()
+    )
+    worker.start()
 
+    timed_out = False
     poll_start = time.time()
     while not disc_done.wait(timeout=3):
         elapsed = int(time.time() - poll_start)
@@ -378,12 +414,46 @@ def _run_discovery_phase(
             phase=f'Phase 2/4: Discovering... ({elapsed}s)',
         )
         if elapsed > DISCOVERY_TIMEOUT_SECONDS:
+            timed_out = True
             deps.update_progress(
                 automation_id,
                 log_line='Discovery timed out after 1 hour',
                 log_type='warning',
             )
             break
+
+    if timed_out:
+        # M13: don't hand off to sync while the worker can still be mutating
+        # playlist metadata — join with a grace period first. The thread is
+        # daemon so it can't be force-cancelled; if it's still alive after
+        # the grace period the phase is still reported timed-out.
+        disc_done.wait(timeout=DISCOVERY_TIMEOUT_GRACE_SECONDS)
+        still_running = not disc_done.is_set()
+        deps.update_progress(
+            automation_id,
+            progress=55,
+            phase='Phase 2/4: Discovery timed out',
+            log_line='Phase 2: discovery timed out' + (
+                ' (worker still running after grace period)' if still_running else ''),
+            log_type='error',
+        )
+        return {
+            'status': 'timed_out',
+            'error': 'Discovery timed out after 1 hour',
+            'worker_still_running': still_running,
+        }
+
+    if disc_errors:
+        # M14: the worker raised — record it; never report success.
+        error = disc_errors[0]
+        deps.update_progress(
+            automation_id,
+            progress=55,
+            phase='Phase 2/4: Discovery failed',
+            log_line=f'Phase 2 failed: discovery error: {error}',
+            log_type='error',
+        )
+        return {'status': 'failed', 'error': error}
 
     deps.update_progress(
         automation_id,
@@ -392,3 +462,4 @@ def _run_discovery_phase(
         log_line='Phase 2 done: discovery complete',
         log_type='success',
     )
+    return {'status': 'completed', 'error': ''}

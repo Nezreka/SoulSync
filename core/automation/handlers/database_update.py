@@ -116,9 +116,12 @@ def _run_with_progress(
             'status': 'running', 'phase': initial_phase,
             'progress': 0, 'current_item': '', 'processed': 0, 'total': 0,
             'error_message': '',
+            # H16: new run epoch — a stale worker from a watchdog-superseded
+            # run must not overwrite this run's terminal state.
+            'run_epoch': state.get('run_epoch', 0) + 1,
             'last_progress_at': time.time(),
         })
-    deps.db_update_executor.submit(task, *task_args)
+    deps.db_update_executor.submit(task, *task_args, state['run_epoch'])
 
     # Monitor progress (callbacks handle card updates, we just block until done).
     # We time out on STALL, not total runtime: ``processed`` advances on every

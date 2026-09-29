@@ -224,13 +224,27 @@ class PersonalizedPlaylistsService:
             if exclude_owned:
                 # Note column-name asymmetry: discovery_pool.deezer_track_id
                 # but tracks.deezer_id. Don't refactor without checking.
+                #
+                # Split into three single-column NOT EXISTS checks (one per
+                # ID space) instead of one OR'd clause: SQLite cannot use an
+                # index for the OR'd correlated subquery and falls back to a
+                # full scan of `tracks` for every discovery_pool row, which
+                # pins the CPU for minutes on large pools (issue #1350).
+                # Each subquery is guarded by an IS NULL test on the pool
+                # side — a NULL ID can never match the original clause
+                # either (equality against NULL is never true), so this
+                # changes nothing semantically and skips the index probe
+                # entirely for rows without that ID.
                 owned_clause = """
-                  AND NOT EXISTS (
+                  AND (discovery_pool.spotify_track_id IS NULL OR NOT EXISTS (
                       SELECT 1 FROM tracks t
-                      WHERE (t.spotify_track_id IS NOT NULL AND t.spotify_track_id = discovery_pool.spotify_track_id)
-                         OR (t.itunes_track_id IS NOT NULL AND t.itunes_track_id = discovery_pool.itunes_track_id)
-                         OR (t.deezer_id IS NOT NULL AND t.deezer_id = discovery_pool.deezer_track_id)
-                  )"""
+                      WHERE t.spotify_track_id = discovery_pool.spotify_track_id))
+                  AND (discovery_pool.itunes_track_id IS NULL OR NOT EXISTS (
+                      SELECT 1 FROM tracks t
+                      WHERE t.itunes_track_id = discovery_pool.itunes_track_id))
+                  AND (discovery_pool.deezer_track_id IS NULL OR NOT EXISTS (
+                      SELECT 1 FROM tracks t
+                      WHERE t.deezer_id = discovery_pool.deezer_track_id))"""
 
             query = f"""
                 SELECT
@@ -1071,6 +1085,14 @@ class PersonalizedPlaylistsService:
             else:
                 from core.metadata_service import get_primary_client
                 itunes = get_primary_client()
+                # S8: these track ids come from the active (non-Spotify)
+                # source — label them with the provider-correct key instead
+                # of mislabeling them as spotify_track_id. The generic 'id'
+                # is preserved for consumers that don't care about the source.
+                track_id_key = {
+                    'itunes': 'itunes_track_id',
+                    'deezer': 'deezer_track_id',
+                }.get(active_source, 'spotify_track_id')
                 for album in selected_albums:
                     try:
                         album_data = itunes.get_album(album.id, include_tracks=True)
@@ -1086,7 +1108,7 @@ class PersonalizedPlaylistsService:
                                     track_artists = track.get('artists', [])
                                     artist_names = [a['name'] for a in track_artists] if isinstance(track_artists, list) and track_artists and isinstance(track_artists[0], dict) else (track_artists if isinstance(track_artists, list) else [])
                                     all_tracks.append({
-                                        'spotify_track_id': track_id,
+                                        track_id_key: track_id,
                                         'track_name': track.get('name', ''),
                                         'artist_name': ', '.join(artist_names) if artist_names else 'Unknown',
                                         'album_name': album_name,

@@ -110,6 +110,9 @@
     <!-- Wishlist premier redesign — pure reskin + additive wlp-* markup; every
          JS-referenced hook (.wl-*, #wishlist-*, data-testid) is untouched. -->
     <link rel="stylesheet" href="{{ url_for('static', filename='wishlist-premier.css', v=static_v) }}">
+    <!-- Dashboard premier redesign — pure reskin of the music dashboard hero,
+         rails and right column; orb strip and library-card markup untouched. -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard-premier.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='profiles.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='docs.css', v=static_v) }}">
     <style id="soulsync-initial-appearance">
@@ -7079,6 +7082,23 @@
                                                 </div>
 
                                                 <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="auto-disambiguation" checked>
+                                                        Automatically add release disambiguation to the album folder
+                                                    </label>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>When a
+                                                        release carries a MusicBrainz disambiguation (edition note)
+                                                        and your template doesn't place
+                                                        <code>$disambiguation</code> itself, it is added to the
+                                                        album folder automatically. This keeps same-named releases
+                                                        in their own folders — turn it off and your template is
+                                                        respected exactly as written.</small>
+                                                </div>
+
+                                                <div class="form-group">
                                                     <label>Album Path Template:</label>
                                                     <input type="text" id="template-album-path"
                                                         placeholder="$albumartist/$albumartist - $album/$track - $title">
@@ -7094,7 +7114,9 @@
                                                         <code>$year</code>, <code>$quality</code> (filename only),
                                                         <code>$disambiguation</code> (the release's edition note, like
                                                         &ldquo;baby punk version&rdquo;; added to the album folder
-                                                        automatically when your template leaves it out). The
+                                                        automatically when your template leaves it out, unless
+                                                        &ldquo;Automatically add release disambiguation&rdquo;
+                                                        above is turned off). The
                                                         three disc variables work in a folder segment as well as in the
                                                         filename and are empty on a single-disc album, so
                                                         <code>$albumartist/$album/Disc $discnum/$track - $title</code>

@@ -105,6 +105,16 @@ def auto_import_settings():
     for key in ['enabled', 'scan_interval', 'confidence_threshold', 'auto_process', 'quality_profile_id']:
         if key in data:
             config_manager.set(f'auto_import.{key}', data[key])
+    if 'enabled' in data and _auto_import_worker():
+        # The flag alone doesn't move the worker — mirror the toggle endpoint
+        # so enabling here actually starts it (and disabling stops it).
+        # Without this the settings form left the flag on with a dead thread.
+        worker = _auto_import_worker()
+        if data['enabled']:
+            if not worker.running:
+                worker.start()
+        else:
+            worker.stop()
     return jsonify({"success": True})
 
 

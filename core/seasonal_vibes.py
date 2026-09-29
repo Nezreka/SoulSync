@@ -31,6 +31,35 @@ from utils.logging_config import get_logger
 
 logger = get_logger("seasonal_vibes")
 
+# provider track-id columns in discovery_pool, keyed by discovery source.
+# the old code chose 'spotify_track_id' if source == 'spotify' else
+# 'itunes_track_id' — deezer pool rows carry deezer_track_id (the other two
+# columns are NULL for them), so deezer users got zero seasonal results.
+_SEASONAL_TRACK_ID_COLUMNS = {
+    "spotify": "spotify_track_id",
+    "itunes": "itunes_track_id",
+    "deezer": "deezer_track_id",
+}
+
+
+def seasonal_track_id_column(source: str) -> str:
+    """Provider track-id column in ``discovery_pool`` for a discovery source.
+
+    Unknown sources keep the legacy fallback ('itunes_track_id') — mirrors
+    the pre-fix binary choice for anything that isn't spotify/deezer.
+    """
+    return _SEASONAL_TRACK_ID_COLUMNS.get((source or "").strip().lower(), "itunes_track_id")
+
+
+def seasonal_track_id_key(source: str) -> str:
+    """Provider-correct dict key for a track id from ``source``.
+
+    The returned dicts also keep the legacy ``spotify_track_id`` alias: the
+    seasonal storage column and the frontend both read that name (it is the
+    generic "this source's track id" slot, always paired with ``source``).
+    """
+    return _SEASONAL_TRACK_ID_COLUMNS.get((source or "").strip().lower(), "spotify_track_id")
+
 # seasons that get taste-aware sourcing. christmas and halloween keep the
 # keyword flow: titles genuinely signal there.
 VIBE_SEASONS = {"summer", "spring", "autumn", "valentines"}
@@ -367,7 +396,8 @@ def vibe_pool_tracks(database, season_key: str, source: str,
     names = _vibe_artist_names(database, season_key)
     if not names:
         return []
-    id_col = "spotify_track_id" if source == "spotify" else "itunes_track_id"
+    id_col = seasonal_track_id_column(source)
+    id_key = seasonal_track_id_key(source)
     try:
         with database._get_connection() as conn:
             cursor = conn.cursor()
@@ -402,6 +432,8 @@ def vibe_pool_tracks(database, season_key: str, source: str,
                     except Exception:
                         data = {}
                 out.append({
+                    # legacy generic slot (storage column + frontend read this),
+                    # always paired with ``source``
                     "spotify_track_id": row["track_id"],
                     "track_name": row["track_name"],
                     "artist_name": row["artist_name"],
@@ -411,6 +443,9 @@ def vibe_pool_tracks(database, season_key: str, source: str,
                     "popularity": row["popularity"],
                     "track_data_json": data or {},
                 })
+                if id_key != "spotify_track_id":
+                    # provider-correct label for the id
+                    out[-1][id_key] = row["track_id"]
                 if len(out) >= limit:
                     break
             return out

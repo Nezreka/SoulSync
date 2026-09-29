@@ -75,6 +75,17 @@ ALBUM_SEARCH_ARTIST_WEIGHT = 0.2
 ALBUM_SEARCH_TRACK_COUNT_WEIGHT = 0.3
 ALBUM_SEARCH_THRESHOLD = 0.4
 
+# M7: minimum artist similarity a result must clear before its title score
+# can pass. Without this, an exact title match (0.5) clears the 0.4
+# threshold on a completely wrong artist. Calibrated against the real
+# similarity engine (Sep 2026):
+#   "Target Artist" vs "Some Other Band": 0.143 -> reject
+#   "Metallica" vs "Metallica Tribute Band": 0.581 -> reject
+#   Beatles variant 0.778, Kendrick Lamar & SZA 0.875, AC/DC vs ACDC 0.889
+#   -> accept. Applies only when BOTH sides name an artist; album-only
+#   searches and artist-less results keep the old behavior.
+ALBUM_SEARCH_ARTIST_MIN_SIMILARITY = 0.6
+
 _FORMAT_QUALITY_RANK = {
     '.flac': 10, '.wav': 9, '.aiff': 9, '.aif': 9, '.ape': 8,
     '.m4a': 7, '.ogg': 6, '.opus': 6, '.mp3': 5, '.wma': 3, '.aac': 5,
@@ -104,7 +115,13 @@ def score_album_search_result(
         r_artist = artists[0] if artists else ''
         if isinstance(r_artist, dict):
             r_artist = r_artist.get('name', '')
-        score += artist_similarity(target_artist, str(r_artist)) * ALBUM_SEARCH_ARTIST_WEIGHT
+        r_artist = str(r_artist)
+        artist_sim = artist_similarity(target_artist, r_artist)
+        if r_artist and artist_sim < ALBUM_SEARCH_ARTIST_MIN_SIMILARITY:
+            # M7: clearly the wrong artist — no title score can rescue it.
+            # An exact title (0.5) used to clear the 0.4 threshold alone.
+            return 0.0
+        score += artist_sim * ALBUM_SEARCH_ARTIST_WEIGHT
 
     r_tracks = getattr(album_result, 'total_tracks', 0) or 0
     if r_tracks > 0 and file_count > 0:

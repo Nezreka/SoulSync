@@ -553,10 +553,19 @@
     color: rgba(255, 255, 255, 0.5);
 }
 
-.chat-peer-badge--soulsync {
+.chat-peer-badge--soulsync-logo {
     background: rgba(var(--accent-rgb, 29, 185, 84), 0.18);
-    color: rgb(var(--accent-light-rgb, 88, 220, 134));
     border: 1px solid rgba(var(--accent-rgb, 29, 185, 84), 0.3);
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 5px;
+    line-height: 0;
+}
+
+.chat-peer-badge--soulsync-logo img {
+    height: 12px;
+    width: auto;
+    display: block;
 }
 
 .chat-msg-timestamp {

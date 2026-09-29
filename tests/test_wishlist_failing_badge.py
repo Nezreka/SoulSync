@@ -51,7 +51,7 @@ def test_failing_rollup_counts_albums_and_singles():
 
 
 def test_failing_filter_chip_is_wired():
-    assert "wl-failing-filter" in _PAGE
+    assert "wlp-chip--warn" in _PAGE  # React rewrite renamed the old wl-failing-filter class
     assert "failing: !prev.failing" in _PAGE
     # and the filter respects the rollup
     assert "failingOnly && group.failingCount === 0" in _HELPERS

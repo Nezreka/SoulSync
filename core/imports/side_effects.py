@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sqlite3
 from typing import Any, Dict
 
 from core.settings import config_manager
@@ -769,30 +770,55 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                         track_isrc,
                         track_quality_profile_id,
                 )
-                if has_retention_columns:
-                    cursor.execute(
-                        """
-                        INSERT INTO tracks (id, album_id, artist_id, title, track_number,
-                                            duration, file_path, bitrate, file_size, track_artist,
-                                            musicbrainz_recording_id, isrc, quality_profile_id,
-                                            acquired_quality_json, retention_json, server_source,
-                                            created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                                'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                        """,
-                        base_values + (acquired_quality_json, retention_json),
-                    )
+                # C4: _stable_soulsync_id is MD5 mod 1e9, so two different
+                # paths can share an id (the artist/album paths above mint
+                # a suffixed id on collision; the track path did not, and
+                # the IntegrityError silently dropped the second track).
+                # Retry the INSERT with a deterministic discriminator. The
+                # post-insert source-id UPDATE below reads `track_id`, so
+                # it follows the reminted id automatically.
+                for _collision_attempt in range(10):
+                    try:
+                        if has_retention_columns:
+                            cursor.execute(
+                                """
+                                INSERT INTO tracks (id, album_id, artist_id, title, track_number,
+                                                    duration, file_path, bitrate, file_size, track_artist,
+                                                    musicbrainz_recording_id, isrc, quality_profile_id,
+                                                    acquired_quality_json, retention_json, server_source,
+                                                    created_at, updated_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                                        'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                                """,
+                                base_values + (acquired_quality_json, retention_json),
+                            )
+                        else:
+                            cursor.execute(
+                                """
+                                INSERT INTO tracks (id, album_id, artist_id, title, track_number,
+                                                    duration, file_path, bitrate, file_size, track_artist,
+                                                    musicbrainz_recording_id, isrc, quality_profile_id, server_source,
+                                                    created_at, updated_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                                        'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                                """,
+                                base_values,
+                            )
+                        break
+                    except sqlite3.IntegrityError:
+                        track_id = _stable_soulsync_id(
+                            f"{final_path}::soulsync::{_collision_attempt + 1}"
+                        )
+                        base_values = (track_id,) + base_values[1:]
+                        logger.warning(
+                            "[SoulSync Library] track id collision for %s — "
+                            "reminted as %s",
+                            final_path,
+                            track_id,
+                        )
                 else:
-                    cursor.execute(
-                        """
-                        INSERT INTO tracks (id, album_id, artist_id, title, track_number,
-                                            duration, file_path, bitrate, file_size, track_artist,
-                                            musicbrainz_recording_id, isrc, quality_profile_id, server_source,
-                                            created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                                'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                        """,
-                        base_values,
+                    raise sqlite3.IntegrityError(
+                        f"track id still collides after retries: {final_path}"
                     )
                 track_source_col = source_columns.get("track")
                 if track_source_col and track_source_id:

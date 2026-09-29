@@ -59,6 +59,7 @@
   },
   "file_organization": {
     "enabled": true,
+    "auto_disambiguation": true,
     "_template_variables": "Available: $artist, $albumartist, $artistletter, $album, $albumtype, $atypes, $title, $track, $disc, $year, $playlist, $quality (filename only)",
     "templates": {
       "album_path": "$albumartist/$albumartist - $album/$track - $title",

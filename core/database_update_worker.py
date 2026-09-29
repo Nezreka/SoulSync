@@ -13,6 +13,13 @@ from core.settings import config_manager
 logger = get_logger("database_update_worker")
 
 
+# Fail-closed threshold for the mid-rescan fence below: when the
+# is_library_scanning() probe raises (scan state unknown) and more than this
+# many tracks look stale, the scan keeps them instead of deleting. Matches
+# the "mass deletion" scale of the 50% guard (>100-track DBs).
+_RESCAN_UNKNOWN_STALE_LIMIT = 100
+
+
 class ListingUnavailable(Exception):
     """the server gave no answer for a listing (albums of an artist, tracks of
     an album). not the same as an empty answer, and the deep scan must never
@@ -564,21 +571,33 @@ class DatabaseUpdateWorker:
                                           f"Deep scan: {len(kept)} track(s) kept, their listing failed this run")
                     stale -= fenced
             # The media server answering is not the same as the media server
-            # being DONE: while Navidrome is mid-rescan its Subsonic answers
-            # are HTTP 200 with transiently incomplete listings. Every one of
+            # being DONE: while the server is mid-rescan its answers can be
+            # HTTP 200 with transiently incomplete listings. Every one of
             # those looks "fully trusted" (no failures recorded), so the 50%
             # guard is bypassed and live tracks get deleted as stale. Never
             # remove on a scan that ran during a server-side rescan.
-            if stale and self.server_type == "navidrome":
+            # Applies to every server type whose client implements
+            # is_library_scanning() (Plex, Jellyfin, Navidrome) — the probe
+            # is consulted, not the server_type string.
+            if stale and hasattr(self.media_client, "is_library_scanning"):
                 try:
-                    _server_scanning = bool(self.media_client.is_library_scanning())
+                    _server_scanning: Optional[bool] = bool(
+                        self.media_client.is_library_scanning())
                 except Exception:
-                    _server_scanning = False
-                if _server_scanning:
+                    _server_scanning = None
+                # Fail closed: a probe that raises leaves the scan state
+                # unknown, and unknown must not green-light a mass deletion.
+                _skip_for_rescan = (
+                    _server_scanning is True
+                    or (_server_scanning is None
+                        and len(stale) > _RESCAN_UNKNOWN_STALE_LIMIT)
+                )
+                if _skip_for_rescan:
                     logger.warning(
-                        "Skipping stale removal: Navidrome is running its own library "
+                        "Skipping stale removal: %s is running its own library "
                         "scan — its listings are transiently incomplete, so %d unseen "
-                        "track(s) are unscanned, not gone", len(stale))
+                        "track(s) are unscanned, not gone",
+                        self.server_type.capitalize(), len(stale))
                     self._emit_signal('phase_changed',
                                       "Deep scan: media server is rescanning, keeping every track")
                     stale = set()

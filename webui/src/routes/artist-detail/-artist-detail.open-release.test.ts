@@ -4,6 +4,7 @@ import {
   albumTracksParams,
   isReleaseClickable,
   openReleaseArtist,
+  reconcileAlbumWithTracksResponse,
   releaseToAlbumData,
   stillCheckingMessage,
 } from './-artist-detail.open-release';
@@ -79,6 +80,57 @@ describe('releaseToAlbumData', () => {
     expect(releaseToAlbumData({ id: 1, album_type: 'single' }).album_type).toBe('single');
     expect(releaseToAlbumData({ id: 1, type: 'ep' }).album_type).toBe('ep');
     expect(releaseToAlbumData({ id: 1 }).album_type).toBe('album');
+  });
+});
+
+describe('reconcileAlbumWithTracksResponse', () => {
+  // Collision Course (Deezer): the artist-albums endpoint omits nb_tracks,
+  // so the release card fabricates total_tracks=1 while correctly carrying
+  // album_type='ep'. The /api/album/<id>/tracks fetch returns the real
+  // release (total_tracks=6). Without reconciliation the modal POSTs the
+  // fabricated count and get_album_type_display('ep', 1) files it as Single.
+  const cardAlbum = releaseToAlbumData({ id: 81827, title: 'Collision Course', album_type: 'ep' });
+  const sixTracks = Array.from({ length: 6 }, (_, i) => ({ id: i + 1 }));
+
+  it('takes the real type/count from the tracks response', () => {
+    expect(cardAlbum.total_tracks).toBe(1); // the fabricated card count
+    const album = reconcileAlbumWithTracksResponse(cardAlbum, {
+      album: { album_type: 'ep', total_tracks: 6 },
+      tracks: sixTracks,
+    });
+    expect(album.album_type).toBe('ep');
+    expect(album.total_tracks).toBe(6);
+    expect(album.id).toBe(81827);
+    expect(album.name).toBe('Collision Course');
+  });
+
+  it('falls back to the tracklist length when the album payload has no count', () => {
+    const album = reconcileAlbumWithTracksResponse(cardAlbum, {
+      album: { album_type: 'ep', total_tracks: 0 },
+      tracks: sixTracks,
+    });
+    expect(album.total_tracks).toBe(6);
+  });
+
+  it('falls back to the tracklist length when the album payload is absent', () => {
+    const album = reconcileAlbumWithTracksResponse(cardAlbum, { tracks: sixTracks });
+    expect(album.total_tracks).toBe(6);
+    expect(album.album_type).toBe('ep');
+  });
+
+  it('keeps the card values when the response carries nothing usable', () => {
+    const album = reconcileAlbumWithTracksResponse(cardAlbum, {});
+    expect(album.total_tracks).toBe(1);
+    expect(album.album_type).toBe('ep');
+  });
+
+  it('prefers the response album_type over the card', () => {
+    const album = reconcileAlbumWithTracksResponse(
+      { ...cardAlbum, album_type: 'album' },
+      { album: { album_type: 'single', total_tracks: 2 }, tracks: [{}, {}] },
+    );
+    expect(album.album_type).toBe('single');
+    expect(album.total_tracks).toBe(2);
   });
 });
 

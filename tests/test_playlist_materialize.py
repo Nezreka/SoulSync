@@ -148,3 +148,32 @@ def test_materialize_one_missing_source(tmp_path: Path):
     dest = tmp_path / "Playlists" / "X" / "x.mp3"
     assert materialize_one(str(tmp_path / "nope.mp3"), str(dest), "symlink") == "missing"
     assert not dest.exists()
+
+
+def test_copy_mode_recopies_when_source_changed(tmp_path: Path):
+    """M15: copy mode must not report 'unchanged' for a stale copy — if the
+    library file changed (retagged/replaced) at the same path, the existing
+    copy is stale and must be re-copied."""
+    src = tmp_path / "Music" / "song.mp3"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(b"ORIGINAL-TAGS-v1")
+
+    dest = Path(rebuild_playlist_folder(
+        str(tmp_path / "Playlists"), "USB", [str(src)], mode="copy").playlist_dir) / "song.mp3"
+    assert dest.read_bytes() == b"ORIGINAL-TAGS-v1"
+
+    # library file retagged at the same path (same name, new bytes)
+    src.write_bytes(b"RETAGGED-v2-DIFFERENT-SIZE")
+
+    s2 = rebuild_playlist_folder(str(tmp_path / "Playlists"), "USB", [str(src)], mode="copy")
+    assert s2.copied == 1 and s2.unchanged == 0
+    assert dest.read_bytes() == b"RETAGGED-v2-DIFFERENT-SIZE"
+
+
+def test_copy_mode_still_idempotent_when_source_untouched(tmp_path: Path):
+    """M15: an up-to-date copy must still be left alone (no churn)."""
+    real = _library(tmp_path)
+    root = str(tmp_path / "Playlists")
+    rebuild_playlist_folder(root, "USB", real, mode="copy")
+    s2 = rebuild_playlist_folder(root, "USB", real, mode="copy")
+    assert s2.unchanged == 2 and s2.copied == 0

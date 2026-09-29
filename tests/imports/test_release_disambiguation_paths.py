@@ -24,14 +24,18 @@ class _Config:
         return self._values.get(key, default)
 
 
-def _config(tmp_path, album_path="$albumartist/$albumartist - $album/$track - $title", **extra):
-    return _Config({
+def _config(tmp_path, album_path="$albumartist/$albumartist - $album/$track - $title",
+             auto_disambiguation=True, **extra):
+    values = {
         "soulseek.transfer_path": str(tmp_path / "Transfer"),
         "file_organization.enabled": True,
         "file_organization.templates": {"album_path": album_path, **extra},
         "file_organization.collab_artist_mode": "first",
         "file_organization.disc_label": "Disc",
-    })
+    }
+    if auto_disambiguation is not None:
+        values["file_organization.auto_disambiguation"] = auto_disambiguation
+    return _Config(values)
 
 
 def _context(release_id, disambiguation=""):
@@ -210,3 +214,76 @@ def test_album_name_check_matches_whole_words_only():
     assert import_paths.album_name_carries("Alive (Live)", "live")
     assert import_paths.album_name_carries("Album [Baby Punk Version]", "baby punk version")
     assert not import_paths.album_name_carries("Album", "")
+
+
+# ── #1352: the auto-suffix toggle ────────────────────────────────────────────
+
+def test_toggle_off_respects_template_exactly(monkeypatch, tmp_path):
+    """#1352: the reporter's case — no $disambiguation in the template means
+    no disambiguation in the folder, however noisy the release comment."""
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _config(
+        tmp_path,
+        album_path="$albumartist/$album ($year)/$track - $title",
+        auto_disambiguation=False,
+    ))
+    folder, filename = import_paths.get_file_path_from_template({
+        "artist": "311", "albumartist": "311", "album": "Soundsystem",
+        "title": "Come Original", "track_number": 1, "disc_number": 1,
+        "year": "1999",
+        "disambiguation": "Matrix / Runout W4889 5 CXK 46645-2 01 M1S1 WEA mfg. olyphant",
+    })
+    assert folder == "311/Soundsystem (1999)"
+    assert filename == "01 - Come Original"
+
+
+def test_toggle_off_explicit_variable_still_renders(monkeypatch, tmp_path):
+    """Toggle off only stops the rewrite — an explicit $disambiguation still
+    renders where the user placed it."""
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _config(
+        tmp_path,
+        album_path="$albumartist/$album ($disambiguation) ($year)/$track - $title",
+        auto_disambiguation=False,
+    ))
+    folder, _ = import_paths.get_file_path_from_template({
+        "artist": "311", "albumartist": "311", "album": "Soundsystem",
+        "title": "t", "track_number": 1, "disc_number": 1, "year": "1999",
+        "disambiguation": "remaster",
+    })
+    assert folder == "311/Soundsystem (remaster) (1999)"
+
+
+def test_toggle_missing_defaults_to_on(monkeypatch, tmp_path):
+    """No key saved (existing installs) → the #1299 auto-suffix stays."""
+    monkeypatch.setattr(import_paths, "_get_config_manager",
+                        lambda: _config(tmp_path, auto_disambiguation=None))
+    folder, _ = import_paths.get_file_path_from_template({
+        "artist": ARTIST, "albumartist": ARTIST, "album": ALBUM, "title": "t",
+        "track_number": 1, "disc_number": 1, "disambiguation": "baby punk version",
+    })
+    assert folder == f"{ARTIST}/{ARTIST} - {ALBUM} (baby punk version)"
+
+
+def test_raw_template_toggle_off_respects_template(monkeypatch):
+    monkeypatch.setattr(import_paths, "_get_config_manager",
+                        lambda: _Config({"file_organization.auto_disambiguation": False}))
+    folder, _ = import_paths.get_file_path_from_template_raw(
+        "$albumartist/$album/$track - $title",
+        {"artist": ARTIST, "albumartist": ARTIST, "album": ALBUM, "title": "t",
+         "track_number": 1, "disc_number": 1, "disambiguation": "baby punk version"})
+    assert folder == f"{ARTIST}/{ALBUM}"
+
+
+def test_end_to_end_toggle_off_no_suffix(monkeypatch, tmp_path):
+    """The full import path builder honors the toggle — nothing downstream
+    re-adds the suffix."""
+    monkeypatch.setattr(import_paths, "_get_config_manager",
+                        lambda: _config(tmp_path, auto_disambiguation=False))
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+    _no_reuse(monkeypatch)
+
+    path, _ = import_paths.build_final_path_for_track(
+        _context(BABY_PUNK, "baby punk version"), {"name": ARTIST}, _album_info(), ".flac",
+        create_dirs=False)
+
+    artist_dir = tmp_path / "Transfer" / ARTIST
+    assert path == str(artist_dir / f"{ARTIST} - {ALBUM}" / "01 - рэпер.flac")

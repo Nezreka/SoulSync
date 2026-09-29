@@ -49,7 +49,7 @@ class AcoustIDScannerJob(RepairJob):
         '- Fingerprint Threshold: Minimum AcoustID match confidence (0.0–1.0)\n'
         '- Title Similarity: How closely the identified title must match\n'
         '- Artist Similarity: How closely the identified artist must match\n'
-        '- Batch Size: Tracks per scan run (checkpoint saved between batches)'
+        '- Batch Size: Tracks scanned between 2 s API pauses (checkpoint saved between batches)'
     )
     icon = 'repair-icon-acoustid'
     default_enabled = True
@@ -138,12 +138,16 @@ class AcoustIDScannerJob(RepairJob):
         hand_tagged = hand_tagged_path_keys(context.db)
 
         batch_count = 0
+        # Checkpoint = the last track that FINISHED scanning. Saving the
+        # about-to-start track here used to skip one unprocessed track forever
+        # on stop/pause (the resume filter keeps only IDs past the checkpoint).
+        last_completed_id = None
         for i, (track_id, track_info) in enumerate(track_list):
             if context.check_stop():
-                self._save_checkpoint_id(context, track_id)
+                self._save_checkpoint_id(context, last_completed_id)
                 return result
             if i % 10 == 0 and context.wait_if_paused():
-                self._save_checkpoint_id(context, track_id)
+                self._save_checkpoint_id(context, last_completed_id)
                 return result
 
             # Resolve the DB path to an actual file on disk
@@ -177,10 +181,15 @@ class AcoustIDScannerJob(RepairJob):
                 logger.debug("Error scanning %s: %s", fname, e)
                 result.errors += 1
 
+            # The track has been fully processed at this point (scan attempted,
+            # result recorded), so it is safe to advance the checkpoint before
+            # the batch pause — a stop during the pause must not reprocess it.
+            last_completed_id = track_id
+
             # Rate limit: pause between batches to avoid hammering AcoustID API
             if batch_count >= batch_size:
                 batch_count = 0
-                self._save_checkpoint_id(context, track_id)
+                self._save_checkpoint_id(context, last_completed_id)
                 if context.sleep_or_stop(2):
                     return result
 

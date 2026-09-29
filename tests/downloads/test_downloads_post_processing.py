@@ -68,7 +68,7 @@ def _build_deps(
         run_async=run_async or (lambda c: None),
         docker_resolve_path=docker_resolve_path or (lambda p: p),
         extract_filename=extract_filename or (lambda f: os.path.basename(f) if f else ''),
-        make_context_key=make_context_key or (lambda u, f: f"{u}::{f}"),
+        make_context_key=make_context_key or (lambda u, f, task_id=None: f"{u}::{f}"),
         find_completed_file=find_completed_file or (lambda *a, **kw: (None, None)),
         enhance_file_metadata=enhance_file_metadata or rec('enhance'),
         wipe_source_tags=wipe_source_tags or rec('wipe'),
