@@ -1406,14 +1406,11 @@ def get_discover_label_explorer():
     try:
         database = get_database()
         cache = get_metadata_cache()
+        # the labels you play (then the ones you own most of), not whichever
+        # 30 sqlite hit first
+        from core.discovery.labels import your_labels
         with database._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT DISTINCT label FROM albums
-                WHERE label IS NOT NULL AND label != ''
-                LIMIT 30
-            """)
-            labels = {r[0] for r in cursor.fetchall()}
+            labels = set(your_labels(conn))
         active_source = _get_active_discovery_source()
         if not labels:
             return jsonify({'success': True, 'albums': [], 'labels': []})
