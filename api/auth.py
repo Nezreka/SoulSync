@@ -114,3 +114,30 @@ def require_api_key(f):
         return f(*args, **kwargs)
 
     return decorated
+
+
+def request_has_valid_api_key() -> bool:
+    """True when the current request carries a valid API key.
+
+    Accepts the same two transports as :func:`require_api_key`
+    (``Authorization: Bearer <key>`` header or ``?api_key=`` query param).
+
+    The session gates (login / launch PIN) use this so key-authed callers that
+    cannot do cookie sessions — e.g. the Companion extension's ``<img>`` tags
+    hitting ``/api/image-proxy`` — are treated with the same trust as the
+    ``/api/v1/*`` public API. A valid key is admin-minted, so this grants no
+    more than the v1 path-prefix exemption already does.
+    """
+    api_key = request.args.get("api_key") or ""
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        api_key = auth_header[len("Bearer "):].strip()
+    if not api_key:
+        return False
+    try:
+        config_mgr = current_app.soulsync["config_manager"]
+    except Exception:
+        return False
+    stored_keys = config_mgr.get("api_keys", []) or []
+    key_hash = _hash_key(api_key)
+    return any(s.get("key_hash") == key_hash for s in stored_keys)
