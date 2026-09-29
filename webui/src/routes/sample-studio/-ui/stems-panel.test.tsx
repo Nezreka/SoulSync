@@ -36,6 +36,7 @@ const doneInfo = {
   status: 'done',
   stems: ['drums', 'vocals', 'bass', 'other'],
   backend: 'demucs',
+  stems_available: true,
 };
 
 describe('StemsPanel', () => {
@@ -44,7 +45,7 @@ describe('StemsPanel', () => {
 
   beforeEach(() => {
     posted = [];
-    statusBody = { track_id: 7, status: 'idle', stems: [] };
+    statusBody = { track_id: 7, status: 'idle', stems: [], stems_available: true };
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -104,11 +105,26 @@ describe('StemsPanel', () => {
   });
 
   it('shows the failed state with a retry button', async () => {
-    statusBody = { track_id: 7, status: 'error: disk full', stems: [] };
+    statusBody = { track_id: 7, status: 'error: disk full', stems: [], stems_available: true };
     renderPanel({ trackId: 7 });
     expect(await screen.findByText('Separation failed')).toBeInTheDocument();
     expect(screen.getByText('disk full')).toBeInTheDocument();
     expect(screen.getByText('Try again')).toBeInTheDocument();
+  });
+
+  it('shows the setup note instead of the button when stems are unavailable', async () => {
+    statusBody = { track_id: 7, status: 'idle', stems: [], stems_available: false };
+    renderPanel({ trackId: 7 });
+    expect(await screen.findByText('Stem separation needs a one-time setup')).toBeInTheDocument();
+    expect(screen.queryByText('Separate stems')).not.toBeInTheDocument();
+    expect(screen.getAllByText(/pip install demucs/)).toHaveLength(2); // native + Docker steps
+  });
+
+  it('shows the setup note instead of retry when a failed track has no backend', async () => {
+    statusBody = { track_id: 7, status: 'error: boom', stems: [], stems_available: false };
+    renderPanel({ trackId: 7 });
+    expect(await screen.findByText('Stem separation needs a one-time setup')).toBeInTheDocument();
+    expect(screen.queryByText('Try again')).not.toBeInTheDocument();
   });
 
   it('selecting a stem notifies the parent', async () => {

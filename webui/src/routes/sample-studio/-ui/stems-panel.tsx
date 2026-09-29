@@ -24,6 +24,32 @@ function stemsStatusMessage(info: StemsInfo | undefined, isFetching: boolean): s
   return 'Ready to separate';
 }
 
+/**
+ * Shown instead of any separation button when the server can't run Demucs
+ * (torch/torchaudio/demucs not installed). A calm setup note — never a
+ * button that would fail.
+ */
+function StemsSetupNote() {
+  return (
+    <div className={styles.setupNote}>
+      <p className={styles.setupTitle}>Stem separation needs a one-time setup</p>
+      <p className={styles.hint}>
+        It stays switched off until the extra software is installed on your server. On a normal
+        install, run these where you start SoulSync, then restart it:
+      </p>
+      <pre className={styles.setupCode}>
+        pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu{'\n'}pip
+        install demucs
+      </pre>
+      <p className={styles.hint}>On Docker, build your own image once:</p>
+      <pre className={styles.setupCode}>
+        FROM boulderbadgedad/soulsync:latest{'\n'}RUN pip install torch torchaudio --index-url
+        https://download.pytorch.org/whl/cpu && pip install demucs
+      </pre>
+    </div>
+  );
+}
+
 function useStemMixer(trackId: number | null, stems: StemName[]) {
   const ctxRef = useRef<AudioContext | null>(null);
   const gainsRef = useRef<Map<StemName, GainNode>>(new Map());
@@ -131,6 +157,9 @@ export default function StemsPanel({ trackId, activeStem, onSelectStem }: StemsP
   const done = info?.status === 'done';
   const failed = info?.status.startsWith('error:') ?? false;
   const busy = separating && (info?.status === 'queued' || info?.status === 'running');
+  // Unknown until the first status poll lands — assume available so the
+  // panel doesn't flash the setup note on every track change.
+  const stemsAvailable = info?.stems_available ?? true;
 
   // Stop the "separating" poll flag once the worker settles.
   useEffect(() => {
@@ -164,7 +193,7 @@ export default function StemsPanel({ trackId, activeStem, onSelectStem }: StemsP
       </header>
 
       <div className={styles.body}>
-        {!done && !busy && !failed && (
+        {!done && !busy && !failed && stemsAvailable && (
           <>
             <p className={styles.hint}>
               Split this track into drums, vocals, bass, and everything else, then chop from any one
@@ -177,6 +206,8 @@ export default function StemsPanel({ trackId, activeStem, onSelectStem }: StemsP
           </>
         )}
 
+        {!done && !busy && !failed && !stemsAvailable && <StemsSetupNote />}
+
         {busy && (
           <div className={styles.progress} role="status" aria-live="polite">
             <div className={styles.spinner} aria-hidden="true" />
@@ -184,7 +215,7 @@ export default function StemsPanel({ trackId, activeStem, onSelectStem }: StemsP
           </div>
         )}
 
-        {failed && (
+        {failed && stemsAvailable && (
           <div className={styles.error} role="alert">
             <p className={styles.errorTitle}>Separation failed</p>
             <p className={styles.errorDetail}>{message}</p>
@@ -193,6 +224,8 @@ export default function StemsPanel({ trackId, activeStem, onSelectStem }: StemsP
             </button>
           </div>
         )}
+
+        {failed && !stemsAvailable && <StemsSetupNote />}
 
         {requestError && (
           <div className={styles.error} role="alert">

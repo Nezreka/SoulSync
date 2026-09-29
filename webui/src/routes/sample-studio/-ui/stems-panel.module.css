@@ -236,3 +236,35 @@
   color: #e89090;
   background: #221616;
 }
+
+/* Shown instead of the "Separate stems" button when torch/demucs isn't
+   installed — a calm setup note, never a button that can fail. */
+.setupNote {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #2c2a25;
+  border-radius: 8px;
+  background: #1a1916;
+}
+
+.setupTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8e4da;
+}
+
+.setupCode {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #0f0e0c;
+  color: #b9b5aa;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: all;
+}

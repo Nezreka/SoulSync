@@ -94,6 +94,8 @@ export interface StemsInfo {
   status: StemsStatus;
   stems: StemName[];
   backend?: string;
+  /** False when torch/demucs isn't installed — the UI must not offer separation. */
+  stems_available: boolean;
 }
 
 export interface StashEntry {
