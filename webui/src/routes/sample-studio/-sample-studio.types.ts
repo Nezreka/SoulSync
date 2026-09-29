@@ -40,6 +40,15 @@ export interface SampleAnalysis {
   bpm: number | null;
   onsets: number[];
   duration_s: number | null;
+  /** Detected musical key (analyzer v3) — null when unknowable (silence/DC). */
+  key: SampleKey | null;
+}
+
+/** Detected key: {"name": "C minor", "confidence": 0.82}. The UI shows
+ *  "key uncertain" below 0.5 confidence and hides the key when null. */
+export interface SampleKey {
+  name: string;
+  confidence: number;
 }
 
 export interface SamplePeaks {
@@ -75,15 +84,65 @@ export const STASH_FORMAT_LABEL: Record<StashFormat, string> = {
 };
 
 /** The four Demucs stems. Order matches the backend STEMS tuple. */
-export type StemName = 'drums' | 'vocals' | 'bass' | 'other';
+export type StemName = 'drums' | 'vocals' | 'bass' | 'other' | RoughStemName;
+
+/** Rough-split output slugs (backend METHOD_STEMS). Never called "stems"
+ *  in the UI — they are approximate DSP splits, labeled "(rough)". */
+export type RoughStemName = 'drums-rough' | 'music-rough' | 'center-rough';
 
 export const STEM_NAMES: StemName[] = ['drums', 'vocals', 'bass', 'other'];
+
+export const ROUGH_STEM_NAMES: RoughStemName[] = ['drums-rough', 'music-rough', 'center-rough'];
 
 export const STEM_LABEL: Record<StemName, string> = {
   drums: 'Drums',
   vocals: 'Vocals',
   bass: 'Bass',
   other: 'Other',
+  'drums-rough': 'Drums (rough)',
+  'music-rough': 'Music (rough)',
+  'center-rough': 'Center (rough)',
+};
+
+/** Separation methods (backend SEPARATION_METHODS). */
+export type SeparationMethod = 'demucs' | 'rough-drums' | 'rough-center';
+
+export function isSeparationMethod(value: unknown): value is SeparationMethod {
+  return value === 'demucs' || value === 'rough-drums' || value === 'rough-center';
+}
+
+/** Beat-synced delay note values the backend accepts. */
+export type DelayTime = '1/4' | '1/8' | '1/2';
+
+export interface DelayParams {
+  time: DelayTime;
+  feedback: number;
+  mix: number;
+}
+
+/**
+ * Render-funnel FX recipe. Sent identically on preview and save — the
+ * backend funnels both through the same manipulations, and the stash entry
+ * echoes the recipe back so it fully describes its sound.
+ */
+export interface RenderFx {
+  /** Peak normalize ("peak"), omitted when false. */
+  normalize: boolean;
+  /** Edge fade, ms — 0.5..1000, always on, default 5. */
+  fadeMs: number;
+  reverse: boolean;
+  /** Reverb T60 seconds — 0.2..1.5, null = off. */
+  space: number | null;
+  /** Beat-synced delay — null = off. Needs a known BPM or the backend 409s. */
+  delay: DelayParams | null;
+}
+
+export const DEFAULT_FX: RenderFx = {
+  normalize: false,
+  fadeMs: 5,
+  reverse: false,
+  space: null,
+  delay: null,
 };
 
 /** Separation lifecycle: idle|queued|running|done, or `error: …` on failure. */
@@ -94,6 +153,14 @@ export interface StemsInfo {
   status: StemsStatus;
   stems: StemName[];
   backend?: string;
+  /** The method of the most recent separation request (backend is method-aware). */
+  method?: string | null;
+  /** Honest display labels for the stems (backend STEM_LABELS). */
+  labels?: Record<string, string> | null;
+  /** False when torch/demucs isn't installed — the UI must not offer separation. */
+  stems_available: boolean;
+  /** Constant true — rough splits need no extra dependencies. */
+  rough_available?: boolean;
 }
 
 export interface StashEntry {
@@ -114,6 +181,14 @@ export interface StashEntry {
   engine?: string;
   /** Configured sample folder the chop was saved to (absolute path). */
   folder: string | null;
+  /** Which stem the chop was cut from — null means the full mix. */
+  stem?: StemName | null;
+  /** Render-funnel recipe the backend echoes back (persisted on the row). */
+  normalize?: 'peak' | null;
+  fade_ms?: number;
+  reverse?: boolean;
+  space?: number | null;
+  delay?: DelayParams | null;
 }
 
 /** One transient slice of the in/out region, for the chop tray. */

@@ -13,9 +13,13 @@ import { apiClient, readJson } from '@/app/api-client';
 
 import type {
   AnalysisStatus,
+  DelayParams,
   PreviewResult,
+  RenderFx,
   SampleAnalysis,
+  SampleKey,
   SamplePeaks,
+  SeparationMethod,
   StashEntry,
   StashFormat,
   StemName,
@@ -48,6 +52,7 @@ interface AnalysisPayload {
   bpm: number | null;
   onsets: number[] | null;
   duration_s: number | null;
+  key?: { name: string; confidence: number } | null;
 }
 
 /** Search the library by title/artist. Empty query -> recently-added tracks. */
@@ -86,6 +91,15 @@ function toStudioTrack(row: StudioTrack): StudioTrack {
   return { ...row, duration: typeof ms === 'number' ? ms / 1000 : ms };
 }
 
+function normalizeKey(raw: unknown): SampleKey | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const k = raw as { name?: unknown; confidence?: unknown };
+  if (typeof k.name !== 'string' || k.name.length === 0) return null;
+  const confidence =
+    typeof k.confidence === 'number' && Number.isFinite(k.confidence) ? k.confidence : 0;
+  return { name: k.name, confidence };
+}
+
 function normalizeAnalysis(payload: AnalysisPayload): SampleAnalysis {
   return {
     track_id: payload.track_id,
@@ -93,6 +107,7 @@ function normalizeAnalysis(payload: AnalysisPayload): SampleAnalysis {
     bpm: payload.bpm ?? null,
     onsets: Array.isArray(payload.onsets) ? payload.onsets : [],
     duration_s: payload.duration_s ?? null,
+    key: normalizeKey(payload.key),
   };
 }
 
@@ -163,6 +178,8 @@ export interface PreviewParams {
   targetBpm: number | null;
   /** Cut from a separated stem instead of the full mix. */
   stem?: StemName | null;
+  /** Render-funnel FX — sent identically on preview and save. */
+  fx?: RenderFx;
 }
 
 interface PreviewResponse {
@@ -171,7 +188,26 @@ interface PreviewResponse {
   duration_s: number;
 }
 
-/** Fast server render of the in/out region for auditioning pitch/BPM changes. */
+/** Map the FX recipe onto the backend's render params. `normalize` is
+ *  omitted (not null) unless peak normalize is on; fade is always sent
+ *  (the backend keeps it always-on, default 5ms). */
+function fxToRenderParams(fx: RenderFx | undefined): {
+  normalize?: 'peak';
+  fade_ms: number;
+  reverse: boolean;
+  space: number | null;
+  delay: DelayParams | null;
+} {
+  return {
+    ...(fx?.normalize ? { normalize: 'peak' as const } : {}),
+    fade_ms: fx?.fadeMs ?? 5,
+    reverse: fx?.reverse ?? false,
+    space: fx?.space ?? null,
+    delay: fx?.delay ?? null,
+  };
+}
+
+/** Fast server render of the in/out region for auditioning pitch/BPM/FX changes. */
 export async function requestPreview(
   trackId: number,
   params: PreviewParams,
@@ -185,6 +221,7 @@ export async function requestPreview(
         pitch_st: params.pitchSt,
         target_bpm: params.targetBpm,
         stem: params.stem ?? null,
+        ...fxToRenderParams(params.fx),
       },
     }),
   );
@@ -208,7 +245,8 @@ export interface SaveChopParams extends PreviewParams {
   folder?: string | null;
 }
 
-/** Final render + stash row (file + bookmark). */
+/** Final render + stash row (file + bookmark). The FX recipe renders into
+ *  the audio AND is persisted on the stash entry. */
 export async function saveChop(trackId: number, params: SaveChopParams): Promise<StashEntry> {
   const payload = await readJson<Envelope<StashEntry>>(
     apiClient.post('sample/chop', {
@@ -223,6 +261,7 @@ export async function saveChop(trackId: number, params: SaveChopParams): Promise
         tags: params.tags,
         format: params.format,
         folder: params.folder ?? null,
+        ...fxToRenderParams(params.fx),
       },
     }),
   );
@@ -280,10 +319,15 @@ export function stemAudioUrl(trackId: number, stem: StemName): string {
   return `/api/sample/stems/${trackId}/${stem}/audio`;
 }
 
-/** Enqueue stem separation for a track. Idempotent. */
-export async function requestStems(trackId: number): Promise<StemsInfo> {
+/** Enqueue separation for a track. Idempotent. `method` picks the
+ *  separator: 'demucs' (needs the torch stack), 'rough-drums' or
+ *  'rough-center' (built-in DSP, always available). */
+export async function requestStems(
+  trackId: number,
+  method: SeparationMethod = 'demucs',
+): Promise<StemsInfo> {
   const payload = await readJson<Envelope<StemsInfo>>(
-    apiClient.post('sample/stems', { json: { track_id: trackId } }),
+    apiClient.post('sample/stems', { json: { track_id: trackId, method } }),
   );
   return payload.data;
 }
@@ -310,4 +354,45 @@ export function studioStemsStatusQueryOptions(trackId: number | null, active: bo
     },
     retry: 1,
   });
+}
+
+export interface TrimResult {
+  start_s: number;
+  end_s: number;
+}
+
+/**
+ * Tighten a selection to its sounding region (server-side silence trim).
+ * Returns the adjusted bounds — the caller moves the in/out handles to them.
+ * An all-silence window comes back unchanged.
+ */
+export async function trimSilence(
+  trackId: number,
+  start: number,
+  end: number,
+): Promise<TrimResult> {
+  const payload = await readJson<Envelope<TrimResult>>(
+    apiClient.post('sample/trim', {
+      json: { track_id: trackId, start_s: start, end_s: end },
+    }),
+  );
+  return payload.data;
+}
+
+/**
+ * Re-resolve a stash entry's track to a full StudioTrack row (the editor
+ * needs file_path for audio). Searches by title/artist, then matches the id —
+ * null when the track left the library.
+ */
+export async function lookupStudioTrack(
+  trackId: number,
+  title: string,
+  artistName: string | null,
+): Promise<StudioTrack | null> {
+  const payload = await readJson<Envelope<TrackSearchResponse>>(
+    apiClient.get('library/tracks', {
+      searchParams: { title, artist: artistName ?? '', limit: 50 },
+    }),
+  );
+  return payload.data.tracks.map(toStudioTrack).find((t) => t.id === trackId) ?? null;
 }
