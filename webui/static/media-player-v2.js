@@ -1177,7 +1177,7 @@ const NPV2_PAINT = {
         // faint depth haze above the horizon
         const haze = ctx.createLinearGradient(0, horizon - h * 0.25, 0, horizon);
         haze.addColorStop(0, npv2Css(S, 0));
-        haze.addColorStop(1, npv2Css(S, (0.10 + S.energy * 0.12).toFixed(3)));
+        haze.addColorStop(1, npv2Css(S, (0.20 + S.energy * 0.18).toFixed(3)));
         ctx.fillStyle = haze;
         ctx.fillRect(0, horizon - h * 0.25, w, h * 0.25);
         // smoke wisps: large soft blobs rising slowly, barely there — depth
@@ -1196,7 +1196,7 @@ const NPV2_PAINT = {
         }
         ctx.restore();
         // rising sparks, two depth layers
-        const spawn = Math.round((2 + Math.floor(S.energy * 7) + (beat > 0.7 ? 30 : 0)) * q);
+        const spawn = Math.round((4 + Math.floor(S.energy * 10) + (beat > 0.7 ? 30 : 0)) * q);
         for (let i = 0; i < spawn; i++) {
             if (st.parts.length > Math.round(460 * q)) break;
             const far = Math.random() < 0.45;
@@ -1230,6 +1230,17 @@ const NPV2_PAINT = {
             ctx.beginPath();
             ctx.arc(p.x, p.y, r, 0, 6.2832);
             ctx.fill();
+            // motion trail on near sparks: streaks read as rising, dots read as noise
+            if (!p.far && p.life > 0.25) {
+                ctx.strokeStyle = ctx.fillStyle;
+                ctx.globalAlpha = 0.35 * Math.min(1, p.life);
+                ctx.lineWidth = Math.max(1, r * 0.6);
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y + r * 0.5);
+                ctx.lineTo(p.x - p.vx * 1.5, p.y - p.vy * 0.055);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+            }
             // hot core dot on near sparks
             if (!p.far && p.life > 0.5 && r > 1.6) {
                 ctx.fillStyle = 'rgba(255,255,255,' + (a * 0.8).toFixed(3) + ')';
@@ -1477,81 +1488,109 @@ const NPV2_PAINT = {
         const st = npv2ThemeState('kaleido', () => ({ dir: 1 }));
         if (beat > 0.9) st.dir *= -1; // flip spin on hard beats
         const bass = npv2Bin(S, 0, 8);
-        const R = Math.min(w, h) * 0.48 * (1 + bass * 0.08 + Math.sin(S.t * 1.1) * 0.02);
-        const segs = 16, N = 20;
+        const R = Math.min(w, h) * 0.46 * (1 + bass * 0.06);
         const rot = S.t * 0.12 * st.dir;
-        const pulse = 1 + beat * 0.12;
-        ctx.fillStyle = 'rgba(2,3,9,0.5)';
+        const pulse = 1 + beat * 0.10;
+        // deep backdrop + soft glow bed so the jewels bloom on darkness
+        ctx.fillStyle = 'rgba(2,3,9,0.55)';
         ctx.fillRect(0, 0, w, h);
-        // soft glow bed under the mandala so colors have something to bloom on
-        const kg = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.35);
-        kg.addColorStop(0, npv2Css(S, (0.10 + bass * 0.10).toFixed(3)));
+        const kg = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.5);
+        kg.addColorStop(0, npv2Css(S, (0.12 + bass * 0.10).toFixed(3)));
         kg.addColorStop(1, npv2Css(S, 0));
         ctx.fillStyle = kg;
         ctx.fillRect(0, 0, w, h);
-        // faint counter-rotating outer halo of wedges for complexity
-        ctx.save();
-        ctx.globalAlpha = 0.35;
-        const hrot = -S.t * 0.05 * st.dir;
-        for (let sgm = 0; sgm < segs; sgm++) {
-            const a0 = hrot + (sgm / segs) * 6.2832;
-            const a1 = hrot + ((sgm + 1) / segs) * 6.2832;
-            const v = npv2BinS(S, 'kaleido-halo', sgm, segs);
-            ctx.beginPath();
-            ctx.arc(cx, cy, R * 1.28 * pulse, a0, a1);
-            ctx.arc(cx, cy, R * 1.02 * pulse, a1, a0, true);
-            ctx.closePath();
-            ctx.fillStyle = sgm % 2 ? npv2Css(S, (0.03 + v * 0.25).toFixed(3)) : npv2Css2(S, (0.03 + v * 0.25).toFixed(3));
-            ctx.fill();
+
+        // Jeweled spiral mandala: each wedge holds a spiral arm of glowing
+        // dots — radius = frequency (bass near the core, treble near the
+        // rim), size/brightness = the smoothed band value — mirrored around
+        // the circle for true kaleidoscope symmetry. A second, dimmer
+        // counter-rotating layer interleaves for depth.
+        const p1 = S.pal, p2 = npv2Pal2(S);
+        const segs = 12, bands = 30;
+        const wedge = (Math.PI * 2) / segs;
+        // color ramp palette -> accent across the spectrum, premixed once
+        const ramp = [];
+        for (let i = 0; i < bands; i++) {
+            const t = i / (bands - 1);
+            ramp.push('rgba(' +
+                Math.round(p1.r + (p2.r - p1.r) * t) + ',' +
+                Math.round(p1.g + (p2.g - p1.g) * t) + ',' +
+                Math.round(p1.b + (p2.b - p1.b) * t) + ',');
         }
-        ctx.restore();
-        for (let sgm = 0; sgm < segs; sgm++) {
-            const mirror = sgm % 2 === 1;
-            const a0 = rot + (sgm / segs) * 6.2832;
-            const a1 = rot + ((sgm + 1) / segs) * 6.2832;
-            for (let i = 0; i < N; i++) {
-                const src = mirror ? N - 1 - i : i;
-                const v = npv2BinS(S, 'kaleido', src, N);
-                const r0 = (i / N) * R * pulse;
-                const r1 = ((i + 1) / N) * R * pulse;
-                ctx.beginPath();
-                ctx.arc(cx, cy, r1, a0, a1);
-                ctx.arc(cx, cy, Math.max(r0, 1), a1, a0, true);
-                ctx.closePath();
-                const accent = (sgm + i) % 5 === 0;
-                // edge fade: outer wedges dissolve instead of hard-clipping
-                const edge = 1 - Math.pow(i / N, 3) * 0.85;
-                ctx.fillStyle = accent ? npv2Css2(S, ((0.18 + v * 0.9) * edge).toFixed(3)) : npv2Css(S, ((0.18 + v * 0.95) * edge).toFixed(3));
-                ctx.fill();
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.globalCompositeOperation = 'lighter';
+        for (let layer = 0; layer < 2; layer++) {
+            const lrot = layer === 0 ? rot : -rot * 1.6;
+            const lr = layer === 0 ? 1 : 0.82; // inner layer sits slightly in
+            const ldim = layer === 0 ? 1 : 0.45;
+            for (let sgm = 0; sgm < segs; sgm++) {
+                ctx.save();
+                ctx.rotate(lrot + (sgm / segs) * Math.PI * 2);
+                if (sgm % 2 === 1) ctx.scale(1, -1); // mirror
+                let px = 0, py = 0, pv = 0;
+                for (let i = 0; i < bands; i++) {
+                    const v = npv2BinS(S, 'kaleido' + layer, i, bands);
+                    // the music bends the spiral: hot bands swing outward
+                    const ang = (i / bands) * wedge * 0.92 +
+                        Math.sin(S.t * 0.9 + i * 0.55 + layer * 2.1) * 0.05 * v;
+                    const rr = (0.10 + 0.84 * (i / bands)) * R * pulse * lr;
+                    const x = Math.cos(ang) * rr, y = Math.sin(ang) * rr;
+                    // filament connecting the jewels along the arm
+                    if (i > 0 && (pv > 0.03 || v > 0.03)) {
+                        const fa = Math.min(pv, v) * 0.5 * ldim * (1 + beat * 0.4);
+                        if (fa > 0.02) {
+                            ctx.strokeStyle = ramp[i] + fa.toFixed(3) + ')';
+                            ctx.lineWidth = 1 + Math.min(pv, v) * 3;
+                            ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(x, y); ctx.stroke();
+                        }
+                    }
+                    if (v > 0.03) {
+                        let a = (0.15 + v * 0.85) * ldim * (1 + beat * 0.5);
+                        if (a > 1) a = 1;
+                        const jr = (0.8 + v * 3.4) * (layer === 0 ? 1 : 0.7);
+                        // halo + jewel core; hottest go white-hot
+                        ctx.fillStyle = (v > 0.72 ? 'rgba(255,255,255,' : ramp[i]) + (a * 0.20).toFixed(3) + ')';
+                        ctx.beginPath(); ctx.arc(x, y, jr * 2.4, 0, 6.2832); ctx.fill();
+                        ctx.fillStyle = (v > 0.72 ? 'rgba(255,255,255,' : ramp[i]) + a.toFixed(3) + ')';
+                        ctx.beginPath(); ctx.arc(x, y, jr, 0, 6.2832); ctx.fill();
+                        // pinpoint sparkle on the brightest jewels
+                        if (v > 0.6 && layer === 0) {
+                            const tw = 0.5 + 0.5 * Math.sin(S.t * 4 + i * 1.7 + sgm);
+                            ctx.fillStyle = 'rgba(255,255,255,' + (tw * v * 0.85).toFixed(3) + ')';
+                            ctx.beginPath(); ctx.arc(x, y, jr * 0.45, 0, 6.2832); ctx.fill();
+                        }
+                    }
+                    px = x; py = y; pv = v;
+                }
+                ctx.restore();
             }
         }
-        // bright cell dividers: the classic kaleidoscope lattice
-        ctx.strokeStyle = 'rgba(255,255,255,' + (0.10 + beat * 0.30).toFixed(3) + ')';
-        ctx.lineWidth = 1;
+        ctx.restore();
+        // rim of beat-pulsing accent jewels framing the mandala
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.rotate(-rot * 0.6);
+        const jr2 = 2 + beat * 5;
         for (let sgm = 0; sgm < segs; sgm++) {
-            const a = rot + (sgm / segs) * 6.2832;
-            ctx.beginPath();
-            ctx.moveTo(cx + Math.cos(a) * R * 0.06, cy + Math.sin(a) * R * 0.06);
-            ctx.lineTo(cx + Math.cos(a) * R * pulse, cy + Math.sin(a) * R * pulse);
-            ctx.stroke();
+            const a = (sgm / segs) * Math.PI * 2;
+            const x = Math.cos(a) * R * 1.02 * pulse, y = Math.sin(a) * R * 1.02 * pulse;
+            ctx.fillStyle = npv2Css2(S, (0.25 + beat * 0.65).toFixed(3));
+            ctx.beginPath(); ctx.arc(x, y, jr2 * 2.2, 0, 6.2832); ctx.fill();
+            ctx.fillStyle = 'rgba(255,255,255,' + (0.35 + beat * 0.5).toFixed(3) + ')';
+            ctx.beginPath(); ctx.arc(x, y, jr2 * 0.8, 0, 6.2832); ctx.fill();
         }
-        // beat flash wash
-        if (beat > 0.05) {
-            ctx.fillStyle = npv2Css(S, (beat * 0.10).toFixed(3));
-            ctx.beginPath(); ctx.arc(cx, cy, R * pulse, 0, 6.2832); ctx.fill();
-        }
-        // breathing core with orbit rings
-        ctx.fillStyle = npv2Css(S, (0.5 + bass * 0.4).toFixed(3));
+        ctx.restore();
+        // breathing luminous core
+        const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 0.20 * pulse);
+        core.addColorStop(0, 'rgba(255,255,255,' + (0.55 + bass * 0.35).toFixed(3) + ')');
+        core.addColorStop(0.4, npv2Css(S, (0.45 + bass * 0.30).toFixed(3)));
+        core.addColorStop(1, npv2Css(S, 0));
+        ctx.fillStyle = core;
         ctx.beginPath();
-        ctx.arc(cx, cy, (3 + bass * 10) * pulse, 0, 6.2832);
+        ctx.arc(cx, cy, R * 0.20 * pulse, 0, 6.2832);
         ctx.fill();
-        ctx.strokeStyle = npv2Css2(S, 0.4);
-        ctx.lineWidth = 1.5;
-        for (let k = 1; k <= 2; k++) {
-            ctx.beginPath();
-            ctx.arc(cx, cy, (14 + bass * 22) * k * pulse + Math.sin(S.t * 2 + k) * 4, 0, 6.2832);
-            ctx.stroke();
-        }
     },
 
     // --- Warp: starfield rushing past, speed tied to energy -------------------------
@@ -1761,17 +1800,22 @@ const NPV2_PAINT = {
             const fillCol = (layer === 1 ? npv2Css2(S, (la * 0.30).toFixed(3)) : npv2Css(S, (la * 0.30).toFixed(3)));
             const seg = 6.2832 / petals;
             for (let p = 0; p < petals; p++) {
-                // petal: filled ellipse body plus outline, long axis radial
+                // petal: luminous gradient body (bright heart, soft fade) plus outline, long axis radial
                 const a0 = rot + p * seg;
                 const px = cx + Math.cos(a0) * lr, py = cy + Math.sin(a0) * lr;
-                ctx.fillStyle = fillCol;
+                const pr = lr * 0.30;
+                const pg = ctx.createRadialGradient(px, py, 0, px, py, pr * 1.15);
+                pg.addColorStop(0, lineCol);
+                pg.addColorStop(0.5, fillCol);
+                pg.addColorStop(1, npv2Css(S, 0));
+                ctx.fillStyle = pg;
                 ctx.beginPath();
-                ctx.ellipse(px, py, lr * 0.30, lr * 0.17, a0, 0, 6.2832);
+                ctx.ellipse(px, py, pr, lr * 0.17, a0, 0, 6.2832);
                 ctx.fill();
                 ctx.strokeStyle = lineCol;
                 ctx.lineWidth = 1.4;
                 ctx.beginPath();
-                ctx.ellipse(px, py, lr * 0.30, lr * 0.17, a0, 0, 6.2832);
+                ctx.ellipse(px, py, pr, lr * 0.17, a0, 0, 6.2832);
                 ctx.stroke();
             }
         }
