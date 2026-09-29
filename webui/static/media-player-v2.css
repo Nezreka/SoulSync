@@ -988,6 +988,31 @@
     max-height: none;
 }
 
+/* Queue fills its container instead of the v1 200px cap: the panel becomes
+   a flex column the height of its region (immersive side panel or the
+   normal-mode tab region) and the track list scrolls inside it. */
+#np-modal-overlay #np-queue-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    max-height: none;
+    overflow: visible;
+    border-top: none;
+    padding: 0 24px 12px;
+}
+#np-v2-sidepanel-body > #np-queue-panel {
+    padding: 0; /* side panel body already pads */
+}
+#np-modal-overlay .np-queue-header {
+    flex: 0 0 auto;
+}
+#np-modal-overlay .np-queue-body {
+    max-height: none;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+}
+
 @media (max-width: 640px) {
     #np-v2-visuals-sidepanel {
         width: 100vw;
