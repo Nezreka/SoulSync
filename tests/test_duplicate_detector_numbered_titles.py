@@ -52,6 +52,18 @@ def test_copies_of_the_same_numbered_track_are_still_found():
     assert {track['id'] for track in findings[0]['details']['tracks']} == {1, 3}
 
 
+def test_roman_numbered_tracks_match_the_same_part_across_albums():
+    tracks = [
+        _make_track(1, title='Ultima Esperanza, Pt. I', album='Ultima Esperanza', file_path='/music/ep/part1.flac'),
+        _make_track(2, title='Ultima Esperanza, Pt. II', album='Ultima Esperanza', file_path='/music/ep/part2.flac'),
+        _make_track(3, title='Ultima Esperanza, Pt. I', album='Solaris', file_path='/music/album/part1.flac'),
+        _make_track(4, title='Ultima Esperanza, Pt. II', album='Solaris', file_path='/music/album/part2.flac'),
+    ]
+    findings = _findings(tracks)
+    assert len(findings) == 2
+    assert [{track['id'] for track in finding['details']['tracks']} for finding in findings] == [{1, 3}, {2, 4}]
+
+
 def test_conflicting_tag_numbers_override_shared_filename():
     tracks = [
         _make_track(1, title='Segue 1', file_path='/music/album/Segue.flac'),
