@@ -516,6 +516,17 @@
                         <span class="nav-text">Chat</span>
                         <span class="issues-nav-badge hidden" id="chat-nav-badge">0</span>
                     </a>
+                    <a class="nav-button" data-page="sample-studio" href="/sample-studio">
+                        <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="4" y1="10" x2="4" y2="14" />
+                                <line x1="8" y1="7" x2="8" y2="17" />
+                                <line x1="12" y1="4" x2="12" y2="20" />
+                                <line x1="16" y1="8" x2="16" y2="16" />
+                                <line x1="20" y1="10" x2="20" y2="14" />
+                            </svg></span>
+                        <span class="nav-text">Sample Studio</span>
+                    </a>
                     <a class="nav-button" data-page="tools" href="/tools">
                         <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
                                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -6975,6 +6986,27 @@
                                                         Path</button>
                                                 </div>
                                             </div>
+                                            <div class="settings-group" data-stg="library">
+                                                <h3>Sample Studio Folders</h3>
+
+                                                <div class="help-text" style="margin-bottom: 12px;">
+                                                    Where <strong>Sample Studio</strong> saves your chops — organized
+                                                    into Artist/Track folders inside the destination. The
+                                                    <strong>first folder is the default</strong>; the save dialog lets
+                                                    you pick a different one per chop (drums here, melodies there, a
+                                                    folder per project). Keep these <strong>outside</strong> your
+                                                    music library so your media server doesn't index chops as albums.
+                                                    <strong>Docker users:</strong> mount the folder(s) into the
+                                                    SoulSync container, then add the <em>container-side</em> path here.
+                                                </div>
+
+                                                <div id="sample-paths-list"></div>
+
+                                                <div class="form-actions" style="margin-top: 8px;">
+                                                    <button class="test-button" onclick="addSamplePathRow()">+ Add
+                                                        Path</button>
+                                                </div>
+                                            </div>
 
                                         </div>
                                         <div id="folders-video-panel" role="tabpanel"
@@ -7271,6 +7303,25 @@
                                                         series collapse the series folder and its number cleanly, the
                                                         same way podcast season folders do. Use <code>${var}</code> to
                                                         append text.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>Sample Path Template:</label>
+                                                    <input type="text" id="template-sample-path"
+                                                        placeholder="$artist/$track - $chop">
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Variables:
+                                                        <code>$artist</code>, <code>$track</code>,
+                                                        <code>$album</code>, <code>$chop</code> (the save name),
+                                                        <code>$stem</code> (drums/vocals/bass/other, empty for the
+                                                        full mix). Default:
+                                                        <code>$artist/$track - $chop</code>. Sample Studio files saved
+                                                        chops inside the chosen sample folder with this layout; every
+                                                        rendered file also carries its own tags. Empty segments
+                                                        collapse — a chop with no album info won't leave a stray
+                                                        folder. Use <code>${var}</code> to append text.</small>
                                                 </div>
 
                                                 <div class="form-group">
@@ -11625,6 +11676,7 @@
     <script src="{{ url_for('static', filename='docs-content/12-profiles.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='docs-content/13-troubleshooting.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='docs-content/14-video.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='docs-content/15-sample-studio.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='docs-content/16-api.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='docs-content/17-podcasts-audiobooks.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='helper.js', v=static_v) }}"></script>

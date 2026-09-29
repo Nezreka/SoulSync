@@ -1002,6 +1002,7 @@ VALID_PAGE_IDS = {
     'issues',
     'podcasts',
     'audiobooks',
+    'sample-studio',
     # Video side — per-profile page toggles (admin-only surfaces are gated separately,
     # not via allowed_pages: overlay studio, video-import, video-settings, video-automations).
     'video-dashboard',
@@ -1679,6 +1680,290 @@ try:
     logger.info("Public REST API v1 registered at /api/v1")
 except Exception as e:
     logger.error(f"Public REST API v1 failed to register: {e}")
+
+
+# --- Sample Studio legacy web UI routes (session auth) ---
+# The web UI (webui/src/app/api-client.ts) has no API key, so the v1
+# /api/v1/library/tracks and /api/v1/sample/* endpoints are unreachable from
+# the browser. These thin wrappers share the same MusicDatabase/service
+# functions and rely on the standard profile-session validation in
+# before_request — same dual-route convention as the legacy /api/library/*
+# routes.
+@app.route('/api/library/tracks', methods=['GET'])
+def library_tracks_web():
+    """Session-auth track search backing the Sample Studio library panel.
+
+    Accepts a free-text `q` (matched against both title and artist) or the
+    v1-style `title`/`artist` params. Same DB search as the API-key
+    /api/v1/library/tracks route.
+    """
+    try:
+        from database.music_database import get_database
+        from api.serializers import serialize_track
+
+        q = (request.args.get('q') or '').strip()
+        title = (request.args.get('title') or '').strip()
+        artist = (request.args.get('artist') or '').strip()
+        try:
+            limit = min(100, max(1, int(request.args.get('limit') or 50)))
+        except (TypeError, ValueError):
+            limit = 50
+        if q:
+            # Free text: search the title column, then the artist column,
+            # and merge/dedupe so "aphex" finds both titles and artists.
+            searches = [(q, ''), ('', q)]
+        elif title or artist:
+            searches = [(title, artist)]
+        else:
+            return jsonify({"success": False, "data": None, "error": "q, title, or artist is required"}), 400
+        db = get_database()
+        seen = set()
+        tracks = []
+        for t, a in searches:
+            for row in db.api_search_tracks(title=t, artist=a, limit=limit):
+                row_id = row.get('id')
+                if row_id in seen:
+                    continue
+                seen.add(row_id)
+                tracks.append(serialize_track(row))
+                if len(tracks) >= limit:
+                    break
+            if len(tracks) >= limit:
+                break
+        return jsonify({"success": True, "data": {"tracks": tracks}, "error": None})
+    except Exception as e:
+        logger.error(f"web /api/library/tracks failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/analysis', methods=['GET'])
+def sample_analysis_web():
+    try:
+        from api.sample import fetch_analysis, SampleHttpError
+        try:
+            track_id = int(request.args.get('track_id') or 0)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
+        try:
+            payload, status = fetch_analysis(track_id)
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/analysis failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/analyze', methods=['POST'])
+def sample_analyze_web():
+    try:
+        from api.sample import enqueue_track_analysis, SampleHttpError
+        data = request.get_json(silent=True) or {}
+        try:
+            track_id = int(data.get('track_id') or 0)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
+        try:
+            payload, status = enqueue_track_analysis(track_id)
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/analyze failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/peaks', methods=['GET'])
+def sample_peaks_web():
+    try:
+        from api.sample import fetch_peaks, SampleHttpError
+        try:
+            track_id = int(request.args.get('track_id') or 0)
+            buckets = int(request.args.get('buckets') or 1500)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "data": None, "error": "track_id and buckets must be integers"}), 400
+        try:
+            payload, status = fetch_peaks(track_id, buckets)
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/peaks failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/preview', methods=['POST'])
+def sample_preview_web():
+    try:
+        from api.sample import _parse_render_params, render_preview, SampleHttpError
+        data = request.get_json(silent=True) or {}
+        try:
+            params = _parse_render_params(data)
+            payload, status = render_preview(**params)
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/preview failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/preview/<preview_id>', methods=['GET'])
+def sample_preview_file_web(preview_id):
+    try:
+        from api.sample import preview_file_path, SampleHttpError
+        try:
+            path = preview_file_path(preview_id)
+            return send_file(path, mimetype="audio/wav", conditional=True)
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/preview/<id> failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/chop', methods=['POST'])
+def sample_chop_web():
+    try:
+        from api.sample import _parse_render_params, save_chop, SampleHttpError
+        data = request.get_json(silent=True) or {}
+        try:
+            params = _parse_render_params(data)
+            payload, status = save_chop(
+                **params,
+                name=data.get("name"),
+                tags=data.get("tags"),
+                format=data.get("format") or "wav16",
+                folder=data.get("folder"),
+            )
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/chop failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/folders', methods=['GET'])
+def sample_folders_web():
+    try:
+        from api.sample import list_sample_folders, SampleHttpError
+        try:
+            payload, status = list_sample_folders()
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/folders failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stash', methods=['GET'])
+def sample_stash_web():
+    try:
+        from api.sample import list_stash_entries, SampleHttpError
+        try:
+            payload, status = list_stash_entries()
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stash failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stash/<int:entry_id>', methods=['DELETE'])
+def sample_stash_delete_web(entry_id):
+    try:
+        from api.sample import remove_stash_entry, SampleHttpError
+        try:
+            payload, status = remove_stash_entry(entry_id)
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stash/<id> DELETE failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stash/<int:entry_id>/audio', methods=['GET'])
+def sample_stash_audio_web(entry_id):
+    try:
+        from api.sample import stash_audio_path, SampleHttpError
+        try:
+            path, mimetype = stash_audio_path(entry_id)
+            return send_file(path, mimetype=mimetype, conditional=True)
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stash/<id>/audio failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stash/export', methods=['GET'])
+def sample_stash_export_web():
+    try:
+        from api.sample import export_stash_zip, SampleHttpError
+        try:
+            buf, filename = export_stash_zip()
+            return send_file(buf, mimetype="application/zip", as_attachment=True,
+                             download_name=filename)
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stash/export failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stems', methods=['POST'])
+def sample_stems_web():
+    try:
+        from api.sample import separate_stems, SampleHttpError
+        data = request.get_json(silent=True) or {}
+        try:
+            track_id = int(data.get('track_id') or 0)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
+        try:
+            payload, status = separate_stems(track_id)
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stems failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stems/status', methods=['GET'])
+def sample_stems_status_web():
+    try:
+        from api.sample import stems_status, SampleHttpError
+        try:
+            track_id = int(request.args.get('track_id') or 0)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
+        try:
+            payload, status = stems_status(track_id)
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stems/status failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stems/<int:track_id>/<stem>/audio', methods=['GET'])
+def sample_stem_audio_web(track_id, stem):
+    try:
+        from api.sample import stem_audio_path, SampleHttpError
+        try:
+            path, mimetype = stem_audio_path(track_id, stem)
+            return send_file(path, mimetype=mimetype, conditional=True)
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stems/<id>/<stem>/audio failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
 
 
 # --- Automation Progress Tracking ---

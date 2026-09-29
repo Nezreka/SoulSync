@@ -1,0 +1,238 @@
+/* Sample Studio — stems panel. Same dark language as the stash panel. */
+
+.stemsPanel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #141311;
+  border-top: 1px solid #26241f;
+  flex: none;
+  max-height: 46%;
+  overflow: hidden;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8a877f;
+  border-bottom: 1px solid #26241f;
+  flex: none;
+}
+
+.backendBadge {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: #f5b942;
+  border: 1px solid #3a3423;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #8a877f;
+}
+
+.primary {
+  align-self: flex-start;
+  padding: 8px 16px;
+  border: 1px solid #f5b942;
+  border-radius: 8px;
+  background: #2a2417;
+  color: #f5b942;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primary:hover {
+  background: #352d1b;
+}
+
+.ghost {
+  align-self: flex-start;
+  padding: 6px 0;
+  border: none;
+  background: none;
+  color: #8a877f;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ghost:hover {
+  color: #e8e4da;
+}
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #b9b5aa;
+}
+
+.spinner {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #2c2a25;
+  border-top-color: #f5b942;
+  border-radius: 50%;
+  animation: stemsSpin 0.9s linear infinite;
+}
+
+@keyframes stemsSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.error {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #4a2c2c;
+  border-radius: 8px;
+  background: #221616;
+}
+
+.errorTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e89090;
+}
+
+.errorDetail {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #b9b5aa;
+  word-break: break-word;
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.playAll {
+  flex: none;
+  padding: 7px 14px;
+  border: 1px solid #f5b942;
+  border-radius: 999px;
+  background: none;
+  color: #f5b942;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.playAll:hover {
+  background: #2a2417;
+}
+
+.stemList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stemRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #2c2a25;
+  border-radius: 8px;
+  background: #1a1916;
+}
+
+.stemRow.selected {
+  border-color: #f5b942;
+  background: #211d12;
+}
+
+.stemName {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  border: none;
+  background: none;
+  color: #e8e4da;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stemName:disabled {
+  color: #5a574f;
+  cursor: default;
+}
+
+.stemControls {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
+.mini {
+  width: 28px;
+  height: 28px;
+  border: 1px solid #2c2a25;
+  border-radius: 6px;
+  background: none;
+  color: #8a877f;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mini:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.mini:hover:not(:disabled) {
+  border-color: #8a877f;
+}
+
+.soloOn {
+  border-color: #f5b942;
+  color: #f5b942;
+  background: #2a2417;
+}
+
+.muteOn {
+  border-color: #e89090;
+  color: #e89090;
+  background: #221616;
+}

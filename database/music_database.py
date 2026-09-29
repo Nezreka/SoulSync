@@ -518,6 +518,75 @@ class MusicDatabase:
                 )
             """)
             
+            # Sample Studio analysis cache — one row per library track. Written by
+            # the sample analysis worker (core/sample/worker.py); rows are
+            # re-computed when core.sample.analyze.ANALYZER_VERSION increases.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sample_analysis (
+                    track_id INTEGER PRIMARY KEY,
+                    bpm REAL,
+                    onsets_json TEXT,  -- JSON array of onset times in seconds
+                    duration_s REAL,
+                    analyzed_at REAL,
+                    analyzer_version INTEGER DEFAULT 1
+                )
+            """)
+
+            # Sample Studio stash — saved chops. Each row is BOTH the file
+            # record (file_path -> data/sample-studio/chops/) and the
+            # lightweight bookmark (track_id + start/end + pitch/target_bpm),
+            # so a chop can be re-rendered or traced back to its source.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sample_stash (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    tags_json TEXT,  -- JSON array of tag strings
+                    track_id INTEGER NOT NULL,
+                    start_s REAL NOT NULL,
+                    end_s REAL NOT NULL,
+                    pitch_st REAL DEFAULT 0,
+                    target_bpm REAL,
+                    format TEXT DEFAULT 'wav16',
+                    file_path TEXT NOT NULL,
+                    created_at REAL
+                )
+            """)
+            # (ledger back-fill for sample_stash_v1 rides _KNOWN_MIGRATION_SIGNALS below)
+
+            # Phase 4: which stem a chop was cut from (NULL = the full mix).
+            # Tolerant ALTER — existing installs get the column on next boot.
+            try:
+                cursor.execute("ALTER TABLE sample_stash ADD COLUMN stem TEXT")
+            except sqlite3.OperationalError:
+                pass  # already there
+
+            # Phase 6: which configured sample folder the chop was saved to
+            # (the configured path string at save time). file_path stays the
+            # resolvable absolute path, so removing a folder from settings
+            # never breaks existing chops.
+            try:
+                cursor.execute("ALTER TABLE sample_stash ADD COLUMN folder TEXT")
+            except sqlite3.OperationalError:
+                pass  # already there
+
+            # Sample Studio stems — per-track separation cache. One row per
+            # (track_id, stem); the four WAVs live under
+            # data/sample-studio/stems/<track_id>/. "Separate once, cache
+            # forever" — re-running is keyed off separator_version.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sample_stems (
+                    track_id INTEGER NOT NULL,
+                    stem TEXT NOT NULL,  -- drums | vocals | bass | other
+                    file_path TEXT NOT NULL,
+                    status TEXT DEFAULT 'done',
+                    backend TEXT,  -- demucs-htdemucs | stub
+                    separator_version INTEGER DEFAULT 1,
+                    created_at REAL,
+                    PRIMARY KEY (track_id, stem)
+                )
+            """)
+            # (ledger back-fill for sample_stems_v1 rides _KNOWN_MIGRATION_SIGNALS below)
+
             # Metadata table for storing system information like last refresh dates
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS metadata (
@@ -1793,6 +1862,9 @@ class MusicDatabase:
         'genius_search_fix':        ('table', '_genius_search_fix_applied'),
         'tidal_search_fix':         ('table', '_tidal_search_fix_applied'),
         'quality_profiles_schema':  ('table', 'quality_profiles'),
+        'sample_analysis_v1':        ('table', 'sample_analysis'),
+        'sample_stash_v1':            ('table', 'sample_stash'),
+        'sample_stems_v1':            ('table', 'sample_stems'),
     }
 
     def _record_migration(self, cursor, name):

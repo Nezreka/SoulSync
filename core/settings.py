@@ -14,6 +14,17 @@ from core.imports.album_types import (
 from utils.logging_config import get_logger
 
 
+def default_sample_paths() -> list:
+    """Fresh-install default for ``library.sample_paths`` (Docker-aware).
+
+    Kept module-level so core/sample/folders.py can reuse the same default
+    for installs whose stored config predates the key (no deep-merge of
+    defaults happens on load — see ConfigManager._load_config).
+    """
+    is_docker = os.path.exists("/.dockerenv") or os.environ.get("SOULSYNC_IN_DOCKER", "").lower() in ("1", "true", "yes")
+    return ["/app/samples"] if is_docker else ["./samples"]
+
+
 logger = get_logger("config")
 
 class ConfigManager:
@@ -840,6 +851,12 @@ class ConfigManager:
                 "music_videos_path": "",
                 "podcasts_path": default_podcast_path,
                 "audiobooks_path": default_audiobook_path,
+                # Sample Studio output folders (Phase 6): where saved chops
+                # are rendered. A list like music_paths — the first entry is
+                # the default destination; the save dialog lets the user pick
+                # per chop. Separate from the music library on purpose so
+                # media servers never index chops as albums.
+                "sample_paths": default_sample_paths(),
                 # Library Organize: when the tool re-resolves a track from the
                 # metadata source, the source's title/album CASING often differs
                 # from a file the user already curated (Spotify capitalizing
@@ -862,6 +879,12 @@ class ConfigManager:
                     # Plex both read. Series segments collapse when a book has no
                     # series, exactly as the podcast season folder does.
                     "audiobook_path": "$author/$series/$seriespos - $title",
+                    # Sample Studio chops, rendered inside the chosen sample
+                    # folder (see library.sample_paths). Variables:
+                    # $artist / $track / $album = the SOURCE track's metadata,
+                    # $chop = the chop's save name, $stem = stem name or empty.
+                    # Empty segments collapse, same as the audiobook template.
+                    "sample_path": "$artist/$track - $chop",
                 },
                 # $atypes — beets-compatible release-type labels for folder
                 # names. Empty for a plain album, bracketed and concatenated
