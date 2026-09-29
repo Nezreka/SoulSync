@@ -1,11 +1,6 @@
 import type { CacheItem, CacheSectionDef, CacheSectionKey } from '../-discover.cache-sections';
 
-import {
-  cacheDiscoverCard,
-  GENRE_EXPLORER_SECTION,
-  genrePill,
-  gridClamp,
-} from '../-discover.cache-sections';
+import { cacheDiscoverCard, GENRE_EXPLORER_SECTION, genrePill } from '../-discover.cache-sections';
 import { DiscoverAlbumCard } from './album-shelves';
 
 /**
@@ -27,32 +22,30 @@ import { DiscoverAlbumCard } from './album-shelves';
 export interface CacheShelfProps {
   def: CacheSectionDef;
   items: CacheItem[];
-  /** The Show all / Show less state — one flag per shelf, owned by the hook. */
-  expanded: boolean;
-  onToggleExpand: () => void;
   onOpenItem: (key: CacheSectionKey, index: number) => void;
 }
 
-export function CacheShelf({ def, items, expanded, onToggleExpand, onOpenItem }: CacheShelfProps) {
+/**
+ * one rail of cache-backed albums. every item is in the rail: the vanilla
+ * clamped a wrapping grid to 12 behind a "Show all" pill, and on a rail that
+ * already scrolls sideways that pill just hid the end of the row.
+ */
+export function CacheShelf({ def, items, onOpenItem }: CacheShelfProps) {
   if (items.length === 0) return null;
-  const clamp = gridClamp(items.length, expanded);
 
   return (
     <div className="discover-section" id={def.id}>
       <div className="discover-section-header">
         <div>
-          <div className="discover-section-subtitle">{def.subtitle}</div>
           <h3 className="discover-section-title">{def.title}</h3>
+          <div className="discover-section-subtitle">{def.subtitle}</div>
         </div>
       </div>
       <div className="discover-grid">
         {items.map((item, i) => {
           const card = cacheDiscoverCard(item);
-          // The vanilla clamps by toggling display on the card (10635) rather
-          // than dropping it; kept, so expanding is instant and image loads
-          // are not re-triggered.
           return (
-            <div key={i} style={i < clamp.visibleCount ? undefined : { display: 'none' }}>
+            <div key={i}>
               <DiscoverAlbumCard
                 cover={card.cover}
                 albumName={card.title}
@@ -64,12 +57,6 @@ export function CacheShelf({ def, items, expanded, onToggleExpand, onOpenItem }:
           );
         })}
       </div>
-      {/* The toggle is the grid's SIBLING (10641), outside the card flow. */}
-      {clamp.toggleVisible && (
-        <button type="button" className="discover-show-all" onClick={onToggleExpand}>
-          {clamp.label}
-        </button>
-      )}
     </div>
   );
 }
@@ -94,8 +81,8 @@ export function GenreExplorerSection({ genres, onOpenGenre, limit }: GenreExplor
     <div className="discover-section" id={GENRE_EXPLORER_SECTION.id}>
       <div className="discover-section-header">
         <div>
-          <div className="discover-section-subtitle">{GENRE_EXPLORER_SECTION.subtitle}</div>
           <h3 className="discover-section-title">{GENRE_EXPLORER_SECTION.title}</h3>
+          <div className="discover-section-subtitle">{GENRE_EXPLORER_SECTION.subtitle}</div>
         </div>
       </div>
       <div className="genre-explorer-grid">

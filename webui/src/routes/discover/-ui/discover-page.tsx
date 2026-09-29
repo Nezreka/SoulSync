@@ -262,7 +262,6 @@ export function DiscoverPage() {
   // the recipe editor: a new mix, or the one being edited
   const [recipeEditor, setRecipeEditor] = useState<{ editing: RecipeMixCard | null } | null>(null);
   const [addingAll, setAddingAll] = useState(false);
-  const [expandedCaches, setExpandedCaches] = useState<Record<string, boolean>>({});
   const [explorerPromptOpen, setExplorerPromptOpen] = useState(false);
   const [lbCovers, setLbCovers] = useState<Record<string, unknown[]>>({});
 
@@ -930,8 +929,6 @@ export function DiscoverPage() {
       <CacheShelf
         def={def}
         items={items}
-        expanded={Boolean(expandedCaches[id])}
-        onToggleExpand={() => setExpandedCaches((e) => ({ ...e, [id]: !e[id] }))}
         onOpenItem={(key, index) => void albumOpen.openCacheItem(key, items[index])}
       />
     );

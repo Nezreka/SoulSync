@@ -38205,22 +38205,8 @@ div.artist-hero-badge {
     border: 1px solid rgba(255,255,255,0.2);
 }
 /* Show all / Show less toggle under a clamped discover-grid. */
-.discover-show-all {
-    margin: 14px auto 0;
-    display: block;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.12);
-    color: rgba(255,255,255,0.85);
-    font-size: 13px; font-weight: 600;
-    padding: 8px 20px; border-radius: 20px;
-    cursor: pointer;
-    transition: background 0.2s, border-color 0.2s, color 0.2s;
-}
-.discover-show-all:hover {
-    background: rgba(var(--accent-rgb),0.15);
-    border-color: rgba(var(--accent-rgb),0.4);
-    color: #fff;
-}
+
+
 
 /* ── Adventurousness — living wave dial (Discover page) ──────────────────────
    A draggable orb rides an animated line that waves calmer + greener at the left (safe)
@@ -38763,12 +38749,7 @@ div.artist-hero-badge {
 .discovery-zone .adv-wave-track {
     height: 70px;
 }
-.discovery-zone .discover-show-all {
-    margin-top: 7px;
-    padding: 6px 13px;
-    font-size: 11.5px;
-    border-radius: 8px;
-}
+
 .discovery-zone-section--cache-deep-cuts .discover-grid,
 .discovery-zone-section--cache-genre-releases .discover-grid,
 .discovery-zone-section--cache-undiscovered .discover-grid,
