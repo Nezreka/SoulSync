@@ -118,3 +118,75 @@ def test_punctuation_only_titles_do_not_share_an_empty_identity_key():
         _db('-', 'Album'), '-', [{'name': 'Soul Asylum'}],
         'Album', 'navidrome', strict_identity=True, require_album=True,
     ) is not None
+
+
+def test_wrong_release_winner_does_not_hide_owned_copy_on_requested_album():
+    wrong_release = SimpleNamespace(
+        title='Chasing Cars', album_title='Eyes Open', artist_name='Snow Patrol',
+        track_artist=None, file_path='/music/eyes-open.flac', server_source='navidrome')
+    chosen_release = SimpleNamespace(
+        title='Chasing Cars', album_title='Up To Now', artist_name='Snow Patrol',
+        track_artist=None, file_path='/music/up-to-now.flac', server_source='navidrome')
+    calls = []
+    db = SimpleNamespace(
+        check_track_exists=lambda *args, **kwargs: (wrong_release, 1.0),
+        search_albums=lambda **kwargs: calls.append(('albums', kwargs)) or [
+            SimpleNamespace(id='album-1', title='Up To Now')],
+        get_candidate_tracks_for_albums=lambda ids: calls.append(('tracks', ids)) or [chosen_release],
+    )
+
+    match = find_owned_match(
+        db, 'Chasing Cars', [{'name': 'Snow Patrol'}], 'Up To Now',
+        'navidrome', strict_identity=True, require_album=True,
+    )
+
+    assert match == (chosen_release, 1.0, 'Snow Patrol')
+    assert calls[0][0] == 'albums'
+    assert calls[0][1]['title'] == 'Up To Now'
+    assert calls[0][1]['server_source'] == 'navidrome'
+    assert calls[1] == ('tracks', ['album-1'])
+
+
+def test_valid_first_match_does_not_run_album_fallback():
+    owned = SimpleNamespace(title='Song', album_title='Album', artist_name='Artist',
+                            track_artist=None, file_path='/music/song.flac')
+    db = SimpleNamespace(
+        check_track_exists=lambda *args, **kwargs: (owned, 1.0),
+        search_albums=lambda **kwargs: (_ for _ in ()).throw(AssertionError('unneeded album query')),
+    )
+    assert find_owned_match(
+        db, 'Song', [{'name': 'Artist'}], 'Album', 'navidrome',
+        strict_identity=True, require_album=True,
+    ) is not None
+
+
+def test_missing_fuzzy_match_does_not_run_album_fallback():
+    db = SimpleNamespace(
+        check_track_exists=lambda *args, **kwargs: (None, 0.0),
+        search_albums=lambda **kwargs: (_ for _ in ()).throw(AssertionError('unneeded album query')),
+    )
+    assert find_owned_match(
+        db, 'Song', [{'name': 'Artist'}], 'Album', 'navidrome',
+        strict_identity=True, require_album=True,
+    ) is None
+
+
+def test_album_fallback_checks_per_track_artist_and_server():
+    wrong_release = SimpleNamespace(title='Time', album_title='Elsewhere',
+                                    artist_name='Deeparture', track_artist=None,
+                                    file_path='/music/other.flac')
+    wrong_artist = SimpleNamespace(title='Time', album_title='Time',
+                                   artist_name='Deeparture', track_artist='Aril Brikha',
+                                   file_path='/music/wrong-artist.flac', server_source='navidrome')
+    wrong_server = SimpleNamespace(title='Time', album_title='Time',
+                                   artist_name='Deeparture', track_artist='Deeparture',
+                                   file_path='/music/wrong-server.flac', server_source='plex')
+    db = SimpleNamespace(
+        check_track_exists=lambda *args, **kwargs: (wrong_release, 1.0),
+        search_albums=lambda **kwargs: [SimpleNamespace(id='album-1', title='Time')],
+        get_candidate_tracks_for_albums=lambda ids: [wrong_artist, wrong_server],
+    )
+    assert find_owned_match(
+        db, 'Time', [{'name': 'Deeparture'}], 'Time', 'navidrome',
+        strict_identity=True, require_album=True,
+    ) is None

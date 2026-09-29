@@ -95,6 +95,18 @@ def _same_artist(requested: str, db_track: Any) -> bool:
     return bool(target and any(normalize_key(part) == target for part in [credit, *parts]))
 
 
+def _strict_identity_matches(db_track: Any, track_name: str, artist_name: str,
+                             album: Optional[str], require_album: bool) -> bool:
+    matched_title = getattr(db_track, 'title', None)
+    matched_album = getattr(db_track, 'album_title', None)
+    album_key = _identity_key(album)
+    if require_album and (not album_key or not matched_album or album_key != _identity_key(matched_album)):
+        return False
+    album_context = matched_album if album_key and matched_album and album_key == _identity_key(matched_album) else ''
+    return bool(matched_title and _same_title(track_name, matched_title, album_context)
+                and _same_artist(artist_name, db_track))
+
+
 def find_owned_match(music_database, track_name: str, artists: Any, album: Optional[str],
                      active_server: str, *, confidence_threshold: float = 0.7,
                      strict_identity: bool = False, require_album: bool = False,
@@ -106,7 +118,9 @@ def find_owned_match(music_database, track_name: str, artists: Any, album: Optio
     media server cannot see.
     """
     log = log or logger
-    for artist_name in artist_names(artists):
+    names = artist_names(artists)
+    rejected_match = False
+    for artist_name in names:
         try:
             db_track, confidence = music_database.check_track_exists(
                 track_name,
@@ -127,16 +141,8 @@ def find_owned_match(music_database, track_name: str, artists: Any, album: Optio
             # That is useful for search suggestions, but is not proof that a
             # wishlist request has been fulfilled. Keep version words, too:
             # an acoustic/demo/live recording may be a distinct target.
-            matched_title = getattr(db_track, 'title', None)
-            matched_album = getattr(db_track, 'album_title', None)
-            album_key = _identity_key(album)
-            if require_album:
-                if not album_key or not matched_album or album_key != _identity_key(matched_album):
-                    continue
-            album_context = matched_album if album_key and matched_album and album_key == _identity_key(matched_album) else ''
-            if not matched_title or not _same_title(track_name, matched_title, album_context):
-                continue
-            if not _same_artist(artist_name, db_track):
+            if not _strict_identity_matches(db_track, track_name, artist_name, album, require_album):
+                rejected_match = True
                 continue
 
         file_path = getattr(db_track, 'file_path', None)
@@ -149,12 +155,37 @@ def find_owned_match(music_database, track_name: str, artists: Any, album: Optio
                 f"'{artist_name}' (confidence: {confidence:.2f}): the matched library row "
                 f"still points into atomic-publish staging ({file_path}), so the track is "
                 f"not in the library yet — keeping the wishlist entry")
+            rejected_match = True
             continue
 
         log.info(
             f"{log_prefix} Track found in database: '{track_name}' by {artist_name} "
             f"(confidence: {confidence:.2f}) → {file_path or '<no path>'}")
         return db_track, confidence, artist_name
+
+    # The fuzzy matcher returns one winner and does not rank by album. When it
+    # chose another release, check the requested album's tracks before leaving
+    # an already-owned album wish queued. This runs only after the cheap check
+    # failed, and uses the existing album/candidate queries.
+    if strict_identity and require_album and album and names and rejected_match:
+        try:
+            albums = music_database.search_albums(
+                title=album, artist='', limit=500, server_source=active_server)
+            album_key = _identity_key(album)
+            album_ids = [candidate.id for candidate in albums
+                         if album_key and _identity_key(candidate.title) == album_key]
+            if album_ids:
+                for candidate in music_database.get_candidate_tracks_for_albums(album_ids):
+                    if getattr(candidate, 'server_source', active_server) != active_server:
+                        continue
+                    if contains_staging_segment(getattr(candidate, 'file_path', None) or ''):
+                        continue
+                    for artist_name in names:
+                        if _strict_identity_matches(candidate, track_name, artist_name, album, True):
+                            log.info(f"{log_prefix} Track found on requested album: '{track_name}' by {artist_name}")
+                            return candidate, 1.0, artist_name
+        except Exception as exc:  # noqa: BLE001 - cleanup must leave the wish intact on lookup failure
+            log.warning(f"{log_prefix} Album-scoped ownership lookup failed for '{track_name}': {exc}")
 
     return None
 
