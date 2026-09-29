@@ -1,29 +1,50 @@
 import { useMemo, useState } from 'react';
 
-import { formatTime, slicesFromOnsets } from '../-sample-studio.helpers';
+import type { SamplePeaks } from '../-sample-studio.types';
+
+import { formatTime, slicesFromOnsets, suggestChops } from '../-sample-studio.helpers';
 import styles from './sample-studio-page.module.css';
 
 interface ChopTrayProps {
   onsets: number[];
   inPoint: number;
   outPoint: number;
+  bpm: number | null;
+  durationS: number;
+  peaks: SamplePeaks | undefined;
+  /** True once the analysis row is done (or errored) — gates suggestions. */
+  analysisReady: boolean;
   onAuditionSlice: (start: number, end: number) => void;
   onMergeSlices: (start: number, end: number) => void;
+  /** A suggested chop was picked: make it the loop region. */
+  onUseSuggestion: (start: number, end: number) => void;
 }
 
 /**
- * Transient chop tray: the in/out region is split at detected onsets into
- * slices. Click a slice to select it (multi-select), audition individual
- * slices, or merge the selection back into the loop region.
+ * Chop tray, redesigned around a guided default: the most promising regions
+ * ("Suggested chops", scored by loudness × transient density on the bar
+ * grid) are shown first. The full transient-slice firehose is one toggle
+ * away for power users — same selection/merge mechanics as before.
  */
 export function ChopTray({
   onsets,
   inPoint,
   outPoint,
+  bpm,
+  durationS,
+  peaks,
+  analysisReady,
   onAuditionSlice,
   onMergeSlices,
+  onUseSuggestion,
 }: ChopTrayProps) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [showAll, setShowAll] = useState(false);
+
+  const suggestions = useMemo(
+    () => (analysisReady ? suggestChops({ bpm, durationS, peaks, onsets, count: 8 }) : []),
+    [analysisReady, bpm, durationS, peaks, onsets],
+  );
 
   const slices = useMemo(
     () => slicesFromOnsets(onsets, inPoint, outPoint),
@@ -48,72 +69,143 @@ export function ChopTray({
     setSelected(new Set());
   };
 
-  if (slices.length === 0) return null;
-
   return (
     <div className={styles.chopTray}>
       <div className={styles.chopTrayHeader}>
         <span>
-          Chops <span className={styles.resultCount}>{slices.length}</span>
-        </span>
-        <span className={styles.chopActions}>
-          <button
-            type="button"
-            className={styles.transportBtn}
-            disabled={selected.size === 0}
-            onClick={merge}
-            title="Set the loop region to the selected slices"
-          >
-            Merge {selected.size > 0 ? `(${selected.size})` : ''} → loop
-          </button>
-          <button
-            type="button"
-            className={styles.transportBtn}
-            disabled={selected.size === 0}
-            onClick={() => setSelected(new Set())}
-          >
-            Clear
-          </button>
+          Suggested chops{' '}
+          {suggestions.length > 0 && (
+            <span className={styles.resultCount}>{suggestions.length}</span>
+          )}
         </span>
       </div>
-      <div className={styles.chopList}>
-        {slices.map((s, i) => (
-          <div
-            key={i}
-            role="button"
-            tabIndex={0}
-            className={styles.chopChip}
-            data-selected={selected.has(i)}
-            onClick={() => toggle(i)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                toggle(i);
-              }
-            }}
-            title={`${formatTime(s.start)} → ${formatTime(s.end)} — click to select`}
-          >
-            <span className={styles.chopChipTime}>
-              {formatTime(s.start)}–{formatTime(s.end)}
-            </span>
-            <button
-              type="button"
-              className={styles.chopAuditionBtn}
-              onClick={(e) => {
-                e.stopPropagation();
-                onAuditionSlice(s.start, s.end);
-              }}
-              title={`Audition ${formatTime(s.start)} → ${formatTime(s.end)}`}
-            >
-              ▶
-            </button>
+      {!analysisReady ? (
+        <div className={styles.emptyHint}>
+          Suggestions land with the analysis — meanwhile the waveform above is ready to chop by ear.
+        </div>
+      ) : suggestions.length === 0 ? (
+        <div className={styles.emptyHint}>
+          No strong candidates in this track — set the region by ear, or open all transient slices
+          below.
+        </div>
+      ) : (
+        <>
+          <div className={styles.chopList}>
+            {suggestions.map((s, i) => (
+              <div
+                key={i}
+                role="button"
+                tabIndex={0}
+                className={styles.chopChip}
+                data-kind="suggested"
+                onClick={() => onUseSuggestion(s.start, s.end)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onUseSuggestion(s.start, s.end);
+                  }
+                }}
+                title={`${s.label} (${formatTime(s.start)} → ${formatTime(s.end)}) — click to make it the loop region`}
+              >
+                <span className={styles.chopChipTime}>{s.label}</span>
+                <button
+                  type="button"
+                  className={styles.chopAuditionBtn}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAuditionSlice(s.start, s.end);
+                  }}
+                  title={`Audition ${s.label}`}
+                >
+                  ▶
+                </button>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <div className={styles.emptyHint}>
-        Slices follow the detected transients. Audition with ▶, select several, then merge them into
-        the loop.
-      </div>
+          <div className={styles.emptyHint}>
+            Click a suggestion to make it the loop region, or audition it with ▶ first.
+          </div>
+        </>
+      )}
+
+      <button
+        type="button"
+        className={styles.disclosureToggle}
+        onClick={() => setShowAll((v) => !v)}
+        aria-expanded={showAll}
+      >
+        {showAll ? '▾' : '▸'} All transient slices ({slices.length})
+      </button>
+      {showAll && (
+        <>
+          <div className={styles.chopTrayHeader}>
+            <span>
+              Transient slices <span className={styles.resultCount}>{slices.length}</span>
+            </span>
+            <span className={styles.chopActions}>
+              <button
+                type="button"
+                className={styles.transportBtn}
+                disabled={selected.size === 0}
+                onClick={merge}
+                title="Set the loop region to the selected slices"
+              >
+                Merge {selected.size > 0 ? `(${selected.size})` : ''} → loop
+              </button>
+              <button
+                type="button"
+                className={styles.transportBtn}
+                disabled={selected.size === 0}
+                onClick={() => setSelected(new Set())}
+              >
+                Clear
+              </button>
+            </span>
+          </div>
+          {slices.length === 0 ? (
+            <div className={styles.emptyHint}>No slices in the current region.</div>
+          ) : (
+            <div className={styles.chopList}>
+              {slices.map((s, i) => (
+                <div
+                  key={i}
+                  role="button"
+                  tabIndex={0}
+                  className={styles.chopChip}
+                  data-selected={selected.has(i)}
+                  onClick={() => toggle(i)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      toggle(i);
+                    }
+                  }}
+                  title={`${formatTime(s.start)} → ${formatTime(s.end)} — click to select`}
+                >
+                  <span className={styles.chopChipTime}>
+                    {formatTime(s.start)}–{formatTime(s.end)}
+                  </span>
+                  <button
+                    type="button"
+                    className={styles.chopAuditionBtn}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAuditionSlice(s.start, s.end);
+                    }}
+                    title={`Audition ${formatTime(s.start)} → ${formatTime(s.end)}`}
+                  >
+                    ▶
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className={styles.emptyHint}>
+            Slices follow the detected transients. Audition with ▶, select several, then merge them
+            into the loop.
+          </div>
+        </>
+      )}
     </div>
   );
 }

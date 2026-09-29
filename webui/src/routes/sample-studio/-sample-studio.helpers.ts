@@ -188,3 +188,121 @@ export function suggestChopName(trackTitle: string | null | undefined, startS: n
   const stamp = `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
   return `${title} · ${stamp} chop`;
 }
+
+export interface SuggestedChop {
+  start: number;
+  end: number;
+  /** "Bars 24–25" when BPM is known, otherwise "0:12.0–0:16.5". */
+  label: string;
+  score: number;
+}
+
+export interface SuggestChopsOptions {
+  bpm: number | null | undefined;
+  durationS: number | null | undefined;
+  peaks: { min: number[]; max: number[] } | null | undefined;
+  onsets: number[];
+  count?: number;
+  /** Musical unit per suggestion when BPM is known. */
+  barsPerChop?: number;
+}
+
+/** Mean peak amplitude of the [t0, t1) window; 1 when peaks are missing. */
+function windowEnergy(
+  peaks: { min: number[]; max: number[] } | null | undefined,
+  durationS: number,
+  t0: number,
+  t1: number,
+): number {
+  const n = Math.min(peaks?.min.length ?? 0, peaks?.max.length ?? 0);
+  if (!peaks || n === 0 || durationS <= 0 || !(t1 > t0)) return 1;
+  const i0 = clamp(Math.floor((t0 / durationS) * n), 0, n - 1);
+  const i1 = clamp(Math.ceil((t1 / durationS) * n), i0 + 1, n);
+  let sum = 0;
+  for (let i = i0; i < i1; i++) {
+    const lo = Math.abs(peaks.min[i]);
+    const hi = Math.abs(peaks.max[i]);
+    sum += Math.max(lo, hi);
+  }
+  return sum / (i1 - i0);
+}
+
+function onsetsInWindow(onsets: number[], t0: number, t1: number): number {
+  let c = 0;
+  for (const t of onsets) if (t >= t0 && t < t1) c++;
+  return c;
+}
+
+/**
+ * Smart default chops: the most promising regions of the track, scored by
+ * loudness × transient density. With a known BPM these are musical units
+ * (2-bar phrases on the bar grid); without BPM they fall back to loud
+ * time windows. The full transient firehose stays available behind
+ * "show all" — this is the curated default a first-time user sees.
+ *
+ * Deterministic: same input -> same output, sorted by score descending.
+ */
+export function suggestChops(opts: SuggestChopsOptions): SuggestedChop[] {
+  const { bpm, peaks, onsets } = opts;
+  const durationS = opts.durationS ?? 0;
+  const count = Math.max(1, Math.min(opts.count ?? 8, 32));
+  const barsPerChop = Math.max(1, opts.barsPerChop ?? 2);
+  if (!(durationS > 0)) return [];
+
+  interface Candidate extends SuggestedChop {
+    key: number;
+  }
+  const candidates: Candidate[] = [];
+  const interval = beatInterval(bpm);
+
+  if (interval !== null) {
+    const barLen = 4 * interval;
+    const nBars = Math.floor(durationS / barLen);
+    for (let b = 1; b <= nBars; b++) {
+      const start = (b - 1) * barLen;
+      const end = Math.min(start + barsPerChop * barLen, durationS);
+      if (end - start < barLen * 0.5) continue;
+      const lastBar = Math.min(b + barsPerChop - 1, nBars);
+      const energy = windowEnergy(peaks, durationS, start, end);
+      const density = onsetsInWindow(onsets, start, end);
+      candidates.push({
+        start,
+        end,
+        label: `Bars ${b}–${lastBar}`,
+        score: energy * (1 + density / 4),
+        key: b,
+      });
+    }
+  } else {
+    // No tempo: score loud windows of a few seconds each.
+    const windowS = Math.max(2, durationS / (count * 2));
+    const n = Math.floor(durationS / windowS);
+    for (let w = 0; w < n; w++) {
+      const start = w * windowS;
+      const end = Math.min(start + windowS, durationS);
+      const energy = windowEnergy(peaks, durationS, start, end);
+      const density = onsetsInWindow(onsets, start, end);
+      candidates.push({
+        start,
+        end,
+        label: `${formatTime(start)}–${formatTime(end)}`,
+        score: energy * (1 + density / 4),
+        key: w,
+      });
+    }
+  }
+
+  // Greedy top-N with no overlaps (bar-granular when BPM is known).
+  candidates.sort((a, z) => z.score - a.score);
+  const picked: Candidate[] = [];
+  for (const c of candidates) {
+    if (picked.length >= count) break;
+    const overlaps = picked.some((p) =>
+      interval !== null
+        ? Math.abs(p.key - c.key) < barsPerChop
+        : !(c.end <= p.start || c.start >= p.end),
+    );
+    if (!overlaps) picked.push(c);
+  }
+  return picked.map(({ start, end, label, score }) => ({ start, end, label, score }));
+}

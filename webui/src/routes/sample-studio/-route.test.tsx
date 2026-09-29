@@ -91,16 +91,19 @@ describe('sample-studio route', () => {
     expect(await screen.findByText('Test Track')).toBeInTheDocument();
   });
 
-  it('shows the analysis-pending state when the backend returns 202', async () => {
+  it('shows the staged analysis-pending state when the backend returns 202', async () => {
     stubFetch({ track_id: 7, status: 'queued' }, 202);
     renderRoute();
 
     await waitFor(() => expect(screen.getByText('Test Track')).toBeInTheDocument());
     screen.getByText('Test Track').click();
 
+    // Peaks resolve from the stub, so the staged copy acknowledges the
+    // waveform is up while tempo/chops are still being found.
     await waitFor(() => {
-      expect(screen.getByText(/Analyzing track/)).toBeInTheDocument();
+      expect(screen.getByText(/Waveform’s up — finding the tempo/)).toBeInTheDocument();
     });
+    expect(screen.getByText(/Waveform’s ready — finding the tempo/)).toBeInTheDocument();
   });
 
   it('shows the analysis error banner with a working Try again', async () => {

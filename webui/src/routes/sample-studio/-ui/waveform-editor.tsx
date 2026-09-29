@@ -105,6 +105,10 @@ export function WaveformEditor({
   } | null>(null);
   const [saveOpen, setSaveOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // Progressive disclosure: the common path (play, loop, save) stays up
+  // front; edit tools and pitch/tempo tuck behind toggles.
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [fxOpen, setFxOpen] = useState(false);
 
   // Refs mirror state for the rAF draw loop (avoids stale closures).
   const viewRef = useRef(view);
@@ -295,6 +299,16 @@ export function WaveformEditor({
     setOutPoint(end);
     // The in/out effect retires the preview and slice.
   };
+
+  /** A suggested chop becomes the loop region (the guided happy path). */
+  const useSuggestion = useCallback((start: number, end: number) => {
+    setInPoint(start);
+    setOutPoint(Math.max(end, start + 0.05));
+    if (audioRef.current) {
+      audioRef.current.currentTime = start;
+      setPlayhead(start);
+    }
+  }, []);
 
   const click = useCallback((accent: boolean) => {
     try {
@@ -636,6 +650,19 @@ export function WaveformEditor({
   const inPct = viewSpan > 0 ? ((inPoint - view.start) / viewSpan) * 100 : 0;
   const outPct = viewSpan > 0 ? ((outPoint - view.start) / viewSpan) * 100 : 0;
   const bb = barBeatAt(playhead, bpm);
+  const analysisReady = !!analysis && analysis.status === 'done';
+
+  // Contextual one-liner: a first-time user always knows the next step.
+  const guideText = analysisError
+    ? 'Analysis failed, but you can still chop by ear — mark a region and save it.'
+    : analysisPending && !peaks
+      ? 'Analyzing your track — the waveform lands first, tempo and chops follow.'
+      : analysisPending
+        ? 'Waveform’s ready — finding the tempo and chop points…'
+        : !(outPoint > inPoint)
+          ? 'Mark your chop: drag the amber handles, or press I and O while playing.'
+          : 'Audition a suggested chop below — or press Save chop to stash this region.';
+  const fxActive = Math.abs(pitchSt) > 0.01 || targetBpm != null || mode === 'preview';
 
   return (
     <div className={styles.column}>
@@ -645,6 +672,8 @@ export function WaveformEditor({
           <span className={styles.resultCount}>
             {bpm.toFixed(1)} BPM{bb ? ` · bar ${bb.bar} beat ${bb.beat}` : ''}
           </span>
+        ) : analysisPending ? (
+          <span className={styles.listening}>Listening…</span>
         ) : (
           <span className={styles.resultCount}>tempo unknown</span>
         )}
@@ -656,6 +685,10 @@ export function WaveformEditor({
             <span>{[track.artist_name, track.album_title].filter(Boolean).join(' · ')}</span>
             {duration > 0 && <span>{formatTime(duration)}</span>}
           </p>
+        </div>
+
+        <div className={styles.guideBar} role="status">
+          {guideText}
         </div>
 
         <div className={styles.transportBar}>
@@ -676,53 +709,21 @@ export function WaveformEditor({
           >
             🔁 Loop
           </button>
-          <button
-            type="button"
-            className={styles.transportBtn}
-            data-on={metroOn}
-            onClick={() => setMetroOn((v) => !v)}
-            disabled={!bpm || mode !== 'original' || slicePreview != null}
-            title="Metronome click (browser only, original audio)"
-          >
-            🥁 Click
-          </button>
-          <span className={styles.loopPresets}>
-            <span className={styles.presetLabel}>Loop:</span>
-            {[1, 2, 4].map((n) => (
-              <button
-                key={n}
-                type="button"
-                className={styles.transportBtn}
-                onClick={() => setLoopBars(n)}
-                disabled={!bpm}
-                title={`Set loop to ${n} bar${n > 1 ? 's' : ''} from the playhead`}
-              >
-                {n} bar{n > 1 ? 's' : ''}
-              </button>
-            ))}
-          </span>
-          <button
-            type="button"
-            className={styles.transportBtn}
-            onClick={() => zoom(0.5)}
-            title="Zoom in (+)"
-          >
-            ＋
-          </button>
-          <button
-            type="button"
-            className={styles.transportBtn}
-            onClick={() => zoom(2)}
-            title="Zoom out (−)"
-          >
-            －
-          </button>
           <span className={styles.timeReadout}>
             {formatTime(playhead)} / {formatTime(duration)}
           </span>
           <button
             type="button"
             className={styles.transportBtn}
+            onClick={() => setToolsOpen((v) => !v)}
+            aria-expanded={toolsOpen}
+            title="Edit tools: click track, bar loops, zoom"
+          >
+            🛠 Tools {toolsOpen ? '▾' : '▸'}
+          </button>
+          <button
+            type="button"
+            className={`${styles.transportBtn} ${styles.primaryBtn}`}
             data-on={true}
             onClick={() => setSaveOpen(true)}
             disabled={!track.file_path || !(outPoint > inPoint)}
@@ -730,16 +731,62 @@ export function WaveformEditor({
           >
             💾 Save chop
           </button>
-          <button
-            type="button"
-            className={styles.transportBtn}
-            onClick={() => setShortcutsOpen(true)}
-            title="Keyboard shortcuts (?)"
-            aria-label="Show keyboard shortcuts"
-          >
-            ?
-          </button>
         </div>
+
+        {toolsOpen && (
+          <div className={styles.transportBar} data-kind="secondary">
+            <button
+              type="button"
+              className={styles.transportBtn}
+              data-on={metroOn}
+              onClick={() => setMetroOn((v) => !v)}
+              disabled={!bpm || mode !== 'original' || slicePreview != null}
+              title="Metronome click (browser only, original audio)"
+            >
+              🥁 Click
+            </button>
+            <span className={styles.loopPresets}>
+              <span className={styles.presetLabel}>Loop:</span>
+              {[1, 2, 4].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  className={styles.transportBtn}
+                  onClick={() => setLoopBars(n)}
+                  disabled={!bpm}
+                  title={`Set loop to ${n} bar${n > 1 ? 's' : ''} from the playhead`}
+                >
+                  {n} bar{n > 1 ? 's' : ''}
+                </button>
+              ))}
+            </span>
+            <button
+              type="button"
+              className={styles.transportBtn}
+              onClick={() => zoom(0.5)}
+              title="Zoom in (+)"
+            >
+              ＋
+            </button>
+            <button
+              type="button"
+              className={styles.transportBtn}
+              onClick={() => zoom(2)}
+              title="Zoom out (−)"
+            >
+              －
+            </button>
+            <button
+              type="button"
+              className={styles.transportBtn}
+              onClick={() => setShortcutsOpen(true)}
+              title="Keyboard shortcuts (?)"
+              aria-label="Show keyboard shortcuts"
+            >
+              ?
+            </button>
+          </div>
+        )}
 
         {analysisError ? (
           <div className={styles.statusLine} data-tone="error" role="alert">
@@ -751,7 +798,9 @@ export function WaveformEditor({
         ) : (
           analysisPending && (
             <div className={styles.statusLine} data-tone="warn">
-              Analyzing track — BPM and chop points will appear when ready…
+              {peaks
+                ? 'Waveform’s up — finding the tempo and chop points…'
+                : 'Analyzing track — the waveform appears first…'}
             </div>
           )
         )}
@@ -815,24 +864,43 @@ export function WaveformEditor({
           </div>
         )}
 
-        <PitchTempoPanel
-          sourceBpm={bpm}
-          pitchSt={pitchSt}
-          targetBpm={targetBpm}
-          onParamsChange={onFxParamsChange}
-          rendering={previewRendering}
-          previewEngine={preview?.engine ?? null}
-          mode={mode}
-          onModeChange={switchMode}
-          disabled={!track.file_path || !duration}
-        />
+        <div className={styles.section}>
+          <button
+            type="button"
+            className={styles.sectionToggle}
+            onClick={() => setFxOpen((v) => !v)}
+            aria-expanded={fxOpen}
+          >
+            <span>Pitch &amp; tempo</span>
+            {fxActive && <span className={styles.fxBadge}>active</span>}
+            <span className={styles.chev}>{fxOpen ? '▾' : '▸'}</span>
+          </button>
+          {fxOpen && (
+            <PitchTempoPanel
+              sourceBpm={bpm}
+              pitchSt={pitchSt}
+              targetBpm={targetBpm}
+              onParamsChange={onFxParamsChange}
+              rendering={previewRendering}
+              previewEngine={preview?.engine ?? null}
+              mode={mode}
+              onModeChange={switchMode}
+              disabled={!track.file_path || !duration}
+            />
+          )}
+        </div>
 
         <ChopTray
           onsets={analysis?.onsets ?? []}
           inPoint={inPoint}
           outPoint={outPoint}
+          bpm={bpm}
+          durationS={duration}
+          peaks={peaks}
+          analysisReady={analysisReady}
           onAuditionSlice={auditionSlice}
           onMergeSlices={mergeSlices}
+          onUseSuggestion={useSuggestion}
         />
 
         <audio ref={audioRef} preload="auto" />
