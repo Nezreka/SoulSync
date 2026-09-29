@@ -2161,6 +2161,31 @@ describe('a finished job refreshes the findings (#1386)', () => {
     ).toBe('2@2026-09-29T11:00:00');
   });
 
+  it('a background run landing keeps the findings you ticked', async () => {
+    routes({ [FINDINGS]: page([finding({ id: 1 }), finding({ id: 2 })]) });
+    const onStatusChanged = vi.fn();
+    const view = (runs: ReturnType<typeof run>[]) => (
+      <FindingsSurface jobs={JOBS} runs={runs} trackCount={4} onStatusChanged={onStatusChanged} />
+    );
+    const { rerender } = render(view([]));
+    await flush();
+    fireEvent.change(document.getElementById('repair-findings-search') as HTMLElement, {
+      target: { value: 'a' },
+    });
+    await flush();
+    fireEvent.click(document.querySelectorAll('.repair-finding-select input')[0]);
+    expect(document.querySelector('.repair-bulk-count')?.textContent).toBe('1 selected');
+    const listCalls = () =>
+      fetchMock.mock.calls.filter(([url]) => /\/api\/repair\/findings\?/.test(String(url))).length;
+    const before = listCalls();
+
+    rerender(view([run(9, '2026-09-29T12:00:00')]));
+    await flush();
+    expect(document.querySelector('.repair-bulk-count')?.textContent).toBe('1 selected');
+    expect(listCalls()).toBe(before);
+    expect(onStatusChanged).toHaveBeenCalled();
+  });
+
   it('reloads counts, groups and the album grid when a new run lands, even the first ever', async () => {
     routes({ [GROUPS]: [], [COUNTS]: {}, [TYPES]: [], '/api/repair/findings/albums': [] }, []);
     const calls = (path: string) =>

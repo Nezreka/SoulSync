@@ -340,17 +340,24 @@ export function FindingsSurface({
   // a job finished: its findings only showed after a page refresh (#1386).
   // any change after the first render counts, even from no runs at all (a
   // fresh install's first job); the history arriving on open costs one
-  // extra small reload
+  // extra small reload. scheduled jobs finish in the background too, so the
+  // open list only reloads when nothing's ticked: reloading it clears the
+  // selection you were building
   const [refreshToken, setRefreshToken] = useState(0);
   const runKey = latestRunKey(runs);
   const seenRunKey = useRef<string | null>(null);
+  const selectedCount = useRef(0);
+  selectedCount.current = selected.size;
   useEffect(() => {
     const previous = seenRunKey.current;
     seenRunKey.current = runKey;
     if (previous === null || previous === runKey) return;
-    refreshAll();
+    void loadCounts();
+    void loadGroups();
+    if (selectedCount.current === 0) void loadFindings();
+    onStatusChanged();
     setRefreshToken((token) => token + 1);
-  }, [runKey, refreshAll]);
+  }, [runKey, loadCounts, loadGroups, loadFindings, onStatusChanged]);
 
   // ── The background Fix All run ─────────────────────────────────────────────
 
