@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { PromoBanner } from './promo-banner';
+import { PromoBanner, tiltFrom } from './promo-banner';
 
 function props(over: Partial<Parameters<typeof PromoBanner>[0]> = {}) {
   return {
@@ -64,6 +64,12 @@ describe('PromoBanner', () => {
     expect(container.querySelector('.dsc-backdrop-video')).toBeNull();
   });
 
+  it('leaves the cover out rather than show an empty square with no art', () => {
+    const { container } = render(<PromoBanner {...props({ art: null })} />);
+    expect(container.querySelector('.dsc-promo-cover')).toBeNull();
+    expect(container.querySelector('.dsc-promo-drift')).toBeNull();
+  });
+
   it('glows the colour of its artwork', () => {
     const { container } = render(<PromoBanner {...props({ glowRgb: '10, 20, 30' })} />);
     expect(
@@ -71,10 +77,56 @@ describe('PromoBanner', () => {
     ).toBe('10, 20, 30');
   });
 
+  it('offers sound only while its video is live, and pauses soulsync when you take it', () => {
+    const audio = document.createElement('audio');
+    audio.id = 'audio-player';
+    document.body.appendChild(audio);
+    Object.defineProperty(audio, 'paused', { value: false, configurable: true });
+    const pause = vi.spyOn(audio, 'pause').mockImplementation(() => {});
+    const onSoundChange = vi.fn();
+    const { container, rerender } = render(
+      <PromoBanner {...props({ videoId: 'v1', playing: false, onSoundChange })} />,
+    );
+    expect(screen.queryByLabelText('Play this video with sound')).toBeNull();
+    rerender(<PromoBanner {...props({ videoId: 'v1', playing: true, onSoundChange })} />);
+    fireEvent.click(screen.getByLabelText('Play this video with sound'));
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('.dsc-promo')).toHaveClass('has-sound');
+    expect(onSoundChange).toHaveBeenLastCalledWith(true);
+    // it lost the stage: muted again, and it lets the stage go
+    rerender(<PromoBanner {...props({ videoId: 'v1', playing: false, onSoundChange })} />);
+    expect(container.querySelector('.dsc-promo')).not.toHaveClass('has-sound');
+    expect(onSoundChange).toHaveBeenLastCalledWith(false);
+    audio.remove();
+  });
+
+  it('shows the rail countdown only on the card that is up and live', () => {
+    const { container, rerender } = render(
+      <PromoBanner {...props({ videoId: 'v1', playing: true, cycleMs: 9000 })} />,
+    );
+    const bar = container.querySelector('.dsc-promo-countdown') as HTMLElement;
+    expect(bar.style.animationDuration).toBe('9000ms');
+    rerender(<PromoBanner {...props({ videoId: 'v1', playing: true, cycleMs: null })} />);
+    expect(container.querySelector('.dsc-promo-countdown')).toBeNull();
+  });
+
   it('switches video backgrounds and says which way', () => {
     const onToggle = vi.fn();
     render(<PromoBanner {...props({ videoToggle: { on: true, onToggle } })} />);
     fireEvent.click(screen.getByLabelText('Turn video backgrounds off'));
     expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('tiltFrom', () => {
+  const rect = { left: 100, top: 50, width: 200, height: 100 };
+  it('is -1..1 from the centre, clamped outside the box', () => {
+    expect(tiltFrom(200, 100, rect)).toEqual({ px: 0, py: 0 });
+    expect(tiltFrom(100, 50, rect)).toEqual({ px: -1, py: -1 });
+    expect(tiltFrom(250, 125, rect)).toEqual({ px: 0.5, py: 0.5 });
+    expect(tiltFrom(900, -40, rect)).toEqual({ px: 1, py: -1 });
+  });
+  it('a box with no size stays flat', () => {
+    expect(tiltFrom(5, 5, { left: 0, top: 0, width: 0, height: 0 })).toEqual({ px: 0, py: 0 });
   });
 });

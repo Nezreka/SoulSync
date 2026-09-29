@@ -57,6 +57,37 @@ describe('chooseActive', () => {
     ).toBe('feature');
   });
 
+  it('a banner with its sound on keeps the stage over a hovered one', () => {
+    const s = slots([
+      ['card-2', { ratio: 0.4, hasVideo: true, held: true }],
+      ['card-5', { ratio: 1, hasVideo: true, hover: true }],
+    ]);
+    expect(chooseActive(s, true)).toBe('card-2');
+    // scrolled fully away, it lets go
+    s.set('card-2', { ratio: 0, hasVideo: true, held: true });
+    expect(chooseActive(s, true)).toBe('card-5');
+  });
+
+  it("a rail's cycle picks its card over plain visibility, but only on screen", () => {
+    const both = (ratio: number) =>
+      slots([
+        ['feature', { ratio: 1, hasVideo: true }],
+        ['card-2', { ratio, hasVideo: true, boost: true }],
+      ]);
+    expect(chooseActive(both(0.8), true)).toBe('card-2');
+    expect(chooseActive(both(0.3), true)).toBe('feature');
+    // a hovered card still beats the cycle
+    expect(
+      chooseActive(
+        slots([
+          ['card-2', { ratio: 1, hasVideo: true, boost: true }],
+          ['card-5', { ratio: 1, hasVideo: true, hover: true }],
+        ]),
+        true,
+      ),
+    ).toBe('card-5');
+  });
+
   it('plays nothing when disabled', () => {
     expect(chooseActive(slots([['hero', { ratio: 1, hasVideo: true }]]), false)).toBeNull();
   });

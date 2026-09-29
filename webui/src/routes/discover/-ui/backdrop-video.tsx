@@ -22,12 +22,22 @@ export interface BackdropVideoProps {
   playing: boolean;
   /** youtube refused this video (embedding off, removed): try something else */
   onUnplayable?: (videoId: string) => void;
+  /** false plays its sound. it starts muted every time it mounts */
+  muted?: boolean;
 }
 
-type MutablePlayer = YouTubePlayer & { mute?: () => void };
+type MutablePlayer = YouTubePlayer & { mute?: () => void; unMute?: () => void };
 
-export function BackdropVideo({ videoId, playing, onUnplayable }: BackdropVideoProps) {
+export function BackdropVideo({
+  videoId,
+  playing,
+  onUnplayable,
+  muted = true,
+}: BackdropVideoProps) {
   const host = useRef<HTMLDivElement | null>(null);
+  const playerRef = useRef<MutablePlayer | null>(null);
+  const mutedRef = useRef(muted);
+  mutedRef.current = muted;
   const [live, setLive] = useState(false);
   const unplayable = useRef(onUnplayable);
   unplayable.current = onUnplayable;
@@ -65,8 +75,11 @@ export function BackdropVideo({ videoId, playing, onUnplayable }: BackdropVideoP
         },
         events: {
           onReady: (e) => {
-            (e.target as MutablePlayer).mute?.();
-            e.target.playVideo();
+            const target = e.target as MutablePlayer;
+            playerRef.current = target;
+            if (mutedRef.current) target.mute?.();
+            else target.unMute?.();
+            target.playVideo();
           },
           onStateChange: (e) => {
             if (!cancelled && e.data === YT_STATE.PLAYING) setLive(true);
@@ -83,6 +96,7 @@ export function BackdropVideo({ videoId, playing, onUnplayable }: BackdropVideoP
     });
     return () => {
       cancelled = true;
+      playerRef.current = null;
       try {
         player?.destroy();
       } catch {
@@ -91,6 +105,14 @@ export function BackdropVideo({ videoId, playing, onUnplayable }: BackdropVideoP
       mountPoint.remove();
     };
   }, [videoId, playing]);
+
+  // the sound switch, without rebuilding the player
+  useEffect(() => {
+    const p = playerRef.current;
+    if (!p) return;
+    if (muted) p.mute?.();
+    else p.unMute?.();
+  }, [muted]);
 
   if (!videoId || !playing) return null;
   return (

@@ -112,7 +112,7 @@ import { MixModal } from './mix-modal';
 import { MixShelf } from './mix-shelf';
 import { NowPlayingBanner, useNowPlaying } from './now-playing-banner';
 import { PromoBanner } from './promo-banner';
-import { TasteGapBanner, WeekBanner } from './pulse-banners';
+import { TasteGapBanner, useReveal, WeekBanner } from './pulse-banners';
 import { LastfmRadioSection, ListenBrainzSection } from './radio-sections';
 import { RecipeEditor } from './recipe-editor';
 import { RecommendedModal } from './recommended-modal';
@@ -1294,6 +1294,7 @@ export function DiscoverPage() {
     throwback?.cover,
     videosOn,
   );
+  const [bentoRef, bentoIn] = useReveal<HTMLElement>();
   const videoToggle = { on: videosOn, onToggle: () => setVideosOn(!videosOn) };
   // the watch rail: hero picks and recommendations with a photo, one each,
   // never the artist already in the bento
@@ -1501,12 +1502,17 @@ export function DiscoverPage() {
           </DiscoveryZone>
 
           {spotlight || artistPick || (throwback && throwbackRow) ? (
-            <section className="dsc-bento" aria-label="Spotlight">
+            <section
+              ref={bentoRef}
+              className={`dsc-bento dsc-reveal${bentoIn ? ' is-in' : ''}`}
+              aria-label="Spotlight"
+            >
               {spotlight ? (
                 <PromoBanner
                   kind="release"
                   size="feature"
                   onHoverChange={releasePromo.setHover}
+                  onSoundChange={releasePromo.setHeld}
                   eyebrow={`${releaseKind(spotlight.album.album_type)}${shortDate(spotlight.album.release_date) ? ` · ${shortDate(spotlight.album.release_date)}` : ''}`}
                   title={spotlight.album.album_name ?? ''}
                   subtitle={
@@ -1539,6 +1545,7 @@ export function DiscoverPage() {
                   kind="artist"
                   size="tile"
                   onHoverChange={artistPromo.setHover}
+                  onSoundChange={artistPromo.setHeld}
                   eyebrow="An artist you should know"
                   title={artistPick.artist_name ?? ''}
                   subtitle={
@@ -1590,6 +1597,7 @@ export function DiscoverPage() {
                   kind="throwback"
                   size="tile"
                   onHoverChange={throwbackPromo.setHover}
+                  onSoundChange={throwbackPromo.setHeld}
                   eyebrow="Throwback"
                   title={throwback.name}
                   subtitle={
@@ -1654,7 +1662,7 @@ export function DiscoverPage() {
 
           <VideoRail
             title="Watch"
-            subtitle="Artists picked for you. Point at one to watch its video."
+            subtitle="Artists picked for you, playing one after another. Point at one to watch it now."
             artists={railArtists}
             videosOn={videosOn}
           />

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { WeekSummary } from '../-discover.pulse';
 
@@ -95,6 +95,41 @@ describe('TasteGapBanner', () => {
 });
 
 describe('the entrance', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('useReveal shows straight away without an observer, so nothing stays hidden', async () => {
+    const { renderHook } = await import('@testing-library/react');
+    vi.stubGlobal('IntersectionObserver', undefined);
+    const { useReveal } = await import('./pulse-banners');
+    expect(renderHook(() => useReveal<HTMLDivElement>()).result.current[1]).toBe(true);
+  });
+
+  it('useReveal waits for a late-mounted section to scroll in, then stays shown', async () => {
+    const { act, renderHook } = await import('@testing-library/react');
+    let fire: (hit: boolean) => void = () => {};
+    const disconnect = vi.fn();
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        constructor(cb: (e: { isIntersecting: boolean }[]) => void) {
+          fire = (hit) => cb([{ isIntersecting: hit }]);
+        }
+        observe() {}
+        disconnect = disconnect;
+      },
+    );
+    const { useReveal } = await import('./pulse-banners');
+    const { result } = renderHook(() => useReveal<HTMLDivElement>());
+    expect(result.current[1]).toBe(false);
+    // the section appears after the first render (a callback ref)
+    act(() => result.current[0](document.createElement('div')));
+    act(() => fire(false));
+    expect(result.current[1]).toBe(false);
+    act(() => fire(true));
+    expect(result.current[1]).toBe(true);
+    expect(disconnect).toHaveBeenCalled();
+  });
+
   it('useSeenOnce counts as seen straight away without an observer', async () => {
     const { renderHook } = await import('@testing-library/react');
     const { useSeenOnce } = await import('./pulse-banners');

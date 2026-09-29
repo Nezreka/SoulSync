@@ -16,6 +16,12 @@ export interface PromoVideo {
   glowRgb: string | null;
   /** the pointer is on the banner: its video jumps the queue */
   setHover: (hover: boolean) => void;
+  /** its rail is cycling to it */
+  setBoost: (boost: boolean) => void;
+  /** its sound is on: keep playing it */
+  setHeld: (held: boolean) => void;
+  /** half of it or more is on screen */
+  visible: boolean;
 }
 
 export function usePromoVideo(
@@ -44,5 +50,8 @@ export function usePromoVideo(
     onUnplayable,
     glowRgb,
     setHover: slot.setHover,
+    setBoost: slot.setBoost,
+    setHeld: slot.setHeld,
+    visible: slot.visible,
   };
 }

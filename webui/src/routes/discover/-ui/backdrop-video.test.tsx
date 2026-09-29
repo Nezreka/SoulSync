@@ -16,6 +16,9 @@ class FakePlayer {
   mute() {
     this.record.muted = true;
   }
+  unMute() {
+    this.record.muted = false;
+  }
   playVideo() {}
   pauseVideo() {}
   loadVideoById() {}
@@ -106,6 +109,20 @@ describe('BackdropVideo', () => {
     await waitFor(() => expect(players).toHaveLength(1));
     rerender(<BackdropVideo videoId="v1" playing={false} />);
     expect(players[0].destroyed).toBe(true);
+  });
+
+  it('starts muted and turns its sound on and off without a new player', async () => {
+    const { rerender } = render(<BackdropVideo videoId="v1" playing />);
+    await waitFor(() => expect(players).toHaveLength(1));
+    fire('onReady');
+    // fire hands the player a fresh target: that's the one it now drives
+    const target = players[players.length - 1];
+    expect(target.muted).toBe(true);
+    rerender(<BackdropVideo videoId="v1" playing muted={false} />);
+    expect(target.muted).toBe(false);
+    rerender(<BackdropVideo videoId="v1" playing muted />);
+    expect(target.muted).toBe(true);
+    expect(players[0].destroyed).toBe(false);
   });
 
   it('counts as unplayable when youtube itself cannot load', async () => {

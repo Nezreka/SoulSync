@@ -41,6 +41,34 @@ export function useSeenOnce<T extends Element>(): [React.RefObject<T | null>, bo
   return [ref, seen];
 }
 
+/**
+ * a section's entrance: false until it first scrolls into view, then true for
+ * good. a callback ref, so it works for a section that appears late. true
+ * straight away without an observer or with reduced motion, so nothing is
+ * ever left hidden.
+ */
+export function useReveal<T extends Element>(): [(el: T | null) => void, boolean] {
+  const [el, setEl] = useState<T | null>(null);
+  const [shown, setShown] = useState(
+    () => typeof IntersectionObserver === 'undefined' || reducedMotion(),
+  );
+  useEffect(() => {
+    if (shown || !el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setShown(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.12 },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [el, shown]);
+  return [setEl, shown];
+}
+
 /** eases a number up from 0 to target once `run` turns true. */
 export function useCountUp(target: number, run: boolean, ms = 1100): number {
   const [value, setValue] = useState(() => (run && reducedMotion() ? target : 0));

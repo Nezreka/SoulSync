@@ -3824,3 +3824,164 @@ a.dsc-now-artist:hover {
         animation: none;
     }
 }
+
+/* ── 19. Banners you can touch: tilt, glare, sound, the rail's countdown ─── */
+/* under a mouse a banner leans toward the pointer. --px/--py are -1..1 from
+   its centre, set by the banner as the pointer moves */
+.dsc-promo--feature { --tilt: 2.2deg; }
+.dsc-promo--tile { --tilt: 3.5deg; }
+.dsc-promo--portrait { --tilt: 7deg; }
+
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+    .dsc-promo--feature,
+    .dsc-promo--tile,
+    .dsc-promo--portrait {
+        transform: perspective(1100px) rotateX(calc(var(--py, 0) * -1 * var(--tilt)))
+            rotateY(calc(var(--px, 0) * var(--tilt)));
+        transition: transform 420ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 240ms ease;
+    }
+    .dsc-promo--feature:hover,
+    .dsc-promo--tile:hover {
+        transition: transform 120ms linear, box-shadow 240ms ease;
+    }
+    .dsc-promo--portrait:hover,
+    .dsc-promo--portrait:focus-within {
+        transform: perspective(900px) translateY(-6px) rotateX(calc(var(--py, 0) * -1 * var(--tilt)))
+            rotateY(calc(var(--px, 0) * var(--tilt)));
+        transition: transform 120ms linear, box-shadow 240ms ease;
+    }
+}
+
+/* a soft light that follows the pointer across the art */
+.dsc-promo-glare {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(
+        55% 45% at calc(50% + var(--px, 0) * 50%) calc(50% + var(--py, 0) * 50%),
+        rgba(255, 255, 255, 0.22),
+        rgba(255, 255, 255, 0) 70%
+    );
+    mix-blend-mode: soft-light;
+    opacity: 0;
+    transition: opacity 300ms ease;
+    pointer-events: none;
+}
+
+.dsc-promo:hover .dsc-promo-glare {
+    opacity: 1;
+}
+
+/* tap for sound: only on a banner whose video is live */
+.dsc-promo-sound {
+    position: absolute;
+    right: 18px;
+    bottom: 18px;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 34px;
+    padding: 0 14px 0 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(12px);
+    color: #fff;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    animation: dsc-sound-in 500ms 900ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+    transition: background 160ms ease, border-color 160ms ease;
+}
+
+.dsc-promo-sound:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.dsc-promo-sound.on {
+    background: rgb(var(--promo-rgb));
+    border-color: transparent;
+    color: #0b0d12;
+}
+
+.dsc-promo-sound:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+
+/* a portrait card's is just the icon, top right */
+.dsc-promo--portrait .dsc-promo-sound {
+    top: 12px;
+    right: 12px;
+    bottom: auto;
+    width: 34px;
+    padding: 0;
+    justify-content: center;
+}
+
+/* a tile's sits top right, out of the way of its buttons */
+.dsc-promo--tile .dsc-promo-sound {
+    top: 64px;
+    bottom: auto;
+    right: 18px;
+    width: 36px;
+    padding: 0;
+    justify-content: center;
+}
+
+.dsc-promo--tile .dsc-promo-sound span {
+    display: none;
+}
+
+@keyframes dsc-sound-in {
+    from { opacity: 0; transform: translateY(6px); }
+}
+
+/* the rail's countdown: a line along the top of the card that's up */
+.dsc-promo-countdown {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 3;
+    height: 3px;
+    background: rgb(var(--promo-rgb));
+    box-shadow: 0 0 12px rgba(var(--promo-rgb), 0.9);
+    transform-origin: left;
+    animation: dsc-countdown linear both;
+}
+
+@keyframes dsc-countdown {
+    from { transform: scaleX(0); }
+    to { transform: scaleX(1); }
+}
+
+/* sections rise in, one tile after another, the first time you reach them */
+.dsc-reveal:not(.is-in) > * {
+    opacity: 0;
+}
+
+.dsc-reveal.is-in > * {
+    animation: dsc-rise 800ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+.dsc-reveal.is-in > :nth-child(2) { animation-delay: 90ms; }
+.dsc-reveal.is-in > :nth-child(3) { animation-delay: 180ms; }
+.dsc-reveal.is-in > :nth-child(4) { animation-delay: 270ms; }
+.dsc-reveal.is-in > :nth-child(5) { animation-delay: 360ms; }
+.dsc-reveal.is-in > :nth-child(n + 6) { animation-delay: 450ms; }
+
+@keyframes dsc-rise {
+    from { opacity: 0; transform: translateY(28px) scale(0.97); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dsc-reveal:not(.is-in) > * {
+        opacity: 1;
+    }
+    .dsc-reveal.is-in > *,
+    .dsc-promo-sound,
+    .dsc-promo-countdown {
+        animation: none;
+    }
+}

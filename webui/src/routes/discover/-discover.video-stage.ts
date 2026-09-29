@@ -18,20 +18,31 @@ export interface SlotState {
   hasVideo: boolean;
   /** the pointer is on it: a hovered card with a video jumps the queue */
   hover?: boolean;
+  /** its rail picked it as the one to play next (the watch rail's cycle) */
+  boost?: boolean;
+  /** you turned its sound on: it keeps the stage until you mute it or scroll it away */
+  held?: boolean;
 }
 
 /** at least this much of a banner must be showing for its video to play */
 export const MIN_VISIBLE = 0.5;
 
 /**
- * the slot that gets the stage, or null. a hovered slot with a video wins
- * outright (you pointed at it); otherwise the most visible one with a video,
- * if at least half of it shows. ties go to the one registered first.
+ * the slot that gets the stage, or null. one playing with its sound on keeps
+ * it; then a hovered slot with a video wins (you pointed at it); then one its rail is cycling to, if it's on
+ * screen; otherwise the most visible one with a video, if at least half of
+ * it shows. ties go to the one registered first.
  */
 export function chooseActive(slots: Map<string, SlotState>, enabled: boolean): string | null {
   if (!enabled) return null;
   for (const [id, s] of slots) {
+    if (s.held && s.hasVideo && s.ratio > 0) return id;
+  }
+  for (const [id, s] of slots) {
     if (s.hover && s.hasVideo && s.ratio > 0) return id;
+  }
+  for (const [id, s] of slots) {
+    if (s.boost && s.hasVideo && s.ratio >= MIN_VISIBLE) return id;
   }
   let best: string | null = null;
   let bestRatio = MIN_VISIBLE - 1e-9;
@@ -151,6 +162,12 @@ export interface VideoSlot {
   playing: boolean;
   /** tell the stage the pointer is on this banner, or has left it */
   setHover: (hover: boolean) => void;
+  /** this banner's rail wants it played next */
+  setBoost: (boost: boolean) => void;
+  /** its sound is on: hold the stage */
+  setHeld: (held: boolean) => void;
+  /** at least MIN_VISIBLE of it is on screen */
+  visible: boolean;
 }
 
 /** register a banner with the stage. */
@@ -158,6 +175,7 @@ export function useVideoSlot(id: string, hasVideo: boolean, stage = videoStage):
   wireStage(stage);
   const [el, setEl] = useState<HTMLElement | null>(null);
   const [seen, setSeen] = useState(false);
+  const [visible, setVisible] = useState(false);
   const active = useSyncExternalStore(stage.subscribe, stage.getActive);
   const ref = useCallback((node: HTMLElement | null) => setEl(node), []);
 
@@ -171,6 +189,7 @@ export function useVideoSlot(id: string, hasVideo: boolean, stage = videoStage):
       (entries) => {
         const ratio = entries[entries.length - 1]?.intersectionRatio ?? 0;
         if (ratio > 0) setSeen(true);
+        setVisible(ratio >= MIN_VISIBLE);
         stage.set(id, { ratio });
       },
       { threshold: THRESHOLDS },
@@ -178,6 +197,7 @@ export function useVideoSlot(id: string, hasVideo: boolean, stage = videoStage):
     observer.observe(el);
     return () => {
       observer.disconnect();
+      setVisible(false);
       stage.set(id, { ratio: 0 });
     };
   }, [id, el, stage]);
@@ -185,6 +205,8 @@ export function useVideoSlot(id: string, hasVideo: boolean, stage = videoStage):
   useEffect(() => () => stage.remove(id), [id, stage]);
 
   const setHover = useCallback((hover: boolean) => stage.set(id, { hover }), [id, stage]);
+  const setBoost = useCallback((boost: boolean) => stage.set(id, { boost }), [id, stage]);
+  const setHeld = useCallback((held: boolean) => stage.set(id, { held }), [id, stage]);
 
-  return { ref, seen, playing: active === id, setHover };
+  return { ref, seen, visible, playing: active === id, setHover, setBoost, setHeld };
 }
