@@ -326,6 +326,12 @@ class DuplicateDetectorJob(RepairJob):
                         t1['file_path'], t2['file_path'], lossy_companion_exts):
                     continue
 
+                # Part/sequence numbers distinguish tracks even when their
+                # remaining titles are nearly identical. Apply this to both
+                # passes: a shared filename cannot override conflicting tags.
+                if _conflicting_title_numbers(t1['norm_title'], t2['norm_title']):
+                    continue
+
                 if require_metadata_match:
                     title_sim = SequenceMatcher(None, t1['norm_title'], t2['norm_title']).ratio()
                     if title_sim < title_threshold:
@@ -500,6 +506,17 @@ def _normalize(text: str) -> str:
     t = text.lower()
     t = re.sub(r'\s*-\s*from\s+.+$', '', t)
     return ''.join(c for c in t if c.isalnum() or c in '() ').strip()
+
+
+def _conflicting_title_numbers(title1: str, title2: str) -> bool:
+    """Keep explicitly different numbered titles out of duplicate groups.
+
+    Only a conflict between two present numbers is decisive. A numberless
+    title may be an incomplete tag for the same recording.
+    """
+    numbers1 = tuple(int(number) for number in re.findall(r'\d+', title1))
+    numbers2 = tuple(int(number) for number in re.findall(r'\d+', title2))
+    return bool(numbers1 and numbers2 and numbers1 != numbers2)
 
 
 def _credit_names(artist: str) -> list:
