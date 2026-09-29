@@ -92,6 +92,7 @@
     <meta name="theme-color" content="{{ initial_accent_color }}">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='pwa-icon-192.png', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='media-player-v2.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css', v=static_v) }}">
     <!-- Automations visual redesign — a pure reskin loaded after style/mobile so it
          wins by cascade; no JS-referenced selectors change (see file header). -->
@@ -10821,6 +10822,21 @@
     <!-- Expanded Now Playing Modal -->
     <div class="np-modal-overlay hidden" id="np-modal-overlay">
         <div class="np-modal">
+            <!-- Player theater backdrop: animated visuals painted by media-player-v2.js -->
+            <canvas id="np-v2-bg" aria-hidden="true"></canvas>
+            <!-- Full-modal visuals mode: exit + track/theme header (shown only in visuals mode) -->
+            <button id="np-v2-visuals-exit" class="hidden" title="Exit visuals mode (Esc)">✕</button>
+            <div id="np-v2-visuals-header" aria-hidden="true">
+                <div>
+                    <h2 id="np-v2-visuals-title">Unknown Track</h2>
+                    <p id="np-v2-visuals-artist">Unknown Artist</p>
+                </div>
+                <div id="np-v2-visuals-theme-switch">
+                    <button class="np-v2-visuals-arrow" id="np-v2-visuals-theme-prev" title="Previous visual (Shift+V)">‹</button>
+                    <span id="np-v2-visuals-theme-name">Aurora</span>
+                    <button class="np-v2-visuals-arrow" id="np-v2-visuals-theme-next" title="Next visual (V)">›</button>
+                </div>
+            </div>
             <button class="np-close-btn" id="np-close-btn" title="Minimize">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
                     stroke-linecap="round" stroke-linejoin="round">
@@ -10902,6 +10918,61 @@
                             </svg>
                             <span>Crossfade</span>
                         </button>
+                        <button class="np-util-btn" id="np-v2-speed-btn" title="Playback speed: 1× (click to cycle, [ / ] to adjust)">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 14l4-4" />
+                                <path d="M3.34 19a10 10 0 1 1 17.32 0" />
+                            </svg>
+                            <span>1×</span>
+                        </button>
+                        <button class="np-util-btn" id="np-v2-eq-btn" title="Equalizer (opens Settings tab)">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="4" y1="21" x2="4" y2="14" />
+                                <line x1="4" y1="10" x2="4" y2="3" />
+                                <line x1="12" y1="21" x2="12" y2="12" />
+                                <line x1="12" y1="8" x2="12" y2="3" />
+                                <line x1="20" y1="21" x2="20" y2="16" />
+                                <line x1="20" y1="12" x2="20" y2="3" />
+                                <line x1="1" y1="14" x2="7" y2="14" />
+                                <line x1="9" y1="8" x2="15" y2="8" />
+                                <line x1="17" y1="16" x2="23" y2="16" />
+                            </svg>
+                            <span>EQ</span>
+                        </button>
+                        <button class="np-util-btn" id="np-v2-ab-btn" title="A-B loop: press once to set A, again to set B and loop (L)">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M17 2l4 4-4 4" />
+                                <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+                                <path d="M7 22l-4-4 4-4" />
+                                <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+                            </svg>
+                            <span>A-B</span>
+                        </button>
+                        <button class="np-util-btn" id="np-v2-visual-btn" title="Visuals: Aurora (click to change, V)">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
+                            </svg>
+                            <span>Visuals</span>
+                        </button>
+                        <button class="np-util-btn" id="np-v2-visuals-expand" title="Full-screen visuals mode (F)">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                            </svg>
+                            <span>Immersive</span>
+                        </button>
+                        <button class="np-util-btn" id="np-v2-shorts-btn" title="Keyboard shortcuts (?)">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="2" y="6" width="20" height="12" rx="2" />
+                                <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" />
+                            </svg>
+                            <span>Keys</span>
+                        </button>
                     </div>
                     <div class="np-progress-section">
                         <div class="np-progress-bar-container">
@@ -10915,6 +10986,9 @@
                         <div class="np-time-display">
                             <span class="np-current-time" id="np-current-time">0:00</span>
                             <span class="np-total-time" id="np-total-time">0:00</span>
+                        </div>
+                        <div class="np-v2-ab-row">
+                            <span class="hidden" id="np-v2-ab-indicator" title="A-B loop range"></span>
                         </div>
                     </div>
                     <div class="np-controls-row">
@@ -11007,29 +11081,15 @@
                         <div class="np-viz-bar"></div>
                         <div class="np-viz-bar"></div>
                     </div>
-                </div>
-            </div>
-            <!-- Lyrics Panel -->
-            <div class="np-lyrics-panel collapsed" id="np-lyrics-panel">
-                <div class="np-lyrics-header">
-                    <button class="np-lyrics-toggle" id="np-lyrics-toggle" title="Toggle lyrics" aria-expanded="false">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M9 18V5l12-2v13" />
-                            <circle cx="6" cy="18" r="3" />
-                            <circle cx="18" cy="16" r="3" />
-                        </svg>
-                        <span>Lyrics</span>
-                        <span class="np-lyrics-status" id="np-lyrics-status"></span>
-                    </button>
-                </div>
-                <div class="np-lyrics-body hidden" id="np-lyrics-body">
-                    <div class="np-lyrics-content" id="np-lyrics-content">
-                        <div class="np-lyrics-empty">No lyrics loaded</div>
+                    <!-- Player theater: tabbed panel region (v2) -->
+                    <div class="np-v2-tabs" role="tablist" aria-label="Player panels">
+                        <button type="button" class="np-v2-tab active" data-npv2-tab="queue" role="tab" aria-selected="true">Queue</button>
+                        <button type="button" class="np-v2-tab" data-npv2-tab="history" role="tab" aria-selected="false">History</button>
+                        <button type="button" class="np-v2-tab" data-npv2-tab="lyrics" role="tab" aria-selected="false">Lyrics</button>
+                        <button type="button" class="np-v2-tab" data-npv2-tab="details" role="tab" aria-selected="false">Details</button>
+                        <button type="button" class="np-v2-tab" data-npv2-tab="settings" role="tab" aria-selected="false">Settings</button>
                     </div>
-                </div>
-            </div>
-
+                    <div class="np-v2-tabpanels">
             <!-- Queue Panel -->
             <div class="np-queue-panel" id="np-queue-panel">
                 <div class="np-queue-header">
@@ -11069,6 +11129,7 @@
                             <span class="np-radio-label">Radio</span>
                             <span class="np-radio-pulse"></span>
                         </button>
+                        <button class="np-queue-clear-btn" id="np-queue-clear-played" title="Remove tracks already played">Clear played</button>
                         <button class="np-queue-clear-btn" id="np-queue-clear" title="Clear queue">Clear</button>
                     </div>
                 </div>
@@ -11077,6 +11138,140 @@
                     <div class="np-queue-list" id="np-queue-list"></div>
                 </div>
             </div>
+                        <!-- Playback history (v2) -->
+                        <div class="np-v2-history-panel hidden" id="np-v2-history-panel" role="tabpanel">
+                            <div class="np-v2-history-head">
+                                <h3>History <span id="np-v2-history-count"></span></h3>
+                                <button type="button" class="np-v2-ghost-btn" id="np-v2-history-clear">Clear</button>
+                            </div>
+                            <div class="np-v2-history-empty" id="np-v2-history-empty">Nothing played yet — your recent tracks will show up here.</div>
+                            <div class="np-v2-history-list" id="np-v2-history-list"></div>
+                        </div>
+            <!-- Lyrics Panel -->
+            <div class="np-lyrics-panel collapsed" id="np-lyrics-panel">
+                <div class="np-lyrics-header">
+                    <button class="np-lyrics-toggle" id="np-lyrics-toggle" title="Toggle lyrics" aria-expanded="false">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M9 18V5l12-2v13" />
+                            <circle cx="6" cy="18" r="3" />
+                            <circle cx="18" cy="16" r="3" />
+                        </svg>
+                        <span>Lyrics</span>
+                        <span class="np-lyrics-status" id="np-lyrics-status"></span>
+                    </button>
+                </div>
+                <div class="np-lyrics-body hidden" id="np-lyrics-body">
+                    <div class="np-lyrics-content" id="np-lyrics-content">
+                        <div class="np-lyrics-empty">No lyrics loaded</div>
+                    </div>
+                </div>
+            </div>
+
+
+                        <!-- Track details (v2) -->
+                        <div class="np-v2-details-panel hidden" id="np-v2-details-panel" role="tabpanel">
+                            <div class="np-v2-details-head">
+                                <h3>Track details</h3>
+                                <div class="np-v2-details-actions">
+                                    <button type="button" class="np-v2-ghost-btn" id="np-v2-copy-info" title="Copy title, artist and album">Copy info</button>
+                                    <button type="button" class="np-v2-ghost-btn" id="np-v2-copy-path" title="Copy the file path">Copy path</button>
+                                </div>
+                            </div>
+                            <div id="np-v2-details-rows"></div>
+                        </div>
+                        <!-- Theater settings (v2) -->
+                        <div class="np-v2-settings-panel np-v2-settings hidden" id="np-v2-settings-panel" role="tabpanel">
+                            <h3>Animated background</h3>
+                            <div class="np-v2-theme-grid" id="np-v2-theme-grid"></div>
+                            <div class="np-v2-setting-row">
+                                <div class="np-v2-setting-label">Animated background
+                                    <small>Windows Media Player-style visuals behind the player.</small>
+                                </div>
+                                <label class="np-v2-switch"><input type="checkbox" id="np-v2-bg-toggle" checked><span class="np-v2-slider"></span></label>
+                            </div>
+                            <h3>Equalizer</h3>
+                            <div class="np-v2-eq-head">
+                                <select class="np-v2-select" id="np-v2-eq-preset" aria-label="Equalizer preset"></select>
+                                <label class="np-v2-switch"><input type="checkbox" id="np-v2-eq-toggle"><span class="np-v2-slider"></span></label>
+                            </div>
+                            <div id="np-v2-eq-sliders"></div>
+                            <div class="np-v2-setting-row">
+                                <div class="np-v2-setting-label">Loudness normalization
+                                    <small>Evens out volume between tracks (gentle compression).</small>
+                                </div>
+                                <label class="np-v2-switch"><input type="checkbox" id="np-v2-normalize-toggle"><span class="np-v2-slider"></span></label>
+                            </div>
+                            <h3>Playback</h3>
+                            <div class="np-v2-setting-row">
+                                <div class="np-v2-setting-label">Speed
+                                    <small>Sticks for the rest of the session.</small>
+                                </div>
+                                <select class="np-v2-select" id="np-v2-speed-select" aria-label="Playback speed">
+                                    <option value="0.5">0.5×</option>
+                                    <option value="0.75">0.75×</option>
+                                    <option value="1">1×</option>
+                                    <option value="1.25">1.25×</option>
+                                    <option value="1.5">1.5×</option>
+                                    <option value="1.75">1.75×</option>
+                                    <option value="2">2×</option>
+                                </select>
+                            </div>
+                            <div class="np-v2-setting-row">
+                                <div class="np-v2-setting-label">Crossfade
+                                    <small>Overlap between tracks when crossfade is on.</small>
+                                </div>
+                                <select class="np-v2-select" id="np-v2-xfade-secs" aria-label="Crossfade duration">
+                                    <option value="0">Off</option>
+                                    <option value="2">2 seconds</option>
+                                    <option value="4">4 seconds</option>
+                                    <option value="6">6 seconds</option>
+                                    <option value="10">10 seconds</option>
+                                    <option value="15">15 seconds</option>
+                                </select>
+                            </div>
+                            <div class="np-v2-setting-row">
+                                <div class="np-v2-setting-label">Keep screen awake
+                                    <small>While music is playing in the theater.</small>
+                                </div>
+                                <label class="np-v2-switch"><input type="checkbox" id="np-v2-wake-toggle"><span class="np-v2-slider"></span></label>
+                            </div>
+                            <div class="np-v2-danger-zone">
+                                <div class="np-v2-setting-row">
+                                    <div class="np-v2-setting-label">Reset theater settings
+                                        <small>Clears every theater preference on this device.</small>
+                                    </div>
+                                    <button type="button" class="np-v2-ghost-btn" id="np-v2-reset-settings">Reset</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Keyboard shortcuts overlay (v2) -->
+            <div class="np-v2-shorts-overlay hidden" id="np-v2-shorts-overlay" role="dialog" aria-label="Keyboard shortcuts">
+                <div class="np-v2-shorts-card">
+                    <button type="button" class="np-v2-shorts-close" id="np-v2-shorts-close" aria-label="Close">&times;</button>
+                    <h3>Keyboard shortcuts</h3>
+                    <p>These work while the player theater is open.</p>
+                    <div class="np-v2-shorts-grid">
+                        <div class="np-v2-short"><span>Play / pause</span><kbd>Space</kbd></div>
+                        <div class="np-v2-short"><span>Seek 10s</span><kbd>&larr; &rarr;</kbd></div>
+                        <div class="np-v2-short"><span>Volume</span><kbd>&uarr; &darr;</kbd></div>
+                        <div class="np-v2-short"><span>Mute</span><kbd>M</kbd></div>
+                        <div class="np-v2-short"><span>Next track</span><kbd>N</kbd></div>
+                        <div class="np-v2-short"><span>Previous track</span><kbd>P</kbd></div>
+                        <div class="np-v2-short"><span>A-B loop</span><kbd>L</kbd></div>
+                        <div class="np-v2-short"><span>Speed down / up</span><kbd>[ ]</kbd></div>
+                        <div class="np-v2-short"><span>Change visuals</span><kbd>V</kbd></div>
+                        <div class="np-v2-short"><span>Previous visual</span><kbd>Shift V</kbd></div>
+                        <div class="np-v2-short"><span>Immersive visuals mode</span><kbd>F</kbd></div>
+                        <div class="np-v2-short"><span>This panel</span><kbd>?</kbd></div>
+                        <div class="np-v2-short"><span>Minimize player</span><kbd>Esc</kbd></div>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </div>
 
@@ -11492,6 +11687,7 @@
     <script src="{{ url_for('static', filename='core.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='shared-helpers.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='media-player.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='media-player-v2.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='settings.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-spotify.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='downloads.js', v=static_v) }}"></script>
