@@ -93,7 +93,11 @@ def fetch_release(
     album['source'] = source
     total_discs = max([int(t.get('disc_number') or 1) for t in tracks] or [1])
     album['total_discs'] = total_discs
-    album.setdefault('total_tracks', len(tracks))
+    # A 0/None count is "unknown", not a real count — overwrite it with the
+    # actual track list length so $albumtype verification has a count to work
+    # with. setdefault() alone would keep the 0 (the key exists).
+    if not album.get('total_tracks'):
+        album['total_tracks'] = len(tracks)
     return {'album': album, 'tracks': tracks, 'total_discs': total_discs}
 
 
