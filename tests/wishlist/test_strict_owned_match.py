@@ -74,3 +74,38 @@ def test_apostrophe_wording_does_not_create_an_extra_request():
         [{'name': 'Soul Asylum'}], 'Album', 'navidrome',
         strict_identity=True, require_album=True,
     ) is not None
+
+
+def test_different_subtitles_cannot_clear_one_another():
+    assert find_owned_match(
+        _db('Song (Chorus)', 'Album'), 'Song (Verse)',
+        [{'name': 'Soul Asylum'}], 'Album', 'navidrome',
+        strict_identity=True, require_album=True,
+    ) is None
+
+
+def test_single_nonversion_subtitle_can_match_bare_title():
+    assert find_owned_match(
+        _db('Song', 'Album'), 'Song (Serenade From the Stars)',
+        [{'name': 'Soul Asylum'}], 'Album', 'navidrome',
+        strict_identity=True, require_album=True,
+    ) is not None
+
+
+def test_artist_punctuation_uses_existing_library_identity_key():
+    assert find_owned_match(
+        _db('Song', 'Album', artist='AC/DC'), 'Song',
+        [{'name': 'ACDC'}], 'Album', 'navidrome',
+        strict_identity=True, require_album=True,
+    ) is not None
+
+
+def test_punctuation_only_titles_do_not_share_an_empty_identity_key():
+    assert find_owned_match(
+        _db('&', 'Album'), '-', [{'name': 'Soul Asylum'}],
+        'Album', 'navidrome', strict_identity=True, require_album=True,
+    ) is None
+    assert find_owned_match(
+        _db('-', 'Album'), '-', [{'name': 'Soul Asylum'}],
+        'Album', 'navidrome', strict_identity=True, require_album=True,
+    ) is not None
