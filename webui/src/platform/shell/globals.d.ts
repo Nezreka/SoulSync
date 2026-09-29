@@ -146,6 +146,9 @@ declare global {
     /** media-player.js — seedless Library Radio: queues a ranked-random batch
      *  from the whole library and arms radio mode for refills. */
     startLibraryRadio?: () => void | Promise<void>;
+    /** media-player.js — the track the player has loaded (title, artist,
+     *  album, image_url, artist_id...), or null. */
+    getCurrentTrack?: () => unknown;
     /** media-player.js — play a resolved library track list (radio-row shape)
      *  as the queue, labeled with a "Playing from" context. */
     cancelPendingPlayback?: () => void;

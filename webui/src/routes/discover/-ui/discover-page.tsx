@@ -21,6 +21,7 @@ import {
   fetchLbPlaylist,
   fetchWeekStats,
 } from '../-discover.api';
+import { useBackdropVideoId, useDominantColor } from '../-discover.backdrop';
 import { bpMetaStats } from '../-discover.build-playlist';
 import {
   byltSections,
@@ -81,6 +82,7 @@ import { useAdventurousness, useRecommended } from '../-discover.use-recommended
 import { useStationPreview } from '../-discover.use-station';
 import { useYourAlbums } from '../-discover.use-your-albums';
 import { useYourArtists } from '../-discover.use-your-artists';
+import { useVideoBackdropsEnabled, useVideoSlot } from '../-discover.video-stage';
 import {
   ARTISTS_DEFAULT_SOURCES,
   savedArtistSourcesSubtitle,
@@ -92,6 +94,7 @@ import { ArtistMapAssembly } from './artist-map-assembly';
 import { ArtistMapHub, ArtistWebHub } from './artist-map-hub';
 import { ArtistWebAssembly } from './artist-web-assembly';
 import { ArtMapExplorePrompt } from './artmap-explore-prompt';
+import { BackdropVideo } from './backdrop-video';
 import { BlacklistModal } from './blacklist-modal';
 import { BuildPlaylistSection } from './build-playlist';
 import { ByltSections } from './bylt-sections';
@@ -106,6 +109,7 @@ import { GenreDiveModal } from './genre-dive-modal';
 import { GreetingGrid } from './greeting-grid';
 import { MixModal } from './mix-modal';
 import { MixShelf } from './mix-shelf';
+import { NowPlayingBanner, useNowPlaying } from './now-playing-banner';
 import { SpotlightBanner, TasteGapBanner, WeekBanner } from './pulse-banners';
 import { LastfmRadioSection, ListenBrainzSection } from './radio-sections';
 import { RecipeEditor } from './recipe-editor';
@@ -150,6 +154,9 @@ const LOGOS = {
 };
 
 const toast = (message: string, level = 'info') => window.showToast?.(message, level);
+
+/** a playing hero video still moves on to the next artist after this long */
+const HERO_VIDEO_DWELL_MS = 30000;
 
 /**
  * progressFor hands back the REDUCED SyncProgress; SyncStatus re-reduces from
@@ -322,6 +329,27 @@ export function DiscoverPage() {
   const gap = tasteGap(weekQuery.data);
   const [playingTop, setPlayingTop] = useState(false);
   const [flowBusy, setFlowBusy] = useState(false);
+  const [spotVideoId, setSpotVideoId] = useState<string | null>(null);
+
+  // ── the living banners: one music video at a time, only the one on screen ──
+  const [videosOn, setVideosOn] = useVideoBackdropsEnabled();
+  const [heroVideoId, setHeroVideoId] = useState<string | null>(null);
+  const heroSlot = useVideoSlot('hero', Boolean(heroVideoId));
+  const heroArtist = hero.artist?.artist_name ?? null;
+  const fetchedHeroVideo = useBackdropVideoId(heroArtist, null, heroSlot.seen && videosOn);
+  useEffect(() => setHeroVideoId(fetchedHeroVideo), [fetchedHeroVideo]);
+  const heroGlow = useDominantColor(hero.artist?.image_url ?? null);
+  // the billboard holds while you're on it, and while its video plays; a
+  // playing video still moves on after HERO_VIDEO_DWELL_MS so the rotation lives
+  const [heroHover, setHeroHover] = useState(false);
+  useEffect(() => {
+    hero.setPaused(heroHover || heroSlot.playing);
+  }, [hero, heroHover, heroSlot.playing]);
+  useEffect(() => {
+    if (!heroSlot.playing || heroHover) return;
+    const timer = setTimeout(() => hero.navigate(1), HERO_VIDEO_DWELL_MS);
+    return () => clearTimeout(timer);
+  }, [hero, heroSlot.playing, heroHover, hero.index]);
   const stationPreview = useStationPreview();
   // A profile switch discards an open preview: it belongs to the old profile,
   // and a response already in flight for it must never fill this one in.
@@ -1251,6 +1279,14 @@ export function DiscoverPage() {
 
   const recentForSpotlight = page.sectionState('recent-releases').items as RecentAlbum[];
   const spotlight = pickSpotlight(recentForSpotlight, weekQuery.data?.top_artists ?? []);
+  const spotSlot = useVideoSlot('spotlight', Boolean(spotVideoId));
+  const fetchedSpotVideo = useBackdropVideoId(
+    spotlight?.album.artist_name ?? null,
+    spotlight?.album.album_name ?? null,
+    spotSlot.seen && videosOn,
+  );
+  useEffect(() => setSpotVideoId(fetchedSpotVideo), [fetchedSpotVideo]);
+  const spotGlow = useDominantColor(spotlight?.album.album_cover_url ?? null);
   const playTopTracks = () => {
     if (!week || playingTop) return;
     const intent = beginPlayIntent();
@@ -1278,6 +1314,7 @@ export function DiscoverPage() {
       .finally(() => setFlowBusy(false));
   };
   const tiles = quickTiles(mixes.mixes, mixes.moodMixes, new Date().getHours());
+  const nowPlaying = useNowPlaying();
   const shellProfile = getShellProfileContext();
 
   const newMissingIds = zoneSections('new-missing');
@@ -1329,7 +1366,12 @@ export function DiscoverPage() {
       />
 
       {!vizOpen && (
-        <div className="discover-container">
+        <div
+          className="discover-container"
+          style={
+            heroGlow ? ({ '--discover-glow-rgb': heroGlow } as React.CSSProperties) : undefined
+          }
+        >
           {(playingMixKey !== null || playingTrackIndex !== null) && (
             <div className="discover-playback-pending" role="status">
               <span>
@@ -1359,6 +1401,23 @@ export function DiscoverPage() {
             flowBusy={flowBusy}
             playingKey={playingMixKey}
           />
+          <NowPlayingBanner
+            state={nowPlaying}
+            artistHref={
+              nowPlaying.track?.artist_id != null
+                ? detailPath(nowPlaying.track.artist_id, nowPlaying.track.artist_source ?? null)
+                : null
+            }
+            onMoreLikeThis={(track) => {
+              if (!window.startArtistRadioById || track.artist_id == null) return;
+              void Promise.resolve(
+                window.startArtistRadioById(String(track.artist_id), track.artist ?? ''),
+              ).then((started) => {
+                if (started === false)
+                  toast(`Could not start ${track.artist ?? 'that'} radio`, 'error');
+              });
+            }}
+          />
           <div className="discover-command-hero">
             <DiscoverHero
               artist={hero.artist}
@@ -1379,7 +1438,11 @@ export function DiscoverPage() {
               onViewRecommended={() => setRecModalOpen(true)}
               onOpenBlacklist={blacklist.openModal}
               artists={hero.artists}
-              onPauseChange={hero.setPaused}
+              onPauseChange={setHeroHover}
+              rootRef={heroSlot.ref}
+              glowRgb={heroGlow}
+              backdrop={<BackdropVideo videoId={heroVideoId} playing={heroSlot.playing} />}
+              videoToggle={{ on: videosOn, onToggle: () => setVideosOn(!videosOn) }}
             />
           </div>
           {week || gap ? (
@@ -1406,6 +1469,9 @@ export function DiscoverPage() {
             <SpotlightBanner
               spotlight={spotlight}
               onOpen={() => void albumOpen.openRecentAlbum(recentForSpotlight[spotlight.index])}
+              rootRef={spotSlot.ref}
+              glowRgb={spotGlow}
+              backdrop={<BackdropVideo videoId={spotVideoId} playing={spotSlot.playing} />}
             />
           ) : null}
 

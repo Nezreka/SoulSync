@@ -2066,6 +2066,29 @@ def get_flow():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@bp.route('/api/discover/backdrop-video', methods=['GET'])
+def get_backdrop_video():
+    """a music video id to play muted behind a banner, or null. the page asks
+    only for the one banner on screen; the pick is remembered for a month."""
+    artist = (request.args.get('artist') or '').strip()
+    title = (request.args.get('title') or '').strip() or None
+    if not artist:
+        return jsonify({"success": False, "error": "artist required"}), 400
+    try:
+        from core.discovery.blocked import BlockedArtists
+        if BlockedArtists.load(get_database(), get_current_profile_id()).blocks_name(artist):
+            return jsonify({"success": True, "video_id": None})
+        from core.discovery.video_backdrops import find_backdrop
+        client = None
+        if download_orchestrator is not None and hasattr(download_orchestrator, 'client'):
+            client = download_orchestrator.client('youtube')
+        return jsonify({"success": True,
+                        "video_id": find_backdrop(get_database(), client, artist, title)})
+    except Exception as e:
+        logger.error(f"Error finding backdrop video: {e}")
+        return jsonify({"success": True, "video_id": None})
+
+
 @bp.route('/api/discover/moods', methods=['GET'])
 @_hide_blocked({'mixes[].tracks': WORKS})
 def get_mood_mixes():

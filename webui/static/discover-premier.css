@@ -36,7 +36,7 @@
     left: 10%;
     right: 10%;
     height: 600px;
-    background: radial-gradient(ellipse at 50% 0%, rgba(var(--accent-rgb, 29, 185, 84), 0.18) 0%, rgba(162, 56, 255, 0.08) 45%, transparent 75%);
+    background: radial-gradient(ellipse at 50% 0%, rgba(var(--discover-glow-rgb, var(--accent-rgb, 29, 185, 84)), 0.22) 0%, rgba(var(--discover-glow-rgb, 162, 56, 255), 0.08) 45%, transparent 75%);
     pointer-events: none;
     z-index: 0;
     filter: blur(60px);
@@ -3190,5 +3190,266 @@
     .dsc-quick-open {
         padding-right: 8px;
         gap: 10px;
+    }
+}
+
+/* ── 16. Living banners: one music video at a time, colour-matched glow ─── */
+/* the video sits between the photo and the scrim. it's sized like
+   background-size: cover against its own box (cq units), and zoomed a touch
+   so youtube's letterboxing and corner branding fall outside the frame */
+.dsc-backdrop-video {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+    container-type: size;
+    opacity: 0;
+    transition: opacity 1.4s ease;
+}
+
+.dsc-backdrop-video.ready {
+    opacity: 0.9;
+}
+
+.dsc-backdrop-video iframe {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100cqw, 177.78cqh);
+    height: max(100cqh, 56.25cqw);
+    border: 0;
+    transform: translate(-50%, -50%) scale(1.18);
+    pointer-events: none;
+}
+
+/* the hero glows the colour of the artist on it */
+.discover-hero[style*="--hero-rgb"] {
+    box-shadow:
+        0 24px 70px rgba(0, 0, 0, 0.55),
+        0 0 120px -30px rgba(var(--hero-rgb), 0.55),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
+    border-color: rgba(var(--hero-rgb), 0.28) !important;
+    transition: box-shadow 1.2s ease, border-color 1.2s ease;
+}
+
+.discover-hero[style*="--hero-rgb"] .discover-hero-label-dot {
+    background: rgb(var(--hero-rgb));
+    box-shadow: 0 0 10px rgba(var(--hero-rgb), 0.9);
+}
+
+.discover-hero[style*="--hero-rgb"] .hero-indicator--face.active .hero-indicator-face {
+    box-shadow: 0 0 0 2px rgba(10, 13, 20, 0.9), 0 0 0 4px rgb(var(--hero-rgb));
+}
+
+.dsc-spotlight[style*="--spot-rgb"] {
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45), 0 0 120px -30px rgba(var(--spot-rgb), 0.6);
+    border-color: rgba(var(--spot-rgb), 0.3);
+}
+
+.dsc-spotlight .dsc-backdrop-video.ready {
+    opacity: 0.75;
+}
+
+/* the video switch, beside the block and help buttons */
+.discover-hero-video-toggle {
+    position: absolute;
+    top: 20px;
+    right: 100px;
+    z-index: 10;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    transition: background 160ms ease, color 160ms ease;
+}
+
+.discover-hero-video-toggle.on {
+    color: #fff;
+}
+
+.discover-hero-video-toggle:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+}
+
+.discover-hero-video-toggle:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb, 29, 185, 84), 0.9);
+    outline-offset: 2px;
+}
+
+/* the week's bars grow in, one after another, the first time you see them */
+.dsc-week:not(.in-view) .dsc-week-bar {
+    transform: scaleY(0);
+}
+
+.dsc-week.in-view .dsc-week-bar {
+    transform-origin: bottom;
+    animation: dsc-bar-grow 700ms cubic-bezier(0.16, 1, 0.3, 1) var(--bar-delay, 0ms) both;
+}
+
+@keyframes dsc-bar-grow {
+    from { transform: scaleY(0); }
+    to { transform: scaleY(1); }
+}
+
+/* mood cards drift through their colour */
+.discover-mix-card[data-mix-key^="mood_"] .mix-card-cover::after {
+    background:
+        linear-gradient(160deg, rgba(var(--mood-rgb), 0.8) 0%, rgba(var(--mood-rgb), 0.3) 50%, rgba(var(--mood-rgb), 0.75) 100%);
+    background-size: 100% 220%;
+    animation: dsc-mood-drift 9s ease-in-out infinite alternate;
+}
+
+@keyframes dsc-mood-drift {
+    from { background-position: 0% 0%; }
+    to { background-position: 0% 100%; }
+}
+
+/* now playing */
+.dsc-now {
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: -6px 0 24px;
+    padding: 12px 18px 12px 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(18, 22, 31, 0.9);
+}
+
+.dsc-now-wash {
+    position: absolute;
+    inset: -30px;
+    background-size: cover;
+    background-position: center;
+    filter: blur(40px) saturate(1.4);
+    opacity: 0.35;
+    pointer-events: none;
+}
+
+.dsc-now-art {
+    position: relative;
+    flex: 0 0 56px;
+    width: 56px;
+    height: 56px;
+    border-radius: 8px;
+    background-size: cover;
+    background-position: center;
+    background-color: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+}
+
+.dsc-now-text {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.dsc-now-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgb(var(--accent-light-rgb, 30, 215, 96));
+}
+
+.dsc-now-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #fff;
+}
+
+.dsc-now-artist {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.65);
+    text-decoration: none;
+}
+
+a.dsc-now-artist:hover {
+    color: #fff;
+    text-decoration: underline;
+}
+
+.dsc-now .dsc-pulse-btn {
+    position: relative;
+    flex: 0 0 auto;
+}
+
+.dsc-eq {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 12px;
+}
+
+.dsc-eq > span {
+    width: 3px;
+    height: 30%;
+    border-radius: 1px;
+    background: currentColor;
+}
+
+.dsc-now.playing .dsc-eq > span {
+    animation: dsc-eq-bounce 900ms ease-in-out infinite;
+}
+
+.dsc-now.playing .dsc-eq > span:nth-child(2) { animation-delay: -300ms; }
+.dsc-now.playing .dsc-eq > span:nth-child(3) { animation-delay: -600ms; }
+.dsc-now.playing .dsc-eq > span:nth-child(4) { animation-delay: -150ms; }
+
+@keyframes dsc-eq-bounce {
+    0%, 100% { height: 25%; }
+    50% { height: 100%; }
+}
+
+.dsc-now:not(.playing) .dsc-now-eyebrow {
+    color: rgba(255, 255, 255, 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dsc-backdrop-video {
+        display: none;
+    }
+    .dsc-week .dsc-week-bar,
+    .dsc-week:not(.in-view) .dsc-week-bar {
+        animation: none;
+        transform: none;
+    }
+    .discover-mix-card[data-mix-key^="mood_"] .mix-card-cover::after,
+    .dsc-now.playing .dsc-eq > span {
+        animation: none;
+    }
+}
+
+@media (max-width: 640px) {
+    .discover-hero-video-toggle {
+        right: 96px;
+    }
+    .dsc-now {
+        gap: 12px;
+    }
+    .dsc-now .dsc-pulse-btn {
+        padding: 0 12px;
     }
 }

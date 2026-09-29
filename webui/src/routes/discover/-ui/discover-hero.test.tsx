@@ -206,6 +206,35 @@ describe('the hero', () => {
     ]);
   });
 
+  it('switches video backgrounds from the corner, and says which way', () => {
+    const onToggle = vi.fn();
+    const { rerender } = render(
+      <DiscoverHero {...heroProps({ videoToggle: { on: true, onToggle } })} />,
+    );
+    const btn = screen.getByLabelText('Turn video backgrounds off');
+    expect(btn).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(btn);
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    rerender(<DiscoverHero {...heroProps({ videoToggle: { on: false, onToggle } })} />);
+    expect(screen.getByLabelText('Turn video backgrounds on')).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('puts the backdrop between the photo and the scrim, and glows the picture colour', () => {
+    const { container } = render(
+      <DiscoverHero
+        {...heroProps({ backdrop: <div className="probe-backdrop" />, glowRgb: '200, 50, 50' })}
+      />,
+    );
+    const root = container.querySelector('.discover-hero') as HTMLElement;
+    const kids = [...root.children].map((c) => c.className);
+    expect(kids.indexOf('probe-backdrop')).toBe(kids.indexOf('discover-hero-background') + 1);
+    expect(kids.indexOf('discover-hero-overlay')).toBe(kids.indexOf('probe-backdrop') + 1);
+    expect(root.style.getPropertyValue('--hero-rgb')).toBe('200, 50, 50');
+  });
+
   it('asks to hold the rotation while the pointer is on it', () => {
     const onPauseChange = vi.fn();
     const { container } = render(<DiscoverHero {...heroProps({ onPauseChange })} />);

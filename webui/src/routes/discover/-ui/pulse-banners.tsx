@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
+
 import type { Spotlight, TasteGap, WeekSummary } from '../-discover.pulse';
 
 import { releaseKind, shortDate, tasteGapLine } from '../-discover.pulse';
@@ -14,6 +16,56 @@ import { recentAlbumCover } from '../-discover.recent-releases';
 
 const fmt = new Intl.NumberFormat();
 
+function reducedMotion(): boolean {
+  return Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+}
+
+/** true once the element has been on screen (and straight away without an observer). */
+export function useSeenOnce<T extends Element>(): [React.RefObject<T | null>, boolean] {
+  const ref = useRef<T | null>(null);
+  const [seen, setSeen] = useState(() => typeof IntersectionObserver === 'undefined');
+  useEffect(() => {
+    const el = ref.current;
+    if (seen || !el || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setSeen(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.35 },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [seen]);
+  return [ref, seen];
+}
+
+/** eases a number up from 0 to target once `run` turns true. */
+export function useCountUp(target: number, run: boolean, ms = 1100): number {
+  const [value, setValue] = useState(() => (run && reducedMotion() ? target : 0));
+  useEffect(() => {
+    if (!run) return;
+    if (reducedMotion() || typeof requestAnimationFrame === 'undefined') {
+      setValue(target);
+      return;
+    }
+    let raf = 0;
+    const start = performance.now();
+    // read the clock here, not the frame's timestamp: that one isn't on
+    // performance.now's clock everywhere, and a mismatch stalls the count
+    const tick = () => {
+      const t = Math.min(1, (performance.now() - start) / ms);
+      setValue(Math.round(target * (1 - Math.pow(1 - t, 3))));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, run, ms]);
+  return value;
+}
+
 export interface WeekBannerProps {
   week: WeekSummary;
   onPlayTop: () => void;
@@ -24,8 +76,14 @@ export interface WeekBannerProps {
 export function WeekBanner({ week, onPlayTop, playing = false }: WeekBannerProps) {
   const up = week.change !== null && week.change >= 0;
   const artist = week.topArtist;
+  const [ref, seen] = useSeenOnce<HTMLElement>();
+  const shown = useCountUp(week.plays, seen);
   return (
-    <section className="dsc-pulse dsc-week" aria-label="Your week in music">
+    <section
+      ref={ref}
+      className={`dsc-pulse dsc-week${seen ? ' in-view' : ''}`}
+      aria-label="Your week in music"
+    >
       {artist?.image_url ? (
         <div
           className="dsc-week-wash"
@@ -36,7 +94,7 @@ export function WeekBanner({ week, onPlayTop, playing = false }: WeekBannerProps
       <div className="dsc-week-main">
         <span className="dsc-pulse-eyebrow">Your week in music</span>
         <div className="dsc-week-figure">
-          <strong>{fmt.format(week.plays)}</strong>
+          <strong aria-label={fmt.format(week.plays)}>{fmt.format(shown)}</strong>
           <span>plays</span>
           {week.change !== null ? (
             <span
@@ -74,7 +132,7 @@ export function WeekBanner({ week, onPlayTop, playing = false }: WeekBannerProps
 
       {week.days.length > 1 ? (
         <div className="dsc-week-chart" role="img" aria-label={daysLabel(week)}>
-          {week.days.map((d) => (
+          {week.days.map((d, i) => (
             <div
               className="dsc-week-day"
               key={d.date}
@@ -83,7 +141,12 @@ export function WeekBanner({ week, onPlayTop, playing = false }: WeekBannerProps
               <div className="dsc-week-bar-slot">
                 <div
                   className="dsc-week-bar"
-                  style={{ height: `${Math.max(4, Math.round(d.share * 100))}%` }}
+                  style={
+                    {
+                      height: `${Math.max(4, Math.round(d.share * 100))}%`,
+                      '--bar-delay': `${i * 70}ms`,
+                    } as React.CSSProperties
+                  }
                 />
               </div>
               <span className="dsc-week-day-label">{d.label}</span>
@@ -162,23 +225,41 @@ export function TasteGapBanner({ gap, onExplore }: TasteGapBannerProps) {
 export interface SpotlightBannerProps {
   spotlight: Spotlight;
   onOpen: () => void;
+  /** the banner's element, for the video stage */
+  rootRef?: Ref<HTMLElement>;
+  /** the release's music video, when the spotlight holds the stage */
+  backdrop?: ReactNode;
+  /** 'r, g, b' from the cover */
+  glowRgb?: string | null;
 }
 
 /**
  * the "ad": one release, full width, from the artist you've had on repeat.
  * one action, and it's the obvious one.
  */
-export function SpotlightBanner({ spotlight, onOpen }: SpotlightBannerProps) {
+export function SpotlightBanner({
+  spotlight,
+  onOpen,
+  rootRef,
+  backdrop,
+  glowRgb,
+}: SpotlightBannerProps) {
   const { album } = spotlight;
   const cover = recentAlbumCover(album);
   const date = shortDate(album.release_date);
   return (
-    <section className="dsc-spotlight" aria-label="Spotlight">
+    <section
+      ref={rootRef}
+      className="dsc-spotlight"
+      aria-label="Spotlight"
+      style={glowRgb ? ({ '--spot-rgb': glowRgb } as React.CSSProperties) : undefined}
+    >
       <div
         className="dsc-spotlight-wash"
         aria-hidden="true"
         style={cover ? { backgroundImage: `url('${cover}')` } : undefined}
       />
+      {backdrop}
       <button
         type="button"
         className="dsc-spotlight-cover"

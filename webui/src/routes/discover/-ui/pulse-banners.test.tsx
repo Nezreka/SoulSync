@@ -22,7 +22,8 @@ const WEEK: WeekSummary = {
 describe('WeekBanner', () => {
   it('says the week in plain words', () => {
     render(<WeekBanner week={WEEK} onPlayTop={() => {}} />);
-    expect(screen.getByText('2,333')).toBeInTheDocument();
+    // the figure counts up on sight; its label is the real number throughout
+    expect(screen.getByLabelText('2,333')).toBeInTheDocument();
     expect(screen.getByText('↓ 55%')).toBeInTheDocument();
     expect(screen.getByText('361 artists · 8-day streak · mostly electronic')).toBeInTheDocument();
     expect(screen.getByText('Oliver Tree')).toBeInTheDocument();
@@ -118,5 +119,24 @@ describe('SpotlightBanner', () => {
     fireEvent.click(screen.getByText('Open album'));
     fireEvent.click(screen.getByLabelText('Open I Wrote You A Letter'));
     expect(onOpen).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('the entrance', () => {
+  it('useSeenOnce counts as seen straight away without an observer', async () => {
+    const { renderHook } = await import('@testing-library/react');
+    const { useSeenOnce } = await import('./pulse-banners');
+    expect(renderHook(() => useSeenOnce<HTMLDivElement>()).result.current[1]).toBe(true);
+  });
+
+  it('useCountUp climbs to the number, and waits until told to run', async () => {
+    const { renderHook, waitFor } = await import('@testing-library/react');
+    const { useCountUp } = await import('./pulse-banners');
+    const { result, rerender } = renderHook(({ run }) => useCountUp(500, run, 50), {
+      initialProps: { run: false },
+    });
+    expect(result.current).toBe(0);
+    rerender({ run: true });
+    await waitFor(() => expect(result.current).toBe(500));
   });
 });
