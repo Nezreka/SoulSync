@@ -2157,6 +2157,8 @@ def download_discography(artist_id):
                         skip_reason = content_type_skip_reason(track_name, album_name, content_settings)
                         if skip_reason:
                             skipped_filter += 1
+                            # name it: a count alone hid #1381's wrong skips
+                            logger.info(f"[Discography] Skipped '{track_name}' on '{album_name}' ({skip_reason} filter)")
                             continue
 
                         # Skowl (Discord): clicking Download Discography

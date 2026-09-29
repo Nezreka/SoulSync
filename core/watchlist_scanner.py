@@ -225,29 +225,34 @@ def is_remix_version(track_name: str, album_name: str = "") -> bool:
     # Combine track and album names for comprehensive checking
     text_to_check = f"{track_name} {album_name}".lower()
 
-    # Remix patterns (but NOT remaster/remastered)
-    remix_patterns = [
-        r'\bremix\b',                   # Remix, Remixed
-        r'\bmix\b(?!.*\bremaster)',     # Mix (but not if followed by remaster)
-        r'\bedit\b',                    # Radio Edit, Extended Edit
-        r'\bversion\b(?=.*\bmix\b)',    # Version with Mix (e.g., "Dance Version Mix")
-        r'\bclub mix\b',                # Club Mix
-        r'\bdance mix\b',               # Dance Mix
-        r'\bradio edit\b',              # Radio Edit
-        r'\bextended\b(?=.*\bmix\b)',   # Extended Mix
-        r'\bdub\b',                     # Dub version
-        r'\bvip mix\b',                 # VIP Mix
-    ]
-
     # But exclude remaster/remastered - those are originals
     if re.search(r'\bremaster(ed)?\b', text_to_check, re.IGNORECASE):
         return False
 
-    for pattern in remix_patterns:
-        if re.search(pattern, text_to_check, re.IGNORECASE):
-            return True
+    # "remix" says it outright, wherever it sits
+    if re.search(r'\b(remix(es|ed)?|rmx)\b', text_to_check, re.IGNORECASE):
+        return True
+
+    # mix / edit / dub only mean a remix inside a version qualifier: "(Club
+    # Mix)", "[Dub]", "- Radio Edit". bare, they're ordinary title words,
+    # like 311's "Mix It Up" and "Rub a Dub" (#1381), the same trap
+    # is_live_version fixed for "Live Forever"
+    for name in (track_name, album_name or ''):
+        for qualifier in _version_qualifiers(name):
+            if re.search(r'\b(mix|edit|dub)\b', qualifier, re.IGNORECASE):
+                return True
 
     return False
+
+
+def _version_qualifiers(name: str) -> list:
+    """the bracketed parts of a title and its " - " suffix, where version
+    words live: "Song (Club Mix) - Radio Edit" -> ["Club Mix", "Radio Edit"]."""
+    found = re.findall(r'[\(\[]([^\)\]]*)[\)\]]', name)
+    dash = re.search(r'\s[-–—]\s+(.+)$', name)
+    if dash:
+        found.append(dash.group(1))
+    return found
 
 def is_acoustic_version(track_name: str, album_name: str = "") -> bool:
     """
