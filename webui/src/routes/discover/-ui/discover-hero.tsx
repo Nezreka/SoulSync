@@ -1,4 +1,4 @@
-import { useState, type ReactNode, type Ref } from 'react';
+import { useState } from 'react';
 
 import type { HeroWatchlistButton, WatchAllPhase } from '../-discover.hero';
 import type { DiscoverHeroArtist } from '../-discover.types';
@@ -66,14 +66,8 @@ export interface DiscoverHeroProps {
   artists?: DiscoverHeroArtist[];
   /** the pointer or focus is on the hero: hold the rotation while they read. */
   onPauseChange?: (paused: boolean) => void;
-  /** the hero's element, so the page can tell how much of it is on screen */
-  rootRef?: Ref<HTMLDivElement>;
-  /** a music video playing behind everything, when the hero holds the stage */
-  backdrop?: ReactNode;
   /** 'r, g, b' from the artist's photo: the glow matches the picture */
   glowRgb?: string | null;
-  /** the video backgrounds switch, shown in the corner */
-  videoToggle?: { on: boolean; onToggle: () => void };
 }
 
 /** the reason line, with the artists it names set apart from the words around them. */
@@ -155,10 +149,7 @@ export function DiscoverHero({
   loading = false,
   artists,
   onPauseChange,
-  rootRef,
-  backdrop,
   glowRgb,
-  videoToggle,
 }: DiscoverHeroProps) {
   const empty = !artist;
   const watchLabel = watchlist?.label ?? heroWatchlistLabel(false);
@@ -170,7 +161,6 @@ export function DiscoverHero({
 
   return (
     <div
-      ref={rootRef}
       className={`discover-hero${empty ? ' discover-hero--empty' : ''}${loading ? ' discover-hero--loading' : ''}`}
       style={glowRgb ? ({ '--hero-rgb': glowRgb } as React.CSSProperties) : undefined}
       onMouseEnter={() => onPauseChange?.(true)}
@@ -193,7 +183,6 @@ export function DiscoverHero({
             : undefined
         }
       />
-      {backdrop}
       <div className="discover-hero-overlay" />
 
       {rotates && (
@@ -226,39 +215,6 @@ export function DiscoverHero({
       >
         ?
       </button>
-      {videoToggle ? (
-        <button
-          type="button"
-          className={`discover-hero-video-toggle${videoToggle.on ? ' on' : ''}`}
-          title={videoToggle.on ? 'Turn video backgrounds off' : 'Turn video backgrounds on'}
-          aria-label={videoToggle.on ? 'Turn video backgrounds off' : 'Turn video backgrounds on'}
-          aria-pressed={videoToggle.on}
-          onClick={videoToggle.onToggle}
-        >
-          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-            <rect
-              x="3"
-              y="6"
-              width="13"
-              height="12"
-              rx="2"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            />
-            <path
-              d="M16 10l5-3v10l-5-3z"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinejoin="round"
-            />
-            {videoToggle.on ? null : (
-              <path d="M3 3l18 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            )}
-          </svg>
-        </button>
-      ) : null}
       <button
         type="button"
         className="discover-blacklist-btn"

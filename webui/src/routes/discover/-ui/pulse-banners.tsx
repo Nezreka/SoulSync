@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-import type { Spotlight, TasteGap, WeekSummary } from '../-discover.pulse';
+import type { TasteGap, WeekSummary } from '../-discover.pulse';
 
-import { releaseKind, shortDate, tasteGapLine } from '../-discover.pulse';
-import { recentAlbumCover } from '../-discover.recent-releases';
+import { tasteGapLine } from '../-discover.pulse';
 
 /**
  * the banners that are about you, not the catalogue.
@@ -217,70 +216,6 @@ export function TasteGapBanner({ gap, onExplore }: TasteGapBannerProps) {
         <button type="button" className="dsc-pulse-btn" onClick={() => onExplore(gap.genre)}>
           Explore {gap.genre.toLowerCase()}
         </button>
-      </div>
-    </section>
-  );
-}
-
-export interface SpotlightBannerProps {
-  spotlight: Spotlight;
-  onOpen: () => void;
-  /** the banner's element, for the video stage */
-  rootRef?: Ref<HTMLElement>;
-  /** the release's music video, when the spotlight holds the stage */
-  backdrop?: ReactNode;
-  /** 'r, g, b' from the cover */
-  glowRgb?: string | null;
-}
-
-/**
- * the "ad": one release, full width, from the artist you've had on repeat.
- * one action, and it's the obvious one.
- */
-export function SpotlightBanner({
-  spotlight,
-  onOpen,
-  rootRef,
-  backdrop,
-  glowRgb,
-}: SpotlightBannerProps) {
-  const { album } = spotlight;
-  const cover = recentAlbumCover(album);
-  const date = shortDate(album.release_date);
-  return (
-    <section
-      ref={rootRef}
-      className="dsc-spotlight"
-      aria-label="Spotlight"
-      style={glowRgb ? ({ '--spot-rgb': glowRgb } as React.CSSProperties) : undefined}
-    >
-      <div
-        className="dsc-spotlight-wash"
-        aria-hidden="true"
-        style={cover ? { backgroundImage: `url('${cover}')` } : undefined}
-      />
-      {backdrop}
-      <button
-        type="button"
-        className="dsc-spotlight-cover"
-        onClick={onOpen}
-        aria-label={`Open ${album.album_name}`}
-      >
-        {cover ? <img src={cover} alt="" loading="lazy" /> : null}
-      </button>
-      <div className="dsc-spotlight-copy">
-        <span className="dsc-pulse-eyebrow">
-          {releaseKind(album.album_type)}
-          {date ? ` · ${date}` : ''}
-        </span>
-        <h3 className="dsc-spotlight-title">{album.album_name}</h3>
-        <p className="dsc-spotlight-artist">{album.artist_name}</p>
-        <p className="dsc-spotlight-reason">{spotlight.reason}</p>
-        <div className="dsc-pulse-actions">
-          <button type="button" className="dsc-pulse-btn primary" onClick={onOpen}>
-            Open {releaseKind(album.album_type).replace('New ', '')}
-          </button>
-        </div>
       </div>
     </section>
   );

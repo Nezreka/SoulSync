@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { WeekSummary } from '../-discover.pulse';
 
-import { daysLabel, SpotlightBanner, TasteGapBanner, WeekBanner } from './pulse-banners';
+import { daysLabel, TasteGapBanner, WeekBanner } from './pulse-banners';
 
 const WEEK: WeekSummary = {
   plays: 2333,
@@ -91,34 +91,6 @@ describe('TasteGapBanner', () => {
     // 20 / 23 and 5 / 23 of the track
     expect(played.style.width).toBe('87%');
     expect(owned.style.width).toBe('22%');
-  });
-});
-
-describe('SpotlightBanner', () => {
-  it('shows the release and opens it from the cover or the button', () => {
-    const onOpen = vi.fn();
-    render(
-      <SpotlightBanner
-        spotlight={{
-          album: {
-            album_name: 'I Wrote You A Letter',
-            artist_name: 'M83',
-            album_cover_url: 'https://cdn.example/cover.jpg',
-            album_type: 'album',
-            release_date: '2026-09-25',
-          },
-          index: 1,
-          plays: 3,
-          reason: 'You played M83 3 times this week',
-        }}
-        onOpen={onOpen}
-      />,
-    );
-    expect(screen.getByText('New album · Sep 25')).toBeInTheDocument();
-    expect(screen.getByText('You played M83 3 times this week')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Open album'));
-    fireEvent.click(screen.getByLabelText('Open I Wrote You A Letter'));
-    expect(onOpen).toHaveBeenCalledTimes(2);
   });
 });
 

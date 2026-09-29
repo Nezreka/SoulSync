@@ -2709,94 +2709,16 @@
 }
 
 /* the spotlight: one release, full width, between For You and New & Missing */
-.dsc-spotlight {
-    position: relative;
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-    gap: 32px;
-    margin: -24px 0 56px;
-    padding: 28px;
-    border-radius: 24px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: #0d1017;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
-}
 
-.dsc-spotlight-wash {
-    position: absolute;
-    inset: -40px;
-    background-size: cover;
-    background-position: center;
-    filter: blur(48px) saturate(1.4);
-    opacity: 0.5;
-    transform: scale(1.1);
-    pointer-events: none;
-}
 
-.dsc-spotlight::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(90deg, rgba(10, 11, 13, 0.35) 0%, rgba(10, 11, 13, 0.75) 60%, rgba(10, 11, 13, 0.9) 100%);
-    pointer-events: none;
-}
 
-.dsc-spotlight-cover {
-    position: relative;
-    z-index: 1;
-    flex: 0 0 auto;
-    width: 200px;
-    height: 200px;
-    padding: 0;
-    border: none;
-    border-radius: 14px;
-    overflow: hidden;
-    background: rgba(255, 255, 255, 0.06);
-    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
-    cursor: pointer;
-    transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
-}
 
-.dsc-spotlight-cover:hover {
-    transform: scale(1.03);
-}
 
-.dsc-spotlight-cover img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-}
 
-.dsc-spotlight-copy {
-    position: relative;
-    z-index: 1;
-    min-width: 0;
-}
 
-.dsc-spotlight-title {
-    margin: 10px 0 0;
-    font-size: clamp(1.8rem, 3vw, 2.8rem);
-    font-weight: 850;
-    letter-spacing: -0.035em;
-    line-height: 1.05;
-    color: #fff;
-    overflow-wrap: anywhere;
-}
 
-.dsc-spotlight-artist {
-    margin: 6px 0 0;
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.85);
-}
 
-.dsc-spotlight-reason {
-    margin: 10px 0 0;
-    font-size: 0.88rem;
-    color: rgba(255, 255, 255, 0.6);
-}
+
 
 @media (max-width: 1100px) {
     .dsc-pulse-row {
@@ -2827,16 +2749,8 @@
     .dsc-pulse {
         padding: 18px;
     }
-    .dsc-spotlight {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 18px;
-        padding: 20px;
-    }
-    .dsc-spotlight-cover {
-        width: 140px;
-        height: 140px;
-    }
+
+
 }
 
 /* ── 13. Not-connected and unreachable states stay one line tall ─────────── */
@@ -3242,48 +3156,13 @@
     box-shadow: 0 0 0 2px rgba(10, 13, 20, 0.9), 0 0 0 4px rgb(var(--hero-rgb));
 }
 
-.dsc-spotlight[style*="--spot-rgb"] {
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45), 0 0 120px -30px rgba(var(--spot-rgb), 0.6);
-    border-color: rgba(var(--spot-rgb), 0.3);
-}
 
-.dsc-spotlight .dsc-backdrop-video.ready {
-    opacity: 0.75;
-}
 
 /* the video switch, beside the block and help buttons */
-.discover-hero-video-toggle {
-    position: absolute;
-    top: 20px;
-    right: 100px;
-    z-index: 10;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 38px;
-    height: 38px;
-    border-radius: 50%;
-    background: rgba(0, 0, 0, 0.45);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    color: rgba(255, 255, 255, 0.55);
-    cursor: pointer;
-    transition: background 160ms ease, color 160ms ease;
-}
 
-.discover-hero-video-toggle.on {
-    color: #fff;
-}
 
-.discover-hero-video-toggle:hover {
-    background: rgba(255, 255, 255, 0.2);
-    color: #fff;
-}
 
-.discover-hero-video-toggle:focus-visible {
-    outline: 2px solid rgba(var(--accent-rgb, 29, 185, 84), 0.9);
-    outline-offset: 2px;
-}
+
 
 /* the week's bars grow in, one after another, the first time you see them */
 .dsc-week:not(.in-view) .dsc-week-bar {
@@ -3443,13 +3322,224 @@ a.dsc-now-artist:hover {
 }
 
 @media (max-width: 640px) {
-    .discover-hero-video-toggle {
-        right: 96px;
-    }
+
     .dsc-now {
         gap: 12px;
     }
     .dsc-now .dsc-pulse-btn {
         padding: 0 12px;
+    }
+}
+
+/* ── 17. Promo banners: one thing advertised, big, over a moving background ─ */
+.dsc-promo {
+    --promo-rgb: var(--accent-rgb, 29, 185, 84);
+    position: relative;
+    overflow: hidden;
+    height: clamp(280px, 26vw, 360px);
+    margin: -20px 0 56px;
+    border-radius: 24px;
+    border: 1px solid rgba(var(--promo-rgb), 0.28);
+    background: #0b0d12;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5), 0 0 140px -40px rgba(var(--promo-rgb), 0.7);
+    isolation: isolate;
+}
+
+.dsc-promo-bg {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+}
+
+/* the artwork drifts: a slow ken burns pan and zoom, forever */
+.dsc-promo-drift {
+    position: absolute;
+    inset: -12%;
+    background-size: cover;
+    background-position: center;
+    filter: saturate(1.25) brightness(0.8);
+    animation: dsc-kenburns 26s ease-in-out infinite alternate;
+    will-change: transform;
+}
+
+.dsc-promo--artist .dsc-promo-drift {
+    background-position: 50% 25%;
+}
+
+@keyframes dsc-kenburns {
+    0% { transform: scale(1.02) translate3d(-2%, 1%, 0); }
+    50% { transform: scale(1.14) translate3d(2%, -2%, 0); }
+    100% { transform: scale(1.08) translate3d(-1%, 2%, 0); }
+}
+
+/* a sheen in the artwork's own colour, moving across it */
+.dsc-promo-sheen {
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(60% 80% at 20% 30%, rgba(var(--promo-rgb), 0.55), transparent 70%),
+        radial-gradient(50% 70% at 85% 75%, rgba(var(--promo-rgb), 0.4), transparent 70%);
+    background-size: 160% 160%;
+    mix-blend-mode: screen;
+    opacity: 0.75;
+    animation: dsc-sheen 14s ease-in-out infinite alternate;
+}
+
+@keyframes dsc-sheen {
+    from { background-position: 0% 0%; }
+    to { background-position: 100% 100%; }
+}
+
+.dsc-promo .dsc-backdrop-video.ready {
+    opacity: 1;
+}
+
+/* dark where the words are, clear where the picture is */
+.dsc-promo-scrim {
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(90deg, rgba(8, 9, 12, 0.94) 0%, rgba(8, 9, 12, 0.72) 36%, rgba(8, 9, 12, 0.18) 68%, rgba(8, 9, 12, 0) 100%),
+        linear-gradient(0deg, rgba(8, 9, 12, 0.55) 0%, rgba(8, 9, 12, 0) 45%);
+}
+
+.dsc-promo-body {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 32px;
+    height: 100%;
+    padding: 0 48px;
+}
+
+.dsc-promo-cover {
+    flex: 0 0 auto;
+    width: clamp(150px, 15vw, 210px);
+    aspect-ratio: 1;
+    border-radius: 12px;
+    background-size: cover;
+    background-position: center;
+    background-color: rgba(255, 255, 255, 0.06);
+    box-shadow: 0 22px 50px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.dsc-promo-cover.round {
+    border-radius: 50%;
+}
+
+.dsc-promo-copy {
+    min-width: 0;
+    max-width: 640px;
+}
+
+.dsc-promo-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #fff;
+}
+
+.dsc-promo-eyebrow::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgb(var(--promo-rgb));
+    box-shadow: 0 0 12px rgba(var(--promo-rgb), 0.9);
+}
+
+.dsc-promo-title {
+    margin: 10px 0 0;
+    font-size: clamp(2.2rem, 4.4vw, 3.8rem);
+    font-weight: 900;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    color: #fff;
+    text-shadow: 0 6px 30px rgba(0, 0, 0, 0.6);
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.dsc-promo-sub {
+    margin: 12px 0 0;
+    font-size: 1rem;
+    color: rgba(255, 255, 255, 0.78);
+}
+
+.dsc-promo-sub strong {
+    color: #fff;
+}
+
+.dsc-promo-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 22px;
+}
+
+.dsc-promo-video-toggle {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(12px);
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    transition: background 160ms ease, color 160ms ease;
+}
+
+.dsc-promo-video-toggle.on,
+.dsc-promo-video-toggle:hover {
+    color: #fff;
+}
+
+.dsc-promo-video-toggle:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.dsc-promo-video-toggle:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb, 29, 185, 84), 0.9);
+    outline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+    .dsc-promo {
+        height: auto;
+    }
+    .dsc-promo-body {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 18px;
+        padding: 28px 22px 26px;
+    }
+    .dsc-promo-cover {
+        width: 120px;
+    }
+    .dsc-promo-scrim {
+        background: linear-gradient(0deg, rgba(8, 9, 12, 0.95) 0%, rgba(8, 9, 12, 0.6) 60%, rgba(8, 9, 12, 0.3) 100%);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dsc-promo-drift,
+    .dsc-promo-sheen {
+        animation: none;
     }
 }

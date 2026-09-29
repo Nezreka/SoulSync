@@ -21,7 +21,7 @@ import {
   fetchLbPlaylist,
   fetchWeekStats,
 } from '../-discover.api';
-import { useBackdropVideoId, useDominantColor } from '../-discover.backdrop';
+import { useDominantColor } from '../-discover.backdrop';
 import { bpMetaStats } from '../-discover.build-playlist';
 import {
   byltSections,
@@ -39,6 +39,7 @@ import {
 } from '../-discover.bylt';
 import { CACHE_SECTIONS } from '../-discover.cache-sections';
 import { decadeClassicsName, decadeTrackToSpotify } from '../-discover.decade-shelf';
+import { explanationLine } from '../-discover.explanation';
 import { quickTiles } from '../-discover.greeting';
 import { normalizeTrack } from '../-discover.helpers';
 import { inboxArtistRef } from '../-discover.inbox';
@@ -53,7 +54,7 @@ import {
 import { beginPlayIntent, playMixNow, playTrackNow, type PlayIntent } from '../-discover.playable';
 import { syncBubbleImage, toSyncTracks } from '../-discover.playlist-sync';
 import { profileKey, useProfileScope } from '../-discover.profile-scope';
-import { pickSpotlight, tasteGap, weekSummary } from '../-discover.pulse';
+import { pickSpotlight, releaseKind, shortDate, tasteGap, weekSummary } from '../-discover.pulse';
 import { keepRecipe, recipeVerb, refreshRecipe, type RecipeMixCard } from '../-discover.recipes';
 import { recSource, recommendedVisible } from '../-discover.recommended';
 import {
@@ -78,11 +79,12 @@ import { defaultLazySource, useMixModal } from '../-discover.use-mix-modal';
 import { useDiscoverMixes } from '../-discover.use-mixes';
 import { useDiscoverPage } from '../-discover.use-page';
 import { usePlaylistSync } from '../-discover.use-playlist-sync';
+import { usePromoVideo } from '../-discover.use-promo';
 import { useAdventurousness, useRecommended } from '../-discover.use-recommended';
 import { useStationPreview } from '../-discover.use-station';
 import { useYourAlbums } from '../-discover.use-your-albums';
 import { useYourArtists } from '../-discover.use-your-artists';
-import { useVideoBackdropsEnabled, useVideoSlot } from '../-discover.video-stage';
+import { useVideoBackdropsEnabled } from '../-discover.video-stage';
 import {
   ARTISTS_DEFAULT_SOURCES,
   savedArtistSourcesSubtitle,
@@ -94,7 +96,6 @@ import { ArtistMapAssembly } from './artist-map-assembly';
 import { ArtistMapHub, ArtistWebHub } from './artist-map-hub';
 import { ArtistWebAssembly } from './artist-web-assembly';
 import { ArtMapExplorePrompt } from './artmap-explore-prompt';
-import { BackdropVideo } from './backdrop-video';
 import { BlacklistModal } from './blacklist-modal';
 import { BuildPlaylistSection } from './build-playlist';
 import { ByltSections } from './bylt-sections';
@@ -110,7 +111,8 @@ import { GreetingGrid } from './greeting-grid';
 import { MixModal } from './mix-modal';
 import { MixShelf } from './mix-shelf';
 import { NowPlayingBanner, useNowPlaying } from './now-playing-banner';
-import { SpotlightBanner, TasteGapBanner, WeekBanner } from './pulse-banners';
+import { PromoBanner } from './promo-banner';
+import { TasteGapBanner, WeekBanner } from './pulse-banners';
 import { LastfmRadioSection, ListenBrainzSection } from './radio-sections';
 import { RecipeEditor } from './recipe-editor';
 import { RecommendedModal } from './recommended-modal';
@@ -154,9 +156,6 @@ const LOGOS = {
 };
 
 const toast = (message: string, level = 'info') => window.showToast?.(message, level);
-
-/** a playing hero video still moves on to the next artist after this long */
-const HERO_VIDEO_DWELL_MS = 30000;
 
 /**
  * progressFor hands back the REDUCED SyncProgress; SyncStatus re-reduces from
@@ -329,27 +328,10 @@ export function DiscoverPage() {
   const gap = tasteGap(weekQuery.data);
   const [playingTop, setPlayingTop] = useState(false);
   const [flowBusy, setFlowBusy] = useState(false);
-  const [spotVideoId, setSpotVideoId] = useState<string | null>(null);
 
   // ── the living banners: one music video at a time, only the one on screen ──
   const [videosOn, setVideosOn] = useVideoBackdropsEnabled();
-  const [heroVideoId, setHeroVideoId] = useState<string | null>(null);
-  const heroSlot = useVideoSlot('hero', Boolean(heroVideoId));
-  const heroArtist = hero.artist?.artist_name ?? null;
-  const fetchedHeroVideo = useBackdropVideoId(heroArtist, null, heroSlot.seen && videosOn);
-  useEffect(() => setHeroVideoId(fetchedHeroVideo), [fetchedHeroVideo]);
   const heroGlow = useDominantColor(hero.artist?.image_url ?? null);
-  // the billboard holds while you're on it, and while its video plays; a
-  // playing video still moves on after HERO_VIDEO_DWELL_MS so the rotation lives
-  const [heroHover, setHeroHover] = useState(false);
-  useEffect(() => {
-    hero.setPaused(heroHover || heroSlot.playing);
-  }, [hero, heroHover, heroSlot.playing]);
-  useEffect(() => {
-    if (!heroSlot.playing || heroHover) return;
-    const timer = setTimeout(() => hero.navigate(1), HERO_VIDEO_DWELL_MS);
-    return () => clearTimeout(timer);
-  }, [hero, heroSlot.playing, heroHover, hero.index]);
   const stationPreview = useStationPreview();
   // A profile switch discards an open preview: it belongs to the old profile,
   // and a response already in flight for it must never fill this one in.
@@ -1279,14 +1261,39 @@ export function DiscoverPage() {
 
   const recentForSpotlight = page.sectionState('recent-releases').items as RecentAlbum[];
   const spotlight = pickSpotlight(recentForSpotlight, weekQuery.data?.top_artists ?? []);
-  const spotSlot = useVideoSlot('spotlight', Boolean(spotVideoId));
-  const fetchedSpotVideo = useBackdropVideoId(
-    spotlight?.album.artist_name ?? null,
-    spotlight?.album.album_name ?? null,
-    spotSlot.seen && videosOn,
+  const releasePromo = usePromoVideo(
+    'promo-release',
+    spotlight?.album.artist_name,
+    spotlight?.album.album_name,
+    spotlight?.album.album_cover_url,
+    videosOn,
   );
-  useEffect(() => setSpotVideoId(fetchedSpotVideo), [fetchedSpotVideo]);
-  const spotGlow = useDominantColor(spotlight?.album.album_cover_url ?? null);
+  // an artist you should know: the first recommendation with a photo that
+  // isn't already rotating through the hero
+  const heroNames = new Set(hero.artists.map((a) => a.artist_name.toLowerCase()));
+  const artistPick =
+    recArtists.find(
+      (a) => a.image_url && a.artist_name && !heroNames.has(a.artist_name.toLowerCase()),
+    ) ?? null;
+  const artistPromo = usePromoVideo(
+    'promo-artist',
+    artistPick?.artist_name,
+    null,
+    artistPick?.image_url,
+    videosOn,
+  );
+  // a throwback: the top of repeat rewind, a song you had on repeat
+  const rewindMix = mixes.mixes.find((m) => m.key === 'repeat_rewind') ?? null;
+  const throwbackRow = (rewindMix?.tracks?.[0] ?? null) as Record<string, unknown> | null;
+  const throwback = throwbackRow ? normalizeTrack(throwbackRow as never) : null;
+  const throwbackPromo = usePromoVideo(
+    'promo-throwback',
+    throwback?.artist,
+    throwback?.name,
+    throwback?.cover,
+    videosOn,
+  );
+  const videoToggle = { on: videosOn, onToggle: () => setVideosOn(!videosOn) };
   const playTopTracks = () => {
     if (!week || playingTop) return;
     const intent = beginPlayIntent();
@@ -1438,11 +1445,8 @@ export function DiscoverPage() {
               onViewRecommended={() => setRecModalOpen(true)}
               onOpenBlacklist={blacklist.openModal}
               artists={hero.artists}
-              onPauseChange={setHeroHover}
-              rootRef={heroSlot.ref}
+              onPauseChange={hero.setPaused}
               glowRgb={heroGlow}
-              backdrop={<BackdropVideo videoId={heroVideoId} playing={heroSlot.playing} />}
-              videoToggle={{ on: videosOn, onToggle: () => setVideosOn(!videosOn) }}
             />
           </div>
           {week || gap ? (
@@ -1466,12 +1470,33 @@ export function DiscoverPage() {
           </DiscoveryZone>
 
           {spotlight ? (
-            <SpotlightBanner
-              spotlight={spotlight}
-              onOpen={() => void albumOpen.openRecentAlbum(recentForSpotlight[spotlight.index])}
-              rootRef={spotSlot.ref}
-              glowRgb={spotGlow}
-              backdrop={<BackdropVideo videoId={spotVideoId} playing={spotSlot.playing} />}
+            <PromoBanner
+              kind="release"
+              eyebrow={`${releaseKind(spotlight.album.album_type)}${shortDate(spotlight.album.release_date) ? ` · ${shortDate(spotlight.album.release_date)}` : ''}`}
+              title={spotlight.album.album_name ?? ''}
+              subtitle={
+                <>
+                  <strong>{spotlight.album.artist_name}</strong> · {spotlight.reason}
+                </>
+              }
+              art={spotlight.album.album_cover_url ?? null}
+              actions={
+                <button
+                  type="button"
+                  className="dsc-pulse-btn primary"
+                  onClick={() =>
+                    void albumOpen.openRecentAlbum(recentForSpotlight[spotlight.index])
+                  }
+                >
+                  Open {releaseKind(spotlight.album.album_type).replace('New ', '')}
+                </button>
+              }
+              glowRgb={releasePromo.glowRgb}
+              rootRef={releasePromo.ref}
+              videoId={releasePromo.videoId}
+              playing={releasePromo.playing}
+              onUnplayable={releasePromo.onUnplayable}
+              videoToggle={videoToggle}
             />
           ) : null}
 
@@ -1496,6 +1521,56 @@ export function DiscoverPage() {
             {renderZoneSections(newMissingIds)}
           </DiscoveryZone>
 
+          {artistPick ? (
+            <PromoBanner
+              kind="artist"
+              eyebrow="An artist you should know"
+              title={artistPick.artist_name ?? ''}
+              subtitle={
+                explanationLine(artistPick.explanation as never) || 'Picked from your library'
+              }
+              art={artistPick.image_url ?? null}
+              round
+              actions={
+                <>
+                  <a
+                    className="dsc-pulse-btn primary"
+                    href={detailPath(
+                      artistPick.artist_id ?? '',
+                      recSource(recPayload) || null,
+                      artistPick.artist_name,
+                    )}
+                  >
+                    View artist
+                  </a>
+                  {artistPick.artist_id ? (
+                    <button
+                      type="button"
+                      className="dsc-pulse-btn"
+                      disabled={rec.watchingIds.has(String(artistPick.artist_id))}
+                      onClick={() =>
+                        void rec.toggleWatchlist(
+                          String(artistPick.artist_id),
+                          artistPick.artist_name ?? '',
+                        )
+                      }
+                    >
+                      {rec.watchingIds.has(String(artistPick.artist_id))
+                        ? 'On your watchlist'
+                        : 'Add to watchlist'}
+                    </button>
+                  ) : null}
+                </>
+              }
+              glowRgb={artistPromo.glowRgb}
+              rootRef={artistPromo.ref}
+              videoId={artistPromo.videoId}
+              playing={artistPromo.playing}
+              onUnplayable={artistPromo.onUnplayable}
+              videoToggle={videoToggle}
+            />
+          ) : null}
+
           {libraryIds.length > 0 && (
             <DiscoveryZone
               id="discover-zone-library"
@@ -1506,6 +1581,47 @@ export function DiscoverPage() {
               {renderZoneSections(libraryIds)}
             </DiscoveryZone>
           )}
+
+          {throwback && throwbackRow ? (
+            <PromoBanner
+              kind="throwback"
+              eyebrow="Throwback"
+              title={throwback.name}
+              subtitle={
+                <>
+                  <strong>{throwback.artist}</strong> · you had this on repeat, then it went quiet
+                </>
+              }
+              art={throwback.cover || null}
+              actions={
+                <>
+                  <button
+                    type="button"
+                    className="dsc-pulse-btn primary"
+                    onClick={() => {
+                      const intent = beginPlayIntent();
+                      void playTrackNow(throwbackRow, throwback.name, intent);
+                    }}
+                  >
+                    Play it
+                  </button>
+                  <button
+                    type="button"
+                    className="dsc-pulse-btn"
+                    onClick={() => modal.open('repeat_rewind')}
+                  >
+                    Repeat Rewind
+                  </button>
+                </>
+              }
+              glowRgb={throwbackPromo.glowRgb}
+              rootRef={throwbackPromo.ref}
+              videoId={throwbackPromo.videoId}
+              playing={throwbackPromo.playing}
+              onUnplayable={throwbackPromo.onUnplayable}
+              videoToggle={videoToggle}
+            />
+          ) : null}
 
           <DiscoveryZone
             id="discover-zone-tools"
