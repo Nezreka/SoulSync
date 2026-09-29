@@ -7,6 +7,7 @@ import {
   blacklistArtist,
   dismissAllInbox,
   fetchInbox,
+  fetchWeekStats,
   setInboxState,
   postDiscoverFeedback,
   resetDiscoverTaste,
@@ -303,6 +304,20 @@ describe('the inbox', () => {
     await setInboxState(7, 'saved');
     expect((await dismissAllInbox()).dismissed).toBe(4);
     expect(seen).toEqual(['GET saved', 'STATE 7 {"state":"saved"}', 'DISMISS']);
+  });
+});
+
+describe('your week', () => {
+  it('reads the cached 7-day stats, the same numbers the Stats page shows', async () => {
+    let range: string | null = null;
+    server.use(
+      http.get('*/api/stats/cached', ({ request }) => {
+        range = new URL(request.url).searchParams.get('range');
+        return HttpResponse.json({ success: true, overview: { total_plays: 12 } });
+      }),
+    );
+    expect((await fetchWeekStats()).overview?.total_plays).toBe(12);
+    expect(range).toBe('7d');
   });
 });
 

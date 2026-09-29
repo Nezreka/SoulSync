@@ -21,6 +21,7 @@ import { apiClient, readJson } from '@/app/api-client';
 
 import type { InboxPayload, InboxView } from './-discover.inbox';
 import type { DiscoverLayoutSection } from './-discover.layout';
+import type { WeekStats } from './-discover.pulse';
 import type { SectionOutcome } from './-discover.section-state';
 import type {
   DiscoverAlbum,
@@ -379,6 +380,16 @@ export function postDiscoverFeedback(body: {
 
 export function resetDiscoverTaste(): Promise<DiscoverResult & { cleared?: number }> {
   return readJson(apiClient.delete('discover/feedback'));
+}
+
+// ── Your week (the pulse banners) ──────────────────────────────────────────
+
+/**
+ * the stats worker's cached 7-day summary, the same numbers the Stats page
+ * shows. a metadata read, so it's instant and safe above the fold.
+ */
+export function fetchWeekStats(): Promise<WeekStats> {
+  return readJson(apiClient.get('stats/cached', { searchParams: { range: '7d' } }));
 }
 
 // ── The inbox ──────────────────────────────────────────────────────────────

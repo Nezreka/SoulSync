@@ -12,7 +12,12 @@ import type { DiscoverHeroArtist } from '../-discover.types';
 import type { YourAlbum } from '../-discover.your-albums-actions';
 import type { GenreDiveData } from './genre-dive-modal';
 
-import { fetchBecauseYouListenTo, fetchGenreDeepDive, fetchLbPlaylist } from '../-discover.api';
+import {
+  fetchBecauseYouListenTo,
+  fetchGenreDeepDive,
+  fetchLbPlaylist,
+  fetchWeekStats,
+} from '../-discover.api';
 import { bpMetaStats } from '../-discover.build-playlist';
 import {
   byltSections,
@@ -43,6 +48,7 @@ import {
 import { beginPlayIntent, playMixNow, playTrackNow, type PlayIntent } from '../-discover.playable';
 import { syncBubbleImage, toSyncTracks } from '../-discover.playlist-sync';
 import { profileKey, useProfileScope } from '../-discover.profile-scope';
+import { pickSpotlight, tasteGap, weekSummary } from '../-discover.pulse';
 import { keepRecipe, recipeVerb, refreshRecipe, type RecipeMixCard } from '../-discover.recipes';
 import { recSource, recommendedVisible } from '../-discover.recommended';
 import {
@@ -95,6 +101,7 @@ import { DownloadBar } from './download-bar';
 import { GenreDiveModal } from './genre-dive-modal';
 import { MixModal } from './mix-modal';
 import { MixShelf } from './mix-shelf';
+import { SpotlightBanner, TasteGapBanner, WeekBanner } from './pulse-banners';
 import { LastfmRadioSection, ListenBrainzSection } from './radio-sections';
 import { RecipeEditor } from './recipe-editor';
 import { RecommendedModal } from './recommended-modal';
@@ -298,6 +305,18 @@ export function DiscoverPage() {
     retry: false,
     enabled: page.aboveFoldSettled,
   });
+  // your week: the stats worker's cached summary. instant (a metadata read),
+  // so it rides with the first paint instead of waiting for tier 2.
+  const weekQuery = useQuery({
+    queryKey: ['discover', 'week-stats', profileKey(profileId)] as const,
+    queryFn: () => discoverLimiter.run(fetchWeekStats),
+    staleTime: BYLT_STALE_MS,
+    gcTime: BYLT_STALE_MS * 2,
+    retry: false,
+  });
+  const week = weekSummary(weekQuery.data);
+  const gap = tasteGap(weekQuery.data);
+  const [playingTop, setPlayingTop] = useState(false);
   const stationPreview = useStationPreview();
   // A profile switch discards an open preview: it belongs to the old profile,
   // and a response already in flight for it must never fill this one in.
@@ -1208,11 +1227,21 @@ export function DiscoverPage() {
     );
   };
 
+  const recentForSpotlight = page.sectionState('recent-releases').items as RecentAlbum[];
+  const spotlight = pickSpotlight(recentForSpotlight, weekQuery.data?.top_artists ?? []);
+  const playTopTracks = () => {
+    if (!week || playingTop) return;
+    const intent = beginPlayIntent();
+    setPlayingTop(true);
+    const rows = week.topTracks.map((t) => ({ title: t.name, artist: t.artist, album: t.album }));
+    void playMixNow(rows, 'Your top tracks this week', intent).finally(() => setPlayingTop(false));
+  };
+
   const newMissingIds = zoneSections('new-missing');
   const libraryIds = zoneSections('library');
   const navItems: DiscoverNavItem[] = [
     { id: 'discover-zone-for-you', label: 'For You' },
-    ...(newMissingIds.length ? [{ id: 'discover-zone-new-missing', label: 'New & Missing' }] : []),
+    { id: 'discover-zone-new-missing', label: 'New & Missing' },
     ...(libraryIds.length ? [{ id: 'discover-zone-library', label: 'From Your Library' }] : []),
     { id: 'discover-zone-tools', label: 'Explore & Build' },
   ];
@@ -1300,13 +1329,16 @@ export function DiscoverPage() {
               onPauseChange={hero.setPaused}
             />
           </div>
-          <DiscoveryInbox
-            onOpenRelease={(album) => void albumOpen.openRecentAlbum(album)}
-            buildArtistPath={(item) => {
-              const ref = inboxArtistRef(item);
-              return ref ? detailPath(ref.id, ref.source, item.artist_name) : '';
-            }}
-          />
+          {week || gap ? (
+            <div className={`dsc-pulse-row${week && gap ? '' : ' dsc-pulse-row--single'}`}>
+              {week ? (
+                <WeekBanner week={week} onPlayTop={playTopTracks} playing={playingTop} />
+              ) : null}
+              {gap ? (
+                <TasteGapBanner gap={gap} onExplore={(g) => openDive(g.toLowerCase())} />
+              ) : null}
+            </div>
+          ) : null}
           <DiscoverNav items={navItems} onOpenLayout={() => setLayoutOpen(true)} />
           <DiscoveryZone
             id="discover-zone-for-you"
@@ -1317,16 +1349,33 @@ export function DiscoverPage() {
             {renderForYouSections()}
           </DiscoveryZone>
 
-          {newMissingIds.length > 0 && (
-            <DiscoveryZone
-              id="discover-zone-new-missing"
-              title="New & Missing"
-              subtitle="Fresh releases, and the albums your collection is missing."
-              tone="new-missing"
-            >
-              {renderZoneSections(newMissingIds)}
-            </DiscoveryZone>
-          )}
+          {spotlight ? (
+            <SpotlightBanner
+              spotlight={spotlight}
+              onOpen={() => void albumOpen.openRecentAlbum(recentForSpotlight[spotlight.index])}
+            />
+          ) : null}
+
+          <DiscoveryZone
+            id="discover-zone-new-missing"
+            title="New & Missing"
+            subtitle="Fresh releases, and the albums your collection is missing."
+            tone="new-missing"
+          >
+            {/* the inbox lives here now: releases and dates worth coming back
+                to, which is what this zone is. it used to sit between the hero
+                and everything else, pushing the feed a screen down. */}
+            <div className="discovery-zone-section discovery-zone-section--inbox">
+              <DiscoveryInbox
+                onOpenRelease={(album) => void albumOpen.openRecentAlbum(album)}
+                buildArtistPath={(item) => {
+                  const ref = inboxArtistRef(item);
+                  return ref ? detailPath(ref.id, ref.source, item.artist_name) : '';
+                }}
+              />
+            </div>
+            {renderZoneSections(newMissingIds)}
+          </DiscoveryZone>
 
           {libraryIds.length > 0 && (
             <DiscoveryZone

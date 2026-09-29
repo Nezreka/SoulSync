@@ -2181,3 +2181,446 @@
         flex-direction: column;
     }
 }
+
+/* ── 12. Pulse banners: your week, your taste gap, the spotlight ─────────── */
+.dsc-pulse-row {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    gap: 20px;
+    margin: 0 0 12px;
+}
+
+.dsc-pulse-row--single {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.dsc-pulse {
+    position: relative;
+    overflow: hidden;
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: linear-gradient(145deg, rgba(24, 29, 40, 0.9), rgba(13, 16, 23, 0.95));
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35);
+    padding: 22px 24px;
+    min-width: 0;
+}
+
+.dsc-pulse-eyebrow {
+    display: block;
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.dsc-pulse-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 18px;
+}
+
+.dsc-pulse-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 16px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+    font: inherit;
+    font-size: 0.84rem;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 160ms ease, transform 160ms ease;
+}
+
+.dsc-pulse-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.dsc-pulse-btn.primary {
+    border-color: transparent;
+    background: #fff;
+    color: #0a0b0d;
+}
+
+.dsc-pulse-btn.primary:hover:not(:disabled) {
+    background: #fff;
+    transform: scale(1.03);
+}
+
+.dsc-pulse-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.dsc-pulse-btn:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb, 29, 185, 84), 0.9);
+    outline-offset: 2px;
+}
+
+/* your week: figure | the week's shape | who was on repeat */
+.dsc-week {
+    display: grid;
+    grid-template-columns: minmax(290px, 1.5fr) minmax(140px, 1fr) auto;
+    align-items: center;
+    gap: 28px;
+}
+
+.dsc-week-wash {
+    position: absolute;
+    inset: -30%;
+    left: 40%;
+    background-size: cover;
+    background-position: center;
+    filter: blur(60px) saturate(1.3);
+    opacity: 0.22;
+    pointer-events: none;
+}
+
+.dsc-week-main,
+.dsc-week-chart,
+.dsc-week-top {
+    position: relative;
+}
+
+.dsc-week-figure {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.dsc-week-figure strong {
+    font-size: 2.6rem;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    color: #fff;
+    font-variant-numeric: tabular-nums;
+}
+
+.dsc-week-figure > span:not(.dsc-week-change) {
+    font-size: 1rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.dsc-week-change {
+    align-self: center;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 0.76rem;
+    font-weight: 700;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.dsc-week-change.up {
+    color: rgb(var(--accent-light-rgb, 30, 215, 96));
+    background: rgba(var(--accent-rgb, 29, 185, 84), 0.14);
+}
+
+.dsc-week-sub {
+    margin: 8px 0 0;
+    font-size: 0.88rem;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.dsc-week-chart {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 6px;
+    height: 110px;
+}
+
+.dsc-week-day {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.dsc-week-bar-slot {
+    flex: 1 1 auto;
+    width: 100%;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+}
+
+.dsc-week-bar {
+    width: min(100%, 18px);
+    border-radius: 4px 4px 1px 1px;
+    background: var(--accent-color, #1db954);
+    opacity: 0.85;
+    transition: opacity 160ms ease;
+}
+
+.dsc-week-day:hover .dsc-week-bar {
+    opacity: 1;
+}
+
+.dsc-week-day-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.dsc-week-top {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 2px;
+    width: 128px;
+}
+
+.dsc-week-top-img {
+    width: 76px;
+    height: 76px;
+    border-radius: 50%;
+    object-fit: cover;
+    margin-bottom: 8px;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
+}
+
+.dsc-week-top-img--blank {
+    display: grid;
+    place-items: center;
+    background: rgba(255, 255, 255, 0.1);
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: #fff;
+}
+
+.dsc-week-top-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.dsc-week-top-name {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #fff;
+}
+
+.dsc-week-top-plays {
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+/* the inbox, now the first thing in New & Missing */
+.discovery-zone-section--inbox {
+    margin-bottom: 28px;
+}
+
+/* the taste gap */
+.dsc-gap {
+    display: flex;
+    flex-direction: column;
+    background:
+        radial-gradient(circle at 100% 0%, rgba(var(--accent-rgb, 29, 185, 84), 0.16), transparent 55%),
+        linear-gradient(145deg, rgba(24, 29, 40, 0.9), rgba(13, 16, 23, 0.95));
+}
+
+.dsc-gap-genre {
+    margin: 8px 0 0;
+    font-size: 1.6rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: #fff;
+}
+
+.dsc-gap-line {
+    margin: 4px 0 16px;
+    font-size: 0.88rem;
+    color: rgba(255, 255, 255, 0.65);
+}
+
+.dsc-gap-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.dsc-gap-row {
+    display: grid;
+    grid-template-columns: 84px minmax(0, 1fr) 44px;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.dsc-gap-row b {
+    text-align: right;
+    color: #fff;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.dsc-gap-track {
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+}
+
+.dsc-gap-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.35);
+}
+
+.dsc-gap-fill.played {
+    background: var(--accent-color, #1db954);
+}
+
+.dsc-gap .dsc-pulse-actions {
+    margin-top: auto;
+    padding-top: 16px;
+}
+
+/* the spotlight: one release, full width, between For You and New & Missing */
+.dsc-spotlight {
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    gap: 32px;
+    margin: -24px 0 56px;
+    padding: 28px;
+    border-radius: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: #0d1017;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+
+.dsc-spotlight-wash {
+    position: absolute;
+    inset: -40px;
+    background-size: cover;
+    background-position: center;
+    filter: blur(48px) saturate(1.4);
+    opacity: 0.5;
+    transform: scale(1.1);
+    pointer-events: none;
+}
+
+.dsc-spotlight::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, rgba(10, 11, 13, 0.35) 0%, rgba(10, 11, 13, 0.75) 60%, rgba(10, 11, 13, 0.9) 100%);
+    pointer-events: none;
+}
+
+.dsc-spotlight-cover {
+    position: relative;
+    z-index: 1;
+    flex: 0 0 auto;
+    width: 200px;
+    height: 200px;
+    padding: 0;
+    border: none;
+    border-radius: 14px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.06);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+    cursor: pointer;
+    transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dsc-spotlight-cover:hover {
+    transform: scale(1.03);
+}
+
+.dsc-spotlight-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.dsc-spotlight-copy {
+    position: relative;
+    z-index: 1;
+    min-width: 0;
+}
+
+.dsc-spotlight-title {
+    margin: 10px 0 0;
+    font-size: clamp(1.8rem, 3vw, 2.8rem);
+    font-weight: 850;
+    letter-spacing: -0.035em;
+    line-height: 1.05;
+    color: #fff;
+    overflow-wrap: anywhere;
+}
+
+.dsc-spotlight-artist {
+    margin: 6px 0 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.dsc-spotlight-reason {
+    margin: 10px 0 0;
+    font-size: 0.88rem;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+@media (max-width: 1100px) {
+    .dsc-pulse-row {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+@media (max-width: 760px) {
+    .dsc-week {
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 18px;
+    }
+    .dsc-week-chart {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        height: 80px;
+    }
+    .dsc-week-top {
+        width: 96px;
+    }
+    .dsc-week-top-img {
+        width: 56px;
+        height: 56px;
+    }
+    .dsc-week-figure strong {
+        font-size: 2.1rem;
+    }
+    .dsc-spotlight {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 18px;
+        padding: 20px;
+    }
+    .dsc-spotlight-cover {
+        width: 140px;
+        height: 140px;
+    }
+}
