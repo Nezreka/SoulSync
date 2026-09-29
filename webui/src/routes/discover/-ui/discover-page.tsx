@@ -89,6 +89,7 @@ import { CacheShelf, GenreExplorerSection } from './cache-shelves';
 import { DeezerEditorialShelf } from './deezer-editorial-shelf';
 import { DiscoverHero } from './discover-hero';
 import { DiscoverLayoutModal } from './discover-layout-modal';
+import { DiscoverNav, type DiscoverNavItem } from './discover-nav';
 import { DiscoveryInbox } from './discovery-inbox';
 import { DownloadBar } from './download-bar';
 import { GenreDiveModal } from './genre-dive-modal';
@@ -193,115 +194,27 @@ function okData<T>(outcome: unknown): T | undefined {
   return o?.kind === 'ok' ? o.data : undefined;
 }
 
-interface DiscoveryActionCard {
-  id: string;
-  eyebrow: string;
-  title: string;
-  detail: string;
-  value: string;
-  target: string;
-}
-
-interface DiscoveryInsight {
-  eyebrow: string;
-  title: string;
-  detail: string;
-  value: string;
-  actionLabel: string;
-  target: string;
-}
-
-function scrollToDiscoveryTarget(target: string) {
-  document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
-function DiscoveryActionCard({ card }: { card: DiscoveryActionCard }) {
-  return (
-    <button
-      type="button"
-      className={`discover-action-card discover-action-card--${card.id}`}
-      onClick={() => scrollToDiscoveryTarget(card.target)}
-    >
-      <span className="discover-action-card__eyebrow">{card.eyebrow}</span>
-      <span className="discover-action-card__title">{card.title}</span>
-      <span className="discover-action-card__detail">{card.detail}</span>
-      <span className="discover-action-card__value">{card.value}</span>
-    </button>
-  );
-}
-
-function DiscoveryCommandPanel({
-  cards,
-  insight,
-  onBuildPlaylist,
-  onOpenMap,
-  onOpenRecommended,
-}: {
-  cards: DiscoveryActionCard[];
-  insight: DiscoveryInsight;
-  onBuildPlaylist: () => void;
-  onOpenMap: () => void;
-  onOpenRecommended: () => void;
-}) {
-  return (
-    <aside className="discover-command-panel" aria-label="Discovery shortcuts">
-      <div className="discover-command-panel__head">
-        <span className="discover-command-kicker">Discovery Queue</span>
-        <h2>Start Here</h2>
-        <p>The strongest moves from your library, listening history, release gaps, and builders.</p>
-      </div>
-      <button
-        type="button"
-        className="discover-next-move"
-        onClick={() => scrollToDiscoveryTarget(insight.target)}
-      >
-        <span className="discover-next-move__eyebrow">{insight.eyebrow}</span>
-        <strong>{insight.title}</strong>
-        <span>{insight.detail}</span>
-        <span className="discover-next-move__foot">
-          <em>{insight.value}</em>
-          <b>{insight.actionLabel}</b>
-        </span>
-      </button>
-      <div className="discover-action-grid">
-        {cards.map((card) => (
-          <DiscoveryActionCard key={card.id} card={card} />
-        ))}
-      </div>
-      <div className="discover-command-tools">
-        <button type="button" onClick={onBuildPlaylist}>
-          Build playlist
-        </button>
-        <button type="button" onClick={onOpenMap}>
-          Artist map
-        </button>
-        <button type="button" onClick={onOpenRecommended}>
-          Recommended
-        </button>
-      </div>
-    </aside>
-  );
-}
-
 interface DiscoveryZoneProps {
   id: string;
   title: string;
   subtitle: string;
   tone: string;
-  metric: string;
   children: React.ReactNode;
 }
 
-function DiscoveryZone({ id, title, subtitle, tone, metric, children }: DiscoveryZoneProps) {
+/**
+ * one zone of the feed. a title and one line, then its rows. the zone used to
+ * wear a kicker that repeated its own title ("FOR YOU / For You") and a count
+ * of "signals", "leads" and "tools" that meant nothing to anyone reading it.
+ */
+function DiscoveryZone({ id, title, subtitle, tone, children }: DiscoveryZoneProps) {
   return (
     <section className={`discovery-zone discovery-zone--${tone}`} id={id}>
       <header className="discovery-zone-head">
         <div>
-          <span className="discovery-zone-kicker">{tone.replace('-', ' ')}</span>
           <h2>{title}</h2>
           <p>{subtitle}</p>
         </div>
-        <span className="discovery-zone-metric">{metric}</span>
       </header>
       <div className="discovery-zone-body">{children}</div>
     </section>
@@ -1260,83 +1173,6 @@ export function DiscoverPage() {
     }
   };
 
-  const recentAlbums = page.sectionState('recent-releases').items as RecentAlbum[];
-  const genreReleaseAlbums = page.sectionState('cache-genre-releases').items as CacheItem[];
-  const undiscoveredAlbums = page.sectionState('cache-undiscovered').items as CacheItem[];
-  const labelAlbums = page.sectionState('cache-label-explorer').items as CacheItem[];
-  const deepCuts = page.sectionState('cache-deep-cuts').items as CacheItem[];
-  const genrePills = page.sectionState('cache-genre-explorer').items as { genre?: string }[];
-  const personalSignalCount = mixes.mixes.length + listeningArtists.length + recArtists.length;
-  const actionableAlbumCount =
-    recentAlbums.length +
-    genreReleaseAlbums.length +
-    undiscoveredAlbums.length +
-    labelAlbums.length;
-  const librarySignalCount = deepCuts.length + decadeMixesHydrated.length;
-  const toolSignalCount = genrePills.length + lbMixesHydrated.length + lastfm.mixes.length;
-  const discoveryInsight: DiscoveryInsight =
-    actionableAlbumCount > 0
-      ? {
-          eyebrow: 'Next best move',
-          title: 'Fill the newest gaps first',
-          detail: 'New releases, label finds, and missing albums are ready to open or download.',
-          value: `${actionableAlbumCount} albums`,
-          actionLabel: 'Review gaps',
-          target: 'discover-zone-new-missing',
-        }
-      : personalSignalCount > 0
-        ? {
-            eyebrow: 'Next best move',
-            title: 'Follow the taste engine',
-            detail: 'Your mixes and artist recommendations are the strongest live signal today.',
-            value: `${personalSignalCount} signals`,
-            actionLabel: 'Open For You',
-            target: 'discover-zone-for-you',
-          }
-        : {
-            eyebrow: 'Next best move',
-            title: 'Build from a seed artist',
-            detail: 'Start with one artist and let SoulSync expand the discovery graph.',
-            value: `${toolSignalCount} tools`,
-            actionLabel: 'Build',
-            target: 'build-a-playlist',
-          };
-
-  const actionCards: DiscoveryActionCard[] = [
-    {
-      id: 'for-you',
-      eyebrow: 'Personal',
-      title: 'For You',
-      detail: 'Mixes, artist recs, and because-you-listen-to picks.',
-      value: `${personalSignalCount} signals`,
-      target: 'discover-zone-for-you',
-    },
-    {
-      id: 'new-missing',
-      eyebrow: 'Actionable',
-      title: 'New & Missing',
-      detail: 'Fresh releases and library gaps ready to open or download.',
-      value: `${actionableAlbumCount} albums`,
-      target: 'discover-zone-new-missing',
-    },
-    {
-      id: 'library',
-      eyebrow: 'Library',
-      title: 'Your Taste Map',
-      detail: 'Saved artists, albums, eras, and deep cuts from your collection.',
-      value: `${librarySignalCount} leads`,
-      target: 'discover-zone-library',
-    },
-    {
-      id: 'tools',
-      eyebrow: 'Explore',
-      title: 'Browse & Build',
-      detail: 'Genre explorer, stations, ListenBrainz, and custom builder.',
-      value: `${toolSignalCount} tools`,
-      target: 'discover-zone-tools',
-    },
-  ];
-
   const renderZoneSections = (ids: DiscoverSectionId[]) =>
     ids.filter(hasContent).map((id) => (
       <div className={`discovery-zone-section discovery-zone-section--${id}`} key={id}>
@@ -1371,6 +1207,15 @@ export function DiscoverPage() {
       </>
     );
   };
+
+  const newMissingIds = zoneSections('new-missing');
+  const libraryIds = zoneSections('library');
+  const navItems: DiscoverNavItem[] = [
+    { id: 'discover-zone-for-you', label: 'For You' },
+    ...(newMissingIds.length ? [{ id: 'discover-zone-new-missing', label: 'New & Missing' }] : []),
+    ...(libraryIds.length ? [{ id: 'discover-zone-library', label: 'From Your Library' }] : []),
+    { id: 'discover-zone-tools', label: 'Explore & Build' },
+  ];
 
   const handleSaveLayout = (sections: Parameters<typeof pageLayout.save>[0]) => {
     setLayoutSaving(true);
@@ -1432,146 +1277,25 @@ export function DiscoverPage() {
               </button>
             </div>
           )}
-          {/* Quick Filter Navigation Rail (Spotify / Deezer style) */}
-          <nav className="dsc-quick-filter-bar" aria-label="Discover Categories">
-            <button
-              type="button"
-              className="dsc-filter-pill active"
-              onClick={() => scrollToDiscoveryTarget('discover-zone-for-you')}
-            >
-              <span>✨ For You</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-filter-pill"
-              onClick={() => scrollToDiscoveryTarget('discover-zone-for-you')}
-            >
-              <span>🎵 Daily Mixes</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-filter-pill"
-              onClick={() => scrollToDiscoveryTarget('recommended-stations-section')}
-            >
-              <span>📻 Artist Radio</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-filter-pill"
-              onClick={() => scrollToDiscoveryTarget('discover-zone-new-missing')}
-            >
-              <span>🔥 New Releases</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-filter-pill"
-              onClick={() => scrollToDiscoveryTarget('deezer-editorial')}
-            >
-              <span>🎧 Deezer Curated</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-filter-pill"
-              onClick={() => scrollToDiscoveryTarget('discover-zone-tools')}
-            >
-              <span>🪐 Explore & Lab</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-filter-pill"
-              onClick={() => scrollToDiscoveryTarget('discover-zone-library')}
-            >
-              <span>📦 Library Gaps</span>
-            </button>
-          </nav>
-
-          {/* Deezer Flow & Moods Bar */}
-          <div className="dsc-flow-bar" role="toolbar" aria-label="Music Moods">
-            <span className="dsc-flow-title">Flow Moods</span>
-            <button
-              type="button"
-              className="dsc-flow-pill"
-              onClick={() => scrollToDiscoveryTarget('discover-zone-for-you')}
-              title="Energizing high-tempo mixes"
-            >
-              <span className="dsc-flow-icon">⚡</span>
-              <span>Energizing</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-flow-pill"
-              onClick={() => scrollToDiscoveryTarget('discover-zone-for-you')}
-              title="Chill & ambient listening"
-            >
-              <span className="dsc-flow-icon">☕</span>
-              <span>Chill & Lo-Fi</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-flow-pill"
-              onClick={() => scrollToDiscoveryTarget('library-radio-section')}
-              title="Focus radio from your collection"
-            >
-              <span className="dsc-flow-icon">🎯</span>
-              <span>Focus</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-flow-pill"
-              onClick={() => scrollToDiscoveryTarget('discover-zone-library')}
-              title="Deep cuts and nocturnal sounds"
-            >
-              <span className="dsc-flow-icon">🌙</span>
-              <span>Deep Cuts</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-flow-pill"
-              onClick={() => scrollToDiscoveryTarget('discover-zone-tools')}
-              title="Surprise discovery shuffle"
-            >
-              <span className="dsc-flow-icon">🎲</span>
-              <span>Discovery Roulette</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-flow-pill"
-              onClick={() => setLayoutOpen(true)}
-              title="Choose which sections appear on Discover and in what order"
-            >
-              <span className="dsc-flow-icon">⚙️</span>
-              <span>Layout</span>
-            </button>
-          </div>
-
-          <div className="discover-command-grid">
-            <div className="discover-command-hero">
-              <DiscoverHero
-                artist={hero.artist}
-                loading={page.hero.isPending}
-                count={hero.artists.length}
-                index={hero.index}
-                watchlist={hero.watchlist}
-                watchAllPhase={hero.watchAllPhase}
-                discographyHref={
-                  hero.artist?.artist_id != null
-                    ? detailPath(hero.artist.artist_id, hero.artist.source ?? null)
-                    : '#'
-                }
-                onNavigate={hero.navigate}
-                onJump={hero.jump}
-                onToggleWatchlist={() => void hero.toggleWatchlist()}
-                onWatchAll={() => void hero.watchAll()}
-                onViewRecommended={() => setRecModalOpen(true)}
-                onOpenBlacklist={blacklist.openModal}
-              />
-            </div>
-            <DiscoveryCommandPanel
-              cards={actionCards}
-              insight={discoveryInsight}
-              onBuildPlaylist={() => scrollToDiscoveryTarget('build-a-playlist')}
-              onOpenMap={() => void map.openWatchlist()}
-              onOpenRecommended={() => setRecModalOpen(true)}
+          <div className="discover-command-hero">
+            <DiscoverHero
+              artist={hero.artist}
+              loading={page.hero.isPending}
+              count={hero.artists.length}
+              index={hero.index}
+              watchlist={hero.watchlist}
+              watchAllPhase={hero.watchAllPhase}
+              discographyHref={
+                hero.artist?.artist_id != null
+                  ? detailPath(hero.artist.artist_id, hero.artist.source ?? null)
+                  : '#'
+              }
+              onNavigate={hero.navigate}
+              onJump={hero.jump}
+              onToggleWatchlist={() => void hero.toggleWatchlist()}
+              onWatchAll={() => void hero.watchAll()}
+              onViewRecommended={() => setRecModalOpen(true)}
+              onOpenBlacklist={blacklist.openModal}
             />
           </div>
           <DiscoveryInbox
@@ -1581,42 +1305,43 @@ export function DiscoverPage() {
               return ref ? detailPath(ref.id, ref.source, item.artist_name) : '';
             }}
           />
+          <DiscoverNav items={navItems} onOpenLayout={() => setLayoutOpen(true)} />
           <DiscoveryZone
             id="discover-zone-for-you"
             title="For You"
-            subtitle="High-confidence mixes, artist paths, and records connected to what you already play."
+            subtitle="Mixes, stations and artists picked from what you play."
             tone="for-you"
-            metric={`${personalSignalCount} signals`}
           >
             {renderForYouSections()}
           </DiscoveryZone>
 
-          <DiscoveryZone
-            id="discover-zone-new-missing"
-            title="New & Missing"
-            subtitle="Fresh releases and collection gaps worth opening, downloading, or syncing next."
-            tone="new-missing"
-            metric={`${actionableAlbumCount} albums`}
-          >
-            {renderZoneSections(zoneSections('new-missing'))}
-          </DiscoveryZone>
+          {newMissingIds.length > 0 && (
+            <DiscoveryZone
+              id="discover-zone-new-missing"
+              title="New & Missing"
+              subtitle="Fresh releases, and the albums your collection is missing."
+              tone="new-missing"
+            >
+              {renderZoneSections(newMissingIds)}
+            </DiscoveryZone>
+          )}
 
-          <DiscoveryZone
-            id="discover-zone-library"
-            title="Library Signals"
-            subtitle="Saved artists, eras, and deep cuts turned into useful entry points."
-            tone="library"
-            metric={`${librarySignalCount} leads`}
-          >
-            {renderZoneSections(zoneSections('library'))}
-          </DiscoveryZone>
+          {libraryIds.length > 0 && (
+            <DiscoveryZone
+              id="discover-zone-library"
+              title="From Your Library"
+              subtitle="Your artists, your eras, your deep cuts."
+              tone="library"
+            >
+              {renderZoneSections(libraryIds)}
+            </DiscoveryZone>
+          )}
 
           <DiscoveryZone
             id="discover-zone-tools"
             title="Explore & Build"
-            subtitle="The lab: maps, genres, radio, ListenBrainz, and custom playlists."
+            subtitle="Maps, genres, radio and playlist tools."
             tone="tools"
-            metric={`${toolSignalCount} tools`}
           >
             <div className="discovery-zone-section discovery-zone-section--map-tools">
               <div className="discover-hub-row discover-hub-row--tools">

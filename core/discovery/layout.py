@@ -1,7 +1,7 @@
 """Discover page layout: the single source of truth for section ids, zones, order.
 
 The 19 discover sections live in 4 zones, top to bottom: For You, New &
-Missing, Library Signals, Explore & Build. The frontend mirrors these ids for
+Missing, From Your Library, Explore & Build. The frontend mirrors these ids for
 rendering; the API validates and persists per-profile layouts against them.
 
 A layout is a list of ``{'id', 'zone', 'enabled', 'position'}`` entries.
@@ -21,7 +21,7 @@ ZONES = ('for-you', 'new-missing', 'library', 'tools')
 ZONE_LABELS = {
     'for-you': 'For You',
     'new-missing': 'New & Missing',
-    'library': 'Library Signals',
+    'library': 'From Your Library',
     'tools': 'Explore & Build',
 }
 

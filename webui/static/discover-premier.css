@@ -43,123 +43,22 @@
 }
 
 /* ── 2. Top Quick-Filter Navigation Rail (Spotify / Deezer style) ─────────── */
-.dsc-quick-filter-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 0 20px;
-    overflow-x: auto;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-    position: sticky;
-    top: 0;
-    z-index: 25;
-    background: linear-gradient(180deg, rgba(10, 13, 20, 0.95) 0%, rgba(10, 13, 20, 0.8) 75%, transparent 100%);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    margin-bottom: 8px;
-}
 
-.dsc-quick-filter-bar::-webkit-scrollbar {
-    display: none;
-}
 
-.dsc-filter-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 18px;
-    border-radius: 9999px;
-    font-size: 0.86rem;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    color: var(--dsc-text-secondary);
-    background: rgba(255, 255, 255, 0.07);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    cursor: pointer;
-    white-space: nowrap;
-    transition: all 180ms cubic-bezier(0.16, 1, 0.3, 1);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-    text-decoration: none;
-}
 
-.dsc-filter-pill:hover {
-    color: #ffffff;
-    background: rgba(255, 255, 255, 0.14);
-    border-color: rgba(255, 255, 255, 0.2);
-    transform: translateY(-1px);
-}
 
-.dsc-filter-pill.active,
-.dsc-filter-pill:active {
-    color: #000000;
-    background: #ffffff;
-    border-color: #ffffff;
-    box-shadow: 0 4px 16px rgba(255, 255, 255, 0.25);
-    font-weight: 700;
-}
+
 
 /* Deezer Flow & Moods Bar */
-.dsc-flow-bar {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 0 16px;
-    overflow-x: auto;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-}
 
-.dsc-flow-bar::-webkit-scrollbar {
-    display: none;
-}
 
-.dsc-flow-title {
-    font-size: 0.76rem;
-    font-weight: 800;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--dsc-text-muted);
-    margin-right: 4px;
-    white-space: nowrap;
-}
 
-.dsc-flow-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 7px 14px;
-    border-radius: 9999px;
-    font-size: 0.82rem;
-    font-weight: 600;
-    color: #ffffff;
-    background: rgba(162, 56, 255, 0.12);
-    border: 1px solid rgba(162, 56, 255, 0.25);
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
-    cursor: pointer;
-    white-space: nowrap;
-    transition: all 180ms ease;
-}
 
-.dsc-flow-pill:hover {
-    background: rgba(162, 56, 255, 0.28);
-    border-color: rgba(162, 56, 255, 0.5);
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(162, 56, 255, 0.35);
-}
 
-.dsc-flow-icon {
-    font-size: 14px;
-}
+
 
 /* ── 3. Cinematic Hero Billboard (Full-Width Immersion) ──────────────────── */
-.discover-command-grid {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 20px !important;
-    margin-bottom: 36px !important;
-    padding: 0 !important;
-}
+
 
 .discover-command-hero {
     width: 100% !important;
@@ -523,112 +422,138 @@
 }
 
 /* ── 4. Re-imagined Quick Signals Bar (Replacing the clunky sidebar) ──────── */
-.discover-command-panel {
-    display: grid !important;
-    grid-template-columns: minmax(280px, 340px) 1fr !important;
-    gap: 16px !important;
-    background: rgba(16, 20, 29, 0.7) !important;
-    backdrop-filter: blur(20px) !important;
-    -webkit-backdrop-filter: blur(20px) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    border-radius: 20px !important;
-    padding: 16px 20px !important;
-    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35) !important;
-}
 
-.discover-command-panel__head {
-    display: none !important;
-}
 
-.discover-next-move {
-    min-height: auto !important;
-    background: linear-gradient(135deg, rgba(var(--accent-rgb, 29, 185, 84), 0.22), rgba(16, 20, 29, 0.85)) !important;
-    border: 1px solid rgba(var(--accent-rgb, 29, 185, 84), 0.3) !important;
-    border-radius: 14px !important;
-    padding: 14px 18px !important;
-    display: flex !important;
-    flex-direction: column !important;
-    justify-content: center !important;
-    gap: 4px !important;
-}
 
-.discover-next-move:hover {
-    border-color: var(--accent-color, #1db954) !important;
-    box-shadow: 0 6px 24px rgba(var(--accent-rgb, 29, 185, 84), 0.25) !important;
-}
 
-.discover-action-grid {
-    display: grid !important;
-    grid-template-columns: repeat(4, 1fr) !important;
-    gap: 10px !important;
-}
 
-.discover-action-card {
-    background: rgba(255, 255, 255, 0.04) !important;
-    border: 1px solid rgba(255, 255, 255, 0.07) !important;
-    border-radius: 13px !important;
-    padding: 12px 14px !important;
-    transition: all 160ms cubic-bezier(0.16, 1, 0.3, 1) !important;
-}
 
-.discover-action-card:hover {
-    background: rgba(255, 255, 255, 0.08) !important;
-    border-color: rgba(255, 255, 255, 0.16) !important;
-    transform: translateY(-2px) !important;
-}
 
-.discover-command-tools {
-    display: none !important;
-}
 
-/* ── 5. Discovery Zones: Clean Section Containers ────────────────────────── */
+
+/* ── 5. Discovery Zones: a title, one line, then the rows ────────────────── */
 .discovery-zone {
-    margin-bottom: 44px !important;
+    margin: 0 0 56px !important;
     padding: 0 !important;
     background: transparent !important;
     border: none !important;
+    /* the sticky nav sits over the top of a zone it scrolled to */
+    scroll-margin-top: 64px;
+}
+
+.discovery-zone::before {
+    display: none !important;
 }
 
 .discovery-zone-head {
     display: flex !important;
     align-items: flex-end !important;
     justify-content: space-between !important;
-    margin-bottom: 20px !important;
-    padding: 0 4px 10px !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+    margin: 0 0 18px !important;
+    padding: 0 !important;
+    border: none !important;
 }
 
-.discovery-zone-kicker {
-    font-size: 0.72rem !important;
-    font-weight: 700 !important;
-    letter-spacing: 0.12em !important;
-    text-transform: uppercase !important;
-    color: var(--accent-color, #1db954) !important;
-    margin-bottom: 4px !important;
+.discovery-zone-head::before {
+    display: none !important;
 }
 
 .discovery-zone-head h2 {
-    font-size: 1.65rem !important;
+    font-size: 1.75rem !important;
     font-weight: 800 !important;
-    letter-spacing: -0.025em !important;
+    letter-spacing: -0.03em !important;
+    line-height: 1.1 !important;
     color: #ffffff !important;
     margin: 0 !important;
 }
 
 .discovery-zone-head p {
-    font-size: 0.88rem !important;
-    color: var(--dsc-text-secondary) !important;
-    margin-top: 4px !important;
+    font-size: 0.9rem !important;
+    color: rgba(255, 255, 255, 0.5) !important;
+    margin: 6px 0 0 !important;
 }
 
-.discovery-zone-metric {
-    font-size: 0.78rem !important;
-    font-weight: 700 !important;
-    background: rgba(255, 255, 255, 0.08) !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    border-radius: 9999px !important;
-    padding: 4px 12px !important;
-    color: var(--dsc-text-secondary) !important;
+/* one row of chips, one per zone on the page. sticky, so it's always a tap away */
+.dsc-nav {
+    position: sticky;
+    top: 0;
+    z-index: 25;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0 -4px 28px;
+    padding: 12px 4px;
+    background: linear-gradient(180deg, rgba(10, 11, 13, 0.96) 0%, rgba(10, 11, 13, 0.9) 70%, rgba(10, 11, 13, 0) 100%);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+}
+
+.dsc-nav-chips {
+    display: flex;
+    gap: 8px;
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.dsc-nav-chips::-webkit-scrollbar {
+    display: none;
+}
+
+.dsc-nav-chip,
+.dsc-nav-layout {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 34px;
+    padding: 0 16px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.78);
+    font: inherit;
+    font-size: 0.86rem;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+.dsc-nav-chip:hover,
+.dsc-nav-layout:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+.dsc-nav-chip.active {
+    background: #fff;
+    border-color: #fff;
+    color: #0a0b0d;
+}
+
+.dsc-nav-layout {
+    padding: 0 14px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.dsc-nav-chip:focus-visible,
+.dsc-nav-layout:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb, 29, 185, 84), 0.9);
+    outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+    .dsc-nav-layout span {
+        display: none;
+    }
+    .dsc-nav-layout {
+        width: 34px;
+        padding: 0;
+        justify-content: center;
+    }
 }
 
 /* ── 6. Spotify-Style Tactile Music Cards ────────────────────────────────── */
@@ -1079,19 +1004,24 @@
 }
 
 /* ── 8. Taste Dial (Adventurousness Wave) ─────────────────────────────────── */
-.adv-wave {
+/* min-height auto on purpose. style.css still carried min-height: 100% from
+   the old two-column rows, which stretched the dial ~100px past its content
+   and, with the margins here, pushed it 20px into the shelf below. */
+.adv-wave,
+.discovery-zone .adv-wave {
     position: relative !important;
     display: flex !important;
     flex-direction: column !important;
-    gap: 14px !important;
+    gap: 10px !important;
+    min-height: auto !important;
     background: linear-gradient(135deg, rgba(20, 26, 38, 0.75) 0%, rgba(12, 16, 24, 0.85) 100%) !important;
     backdrop-filter: blur(20px) !important;
     -webkit-backdrop-filter: blur(20px) !important;
-    border: 1px solid rgba(255, 255, 255, 0.09) !important;
-    border-radius: 20px !important;
-    padding: 24px 28px 22px !important;
-    margin: 20px 0 36px !important;
-    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border-radius: 18px !important;
+    padding: 18px 22px 16px !important;
+    margin: 8px 0 32px !important;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35) !important;
     overflow: hidden !important;
 }
 
@@ -1126,9 +1056,10 @@
     margin: 0 !important;
 }
 
-.adv-wave-track {
+.adv-wave-track,
+.discovery-zone .adv-wave-track {
     position: relative !important;
-    height: 104px !important;
+    height: 72px !important;
     border-radius: 14px !important;
     overflow: hidden !important;
     background: rgba(10, 13, 20, 0.85) !important;

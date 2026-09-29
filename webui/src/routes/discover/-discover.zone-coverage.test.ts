@@ -74,8 +74,10 @@ describe('the page renders all four zones from the profile layout', () => {
     expect(PAGE).toContain('<StationsRow');
   });
 
-  it('offers the Layout customizer from the pill rail', () => {
-    expect(PAGE).toContain('⚙️');
+  it('offers the Layout customizer from the section nav', () => {
+    expect(PAGE).toContain(
+      '<DiscoverNav items={navItems} onOpenLayout={() => setLayoutOpen(true)} />',
+    );
     expect(PAGE).toContain('DiscoverLayoutModal');
     expect(PAGE).toContain('setLayoutOpen(true)');
   });

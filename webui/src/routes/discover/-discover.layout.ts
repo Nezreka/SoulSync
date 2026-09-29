@@ -211,7 +211,7 @@ export type DiscoverZoneId = 'for-you' | 'new-missing' | 'library' | 'tools';
 export const DISCOVER_ZONES: { id: DiscoverZoneId; label: string }[] = [
   { id: 'for-you', label: 'For You' },
   { id: 'new-missing', label: 'New & Missing' },
-  { id: 'library', label: 'Library Signals' },
+  { id: 'library', label: 'From Your Library' },
   { id: 'tools', label: 'Explore & Build' },
 ];
 
