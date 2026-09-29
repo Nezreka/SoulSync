@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 /**
- * one music video at a time, and only the one you're looking at.
+ * music videos behind banners, only where you're looking, within a budget.
  *
  * every banner that could play a video registers a slot with how much of it
- * is on screen. the stage picks ONE: the most visible slot that has a video,
- * and only if at least half of it is showing. only that slot mounts a player,
- * so there's never more than one video element on the page, and scrolling a
- * banner away tears its player down. nothing plays while the tab is hidden,
- * with reduced motion on, or when you've switched video backgrounds off.
+ * is on screen. the stage picks which ones are live: the one you turned the
+ * sound on for, then one you're pointing at, then the most visible ones (at
+ * least half showing), up to a budget the device can carry. only live slots
+ * mount a player, so scrolling a banner away tears its player down. nothing
+ * plays while the tab is hidden, with reduced motion on, or when you've
+ * switched video backgrounds off. only one video ever has its sound on.
  */
 
 export interface SlotState {
@@ -18,41 +19,60 @@ export interface SlotState {
   hasVideo: boolean;
   /** the pointer is on it: a hovered card with a video jumps the queue */
   hover?: boolean;
-  /** its rail picked it as the one to play next (the watch rail's cycle) */
-  boost?: boolean;
-  /** you turned its sound on: it keeps the stage until you mute it or scroll it away */
-  held?: boolean;
 }
 
 /** at least this much of a banner must be showing for its video to play */
 export const MIN_VISIBLE = 0.5;
 
+/** a live banner keeps its place over one that's only a little more visible */
+const STICKY = 0.15;
+
+export interface DeviceHints {
+  hardwareConcurrency?: number;
+  deviceMemory?: number;
+  connection?: { saveData?: boolean };
+}
+
 /**
- * the slot that gets the stage, or null. one playing with its sound on keeps
- * it; then a hovered slot with a video wins (you pointed at it); then one its rail is cycling to, if it's on
- * screen; otherwise the most visible one with a video, if at least half of
- * it shows. ties go to the one registered first.
+ * how many videos may play at once. one on a phone or with data saver on,
+ * two on a small machine, up to six on a strong one. muted players this
+ * small get youtube's low-bitrate streams, so six is light work for a desktop.
  */
-export function chooseActive(slots: Map<string, SlotState>, enabled: boolean): string | null {
-  if (!enabled) return null;
-  for (const [id, s] of slots) {
-    if (s.held && s.hasVideo && s.ratio > 0) return id;
-  }
-  for (const [id, s] of slots) {
-    if (s.hover && s.hasVideo && s.ratio > 0) return id;
-  }
-  for (const [id, s] of slots) {
-    if (s.boost && s.hasVideo && s.ratio >= MIN_VISIBLE) return id;
-  }
-  let best: string | null = null;
-  let bestRatio = MIN_VISIBLE - 1e-9;
-  for (const [id, s] of slots) {
-    if (s.hasVideo && s.ratio > bestRatio) {
-      best = id;
-      bestRatio = s.ratio;
-    }
-  }
-  return best;
+export function liveBudget(nav: DeviceHints, coarsePointer: boolean): number {
+  if (nav.connection?.saveData || coarsePointer) return 1;
+  if ((nav.deviceMemory ?? 8) < 4) return 2;
+  const cores = nav.hardwareConcurrency ?? 4;
+  if (cores >= 8) return 6;
+  return cores >= 4 ? 4 : 2;
+}
+
+/**
+ * the slots that play, in priority order. the sound owner first (while any
+ * of it shows), then hovered slots, then the most visible with at least half
+ * showing. slots already live get a small edge so a card on the edge of the
+ * screen doesn't flicker between players.
+ */
+export function chooseLive(
+  slots: Map<string, SlotState>,
+  enabled: boolean,
+  budget: number,
+  sound: string | null = null,
+  current: ReadonlySet<string> = new Set(),
+): string[] {
+  if (!enabled || budget < 1) return [];
+  const out: string[] = [];
+  const take = (id: string) => {
+    if (out.length < budget && !out.includes(id)) out.push(id);
+  };
+  const soundSlot = sound ? slots.get(sound) : undefined;
+  if (sound && soundSlot?.hasVideo && soundSlot.ratio > 0) take(sound);
+  for (const [id, s] of slots) if (s.hover && s.hasVideo && s.ratio > 0) take(id);
+  const score = (id: string, s: SlotState) => s.ratio + (current.has(id) ? STICKY : 0);
+  const rest = [...slots]
+    .filter(([, s]) => s.hasVideo && s.ratio >= MIN_VISIBLE)
+    .sort((a, b) => score(b[0], b[1]) - score(a[0], a[1]));
+  for (const [id] of rest) take(id);
+  return out;
 }
 
 const PREF_KEY = 'soulsync.discover.videoBackdrops';
@@ -73,17 +93,23 @@ function prefersReducedMotion(): boolean {
 export class VideoStage {
   private slots = new Map<string, SlotState>();
   private listeners = new Set<() => void>();
-  private active: string | null = null;
+  private live: ReadonlySet<string> = new Set();
+  private sound: string | null = null;
   userEnabled = true;
   pageVisible = true;
   reducedMotion = false;
+  budget = 1;
 
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   };
 
-  getActive = () => this.active;
+  isLive = (id: string) => this.live.has(id);
+
+  getLive = () => this.live;
+
+  getSound = () => this.sound;
 
   get enabled(): boolean {
     return this.userEnabled && this.pageVisible && !this.reducedMotion;
@@ -100,31 +126,60 @@ export class VideoStage {
     this.recompute();
   }
 
-  recompute() {
-    const next = chooseActive(this.slots, this.enabled);
-    if (next !== this.active) {
-      this.active = next;
-      for (const fn of this.listeners) fn();
-    }
+  /** give one banner the sound (null mutes it). every other video stays muted */
+  setSound(id: string | null) {
+    if (this.sound === id) return;
+    this.sound = id;
+    this.recompute();
+    this.notify();
   }
 
-  /** notify even when the active slot didn't change (the on/off toggle) */
+  recompute() {
+    const next = chooseLive(this.slots, this.enabled, this.budget, this.sound, this.live);
+    let changed = next.length !== this.live.size || next.some((id) => !this.live.has(id));
+    if (changed) this.live = new Set(next);
+    // the sound goes with its video
+    if (this.sound && !this.live.has(this.sound)) {
+      this.sound = null;
+      changed = true;
+    }
+    if (changed) this.notify();
+  }
+
+  /** notify even when the live set didn't change (the on/off toggle) */
   touch() {
     this.recompute();
+    this.notify();
+  }
+
+  private notify() {
     for (const fn of this.listeners) fn();
   }
 }
 
 export const videoStage = new VideoStage();
 
-let wired = false;
+const wired = new WeakSet<VideoStage>();
 /** hook the stage to the page once: visibility, reduced motion, the saved toggle. */
 function wireStage(stage: VideoStage) {
-  if (wired) return;
-  wired = true;
+  if (wired.has(stage)) return;
+  wired.add(stage);
   stage.userEnabled = readPref();
   stage.reducedMotion = prefersReducedMotion();
   stage.pageVisible = !document.hidden;
+  stage.budget = liveBudget(
+    navigator as DeviceHints,
+    Boolean(window.matchMedia?.('(pointer: coarse)').matches),
+  );
+  // soulsync's own player started: the video gives the sound back. media
+  // events don't bubble, so listen in the capture phase
+  document.addEventListener(
+    'play',
+    (e) => {
+      if ((e.target as Element | null)?.id === 'audio-player') stage.setSound(null);
+    },
+    true,
+  );
   document.addEventListener('visibilitychange', () => {
     stage.pageVisible = !document.hidden;
     stage.recompute();
@@ -158,16 +213,16 @@ export interface VideoSlot {
   ref: (el: HTMLElement | null) => void;
   /** it has been on screen at least once: fetch its video now, not before */
   seen: boolean;
-  /** it holds the stage: mount the player */
+  /** it's live: mount the player */
   playing: boolean;
-  /** tell the stage the pointer is on this banner, or has left it */
-  setHover: (hover: boolean) => void;
-  /** this banner's rail wants it played next */
-  setBoost: (boost: boolean) => void;
-  /** its sound is on: hold the stage */
-  setHeld: (held: boolean) => void;
   /** at least MIN_VISIBLE of it is on screen */
   visible: boolean;
+  /** tell the stage the pointer is on this banner, or has left it */
+  setHover: (hover: boolean) => void;
+  /** this banner's video is the one with sound */
+  soundOn: boolean;
+  /** take the sound (muting any other), or give it back */
+  setSound: (on: boolean) => void;
 }
 
 /** register a banner with the stage. */
@@ -176,7 +231,8 @@ export function useVideoSlot(id: string, hasVideo: boolean, stage = videoStage):
   const [el, setEl] = useState<HTMLElement | null>(null);
   const [seen, setSeen] = useState(false);
   const [visible, setVisible] = useState(false);
-  const active = useSyncExternalStore(stage.subscribe, stage.getActive);
+  const playing = useSyncExternalStore(stage.subscribe, () => stage.isLive(id));
+  const soundOn = useSyncExternalStore(stage.subscribe, () => stage.getSound() === id);
   const ref = useCallback((node: HTMLElement | null) => setEl(node), []);
 
   useEffect(() => {
@@ -205,8 +261,13 @@ export function useVideoSlot(id: string, hasVideo: boolean, stage = videoStage):
   useEffect(() => () => stage.remove(id), [id, stage]);
 
   const setHover = useCallback((hover: boolean) => stage.set(id, { hover }), [id, stage]);
-  const setBoost = useCallback((boost: boolean) => stage.set(id, { boost }), [id, stage]);
-  const setHeld = useCallback((held: boolean) => stage.set(id, { held }), [id, stage]);
+  const setSound = useCallback(
+    (on: boolean) => {
+      if (on) stage.setSound(id);
+      else if (stage.getSound() === id) stage.setSound(null);
+    },
+    [id, stage],
+  );
 
-  return { ref, seen, visible, playing: active === id, setHover, setBoost, setHeld };
+  return { ref, seen, visible, playing, setHover, soundOn, setSound };
 }

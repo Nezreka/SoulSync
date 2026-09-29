@@ -91,23 +91,15 @@ describe('PromoBanner', () => {
     rerender(<PromoBanner {...props({ videoId: 'v1', playing: true, onSoundChange })} />);
     fireEvent.click(screen.getByLabelText('Play this video with sound'));
     expect(pause).toHaveBeenCalledTimes(1);
-    expect(container.querySelector('.dsc-promo')).toHaveClass('has-sound');
     expect(onSoundChange).toHaveBeenLastCalledWith(true);
-    // it lost the stage: muted again, and it lets the stage go
-    rerender(<PromoBanner {...props({ videoId: 'v1', playing: false, onSoundChange })} />);
-    expect(container.querySelector('.dsc-promo')).not.toHaveClass('has-sound');
-    expect(onSoundChange).toHaveBeenLastCalledWith(false);
-    audio.remove();
-  });
-
-  it('shows the rail countdown only on the card that is up and live', () => {
-    const { container, rerender } = render(
-      <PromoBanner {...props({ videoId: 'v1', playing: true, cycleMs: 9000 })} />,
+    rerender(
+      <PromoBanner {...props({ videoId: 'v1', playing: true, soundOn: true, onSoundChange })} />,
     );
-    const bar = container.querySelector('.dsc-promo-countdown') as HTMLElement;
-    expect(bar.style.animationDuration).toBe('9000ms');
-    rerender(<PromoBanner {...props({ videoId: 'v1', playing: true, cycleMs: null })} />);
-    expect(container.querySelector('.dsc-promo-countdown')).toBeNull();
+    expect(container.querySelector('.dsc-promo')).toHaveClass('has-sound');
+    fireEvent.click(screen.getByLabelText('Mute this video'));
+    expect(onSoundChange).toHaveBeenLastCalledWith(false);
+    expect(pause).toHaveBeenCalledTimes(1);
+    audio.remove();
   });
 
   it('switches video backgrounds and says which way', () => {

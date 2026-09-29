@@ -1,112 +1,111 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { chooseActive, MIN_VISIBLE, VideoStage, type SlotState } from './-discover.video-stage';
+import {
+  chooseLive,
+  liveBudget,
+  MIN_VISIBLE,
+  VideoStage,
+  type SlotState,
+} from './-discover.video-stage';
 
 const slots = (entries: [string, SlotState][]) => new Map(entries);
 
-describe('chooseActive', () => {
-  it('gives the stage to the most visible banner that has a video', () => {
-    expect(
-      chooseActive(
-        slots([
-          ['hero', { ratio: 0.6, hasVideo: true }],
-          ['spotlight', { ratio: 0.9, hasVideo: true }],
-        ]),
-        true,
-      ),
-    ).toBe('spotlight');
-  });
-
-  it('never picks a banner without a video, however visible', () => {
-    expect(
-      chooseActive(
-        slots([
-          ['hero', { ratio: 1, hasVideo: false }],
-          ['spotlight', { ratio: 0.7, hasVideo: true }],
-        ]),
-        true,
-      ),
-    ).toBe('spotlight');
+describe('chooseLive', () => {
+  it('plays the most visible banners with a video, up to the budget', () => {
+    const s = slots([
+      ['a', { ratio: 0.6, hasVideo: true }],
+      ['b', { ratio: 1, hasVideo: true }],
+      ['c', { ratio: 0.9, hasVideo: true }],
+      ['d', { ratio: 1, hasVideo: false }],
+    ]);
+    expect(chooseLive(s, true, 2)).toEqual(['b', 'c']);
+    expect(chooseLive(s, true, 6)).toEqual(['b', 'c', 'a']);
   });
 
   it('needs at least half a banner on screen', () => {
     expect(MIN_VISIBLE).toBe(0.5);
-    expect(chooseActive(slots([['hero', { ratio: 0.49, hasVideo: true }]]), true)).toBeNull();
-    expect(chooseActive(slots([['hero', { ratio: 0.5, hasVideo: true }]]), true)).toBe('hero');
+    expect(chooseLive(slots([['a', { ratio: 0.49, hasVideo: true }]]), true, 4)).toEqual([]);
+    expect(chooseLive(slots([['a', { ratio: 0.5, hasVideo: true }]]), true, 4)).toEqual(['a']);
   });
 
-  it('a hovered card with a video jumps the queue, even over a more visible one', () => {
-    expect(
-      chooseActive(
-        slots([
-          ['feature', { ratio: 1, hasVideo: true }],
-          ['card-3', { ratio: 0.4, hasVideo: true, hover: true }],
-        ]),
-        true,
-      ),
-    ).toBe('card-3');
-    // pointing at a card with no video changes nothing
-    expect(
-      chooseActive(
-        slots([
-          ['feature', { ratio: 1, hasVideo: true }],
-          ['card-3', { ratio: 1, hasVideo: false, hover: true }],
-        ]),
-        true,
-      ),
-    ).toBe('feature');
-  });
-
-  it('a banner with its sound on keeps the stage over a hovered one', () => {
+  it('a hovered card jumps the queue, even partly off screen', () => {
     const s = slots([
-      ['card-2', { ratio: 0.4, hasVideo: true, held: true }],
-      ['card-5', { ratio: 1, hasVideo: true, hover: true }],
+      ['feature', { ratio: 1, hasVideo: true }],
+      ['card', { ratio: 0.3, hasVideo: true, hover: true }],
     ]);
-    expect(chooseActive(s, true)).toBe('card-2');
-    // scrolled fully away, it lets go
-    s.set('card-2', { ratio: 0, hasVideo: true, held: true });
-    expect(chooseActive(s, true)).toBe('card-5');
+    expect(chooseLive(s, true, 1)).toEqual(['card']);
+    // pointing at a card with no video changes nothing
+    s.set('card', { ratio: 1, hasVideo: false, hover: true });
+    expect(chooseLive(s, true, 1)).toEqual(['feature']);
   });
 
-  it("a rail's cycle picks its card over plain visibility, but only on screen", () => {
-    const both = (ratio: number) =>
-      slots([
-        ['feature', { ratio: 1, hasVideo: true }],
-        ['card-2', { ratio, hasVideo: true, boost: true }],
-      ]);
-    expect(chooseActive(both(0.8), true)).toBe('card-2');
-    expect(chooseActive(both(0.3), true)).toBe('feature');
-    // a hovered card still beats the cycle
-    expect(
-      chooseActive(
-        slots([
-          ['card-2', { ratio: 1, hasVideo: true, boost: true }],
-          ['card-5', { ratio: 1, hasVideo: true, hover: true }],
-        ]),
-        true,
-      ),
-    ).toBe('card-5');
+  it('the banner with sound comes first, and lets go once fully off screen', () => {
+    const s = slots([
+      ['loud', { ratio: 0.2, hasVideo: true }],
+      ['card', { ratio: 1, hasVideo: true, hover: true }],
+    ]);
+    expect(chooseLive(s, true, 1, 'loud')).toEqual(['loud']);
+    s.set('loud', { ratio: 0, hasVideo: true });
+    expect(chooseLive(s, true, 1, 'loud')).toEqual(['card']);
+  });
+
+  it("a live banner keeps its player over one that's only a bit more visible", () => {
+    const s = slots([
+      ['new', { ratio: 0.8, hasVideo: true }],
+      ['old', { ratio: 0.7, hasVideo: true }],
+    ]);
+    expect(chooseLive(s, true, 1)).toEqual(['new']);
+    expect(chooseLive(s, true, 1, null, new Set(['old']))).toEqual(['old']);
+    s.set('new', { ratio: 1, hasVideo: true });
+    expect(chooseLive(s, true, 1, null, new Set(['old']))).toEqual(['new']);
   });
 
   it('plays nothing when disabled', () => {
-    expect(chooseActive(slots([['hero', { ratio: 1, hasVideo: true }]]), false)).toBeNull();
+    expect(chooseLive(slots([['a', { ratio: 1, hasVideo: true }]]), false, 6)).toEqual([]);
+  });
+});
+
+describe('liveBudget', () => {
+  it('scales with the machine, and drops to one on a phone or data saver', () => {
+    expect(liveBudget({ hardwareConcurrency: 12, deviceMemory: 8 }, false)).toBe(6);
+    expect(liveBudget({ hardwareConcurrency: 4 }, false)).toBe(4);
+    expect(liveBudget({ hardwareConcurrency: 2 }, false)).toBe(2);
+    expect(liveBudget({ hardwareConcurrency: 16, deviceMemory: 2 }, false)).toBe(2);
+    expect(liveBudget({ hardwareConcurrency: 16 }, true)).toBe(1);
+    expect(liveBudget({ hardwareConcurrency: 16, connection: { saveData: true } }, false)).toBe(1);
   });
 });
 
 describe('VideoStage', () => {
-  it('hands over as banners scroll, and tells its listeners', () => {
+  it('hands players over as banners scroll, and tells its listeners', () => {
     const stage = new VideoStage();
+    stage.budget = 2;
     const heard = vi.fn();
     stage.subscribe(heard);
-    stage.set('hero', { ratio: 1, hasVideo: true });
-    expect(stage.getActive()).toBe('hero');
-    stage.set('hero', { ratio: 0.1 });
-    stage.set('spotlight', { ratio: 0.8, hasVideo: true });
-    expect(stage.getActive()).toBe('spotlight');
-    stage.remove('spotlight');
-    expect(stage.getActive()).toBeNull();
-    // hero, nobody (hero scrolled to 10%), spotlight, nobody
-    expect(heard).toHaveBeenCalledTimes(4);
+    stage.set('a', { ratio: 1, hasVideo: true });
+    stage.set('b', { ratio: 1, hasVideo: true });
+    stage.set('c', { ratio: 1, hasVideo: true });
+    expect([...stage.getLive()]).toEqual(['a', 'b']);
+    stage.set('a', { ratio: 0.1 });
+    expect([...stage.getLive()].sort()).toEqual(['b', 'c']);
+    stage.remove('b');
+    stage.remove('c');
+    expect(stage.getLive().size).toBe(0);
+    // a, a+b, b+c, c, nobody
+    expect(heard).toHaveBeenCalledTimes(5);
+  });
+
+  it('one banner has the sound at a time, and it goes with the video', () => {
+    const stage = new VideoStage();
+    stage.budget = 3;
+    stage.set('a', { ratio: 1, hasVideo: true });
+    stage.set('b', { ratio: 1, hasVideo: true });
+    stage.setSound('a');
+    expect(stage.getSound()).toBe('a');
+    stage.setSound('b');
+    expect(stage.getSound()).toBe('b');
+    stage.set('b', { ratio: 0 });
+    expect(stage.getSound()).toBeNull();
   });
 
   it('stops everything while the tab is hidden, with reduced motion, or switched off', () => {
@@ -114,18 +113,18 @@ describe('VideoStage', () => {
     stage.set('hero', { ratio: 1, hasVideo: true });
     stage.pageVisible = false;
     stage.recompute();
-    expect(stage.getActive()).toBeNull();
+    expect(stage.isLive('hero')).toBe(false);
     stage.pageVisible = true;
     stage.reducedMotion = true;
     stage.recompute();
-    expect(stage.getActive()).toBeNull();
+    expect(stage.isLive('hero')).toBe(false);
     stage.reducedMotion = false;
     stage.userEnabled = false;
     stage.recompute();
-    expect(stage.getActive()).toBeNull();
+    expect(stage.isLive('hero')).toBe(false);
     stage.userEnabled = true;
     stage.recompute();
-    expect(stage.getActive()).toBe('hero');
+    expect(stage.isLive('hero')).toBe(true);
   });
 });
 
@@ -142,7 +141,7 @@ describe('the hooks', () => {
     expect(result.current[0]).toBe(true);
   });
 
-  it('useVideoSlot plays the one banner on screen, and only once it has a video', async () => {
+  it('useVideoSlot plays a banner on screen once it has a video, and hands over the sound', async () => {
     const { act, renderHook } = await import('@testing-library/react');
     const { useVideoSlot, videoStage } = await import('./-discover.video-stage');
     let fire: (ratio: number) => void = () => {};
@@ -165,6 +164,18 @@ describe('the hooks', () => {
       expect(result.current.seen).toBe(true);
       expect(result.current.playing).toBe(false); // no video yet
       rerender({ has: true });
+      expect(result.current.playing).toBe(true);
+      act(() => result.current.setSound(true));
+      expect(result.current.soundOn).toBe(true);
+      // soulsync's own player starts: the video goes quiet
+      const audio = document.createElement('audio');
+      audio.id = 'audio-player';
+      document.body.appendChild(audio);
+      act(() => {
+        audio.dispatchEvent(new Event('play'));
+      });
+      audio.remove();
+      expect(result.current.soundOn).toBe(false);
       expect(result.current.playing).toBe(true);
       act(() => fire(0.2));
       expect(result.current.playing).toBe(false); // scrolled mostly away

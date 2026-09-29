@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
+import { useEffect, useRef, type PointerEvent, type ReactNode } from 'react';
 
 import { BackdropVideo } from './backdrop-video';
 
@@ -12,7 +12,7 @@ import { BackdropVideo } from './backdrop-video';
  * actually playing. the artwork also sits sharp on the left as the ad's cover.
  *
  * a live video can be unmuted (tap for sound), which pauses soulsync's own
- * player and holds the stage on this banner until it's muted again. under a
+ * player and mutes any other banner. under a
  * mouse the banner tilts toward the pointer with a glare that follows it.
  */
 
@@ -41,10 +41,10 @@ export interface PromoBannerProps {
   size?: 'wide' | 'feature' | 'tile' | 'portrait';
   /** the pointer entered or left: the stage plays a hovered card's video first */
   onHoverChange?: (hover: boolean) => void;
-  /** its sound went on or off: the stage keeps a banner with sound on */
+  /** this banner's video is the one with sound (the stage allows one) */
+  soundOn?: boolean;
+  /** take the sound or give it back */
   onSoundChange?: (on: boolean) => void;
-  /** a rail is cycling through its cards and this is the one up: show the countdown */
-  cycleMs?: number | null;
 }
 
 /** pointer position over the banner as -1..1 from its centre, for the tilt */
@@ -82,23 +82,13 @@ export function PromoBanner({
   videoToggle,
   size = 'wide',
   onHoverChange,
+  soundOn = false,
   onSoundChange,
-  cycleMs,
 }: PromoBannerProps) {
   const live = playing && Boolean(videoId);
-  const [soundOn, setSoundOn] = useState(false);
-  const soundCb = useRef(onSoundChange);
-  soundCb.current = onSoundChange;
-  // every time the video stops (scrolled away, lost the stage), it's muted again
-  useEffect(() => {
-    if (!live) setSoundOn(false);
-  }, [live]);
-  useEffect(() => {
-    soundCb.current?.(soundOn);
-  }, [soundOn]);
   const toggleSound = () => {
     if (!soundOn) pauseSoulSyncPlayer();
-    setSoundOn(!soundOn);
+    onSoundChange?.(!soundOn);
   };
 
   const frame = useRef(0);
@@ -153,15 +143,7 @@ export function PromoBanner({
         <div className="dsc-promo-scrim" />
         {tilts ? <div className="dsc-promo-glare" /> : null}
       </div>
-      {live && cycleMs ? (
-        <div
-          key={videoId}
-          className="dsc-promo-countdown"
-          aria-hidden="true"
-          style={{ animationDuration: `${cycleMs}ms` }}
-        />
-      ) : null}
-      {live ? (
+      {live && onSoundChange ? (
         <button
           type="button"
           className={`dsc-promo-sound${soundOn ? ' on' : ''}`}

@@ -18,6 +18,7 @@ import {
   fetchBecauseYouListenTo,
   fetchGenreDeepDive,
   fetchFlow,
+  fetchInbox,
   fetchLbPlaylist,
   fetchWeekStats,
 } from '../-discover.api';
@@ -53,6 +54,7 @@ import {
 } from '../-discover.listenbrainz';
 import { beginPlayIntent, playMixNow, playTrackNow, type PlayIntent } from '../-discover.playable';
 import { syncBubbleImage, toSyncTracks } from '../-discover.playlist-sync';
+import { pickConcert, pickPosterAlbum, posterDay } from '../-discover.posters';
 import { profileKey, useProfileScope } from '../-discover.profile-scope';
 import { pickSpotlight, releaseKind, shortDate, tasteGap, weekSummary } from '../-discover.pulse';
 import { keepRecipe, recipeVerb, refreshRecipe, type RecipeMixCard } from '../-discover.recipes';
@@ -111,6 +113,7 @@ import { GreetingGrid } from './greeting-grid';
 import { MixModal } from './mix-modal';
 import { MixShelf } from './mix-shelf';
 import { NowPlayingBanner, useNowPlaying } from './now-playing-banner';
+import { AlbumPoster, ArtistPoster, ConcertPoster, PosterRow } from './poster-row';
 import { PromoBanner } from './promo-banner';
 import { TasteGapBanner, useReveal, WeekBanner } from './pulse-banners';
 import { LastfmRadioSection, ListenBrainzSection } from './radio-sections';
@@ -1294,6 +1297,25 @@ export function DiscoverPage() {
     throwback?.cover,
     videosOn,
   );
+  // the poster row: a show coming up (the inbox's concerts, shared with the
+  // inbox list's own query), a second release, and your week's number one
+  const inboxQuery = useQuery({
+    queryKey: ['discover', 'inbox', 'new'] as const,
+    queryFn: () => fetchInbox('new'),
+    retry: false,
+  });
+  const concert = pickConcert(inboxQuery.data?.items);
+  const concertDay = concert ? posterDay(concert.item.item_date) : null;
+  const photoByName = new Map<string, string>();
+  for (const a of [
+    ...(weekQuery.data?.top_artists ?? []).map((t) => ({ n: t.name, i: t.image_url })),
+    ...hero.artists.map((h) => ({ n: h.artist_name, i: h.image_url })),
+    ...recArtists.map((r) => ({ n: r.artist_name, i: r.image_url })),
+  ]) {
+    if (a.n && a.i && !photoByName.has(a.n.toLowerCase())) photoByName.set(a.n.toLowerCase(), a.i);
+  }
+  const posterAlbum = pickPosterAlbum(recentForSpotlight, spotlight?.index ?? null);
+  const topArtist = week?.topArtist ?? null;
   const [bentoRef, bentoIn] = useReveal<HTMLElement>();
   const videoToggle = { on: videosOn, onToggle: () => setVideosOn(!videosOn) };
   // the watch rail: hero picks and recommendations with a photo, one each,
@@ -1512,7 +1534,8 @@ export function DiscoverPage() {
                   kind="release"
                   size="feature"
                   onHoverChange={releasePromo.setHover}
-                  onSoundChange={releasePromo.setHeld}
+                  soundOn={releasePromo.soundOn}
+                  onSoundChange={releasePromo.setSound}
                   eyebrow={`${releaseKind(spotlight.album.album_type)}${shortDate(spotlight.album.release_date) ? ` · ${shortDate(spotlight.album.release_date)}` : ''}`}
                   title={spotlight.album.album_name ?? ''}
                   subtitle={
@@ -1545,7 +1568,8 @@ export function DiscoverPage() {
                   kind="artist"
                   size="tile"
                   onHoverChange={artistPromo.setHover}
-                  onSoundChange={artistPromo.setHeld}
+                  soundOn={artistPromo.soundOn}
+                  onSoundChange={artistPromo.setSound}
                   eyebrow="An artist you should know"
                   title={artistPick.artist_name ?? ''}
                   subtitle={
@@ -1597,7 +1621,8 @@ export function DiscoverPage() {
                   kind="throwback"
                   size="tile"
                   onHoverChange={throwbackPromo.setHover}
-                  onSoundChange={throwbackPromo.setHeld}
+                  soundOn={throwbackPromo.soundOn}
+                  onSoundChange={throwbackPromo.setSound}
                   eyebrow="Throwback"
                   title={throwback.name}
                   subtitle={
@@ -1662,7 +1687,7 @@ export function DiscoverPage() {
 
           <VideoRail
             title="Watch"
-            subtitle="Artists picked for you, playing one after another. Point at one to watch it now."
+            subtitle="Artists picked for you, every one playing its video."
             artists={railArtists}
             videosOn={videosOn}
           />
@@ -1677,6 +1702,47 @@ export function DiscoverPage() {
               {renderZoneSections(libraryIds)}
             </DiscoveryZone>
           )}
+
+          <PosterRow>
+            {[
+              concert && concertDay ? (
+                <ConcertPoster
+                  key="concert"
+                  artist={concert.item.artist_name ?? ''}
+                  day={concertDay}
+                  venue={(concert.item.payload as { venue?: string } | undefined)?.venue}
+                  city={(concert.item.payload as { city?: string } | undefined)?.city}
+                  url={concert.item.payload?.url}
+                  more={concert.more}
+                  photo={photoByName.get((concert.item.artist_name ?? '').toLowerCase()) ?? null}
+                />
+              ) : null,
+              posterAlbum ? (
+                <AlbumPoster
+                  key="album"
+                  title={posterAlbum.album.album_name ?? ''}
+                  artist={posterAlbum.album.artist_name ?? ''}
+                  tag={releaseKind(posterAlbum.album.album_type as string | undefined)}
+                  art={posterAlbum.album.album_cover_url ?? ''}
+                  openLabel={`Open ${releaseKind(posterAlbum.album.album_type as string | undefined).replace('New ', '')}`}
+                  onOpen={() => void albumOpen.openRecentAlbum(posterAlbum.album)}
+                />
+              ) : null,
+              topArtist && (topArtist.play_count ?? 0) > 0 ? (
+                <ArtistPoster
+                  key="artist"
+                  name={topArtist.name}
+                  plays={topArtist.play_count ?? 0}
+                  photo={topArtist.image_url ?? null}
+                  href={
+                    topArtist.id != null
+                      ? detailPath(topArtist.id, 'library', topArtist.name)
+                      : null
+                  }
+                />
+              ) : null,
+            ]}
+          </PosterRow>
 
           <DiscoveryZone
             id="discover-zone-tools"

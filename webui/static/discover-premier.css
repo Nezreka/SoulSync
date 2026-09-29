@@ -3825,7 +3825,7 @@ a.dsc-now-artist:hover {
     }
 }
 
-/* ── 19. Banners you can touch: tilt, glare, sound, the rail's countdown ─── */
+/* ── 19. Banners you can touch: tilt, glare, sound, the entrance ───────── */
 /* under a mouse a banner leans toward the pointer. --px/--py are -1..1 from
    its centre, set by the banner as the pointer moves */
 .dsc-promo--feature { --tilt: 2.2deg; }
@@ -3937,25 +3937,6 @@ a.dsc-now-artist:hover {
     from { opacity: 0; transform: translateY(6px); }
 }
 
-/* the rail's countdown: a line along the top of the card that's up */
-.dsc-promo-countdown {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 3;
-    height: 3px;
-    background: rgb(var(--promo-rgb));
-    box-shadow: 0 0 12px rgba(var(--promo-rgb), 0.9);
-    transform-origin: left;
-    animation: dsc-countdown linear both;
-}
-
-@keyframes dsc-countdown {
-    from { transform: scaleX(0); }
-    to { transform: scaleX(1); }
-}
-
 /* sections rise in, one tile after another, the first time you reach them */
 .dsc-reveal:not(.is-in) > * {
     opacity: 0;
@@ -3980,8 +3961,496 @@ a.dsc-now-artist:hover {
         opacity: 1;
     }
     .dsc-reveal.is-in > *,
-    .dsc-promo-sound,
-    .dsc-promo-countdown {
+    .dsc-promo-sound {
         animation: none;
     }
+}
+
+/* ── 20. Posters: loud flat colour, a gig, a record, your number one ─────── */
+.dsc-posters {
+    margin: -12px 0 56px;
+}
+
+.dsc-posters-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+}
+
+.dsc-posters-grid--2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dsc-posters-grid--1 {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.dsc-poster {
+    --ink: 255, 255, 255;
+    position: relative;
+    overflow: hidden;
+    height: 480px;
+    border-radius: 24px;
+    background: rgb(var(--poster-rgb));
+    color: rgb(var(--ink));
+    isolation: isolate;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+    transition: transform 320ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 320ms ease;
+}
+
+.dsc-poster.ink-dark {
+    --ink: 12, 12, 14;
+}
+
+.dsc-poster:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 32px 70px rgba(0, 0, 0, 0.5), 0 0 80px -20px rgba(var(--poster-rgb), 0.9);
+}
+
+.dsc-poster-art {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+}
+
+.dsc-poster-body {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 26px;
+}
+
+.dsc-poster-tag {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 10px;
+    border: 1.5px solid rgba(var(--ink), 0.85);
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.dsc-poster-title {
+    margin: 12px 0 0;
+    max-width: 100%;
+    font-size: clamp(1.8rem, 2.4vw, 2.5rem);
+    font-weight: 900;
+    letter-spacing: -0.045em;
+    line-height: 0.95;
+    color: inherit;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.dsc-poster-sub {
+    margin: 8px 0 0;
+    max-width: 100%;
+    font-size: 0.9rem;
+    font-weight: 600;
+    opacity: 0.8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dsc-poster-actions {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 18px;
+}
+
+.dsc-poster-btn {
+    display: inline-flex;
+    align-items: center;
+    height: 40px;
+    padding: 0 20px;
+    border: 0;
+    border-radius: 999px;
+    background: rgb(var(--ink));
+    color: rgb(var(--poster-rgb));
+    font: inherit;
+    font-size: 0.88rem;
+    font-weight: 800;
+    text-decoration: none;
+    cursor: pointer;
+    transition: transform 160ms ease;
+}
+
+.dsc-poster-btn:hover {
+    transform: scale(1.05);
+    color: rgb(var(--poster-rgb));
+}
+
+.dsc-poster-btn:focus-visible {
+    outline: 2px solid rgb(var(--ink));
+    outline-offset: 3px;
+}
+
+.dsc-poster-more {
+    font-size: 0.8rem;
+    font-weight: 700;
+    opacity: 0.75;
+}
+
+/* a marquee line: two copies side by side, each sliding one width left */
+.dsc-poster-marquee,
+.dsc-poster-type-row {
+    display: flex;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.dsc-poster-marquee > span,
+.dsc-poster-type-row > span {
+    flex: 0 0 auto;
+    padding-right: 0.4em;
+    animation: dsc-marquee 24s linear infinite;
+}
+
+@keyframes dsc-marquee {
+    to { transform: translateX(-100%); }
+}
+
+/* the gig poster: a ticker along the top, halftone, stage lights sweeping */
+.dsc-poster-marquee {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 3;
+    height: 30px;
+    align-items: center;
+    background: rgb(var(--ink));
+    color: rgb(var(--poster-rgb));
+    font-size: 0.72rem;
+    font-weight: 900;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+}
+
+.dsc-poster-dots {
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(rgba(var(--ink), 0.2) 1.3px, transparent 1.7px);
+    background-size: 11px 11px;
+    -webkit-mask-image: linear-gradient(200deg, #000 0%, transparent 60%);
+    mask-image: linear-gradient(200deg, #000 0%, transparent 60%);
+}
+
+.dsc-poster-photo {
+    position: absolute;
+    top: 30px;
+    right: 0;
+    width: 78%;
+    height: 58%;
+    background-size: cover;
+    background-position: center 25%;
+    filter: grayscale(1) contrast(1.3) brightness(1.05);
+    mix-blend-mode: multiply;
+    -webkit-mask-image: linear-gradient(180deg, #000 45%, transparent 100%), linear-gradient(90deg, transparent 0%, #000 40%);
+    -webkit-mask-composite: source-in;
+    mask-image: linear-gradient(180deg, #000 45%, transparent 100%), linear-gradient(90deg, transparent 0%, #000 40%);
+    mask-composite: intersect;
+}
+
+.dsc-poster-beam {
+    position: absolute;
+    bottom: -8%;
+    width: 46%;
+    height: 130%;
+    background: linear-gradient(0deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0) 85%);
+    clip-path: polygon(44% 100%, 56% 100%, 100% 0, 0 0);
+    transform-origin: 50% 100%;
+    mix-blend-mode: soft-light;
+    animation: dsc-beam 7s ease-in-out infinite alternate;
+}
+
+.dsc-poster-beam--a {
+    left: -6%;
+}
+
+.dsc-poster-beam--b {
+    right: -6%;
+    animation-duration: 9s;
+    animation-direction: alternate-reverse;
+}
+
+@keyframes dsc-beam {
+    from { transform: rotate(-22deg); }
+    to { transform: rotate(22deg); }
+}
+
+.dsc-poster-date {
+    display: flex;
+    flex-direction: column;
+    margin-top: 14px;
+    line-height: 1;
+}
+
+.dsc-poster-month {
+    font-size: 1rem;
+    font-weight: 900;
+    letter-spacing: 0.24em;
+}
+
+.dsc-poster-day {
+    margin-top: -4px;
+    font-size: 5.4rem;
+    font-weight: 900;
+    letter-spacing: -0.06em;
+    line-height: 0.9;
+}
+
+.dsc-poster--concert .dsc-poster-title {
+    margin-top: 6px;
+    text-transform: uppercase;
+}
+
+/* the record poster: the sleeve with its record sliding out, spinning */
+.dsc-poster-blob {
+    position: absolute;
+    width: 70%;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    filter: blur(40px);
+    animation: dsc-blob 14s ease-in-out infinite alternate;
+}
+
+.dsc-poster-blob--a {
+    top: -20%;
+    right: -25%;
+    background: rgba(255, 255, 255, 0.4);
+}
+
+.dsc-poster-blob--b {
+    bottom: -25%;
+    left: -20%;
+    background: rgba(0, 0, 0, 0.22);
+    animation-duration: 18s;
+}
+
+@keyframes dsc-blob {
+    from { transform: translate3d(0, 0, 0) scale(1); }
+    to { transform: translate3d(-12%, 10%, 0) scale(1.15); }
+}
+
+.dsc-poster-record {
+    position: absolute;
+    top: 30px;
+    left: 26px;
+    z-index: 1;
+    width: 52%;
+    aspect-ratio: 1;
+    transform: rotate(-4deg);
+}
+
+.dsc-poster-vinyl,
+.dsc-poster-record::before {
+    position: absolute;
+    top: 3%;
+    left: 34%;
+    width: 94%;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    transition: left 600ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dsc-poster-vinyl {
+    background: repeating-radial-gradient(circle at center, #0b0b0c 0 1.6px, #1a1a1c 1.6px 3.2px);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
+    animation: dsc-spin 4.5s linear infinite;
+}
+
+/* the light on the grooves stays put while the record turns under it */
+.dsc-poster-record::before {
+    content: '';
+    z-index: 1;
+    background: conic-gradient(from 20deg, rgba(255, 255, 255, 0.16), transparent 12%, transparent 45%, rgba(255, 255, 255, 0.12) 52%, transparent 64%);
+    pointer-events: none;
+}
+
+.dsc-poster-vinyl-label {
+    position: absolute;
+    inset: 33%;
+    border-radius: 50%;
+    background-size: cover;
+    background-position: center;
+    box-shadow: 0 0 0 3px #0b0b0c;
+}
+
+.dsc-poster-vinyl-label::after {
+    content: '';
+    position: absolute;
+    inset: 44%;
+    border-radius: 50%;
+    background: #0b0b0c;
+}
+
+@keyframes dsc-spin {
+    to { transform: rotate(360deg); }
+}
+
+.dsc-poster-sleeve {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    border-radius: 6px;
+    background-size: cover;
+    background-position: center;
+    box-shadow: 0 26px 50px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.dsc-poster--album:hover .dsc-poster-vinyl,
+.dsc-poster--album:hover .dsc-poster-record::before {
+    left: 50%;
+}
+
+/* your number one: their name in giant type, scrolling, behind their face */
+.dsc-poster-type {
+    position: absolute;
+    inset: -10% -20%;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-around;
+    transform: rotate(-8deg);
+}
+
+.dsc-poster-type-row {
+    font-size: 4.6rem;
+    font-weight: 900;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    text-transform: uppercase;
+    color: transparent;
+    -webkit-text-stroke: 1.5px rgba(var(--ink), 0.3);
+}
+
+.dsc-poster-type-row:nth-child(even) {
+    color: rgba(var(--ink), 0.1);
+    -webkit-text-stroke: 0;
+}
+
+.dsc-poster-type-row:nth-child(even) > span {
+    animation-direction: reverse;
+    animation-duration: 30s;
+}
+
+.dsc-poster-face {
+    position: absolute;
+    top: 30px;
+    left: 50%;
+    z-index: 1;
+    width: 44%;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background-color: rgba(var(--ink), 0.15);
+    background-size: cover;
+    background-position: center 25%;
+    transform: translateX(-50%);
+    box-shadow: 0 0 0 6px rgb(var(--poster-rgb)), 0 28px 60px rgba(0, 0, 0, 0.35);
+}
+
+.dsc-poster-ring {
+    position: absolute;
+    inset: -6px;
+    border-radius: 50%;
+    border: 2px solid rgba(var(--ink), 0.55);
+    animation: dsc-ring 2.6s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+.dsc-poster-ring--late {
+    animation-delay: 1.3s;
+}
+
+@keyframes dsc-ring {
+    from { transform: scale(1); opacity: 0.9; }
+    to { transform: scale(1.45); opacity: 0; }
+}
+
+.dsc-poster-figure {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-top: 10px;
+    line-height: 1;
+}
+
+.dsc-poster-figure strong {
+    font-size: 3.2rem;
+    font-weight: 900;
+    letter-spacing: -0.05em;
+}
+
+.dsc-poster-figure span {
+    font-size: 0.95rem;
+    font-weight: 800;
+    opacity: 0.8;
+}
+
+.dsc-poster--artist .dsc-poster-title {
+    margin-top: 6px;
+    font-size: clamp(1.6rem, 2vw, 2.1rem);
+    text-transform: uppercase;
+}
+
+/* off screen, nothing moves */
+.dsc-posters.is-paused *,
+.dsc-posters.is-paused *::before,
+.dsc-posters.is-paused *::after {
+    animation-play-state: paused !important;
+}
+
+@media (max-width: 1000px) {
+    .dsc-posters-grid,
+    .dsc-posters-grid--2 {
+        grid-template-columns: none;
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(280px, 78vw);
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        padding-bottom: 12px;
+    }
+    .dsc-poster {
+        scroll-snap-align: start;
+        height: 460px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dsc-poster,
+    .dsc-poster-marquee > span,
+    .dsc-poster-type-row > span,
+    .dsc-poster-beam,
+    .dsc-poster-blob,
+    .dsc-poster-vinyl,
+    .dsc-poster-ring {
+        animation: none;
+        transition: none;
+    }
+    .dsc-poster-ring {
+        display: none;
+    }
+}
+
+/* a show with no photo: the date is the picture */
+.dsc-poster--typeset .dsc-poster-day {
+    font-size: 9rem;
+    letter-spacing: -0.07em;
+}
+
+.dsc-poster--typeset .dsc-poster-month {
+    font-size: 1.2rem;
 }
