@@ -42,21 +42,6 @@
     filter: blur(60px);
 }
 
-/* ── 2. Top Quick-Filter Navigation Rail (Spotify / Deezer style) ─────────── */
-
-
-
-
-
-
-/* Deezer Flow & Moods Bar */
-
-
-
-
-
-
-
 /* ── 3. Cinematic Hero Billboard (Full-Width Immersion) ──────────────────── */
 
 
@@ -68,11 +53,11 @@
 .discover-hero {
     position: relative !important;
     width: 100% !important;
-    min-height: 430px !important;
+    min-height: 400px !important;
     height: auto !important;
     border-radius: 24px !important;
     overflow: hidden !important;
-    margin-bottom: 0 !important;
+    margin-bottom: 20px !important;
     border: 1px solid rgba(255, 255, 255, 0.1) !important;
     box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
     background: #0d111a !important;
@@ -141,24 +126,40 @@
     margin: 0 !important;
 }
 
-/* Glowing Featured Eyebrow Badge */
+/* eyebrow: a quiet accent line, not a neon badge. the count lives here too */
 .discover-hero-label {
     display: inline-flex !important;
     align-items: center !important;
     align-self: flex-start !important;
-    text-align: left !important;
-    gap: 6px !important;
-    font-size: 0.72rem !important;
-    font-weight: 800 !important;
-    letter-spacing: 0.12em !important;
-    text-transform: uppercase !important;
-    color: #ffffff !important;
-    background: linear-gradient(135deg, var(--accent-color, #1db954), #059669) !important;
-    padding: 5px 12px !important;
-    border-radius: 9999px !important;
-    box-shadow: 0 2px 10px rgba(var(--accent-rgb, 29, 185, 84), 0.4) !important;
-    margin: 0 0 12px 0 !important;
+    gap: 8px !important;
+    font-size: 0.78rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.02em !important;
+    text-transform: none !important;
+    color: rgba(255, 255, 255, 0.82) !important;
+    background: none !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    margin: 0 0 14px 0 !important;
     text-shadow: none !important;
+}
+
+.discover-hero-label-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent-color, #1db954);
+    box-shadow: 0 0 10px rgba(var(--accent-rgb, 29, 185, 84), 0.8);
+}
+
+.discover-hero-count {
+    margin-left: 2px;
+    padding-left: 10px;
+    border-left: 1px solid rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
 }
 
 /* Massive Spotify/Deezer Title */
@@ -189,12 +190,17 @@
     text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6) !important;
 }
 
-/* Meta Pills: Popularity, Owned Status, Genres */
+/* meta: one quiet line. genres as words, popularity as a meter, ownership as text */
+.discover-hero-seed {
+    color: #fff;
+    font-weight: 700;
+}
+
 .discover-hero-meta,
 .discover-command-hero .discover-hero-meta {
     width: 100% !important;
     text-align: left !important;
-    margin: 0 0 20px 0 !important;
+    margin: 0 0 24px 0 !important;
 }
 
 .discover-hero-meta-content {
@@ -202,39 +208,105 @@
     flex-wrap: wrap !important;
     align-items: center !important;
     justify-content: flex-start !important;
-    gap: 8px !important;
+    gap: 6px 0 !important;
     margin: 0 !important;
     text-align: left !important;
 }
 
 .hero-meta-item {
-    background: rgba(255, 255, 255, 0.1) !important;
-    backdrop-filter: blur(12px) !important;
-    -webkit-backdrop-filter: blur(12px) !important;
-    border: 1px solid rgba(255, 255, 255, 0.12) !important;
-    border-radius: 9999px !important;
-    padding: 5px 12px !important;
-    font-size: 0.8rem !important;
-    font-weight: 600 !important;
-    color: #ffffff !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    font-size: 0.86rem !important;
+    font-weight: 500 !important;
+    color: rgba(255, 255, 255, 0.72) !important;
+}
+
+/* a dot between items, never before the first */
+.hero-meta-item + .hero-meta-item::before {
+    content: '';
+    width: 3px;
+    height: 3px;
+    margin: 0 12px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.4);
 }
 
 .hero-meta-item.hero-popularity {
-    display: inline-flex !important;
-    align-items: center !important;
-    gap: 5px !important;
-    background: rgba(245, 158, 11, 0.2) !important;
-    border-color: rgba(245, 158, 11, 0.4) !important;
-    color: #fbbf24 !important;
+    background: none !important;
+    border: none !important;
+    color: rgba(255, 255, 255, 0.72) !important;
+}
+
+.hero-popularity .meta-value {
+    display: none;
+}
+
+.hero-popularity .meta-label {
+    font-weight: 500;
+}
+
+.hero-pop-meter {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 12px;
+}
+
+.hero-pop-meter > span {
+    width: 3px;
+    border-radius: 1px;
+    background: rgba(255, 255, 255, 0.22);
+}
+
+.hero-pop-meter > span:nth-child(1) { height: 40%; }
+.hero-pop-meter > span:nth-child(2) { height: 55%; }
+.hero-pop-meter > span:nth-child(3) { height: 70%; }
+.hero-pop-meter > span:nth-child(4) { height: 85%; }
+.hero-pop-meter > span:nth-child(5) { height: 100%; }
+
+.hero-pop-meter > span.on {
+    background: var(--accent-color, #1db954);
+}
+
+.discover-hero .hero-genres {
+    gap: 0 !important;
 }
 
 .discover-hero .genre-tag {
-    background: rgba(255, 255, 255, 0.08) !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    border-radius: 9999px !important;
-    padding: 3px 10px !important;
-    font-size: 0.76rem !important;
-    color: rgba(255, 255, 255, 0.9) !important;
+    background: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    font-size: 0.86rem !important;
+    color: rgba(255, 255, 255, 0.72) !important;
+    text-transform: capitalize;
+}
+
+.discover-hero .genre-tag + .genre-tag::before {
+    content: ', ';
+}
+
+.discover-hero .hero-owned {
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: none;
+    font-size: inherit;
+    color: rgba(var(--accent-light-rgb, 30, 215, 96), 0.95);
+    font-weight: 600;
+}
+
+.discover-hero .hero-owned--none {
+    background: none;
+    color: rgba(255, 255, 255, 0.72);
+    font-weight: 500;
 }
 
 /* Primary Action Buttons */
@@ -311,27 +383,35 @@
     transform: translateY(-1px) !important;
 }
 
-/* Hero Controls: Pill Indicators & Actions */
+/* foot: the rotation as faces on the left, two quiet links on the right */
 .discover-hero-controls {
     position: relative !important;
     z-index: 3 !important;
     display: flex !important;
     align-items: center !important;
     justify-content: space-between !important;
-    padding: 12px 56px 20px !important;
+    gap: 16px !important;
+    padding: 8px 60px 26px !important;
     box-sizing: border-box !important;
 }
 
 .discover-hero-indicators {
     display: flex !important;
     align-items: center !important;
-    gap: 7px !important;
-    background: rgba(0, 0, 0, 0.45) !important;
-    backdrop-filter: blur(12px) !important;
-    -webkit-backdrop-filter: blur(12px) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    padding: 6px 14px !important;
-    border-radius: 9999px !important;
+    gap: 6px !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: none !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+    min-width: 0 !important;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.discover-hero-indicators::-webkit-scrollbar {
+    display: none;
 }
 
 .hero-indicator {
@@ -341,6 +421,7 @@
     cursor: pointer !important;
     display: inline-flex !important;
     align-items: center !important;
+    flex: 0 0 auto !important;
 }
 
 .hero-indicator-dot {
@@ -361,29 +442,81 @@
     background: rgba(255, 255, 255, 0.65) !important;
 }
 
+.hero-indicator--face {
+    padding: 3px !important;
+    border-radius: 50% !important;
+}
+
+.hero-indicator-face {
+    display: block;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    object-fit: cover;
+    opacity: 0.5;
+    filter: grayscale(0.4);
+    box-shadow: 0 0 0 2px rgba(10, 13, 20, 0.9);
+    transition: opacity 180ms ease, filter 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+}
+
+.hero-indicator-face--blank {
+    display: grid;
+    place-items: center;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
+.hero-indicator--face:hover .hero-indicator-face {
+    opacity: 0.9;
+    filter: none;
+}
+
+.hero-indicator--face.active .hero-indicator-face {
+    opacity: 1;
+    filter: none;
+    transform: scale(1.08);
+    box-shadow: 0 0 0 2px rgba(10, 13, 20, 0.9), 0 0 0 4px var(--accent-color, #1db954);
+}
+
+.hero-indicator:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb, 29, 185, 84), 0.9) !important;
+    outline-offset: 2px !important;
+}
+
 .discover-hero-bottom-actions {
     display: flex !important;
     align-items: center !important;
-    gap: 10px !important;
+    gap: 4px !important;
+    flex: 0 0 auto !important;
 }
 
 .discover-hero-bottom-actions button {
-    background: rgba(0, 0, 0, 0.45) !important;
-    backdrop-filter: blur(12px) !important;
-    border: 1px solid rgba(255, 255, 255, 0.12) !important;
-    color: rgba(255, 255, 255, 0.85) !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    border: none !important;
+    color: rgba(255, 255, 255, 0.7) !important;
     border-radius: 9999px !important;
-    padding: 7px 16px !important;
-    font-size: 0.8rem !important;
+    padding: 8px 12px !important;
+    font-size: 0.84rem !important;
     font-weight: 600 !important;
     cursor: pointer !important;
-    transition: all 160ms ease !important;
+    transition: color 160ms ease, background 160ms ease !important;
 }
 
-.discover-hero-bottom-actions button:hover {
-    background: rgba(255, 255, 255, 0.18) !important;
+.discover-hero-bottom-actions button:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1) !important;
     color: #ffffff !important;
-    border-color: rgba(255, 255, 255, 0.25) !important;
+}
+
+.discover-hero-bottom-actions button:disabled {
+    opacity: 0.55;
+    cursor: default !important;
+}
+
+.discover-hero-view-all::after {
+    content: ' \2192';
 }
 
 /* Prev/Next Hero Arrow Chevrons */
@@ -420,16 +553,6 @@
     background: rgba(255, 255, 255, 0.25) !important;
     transform: translateY(-50%) scale(1.08) !important;
 }
-
-/* ── 4. Re-imagined Quick Signals Bar (Replacing the clunky sidebar) ──────── */
-
-
-
-
-
-
-
-
 
 /* ── 5. Discovery Zones: a title, one line, then the rows ────────────────── */
 .discovery-zone {

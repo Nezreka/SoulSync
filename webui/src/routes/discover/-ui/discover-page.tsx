@@ -1296,6 +1296,8 @@ export function DiscoverPage() {
               onWatchAll={() => void hero.watchAll()}
               onViewRecommended={() => setRecModalOpen(true)}
               onOpenBlacklist={blacklist.openModal}
+              artists={hero.artists}
+              onPauseChange={hero.setPaused}
             />
           </div>
           <DiscoveryInbox

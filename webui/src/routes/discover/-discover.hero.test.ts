@@ -17,6 +17,7 @@ import {
   heroJumpIndex,
   heroNextIndex,
   heroPopularityClass,
+  heroPopularityWords,
   heroShowsPopularity,
   heroWatchlistLabel,
   WATCH_ALL_BUSY,
@@ -75,6 +76,13 @@ describe('popularity', () => {
     expect(heroPopularityClass(50)).toBe('medium'); //  boundary is inclusive
     expect(heroPopularityClass(49)).toBe('low');
     expect(heroPopularityClass(0)).toBe('low');
+  });
+
+  it('words each band, on the same thresholds', () => {
+    expect(heroPopularityWords(80)).toBe('Well known');
+    expect(heroPopularityWords(79)).toBe('Rising');
+    expect(heroPopularityWords(50)).toBe('Rising');
+    expect(heroPopularityWords(49)).toBe('Under the radar');
   });
 });
 

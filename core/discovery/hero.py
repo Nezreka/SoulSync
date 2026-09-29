@@ -63,6 +63,19 @@ _HERO_CACHE = {}  # (profile_id, source) -> (expiry_ts, payload)
 _HERO_TTL_S = 1800
 
 
+def billboard_order(hero_artists):
+    """a billboard needs a photo. deezer answers "no photo" with a real url
+    to a grey silhouette (the md5 of an empty string), and coldplay sat on
+    the hero like that. placeholder urls become none so the ui shows its own
+    fallback, and artists with a real photo go first. stable, so the
+    least-recently-featured rotation still holds inside each group."""
+    from core.metadata.artwork import usable_image_url
+    for a in hero_artists:
+        if a.get('image_url') and not usable_image_url(a.get('image_url')):
+            a['image_url'] = None
+    return sorted(hero_artists, key=lambda a: 0 if a.get('image_url') else 1)
+
+
 def get_discover_hero():
     """Get featured similar artists for hero slideshow"""
     try:
@@ -148,6 +161,7 @@ def get_discover_hero():
 
                 hero_artists.append(artist_data)
 
+            hero_artists = billboard_order(hero_artists)
             logger.warning(f"[Discover Hero] Returning {len(hero_artists)} watchlist artists as fallback")
             _payload = {"success": True, "artists": hero_artists, "source": active_source, "fallback": "watchlist"}
             if hero_artists:
@@ -260,8 +274,10 @@ def get_discover_hero():
                 'similar_to', because,
                 consensus_confidence(len(because) or artist.occurrence_count))
 
-            # Use cached metadata if available
-            if artist.image_url:
+            # Use cached metadata if available (a placeholder is not an image,
+            # it goes down the fetch path like a missing one)
+            from core.metadata.artwork import usable_image_url
+            if usable_image_url(artist.image_url):
                 artist_data['image_url'] = artist.image_url
                 artist_data['genres'] = artist.genres or []
                 artist_data['popularity'] = artist.popularity or 0
@@ -314,6 +330,8 @@ def get_discover_hero():
                 logger.debug(f"owned-album count failed for {artist.similar_artist_name}: {count_err}")
 
             hero_artists.append(artist_data)
+
+        hero_artists = billboard_order(hero_artists)
 
         # Mark these artists as featured so they cycle to the back of the queue
         featured_names = [a["artist_name"] for a in hero_artists]

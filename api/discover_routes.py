@@ -41,6 +41,7 @@ from core.discovery.explain import (  # noqa: E402
 )
 from core.library.service_search import _search_service
 from core.metadata import normalize_image_url as fix_artist_image_url
+from core.metadata.artwork import usable_image_url
 from core.metadata.cache import get_metadata_cache
 from core.profile_context import admin_only, get_current_profile_id
 from core.runtime_state import download_batches, tasks_lock
@@ -496,7 +497,9 @@ def get_discover_similar_artists():
                 "source": active_source,
             }
             # Include cached metadata if available
-            if artist.image_url:
+            # a placeholder url is a grey silhouette, not a photo. leave it
+            # out so the card falls back and image enrichment can try
+            if usable_image_url(artist.image_url):
                 artist_data["image_url"] = artist.image_url
             if artist.genres:
                 artist_data["genres"] = artist.genres[:3]
@@ -811,7 +814,7 @@ def get_discover_listening_recommendations():
             except Exception as _why_err:
                 logger.debug(f"why chips skipped: {_why_err}")
             img = a.get('image_url')
-            if img:
+            if usable_image_url(img):
                 entry["image_url"] = fix_artist_image_url(img)
             if a.get('genres'):
                 entry["genres"] = a['genres'][:3]
