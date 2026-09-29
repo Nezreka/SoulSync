@@ -49,6 +49,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import requests
+from core.http_error_status import http_error_status
 
 from core.settings import config_manager
 from core.api_call_tracker import api_call_tracker
@@ -282,7 +283,10 @@ class JioSaavnClient:
             response.raise_for_status()
             payload = response.json()
         except Exception as exc:
-            if "rate limit" in str(exc).lower() or "429" in str(exc) or "503" in str(exc):
+            status = http_error_status(exc)
+            backoff = (status in (429, 503) if status is not None
+                       else "rate limit" in str(exc).lower() or "429" in str(exc) or "503" in str(exc))
+            if backoff:
                 logger.warning("JioSaavn rate limit hit, implementing backoff: %s", exc)
                 time.sleep(2.0)
             raise
