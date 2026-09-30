@@ -17,6 +17,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List
 
+from core.profile_context import get_background_profile
+
 
 DISCOVERY_TIMEOUT_SECONDS = 3600
 # Grace period after a discovery timeout: the worker runs on a daemon thread
@@ -294,7 +296,10 @@ def _resolve_pipeline_playlists(
     profile_id: Any = None,
 ) -> List[Dict[str, Any]] | None:
     if process_all:
-        return db.get_mirrored_playlists(int(profile_id)) if profile_id else db.get_mirrored_playlists()
+        # automations never save profile_id, so "all" falls back to the profile
+        # the engine is running this as (the automation's owner), not admin
+        owner = profile_id or get_background_profile()
+        return db.get_mirrored_playlists(int(owner)) if owner else db.get_mirrored_playlists()
     if playlist_id:
         playlist = (
             db.get_mirrored_playlist(int(playlist_id), profile_id=int(profile_id))
