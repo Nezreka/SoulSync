@@ -26,6 +26,22 @@ from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.duplicates")
 
+_ROMAN_SEQUENCE = re.compile(
+    r'\b(?:pt|pts|part|parts|movement|movements|segue|interlude|chapter|act)\s*([ivx]+)\b'
+)
+_ROMAN_VALUES = dict(zip(
+    'i ii iii iv v vi vii viii ix x xi xii xiii xiv xv xvi xvii xviii xix xx'.split(),
+    range(1, 21),
+    strict=True,
+))
+_EDITION_YEAR = re.compile(
+    r'\b(?:remaster(?:ed)?|mix|edition|version)\s*(?P<after>(?:19|20)\d{2})\b'
+    r'|\b(?P<before>(?:19|20)\d{2})(?=\s*(?:remaster(?:ed)?|mix|edition|version)\b)'
+)
+_LIVE_YEAR = re.compile(
+    r'\blive\s+(?:(?:mix|edition|version)\s+)?(?P<year>(?:19|20)\d{2})\b'
+)
+
 
 @register_job
 class DuplicateDetectorJob(RepairJob):
@@ -306,6 +322,7 @@ class DuplicateDetectorJob(RepairJob):
                 continue
 
             group = [t1]
+            numbered_title = t1['norm_title']
 
             for j in range(i + 1, len(bucket_tracks)):
                 t2 = bucket_tracks[j]
@@ -324,6 +341,12 @@ class DuplicateDetectorJob(RepairJob):
                 # it (the lossy-copy feature) is not a duplicate
                 if _is_lossy_companion_pair(
                         t1['file_path'], t2['file_path'], lossy_companion_exts):
+                    continue
+
+                # Part/sequence numbers distinguish tracks even when their
+                # remaining titles are nearly identical. Apply this to both
+                # passes: a shared filename cannot override conflicting tags.
+                if _conflicting_title_numbers(numbered_title, t2['norm_title']):
                     continue
 
                 if require_metadata_match:
@@ -363,6 +386,10 @@ class DuplicateDetectorJob(RepairJob):
                     continue
 
                 group.append(t2)
+                # A numberless first row may match either part, but cannot
+                # bridge Part 1 and Part 2 into the same duplicate group.
+                if not _title_numbers(numbered_title):
+                    numbered_title = t2['norm_title']
 
             if len(group) >= 2:
                 for t in group:
@@ -500,6 +527,35 @@ def _normalize(text: str) -> str:
     t = text.lower()
     t = re.sub(r'\s*-\s*from\s+.+$', '', t)
     return ''.join(c for c in t if c.isalnum() or c in '() ').strip()
+
+
+def _conflicting_title_numbers(title1: str, title2: str) -> bool:
+    """Keep explicitly different numbered titles out of duplicate groups.
+
+    Only a conflict between two present numbers is decisive. A numberless
+    title may be an incomplete tag for the same recording.
+    """
+    numbers1 = _title_numbers(title1)
+    numbers2 = _title_numbers(title2)
+    return bool(numbers1 and numbers2 and numbers1 != numbers2)
+
+
+def _title_numbers(title: str) -> tuple[int, ...]:
+    """Read track numbers, excluding years explicitly labeling an edition."""
+    edition_years = {
+        match.start('after' if match.group('after') else 'before')
+        for match in _EDITION_YEAR.finditer(title)
+    }
+    # "Live Version 1977" still identifies the performance year, even
+    # though "version" is normally an edition marker.
+    edition_years.difference_update(match.start('year') for match in _LIVE_YEAR.finditer(title))
+    numbers = [(match.start(), int(match.group())) for match in re.finditer(r'\d+', title)
+               if match.start() not in edition_years]
+    for match in _ROMAN_SEQUENCE.finditer(title):
+        value = _ROMAN_VALUES.get(match.group(1))
+        if value is not None:
+            numbers.append((match.start(1), value))
+    return tuple(value for _, value in sorted(numbers))
 
 
 def _credit_names(artist: str) -> list:

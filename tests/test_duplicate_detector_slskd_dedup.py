@@ -169,10 +169,12 @@ class TestFilenameBucketSurfacesFinding:
         ctx = _FakeContext()
 
         base_dir = "/data/torrents/music/Various Artists - Napoleon Dynamite OST"
+        # Vary the parsed titles without inventing conflicting track numbers;
+        # those deliberately veto grouping even when filenames agree.
         tracks = [
             _make_track(1, title="Heres Rico Musiq",
                         file_path=f"{base_dir}/14-john_swihart-heres_rico-musiq.mp3"),
-            *[_make_track(i + 2, title=f"unrelated parsed title {i}",
+            *[_make_track(i + 2, title=f"unrelated parsed title {chr(ord('a') + i)}",
                           file_path=f"{base_dir}/14-john_swihart-heres_rico-musiq_{ts}.mp3")
               for i, ts in enumerate([
                   "639122324339578022", "639126674226945470",
