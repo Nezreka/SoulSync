@@ -2035,6 +2035,7 @@ def download_discography(artist_id):
         from core.metadata.discography_filters import (
             content_type_skip_reason,
             load_global_content_filter_settings,
+            owned_release_tracks,
             track_already_owned,
             track_artist_matches,
         )
@@ -2064,6 +2065,7 @@ def download_discography(artist_id):
         # Crucially we pass an empty list (not None) when nothing is owned, so the
         # owns-nothing case still takes the fast in-memory path → instant.
         owned_candidate_tracks = []
+        cand_albums = []
         try:
             cand_albums = db.get_candidate_albums_for_artist(
                 artist_name, server_source=active_server
@@ -2135,6 +2137,18 @@ def download_discography(artist_id):
                     skipped_filter = 0
                     skipped_owned = 0
 
+                    # owned means owned ON THIS release, found the way the
+                    # artist page finds it: a single whose song is also on an
+                    # album is still missing. None = lookup failed, fall back
+                    # to the artist-wide check
+                    release_tracks = owned_release_tracks(
+                        db, album_name, hint_artist, len(tracks), release_date,
+                        active_server, candidate_albums=cand_albums or None,
+                        candidate_tracks=owned_candidate_tracks,
+                    )
+                    ownership_candidates = (owned_candidate_tracks if release_tracks is None
+                                            else release_tracks)
+
                     for track in tracks:
                         track_name = track.get('name', '')
                         if not track_name:
@@ -2168,7 +2182,7 @@ def download_discography(artist_id):
                         # backfill repair job uses. Format-agnostic so
                         # Blasphemy mode (FLAC→MP3) doesn't false-miss.
                         if track_already_owned(db, track_name, hint_artist, album_name, active_server,
-                                               candidate_tracks=owned_candidate_tracks):
+                                               candidate_tracks=ownership_candidates):
                             skipped_owned += 1
                             continue
 

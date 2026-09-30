@@ -215,9 +215,61 @@ def track_already_owned(
     return bool(match) and confidence >= confidence_threshold
 
 
+def owned_release_tracks(
+    db: Any,
+    album_name: str,
+    artist: str,
+    expected_tracks: int,
+    release_date: Optional[str],
+    server_source: Optional[str],
+    candidate_albums: Optional[List[Any]] = None,
+    candidate_tracks: Optional[List[Any]] = None,
+) -> Optional[List[Any]]:
+    """the library's tracks for THIS release, found the way the artist page
+    finds it (check_album_exists_with_completeness, strict, year-gated).
+
+    the discography download checked each song against everything the
+    artist owns, so a single whose song is also on an album counted as owned
+    and was never queued, while the artist page, which asks whether the
+    release itself is in the library, showed it missing (discord,
+    SeadogsBooty: Yellowcard's singles). checking songs against this list
+    instead makes the two agree.
+
+    [] when the release isn't in the library. None when the lookup failed:
+    the caller falls back to the artist-wide check, since a redundant skip is
+    cheaper than re-downloading a whole discography.
+    """
+    year = None
+    if release_date and str(release_date)[:4].isdigit():
+        year = int(str(release_date)[:4])
+    try:
+        db_album, _confidence, *_rest = db.check_album_exists_with_completeness(
+            title=album_name,
+            artist=artist,
+            expected_track_count=expected_tracks if expected_tracks and expected_tracks > 0 else None,
+            confidence_threshold=0.7,
+            server_source=server_source,
+            candidate_albums=candidate_albums,
+            strict_discography_match=True,
+            expected_year=year,
+        )
+    except Exception:
+        return None
+    if db_album is None:
+        return []
+    album_id = getattr(db_album, 'id', None)
+    if candidate_tracks is not None:
+        return [t for t in candidate_tracks if getattr(t, 'album_id', None) == album_id]
+    try:
+        return db.get_candidate_tracks_for_albums([album_id]) or []
+    except Exception:
+        return None
+
+
 __all__ = [
     'track_artist_matches',
     'content_type_skip_reason',
     'load_global_content_filter_settings',
     'track_already_owned',
+    'owned_release_tracks',
 ]
