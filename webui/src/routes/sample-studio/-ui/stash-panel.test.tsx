@@ -29,6 +29,7 @@ function renderPanel(over: Partial<Parameters<typeof StashPanel>[0]> = {}) {
     error: null,
     onPlay: vi.fn(),
     onDelete: vi.fn(),
+    onRestore: vi.fn(),
     ...over,
   };
   render(<StashPanel {...props} />);
@@ -62,15 +63,40 @@ describe('StashPanel', () => {
     expect(screen.getByText('loop')).toBeInTheDocument();
   });
 
-  it('plays and deletes entries', () => {
+  it('plays, re-opens and deletes entries', () => {
     const props = renderPanel({ entries: [entry] });
     fireEvent.click(screen.getByRole('button', { name: 'Play killer break' }));
     expect(props.onPlay).toHaveBeenCalledTimes(1);
     expect(props.onPlay).toHaveBeenCalledWith(entry);
 
+    fireEvent.click(screen.getByRole('button', { name: /Re-open/ }));
+    expect(props.onRestore).toHaveBeenCalledTimes(1);
+    expect(props.onRestore).toHaveBeenCalledWith(entry);
+
     fireEvent.click(screen.getByTitle('Delete killer break'));
     expect(props.onDelete).toHaveBeenCalledTimes(1);
     expect(props.onDelete).toHaveBeenCalledWith(11);
+  });
+
+  it('shows the persisted FX recipe on the entry', () => {
+    renderPanel({
+      entries: [
+        {
+          ...entry,
+          stem: 'drums',
+          normalize: 'peak',
+          reverse: true,
+          fade_ms: 10,
+          space: 0.5,
+          delay: { time: '1/8', feedback: 0.35, mix: 0.2 },
+        },
+      ],
+    });
+    expect(
+      screen.getByText(
+        /Drums stem · peak normalize · reversed · 10 ms fade · 0\.5 s space · 1\/8 delay/,
+      ),
+    ).toBeInTheDocument();
   });
 
   it('links the ZIP export', () => {

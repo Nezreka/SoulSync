@@ -41,6 +41,7 @@ from core.discovery.explain import (  # noqa: E402
 )
 from core.library.service_search import _search_service
 from core.metadata import normalize_image_url as fix_artist_image_url
+from core.metadata.artwork import usable_image_url
 from core.metadata.cache import get_metadata_cache
 from core.profile_context import admin_only, get_current_profile_id
 from core.runtime_state import download_batches, tasks_lock
@@ -496,7 +497,9 @@ def get_discover_similar_artists():
                 "source": active_source,
             }
             # Include cached metadata if available
-            if artist.image_url:
+            # a placeholder url is a grey silhouette, not a photo. leave it
+            # out so the card falls back and image enrichment can try
+            if usable_image_url(artist.image_url):
                 artist_data["image_url"] = artist.image_url
             if artist.genres:
                 artist_data["genres"] = artist.genres[:3]
@@ -811,7 +814,7 @@ def get_discover_listening_recommendations():
             except Exception as _why_err:
                 logger.debug(f"why chips skipped: {_why_err}")
             img = a.get('image_url')
-            if img:
+            if usable_image_url(img):
                 entry["image_url"] = fix_artist_image_url(img)
             if a.get('genres'):
                 entry["genres"] = a['genres'][:3]
@@ -1403,14 +1406,11 @@ def get_discover_label_explorer():
     try:
         database = get_database()
         cache = get_metadata_cache()
+        # the labels you play (then the ones you own most of), not whichever
+        # 30 sqlite hit first
+        from core.discovery.labels import your_labels
         with database._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT DISTINCT label FROM albums
-                WHERE label IS NOT NULL AND label != ''
-                LIMIT 30
-            """)
-            labels = {r[0] for r in cursor.fetchall()}
+            labels = set(your_labels(conn))
         active_source = _get_active_discovery_source()
         if not labels:
             return jsonify({'success': True, 'albums': [], 'labels': []})
@@ -2035,6 +2035,74 @@ def get_daily_mixes():
         logger.error(f"Error getting daily mixes: {e}")
         import traceback
         traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@bp.route('/api/discover/for-you', methods=['GET'])
+@_hide_blocked({'mixes[].tracks': WORKS})
+@_discover_shelf_cache()
+def get_for_you_mixes():
+    """on repeat, repeat rewind and any blends, read straight off listening
+    history. owned tracks only, so they play straight away."""
+    try:
+        from core.personalized.for_you import build_for_you
+        payload = build_for_you(get_database(), get_current_profile_id())
+        return jsonify({"success": True, "mixes": payload.get("mixes", [])})
+    except Exception as e:
+        logger.error(f"Error building for-you mixes: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/flow', methods=['GET'])
+@_hide_blocked({'tracks': WORKS})
+def get_flow():
+    """a fresh flow queue every call: favourites, their unplayed tracks, and
+    their neighbours in your library. never cached, on purpose."""
+    try:
+        from core.personalized.for_you import build_flow
+        payload = build_flow(get_database(), get_current_profile_id())
+        return jsonify({"success": True, "tracks": payload.get("tracks", [])})
+    except Exception as e:
+        logger.error(f"Error building flow: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/backdrop-video', methods=['GET'])
+def get_backdrop_video():
+    """a music video id to play muted behind a banner, or null. the page asks
+    only for the one banner on screen; the pick is remembered for a month."""
+    artist = (request.args.get('artist') or '').strip()
+    title = (request.args.get('title') or '').strip() or None
+    if not artist:
+        return jsonify({"success": False, "error": "artist required"}), 400
+    try:
+        from core.discovery.blocked import BlockedArtists
+        if BlockedArtists.load(get_database(), get_current_profile_id()).blocks_name(artist):
+            return jsonify({"success": True, "video_id": None})
+        from core.discovery.video_backdrops import find_backdrop
+        client = None
+        if download_orchestrator is not None and hasattr(download_orchestrator, 'client'):
+            client = download_orchestrator.client('youtube')
+        return jsonify({"success": True,
+                        "video_id": find_backdrop(get_database(), client, artist, title)})
+    except Exception as e:
+        logger.error(f"Error finding backdrop video: {e}")
+        return jsonify({"success": True, "video_id": None})
+
+
+@bp.route('/api/discover/moods', methods=['GET'])
+@_hide_blocked({'mixes[].tracks': WORKS})
+def get_mood_mixes():
+    """chill / focus / energy / feel good / late night, from the owned tracks
+    on albums tagged that way. built once a day per profile (?refresh=1
+    forces it)."""
+    try:
+        from core.discovery.moods import get_or_build_mood_mixes
+        force = request.args.get('refresh') in ('1', 'true')
+        payload = get_or_build_mood_mixes(get_database(), get_current_profile_id(), force=force)
+        return jsonify({"success": True, "mixes": payload.get("mixes", []),
+                        "generated_at": payload.get("generated_at")})
+    except Exception as e:
+        logger.error(f"Error building mood mixes: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route('/api/discover/personalized/discovery-shuffle', methods=['GET'])

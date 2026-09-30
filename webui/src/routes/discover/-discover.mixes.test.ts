@@ -12,6 +12,7 @@ import {
   YOUR_MIX_FEEDERS,
   emptyMixRegistry,
   mixActions,
+  mixCoverLayout,
   mixCoverTiles,
   mixCoverUpgradeApplies,
   mixNeedsCoverHydration,
@@ -120,6 +121,19 @@ describe('the mosaic cover', () => {
       track('/d.jpg'),
     ];
     expect(mixCoverTiles(tracks)).toEqual(['/a.jpg', '/b.jpg', '/c.jpg', '/d.jpg']);
+  });
+
+  it('draws one full cover, never a half-black mosaic, short of four real covers', () => {
+    expect(mixCoverLayout([track('/a.jpg'), track('/b.jpg'), track('/a.jpg')])).toEqual({
+      kind: 'single',
+      cover: '/a.jpg',
+    });
+    expect(mixCoverLayout(['/a', '/b', '/c', '/d'].map(track))).toEqual({
+      kind: 'grid',
+      covers: ['/a', '/b', '/c', '/d'],
+    });
+    expect(mixCoverLayout([])).toEqual({ kind: 'empty' });
+    expect(mixCoverLayout(undefined)).toEqual({ kind: 'empty' });
   });
 
   it('stops at four even with more distinct covers', () => {

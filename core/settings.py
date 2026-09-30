@@ -749,7 +749,10 @@ class ConfigManager:
             # only issues keys to partner organizations.)
             "concerts": {
                 "ticketmaster_api_key": "",
-                "setlistfm_api_key": ""
+                "setlistfm_api_key": "",
+                # two-letter country for the discover inbox's concerts. empty
+                # means anywhere; artist pages always show every date.
+                "country": ""
             },
             "logging": {
                 "path": "logs/app.log",

@@ -2954,6 +2954,8 @@ async function loadSettingsData() {
         if (_tmKey) _tmKey.value = settings.concerts?.ticketmaster_api_key || '';
         const _slfmKey = document.getElementById('concerts-setlistfm-api-key');
         if (_slfmKey) _slfmKey.value = settings.concerts?.setlistfm_api_key || '';
+        const _concertCountry = document.getElementById('concerts-country');
+        if (_concertCountry) _concertCountry.value = settings.concerts?.country || '';
         document.getElementById('lastfm-api-key').value = settings.lastfm?.api_key || '';
         document.getElementById('lastfm-api-secret').value = settings.lastfm?.api_secret || '';
         const _lfmUser = document.getElementById('lastfm-username');
@@ -6175,7 +6177,9 @@ async function saveSettings(quiet = false) {
         },
         concerts: {
             ticketmaster_api_key: _cfgStr('concerts-ticketmaster-api-key', { trim: true }),
-            setlistfm_api_key: _cfgStr('concerts-setlistfm-api-key', { trim: true })
+            setlistfm_api_key: _cfgStr('concerts-setlistfm-api-key', { trim: true }),
+            // ?. not || '': an absent field must stay undefined, or a save wipes it
+            country: _cfgStr('concerts-country', { trim: true })?.toUpperCase()
         },
         lastfm: {
             // _cfgStr rather than .value: this input is absent on the video

@@ -6,8 +6,11 @@ import {
   barStartTime,
   beatInterval,
   clamp,
+  describeRenderParams,
   downsamplePeaks,
+  formatKeyBpm,
   formatTime,
+  fxFromStashEntry,
   qualityTier,
   slicesFromOnsets,
   suggestChopName,
@@ -15,6 +18,7 @@ import {
   tempoBucket,
   visiblePeakSlice,
 } from './-sample-studio.helpers';
+import { DEFAULT_FX } from './-sample-studio.types';
 
 describe('formatTime', () => {
   it('formats seconds as m:ss.t', () => {
@@ -222,5 +226,81 @@ describe('suggestChops', () => {
   it('returns nothing for empty input', () => {
     expect(suggestChops({ bpm: 120, durationS: 0, peaks, onsets })).toEqual([]);
     expect(suggestChops({ bpm: 120, durationS: -5, peaks, onsets })).toEqual([]);
+  });
+});
+
+describe('formatKeyBpm', () => {
+  it('shows the key and BPM when both are known', () => {
+    expect(formatKeyBpm({ name: 'C minor', confidence: 0.87 }, 99.4)).toBe('C minor · 99.4 BPM');
+  });
+
+  it('shows "key uncertain" below the confidence floor', () => {
+    expect(formatKeyBpm({ name: 'C minor', confidence: 0.3 }, 120)).toBe(
+      'key uncertain · 120.0 BPM',
+    );
+  });
+
+  it('hides a null key and shows only the BPM', () => {
+    expect(formatKeyBpm(null, 128)).toBe('128.0 BPM');
+  });
+
+  it('returns null when neither is known', () => {
+    expect(formatKeyBpm(null, null)).toBeNull();
+    expect(formatKeyBpm(undefined, undefined)).toBeNull();
+  });
+});
+
+describe('describeRenderParams', () => {
+  it('describes the default FX (always-on fade)', () => {
+    expect(describeRenderParams(DEFAULT_FX)).toEqual(['5 ms fade']);
+  });
+
+  it('describes a full recipe', () => {
+    expect(
+      describeRenderParams({
+        ...DEFAULT_FX,
+        normalize: true,
+        reverse: true,
+        fadeMs: 10,
+        space: 0.5,
+        delay: { time: '1/8', feedback: 0.35, mix: 0.2 },
+      }),
+    ).toEqual([
+      'peak normalize',
+      'reversed',
+      '10 ms fade',
+      '0.5 s space',
+      '1/8 delay (fb 35%, mix 20%)',
+    ]);
+  });
+});
+
+describe('fxFromStashEntry', () => {
+  it('restores the persisted recipe', () => {
+    const entry = {
+      normalize: 'peak',
+      fade_ms: 10,
+      reverse: true,
+      space: 0.5,
+      delay: { time: '1/8', feedback: 0.35, mix: 0.2 },
+    } as never;
+    expect(fxFromStashEntry(entry)).toEqual({
+      normalize: true,
+      fadeMs: 10,
+      reverse: true,
+      space: 0.5,
+      delay: { time: '1/8', feedback: 0.35, mix: 0.2 },
+    });
+  });
+
+  it('falls back to safe defaults for old or malformed rows', () => {
+    expect(fxFromStashEntry({} as never)).toEqual(DEFAULT_FX);
+    expect(
+      fxFromStashEntry({
+        fade_ms: -5,
+        space: 'huge',
+        delay: { time: '1/3', feedback: 9, mix: 9 },
+      } as never),
+    ).toEqual(DEFAULT_FX);
   });
 });

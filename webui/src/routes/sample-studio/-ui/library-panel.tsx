@@ -130,16 +130,6 @@ export function LibraryPanel({
             </button>
           ))}
         </div>
-        <div className={styles.filterRow} role="group" aria-label="Key filter">
-          <button
-            type="button"
-            className={styles.filterPill}
-            disabled
-            title="Key detection lands in a later phase"
-          >
-            Key · soon
-          </button>
-        </div>
       </div>
       <div className={styles.scroll}>
         {isLoading ? (

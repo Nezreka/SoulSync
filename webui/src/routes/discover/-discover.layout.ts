@@ -21,6 +21,7 @@
 export type DiscoverSectionId =
   | 'cache-genre-explorer'
   | 'your-mixes-section'
+  | 'mood-mixes-section'
   | 'year-mixes-section'
   | 'adv-wave'
   | 'listening-recs-section'
@@ -66,6 +67,7 @@ const pair = (a: DiscoverSectionId, b: DiscoverSectionId): DiscoverLayoutEntry =
  */
 export const DISCOVER_LAYOUT: DiscoverLayoutEntry[] = [
   single('your-mixes-section'), //                                    made for you
+  single('mood-mixes-section'), //                                    moods, from your own albums
   single('adv-wave'), //                                              the dial
   pair('listening-recs-section', 'recommended-artists-section'), //   its two targets
   single('discover-bylt-sections'), //                                because you listen
@@ -111,6 +113,8 @@ export const SECTION_EMPTY_POLICY: Partial<Record<DiscoverSectionId, EmptyPolicy
     'Your mixes show up here after a watchlist scan. You can build your own now.',
   ),
   // hideWhenEmpty: true — these vanish.
+  // no tagged albums, no moods: nothing to show and nothing to do about it here
+  'mood-mixes-section': HIDE,
   'recommended-artists-section': HIDE,
   'listening-recs-section': HIDE,
   'your-albums-section': HIDE,
@@ -211,13 +215,14 @@ export type DiscoverZoneId = 'for-you' | 'new-missing' | 'library' | 'tools';
 export const DISCOVER_ZONES: { id: DiscoverZoneId; label: string }[] = [
   { id: 'for-you', label: 'For You' },
   { id: 'new-missing', label: 'New & Missing' },
-  { id: 'library', label: 'Library Signals' },
+  { id: 'library', label: 'From Your Library' },
   { id: 'tools', label: 'Explore & Build' },
 ];
 
 /** Where each section lives unless the profile's saved layout says otherwise. */
 export const DEFAULT_SECTION_ZONE: Record<DiscoverSectionId, DiscoverZoneId> = {
   'your-mixes-section': 'for-you',
+  'mood-mixes-section': 'for-you',
   'adv-wave': 'for-you',
   'listening-recs-section': 'for-you',
   'recommended-artists-section': 'for-you',

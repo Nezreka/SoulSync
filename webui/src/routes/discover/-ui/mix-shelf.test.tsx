@@ -41,14 +41,43 @@ describe('the mix card', () => {
     expect(screen.getByText('40 tracks')).toBeInTheDocument();
   });
 
-  it('always builds four mosaic tiles, padding with the placeholder', () => {
-    // A ragged grid of two tiles looks broken; the pad is deliberate.
+  it('draws one full cover instead of padding a mosaic with black tiles', () => {
+    // the old pad painted placeholder squares into the corners of a quarter
+    // of the decade and radio cards, which read as broken, not deliberate.
     const { container } = render(<DiscoverMixCard mix={mix()} onOpen={vi.fn()} />);
     const tiles = [...container.querySelectorAll('.mix-card-tile')] as HTMLElement[];
-    expect(tiles).toHaveLength(4);
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0]).toHaveClass('mix-card-tile--full');
     expect(tiles[0].style.backgroundImage).toContain('/a.jpg');
-    expect(tiles[1].style.backgroundImage).toContain('/b.jpg');
-    expect(tiles[3].style.backgroundImage).toContain('placeholder-album.png');
+    expect(container.querySelector('.mix-card-cover')).toHaveClass('mix-card-cover--single');
+  });
+
+  it('builds the 2x2 mosaic once there are four distinct covers', () => {
+    const { container } = render(
+      <DiscoverMixCard
+        mix={mix({ tracks: ['/a', '/b', '/c', '/d'].map(track) })}
+        onOpen={vi.fn()}
+      />,
+    );
+    expect(container.querySelectorAll('.mix-card-tile')).toHaveLength(4);
+    expect(container.querySelector('.mix-card-cover')).not.toHaveClass('mix-card-cover--single');
+  });
+
+  it('shows the placeholder, once, with no covers at all', () => {
+    const { container } = render(<DiscoverMixCard mix={mix({ tracks: [] })} onOpen={vi.fn()} />);
+    const tiles = [...container.querySelectorAll('.mix-card-tile')] as HTMLElement[];
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0].style.backgroundImage).toContain('placeholder-album.png');
+  });
+
+  it("says who's in a mix when it knows, above the count", () => {
+    const { container } = render(
+      <DiscoverMixCard mix={mix({ blurb: 'Katy Perry, M83 and more' })} onOpen={vi.fn()} />,
+    );
+    expect(container.querySelector('.mix-card-blurb')!.textContent).toBe(
+      'Katy Perry, M83 and more',
+    );
+    expect(container.querySelector('.mix-card-meta')!.textContent).toBe('2 tracks');
   });
 
   it('dedupes covers before capping at four', () => {
@@ -57,7 +86,13 @@ describe('the mix card', () => {
     const { container } = render(
       <DiscoverMixCard
         mix={mix({
-          tracks: [track('/a.jpg'), track('/a.jpg'), track('/b.jpg'), track('/c.jpg')],
+          tracks: [
+            track('/a.jpg'),
+            track('/a.jpg'),
+            track('/b.jpg'),
+            track('/c.jpg'),
+            track('/d.jpg'),
+          ],
         })}
         onOpen={vi.fn()}
       />,

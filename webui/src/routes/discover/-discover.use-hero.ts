@@ -27,8 +27,8 @@ import { watchlistRequest, watchlistToast } from './-discover.your-artists-actio
  * `watchlistRequest` builds) and `watchAllHeroArtists` +
  * `checkAllHeroWatchlistStatus` (599-668, 1200-1232).
  *
- * Rotation auto-advances every 8s ONLY with more than one artist; the vanilla
- * never pauses it for manual navigation, and neither does this. The button is
+ * Rotation auto-advances every 8s ONLY with more than one artist, holds while
+ * someone is on the hero, and restarts its clock on any slide change. The button is
  * NULL until its check answers — a failed check says nothing about
  * membership. The all-watched probe short-circuits on the first miss, exactly
  * as the vanilla's early break.
@@ -46,6 +46,8 @@ export interface HeroController {
   jump: (index: number) => void;
   toggleWatchlist: () => Promise<void>;
   watchAll: () => Promise<void>;
+  /** hold rotation while someone is reading or using the hero. */
+  setPaused: (paused: boolean) => void;
 }
 
 export function useHero(
@@ -70,16 +72,20 @@ export function useHero(
   }, [listKey]);
 
   // Auto-advance every 8s, only with more than one artist (432-437).
+  //
+  // the vanilla never paused, so you'd hit next and it would jump again a
+  // second later, or the watchlist button slid away under your cursor. now
+  // the clock restarts on every slide change (manual or not), and it holds
+  // while the pointer or focus is on the hero or motion is reduced.
+  const [paused, setPaused] = useState(false);
   useEffect(() => {
-    // Faithful to 432 — though with ONE artist the interval would only step
-    // 0→0 (mod 1), so a mutant removing this guard is EQUIVALENT; the guard
-    // saves a pointless timer, not a visible behaviour.
-    if (!heroAutoAdvances(artists.length)) return;
-    const timer = setInterval(() => {
+    if (!heroAutoAdvances(artists.length) || paused) return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const timer = setTimeout(() => {
       setIndex((i) => heroNextIndex(i, 1, artists.length));
     }, HERO_SLIDE_MS);
-    return () => clearInterval(timer);
-  }, [artists.length]);
+    return () => clearTimeout(timer);
+  }, [artists.length, index, paused]);
 
   // The per-artist button check (547-577), re-run per slide; null until
   // answered, and a stale answer never lands on a newer slide.
@@ -212,5 +218,6 @@ export function useHero(
     jump,
     toggleWatchlist,
     watchAll,
+    setPaused,
   };
 }

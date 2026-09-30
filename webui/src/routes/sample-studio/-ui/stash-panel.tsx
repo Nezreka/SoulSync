@@ -1,8 +1,8 @@
 import type { StashEntry } from '../-sample-studio.types';
 
 import { stashExportUrl } from '../-sample-studio.api';
-import { formatTime } from '../-sample-studio.helpers';
-import { STASH_FORMAT_LABEL } from '../-sample-studio.types';
+import { describeRenderParams, formatTime, fxFromStashEntry } from '../-sample-studio.helpers';
+import { STEM_LABEL, STASH_FORMAT_LABEL } from '../-sample-studio.types';
 import styles from './sample-studio-page.module.css';
 
 interface StashPanelProps {
@@ -11,6 +11,7 @@ interface StashPanelProps {
   error: Error | null;
   onPlay: (entry: StashEntry) => void;
   onDelete: (entryId: number) => void;
+  onRestore: (entry: StashEntry) => void;
 }
 
 function fxLabel(entry: StashEntry): string {
@@ -18,11 +19,20 @@ function fxLabel(entry: StashEntry): string {
   if (Math.abs(entry.pitch_st) >= 0.01)
     bits.push(`${entry.pitch_st > 0 ? '+' : ''}${entry.pitch_st} st`);
   if (entry.target_bpm != null) bits.push(`→ ${entry.target_bpm} BPM`);
+  if (entry.stem) bits.push(`${STEM_LABEL[entry.stem] ?? entry.stem} stem`);
+  bits.push(...describeRenderParams(fxFromStashEntry(entry)));
   return bits.join(' · ');
 }
 
 /** The personal sample stash: every saved chop (rendered file + bookmark). */
-export function StashPanel({ entries, isLoading, error, onPlay, onDelete }: StashPanelProps) {
+export function StashPanel({
+  entries,
+  isLoading,
+  error,
+  onPlay,
+  onDelete,
+  onRestore,
+}: StashPanelProps) {
   return (
     <div className={styles.stashPanel}>
       <div className={styles.panelHeader}>
@@ -83,14 +93,24 @@ export function StashPanel({ entries, isLoading, error, onPlay, onDelete }: Stas
                     </div>
                   )}
                 </div>
-                <button
-                  type="button"
-                  className={styles.transportBtn}
-                  onClick={() => onDelete(entry.id)}
-                  title={`Delete ${entry.name}`}
-                >
-                  🗑
-                </button>
+                <div className={styles.stashActions}>
+                  <button
+                    type="button"
+                    className={styles.transportBtn}
+                    onClick={() => onRestore(entry)}
+                    title={`Re-open “${entry.name}” in the editor with its recipe (region, pitch, tempo, FX)`}
+                  >
+                    ↺ Re-open
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.transportBtn}
+                    onClick={() => onDelete(entry.id)}
+                    title={`Delete ${entry.name}`}
+                  >
+                    🗑
+                  </button>
+                </div>
               </div>
             ))}
           </div>

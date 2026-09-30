@@ -6,7 +6,11 @@ import { server } from '@/test/msw';
 import {
   blacklistArtist,
   dismissAllInbox,
+  fetchFlow,
+  fetchForYouMixes,
   fetchInbox,
+  fetchMoodMixes,
+  fetchWeekStats,
   setInboxState,
   postDiscoverFeedback,
   resetDiscoverTaste,
@@ -303,6 +307,49 @@ describe('the inbox', () => {
     await setInboxState(7, 'saved');
     expect((await dismissAllInbox()).dismissed).toBe(4);
     expect(seen).toEqual(['GET saved', 'STATE 7 {"state":"saved"}', 'DISMISS']);
+  });
+});
+
+describe('on repeat, blends and flow', () => {
+  it('reads the for-you mixes as an outcome and flow as a plain answer', async () => {
+    server.use(
+      http.get('*/api/discover/for-you', () =>
+        HttpResponse.json({ success: true, mixes: [{ key: 'on_repeat' }] }),
+      ),
+      http.get('*/api/discover/flow', () =>
+        HttpResponse.json({ success: true, tracks: [{ name: 'x' }] }),
+      ),
+    );
+    const out = await fetchForYouMixes();
+    expect(out.kind === 'ok' && (out.data.mixes as unknown[])).toHaveLength(1);
+    expect((await fetchFlow()).tracks).toHaveLength(1);
+  });
+});
+
+describe('moods', () => {
+  it('reads the mood mixes as a section outcome', async () => {
+    server.use(
+      http.get('*/api/discover/moods', () =>
+        HttpResponse.json({ success: true, mixes: [{ key: 'mood_chill' }] }),
+      ),
+    );
+    const out = await fetchMoodMixes();
+    expect(out.kind).toBe('ok');
+    expect(out.kind === 'ok' && (out.data.mixes as unknown[])).toHaveLength(1);
+  });
+});
+
+describe('your week', () => {
+  it('reads the cached 7-day stats, the same numbers the Stats page shows', async () => {
+    let range: string | null = null;
+    server.use(
+      http.get('*/api/stats/cached', ({ request }) => {
+        range = new URL(request.url).searchParams.get('range');
+        return HttpResponse.json({ success: true, overview: { total_plays: 12 } });
+      }),
+    );
+    expect((await fetchWeekStats()).overview?.total_plays).toBe(12);
+    expect(range).toBe('7d');
   });
 });
 

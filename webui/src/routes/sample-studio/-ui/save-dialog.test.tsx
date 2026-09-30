@@ -2,8 +2,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { StashEntry } from '../-sample-studio.types';
+import type { RenderFx, StashEntry } from '../-sample-studio.types';
 
+import { DEFAULT_FX } from '../-sample-studio.types';
 import { SaveDialog } from './save-dialog';
 
 const track = { id: 7, title: 'Midnight Groove', artist_name: 'Test Artist' };
@@ -92,6 +93,7 @@ function renderDialog(over: Partial<Parameters<typeof SaveDialog>[0]> = {}) {
     pitchSt: 0,
     targetBpm: null,
     stem: null,
+    fx: DEFAULT_FX,
     onSaved: vi.fn(),
     ...over,
   };
@@ -138,6 +140,7 @@ describe('SaveDialog', () => {
       pitchSt: 0,
       targetBpm: null,
       stem: null,
+      fx: DEFAULT_FX,
       onSaved: vi.fn(),
       ...over,
     };
@@ -213,6 +216,47 @@ describe('SaveDialog', () => {
   it('shows the stem and fx summary line', () => {
     renderDialog({ stem: 'drums', pitchSt: 2, targetBpm: 128 });
     expect(screen.getByText(/Drums stem · \+2 st · → 128 BPM/)).toBeInTheDocument();
+  });
+
+  it('sends the FX recipe with the save body and shows it in the summary', async () => {
+    const calls = stubApi({});
+    const fx: RenderFx = {
+      ...DEFAULT_FX,
+      normalize: true,
+      reverse: true,
+      fadeMs: 10,
+      space: 0.5,
+      delay: { time: '1/8', feedback: 0.35, mix: 0.2 },
+    };
+    renderDialog({ fx });
+
+    fireEvent.click(screen.getByRole('button', { name: /Save to stash/ }));
+    await waitFor(() => {
+      const chopCall = calls.find((c) => c.url.includes('/api/sample/chop'));
+      expect(chopCall?.body).toMatchObject({
+        normalize: 'peak',
+        reverse: true,
+        fade_ms: 10,
+        space: 0.5,
+        delay: { time: '1/8', feedback: 0.35, mix: 0.2 },
+      });
+    });
+    expect(
+      screen.getByText(/peak normalize · reversed · 10 ms fade · 0.5 s space · 1\/8 delay/),
+    ).toBeInTheDocument();
+  });
+
+  it('omits normalize and sends null space/delay when FX are off', async () => {
+    const calls = stubApi({});
+    renderDialog({ fx: DEFAULT_FX });
+
+    fireEvent.click(screen.getByRole('button', { name: /Save to stash/ }));
+    await waitFor(() => {
+      const chopCall = calls.find((c) => c.url.includes('/api/sample/chop'));
+      expect(chopCall).toBeDefined();
+      expect(chopCall?.body).not.toHaveProperty('normalize');
+      expect(chopCall?.body).toMatchObject({ fade_ms: 5, space: null, delay: null });
+    });
   });
 
   it('defaults the folder picker to the first configured folder', async () => {

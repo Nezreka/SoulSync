@@ -76,6 +76,30 @@ export function explanationLine(explanation: Explanation | null | undefined): st
   return `${LEAD[explanation.kind]} ${nameList(names)}`;
 }
 
+/**
+ * the one line in pieces, so the names can be set apart from the lead
+ * ("Because you have **A**, **B** +2 more"). joined, it reads exactly like
+ * explanationLine. null when there are no names to set apart.
+ */
+export interface ExplanationParts {
+  lead: string;
+  names: string[];
+  more: number;
+}
+
+export function explanationParts(
+  explanation: Explanation | null | undefined,
+): ExplanationParts | null {
+  if (!explanation || !known(explanation.kind)) return null;
+  const names = seedNames(explanation);
+  if (names.length === 0) return null;
+  return {
+    lead: LEAD[explanation.kind],
+    names: names.slice(0, 2),
+    more: Math.max(0, names.length - 2),
+  };
+}
+
 /** Every seed, for the tooltip the truncated line hides — with each seed's
  * share of the score when the server sent components. */
 export function explanationTitle(explanation: Explanation | null | undefined): string {

@@ -70,6 +70,31 @@ describe('useHero — rotation', () => {
     expect(result.current.index).toBe(0);
   });
 
+  it('holds while paused, and picks up again when released', async () => {
+    vi.useFakeTimers();
+    const { result } = mount([artist('a'), artist('b')]);
+    act(() => result.current.setPaused(true));
+    await act(() => vi.advanceTimersByTimeAsync(30000));
+    expect(result.current.index).toBe(0);
+    act(() => result.current.setPaused(false));
+    await act(() => vi.advanceTimersByTimeAsync(8100));
+    expect(result.current.index).toBe(1);
+  });
+
+  it('a manual move restarts the clock instead of jumping again right after', async () => {
+    // the vanilla ran one fixed interval: click next at 7s and it moved
+    // again one second later.
+    vi.useFakeTimers();
+    const { result } = mount([artist('a'), artist('b'), artist('c')]);
+    await act(() => vi.advanceTimersByTimeAsync(7000));
+    act(() => result.current.navigate(1));
+    expect(result.current.index).toBe(1);
+    await act(() => vi.advanceTimersByTimeAsync(2000));
+    expect(result.current.index).toBe(1);
+    await act(() => vi.advanceTimersByTimeAsync(6200));
+    expect(result.current.index).toBe(2);
+  });
+
   it('navigates with wrapping and jumps by dot', async () => {
     const { result } = mount([artist('a'), artist('b'), artist('c')]);
     act(() => result.current.navigate(-1));

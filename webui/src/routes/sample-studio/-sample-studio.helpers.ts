@@ -3,6 +3,8 @@
  * unit-testable (-sample-studio.helpers.test.ts).
  */
 
+import type { DelayParams, RenderFx, SampleKey, StashEntry } from './-sample-studio.types';
+
 /** "m:ss.t" — 83.456 -> "1:23.5" */
 export function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00.0';
@@ -159,6 +161,59 @@ export function clamp(v: number, lo: number, hi: number): number {
 }
 
 /**
+ * "C minor · 99.4 BPM" for the editor header. Below 0.5 key confidence the
+ * key reads "key uncertain"; a null key is hidden (not guessed). Null when
+ * neither is known.
+ */
+export function formatKeyBpm(
+  key: SampleKey | null | undefined,
+  bpm: number | null | undefined,
+): string | null {
+  let keyPart: string | null = null;
+  if (key && typeof key.name === 'string' && key.name.length > 0) {
+    keyPart =
+      typeof key.confidence === 'number' && key.confidence < 0.5 ? 'key uncertain' : key.name;
+  }
+  const bpmPart =
+    typeof bpm === 'number' && Number.isFinite(bpm) && bpm > 0 ? `${bpm.toFixed(1)} BPM` : null;
+  if (!keyPart && !bpmPart) return null;
+  return [keyPart, bpmPart].filter(Boolean).join(' · ');
+}
+
+/**
+ * Normalize a stash entry's echoed render recipe into a full RenderFx.
+ * Older rows (or malformed values) fall back to the backend defaults —
+ * restoring a bookmark never produces an out-of-range render.
+ */
+export function fxFromStashEntry(entry: StashEntry): RenderFx {
+  const delay = entry.delay;
+  const validDelay: DelayParams | null =
+    delay != null &&
+    (delay.time === '1/4' || delay.time === '1/8' || delay.time === '1/2') &&
+    typeof delay.feedback === 'number' &&
+    delay.feedback >= 0 &&
+    delay.feedback < 1 &&
+    typeof delay.mix === 'number' &&
+    delay.mix >= 0 &&
+    delay.mix <= 1
+      ? { time: delay.time, feedback: delay.feedback, mix: delay.mix }
+      : null;
+  return {
+    normalize: entry.normalize === 'peak',
+    fadeMs:
+      typeof entry.fade_ms === 'number' && entry.fade_ms >= 0.5 && entry.fade_ms <= 1000
+        ? entry.fade_ms
+        : 5,
+    reverse: entry.reverse === true,
+    space:
+      typeof entry.space === 'number' && entry.space >= 0.2 && entry.space <= 1.5
+        ? entry.space
+        : null,
+    delay: validDelay,
+  };
+}
+
+/**
  * Transient slices of the in/out region: consecutive onset pairs inside the
  * region become slices; the last slice runs to the out-point. When there are
  * no onsets in the region, the whole region is one slice.
@@ -305,4 +360,24 @@ export function suggestChops(opts: SuggestChopsOptions): SuggestedChop[] {
     if (!overlaps) picked.push(c);
   }
   return picked.map(({ start, end, label, score }) => ({ start, end, label, score }));
+}
+
+/**
+ * Short human-readable bits for an FX recipe: "peak normalize", "reversed",
+ * "10 ms fade", "0.5 s space", "1/8 delay". Used by the save dialog and
+ * stash so the baked-in recipe is visible.
+ */
+export function describeRenderParams(fx: RenderFx): string[] {
+  const bits: string[] = [];
+  if (fx.normalize) bits.push('peak normalize');
+  if (fx.reverse) bits.push('reversed');
+  bits.push(`${fx.fadeMs} ms fade`);
+  if (fx.space != null) bits.push(`${fx.space} s space`);
+  if (fx.delay != null) {
+    const d: DelayParams = fx.delay;
+    bits.push(
+      `${d.time} delay (fb ${Math.round(d.feedback * 100)}%, mix ${Math.round(d.mix * 100)}%)`,
+    );
+  }
+  return bits;
 }
