@@ -84,6 +84,12 @@ def fetch_public_playlist_full(
         logger.debug("playlist metadata fetch failed (%s); continuing", e)
     name = meta.get('name', 'Unknown')
     subtitle = (meta.get('owner') or {}).get('display_name', '')
+    # Playlist artwork rides on the anonymous metadata call — surface it so
+    # no-auth consumers (Companion extension, link-paste) get cover art too.
+    image_url = ''
+    images = meta.get('images') or []
+    if images and isinstance(images[0], dict):
+        image_url = images[0].get('url', '') or ''
 
     tracks: List[Dict[str, Any]] = []
     results = client.playlist_items(spotify_id)
@@ -112,6 +118,7 @@ def fetch_public_playlist_full(
         'tracks': tracks,
         'url': source_url,
         'url_hash': hashlib.md5(source_url.encode()).hexdigest()[:12],
+        'image_url': image_url,
     }
 
 

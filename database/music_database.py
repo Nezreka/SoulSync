@@ -23263,7 +23263,7 @@ class MusicDatabase:
                         name = excluded.name,
                         description = COALESCE(NULLIF(excluded.description, ''), mirrored_playlists.description),
                         owner = excluded.owner,
-                        image_url = excluded.image_url,
+                        image_url = COALESCE(NULLIF(excluded.image_url, ''), mirrored_playlists.image_url),
                         track_count = excluded.track_count,
                         quality_profile_id = CASE
                             WHEN ? THEN excluded.quality_profile_id

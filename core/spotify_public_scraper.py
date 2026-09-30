@@ -148,6 +148,17 @@ def parse_embed_html(html: str, spotify_type: str, spotify_id: str) -> dict:
     source_url = f'https://open.spotify.com/{spotify_type}/{spotify_id}'
     url_hash = hashlib.md5(source_url.encode()).hexdigest()[:12]
 
+    # Playlist artwork: the embed JSON doesn't carry it, but the page's
+    # Open Graph tags do. Absence is fine — callers treat it as unknown.
+    image_url = ''
+    og_match = re.search(
+        r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', html)
+    if not og_match:
+        og_match = re.search(
+            r'<meta[^>]+content="([^"]+)"[^>]+property="og:image"', html)
+    if og_match:
+        image_url = og_match.group(1)
+
     result = {
         'id': spotify_id,
         'type': entity.get('type', spotify_type),
@@ -155,7 +166,8 @@ def parse_embed_html(html: str, spotify_type: str, spotify_id: str) -> dict:
         'subtitle': entity.get('subtitle', ''),
         'tracks': tracks,
         'url': source_url,
-        'url_hash': url_hash
+        'url_hash': url_hash,
+        'image_url': image_url,
     }
 
     logger.info(f"Scraped Spotify {spotify_type}: {result['name']} ({len(tracks)} tracks)")

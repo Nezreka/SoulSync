@@ -19333,7 +19333,7 @@ def _spotify_playlist_public_response(playlist_id):
         'public': True,
         'collaborative': False,
         'track_count': len(tracks),
-        'image_url': None,
+        'image_url': public.get('image_url') or None,
         'snapshot_id': '',
         'tracks': tracks,
         'incomplete': possibly_truncated,
