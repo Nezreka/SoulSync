@@ -163,6 +163,10 @@ export function AutoSyncScheduledCard({
   // folder + quality live behind ⋯ now. every card showing a checkbox and a
   // dropdown made the board a wall of form controls.
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // a personalized row (Daily Mix etc.) isn't a mirrored playlist yet, there's
+  // nothing to save a folder or quality choice onto. the vanilla board drew the
+  // quality select anyway and never filled it, so it sat on "Loading…" forever.
+  const hasSettings = !playlist._personalized;
   const health = autoSyncPlaylistHealth(history, playlist.id as number);
   const healthClass =
     health.level === 'failing' ? 'failing' : health.level === 'warning' ? 'warning' : '';
@@ -189,28 +193,32 @@ export function AutoSyncScheduledCard({
           {autoSyncSourceLabel(playlist.source)} &middot; {playlist.track_count || 0} tracks
         </div>
         <div className="auto-sync-scheduled-timing">{timing}</div>
-        <div
-          className={`auto-sync-card-settings${settingsOpen ? ' open' : ''}`}
+        {hasSettings ? (
+          <div
+            className={`auto-sync-card-settings${settingsOpen ? ' open' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation();
+            }}
+          >
+            <AutoSyncOrganizeRow playlist={playlist} onOrganizeChange={actions.onOrganizeChange} />
+          </div>
+        ) : null}
+      </div>
+      {hasSettings ? (
+        <button
+          type="button"
+          className={`auto-sync-card-more${settingsOpen ? ' open' : ''}`}
+          title="Folder and quality settings"
+          aria-label="Folder and quality settings"
+          aria-expanded={settingsOpen}
           onClick={(e) => {
             e.stopPropagation();
+            setSettingsOpen((v) => !v);
           }}
         >
-          <AutoSyncOrganizeRow playlist={playlist} onOrganizeChange={actions.onOrganizeChange} />
-        </div>
-      </div>
-      <button
-        type="button"
-        className={`auto-sync-card-more${settingsOpen ? ' open' : ''}`}
-        title="Folder and quality settings"
-        aria-label="Folder and quality settings"
-        aria-expanded={settingsOpen}
-        onClick={(e) => {
-          e.stopPropagation();
-          setSettingsOpen((v) => !v);
-        }}
-      >
-        &#8943;
-      </button>
+          &#8943;
+        </button>
+      ) : null}
       <div className="auto-sync-scheduled-actions">
         <button
           className="run"

@@ -171,6 +171,19 @@ describe('AutoSyncScheduledCard (1951-1976 / 979-1024)', () => {
     expect(onCardClick).not.toHaveBeenCalled();
   });
 
+  it('offers no folder / quality settings on a personalized row (Daily Mix)', () => {
+    // there's no mirrored playlist to save them onto yet. the quality select
+    // used to render anyway and sit on "Loading…" forever.
+    window.playlistQualityProfileSelectHtml = () => '<select></select>';
+    const { container } = renderCard(row({ id: -1, _personalized: true }));
+    expect(container.querySelector('.auto-sync-card-more')).toBeNull();
+    expect(container.querySelector('.auto-sync-card-settings')).toBeNull();
+    expect(container.querySelector('select')).toBeNull();
+    // run and unschedule are untouched
+    expect(container.querySelector('button.run')).not.toBeNull();
+    expect(container.querySelectorAll('.auto-sync-scheduled-actions button')).toHaveLength(2);
+  });
+
   it('leaves the organize toggle from reaching the card click', () => {
     const onCardClick = vi.fn();
     const { container } = renderCard(row(), { onCardClick });
