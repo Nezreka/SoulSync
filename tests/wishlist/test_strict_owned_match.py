@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from core.wishlist.library_match import find_owned_match
 
 
@@ -44,12 +46,12 @@ def test_release_annotation_repeated_in_album_is_not_a_distinct_song():
     ) is not None
 
 
-def test_version_annotation_on_another_release_stays_distinct():
+def test_remaster_annotation_does_not_make_a_track_wish_missing():
     assert find_owned_match(
         _db('Runaway Train', 'Grave Dancers Union'),
         'Runaway Train (2022 Remaster)', [{'name': 'Soul Asylum'}],
         'Grave Dancers Union (2022 Remaster)', 'navidrome', strict_identity=True,
-    ) is None
+    ) is not None
 
 
 def test_album_fallback_cannot_accept_same_title_by_different_artist():
@@ -190,3 +192,102 @@ def test_album_fallback_checks_per_track_artist_and_server():
         db, 'Time', [{'name': 'Deeparture'}], 'Time', 'navidrome',
         strict_identity=True, require_album=True,
     ) is None
+
+
+@pytest.mark.parametrize(('first', 'second'), [
+    ('Come Together - Remastered 2009', 'Come Together'),
+    ('Stay', 'Stay (feat. Justin Bieber)'),
+    ('Stay', 'Stay feat. Justin Bieber'),
+    ('Blinding Lights', 'Blinding Lights (Single Version)'),
+    ('Song (2011 Remaster)', 'Song (Remastered 2009)'),
+    ('Song (Deluxe Edition)', 'Song'),
+    ('Song (Deluxe)', 'Song'),
+    ('Song (Live)', 'Song - Live'),
+    ('Song (Live) - Remastered 2011', 'Song - Live'),
+    ('Live Forever', 'Live Forever (2011 Remaster)'),
+    ('[Rhubarb] - Remastered 2011', 'Rhubarb'),
+    ('[Live] - Remastered 2011', 'Live'),
+    ('Song (Pt. 1)', 'Song, Pt. 1'),
+    ('Song (feat. Live)', 'Song'),
+])
+def test_harmless_title_annotations_match_in_both_directions(first, second):
+    for requested, owned in ((first, second), (second, first)):
+        assert find_owned_match(_db(owned, 'Album'), requested, ['Soul Asylum'], 'Album',
+                                'navidrome', strict_identity=True, require_album=True) is not None
+
+
+@pytest.mark.parametrize('qualifier', ['Live', 'Acoustic', 'Remix', 'Demo', 'Instrumental'])
+def test_recording_version_asymmetry_is_not_ownership(qualifier):
+    for requested, owned in (('Song', f'Song ({qualifier})'), (f'Song - {qualifier}', 'Song')):
+        assert find_owned_match(_db(owned, 'Album'), requested, ['Soul Asylum'], 'Album',
+                                'navidrome', strict_identity=True, require_album=True) is None
+
+
+@pytest.mark.parametrize(('first', 'second'), [
+    ('Song (Pt. 1)', 'Song (Pt. 2)'),
+    ('Song (Part I)', 'Song (Part II)'),
+    ('Song (Interlude)', 'Song'),
+    ('Song (1977)', 'Song (1978)'),
+    ('Song (Verse)', 'Song (Chorus)'),
+    ('Runaway Train', 'The Sun Maid'),
+    ('Song (Live 1977)', 'Song (Live 1978)'),
+    ('Song (Alice Remix)', 'Song (Bob Remix)'),
+])
+def test_normalization_does_not_erase_distinct_song_identity(first, second):
+    assert find_owned_match(_db(second, 'Album'), first, ['Soul Asylum'], 'Album',
+                            'navidrome', strict_identity=True, require_album=True) is None
+
+
+@pytest.mark.parametrize(('requested', 'owned'), [
+    ('Abbey Road (Remastered 2009)', 'Abbey Road'),
+    ('Abbey Road', 'Abbey Road - Remastered 2009'),
+    ('Abbey Road [Deluxe Edition]', 'Abbey Road'),
+    ('Abbey Road (50th Anniversary)', 'Abbey Road'),
+])
+def test_album_edition_annotations_do_not_force_duplicate_downloads(requested, owned):
+    assert find_owned_match(_db('Song', owned), 'Song', ['Soul Asylum'], requested,
+                            'navidrome', strict_identity=True, require_album=True) is not None
+
+
+@pytest.mark.parametrize('owned_album', ['Elsewhere', 'Album (Live)', 'Album (Part II)'])
+def test_album_normalization_retains_release_identity(owned_album):
+    assert find_owned_match(_db('Song', owned_album), 'Song', ['Soul Asylum'], 'Album',
+                            'navidrome', strict_identity=True, require_album=True) is None
+
+
+@pytest.mark.parametrize('credit', ['Lil Nas X', 'Lil Nas X ', 'Lil Nas X & Billy Ray Cyrus',
+                                   'Lil Nas X feat. Billy Ray Cyrus'])
+def test_artist_name_ending_in_x_is_preserved_in_a_credit(credit):
+    assert find_owned_match(_db('Old Town Road', 'Album', artist=credit), 'Old Town Road',
+                            ['Lil Nas X'], 'Album', 'navidrome', strict_identity=True) is not None
+    assert find_owned_match(_db('Old Town Road', 'Album', artist=credit), 'Old Town Road',
+                            ['Lil Nas'], 'Album', 'navidrome', strict_identity=True) is None
+
+
+def test_explicit_x_collaboration_still_matches():
+    assert find_owned_match(_db('Song', 'Album', artist='Artist A x Artist B'), 'Song',
+                            ['Artist B'], 'Album', 'navidrome', strict_identity=True) is not None
+
+
+@pytest.mark.parametrize('edition', ['(Remastered 2009)', '[Deluxe Edition]', '- 2011 Remaster'])
+@pytest.mark.parametrize('album', ["Don't Look Back", 'Foo - Bar'])
+def test_album_fallback_searches_the_base_name_without_losing_punctuation(edition, album):
+    owned = SimpleNamespace(title='Song', album_title=album, artist_name='Artist',
+                            file_path='/music/song.flac')
+    wrong_release = SimpleNamespace(title='Song', album_title='Elsewhere', artist_name='Artist')
+    db = SimpleNamespace(
+        check_track_exists=lambda *args, **kwargs: (wrong_release, 1.0),
+        # search_albums is a substring query; an edition absent from the DB
+        # title must not prevent this candidate from being retrieved.
+        search_albums=lambda **kw: [SimpleNamespace(id='owned', title=album)]
+        if kw['title'].lower() in album.lower() else [],
+        get_candidate_tracks_for_albums=lambda ids: [owned],
+    )
+    assert find_owned_match(db, 'Song', ['Artist'], f'{album} {edition}', 'navidrome',
+                            strict_identity=True, require_album=True) == (owned, 1.0, 'Artist')
+
+
+@pytest.mark.parametrize(('requested', 'owned'), [('The Beatles', 'Beatles'), ('Beatles', 'The Beatles')])
+def test_artist_check_keeps_existing_leading_the_equivalence(requested, owned):
+    assert find_owned_match(_db('Song', 'Album', artist=owned), 'Song', [requested], 'Album',
+                            'navidrome', strict_identity=True) is not None

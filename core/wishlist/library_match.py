@@ -29,11 +29,24 @@ from typing import Any, Optional, Tuple
 
 from core.downloads.atomic_album_publish import contains_staging_segment
 from core.imports.context import extract_artist_name
+from core.matching.audio_verification import normalize
 from core.text.normalize import normalize_key
-from core.text.title_match import strip_redundant_context_qualifiers
+from core.text.title_match import (
+    is_trailing_version_qualifier,
+    recording_version_markers,
+    strip_redundant_context_qualifiers,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("wishlist.library_match")
+
+_BRACKET_QUALIFIER = re.compile(r'\(([^()]*)\)|\[([^\[\]]*)\]|<([^<>]*)>')
+_DASH_QUALIFIER = re.compile(r'(?:\s[-–—]\s*|\s*[-–—]\s)([^–—-]+)$')
+_FEATURED_CREDIT = re.compile(r'^(?:feat\.?|ft\.?|featuring)\s', re.I)
+_EDITION_ONLY = re.compile(
+    r'(?:super\s+)?deluxe|expanded|(?:\d+(?:st|nd|rd|th)\s+)?anniversary',
+    re.I,
+)
 
 
 def artist_names(artists: Any) -> list:
@@ -58,6 +71,42 @@ def _identity_key(value: str) -> str:
     return re.sub(r'[\W_]+', ' ', unaccented.casefold()).strip()
 
 
+def _is_metadata_annotation(text: str) -> bool:
+    # A featured artist named Live does not make this a live recording.
+    return bool(_FEATURED_CREDIT.match(text.strip())
+                or ((_EDITION_ONLY.fullmatch(text.strip()) or is_trailing_version_qualifier(text))
+                    and not recording_version_markers(f'({text})')))
+
+
+def _normalized_title(title: str) -> str:
+    # Remove metadata noise, then keep actual subtitles, numbered parts and
+    # recording details by unwrapping them before using the verifier's
+    # normalizer. Category parity alone would merge two different live years
+    # or two named remixes. Preserve dash-form recording details as well.
+    def preserve_subtitle(match):
+        inner = next(group for group in match.groups() if group is not None)
+        return f' {inner} '
+
+    title = _BRACKET_QUALIFIER.sub(preserve_subtitle, _strip_metadata_annotations(title))
+    return normalize(title, strip_version_tail=False)
+
+
+def _strip_metadata_annotations(title: str) -> str:
+    """Strip harmless metadata, retaining punctuation for album SQL searches."""
+    base_key = _identity_key(normalize(title))
+
+    def strip_edition(match):
+        inner = next(group for group in match.groups() if group is not None)
+        if _identity_key(inner) == base_key:
+            return f' {inner} '  # Brackets can contain the whole title.
+        return ' ' if _is_metadata_annotation(inner) else match.group()
+
+    base = _BRACKET_QUALIFIER.sub(strip_edition, title)
+    while (tail := _DASH_QUALIFIER.search(base)) and _is_metadata_annotation(tail.group(1)):
+        base = base[:tail.start()]
+    return ' '.join(base.split()) or title
+
+
 def _same_title(requested: str, owned: str, album_context: str = '') -> bool:
     """Accept metadata wording without discarding a distinct recording version."""
     requested_key = _identity_key(requested)
@@ -67,14 +116,18 @@ def _same_title(requested: str, owned: str, album_context: str = '') -> bool:
         # A punctuation-only title has no word key: "-" and "&" must not
         # become identical merely because both reduce to the empty string.
         return requested.casefold().strip() == owned.casefold().strip()
-    requested_context = strip_redundant_context_qualifiers(requested, album_context, owned)
-    owned_context = strip_redundant_context_qualifiers(owned, album_context, requested)
+    pairs = [(requested, owned)]
+    requested_context = strip_redundant_context_qualifiers(requested, album_context)
+    owned_context = strip_redundant_context_qualifiers(owned, album_context)
     # If both sides lose different qualifiers, their shared base is not enough
     # evidence of ownership ("Song (Verse)" is not "Song (Chorus)").
-    if requested_context != requested and owned_context != owned:
-        return False
-    key = _identity_key(requested_context)
-    return bool(key and key == _identity_key(owned_context))
+    if requested_context == requested or owned_context == owned:
+        pairs.append((requested_context, owned_context))
+    for wanted, found in pairs:
+        key = _identity_key(_normalized_title(wanted))
+        if key and key == _identity_key(_normalized_title(found)):
+            return True
+    return False
 
 
 def _same_artist(requested: str, db_track: Any) -> bool:
@@ -87,22 +140,29 @@ def _same_artist(requested: str, db_track: Any) -> bool:
         return True  # Older database adapters do not expose artist credits.
     # Use the artist key already used by library search: AC/DC and ACDC are
     # the same credit even though their word boundaries differ.
-    target = normalize_key(requested)
+    def artist_key(name):
+        # check_track_exists already searches both leading-"The" spellings.
+        return normalize_key(re.sub(r'^the\s+', '', name.strip(), flags=re.I))
+
+    target = artist_key(requested)
     parts = re.split(
-        r'\s*(?:[,;&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b|\bx\b)\s*',
+        r'\s*(?:[,;&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b)\s*',
         credit, flags=re.I,
     )
-    return bool(target and any(normalize_key(part) == target for part in [credit, *parts]))
+    # Split explicit credits first, retaining "Lil Nas X" as a complete name
+    # before considering the whitespace-delimited collaboration separator.
+    collaborations = [name for part in parts for name in re.split(r'\s+x\s+', part.strip(), flags=re.I)]
+    return bool(target and any(artist_key(part) == target for part in [credit, *parts, *collaborations]))
 
 
 def _strict_identity_matches(db_track: Any, track_name: str, artist_name: str,
                              album: Optional[str], require_album: bool) -> bool:
     matched_title = getattr(db_track, 'title', None)
     matched_album = getattr(db_track, 'album_title', None)
-    album_key = _identity_key(album)
-    if require_album and (not album_key or not matched_album or album_key != _identity_key(matched_album)):
+    same_album = bool(album and matched_album and _same_title(album, matched_album))
+    if require_album and not same_album:
         return False
-    album_context = matched_album if album_key and matched_album and album_key == _identity_key(matched_album) else ''
+    album_context = matched_album if same_album else ''
     return bool(matched_title and _same_title(track_name, matched_title, album_context)
                 and _same_artist(artist_name, db_track))
 
@@ -170,10 +230,9 @@ def find_owned_match(music_database, track_name: str, artists: Any, album: Optio
     if strict_identity and require_album and album and names and rejected_match:
         try:
             albums = music_database.search_albums(
-                title=album, artist='', limit=500, server_source=active_server)
-            album_key = _identity_key(album)
+                title=_strip_metadata_annotations(album), artist='', limit=500, server_source=active_server)
             album_ids = [candidate.id for candidate in albums
-                         if album_key and _identity_key(candidate.title) == album_key]
+                         if _same_title(album, candidate.title)]
             if album_ids:
                 for candidate in music_database.get_candidate_tracks_for_albums(album_ids):
                     if getattr(candidate, 'server_source', active_server) != active_server:
