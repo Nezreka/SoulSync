@@ -995,7 +995,10 @@ async function closeDownloadMissingModal(playlistId) {
         // Automatic cleanup and server operations after successful downloads
         await handlePostDownloadAutomation(playlistId, process);
 
-        cleanupDownloadProcess(playlistId);
+        // awaited: it deletes the process by id after a network call, so a
+        // caller opening a fresh run for the same album right after this
+        // close would otherwise have its new process deleted from under it
+        await cleanupDownloadProcess(playlistId);
     }
 }
 
