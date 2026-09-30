@@ -184,6 +184,22 @@ describe('AutoSyncScheduledCard (1951-1976 / 979-1024)', () => {
     expect(container.querySelectorAll('.auto-sync-scheduled-actions button')).toHaveLength(2);
   });
 
+  it('keeps a filled quality select filled when the card re-renders', () => {
+    // boulder, sept 30: every card sat on "Loading…". the vanilla hydrate fills
+    // the select in place; react 19 rewrote dangerouslySetInnerHTML on any
+    // re-render with a new {__html} object, putting it back to empty. opening
+    // ⋯ or starting a drag re-renders, and hydrate never runs again.
+    window.playlistQualityProfileSelectHtml = () =>
+      '<select class="qp"><option value="">Loading…</option></select>';
+    window.hydratePlaylistQualityProfileSelects = vi.fn(async () => {});
+    const { container } = renderCard(row());
+    const select = () => container.querySelector('select.qp') as HTMLSelectElement;
+    // what the vanilla hydrate does
+    select().innerHTML = '<option value="1">Default (Default)</option>';
+    fireEvent.click(container.querySelector('.auto-sync-card-more') as HTMLElement);
+    expect(select().options[0].text).toBe('Default (Default)');
+  });
+
   it('leaves the organize toggle from reaching the card click', () => {
     const onCardClick = vi.fn();
     const { container } = renderCard(row(), { onCardClick });

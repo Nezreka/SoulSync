@@ -40,7 +40,7 @@
  *   row.quality_profile_id is carried on the row type ready for it.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { MirroredPlaylistDetail } from '../-sync.api';
 import type { ExportMode } from '../-sync.export';
@@ -177,6 +177,12 @@ function MirroredCardMenu({
     typeof window.playlistQualityProfileSelectHtml === 'function'
       ? window.playlistQualityProfileSelectHtml(row.source_playlist_id, row.source, true)
       : '';
+  // one object per html string. react 19 rewrites dangerouslySetInnerHTML
+  // whenever the prop OBJECT changes, not the string, so a fresh {__html} on
+  // every render put the select back to its empty "Loading…" state after the
+  // vanilla hydrate had filled it. opening ⋯ or starting a drag re-renders,
+  // and the hydrate effect doesn't re-run because its deps didn't change.
+  const profileMarkup = useMemo(() => ({ __html: profileHtml }), [profileHtml]);
   const { source_playlist_id: sourcePlaylistId, source, quality_profile_id: profileId } = row;
   useEffect(() => {
     if (!profileHtml) return;
@@ -234,7 +240,7 @@ function MirroredCardMenu({
           }}
         >
           <span className="pl-menu-heading">Quality profile</span>
-          <span dangerouslySetInnerHTML={{ __html: profileHtml }} />
+          <span dangerouslySetInnerHTML={profileMarkup} />
         </div>
       ) : null}
       <div className="pl-menu-sep" />

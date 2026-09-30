@@ -20,7 +20,7 @@
  * guard, so the weekly board gains the hourly board's behaviour.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import {
   autoSyncGroupSidebarRows,
@@ -99,6 +99,12 @@ function AutoSyncOrganizeRow({
       ? window.playlistQualityProfileSelectHtml(playlist.source_playlist_id, playlist.source, true)
       : '';
 
+  // one object per html string. react 19 rewrites dangerouslySetInnerHTML
+  // whenever the prop OBJECT changes, not the string, so a fresh {__html} on
+  // every render put the select back to its empty "Loading…" state after the
+  // vanilla hydrate had filled it. opening ⋯ or starting a drag re-renders,
+  // and the hydrate effect doesn't re-run because its deps didn't change.
+  const profileMarkup = useMemo(() => ({ __html: profileHtml }), [profileHtml]);
   const { source_playlist_id: sourcePlaylistId, source, quality_profile_id: profileId } = playlist;
   useEffect(() => {
     if (!profileHtml) return;
@@ -124,7 +130,7 @@ function AutoSyncOrganizeRow({
         />
         <span>Organize by playlist</span>
       </label>
-      {profileHtml ? <span dangerouslySetInnerHTML={{ __html: profileHtml }} /> : null}
+      {profileHtml ? <span dangerouslySetInnerHTML={profileMarkup} /> : null}
     </>
   );
 }
