@@ -77287,6 +77287,72 @@ body.max-performance .dash-card::after {
     background-clip: padding-box;
 }
 
+/* #1401: the board is where the work happens, so the chrome above it stays
+   short. counts become chips, the idle monitor becomes one line. */
+.auto-sync-modal .auto-sync-header {
+    padding: 16px 28px 14px;
+}
+
+.auto-sync-modal .auto-sync-header h3 {
+    font-size: 20px;
+}
+
+.auto-sync-modal .auto-sync-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 28px 4px;
+}
+
+.auto-sync-modal .auto-sync-summary div {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 999px;
+}
+
+.auto-sync-modal .auto-sync-summary div:hover {
+    transform: none;
+}
+
+.auto-sync-modal .auto-sync-summary span {
+    display: inline;
+    font-size: 16px;
+}
+
+.auto-sync-modal .auto-sync-summary small {
+    display: inline;
+    margin-top: 0;
+}
+
+.auto-sync-monitor.auto-sync-monitor--idle {
+    padding: 8px 28px 10px;
+}
+
+.auto-sync-monitor--idle .auto-sync-monitor-head > div {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+}
+
+.auto-sync-monitor--idle .auto-sync-monitor-kicker,
+.auto-sync-monitor--idle .auto-sync-monitor-head strong,
+.auto-sync-monitor--idle .auto-sync-monitor-head small {
+    display: inline;
+    margin: 0;
+}
+
+.auto-sync-monitor--idle .auto-sync-monitor-empty {
+    display: none;
+}
+
+.auto-sync-modal .auto-sync-board-intro {
+    padding-top: 10px;
+    padding-bottom: 10px;
+}
+
 /* ===========================================================================
    Manage Enrichment Workers modal (enrichment-manager.js)
    =========================================================================== */

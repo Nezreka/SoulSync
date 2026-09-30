@@ -76,7 +76,8 @@ export function AutoSyncMonitorPanel({
 }) {
   const { visible, title, detail } = autoSyncMonitorSummary(playlists);
   return (
-    <section className="auto-sync-monitor">
+    // idle collapses to one line so the board below gets the room (#1401)
+    <section className={`auto-sync-monitor${visible.length ? '' : ' auto-sync-monitor--idle'}`}>
       <div className="auto-sync-monitor-head">
         <div>
           <span className="auto-sync-monitor-kicker">Live pipeline monitor</span>
