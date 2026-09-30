@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 import core.imports.paths as paths
 from core.imports.album_types import (
     DEFAULT_TYPES,
@@ -713,3 +715,32 @@ def test_the_path_builder_labels_a_spotify_ep_correctly(tmp_path, monkeypatch):
         ctx, ctx["spotify_artist"], _build_album_info(ctx), ".flac", create_dirs=False)
     folder = os.path.basename(os.path.dirname(path))
     assert folder == "[EP] Tokyo", folder
+
+
+@pytest.mark.parametrize(("source", "record_type", "tracks", "folder"), [
+    ("deezer", "single", 5, "Single"),   # daft punk's HBFS single, was EP
+    ("deezer", "ep", 9, "EP"),           # tranquility base, was Album
+    ("spotify", "single", 5, "EP"),      # spotify's EP-as-single still splits
+])
+def test_the_path_builder_files_by_the_sources_own_label(tmp_path, monkeypatch, source, record_type, tracks, folder):
+    """Through the real builder: the release lands in the same section the
+    artist page shows it in, for a source that labels EPs itself."""
+    from core.library_reorganize import _build_album_info, _build_post_process_context
+
+    monkeypatch.setattr(paths, "_get_config_manager", lambda: _Cfg({
+        "file_organization.templates": {"album_path": "$albumartist/$albumtype/$album/$track - $title"},
+        "file_organization.enabled": True,
+        "soulseek.transfer_path": str(tmp_path),
+    }))
+    ctx = _build_post_process_context(
+        {"id": "AL9", "name": "Harder, Better, Faster, Stronger", "release_date": "2001-10-13",
+         "total_tracks": tracks, "images": [{"url": ""}]},
+        {"name": "Harder, Better, Faster, Stronger", "track_number": 1, "disc_number": 1,
+         "artists": [{"name": "Daft Punk"}]},
+        "Daft Punk", "Harder, Better, Faster, Stronger", 1, record_type=record_type)
+    ctx["source"] = source
+    path, _ = paths.build_final_path_for_track(
+        ctx, ctx["spotify_artist"], _build_album_info(ctx), ".flac", create_dirs=False)
+    type_folder = os.path.basename(os.path.dirname(os.path.dirname(path)))
+    assert type_folder == folder, path
+

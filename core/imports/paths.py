@@ -395,7 +395,15 @@ def strip_leading_track_number(title: str) -> str:
 
 
 
-def get_album_type_display(raw_type, track_count) -> str:
+def _source_labels_eps(source) -> bool:
+    """a metadata source with its own EP label. spotify has none: it calls
+    singles and EPs both 'single', which is what the track-count split is for.
+    an unknown source might be spotify, so it gets the split too."""
+    name = str(source or "").strip().lower()
+    return bool(name) and not name.startswith("spotify")
+
+
+def get_album_type_display(raw_type, track_count, source: str = "") -> str:
     """Return the display form of an album's type for the $albumtype template variable."""
     raw = (raw_type or "").strip().lower()
     try:
@@ -406,6 +414,13 @@ def get_album_type_display(raw_type, track_count) -> str:
     if raw in ("compilation", "compile"):
         return "Compilation"
     if raw in ("single", "ep"):
+        # a source with its own EP label means what it says: deezer's 5-track
+        # 'single' is a single and its 9-track 'ep' an EP, which is also the
+        # section the artist page shows them in. re-judging them by track
+        # count filed Daft Punk's singles under EP/ and Above & Beyond's EPs
+        # under Album/ (discord, SeadogsBooty)
+        if _source_labels_eps(source):
+            return "EP" if raw == "ep" else "Single"
         # Unknown track count must not collapse to Single: an EP whose count
         # was lost in a handoff kept getting filed as [Single] (#1064). With
         # no count, trust the source's own word.
@@ -971,7 +986,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         or (album_info.get("total_tracks") if isinstance(album_info, dict) else None)
         or 0
     )
-    album_type_display = get_album_type_display(raw_album_type, total_tracks)
+    album_type_display = get_album_type_display(raw_album_type, total_tracks, source)
 
     # $atypes: every qualifier the release actually carries, bracketed, and
     # nothing at all for a plain album — the beets convention, so a library

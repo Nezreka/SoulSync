@@ -163,6 +163,28 @@ def test_unknown_count_ep_stays_ep():
     assert get_album_type_display('album', 0) == 'Album'
 
 
+def test_a_source_with_its_own_ep_label_is_taken_at_its_word():
+    # discord (SeadogsBooty): Daft Punk's 'Harder, Better, Faster, Stronger'
+    # single filed under EP/ and Above & Beyond's Tranquility Base EPs under
+    # Album/, while the artist page showed them as Single and EP. deezer
+    # labels EPs itself, so its 'single' and 'ep' are the answer
+    for source in ('deezer', 'itunes', 'musicbrainz', 'tidal'):
+        assert get_album_type_display('single', 5, source) == 'Single', source
+        assert get_album_type_display('single', 9, source) == 'Single', source
+        assert get_album_type_display('ep', 9, source) == 'EP', source
+        assert get_album_type_display('ep', 2, source) == 'EP', source
+
+
+def test_spotify_and_unknown_sources_keep_the_track_count_split():
+    # spotify calls singles and EPs both 'single'; an unknown source may be it
+    for source in ('spotify', 'Spotify', '', None):
+        assert get_album_type_display('single', 5, source) == 'EP', source
+        assert get_album_type_display('single', 2, source) == 'Single', source
+    # a bare 'album' stays verified for everyone: deezer's track-level
+    # answers hardcode it
+    assert get_album_type_display('album', 2, 'deezer') == 'Single'
+
+
 def test_bare_album_filler_verified_against_track_count():
     # 2026-09-27 (CAL, Yellowcard discography via Deezer): Deezer's
     # track-level responses hardcode album_type='album', and every upstream
