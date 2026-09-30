@@ -87,7 +87,10 @@ const autoSyncStub = {
   setDragging: vi.fn(),
 };
 
-vi.mock('../-sync.use-autosync', () => ({
+// the stub stands in for the data hook only. useAutoSyncActions is the real
+// one, so these tests still pin the unschedule wiring the page gets from it.
+vi.mock('../-sync.use-autosync', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../-sync.use-autosync')>()),
   useAutoSync: () => autoSyncStub,
 }));
 

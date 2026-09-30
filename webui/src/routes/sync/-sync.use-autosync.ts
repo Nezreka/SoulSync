@@ -21,7 +21,7 @@
  * exactly what a ref is for.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { AutoSyncWeeklyDraft } from './-ui/autosync-weekly';
 
@@ -514,4 +514,39 @@ export function useAutoSync({ open, now = () => Date.now(), runPipeline }: UseAu
       dragging.current = value;
     },
   };
+}
+
+/**
+ * the modal's two action groups, built from a useAutoSync result. shared by
+ * the playlists page and the app-wide host so the two can't wire it
+ * differently.
+ *
+ * THE TRAP: both groups extend AutoSyncCardActions, so three of their four
+ * members are identical, and the fourth, `onUnschedule`, must bind to a
+ * DIFFERENT function in each. wire both to the same one and unscheduling a
+ * weekly playlist leaves its weekly automation running while the ui says it
+ * is gone.
+ */
+export function useAutoSyncActions(autoSync: ReturnType<typeof useAutoSync>) {
+  const { runNow, unscheduleHourly, unscheduleWeekly, setOrganize, saveHourly, saveWeekly } =
+    autoSync;
+  const boardActions = useMemo(
+    () => ({
+      onRun: runNow,
+      onUnschedule: unscheduleHourly,
+      onOrganizeChange: setOrganize,
+      onDrop: saveHourly,
+    }),
+    [runNow, unscheduleHourly, setOrganize, saveHourly],
+  );
+  const weeklyActions = useMemo(
+    () => ({
+      onRun: runNow,
+      onUnschedule: unscheduleWeekly,
+      onOrganizeChange: setOrganize,
+      onSave: saveWeekly,
+    }),
+    [runNow, unscheduleWeekly, setOrganize, saveWeekly],
+  );
+  return { boardActions, weeklyActions };
 }

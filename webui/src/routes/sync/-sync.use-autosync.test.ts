@@ -7,7 +7,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as api from './-sync.api';
-import { useAutoSync } from './-sync.use-autosync';
+import { useAutoSync, useAutoSyncActions } from './-sync.use-autosync';
 
 const NOW = Date.UTC(2026, 0, 1, 12, 0, 0);
 
@@ -651,5 +651,29 @@ describe('history paging and filtering (1246-1254)', () => {
     await waitFor(() => {
       expect(api.fetchPipelineHistory).toHaveBeenLastCalledWith(100);
     });
+  });
+});
+
+describe('useAutoSyncActions', () => {
+  it('binds each board to its OWN unschedule, and shares the rest', () => {
+    // shared by the playlists page and the app-wide host. wiring both groups
+    // to one unschedule leaves a weekly automation running after "remove".
+    const fns = {
+      runNow: vi.fn(),
+      unscheduleHourly: vi.fn(),
+      unscheduleWeekly: vi.fn(),
+      setOrganize: vi.fn(),
+      saveHourly: vi.fn(),
+      saveWeekly: vi.fn(),
+    };
+    const { result } = renderHook(() =>
+      useAutoSyncActions(fns as unknown as ReturnType<typeof useAutoSync>),
+    );
+    const { boardActions, weeklyActions } = result.current;
+    expect(boardActions.onUnschedule).toBe(fns.unscheduleHourly);
+    expect(weeklyActions.onUnschedule).toBe(fns.unscheduleWeekly);
+    expect(boardActions.onDrop).toBe(fns.saveHourly);
+    expect(weeklyActions.onSave).toBe(fns.saveWeekly);
+    expect(boardActions.onRun).toBe(weeklyActions.onRun);
   });
 });

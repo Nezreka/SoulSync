@@ -25,7 +25,7 @@ import type { SyncTabId } from '../-sync.shell';
 
 import { metadataSourceLabel } from '../-sync.modal-core';
 import { normalizeSyncTab } from '../-sync.shell';
-import { useAutoSync } from '../-sync.use-autosync';
+import { useAutoSync, useAutoSyncActions } from '../-sync.use-autosync';
 import { useSyncHistory } from '../-sync.use-history';
 import { useSyncPage } from '../-sync.use-page';
 import { QobuzTab, TidalTab, YTMusicTab } from './account-tab';
@@ -175,33 +175,8 @@ export function SyncPage() {
    */
   const sourceName = metadataSourceLabel();
 
-  /**
-   * THE TRAP: both groups extend AutoSyncCardActions, so three of their four
-   * members are identical — and the fourth, `onUnschedule`, must bind to a
-   * DIFFERENT function in each. Wire both to the same one and unscheduling a
-   * weekly playlist leaves its weekly automation running while the UI says it
-   * is gone; that is the one-schedule-per-playlist invariant this port has
-   * already fixed twice in the vanilla.
-   */
-  const boardActions = useMemo(
-    () => ({
-      onRun: autoSync.runNow,
-      onUnschedule: autoSync.unscheduleHourly,
-      onOrganizeChange: autoSync.setOrganize,
-      onDrop: autoSync.saveHourly,
-    }),
-    [autoSync.runNow, autoSync.unscheduleHourly, autoSync.setOrganize, autoSync.saveHourly],
-  );
-
-  const weeklyActions = useMemo(
-    () => ({
-      onRun: autoSync.runNow,
-      onUnschedule: autoSync.unscheduleWeekly,
-      onOrganizeChange: autoSync.setOrganize,
-      onSave: autoSync.saveWeekly,
-    }),
-    [autoSync.runNow, autoSync.unscheduleWeekly, autoSync.setOrganize, autoSync.saveWeekly],
-  );
+  // see useAutoSyncActions for the unschedule trap it guards
+  const { boardActions, weeklyActions } = useAutoSyncActions(autoSync);
 
   const openSourceModal = page.modals.openModal;
   const openLbModal = useCallback(
@@ -410,6 +385,7 @@ export function SyncPage() {
           // runNow takes only the id; the modal offers the name too. Dropping
           // it here is the adapter, not a lost argument.
           onRunAgain={(playlistId) => autoSync.runNow(playlistId)}
+          onDraggingChange={autoSync.setDragging}
         />
       ) : null}
     </>

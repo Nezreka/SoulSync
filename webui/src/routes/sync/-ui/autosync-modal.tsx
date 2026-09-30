@@ -173,6 +173,8 @@ export interface AutoSyncModalProps {
   onBulkUnschedule: (source: string) => void;
   onOpenDetails: (playlistId: number) => void;
   onRunAgain: (playlistId: number, playlistName: string) => void;
+  /** told when a playlist drag starts / ends, so the poller can hold off. */
+  onDraggingChange?: (dragging: boolean) => void;
 }
 
 export function AutoSyncModal({
@@ -191,11 +193,19 @@ export function AutoSyncModal({
   onBulkUnschedule,
   onOpenDetails,
   onRunAgain,
+  onDraggingChange,
 }: AutoSyncModalProps) {
   const [tab, setTab] = useState<AutoSyncTab>('schedule');
   // true while a playlist is mid-drag, so every drop target can light up.
   // empty intervals are small chips now and easy to miss otherwise.
   const [dragging, setDragging] = useState(false);
+  // hold the poller off mid-drag too, a refresh re-renders the board under
+  // the cursor. the hook has had this switch all along, nothing flipped it.
+  const onDraggingChangeRef = useRef(onDraggingChange);
+  onDraggingChangeRef.current = onDraggingChange;
+  useEffect(() => {
+    onDraggingChangeRef.current?.(dragging);
+  }, [dragging]);
   useEffect(() => {
     if (!dragging) return;
     // a card that moves lanes on drop is unmounted before its own dragend can
