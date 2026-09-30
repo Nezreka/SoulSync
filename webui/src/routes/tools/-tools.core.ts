@@ -872,3 +872,13 @@ export function bulkFixLoopMessage(
   if (failed && lastError) message += `: ${lastError}`;
   return { message, type: fixed > 0 ? 'success' : 'error' };
 }
+
+/**
+ * `/tools?job=<id>` from a vanilla link (the download origins modal points at
+ * the expired download cleaner). only a job that actually exists counts, a
+ * stale or typoed id just lands on the page like before.
+ */
+export function linkedJobId(search: string, jobIds: readonly string[]): string | null {
+  const wanted = new URLSearchParams(search).get('job');
+  return wanted && jobIds.includes(wanted) ? wanted : null;
+}

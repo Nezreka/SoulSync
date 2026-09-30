@@ -51,6 +51,7 @@ import {
   repairJobDot,
   scoreBar,
   timeAgo,
+  linkedJobId,
 } from './-tools.core';
 
 describe('prettifyRepairSettingKey', () => {
@@ -761,5 +762,14 @@ describe('bulkFixLoopMessage', () => {
     // ever sets lastError alongside a failure — a stale error must not surface
     // on a clean run.
     expect(bulkFixLoopMessage(5, 0, 'stale').message).toBe('Fixed 5');
+  });
+});
+
+describe('linkedJobId', () => {
+  it('reads a real job id off /tools?job=', () => {
+    const ids = ['expired_download_cleaner', 'duplicate_detector'];
+    expect(linkedJobId('?job=expired_download_cleaner', ids)).toBe('expired_download_cleaner');
+    expect(linkedJobId('?job=nope', ids)).toBeNull();
+    expect(linkedJobId('', ids)).toBeNull();
   });
 });

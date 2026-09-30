@@ -39,7 +39,7 @@ import {
   fetchRepairStatus,
   toggleRepairMaster,
 } from '../-tools.api';
-import { isRepairJobDryRun, prettifyRepairSettingKey } from '../-tools.core';
+import { isRepairJobDryRun, linkedJobId, prettifyRepairSettingKey } from '../-tools.core';
 import { useRepairProgressEvent, useRepairStatusEvent } from '../-tools.events';
 import { takeFindingsFocus } from '../-tools.findings-focus';
 import { FindingsSurface } from './findings-surface';
@@ -375,6 +375,27 @@ export function MaintenanceHero() {
       localStorage.setItem('soulsync_operations_mode', next);
     } catch {}
   }, []);
+
+  // /tools?job=<id>: the job card only exists in advanced mode, so a link that
+  // just opened /tools dropped people on simple mode with the job nowhere in
+  // sight. flip to advanced for this visit, scroll to the card and light it up.
+  const linkedJobHandled = useRef(false);
+  useEffect(() => {
+    if (linkedJobHandled.current || !jobs) return;
+    const jobId = linkedJobId(
+      window.location.search,
+      jobs.map((job) => job.job_id),
+    );
+    if (!jobId) return;
+    linkedJobHandled.current = true;
+    setMode('advanced');
+    setTimeout(() => {
+      const card = document.querySelector<HTMLElement>(`.repair-job-card[data-job-id="${jobId}"]`);
+      card?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+      card?.classList.add('repair-job-card--linked');
+      setTimeout(() => card?.classList.remove('repair-job-card--linked'), 2600);
+    }, 150);
+  }, [jobs]);
 
   return (
     <div className="tools-maintenance-hero">

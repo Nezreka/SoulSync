@@ -54,7 +54,7 @@ export function openDownloadOriginsModal(tab?: string): void {
                              heavier than a soft nav but cannot break. -->
                         <p class="origin-modal-sub origin-modal-hint">
                             Want these cleaned up automatically? The
-                            <a href="/tools" class="origin-modal-link">Expired Download Cleaner</a>
+                            <a href="/tools?job=expired_download_cleaner" class="origin-modal-link">Expired Download Cleaner</a>
                             removes ones nobody played or favourited, after a retention window you set.
                         </p>
                     </div>
