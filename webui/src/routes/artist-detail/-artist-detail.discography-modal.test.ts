@@ -163,6 +163,21 @@ describe('the download payload', () => {
     expect(payload.albums[2].source).toBe('deezer');
     expect(payload.source).toBe('spotify');
   });
+
+  it('sends the section each release was shown in, so the server files it there', () => {
+    const payload = buildDiscographyPayload(
+      [
+        { id: 'fs', name: 'Flow State Sampler', tracks: 3, gapSource: null, albumType: 'album' },
+        { id: 'tb', name: 'Tranquility Base', tracks: 9, gapSource: null, albumType: 'ep' },
+        { id: 'old', name: 'No Section', tracks: 1, gapSource: null },
+      ],
+      { id: 'ab', name: 'Above & Beyond', source: 'deezer' },
+    );
+    const byId = Object.fromEntries(payload.albums.map((a) => [a.id, a]));
+    expect(byId.fs.album_type).toBe('album');
+    expect(byId.tb.album_type).toBe('ep');
+    expect('album_type' in byId.old).toBe(false);
+  });
 });
 
 describe('discogItemStatus (#830)', () => {

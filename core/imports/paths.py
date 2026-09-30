@@ -403,9 +403,21 @@ def _source_labels_eps(source) -> bool:
     return bool(name) and not name.startswith("spotify")
 
 
-def get_album_type_display(raw_type, track_count, source: str = "") -> str:
-    """Return the display form of an album's type for the $albumtype template variable."""
+_LOCKED_TYPE_DISPLAY = {
+    "album": "Album", "ep": "EP", "single": "Single",
+    "compilation": "Compilation", "compile": "Compilation",
+}
+
+
+def get_album_type_display(raw_type, track_count, source: str = "", locked: bool = False) -> str:
+    """Return the display form of an album's type for the $albumtype template variable.
+
+    ``locked``: the type is the section the release sat in on the artist
+    page, which the user already saw. it's used as-is, no track-count
+    guessing, so the folder always matches the section."""
     raw = (raw_type or "").strip().lower()
+    if locked and raw in _LOCKED_TYPE_DISPLAY:
+        return _LOCKED_TYPE_DISPLAY[raw]
     try:
         tc = int(track_count or 0)
     except (TypeError, ValueError):
@@ -989,7 +1001,11 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
     # reorganize names the source its release type came from; a download's
     # type came from the source it was downloaded from
     _type_source = (context.get("_album_type_source") if isinstance(context, dict) else None) or source
-    album_type_display = get_album_type_display(raw_album_type, total_tracks, _type_source)
+    _type_locked = bool(
+        (album_context and album_context.get("album_type_locked"))
+        or (isinstance(album_info, dict) and album_info.get("album_type_locked"))
+    )
+    album_type_display = get_album_type_display(raw_album_type, total_tracks, _type_source, _type_locked)
 
     # $atypes: every qualifier the release actually carries, bracketed, and
     # nothing at all for a plain album — the beets convention, so a library

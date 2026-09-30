@@ -2013,6 +2013,8 @@ def download_discography(artist_id):
                     'name': a.get('name') or a.get('title') or '',
                     'source': (a.get('source') or '').strip().lower() or artist_source,
                     'artist_name': a.get('artist_name') or artist_name,
+                    # the section the artist page showed it in, when sent
+                    'album_type': (a.get('album_type') or '').strip().lower(),
                 }
                 for a in albums_payload if a.get('id')
             ]
@@ -2023,6 +2025,7 @@ def download_discography(artist_id):
                     'name': '',
                     'source': artist_source,
                     'artist_name': artist_name,
+                    'album_type': '',
                 }
                 for aid in legacy_album_ids if aid
             ]
@@ -2116,7 +2119,12 @@ def download_discography(artist_id):
                     album_images = album.get('images') or (
                         [{'url': album['image_url']}] if album.get('image_url') else []
                     )
-                    album_type = album.get('album_type', 'album')
+                    # the artist page's section wins and is locked, so the release
+                    # files in the folder matching where the user saw it
+                    # (discord: Deezer's Flow State Sampler, an album with three
+                    # tracks, filed as a Single by track count)
+                    section_type = entry.get('album_type') or ''
+                    album_type = section_type or album.get('album_type', 'album')
                     release_date = album.get('release_date', '') or ''
                     album_artists = album.get('artists') or [{'name': hint_artist}]
                     resolved_album_id = result.get('resolved_album_id') or album.get('id') or album_id
@@ -2196,6 +2204,7 @@ def download_discography(artist_id):
                                 'artists': album_artists,
                                 'images': album_images,
                                 'album_type': album_type,
+                                'album_type_locked': bool(section_type),
                                 'release_date': release_date,
                                 'total_tracks': len(tracks),
                             },

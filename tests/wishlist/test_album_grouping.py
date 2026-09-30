@@ -240,3 +240,17 @@ def test_agreeing_row_album_artist_is_kept():
     ]
     group = group_wishlist_tracks_by_album(tracks).album_groups[0]
     assert group.artist_context['name'] == 'Snoop Dogg'
+
+
+def test_the_artist_page_section_lock_survives_grouping():
+    tracks = [
+        _wt('Track A', 'Above & Beyond', 'fs1', 'Flow State Sampler',
+            album_type='album', album_type_locked=True),
+        _wt('Track B', 'Above & Beyond', 'fs1', 'Flow State Sampler',
+            album_type='album', album_type_locked=True),
+    ]
+    res = group_wishlist_tracks_by_album(tracks)
+    ctx = res.album_groups[0].album_context
+    assert ctx['album_type'] == 'album'
+    assert ctx['album_type_locked'] is True
+

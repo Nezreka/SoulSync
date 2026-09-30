@@ -80,6 +80,8 @@ def _build_track_data(track: Dict[str, Any], album: Dict[str, Any]) -> Dict[str,
             "artists": album.get("artists", []),
             "images": album_images,
             "album_type": album.get("album_type", "album"),
+            # the artist page's section, when the modal came from there
+            "album_type_locked": bool(album.get("album_type_locked")),
             # release_date stays as whatever the upstream sent
             # (including '' when truly unknown). Path template
             # gracefully omits the year when empty; we don't fake

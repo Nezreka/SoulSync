@@ -833,3 +833,18 @@ def test_set_retry_profile_accepts_a_custom_ladder():
     assert status == 200
     assert payload["profile"]["name"] == "custom"
     assert payload["profile"]["ladder"] == {"2": 600, "3": 3600}
+
+
+def test_an_artist_page_albums_locked_type_survives_the_wishlist_add():
+    """add to wishlist from an artist-page album's modal: the release type is
+    locked to the section it showed under, and has to stay locked on the
+    stored row so the download files it there"""
+    from core.wishlist.routes import _build_track_data
+
+    locked = _build_track_data({"id": "t1", "name": "Track"},
+                               {"id": "fs1", "name": "Flow State Sampler", "album_type": "album",
+                                "album_type_locked": True, "total_tracks": 3})
+    assert locked["album"]["album_type"] == "album"
+    assert locked["album"]["album_type_locked"] is True
+    plain = _build_track_data({"id": "t2", "name": "Track"}, {"id": "x", "name": "X"})
+    assert plain["album"]["album_type_locked"] is False

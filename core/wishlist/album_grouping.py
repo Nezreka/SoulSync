@@ -217,6 +217,7 @@ def group_wishlist_tracks_by_album(
                 'release_date': album.get('release_date', ''),
                 'total_tracks': album.get('total_tracks', 0),
                 'album_type': album.get('album_type', 'album'),
+                'album_type_locked': bool(album.get('album_type_locked')),
                 'images': album.get('images', []),
                 'artists': album.get('artists', []),
             }

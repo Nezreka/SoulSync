@@ -514,6 +514,34 @@ def test_playlist_track_falls_back_to_its_artist_when_the_source_has_no_credit(m
     assert album["artists"] == [{"name": "Solo Artist"}]
 
 
+def test_the_artist_page_section_lock_reaches_the_album_context():
+    """an artist-page download locks the release type to its section; the
+    context the path builder reads has to keep that lock"""
+    deps = _build_deps()
+    _seed_task("t30", track_info={
+        "_is_explicit_album_download": True,
+        "_explicit_album_context": {"id": "fs1", "name": "Flow State Sampler", "album_type": "album",
+                                    "album_type_locked": True, "release_date": "2021-01-01",
+                                    "total_tracks": 3},
+        "_explicit_artist_context": {"id": "ab", "name": "Above & Beyond"},
+        "track_number": 1,
+    })
+    dc.attempt_download_with_candidates("t30", [_Candidate()], _Track(album="Flow State Sampler"),
+                                        batch_id=None, deps=deps)
+    album = matched_downloads_context["user1::song.flac"]["spotify_album"]
+    assert album["album_type"] == "album" and album["album_type_locked"] is True
+
+
+def test_the_lock_also_survives_the_playlist_fallback_context():
+    deps = _build_deps()
+    _seed_task("t31", track_info={"track_number": 1, "album": {
+        "id": "fs1", "name": "Flow State Sampler", "album_type": "album", "album_type_locked": True,
+        "release_date": "2021-01-01", "total_tracks": 3, "artists": [{"name": "Above & Beyond"}]}})
+    dc.attempt_download_with_candidates("t31", [_Candidate()], _Track(album="Flow State Sampler"),
+                                        batch_id=None, deps=deps)
+    assert matched_downloads_context["user1::song.flac"]["spotify_album"]["album_type_locked"] is True
+
+
 # ---------------------------------------------------------------------------
 # Sort by confidence is stable for equal scores
 # ---------------------------------------------------------------------------

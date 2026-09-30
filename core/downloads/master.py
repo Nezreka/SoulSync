@@ -1564,6 +1564,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                             'total_tracks': shared_album.get('total_tracks') or s_album.get('total_tracks', 1),
                             'total_discs': wishlist_album_disc_counts.get(album_id_for_lookup, 1),
                             'album_type': shared_album.get('album_type') or s_album.get('album_type', 'album'),
+                            'album_type_locked': bool(shared_album.get('album_type_locked') or s_album.get('album_type_locked')),
                             'images': shared_album.get('images') or s_album.get('images', []),
                             'artists': shared_album.get('artists') or s_album.get('artists', []),
                         }

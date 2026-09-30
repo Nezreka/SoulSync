@@ -34,6 +34,7 @@ import {
   albumTracksParams,
   isReleaseClickable,
   openReleaseArtist,
+  lockSectionType,
   reconcileAlbumWithTracksResponse,
   releasePlaylistName,
   releaseToAlbumData,
@@ -333,7 +334,9 @@ export function ArtistDetailPage() {
       // reconcileAlbumWithTracksResponse) — take the type/count from the
       // release the fetch just returned so $albumtype and embedded tags
       // are correct.
-      const album = reconcileAlbumWithTracksResponse(cardAlbum, data);
+      // ...and the type is locked to the section the user saw it in, so it
+      // files there rather than by a track-count guess downstream
+      const album = lockSectionType(reconcileAlbumWithTracksResponse(cardAlbum, data), release);
 
       // #1297 the download modal, same as an album in search: pick tracks,
       // download them, or add the picked ones to the wishlist from there.

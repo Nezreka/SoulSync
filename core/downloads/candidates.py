@@ -572,6 +572,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                     'total_tracks': explicit_album.get('total_tracks', 0),
                     'total_discs': explicit_album.get('total_discs', 1),
                     'album_type': explicit_album.get('album_type', 'album'),
+                    'album_type_locked': bool(explicit_album.get('album_type_locked')),
                     'artists': explicit_album.get('artists', [{'name': spotify_artist_context.get('name', '')}])
                 }
                 logger.info(f"[Explicit Context] Using real album data: '{spotify_album_context['name']}' ({spotify_album_context['album_type']}, {spotify_album_context['total_discs']} disc(s))")
@@ -602,6 +603,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                     'release_date': fallback_album.get('release_date', ''),
                     'image_url': fallback_image_url,
                     'album_type': fallback_album.get('album_type', 'album'),
+                    'album_type_locked': bool(fallback_album.get('album_type_locked')),
                     'total_tracks': fallback_album.get('total_tracks', 0),
                     'total_discs': fallback_album.get('total_discs', 1),
                     'artists': _fallback_album_artists

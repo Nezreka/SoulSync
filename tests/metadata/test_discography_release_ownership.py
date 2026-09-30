@@ -36,6 +36,7 @@ class _FakeDB:
     def __init__(self):
         self.wishlist = []
         self.album_checks = []
+        self.albums = []
 
     def get_candidate_albums_for_artist(self, artist, server_source=None):
         return [OCEAN_AVENUE]
@@ -58,6 +59,7 @@ class _FakeDB:
 
     def add_to_wishlist(self, spotify_track_data, **kw):
         self.wishlist.append((spotify_track_data["album"]["name"], spotify_track_data["name"]))
+        self.albums.append(spotify_track_data["album"])
         return True
 
 
@@ -92,11 +94,12 @@ def run(monkeypatch):
     app = Flask(__name__)
     app.register_blueprint(ad.bp)
 
-    def go(release_ids):
+    def go(release_ids, section=None):
         client = app.test_client()
         resp = client.post("/api/artist/yc/download-discography", json={
             "artist_name": "Yellowcard",
-            "albums": [{"id": rid, "name": RELEASES[rid][0]["name"], "source": "deezer"}
+            "albums": [dict({"id": rid, "name": RELEASES[rid][0]["name"], "source": "deezer"},
+                            **({"album_type": section} if section else {}))
                        for rid in release_ids],
         })
         lines = [json.loads(line) for line in resp.get_data(as_text=True).splitlines() if line.strip()]
@@ -131,3 +134,18 @@ def test_a_failed_release_lookup_falls_back_to_the_artist_wide_check(monkeypatch
     owned = df.owned_release_tracks(_FakeDB(), "Ocean Avenue", "Yellowcard", 3, "2003", "plex",
                                     candidate_tracks=LIBRARY_TRACKS)
     assert [t.title for t in owned] == ["Hear You Me", "Ocean Avenue"]
+
+
+def test_the_artist_page_section_is_locked_onto_what_gets_queued(run):
+    # the page showed the release under Albums; the source album lookup calls
+    # it a single. the section wins and is locked, so it files under Album/
+    db, _lines = run(["rel-single"], section="album")
+    assert db.albums and all(a["album_type"] == "album" for a in db.albums)
+    assert all(a["album_type_locked"] is True for a in db.albums)
+
+
+def test_without_a_section_nothing_is_locked(run):
+    db, _lines = run(["rel-single"])
+    assert db.albums[0]["album_type"] == "single"
+    assert db.albums[0]["album_type_locked"] is False
+

@@ -772,3 +772,29 @@ def test_reorganize_files_a_release_where_the_download_did(tmp_path, monkeypatch
     path, _ = paths.build_final_path_for_track(
         ctx, ctx["spotify_artist"], _build_album_info(ctx), ".flac", create_dirs=False)
     assert os.path.basename(os.path.dirname(os.path.dirname(path))) == folder, path
+
+
+@pytest.mark.parametrize(("record_type", "tracks", "folder"), [
+    ("album", 3, "Album"),     # flow state sampler: an album on the page
+    ("single", 5, "Single"),   # a five-track single shown under Singles
+    ("ep", 12, "EP"),
+])
+def test_a_release_locked_to_its_artist_page_section_files_there(tmp_path, monkeypatch, record_type, tracks, folder):
+    from core.library_reorganize import _build_album_info, _build_post_process_context
+
+    monkeypatch.setattr(paths, "_get_config_manager", lambda: _Cfg({
+        "file_organization.templates": {"album_path": "$albumartist/$albumtype/$album/$track - $title"},
+        "file_organization.enabled": True,
+        "soulseek.transfer_path": str(tmp_path),
+    }))
+    ctx = _build_post_process_context(
+        {"id": "AL7", "name": "Flow State Sampler", "release_date": "2021-01-01",
+         "total_tracks": tracks, "images": [{"url": ""}]},
+        {"name": "Track", "track_number": 1, "disc_number": 1,
+         "artists": [{"name": "Above & Beyond"}]},
+        "Above & Beyond", "Flow State Sampler", 1, record_type=record_type)
+    ctx["spotify_album"]["album_type_locked"] = True
+    path, _ = paths.build_final_path_for_track(
+        ctx, ctx["spotify_artist"], _build_album_info(ctx), ".flac", create_dirs=False)
+    assert os.path.basename(os.path.dirname(os.path.dirname(path))) == folder, path
+

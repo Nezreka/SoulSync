@@ -19,6 +19,7 @@ import {
   loadDiscographyForModal,
   streamDiscographyDownload,
 } from '../-artist-detail.discography-modal';
+import { releaseSectionType } from '../-artist-detail.open-release';
 import { BodyPortal } from './portal';
 
 /**
@@ -121,6 +122,7 @@ export function DiscographyModal({
       name: c.view.albumName,
       tracks: c.view.tracks,
       gapSource: c.release._gap_source || null,
+      albumType: releaseSectionType(c.release),
     }));
     setPhase('progress');
     const initial: ProgressState = {};

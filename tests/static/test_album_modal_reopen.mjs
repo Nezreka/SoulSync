@@ -82,3 +82,32 @@ test('closing a finished modal waits until its process is gone (no race with a f
     assert.deepEqual(order, ['deleted', 'close resolved']);
     assert.equal(ctx.activeDownloadProcesses.enhanced_search_x, undefined);
 });
+
+describe('_withLockedAlbumType', () => {
+    // add to wishlist from an artist-page album modal: each track's album
+    // takes the modal album's locked section type, or the wishlist files the
+    // tracks by a track-count guess
+    const ctx = {};
+    vm.createContext(ctx);
+    vm.runInContext(lift(read('wishlist-tools.js'), '_withLockedAlbumType'), ctx);
+
+    test('a locked modal album locks the track album to its type', () => {
+        const out = ctx._withLockedAlbumType(
+            { name: 'Flow State Sampler', album_type: 'single' },
+            { name: 'Flow State Sampler', album_type: 'album', album_type_locked: true });
+        assert.equal(out.album_type, 'album');
+        assert.equal(out.album_type_locked, true);
+        assert.equal(out.name, 'Flow State Sampler');
+    });
+
+    test('an unlocked modal album changes nothing', () => {
+        const track = { name: 'X', album_type: 'single' };
+        assert.equal(ctx._withLockedAlbumType(track, { album_type: 'album' }), track);
+        assert.equal(ctx._withLockedAlbumType(track, undefined), track);
+    });
+
+    test('the modal applies it before it builds each wishlist add', () => {
+        const src = read('wishlist-tools.js');
+        assert.match(src, /trackAlbum = _withLockedAlbumType\(trackAlbum, process\.album\);/);
+    });
+});

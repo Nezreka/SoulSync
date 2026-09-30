@@ -185,6 +185,17 @@ def test_spotify_and_unknown_sources_keep_the_track_count_split():
     assert get_album_type_display('album', 2, 'deezer') == 'Single'
 
 
+def test_a_locked_type_is_used_as_is():
+    # the artist page section the user saw: no track-count guessing, from any
+    # source (discord: Deezer's 3-track album Flow State Sampler filed Single)
+    assert get_album_type_display('album', 3, 'deezer', locked=True) == 'Album'
+    assert get_album_type_display('single', 5, 'spotify', locked=True) == 'Single'
+    assert get_album_type_display('ep', 12, '', locked=True) == 'EP'
+    assert get_album_type_display('compilation', 2, '', locked=True) == 'Compilation'
+    # an unknown value can't be locked to anything: normal rules
+    assert get_album_type_display('mixtape', 2, '', locked=True) == 'Single'
+
+
 def test_bare_album_filler_verified_against_track_count():
     # 2026-09-27 (CAL, Yellowcard discography via Deezer): Deezer's
     # track-level responses hardcode album_type='album', and every upstream

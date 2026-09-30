@@ -1,5 +1,6 @@
 import { classifyReleaseContent } from './-artist-detail.filters';
 import { gapFillEnabled, gapSameRelease } from './-artist-detail.gap-fill';
+import { type ReleaseSectionType } from './-artist-detail.open-release';
 
 /**
  * Download Discography (library.js: openDiscographyModal 580, filters 798,
@@ -217,6 +218,8 @@ export interface DiscogEntry {
   name: string;
   tracks: number;
   gapSource: string | null;
+  /** the section the release sat in on the artist page */
+  albumType?: ReleaseSectionType;
 }
 
 /**
@@ -227,7 +230,14 @@ export interface DiscogEntry {
  * name (pages-extra.js:820-828).
  */
 export interface DiscographyDownloadPayload {
-  albums: { id: unknown; name: string; artist_name: string; source: string | null }[];
+  albums: {
+    id: unknown;
+    name: string;
+    artist_name: string;
+    source: string | null;
+    /** the artist page section: the server files the release under it */
+    album_type?: ReleaseSectionType;
+  }[];
   artist_name: string;
   source?: string | null;
 }
@@ -249,6 +259,7 @@ export function buildDiscographyPayload(
       name: e.name,
       artist_name: artist.name,
       source: e.gapSource || sourceForBatch,
+      ...(e.albumType ? { album_type: e.albumType } : {}),
     })),
     artist_name: artist.name,
     source: sourceForBatch,
