@@ -167,11 +167,30 @@ describe('the card', () => {
         })}
       />,
     );
-    // At most two, and they REPLACE the plain reason line.
+    // At most two. with no artists to name, they stand in for the reason line.
     expect(container.querySelectorAll('.ya-why-chip')).toHaveLength(2);
     expect(container.querySelector('.ya-card-sub')).toBeNull();
     expect(screen.getByText(/shares 3 genres/)).toBeInTheDocument();
     expect(screen.queryByText(/third/)).toBeNull();
+  });
+
+  it('names your artists above the chips when it can', () => {
+    const { container } = render(
+      <RecommendedShelf
+        {...props({
+          artists: [
+            artist({
+              explanation: { kind: 'similar_to', seeds: [{ name: 'Tool' }, { name: 'Deftones' }] },
+              why: [{ type: 'consensus', label: '2 of your artists' }],
+            }),
+          ],
+        })}
+      />,
+    );
+    expect(container.querySelector('.ya-card-sub')!.textContent).toBe(
+      'Because you have Tool & Deftones',
+    );
+    expect(container.querySelectorAll('.ya-why-chip')).toHaveLength(1);
   });
 
   it('gives each chip its type class and icon', () => {

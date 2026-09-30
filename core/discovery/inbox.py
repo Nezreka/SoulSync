@@ -206,17 +206,50 @@ class SourceFailed(RuntimeError):
     """A source that didn't answer at all this refresh."""
 
 
+def drop_foreign_concerts(database, profile_id: int, country: str) -> int:
+    """unread concerts outside ``country`` go. before the country setting the
+    inbox kept every date on earth (boulder's was 24 shows in brisbane, perth
+    and des moines), and setting it has to clear those, not just stop new
+    ones. a concert you saved stays, you kept it on purpose. a row stored
+    before the code was recorded has no code to match, so it goes too; the
+    refresh that follows re-adds it if it really is local."""
+    removed = 0
+    with database._get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, payload_json FROM discovery_inbox WHERE profile_id = ? "
+                    "AND kind = 'concert' AND state = 'unread'", (profile_id,))
+        for item_id, raw in cur.fetchall():
+            try:
+                code = str((json.loads(raw or '{}') or {}).get('country_code') or '').upper()
+            except (TypeError, ValueError):
+                code = ''
+            if code != country:
+                cur.execute("DELETE FROM discovery_inbox WHERE id = ?", (item_id,))
+                removed += 1
+        conn.commit()
+    return removed
+
+
 def collect_concerts(database, profile_id: int,
-                     lookup: Optional[Callable[[str], Dict[str, Any]]] = None) -> Optional[int]:
+                     lookup: Optional[Callable[[str], Dict[str, Any]]] = None,
+                     country: Optional[str] = None) -> Optional[int]:
     """Upcoming dates for watchlist artists. None when Ticketmaster isn't set
     up: that's "off", not a failure. The client reports errors in its answer
     rather than raising, so an outage is read from there: every lookup failing
-    is a failed source; some failing still keeps the ones that answered."""
+    is a failed source; some failing still keeps the ones that answered.
+
+    ``country`` keeps it to one country (None reads the setting, '' means
+    anywhere)."""
     from core import concerts_client
+    if country is None:
+        country = concerts_client.concert_country()
     if lookup is None:
         if not concerts_client.ticketmaster_configured():
             return None
-        lookup = lambda name: concerts_client.ticketmaster_upcoming(name, limit=3)  # noqa: E731
+        lookup = lambda name: concerts_client.ticketmaster_upcoming(  # noqa: E731
+            name, limit=3, country_code=country)
+    if country:
+        drop_foreign_concerts(database, profile_id, country)
     added, asked, errors = 0, 0, []
     for name, artist in list(_watchlist(database, profile_id).items())[:CONCERT_ARTISTS]:
         answer = lookup(artist.artist_name) or {}
@@ -230,12 +263,16 @@ def collect_concerts(database, profile_id: int,
             city = event.get('city') or ''
             if len(when) < 10:
                 continue
+            code = str(event.get('country_code') or '').upper()
+            if country and code and code != country:
+                continue
             title = ' · '.join(p for p in (venue, city) if p) or 'Live'
             if upsert(database, profile_id, 'concert', item_key(name, when, venue),
                       title=title, artist_name=artist.artist_name, item_date=when,
                       payload={'url': event.get('tickets_url') or event.get('url') or '',
                                'venue': venue, 'city': city,
-                               'country': event.get('country') or ''}):
+                               'country': event.get('country') or '',
+                               'country_code': event.get('country_code') or ''}):
                 added += 1
     if asked and len(errors) == asked:
         raise SourceFailed(errors[0])

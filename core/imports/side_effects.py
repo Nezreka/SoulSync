@@ -850,5 +850,14 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
 
             conn.commit()
             logger.info("[SoulSync Library] Added: %s / %s / %s", artist_name, album_name, track_name)
+            if not existing_track:
+                # Fresh import — queue Sample Studio background analysis.
+                # Lazy import + never raises: analysis must not break imports.
+                try:
+                    from core.sample.worker import enqueue_analysis as _enqueue_sample_analysis
+                    _enqueue_sample_analysis(track_id)
+                except Exception as hook_exc:  # noqa: BLE001
+                    logger.debug("Sample analysis enqueue failed for track %s: %s",
+                                 track_id, hook_exc)
     except Exception as exc:
         logger.error("[SoulSync Library] Could not record library entry: %s", exc)

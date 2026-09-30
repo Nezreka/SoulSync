@@ -1225,6 +1225,9 @@ function onAudioEnded() {
     console.log('🏁 Audio playback ended');
     setPlayingState(false);
 
+    // Sleep timer "end of track": pause instead of advancing to the next track.
+    if (npSleepEndOfTrack) { npFireSleepTimer(); return; }
+
     // Reset progress to beginning
     const progressBar = document.getElementById('progress-bar');
     const progressFill = document.getElementById('progress-fill');
@@ -1454,6 +1457,7 @@ let npVizInitialized = false;
 let npCrossfadeOn = false;
 let npSleepMinutes = 0;       // 0 = off
 let npSleepTimerId = null;
+let npSleepEndOfTrack = false; // sleep when the current track ends
 let npAutoDownloadQueue = false;
 let npQueueRequestCounter = 0;
 let npQueuePrefetchRequest = null;
@@ -2188,7 +2192,17 @@ function npPunchUpColor(r, g, b) {
 // dedicated /stream/library-audio endpoint + a second <audio> to play the NEXT
 // library track and ramp volumes. Streamed (non-library) tracks can't crossfade
 // and fall back to the normal hard cut.
-const NP_CROSSFADE_SECONDS = 6;
+//
+// Duration: the player theater (media-player-v2.js) exposes a duration picker;
+// the setting lives in localStorage so the modal and mini player always agree.
+function npCrossfadeSeconds() {
+    const allowed = [0, 2, 4, 6, 10, 15];
+    let v = 6;
+    try {
+        v = parseInt(localStorage.getItem('soulsync-npv2-crossfade-secs') || '6', 10);
+    } catch (e) { /* storage unavailable — keep default */ }
+    return allowed.indexOf(v) >= 0 ? v : 6;
+}
 let npXfadeAudio = null;
 let npXfadeActive = false;
 let npXfadeTimer = null;
@@ -2224,13 +2238,17 @@ function npCancelCrossfade() {
 
 function npCrossfadeTick() {
     if (!npCrossfadeOn || npXfadeActive || npRepeatMode === 'one') return;
+    // "Sleep at end of track" means stop at the end of THIS track — don't
+    // start fading the next one in underneath the sleep.
+    if (typeof npSleepEndOfTrack !== 'undefined' && npSleepEndOfTrack) return;
     // Shuffle picks its next track at 'ended' time; a crossfade preloads the
     // SEQUENTIAL next and its finish handler advances to that index — with
     // shuffle on that silently overrode every shuffled pick. Hard cut instead.
     if (npShuffleOn) return;
     if (!audioPlayer || !audioPlayer.duration || !isFinite(audioPlayer.duration)) return;
     const remaining = audioPlayer.duration - audioPlayer.currentTime;
-    if (remaining > NP_CROSSFADE_SECONDS || remaining <= 0.2) return;
+    const xfSecs = npCrossfadeSeconds();
+    if (xfSecs <= 0 || remaining > xfSecs || remaining <= 0.2) return;
 
     // Determine the sequential next track (crossfade never shuffles — see bail
     // above; repeat-all's wrap is also a hard cut, next is undefined at tail).
@@ -2255,7 +2273,7 @@ function npStartCrossfade(nextIdx, next) {
     xa.src = `/stream/library-audio?path=${encodeURIComponent(next.file_path)}${_xfTid}&t=${Date.now()}`;
     xa.volume = 0;
     xa.play().then(() => {
-        const fadeMs = NP_CROSSFADE_SECONDS * 1000;
+        const fadeMs = npCrossfadeSeconds() * 1000;
         const step = 60; // ms between volume steps
         const steps = Math.max(1, Math.floor(fadeMs / step));
         let n = 0;
@@ -3002,31 +3020,50 @@ function npUpdateUpNext() {
     }
 }
 
-// Sleep timer: cycle off → 15 → 30 → 60 → off; stops playback when it fires.
+// Sleep timer: cycle off → 15 → 30 → 45 → 60 → 90 → 120 → end-of-track → off.
+// End-of-track pauses when the current track finishes instead of using a
+// minute timer. Firing always pauses (never stops) — see npFireSleepTimer.
 function npCycleSleepTimer() {
-    const steps = [0, 15, 30, 60];
-    npSleepMinutes = steps[(steps.indexOf(npSleepMinutes) + 1) % steps.length];
+    const steps = [0, 15, 30, 45, 60, 90, 120, 'track'];
+    const cur = npSleepEndOfTrack ? 'track' : npSleepMinutes;
+    const next = steps[(steps.indexOf(cur) + 1) % steps.length];
+    npClearSleepTimer();
     const btn = document.getElementById('np-sleep-btn');
     const label = document.getElementById('np-sleep-label');
-    if (npSleepTimerId) { clearTimeout(npSleepTimerId); npSleepTimerId = null; }
-    if (npSleepMinutes > 0) {
+    if (next === 'track') {
+        npSleepEndOfTrack = true;
+        if (label) label.textContent = 'Sleep: track end';
+        if (btn) btn.classList.add('active');
+    } else if (next > 0) {
+        npSleepMinutes = next;
         if (label) label.textContent = `Sleep ${npSleepMinutes}m`;
         if (btn) btn.classList.add('active');
-        npSleepTimerId = setTimeout(() => {
-            // Pause, don't stop: handleStop() runs clearTrack(), which wipes
-            // the queue (including the persisted copy) — falling asleep to a
-            // playlist shouldn't cost the playlist. Pause keeps track + queue
-            // so the morning is one tap to resume.
-            if (audioPlayer && !audioPlayer.paused) audioPlayer.pause();
-            setPlayingState(false);
-            npSleepMinutes = 0;
-            if (label) label.textContent = 'Sleep';
-            if (btn) btn.classList.remove('active');
-        }, npSleepMinutes * 60 * 1000);
-    } else {
-        if (label) label.textContent = 'Sleep';
-        if (btn) btn.classList.remove('active');
+        npSleepTimerId = setTimeout(npFireSleepTimer, npSleepMinutes * 60 * 1000);
     }
+    // next === 0 means fully off, already handled by npClearSleepTimer().
+}
+
+function npClearSleepTimer() {
+    if (npSleepTimerId) { clearTimeout(npSleepTimerId); npSleepTimerId = null; }
+    npSleepMinutes = 0;
+    npSleepEndOfTrack = false;
+    const btn = document.getElementById('np-sleep-btn');
+    const label = document.getElementById('np-sleep-label');
+    if (label) label.textContent = 'Sleep';
+    if (btn) btn.classList.remove('active');
+}
+
+function npFireSleepTimer() {
+    // Pause, don't stop: handleStop() runs clearTrack(), which wipes
+    // the queue (including the persisted copy) — falling asleep to a
+    // playlist shouldn't cost the playlist. Pause keeps track + queue
+    // so the morning is one tap to resume.
+    // Tear down any in-flight crossfade first: the second audio element
+    // plays outside audioPlayer, so pausing alone would leave it audible.
+    npCancelCrossfade();
+    if (audioPlayer && !audioPlayer.paused) audioPlayer.pause();
+    setPlayingState(false);
+    npClearSleepTimer();
 }
 
 function updateNpPrevNextButtons() {

@@ -518,6 +518,75 @@ class MusicDatabase:
                 )
             """)
             
+            # Sample Studio analysis cache — one row per library track. Written by
+            # the sample analysis worker (core/sample/worker.py); rows are
+            # re-computed when core.sample.analyze.ANALYZER_VERSION increases.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sample_analysis (
+                    track_id INTEGER PRIMARY KEY,
+                    bpm REAL,
+                    onsets_json TEXT,  -- JSON array of onset times in seconds
+                    duration_s REAL,
+                    analyzed_at REAL,
+                    analyzer_version INTEGER DEFAULT 1
+                )
+            """)
+
+            # Sample Studio stash — saved chops. Each row is BOTH the file
+            # record (file_path -> data/sample-studio/chops/) and the
+            # lightweight bookmark (track_id + start/end + pitch/target_bpm),
+            # so a chop can be re-rendered or traced back to its source.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sample_stash (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    tags_json TEXT,  -- JSON array of tag strings
+                    track_id INTEGER NOT NULL,
+                    start_s REAL NOT NULL,
+                    end_s REAL NOT NULL,
+                    pitch_st REAL DEFAULT 0,
+                    target_bpm REAL,
+                    format TEXT DEFAULT 'wav16',
+                    file_path TEXT NOT NULL,
+                    created_at REAL
+                )
+            """)
+            # (ledger back-fill for sample_stash_v1 rides _KNOWN_MIGRATION_SIGNALS below)
+
+            # Phase 4: which stem a chop was cut from (NULL = the full mix).
+            # Tolerant ALTER — existing installs get the column on next boot.
+            try:
+                cursor.execute("ALTER TABLE sample_stash ADD COLUMN stem TEXT")
+            except sqlite3.OperationalError:
+                pass  # already there
+
+            # Phase 6: which configured sample folder the chop was saved to
+            # (the configured path string at save time). file_path stays the
+            # resolvable absolute path, so removing a folder from settings
+            # never breaks existing chops.
+            try:
+                cursor.execute("ALTER TABLE sample_stash ADD COLUMN folder TEXT")
+            except sqlite3.OperationalError:
+                pass  # already there
+
+            # Sample Studio stems — per-track separation cache. One row per
+            # (track_id, stem); the four WAVs live under
+            # data/sample-studio/stems/<track_id>/. "Separate once, cache
+            # forever" — re-running is keyed off separator_version.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sample_stems (
+                    track_id INTEGER NOT NULL,
+                    stem TEXT NOT NULL,  -- drums | vocals | bass | other
+                    file_path TEXT NOT NULL,
+                    status TEXT DEFAULT 'done',
+                    backend TEXT,  -- demucs-htdemucs | stub
+                    separator_version INTEGER DEFAULT 1,
+                    created_at REAL,
+                    PRIMARY KEY (track_id, stem)
+                )
+            """)
+            # (ledger back-fill for sample_stems_v1 rides _KNOWN_MIGRATION_SIGNALS below)
+
             # Metadata table for storing system information like last refresh dates
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS metadata (
@@ -1793,6 +1862,9 @@ class MusicDatabase:
         'genius_search_fix':        ('table', '_genius_search_fix_applied'),
         'tidal_search_fix':         ('table', '_tidal_search_fix_applied'),
         'quality_profiles_schema':  ('table', 'quality_profiles'),
+        'sample_analysis_v1':        ('table', 'sample_analysis'),
+        'sample_stash_v1':            ('table', 'sample_stash'),
+        'sample_stems_v1':            ('table', 'sample_stems'),
     }
 
     def _record_migration(self, cursor, name):
@@ -10829,6 +10901,109 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"API: Error searching tracks with title='{title}', artist='{artist}': {e}")
             return []
+
+    def search_tracks_interactive(self, query: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """As-you-type library search for interactive use (Sample Studio).
+
+        ONE sql statement: substring match across the normalized title,
+        artist name and per-track artist credit, ordered so an exact title
+        hit comes first, then title prefixes, then artist hits. When that
+        finds nothing and the query has several words, ONE term-OR fallback
+        catches word-order differences.
+
+        Deliberately simpler than api_search_tracks: the download matcher's
+        base-title/fuzzy cascade costs up to six full-table scans per call
+        (artist interpretation, then title interpretation, each with basic +
+        base-title + fuzzy passes), which is what made studio search feel
+        stuck on a big library. Errors propagate so the caller can tell a
+        failed search apart from an empty one.
+        """
+        query = (query or "").strip()
+        if not query:
+            return []
+        limit = max(1, min(int(limit or 50), 200))
+        qn = self._normalize_for_comparison(query)
+        if not qn:
+            return []
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            # readiness probe WITHOUT kicking the norm backfill thread: the
+            # boot-time backfill owns that, and kicking here would serialize
+            # every keystroke behind a library-sized backfill.
+            gaps = [self._norm_unfilled_count(cursor, table, norm, _NORM_INLINE_LIMIT + 1)
+                    for table, raw, norm, _kind in self._NORM_COLUMNS]
+            if any(gaps):
+                if any(n > _NORM_INLINE_LIMIT for n in gaps):
+                    ready = False
+                else:
+                    self.ensure_norm_backfilled()
+                    ready = True
+            else:
+                ready = True
+            t_title = self._norm_expr(ready, "tracks", "title", "title_norm")
+            a_name = self._norm_expr(ready, "artists", "name", "name_norm")
+            t_artist = self._norm_expr(ready, "tracks", "track_artist", "track_artist_norm")
+            scope_sql, scope_params = self._current_scope_sql("tracks.owner_profile_id")
+            like_all = f"%{qn}%"
+            like_prefix = f"{qn}%"
+            params = scope_params + [like_all, like_all, like_all,
+                                    qn, like_prefix, qn, like_prefix, limit]
+            cursor.execute(
+                f"""SELECT tracks.*, artists.name AS artist_name,
+                           albums.title AS album_title,
+                           albums.thumb_url AS album_thumb_url
+                    FROM tracks
+                    JOIN artists ON tracks.artist_id = artists.id
+                    JOIN albums ON tracks.album_id = albums.id
+                    WHERE {scope_sql}
+                      AND ({t_title} LIKE ? OR {a_name} LIKE ? OR {t_artist} LIKE ?)
+                    ORDER BY
+                      CASE
+                        WHEN {t_title} = ? THEN 0
+                        WHEN {t_title} LIKE ? THEN 1
+                        WHEN {a_name} = ? THEN 2
+                        WHEN {a_name} LIKE ? THEN 3
+                        ELSE 4
+                      END,
+                      {t_title}, {a_name}
+                    LIMIT ?""",
+                params)
+            rows = [dict(r) for r in cursor.fetchall()]
+            if not rows:
+                rows = self._search_tracks_interactive_fuzzy(
+                    cursor, qn, t_title, a_name, t_artist, scope_sql, scope_params, limit)
+            return rows
+        finally:
+            conn.close()
+
+    def _search_tracks_interactive_fuzzy(self, cursor, qn: str, t_title: str, a_name: str,
+                                        t_artist: str, scope_sql: str,
+                                        scope_params: list, limit: int) -> List[Dict[str, Any]]:
+        """Term-OR fallback for search_tracks_interactive: one full scan, no
+        python-side scoring. Only runs when the primary pass found nothing."""
+        terms = [t for t in qn.split() if len(t) > 2]
+        if len(terms) < 2:
+            return []
+        ors = " OR ".join(
+            f"({t_title} LIKE ? OR {a_name} LIKE ? OR {t_artist} LIKE ?)" for _ in terms)
+        params = list(scope_params)
+        for term in terms:
+            like = f"%{term}%"
+            params += [like, like, like]
+        params.append(limit)
+        cursor.execute(
+            f"""SELECT tracks.*, artists.name AS artist_name,
+                       albums.title AS album_title,
+                       albums.thumb_url AS album_thumb_url
+                FROM tracks
+                JOIN artists ON tracks.artist_id = artists.id
+                JOIN albums ON tracks.album_id = albums.id
+                WHERE {scope_sql} AND ({ors})
+                ORDER BY {t_title}, {a_name}
+                LIMIT ?""",
+            params)
+        return [dict(r) for r in cursor.fetchall()]
 
     def get_tracks_for_m3u_resolution(self, server_source: Optional[str] = None) -> List[Dict[str, str]]:
         """Bulk-load (artist, title, file_path) for in-memory M3U path resolution.

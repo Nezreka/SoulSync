@@ -232,10 +232,13 @@ describe('ListenBrainz', () => {
     // Not a one-liner: the vanilla card says why, offers the settings button,
     // and points at where the token lives (3479-3489).
     const p = lb({
+      username: null,
       hasData: { recommendations: false, user: false, collaborative: false },
       mixes: [],
     });
     const { container } = render(<ListenBrainzSection {...p} />);
+    // nothing to refresh until an account is linked
+    expect(screen.queryByTitle('Refresh playlists from ListenBrainz')).toBeNull();
     const card = container.querySelector('.lb-empty-state')!;
     expect(card.querySelector('.lb-empty-icon')!.textContent).toBe('🧠');
     expect(card.querySelector('h3')!.textContent).toBe('Connect ListenBrainz');
@@ -245,6 +248,23 @@ describe('ListenBrainz', () => {
       'href',
       'https://listenbrainz.org/profile/',
     );
+  });
+
+  it('never tells a connected user to connect: no playlists yet, and refresh stays', () => {
+    const { container } = render(
+      <ListenBrainzSection
+        {...lb({
+          username: 'boulder',
+          hasData: { recommendations: false, user: false, collaborative: false },
+          mixes: [],
+        })}
+      />,
+    );
+    expect(container.querySelector('.lb-empty-state')).toBeNull();
+    expect(container.querySelector('.discover-empty p')!.textContent).toContain(
+      'No ListenBrainz playlists yet',
+    );
+    expect(screen.getByTitle('Refresh playlists from ListenBrainz')).toBeInTheDocument();
   });
 
   it('distinguishes a failed load from "not connected"', () => {

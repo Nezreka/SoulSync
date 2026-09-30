@@ -38205,22 +38205,8 @@ div.artist-hero-badge {
     border: 1px solid rgba(255,255,255,0.2);
 }
 /* Show all / Show less toggle under a clamped discover-grid. */
-.discover-show-all {
-    margin: 14px auto 0;
-    display: block;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.12);
-    color: rgba(255,255,255,0.85);
-    font-size: 13px; font-weight: 600;
-    padding: 8px 20px; border-radius: 20px;
-    cursor: pointer;
-    transition: background 0.2s, border-color 0.2s, color 0.2s;
-}
-.discover-show-all:hover {
-    background: rgba(var(--accent-rgb),0.15);
-    border-color: rgba(var(--accent-rgb),0.4);
-    color: #fff;
-}
+
+
 
 /* ── Adventurousness — living wave dial (Discover page) ──────────────────────
    A draggable orb rides an animated line that waves calmer + greener at the left (safe)
@@ -38457,15 +38443,7 @@ div.artist-hero-badge {
         linear-gradient(250deg, rgba(22, 172, 150, 0.08), transparent 44%);
     opacity: 0.9;
 }
-.discover-command-grid {
-    position: relative;
-    display: grid;
-    grid-template-columns: repeat(12, minmax(0, 1fr));
-    gap: 16px;
-    align-items: stretch;
-    margin-bottom: 24px;
-    padding: 0 20px;
-}
+
 .discover-command-hero {
     grid-column: span 8;
     min-width: 0;
@@ -38552,38 +38530,10 @@ div.artist-hero-badge {
 .discover-command-hero .discover-hero-button.secondary .button-icon {
     font-size: 15px !important;
 }
-.discover-command-panel {
-    grid-column: span 4;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 14px;
-    border-radius: 14px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.018)),
-        linear-gradient(145deg, rgba(var(--accent-rgb), 0.1), transparent 42%),
-        rgba(8, 9, 13, 0.84);
-    box-shadow:
-        0 22px 62px rgba(0, 0, 0, 0.32),
-        inset 0 1px 0 rgba(255, 255, 255, 0.07);
-}
-.discover-command-panel__head {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    padding: 0 1px;
-}
-.discover-command-kicker,
-.discovery-zone-kicker {
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: 0;
-    text-transform: uppercase;
-    color: rgba(var(--accent-light-rgb), 0.86);
-}
-.discover-command-panel__head h2,
+
+
+
+
 .discovery-zone-head h2 {
     margin: 0;
     color: #fff;
@@ -38591,201 +38541,38 @@ div.artist-hero-badge {
     font-weight: 800;
     letter-spacing: 0;
 }
-.discover-command-panel__head p,
+
 .discovery-zone-head p {
     margin: 0;
     color: rgba(255, 255, 255, 0.5);
     font-size: 12px;
     line-height: 1.45;
 }
-.discover-next-move {
-    position: relative;
-    display: flex;
-    min-height: 104px;
-    flex-direction: column;
-    justify-content: flex-end;
-    gap: 6px;
-    padding: 13px;
-    overflow: hidden;
-    text-align: left;
-    border-radius: 12px;
-    border: 1px solid rgba(var(--accent-rgb), 0.3);
-    background:
-        linear-gradient(135deg, rgba(var(--accent-rgb), 0.34), transparent 48%),
-        linear-gradient(160deg, rgba(21, 23, 31, 0.96), rgba(7, 8, 12, 0.99));
-    color: #fff;
-    cursor: pointer;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
-}
-.discover-next-move::after {
-    content: '';
-    position: absolute;
-    right: 12px;
-    top: 12px;
-    width: 34px;
-    height: 34px;
-    border-radius: 50%;
-    border: 1px solid rgba(var(--accent-light-rgb), 0.28);
-    background:
-        linear-gradient(90deg, transparent 47%, rgba(var(--accent-light-rgb), 0.75) 48% 52%, transparent 53%),
-        linear-gradient(0deg, transparent 47%, rgba(var(--accent-light-rgb), 0.75) 48% 52%, transparent 53%),
-        rgba(var(--accent-rgb), 0.08);
-    opacity: 0.55;
-    transition: opacity 0.18s ease, transform 0.18s ease;
-}
-.discover-next-move:hover {
-    border-color: rgba(var(--accent-rgb), 0.42);
-}
-.discover-next-move:hover::after {
-    opacity: 0.9;
-    transform: rotate(45deg) scale(1.04);
-}
-.discover-next-move__eyebrow {
-    width: fit-content;
-    color: rgba(var(--accent-light-rgb), 0.88);
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: 0;
-    text-transform: uppercase;
-}
-.discover-next-move strong {
-    max-width: 22ch;
-    font-size: 17px;
-    font-weight: 850;
-    line-height: 1.1;
-}
-.discover-next-move > span:not(.discover-next-move__eyebrow, .discover-next-move__foot) {
-    max-width: 36ch;
-    color: rgba(255, 255, 255, 0.55);
-    font-size: 11px;
-    line-height: 1.35;
-}
-.discover-next-move__foot {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-top: 5px;
-    padding-top: 7px;
-    border-top: 1px solid rgba(255, 255, 255, 0.07);
-}
-.discover-next-move__foot em {
-    color: rgba(255, 255, 255, 0.7);
-    font-size: 11px;
-    font-style: normal;
-    font-weight: 700;
-}
-.discover-next-move__foot b {
-    color: #fff;
-    font-size: 11px;
-    font-weight: 800;
-}
-.discover-action-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px;
-}
-.discover-action-card {
-    position: relative;
-    display: flex;
-    min-height: 78px;
-    flex-direction: column;
-    justify-content: space-between;
-    gap: 3px;
-    text-align: left;
-    padding: 10px 10px 9px 14px;
-    border: 1px solid rgba(255, 255, 255, 0.055);
-    border-radius: 9px;
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.014)),
-        rgba(255, 255, 255, 0.018);
-    color: #fff;
-    cursor: pointer;
-    overflow: hidden;
-    transition: background 0.16s ease, padding-left 0.16s ease;
-}
-.discover-action-card::before {
-    content: '';
-    position: absolute;
-    inset: auto 10px 9px 10px;
-    width: auto;
-    height: 2px;
-    border-radius: 4px;
-    background: rgba(var(--accent-light-rgb), 0.9);
-    opacity: 0.5;
-}
-.discover-action-card:hover {
-    padding-left: 14px;
-    border-color: rgba(var(--accent-rgb), 0.24);
-    background: rgba(255, 255, 255, 0.04);
-}
-.discover-action-card--for-you::before {
-    background: rgba(78, 203, 143, 0.95);
-}
-.discover-action-card--new-missing::before {
-    background: rgba(241, 172, 75, 0.95);
-}
-.discover-action-card--library::before {
-    background: rgba(81, 188, 214, 0.95);
-}
-.discover-action-card--tools::before {
-    background: rgba(var(--accent-light-rgb), 0.95);
-}
-.discover-action-card__eyebrow {
-    color: rgba(var(--accent-light-rgb), 0.78);
-    font-size: 9.5px;
-    font-weight: 800;
-    letter-spacing: 0;
-    text-transform: uppercase;
-}
-.discover-action-card__title {
-    font-size: 12.5px;
-    font-weight: 750;
-    color: rgba(255, 255, 255, 0.94);
-}
-.discover-action-card__detail {
-    max-width: 32ch;
-    color: rgba(255, 255, 255, 0.48);
-    font-size: 11px;
-    line-height: 1.35;
-    display: none;
-}
-.discover-action-card__value {
-    align-self: flex-start;
-    padding: 3px 7px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.05);
-    color: rgba(255, 255, 255, 0.64);
-    font-size: 10.5px;
-    font-weight: 700;
-    white-space: nowrap;
-}
-.discover-command-tools {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 5px;
-    margin-top: auto;
-    padding-top: 4px;
-}
-.discover-command-tools button {
-    min-width: 0;
-    padding: 8px 6px;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    background: rgba(255, 255, 255, 0.028);
-    color: rgba(255, 255, 255, 0.76);
-    font-size: 11px;
-    font-weight: 700;
-    cursor: pointer;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.discover-command-tools button:hover {
-    color: #fff;
-    border-color: rgba(var(--accent-rgb), 0.32);
-    background: rgba(var(--accent-rgb), 0.09);
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 .discover-hub-row {
     margin-bottom: 22px;
     padding: 0 20px;
@@ -38837,17 +38624,7 @@ div.artist-hero-badge {
     background: rgb(var(--accent-light-rgb));
     opacity: 0.65;
 }
-.discovery-zone-metric {
-    flex-shrink: 0;
-    padding: 6px 10px;
-    border-radius: 8px;
-    border: 1px solid rgba(var(--accent-rgb), 0.18);
-    background: rgba(var(--accent-rgb), 0.075);
-    color: rgba(255, 255, 255, 0.76);
-    font-size: 11px;
-    font-weight: 750;
-    white-space: nowrap;
-}
+
 .discovery-zone--for-you {
     --zone-rgb: 78, 203, 143;
 }
@@ -38872,19 +38649,8 @@ div.artist-hero-badge {
 .discovery-zone--tools .discovery-zone-head::before {
     background: rgb(var(--zone-rgb));
 }
-.discovery-zone--for-you .discovery-zone-kicker,
-.discovery-zone--new-missing .discovery-zone-kicker,
-.discovery-zone--library .discovery-zone-kicker,
-.discovery-zone--tools .discovery-zone-kicker {
-    color: rgba(var(--zone-rgb), 0.92);
-}
-.discovery-zone--for-you .discovery-zone-metric,
-.discovery-zone--new-missing .discovery-zone-metric,
-.discovery-zone--library .discovery-zone-metric,
-.discovery-zone--tools .discovery-zone-metric {
-    border-color: rgba(var(--zone-rgb), 0.22);
-    background: rgba(var(--zone-rgb), 0.085);
-}
+
+
 .discovery-zone-body {
     display: grid;
     grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -38983,12 +38749,7 @@ div.artist-hero-badge {
 .discovery-zone .adv-wave-track {
     height: 70px;
 }
-.discovery-zone .discover-show-all {
-    margin-top: 7px;
-    padding: 6px 13px;
-    font-size: 11.5px;
-    border-radius: 8px;
-}
+
 .discovery-zone-section--cache-deep-cuts .discover-grid,
 .discovery-zone-section--cache-genre-releases .discover-grid,
 .discovery-zone-section--cache-undiscovered .discover-grid,
@@ -39082,29 +38843,18 @@ div.artist-hero-badge {
     box-shadow: 0 18px 38px rgba(0, 0, 0, 0.44);
 }
 @media (max-width: 1250px) {
-    .discover-command-hero,
-    .discover-command-panel {
+    .discover-command-hero {
         grid-column: 1 / -1;
     }
-    .discover-command-panel {
-        display: grid;
-        grid-template-columns: minmax(220px, 0.74fr) minmax(0, 1.26fr);
-        align-items: start;
-    }
-    .discover-command-tools {
-        grid-column: 1 / -1;
-    }
+
+
 }
 @media (max-width: 900px) {
     .discovery-zone-section {
         grid-column: 1 / -1;
     }
-    .discover-command-panel {
-        display: flex;
-    }
-    .discover-action-grid {
-        grid-template-columns: 1fr;
-    }
+
+
     .discover-command-hero .discover-hero-content {
         padding: 26px 26px 12px;
     }
@@ -39119,7 +38869,7 @@ div.artist-hero-badge {
     }
 }
 @media (max-width: 640px) {
-    .discover-command-grid,
+    
     .discover-hub-row,
     .discovery-zone {
         margin-left: 0;
@@ -39127,12 +38877,7 @@ div.artist-hero-badge {
         padding-left: 12px;
         padding-right: 12px;
     }
-    .discover-command-grid {
-        padding-left: 0;
-        padding-right: 0;
-        gap: 12px;
-        margin-bottom: 24px;
-    }
+
     .discover-command-hero .discover-hero {
         /* min-height, not height. A fixed 318px clipped the hero's own
            actions off the bottom the moment a title wrapped, and the hero has
@@ -39154,59 +38899,23 @@ div.artist-hero-badge {
         max-width: 30ch;
         font-size: 14px;
     }
-    .discover-command-panel {
-        padding: 12px;
-        border-radius: 14px;
-    }
-    .discover-command-panel__head h2 {
-        font-size: 19px;
-    }
-    .discover-next-move {
-        min-height: 92px;
-    }
-    .discover-next-move strong {
-        max-width: 17ch;
-        font-size: 16px;
-    }
-    .discover-next-move::after {
-        opacity: 0.38;
-        transform: scale(0.92);
-    }
-    .discover-action-grid {
-        display: flex;
-        gap: 8px;
-        margin: 0 -2px;
-        overflow-x: auto;
-        padding: 1px 2px 8px;
-        scroll-snap-type: x proximity;
-        scrollbar-width: none;
-    }
-    .discover-action-grid::-webkit-scrollbar {
-        display: none;
-    }
-    .discover-action-card {
-        min-height: 76px;
-        flex: 0 0 148px;
-        scroll-snap-align: start;
-    }
-    .discover-action-card__value {
-        font-size: 10px;
-    }
-    .discover-command-tools {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-    .discover-command-tools button {
-        padding: 8px 4px;
-        font-size: 10.5px;
-    }
+
+
+
+
+
+
+
+
+
+
+
     .discovery-zone-head {
         align-items: flex-start;
         flex-direction: column;
         gap: 10px;
     }
-    .discovery-zone-metric {
-        align-self: flex-start;
-    }
+
     .discovery-zone .discover-mixes-grid {
         grid-auto-columns: 158px;
     }
@@ -80036,18 +79745,6 @@ select.ma-input { appearance: auto; }
     cursor: default;
 }
 
-.discover-station-badge {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    color: rgba(255, 255, 255, 0.75);
-    border: 1px solid rgba(255, 255, 255, 0.25);
-    border-radius: 999px;
-    padding: 2px 7px;
-}
 
 .discover-station-art {
     width: 104px;
@@ -80084,35 +79781,10 @@ select.ma-input { appearance: auto; }
 }
 
 /* discover: the library radio play-now card (tools zone) */
-.discover-library-radio-card {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 18px 20px;
-    border-radius: 14px;
-    border: 1px solid rgba(var(--accent-rgb), 0.25);
-    background: linear-gradient(120deg,
-            rgba(var(--accent-rgb), 0.12) 0%,
-            rgba(255, 255, 255, 0.02) 60%);
-}
 
-.discover-library-radio-copy {
-    min-width: 0;
-}
 
-.discover-library-radio-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.92);
-    margin-bottom: 4px;
-}
 
-.discover-library-radio-sub {
-    font-size: 12.5px;
-    color: rgba(255, 255, 255, 0.55);
-    line-height: 1.5;
-}
+
 
 /* one-line explainer under the review banner - what this sub-view IS */
 .adl-review-explainer {
@@ -85613,8 +85285,7 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 
 /* every control is a real button, so focus has to be visible on all of them */
 .bylt-track-actions .btn:focus-visible,
-.bylt-shelf-actions .btn:focus-visible,
-.discover-station-actions .btn:focus-visible {
+.bylt-shelf-actions .btn:focus-visible {
     outline: 2px solid rgba(var(--accent-rgb), 0.9);
     outline-offset: 2px;
 }
@@ -85633,19 +85304,7 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     transform: none;
 }
 
-.discover-station-actions {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    width: 100%;
-    margin-top: auto;
-}
 
-.discover-station-actions .btn {
-    width: 100%;
-    /* comfortable on touch, where there is no hover to reveal anything */
-    min-height: 36px;
-}
 
 .discover-station-error {
     font-size: 11.5px;

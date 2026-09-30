@@ -44,6 +44,12 @@ export function heroPopularityClass(popularity: number): 'high' | 'medium' | 'lo
   return popularity >= 80 ? 'high' : popularity >= 50 ? 'medium' : 'low';
 }
 
+/** the band in words, beside the meter: numbers need reading, words don't. */
+export function heroPopularityWords(popularity: number): string {
+  const band = heroPopularityClass(popularity);
+  return band === 'high' ? 'Well known' : band === 'medium' ? 'Rising' : 'Under the radar';
+}
+
 /** At most three genre tags — `artist.genres.slice(0, 3)`, line 492. */
 export const HERO_MAX_GENRES = 3;
 

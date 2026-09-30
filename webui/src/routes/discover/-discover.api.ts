@@ -21,6 +21,7 @@ import { apiClient, readJson } from '@/app/api-client';
 
 import type { InboxPayload, InboxView } from './-discover.inbox';
 import type { DiscoverLayoutSection } from './-discover.layout';
+import type { WeekStats } from './-discover.pulse';
 import type { SectionOutcome } from './-discover.section-state';
 import type {
   DiscoverAlbum,
@@ -209,6 +210,17 @@ export const fetchPopularPicks = () =>
   section<Record<string, unknown>>('discover/personalized/popular-picks');
 export const fetchDailyMixes = () =>
   section<Record<string, unknown>>('discover/personalized/daily-mixes');
+
+/** on repeat, repeat rewind and any blends, read off your listening history. */
+export const fetchForYouMixes = () => section<Record<string, unknown>>('discover/for-you');
+
+/** a fresh flow queue: favourites and what they lead to in your library. */
+export function fetchFlow(): Promise<{ success?: boolean; tracks?: unknown[]; error?: string }> {
+  return readJson(apiClient.get('discover/flow'));
+}
+
+/** chill / focus / energy / feel good / late night, from your own tagged albums. */
+export const fetchMoodMixes = () => section<Record<string, unknown>>('discover/moods');
 export const fetchHiddenGems = () =>
   section<Record<string, unknown>>('discover/personalized/hidden-gems');
 
@@ -379,6 +391,16 @@ export function postDiscoverFeedback(body: {
 
 export function resetDiscoverTaste(): Promise<DiscoverResult & { cleared?: number }> {
   return readJson(apiClient.delete('discover/feedback'));
+}
+
+// ── Your week (the pulse banners) ──────────────────────────────────────────
+
+/**
+ * the stats worker's cached 7-day summary, the same numbers the Stats page
+ * shows. a metadata read, so it's instant and safe above the fold.
+ */
+export function fetchWeekStats(): Promise<WeekStats> {
+  return readJson(apiClient.get('stats/cached', { searchParams: { range: '7d' } }));
 }
 
 // ── The inbox ──────────────────────────────────────────────────────────────

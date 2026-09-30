@@ -20,8 +20,6 @@ function props(over: Partial<CacheShelfProps> = {}): CacheShelfProps {
   return {
     def: CACHE_SECTIONS[0], // cache-undiscovered
     items: [item(0), item(1, { in_library: true })],
-    expanded: false,
-    onToggleExpand: vi.fn(),
     onOpenItem: vi.fn(),
     ...over,
   };
@@ -33,15 +31,15 @@ describe('cache shelves', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders each section under its own id with the eyebrow ABOVE an h3', () => {
+  it('renders each section under its own id, title then subtitle like every other shelf', () => {
     for (const def of CACHE_SECTIONS) {
       const { container, unmount } = render(<CacheShelf {...props({ def })} />);
       const section = container.querySelector(`#${def.id}.discover-section`)!;
       const header = section.querySelector('.discover-section-header > div')!;
-      expect(header.children[0]).toHaveClass('discover-section-subtitle');
-      expect(header.children[0].textContent).toBe(def.subtitle);
-      expect(header.children[1].tagName).toBe('H3');
-      expect(header.children[1].textContent).toBe(def.title);
+      expect(header.children[0].tagName).toBe('H3');
+      expect(header.children[0].textContent).toBe(def.title);
+      expect(header.children[1]).toHaveClass('discover-section-subtitle');
+      expect(header.children[1].textContent).toBe(def.subtitle);
       unmount();
     }
   });
@@ -69,30 +67,12 @@ describe('cache shelves', () => {
     );
   });
 
-  it('clamps at 12 by hiding cards, with the sibling Show all toggle', () => {
+  it('puts every item in the rail, with no show-all pill to hide the end of it', () => {
     const many = Array.from({ length: 15 }, (_, i) => item(i));
-    const p = props({ items: many });
-    const { container, rerender } = render(<CacheShelf {...p} />);
-    const wrappers = () =>
-      [...container.querySelector('.discover-grid')!.children] as HTMLElement[];
-    expect(wrappers()).toHaveLength(15); // hidden, not dropped
-    expect(wrappers().filter((w) => w.style.display !== 'none')).toHaveLength(12);
-    const toggle = container.querySelector('.discover-show-all')!;
-    // A SIBLING of the grid, not a 16th child inside it.
-    expect(toggle.parentElement).toBe(container.querySelector('.discover-grid')!.parentElement);
-    expect(toggle.textContent).toBe('Show all 15');
-    fireEvent.click(toggle);
-    expect(p.onToggleExpand).toHaveBeenCalledOnce();
-
-    rerender(<CacheShelf {...p} expanded={true} />);
-    expect(wrappers().filter((w) => w.style.display !== 'none')).toHaveLength(15);
-    expect(container.querySelector('.discover-show-all')!.textContent).toBe('Show less');
-  });
-
-  it('shows no toggle at or below the limit', () => {
-    const { container } = render(
-      <CacheShelf {...props({ items: Array.from({ length: 12 }, (_, i) => item(i)) })} />,
-    );
+    const { container } = render(<CacheShelf {...props({ items: many })} />);
+    const wrappers = [...container.querySelector('.discover-grid')!.children] as HTMLElement[];
+    expect(wrappers).toHaveLength(15);
+    expect(wrappers.every((w) => w.style.display !== 'none')).toBe(true);
     expect(container.querySelector('.discover-show-all')).toBeNull();
   });
 });
