@@ -19286,6 +19286,61 @@ def get_spotify_playlists():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+def _spotify_playlist_public_response(playlist_id):
+    """Build a get_playlist_tracks-style response from the no-auth public path.
+
+    Used when the official Spotify API refuses the playlist metadata call
+    because the app owner's account has no active Premium subscription
+    (HTTP 403 "Active premium subscription required for the owner of the
+    app"). This is the same public source SoulSync's own playlist-link import
+    uses — no official API, no credentials. Fields the public source cannot
+    provide are honest empty values, never fabricated.
+    """
+    from core.spotify_public_scraper import scrape_spotify_embed
+    try:
+        from core.spotify_public_api import fetch_public_playlist_full
+        public = fetch_public_playlist_full(playlist_id)
+        complete = True
+    except Exception:
+        # Full public-API path failed — fall back to the embed scraper, which
+        # caps at ~100 tracks, so the result may be truncated.
+        public = scrape_spotify_embed('playlist', playlist_id)
+        complete = False
+    if not isinstance(public, dict) or public.get('error') or not public.get('tracks'):
+        err = public.get('error') if isinstance(public, dict) else None
+        raise RuntimeError(err or 'Public Spotify playlist fetch failed')
+    tracks = []
+    for t in public['tracks']:
+        artists = t.get('artists', [])
+        tracks.append({
+            'id': t.get('id', ''),
+            'name': t.get('name', ''),
+            'artists': artists if artists else [{'name': 'Unknown'}],
+            'album': {'name': '', 'images': []},
+            'duration_ms': t.get('duration_ms', 0),
+            'popularity': 0,
+            'spotify_track_id': t.get('id', ''),
+        })
+    # The full public-API path paginates to completion; only the embed
+    # scraper caps at ~100 tracks. A 100+ track count from the full path is
+    # a genuinely large playlist, not truncation.
+    possibly_truncated = not complete and len(tracks) >= 100
+    return jsonify({
+        'id': public.get('id', playlist_id),
+        'name': public.get('name', 'Unknown'),
+        'description': '',
+        'owner': public.get('subtitle', ''),
+        'public': True,
+        'collaborative': False,
+        'track_count': len(tracks),
+        'image_url': None,
+        'snapshot_id': '',
+        'tracks': tracks,
+        'incomplete': possibly_truncated,
+        'expected_total': None,
+    })
+
+
 @app.route('/api/spotify/playlist/<playlist_id>', methods=['GET'])
 def get_playlist_tracks(playlist_id):
     """Fetches full track details for a specific playlist."""
@@ -19354,7 +19409,23 @@ def get_playlist_tracks(playlist_id):
         # Fetch raw playlist data to preserve full album objects
         from core.api_call_tracker import api_call_tracker
         api_call_tracker.record_call('spotify', endpoint='playlist')
-        playlist_data = client.sp.playlist(playlist_id)
+        try:
+            playlist_data = client.sp.playlist(playlist_id)
+        except Exception as playlist_err:
+            # The official API 403s when the Spotify account owning the app's
+            # credentials has no active Premium subscription ("Active premium
+            # subscription required for the owner of the app"). Fall back to
+            # the no-auth public path — the same one SoulSync's own
+            # playlist-link import uses — so the playlist still resolves.
+            # Every other error propagates unchanged.
+            from core.spotify_client import _is_premium_required_error
+            if not _is_premium_required_error(playlist_err):
+                raise
+            logger.warning(
+                f"Spotify playlist {playlist_id}: official API blocked "
+                f"(app owner lacks Premium); falling back to public fetch"
+            )
+            return _spotify_playlist_public_response(playlist_id)
 
         # Fetch all tracks with full album data
         tracks = []
