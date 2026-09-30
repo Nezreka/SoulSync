@@ -38,6 +38,12 @@ _thread: Optional[threading.Thread] = None
 # and every non-literal stored path silently fails to resolve.
 _config_manager = None
 
+# the web server's playback resolver (_resolve_library_file_path). injected so
+# sample studio finds a file exactly where the player does: same bases, plus
+# plex all-libraries locations and the confusable-tolerant suffix scan (#833)
+# the shared resolver doesn't have.
+_resolve_path_fn = None
+
 # The DSP warmup is kicked once at boot so the first analyzed track doesn't
 # stall on the librosa import + numba JIT cold start.
 _warmup_started = False
@@ -49,11 +55,12 @@ def _warm_dsp_safe() -> None:
     warm_dsp()
 
 
-def configure(*, config_manager_=None) -> None:
+def configure(*, config_manager_=None, resolve_path_fn=None, warm=True) -> None:
     """Inject shared services. Safe to call more than once."""
-    global _config_manager, _warmup_started
+    global _config_manager, _resolve_path_fn, _warmup_started
     _config_manager = config_manager_
-    if not _warmup_started:
+    _resolve_path_fn = resolve_path_fn
+    if warm and not _warmup_started:
         _warmup_started = True
         threading.Thread(
             target=_warm_dsp_safe, daemon=True, name="SampleDSPWarmup"
@@ -67,15 +74,27 @@ def resolve_audio_path(stored_path: str) -> Optional[str]:
     (suffix-walk against the configured music/transfer folders), which is
     what translates container-style stored paths (``/mnt/musicBackup/…``)
     to the host layout on native installs and vice versa.
+
+    when the web server injected its playback resolver, that goes first, so a
+    track that plays also chops. the shared resolver is the fallback for
+    boot paths that never configured us (it still reads the global config).
     """
     if stored_path and os.path.isfile(stored_path):
         return stored_path
+    if _resolve_path_fn is not None:
+        try:
+            resolved = _resolve_path_fn(stored_path)
+            if resolved and os.path.isfile(resolved):
+                return resolved
+        except Exception as exc:
+            logger.debug("playback resolver failed for %s: %s", stored_path, exc)
     try:
         from core.library.path_resolver import resolve_library_file_path
 
-        resolved = resolve_library_file_path(
-            stored_path, config_manager=_config_manager
-        )
+        config = _config_manager
+        if config is None:
+            from core.settings import config_manager as config
+        resolved = resolve_library_file_path(stored_path, config_manager=config)
         if resolved and os.path.isfile(resolved):
             return resolved
     except Exception as exc:

@@ -86,9 +86,7 @@ def _resolve_source_path(track_id: int, stem: str | None) -> str:
     if not stored:
         raise SampleHttpError("NOT_FOUND", f"no file path for track {track_id}", 404)
     # One shared choke point (core.sample.worker): raw path first, then the
-    # library path resolver with the injected config manager, which is what
-    # translates container-style stored paths (/mnt/musicBackup/…) to the
-    # host layout on native installs.
+    # playback resolver web_server injects, so a track that plays also chops.
     from core.sample import worker as sample_worker
 
     path = sample_worker.resolve_audio_path(stored)
@@ -672,7 +670,7 @@ def register_routes(bp):
         except (TypeError, ValueError):
             return api_error("BAD_REQUEST", "track_id and buckets must be integers", 400)
         try:
-            payload, status = fetch_peaks(track_id, buckets)
+            payload, status = fetch_peaks(track_id, buckets, stem=request.args.get("stem") or None)
             return api_success(payload, status=status)
         except SampleHttpError as e:
             return _handle_service_error(e)

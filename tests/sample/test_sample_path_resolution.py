@@ -42,10 +42,9 @@ def configured_worker(tmp_path):
     track_file.parent.mkdir(parents=True)
     track_file.write_bytes(b"fake flac")
     sample_worker.configure(
-        config_manager_=_FakeConfig([str(music)])
+        config_manager_=_FakeConfig([str(music)]), warm=False
     )
     yield str(track_file)
-    sample_worker.configure(config_manager_=None)
 
 
 def test_resolve_audio_path_translates_container_path(configured_worker):
@@ -61,9 +60,9 @@ def test_resolve_audio_path_raw_path_still_wins(configured_worker, tmp_path):
     assert sample_worker.resolve_audio_path(str(direct)) == str(direct)
 
 
-def test_resolve_audio_path_none_without_config_manager(tmp_path):
-    """No injected config: the resolver has no base dirs, honest miss."""
-    sample_worker.configure(config_manager_=None)
+def test_resolve_audio_path_none_when_nothing_matches(tmp_path):
+    """no base dir holds the file: honest miss."""
+    sample_worker.configure(config_manager_=_FakeConfig([]), warm=False)
     assert sample_worker.resolve_audio_path(
         "/mnt/musicBackup/Artist/Album/01.flac"
     ) is None
@@ -82,7 +81,7 @@ def test_resolve_source_path_uses_translation(configured_worker, monkeypatch):
 def test_resolve_source_path_untranslatable_is_honest(monkeypatch):
     from core.sample import store as sample_store
 
-    sample_worker.configure(config_manager_=None)
+    sample_worker.configure(config_manager_=_FakeConfig([]), warm=False)
     stored = "/mnt/musicBackup/Artist/Album/01.flac"
     monkeypatch.setattr(
         sample_store, "get_track_file_path", lambda track_id: stored
@@ -93,3 +92,60 @@ def test_resolve_source_path_untranslatable_is_honest(monkeypatch):
     assert exc_info.value.status == 409
     # the stored path is named so the user can see what failed to translate
     assert stored in exc_info.value.message
+
+
+# the playback resolver web_server injects wins: sample studio must find a
+# file wherever the player finds it.
+
+
+def test_injected_playback_resolver_wins(tmp_path):
+    real = tmp_path / "elsewhere" / "01 - Aether.flac"
+    real.parent.mkdir()
+    real.write_bytes(b"x")
+    seen = []
+
+    def playback_resolver(path):
+        seen.append(path)
+        return str(real)
+
+    sample_worker.configure(
+        config_manager_=_FakeConfig([]), resolve_path_fn=playback_resolver, warm=False
+    )
+    stored = "/mnt/musicBackup/Virtual Mage/Aether/01 - Aether.flac"
+    assert sample_worker.resolve_audio_path(stored) == str(real)
+    assert seen == [stored]
+
+
+def test_injected_resolver_miss_falls_back_to_shared(configured_worker):
+    sample_worker.configure(
+        config_manager_=sample_worker._config_manager,
+        resolve_path_fn=lambda p: "/nope/not/here.flac",
+        warm=False,
+    )
+    stored = "/mnt/musicBackup/Virtual Mage/Virtual Mage - Aether/01 - Aether.flac"
+    assert sample_worker.resolve_audio_path(stored) == configured_worker
+
+
+def test_injected_resolver_crash_falls_back_to_shared(configured_worker):
+    def boom(path):
+        raise OSError("stale nfs handle")
+
+    sample_worker.configure(
+        config_manager_=sample_worker._config_manager, resolve_path_fn=boom, warm=False
+    )
+    stored = "/mnt/musicBackup/Virtual Mage/Virtual Mage - Aether/01 - Aether.flac"
+    assert sample_worker.resolve_audio_path(stored) == configured_worker
+
+
+def test_unconfigured_worker_reads_global_config(tmp_path, monkeypatch):
+    """a boot path that never called configure() still resolves against the
+    global config instead of silently having no base dirs."""
+    import core.settings as settings
+
+    music = tmp_path / "music"
+    track = music / "A" / "B" / "01.flac"
+    track.parent.mkdir(parents=True)
+    track.write_bytes(b"x")
+    monkeypatch.setattr(settings, "config_manager", _FakeConfig([str(music)]))
+    monkeypatch.setattr(sample_worker, "_config_manager", None)
+    assert sample_worker.resolve_audio_path("/data/music/A/B/01.flac") == str(track)

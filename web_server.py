@@ -1811,7 +1811,7 @@ def sample_peaks_web():
         except (TypeError, ValueError):
             return jsonify({"success": False, "data": None, "error": "track_id and buckets must be integers"}), 400
         try:
-            payload, status = fetch_peaks(track_id, buckets)
+            payload, status = fetch_peaks(track_id, buckets, stem=request.args.get('stem') or None)
             return jsonify({"success": True, "data": payload, "error": None}), status
         except SampleHttpError as e:
             return jsonify({"success": False, "data": None, "error": e.message}), e.status
@@ -23109,6 +23109,13 @@ _cfg_is(
     _get_audio_quality_string=_get_audio_quality_string,
 )
 app.register_blueprint(_bp_is())
+
+# sample studio: resolve track files with the same resolver playback uses, so
+# a track that plays can also be analyzed, previewed and chopped. warm=False
+# keeps librosa out of boot for people who never open the studio.
+from core.sample.worker import configure as _cfg_sample
+_cfg_sample(config_manager_=config_manager,
+            resolve_path_fn=_resolve_library_file_path, warm=False)
 
 # music requests: what a profile without download rights asked for
 from api.music_requests import configure as _cfg_mr, create_blueprint as _bp_mr
