@@ -60,7 +60,7 @@ def register_routes(bp):
         """Delete all retag groups and tracks."""
         try:
             db = get_database()
-            count = db.clear_all_retag_groups()
+            count = db.delete_all_retag_groups()
             return api_success({"message": f"Cleared {count} retag groups."})
         except Exception as e:
             return api_error("RETAG_ERROR", str(e), 500)
