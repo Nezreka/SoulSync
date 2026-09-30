@@ -590,10 +590,12 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                 elif fallback_images and isinstance(fallback_images, list) and len(fallback_images) > 0:
                     fallback_image_url = fallback_images[0].get('url') if isinstance(fallback_images[0], dict) else None
                 spotify_artist_context = {'id': 'from_sync_modal', 'name': track.artists[0] if track.artists else 'Unknown', 'genres': []}
-                # Preserve album-level artists for consistent folder naming
-                _fallback_album_artists = fallback_album.get('artists', [])
-                if not _fallback_album_artists:
-                    _fallback_album_artists = [{'name': track.artists[0]}] if track.artists else []
+                # Preserve album-level artists for consistent folder naming. left
+                # empty when the track's album carries none: the source backfill
+                # below fills the album's real credit, and only then does the
+                # track artist stand in (#1385: a soundtrack filed under whichever
+                # singer's song was downloaded)
+                _fallback_album_artists = fallback_album.get('artists', []) or []
                 spotify_album_context = {
                     'id': fallback_album.get('id', 'from_sync_modal'),
                     'name': fallback_album.get('name', '') or track.album,
@@ -619,6 +621,8 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                 )
             except Exception as _bf_err:  # noqa: BLE001 — never let backfill break a download
                 logger.debug("[Context] primary-source album backfill skipped: %s", _bf_err)
+            if not spotify_album_context.get('artists') and track.artists:
+                spotify_album_context['artists'] = [{'name': track.artists[0]}]
 
             download_payload = candidate.__dict__
 

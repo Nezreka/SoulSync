@@ -85,6 +85,14 @@ def _backfill_album_context(
         if not album_context.get(key) and dt_album.get(key):
             album_context[key] = dt_album[key]
 
+    # the album's own credit, when the caller had none. a playlist track's
+    # album often arrives without artists, and the album is filed under its
+    # album artist (#1385)
+    if not album_context.get('artists'):
+        artists = dt_album.get('artists')
+        if isinstance(artists, list) and artists:
+            album_context['artists'] = artists
+
     if not album_context.get('image_url'):
         images = dt_album.get('images')
         if isinstance(images, list) and images:
@@ -118,7 +126,12 @@ def backfill_album_context_from_source(
     track-details path covers it); or no real source album id is present. Returns True when
     it filled anything. Never raises — a backfill failure must not break a download.
     """
-    if not isinstance(album_context, dict) or not _album_is_lean(album_context):
+    if not isinstance(album_context, dict):
+        return False
+    # no album credit counts as lean here too (#1385), but only here: the
+    # spotify track-details hydrate keeps its own trigger, so this never adds
+    # spotify calls
+    if not _album_is_lean(album_context) and album_context.get('artists'):
         return False
     if not primary_source or primary_source == 'spotify':
         return False

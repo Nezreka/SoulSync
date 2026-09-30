@@ -475,6 +475,45 @@ def test_api_backfills_album_context_when_missing():
     assert ctx["spotify_album"]["id"] == "from_sync_modal"
 
 
+def _patch_primary_source(monkeypatch, source, album):
+    from core.metadata import album_tracks, registry
+    monkeypatch.setattr(registry, "get_primary_source", lambda: source)
+    monkeypatch.setattr(album_tracks, "get_album_for_source", lambda *_a, **_k: album)
+
+
+def test_playlist_track_gets_the_albums_own_credit_not_the_singer(monkeypatch):
+    """#1385: 'Let It Go' from a playlist was filed under Idina Menzel/Frozen.
+    the track's album had no artists, so the track artist was made the album
+    artist before the source backfill could supply the real one."""
+    _patch_primary_source(monkeypatch, "itunes", {
+        "id": "it-frozen", "release_date": "2013-11-25", "total_tracks": 32,
+        "album_type": "album", "artists": [{"name": "Various Artists", "id": "va"}],
+    })
+    deps = _build_deps()
+    _seed_task("t20", track_info={
+        "track_number": 5,
+        "album": {"id": "it-frozen", "name": "Frozen (Original Motion Picture Soundtrack)"},
+    })
+    track = _Track(album="Frozen (Original Motion Picture Soundtrack)", artists=["Idina Menzel"])
+
+    dc.attempt_download_with_candidates("t20", [_Candidate()], track, batch_id=None, deps=deps)
+
+    album = matched_downloads_context["user1::song.flac"]["spotify_album"]
+    assert album["artists"] == [{"name": "Various Artists", "id": "va"}]
+
+
+def test_playlist_track_falls_back_to_its_artist_when_the_source_has_no_credit(monkeypatch):
+    _patch_primary_source(monkeypatch, "itunes", None)
+    deps = _build_deps()
+    _seed_task("t21", track_info={"track_number": 5, "album": {"id": "it-x", "name": "Some Album"}})
+    track = _Track(album="Some Album", artists=["Solo Artist"])
+
+    dc.attempt_download_with_candidates("t21", [_Candidate()], track, batch_id=None, deps=deps)
+
+    album = matched_downloads_context["user1::song.flac"]["spotify_album"]
+    assert album["artists"] == [{"name": "Solo Artist"}]
+
+
 # ---------------------------------------------------------------------------
 # Sort by confidence is stable for equal scores
 # ---------------------------------------------------------------------------

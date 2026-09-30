@@ -537,7 +537,9 @@ def test_backfill_hydrates_lean_context_from_primary_source():
 
 
 def test_backfill_noop_when_context_already_complete():
-    ctx = {"id": "itunes-123", "release_date": "2024-04-17", "total_tracks": 70, "album_type": "album"}
+    # complete includes the album's own credit (#1385)
+    ctx = {"id": "itunes-123", "release_date": "2024-04-17", "total_tracks": 70, "album_type": "album",
+           "artists": [{"name": "Various Artists"}]}
     called = []
     backfill_album_context_from_source(ctx, "itunes", lambda *a: called.append(a))
     assert called == []                          # complete -> no fetch
@@ -573,6 +575,39 @@ def test_backfill_swallows_source_errors():
     # Must not raise — a backfill failure cannot break a download.
     assert backfill_album_context_from_source(ctx, "itunes", boom) is False
     assert ctx["release_date"] == ""
+
+
+def test_backfill_fills_the_album_credit_when_the_context_has_none():
+    # #1385: a playlist track's album arrived with no artists, so the download
+    # invented one from the track artist and a soundtrack was filed under
+    # whichever singer's song it was. dates and counts were already there
+    ctx = {"id": "itunes-123", "release_date": "2024-04-17", "total_tracks": 70, "album_type": "album"}
+    calls = []
+
+    def get_album(source, album_id):
+        calls.append(album_id)
+        return _itunes_album(artists=[{"name": "Various Artists", "id": "va"}])
+
+    assert backfill_album_context_from_source(ctx, "itunes", get_album) is True
+    assert calls == ["itunes-123"]
+    assert ctx["artists"] == [{"name": "Various Artists", "id": "va"}]
+
+
+def test_backfill_never_replaces_a_credit_the_caller_had():
+    ctx = _lean_ctx()
+    ctx["artists"] = [{"name": "Real Credit"}]
+    backfill_album_context_from_source(
+        ctx, "itunes", lambda *a: _itunes_album(artists=[{"name": "Other"}]))
+    assert ctx["artists"] == [{"name": "Real Credit"}]
+    assert ctx["release_date"] == "2024-04-17"   # the lean fields still fill
+
+
+def test_a_missing_credit_alone_never_adds_a_spotify_call():
+    # spotify keeps its own hydrate trigger; this backfill stays off for it
+    called = []
+    ctx = {"id": "sp-1", "release_date": "2024-04-17", "total_tracks": 7}
+    assert backfill_album_context_from_source(ctx, "spotify", lambda *a: called.append(a)) is False
+    assert called == []
 
 
 if __name__ == '__main__':
