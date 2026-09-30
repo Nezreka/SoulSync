@@ -18847,7 +18847,7 @@ def start_missing_tracks_process(playlist_id):
 
     # Log album context if provided
     if is_album_download and album_context and artist_context:
-        logger.info(f"[Artist Album] Received album context: '{album_context.get('name')}' by '{artist_context.get('name')}' ({album_context.get('album_type', 'album')})")
+        logger.info(f"[Artist Album] Received album context: '{album_context.get('name')}' by '{artist_context.get('name')}' ({album_context.get('album_type', 'album')}{', locked to its artist page section' if album_context.get('album_type_locked') else ''})")
         logger.info(f"   Release: {album_context.get('release_date', 'Unknown')}, Tracks: {album_context.get('total_tracks', len(tracks))}")
 
     # Log playlist folder mode if enabled
