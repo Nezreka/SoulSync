@@ -167,7 +167,7 @@ export function useSyncHistory(options: UseSyncHistoryOptions) {
 
             stopPolling(entryId);
             if (progress.phase === 'finished') {
-              toast(`Re-sync complete: ${progress.matched}/${progress.total} matched`, 'success');
+              toast(`Pushed again: ${progress.matched}/${progress.total} matched`, 'success');
             }
             const linger = progress.phase === 'finished' ? FINISHED_LINGER_MS : ENDED_LINGER_MS;
             setTimeout(() => {

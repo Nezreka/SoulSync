@@ -188,8 +188,13 @@ export function MirroredDetailModal({
               Edit Source
             </button>
             {/* Runs the pipeline now; the header's "Auto-Sync" schedules it. */}
-            <button type="button" className="mm-btn mm-btn-secondary" onClick={onRunPipeline}>
-              Sync now
+            <button
+              type="button"
+              className="mm-btn mm-btn-secondary"
+              title="Refresh from the source, match, push to your server and download what's missing"
+              onClick={onRunPipeline}
+            >
+              Sync &amp; download
             </button>
             <button type="button" className="mm-btn mm-btn-ghost" onClick={onClose}>
               Close

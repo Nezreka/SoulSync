@@ -97,7 +97,7 @@ describe('MirroredDetailModal', () => {
     expect(h.onDiscover).toHaveBeenCalled();
     fireEvent.click(screen.getByText('Edit Source'));
     expect(h.onEditSource).toHaveBeenCalled();
-    fireEvent.click(screen.getByText('Sync now'));
+    fireEvent.click(screen.getByText('Sync & download'));
     expect(h.onRunPipeline).toHaveBeenCalled();
     fireEvent.click(screen.getByText('Close'));
     expect(h.onClose).toHaveBeenCalled();

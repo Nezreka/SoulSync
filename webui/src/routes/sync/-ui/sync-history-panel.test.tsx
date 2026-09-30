@@ -130,7 +130,7 @@ describe('pagination', () => {
 describe('the row actions', () => {
   it('re-syncs and deletes through the caller', () => {
     const { props } = renderPanel();
-    fireEvent.click(screen.getByText('Re-sync'));
+    fireEvent.click(screen.getByText('Push again'));
     expect(props.onResync).toHaveBeenCalledWith(7);
     fireEvent.click(screen.getByLabelText('Delete Road Trip from history'));
     expect(props.onDelete).toHaveBeenCalledWith(7);
@@ -156,7 +156,7 @@ describe('the row actions', () => {
       (container.querySelector('.sync-history-progress-bar-fill') as HTMLElement).style.width,
     ).toBe('40%');
     expect(screen.getByText('Matching — Sexy Boy')).toBeInTheDocument();
-    expect((screen.getByText('Syncing…') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText('Pushing…') as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('offers Cancel only while the run is still going', () => {

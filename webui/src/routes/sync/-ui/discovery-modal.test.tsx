@@ -102,7 +102,7 @@ describe('phase footers', () => {
         onStartSync={onStartSync}
       />,
     );
-    fireEvent.click(screen.getByText('🔄 Sync This Playlist'));
+    fireEvent.click(screen.getByText('🔄 Push to server'));
     expect(onStartSync).toHaveBeenCalledOnce();
   });
 
@@ -118,7 +118,7 @@ describe('phase footers', () => {
     expect(
       screen.getByText('⚠️ No discovery results available. Try starting discovery again.'),
     ).toBeInTheDocument();
-    expect(screen.queryByText('🔄 Sync This Playlist')).not.toBeInTheDocument();
+    expect(screen.queryByText('🔄 Push to server')).not.toBeInTheDocument();
   });
 
   it('matches are COUNTER-only, and a converted id keeps Download available (9604-9605)', () => {
@@ -138,7 +138,7 @@ describe('phase footers', () => {
         {...noopHandlers}
       />,
     );
-    expect(screen.queryByText('🔄 Sync This Playlist')).not.toBeInTheDocument();
+    expect(screen.queryByText('🔄 Push to server')).not.toBeInTheDocument();
     expect(screen.getByText('🔍 Download Missing Tracks')).toBeInTheDocument();
     expect(screen.queryByText(/No .* matches found/)).not.toBeInTheDocument();
   });
@@ -159,7 +159,7 @@ describe('phase footers', () => {
         onDownloadMissing={onDownloadMissing}
       />,
     );
-    expect(screen.queryByText('🔄 Sync This Playlist')).not.toBeInTheDocument();
+    expect(screen.queryByText('🔄 Push to server')).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('📁 Download to Playlist Folder'));
     expect(onDownloadMissing).toHaveBeenCalledWith({ forcePlaylistFolder: true });
   });

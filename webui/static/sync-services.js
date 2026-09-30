@@ -9731,21 +9731,21 @@ function getModalActionButtons(urlHash, phase, state = null) {
             // Only show sync button if there are Spotify matches (and not standalone mode)
             if (hasSpotifyMatches && !_isSoulsyncStandalone) {
                 if (isListenBrainz) {
-                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else if (isTidal) {
-                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startTidalPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startTidalPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else if (isQobuz) {
-                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startQobuzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startQobuzPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else if (isDeezer) {
-                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else if (isSpotifyPublic) {
-                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else if (isITunesLink) {
-                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startITunesLinkPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startITunesLinkPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else if (isBeatport) {
-                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else {
-                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 }
             }
 
@@ -9909,19 +9909,19 @@ function getModalActionButtons(urlHash, phase, state = null) {
             // Only show sync button if there are Spotify matches (and not standalone mode)
             if (hasSpotifyMatches && !_isSoulsyncStandalone) {
                 if (isListenBrainz) {
-                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else if (isTidal) {
-                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startTidalPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startTidalPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else if (isQobuz) {
-                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startQobuzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startQobuzPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else if (isSpotifyPublic) {
-                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else if (isITunesLink) {
-                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startITunesLinkPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startITunesLinkPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else if (isBeatport) {
-                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else {
-                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 }
             }
 
@@ -9967,21 +9967,21 @@ function getModalActionButtons(urlHash, phase, state = null) {
 
             if (hasSpotifyMatches) {
                 if (isListenBrainz) {
-                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else if (isTidal) {
-                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startTidalPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startTidalPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else if (isQobuz) {
-                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startQobuzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startQobuzPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else if (isDeezer) {
-                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else if (isSpotifyPublic) {
-                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else if (isITunesLink) {
-                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startITunesLinkPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startITunesLinkPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else if (isBeatport) {
-                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportPlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 } else {
-                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Push to server</button>`;
                 }
             }
 

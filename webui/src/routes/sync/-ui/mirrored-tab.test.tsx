@@ -454,7 +454,7 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     fireEvent.click(document.querySelector('.pl-card-more') as HTMLElement);
     const labels = [...document.querySelectorAll('.pl-menu-item')].map((b) => b.textContent);
     expect(labels).toContain('Export');
-    expect(screen.getByText('Sync now')).toBeInTheDocument();
+    expect(screen.getByText('Sync & download')).toBeInTheDocument();
     expect(labels).toContain('Edit source link');
   });
 
@@ -583,7 +583,7 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
               : { states: [] };
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Sync now'));
+    fireEvent.click(screen.getByText('Sync & download'));
     await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('pipeline_running'));
     fireEvent.click(screen.getByText('Road Trip'));
     await waitFor(() => expect(document.querySelector('#mirrored-track-modal')).not.toBeNull());
@@ -670,7 +670,7 @@ describe('MirroredTab — export (#903)', () => {
 });
 
 describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
-  it('Sync now runs the pipeline and paints its phase onto the card', async () => {
+  it('Sync & download runs the pipeline and paints its phase onto the card', async () => {
     stubFetch();
     window.showToast = vi.fn() as typeof window.showToast;
     responder = (url) => {
@@ -684,7 +684,7 @@ describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
     };
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Sync now'));
+    fireEvent.click(screen.getByText('Sync & download'));
     await waitFor(() =>
       expect(calls.some((c) => c.url === '/api/mirrored-playlists/3/pipeline/run')).toBe(true),
     );
@@ -695,13 +695,13 @@ describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
     await waitFor(() => expect(screen.getByText('Syncing 45%')).toBeInTheDocument());
   });
 
-  it('the Sync now click never opens the card behind it', async () => {
+  it('the Sync & download click never opens the card behind it', async () => {
     stubFetch();
     window.showToast = vi.fn() as typeof window.showToast;
     responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Sync now'));
+    fireEvent.click(screen.getByText('Sync & download'));
     expect(screen.getByTestId('open-id')).toHaveTextContent('none');
   });
 
