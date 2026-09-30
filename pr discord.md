@@ -1,9 +1,13 @@
-**SoulSync 3.4.8 is out** :musical_note:
+**SoulSync 3.4.9 is out** :musical_note:
 
-The wishlist, dashboard, and automations pages all got the premier treatment — new designs across the board, sidebar navigation and an overview dashboard for automations, per-artist grab and a failing-track triage banner on the wishlist.
+Discover got its biggest glow-up yet. It opens like a home page with a grid of what you go back to, daily mixes lead and say who's in them, there's a "your week in music" banner, real mood mixes built from your own albums, and music video backdrops with a watch rail that plays itself. Set a country under Settings > Concerts and the inbox only shows shows near you.
 
-The library page now has an albums grid with sorting, and chat gets 1-click P2P sharing for wanted requests, user flair badges, per-room history retention, and the SoulSync logo replacing the old text tag.
+The Now Playing modal is now a full Player Theater: animated backgrounds that follow the song, a 10-band EQ, an immersive full-screen mode (press F) and 8 new themes.
 
-Under the hood: EPs stop filing as singles, deluxe folders stop swallowing standard editions, downloaded songs with extensionless dispatch keys are finally recognized for import, the duplicate detector and AcoustID checks got smarter, Navidrome scans stop dropping new albums, and the corrupt-FLAC detector is practical on big libraries for the first time.
+New: Sample Studio. Your library is the sample pack. Chop tracks on a waveform editor with a BPM grid, pitch and time-stretch, add FX, and split real stems without installing torch.
 
-Plus the usual long tail of import correctness fixes and a cleared test baseline. Full notes on GitHub — enjoy! :tada:
+The Sync page is calmer: a roomier auto-sync board with glowing drop targets, hideable source tabs, clearer sync button names, and playlist server backups now default off. Scheduled "process all mirrored playlists" runs now use the owner's playlists instead of admin's.
+
+Under the hood: releases file under the section you saw them in (Deezer singles and EPs stay put), playlist tracks file under their album's credit, the download modal handles outside cancels properly, genre playlists and daily mixes work for Deezer users, smarter duplicate and AcoustID matching from @mandos21, and the Companion browser extension can now talk to the API.
+
+Full notes on GitHub. Enjoy! :tada:

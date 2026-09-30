@@ -1,49 +1,74 @@
-# soulsync 3.4.8: `dev` → `main`
+# soulsync 3.4.9: `dev` → `main`
 
-premier overhauls of the wishlist, dashboard and automations pages, library album views with sorting, chat p2p sharing and badges, and a long tail of filing, scan and import correctness fixes. scope: the 48 commits since the 3.4.7 release commit (`0a8a6911d`).
+big discover glow-up, a full player theater, sample studio from your own library, a calmer sync page, and a stack of filing and download fixes. scope: the 135 commits since the 3.4.8 release commit (`7ea9ad9c3`).
 
-## the wishlist, dashboard and automations overhauls
+## discover
 
-- the music wishlist got the premier treatment (#1336): a new after-hours record-store design with a glass hero, live stats, a failing-track triage banner with retry-all, per-artist and per-album grab, shift-click range selection, nebula sorting, and bulk calls chunked at the server's 200-id cap so grabbing a big artist no longer 400s. removing an artist now targets exact track ids instead of name-matching, so a shared "Greatest Hits" title can't nuke another artist's tracks.
-- the music dashboard was reskinned (#1355) with an editorial hero, composed rail headers with live counts and a feed switcher, larger album cards with timestamp chips, and a wider right column — zero behavior changes, all pinned test contracts kept.
-- the automations page was rebuilt around sidebar navigation (#1347): an overview dashboard with a health hero, upcoming-runs timeline and attention queue, smart collections, URL-backed navigation, and a proper empty state for fresh installs. a follow-up (#1354) fixed the 880–1150px responsive squeeze where the sidebar refused to collapse and clipped the hero.
+- the top of discover opens like a home page now: a greeting and a grid of what you go back to, then flow, on repeat, your daily mixes, a mood for the hour, repeat rewind and a blend.
+- fourteen pills that all just scrolled became one honest section nav. the hero reads like a billboard instead of a form, and the reason line bolds the artists it names.
+- new banners about you: your week in music (plays vs last week, a bar per day, streak, who was on repeat), plus rows that lead with you and say why. daily mixes come first and say who's in them.
+- music video backdrops: the hero and spotlight play the artist's official video, a bento spotlight and a 9:16 watch rail that plays itself, tap for sound, and a stage that only plays what fits the device (1 on a phone, up to 6 on a strong desktop).
+- concerts near you: a country setting under settings > concerts so the inbox stops showing shows in green bay, and the inbox triages like mail.
+- real mood mixes (chill, focus, energy, feel good, late night) built from your own albums, where the fake flow moods bar used to be.
+- fixes: the label explorer picks labels you actually play instead of the first 30 sqlite found, the genre browser shows art it had all along, album rails show the whole row, the page works on a phone, and broken hero faces fall back to an initial.
+- daily mixes were ranking "genres" that were really artist names, so a mix asked the pool for a genre called "Louis Armstrong" and came back empty. and deezer tracks never got genres at all (deezer artists have none, only albums do), so every genre playlist was empty for deezer users. both fixed.
 
-## library views, stats and the tools studio
+## player theater
 
-- the library page grew an albums grid (#1307, sarab97): flip between artists and albums, with search, A–Z and metadata-source filters living in the URL. a follow-up pass (#1338) added sorting (recently added, year), a denser album grid, hover-prefetch that covers the ~3s cold load, and fixed the wrong "loading artists" copy; clicking an album now deep-links into the artist page instead of landing on the plain view (#1337).
-- the stats dashboard was overhauled with a Your Year keepsake studio, and the tools page became a Simple Studio vs Advanced workstation with a smart-action triage center, 1-click safe bulk fixes and a live mission-control HUD. sarab97's hidden-file handling standardizes library walking so quarantine, staging and AppleDouble junk are filtered consistently (#1285).
-- the settings page could fail to load entirely when a referenced checkbox didn't exist in the markup; the missing verify-flac-decode checkbox was added and a drift-guard test now fails CI if JS and HTML disagree again (#1339).
+- the small now playing modal is a full player theater: animated backgrounds, a 10-band EQ, and proper playback tools, on the same playback engine (#1388).
+- immersive mode takes over the whole modal (click the art, the button, or F), plus 8 new themes and visual options for quality, energy, palettes, dim, auto-cycle and reduce motion (#1389, #1390).
+- backgrounds actually follow the song now: a dedicated analyser with real bass/vocal/cymbal bands and spectral-flux beat detection, plus a visual pass on kaleido, battery and bloom (#1392). also fixed the visualizer tap doubling the signal, which made everything ~6 dB louder while it was on.
 
-## chat
+## sample studio
 
-- wanted requests can now be fulfilled peer-to-peer (#1333): a Share Now action lets someone who owns the release broadcast their files over the room protocol, and the requester enqueues the download in one click.
-- user flair badges arrived (#1344) with hardened anti-impersonation on both sides, per-room history retention (default 30 days), and notification read-markers that persist; a follow-up added the same obfuscation-proof profanity filter to badges (#1345). the soulsync tag next to soulsync users is now the logo instead of text (#1369).
+- new: your library is the sample pack. browse tracks, chop on a waveform editor with a bpm grid and onset detection, pitch and time-stretch, and save to a sample stash (#1374).
+- a guided ux pass with suggested chops and ~14x faster analysis, then fx (normalize, reverse, fades, reverb, beat-synced delay) where the preview and the saved chop render the same (#1379, #1383).
+- the page was calling a backend that didn't read half of it, so fx came out dry, trim 404'd and the key was never computed. built out for real.
+- real stems without torch: the same htdemucs weights run on onnxruntime (~20 MB instead of a ~2 GB torch install), so everyone gets stems. the rough splits sounded bad and are gone.
+- path fixes so it finds files the same way playback does, container paths included, plus duration units, stuck analysis and slow search (#1376, #1378).
 
-## discovery and search
+## sync page
 
-- the discovery/search wrap-up (#1334) closed the remaining competitive gaps: named interactive/automatic search modes, provenance on every download decision, a policy facet in the inspector, cross-source dedupe in best-quality mode, bulk queue ops, retry profiles, a failed-download blocklist, per-profile discover layouts, recommendation explanations and broader recipes. the artist-news inbox is provider-hook scaffolding only — it does nothing yet.
-- the discover endpoints could pin the CPU for minutes on large pools; exclude-owned checks are now index-backed (#1350, #1356).
+- the auto-sync board got its room back (#1401): counts are chips, the idle monitor is one line, empty intervals are small drop chips, and drop targets glow sky blue while you drag. the dashboard now opens the same manager as the playlists page.
+- source tabs you don't use can be hidden (#1402).
+- a mirrored card always opens the playlist, so delete mirror and edit source are reachable again (#1403, #1405).
+- the three "sync" buttons that did three different things have three names now, and syncs stop announcing every playlist as youtube or spotify (#1404).
+- playlist server backups default off. replace sync was making a "<name> Backup" on navidrome/plex/jellyfin every time, on by default, and the setting now says what it actually is (#1406).
+- listenbrainz rolling mirrors pick the newest week instead of whichever row was written last (#1407), and the listenbrainz / last.fm discover button does something again.
+- the quality profile select stopped hanging on "Loading…", and personalized cards stop offering folder/quality settings they can't save.
+- scheduled "process all mirrored playlists" and refresh mirrored used admin's mirrors for every profile, so a non-admin's pipeline ran on nothing and said success. it uses the automation owner's mirrors now (#1411).
 
-## filing and import correctness
+## downloads and filing
 
-- EPs stop filing as singles two ways: the import no longer falls back to per-track counts when the album total is unknown (#1365), and the artist-detail download modal reconciles the real album count from the track fetch instead of the fabricated card count (#1367).
-- a standard edition no longer reuses a deluxe/anniversary folder when its track total is known and smaller than the existing roster; the shared edition-upgrade bonus used by download analysis was left alone (#1362). the file finder now matches extensionless `id||artist - title` dispatch keys against the on-disk stem, so downloaded songs like `PRYVT - ANGEL.flac` are recognized for import (#1366, #1368).
-- the duplicate detector strips ` - from ...` provenance tails before comparing, so "Rabbit Run" finally matches 'Rabbit Run - From "8 Mile" Soundtrack' (#1361). AcoustID verification no longer false-fails bracket-only titles like "[untitled]" (#1353, #1360).
-- file organization grew an auto-disambiguation toggle: off means the template is authoritative and the importer stops injecting the MusicBrainz release disambiguation into folder names (#1352, #1359). the $albumtype fix stops a bare "album" from Deezer/Spotify being trusted as an explicit type signal, and Deezer's raw "compile" now maps to "compilation" (#1340); mandos21's $atypes brings beets-compatible release-type labels like [EP][Live] (#1302).
-- three profile drops fixed (#1351, #1358): post-processing stamps the batch profile, auto-wishlist stamps each track's owner, and Jellyfin's default scan refreshes every music library.
-- the "already in library" check no longer flags different songs as owned — "Solve" vs "Solace", "Snowball" vs "Snowblind" — and the player can't play the wrong file through a bad match anymore (#1292, #1363). Specialmed's staging folder stops being deleted by repair cleanups, orphan "move to staging" is no longer a dead end, and the AcoustID mismatch modal surfaces the per-track fix button (#1364).
+- a release from the artist page or search files under the section it showed in. deezer's 3-track album showed under Albums and filed as a Single. paths and reorganize now respect the type the source gave, so deezer singles and EPs stay put (thanks SeadogsBooty on discord).
+- download discography only counts a single as owned when that single is, instead of when its song is on some album.
+- a playlist track files under its album's credit, not its singer, so Let It Go lands in Frozen instead of Idina Menzel (#1385). settings now shows the compilation path template that soundtracks were using all along (#1385).
+- the download modal: cancelling from outside it or a batch the server dropped ends it properly, and reopening an album after its run starts fresh (#1384, #1386). search results pick up their in-library badge when a download finishes (#1386).
+- mix, dub and edit only mean remix inside a version qualifier, so 311's "Mix It Up" and "Rub a Dub" stop getting dropped (#1381).
+- search tries other itunes stores when the US one doesn't have it, deezer stops skipping songs, and covers sit above the artist (#1398).
+- the downloads review tab is readable now: a segmented control with counts, and the attempt count sits by the track name.
 
-## scans and library health
+## matching (@mandos21)
 
-- Navidrome scans stop lying: the incremental scan's stale album index is reset so new albums aren't filtered out, deep scans skip stale-row removal while Navidrome itself is rescanning, and Deezer playlist imports use the album's own track count (#1346). the backend review extended the mid-rescan deletion fence to every server type and made failing probes fail closed for large stale sets (#1348).
-- the corrupt FLAC detector is now practical on big libraries: remembered passes by path/size/mtime, parallel decoding, quarantine-first repair, and a run-maintenance-job automation action (#1332, curiousmoose24). a suspect-album-tag detector flags "Now 45"-style mistags with a one-click re-identify repair flow (#1335).
+- acoustid keeps whole titles inside brackets, and wishlist cleanup confirms track and release identity before clearing, so distinct subtitles and punctuation titles don't collapse (#1372).
+- the duplicate detector tells numbered tracks and roman numeral parts apart and ignores edition years (#1382).
 
-## audiobooks on soulseek
+## companion extension and api
 
-- Soulseek audiobook searches find single-file `.m4b` books instead of dropping them, the audiobook database lives in the persisted volume, and wishlist persistence was fixed (#1330, curiousmoose24).
+- browser extensions can call the api: cors preflights are answered, api keys pass the login/pin gates for image requests, and a valid key gets the admin profile context instead of 401ing (#1375, #1377, #1380).
+- the image proxy normalizes plex/jellyfin/navidrome artwork urls before fetching instead of 502ing (#1373).
+- spotify playlists fall back to the public source on the premium 403, link-pasted mirrors resolve by raw id, and cover art shows up on the no-auth paths and never gets wiped on re-mirror (#1394, #1395, #1396).
+- a complete per-endpoint api reference for all 87 /api/v1 endpoints, and the readme points at the companion extension (#1397, #1400).
+
+## the rest
+
+- library a-z sort ignores leading punctuation, so "Weird Al" files under W and *NSYNC under N (#1408).
+- tools: findings show up when a maintenance job finishes and a background run doesn't clear what you ticked (#1386), and the expired download cleaner link lands on the cleaner.
+- explorer: scroll scrolls and ctrl/pinch zooms, like google maps, with a lock to flip it back (#1409).
+- soulseek stops polling slskd every 6 seconds when nothing's listening (#1387).
+- a stray brace in mobile.css was throwing away the next block of mobile styles.
 
 ## validation
 
-- the dev test baseline was cleared: all 16 pre-existing failures reproduced on clean dev and fixed, so real regressions can't hide in the noise (#1357).
-- fixes in scope shipped with regression tests and green neighboring suites, per their PRs; the backend-review batch re-verified each finding on current code before fixing (#1348).
-- a full green full-suite run on the release head has not been verified.
+- fixes shipped with regression tests and green neighboring suites, per their commits and PRs.
+- a full green suite run on the release head has not been verified.
