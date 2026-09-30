@@ -217,7 +217,13 @@ describe('stems + stash requests', () => {
     });
     const bounds = await trimSilence(7, 0, 3.5);
     expect(bounds).toEqual({ track_id: 7, start_s: 0.12, end_s: 3.4 });
-    expect(calls[0].body).toMatchObject({ track_id: 7, start_s: 0, end_s: 3.5 });
+    expect(calls[0].body).toMatchObject({ track_id: 7, start_s: 0, end_s: 3.5, stem: null });
+  });
+
+  it('trimSilence trims against the stem being chopped', async () => {
+    routes['/api/sample/trim'] = ok({ success: true, data: { start_s: 1, end_s: 2 }, error: null });
+    await trimSilence(7, 0, 3.5, 'drums-rough');
+    expect(calls[0].body).toMatchObject({ stem: 'drums-rough' });
   });
 
   it('lookupStudioTrack resolves by exact track id', async () => {

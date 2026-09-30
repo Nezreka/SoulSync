@@ -97,9 +97,25 @@ export function SampleStudioPage() {
 
   const removeStashEntry = (entryId: number) => {
     setStashError(null);
-    void deleteStashEntry(entryId).then(refreshStash, (e: unknown) => {
-      setStashError(e instanceof Error ? e.message : 'Delete failed');
-    });
+    const entry = stashQuery.data?.find((e) => e.id === entryId);
+    void (async () => {
+      // deleting removes the audio file from the sample folder too, so ask first
+      const ok = window.showConfirmDialog
+        ? await window.showConfirmDialog({
+            title: 'Delete this chop?',
+            message: `“${entry?.name ?? 'This chop'}” and its audio file will be removed from your sample folder.`,
+            confirmText: 'Delete',
+            destructive: true,
+          })
+        : true;
+      if (!ok) return;
+      try {
+        await deleteStashEntry(entryId);
+        refreshStash();
+      } catch (e) {
+        setStashError(e instanceof Error ? e.message : 'Delete failed');
+      }
+    })();
   };
 
   /** Re-open a stash entry: find its source track, select it, and hand the

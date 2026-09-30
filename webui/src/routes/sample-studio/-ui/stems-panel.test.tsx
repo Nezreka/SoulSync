@@ -99,7 +99,7 @@ describe('StemsPanel', () => {
     for (const name of ['Drums', 'Vocals', 'Bass', 'Other']) {
       expect(await screen.findByRole('button', { name: `○ ${name}` })).toBeInTheDocument();
     }
-    expect(screen.getByText('▶ Play all')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Play all' })).toBeInTheDocument();
     expect(screen.getAllByTitle(/Solo /)).toHaveLength(4);
     expect(screen.getAllByTitle(/Mute /)).toHaveLength(4);
   });

@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import type { StudioFilters, StudioTrack } from '../-sample-studio.types';
 
 import { QUALITY_TIER_LABEL, qualityTier, tempoBucket } from '../-sample-studio.helpers';
+import { DEFAULT_FILTERS } from '../-sample-studio.types';
 import styles from './sample-studio-page.module.css';
 
 interface LibraryPanelProps {
@@ -18,7 +19,7 @@ interface LibraryPanelProps {
 }
 
 const QUALITY_OPTIONS = [
-  { key: 'all', label: 'All quality' },
+  { key: 'all', label: 'Quality' },
   { key: 'hires', label: 'Hi-Res 24-bit' },
   { key: 'lossless', label: 'Lossless 16-bit+' },
   { key: 'high', label: '320 kbps+' },
@@ -26,19 +27,48 @@ const QUALITY_OPTIONS = [
 ] as const;
 
 const TEMPO_OPTIONS = [
-  { key: 'all', label: 'Any tempo' },
-  { key: 'slow', label: '< 100' },
-  { key: 'mid', label: '100–120' },
-  { key: 'fast', label: '120–140' },
-  { key: 'fastest', label: '140+' },
+  { key: 'all', label: 'Tempo' },
+  { key: 'slow', label: 'Under 100 BPM' },
+  { key: 'mid', label: '100–120 BPM' },
+  { key: 'fast', label: '120–140 BPM' },
+  { key: 'fastest', label: '140+ BPM' },
 ] as const;
 
 const LENGTH_OPTIONS = [
-  { key: 'all', label: 'Any length' },
-  { key: 'short', label: '< 2 min' },
+  { key: 'all', label: 'Length' },
+  { key: 'short', label: 'Under 2 min' },
   { key: 'medium', label: '2–5 min' },
   { key: 'long', label: '5+ min' },
 ] as const;
+
+/** One compact filter: a native select styled as a pill, amber once set. */
+function FilterSelect<K extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: K;
+  options: readonly { key: K; label: string }[];
+  onChange: (key: K) => void;
+}) {
+  return (
+    <select
+      className={styles.filterSelect}
+      aria-label={label}
+      data-active={value !== 'all'}
+      value={value}
+      onChange={(e) => onChange(e.target.value as K)}
+    >
+      {options.map((o) => (
+        <option key={o.key} value={o.key}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 function lengthBucket(duration: number | null | undefined): 'short' | 'medium' | 'long' | null {
   if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0) return null;
@@ -58,6 +88,8 @@ export function LibraryPanel({
   selectedId,
   onSelect,
 }: LibraryPanelProps) {
+  const filtersActive =
+    filters.quality !== 'all' || filters.tempo !== 'all' || filters.length !== 'all';
   const filtered = useMemo(() => {
     return tracks.filter((t) => {
       if (filters.quality !== 'all') {
@@ -91,44 +123,34 @@ export function LibraryPanel({
           onChange={(e) => onQueryChange(e.target.value)}
           aria-label="Search library"
         />
-        <div className={styles.filterRow} role="group" aria-label="Quality filter">
-          {QUALITY_OPTIONS.map((o) => (
+        <div className={styles.filterSelects} role="group" aria-label="Filters">
+          <FilterSelect
+            label="Quality"
+            value={filters.quality}
+            options={QUALITY_OPTIONS}
+            onChange={(quality) => onFiltersChange({ ...filters, quality })}
+          />
+          <FilterSelect
+            label="Tempo"
+            value={filters.tempo}
+            options={TEMPO_OPTIONS}
+            onChange={(tempo) => onFiltersChange({ ...filters, tempo })}
+          />
+          <FilterSelect
+            label="Length"
+            value={filters.length}
+            options={LENGTH_OPTIONS}
+            onChange={(length) => onFiltersChange({ ...filters, length })}
+          />
+          {filtersActive && (
             <button
-              key={o.key}
               type="button"
-              className={styles.filterPill}
-              data-active={filters.quality === o.key}
-              onClick={() => onFiltersChange({ ...filters, quality: o.key })}
+              className={styles.filterReset}
+              onClick={() => onFiltersChange(DEFAULT_FILTERS)}
             >
-              {o.label}
+              Reset
             </button>
-          ))}
-        </div>
-        <div className={styles.filterRow} role="group" aria-label="Tempo filter">
-          {TEMPO_OPTIONS.map((o) => (
-            <button
-              key={o.key}
-              type="button"
-              className={styles.filterPill}
-              data-active={filters.tempo === o.key}
-              onClick={() => onFiltersChange({ ...filters, tempo: o.key })}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-        <div className={styles.filterRow} role="group" aria-label="Length filter">
-          {LENGTH_OPTIONS.map((o) => (
-            <button
-              key={o.key}
-              type="button"
-              className={styles.filterPill}
-              data-active={filters.length === o.key}
-              onClick={() => onFiltersChange({ ...filters, length: o.key })}
-            >
-              {o.label}
-            </button>
-          ))}
+          )}
         </div>
       </div>
       <div className={styles.scroll}>

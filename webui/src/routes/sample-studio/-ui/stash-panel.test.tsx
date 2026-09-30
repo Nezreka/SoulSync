@@ -100,8 +100,13 @@ describe('StashPanel', () => {
   });
 
   it('links the ZIP export', () => {
-    renderPanel({ entries: [] });
+    renderPanel({ entries: [entry] });
     const link = screen.getByRole('link', { name: /Export ZIP/ });
     expect(link).toHaveAttribute('href', '/api/sample/stash/export');
+  });
+
+  it('hides the export while the stash is empty (the server refuses an empty zip)', () => {
+    renderPanel({ entries: [] });
+    expect(screen.queryByRole('link', { name: /Export ZIP/ })).not.toBeInTheDocument();
   });
 });

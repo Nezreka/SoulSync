@@ -172,6 +172,66 @@ describe('sample-studio route', () => {
     await waitFor(() => expect(searched).toHaveLength(1), { timeout: 5000 });
     expect(searched[0]).toContain('q=roc');
   });
+
+  it('asks before deleting a chop, and only deletes on yes', async () => {
+    const stashEntry = {
+      id: 11,
+      name: 'killer break',
+      tags: [],
+      track_id: 7,
+      track_title: 'Test Track',
+      artist_name: 'Test Artist',
+      start_s: 1,
+      end_s: 2,
+      pitch_st: 0,
+      target_bpm: null,
+      format: 'wav16',
+      file_path: '/samples/k.wav',
+      created_at: 0,
+      folder: null,
+    };
+    const deletes: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        const method = input instanceof Request ? input.method : (init?.method ?? 'GET');
+        if (method === 'DELETE') {
+          deletes.push(url);
+          return new Response(JSON.stringify({ success: true, data: { deleted: 11 } }));
+        }
+        if (url.includes('/api/sample/stash')) {
+          return new Response(
+            JSON.stringify({ success: true, data: { entries: [stashEntry] }, error: null }),
+          );
+        }
+        return stubbedResponse(url, analysis, 200);
+      }),
+    );
+    const confirm = vi.fn(async () => false);
+    window.showConfirmDialog = confirm;
+    try {
+      renderRoute();
+      const del = await screen.findByRole('button', { name: 'Delete killer break' });
+      fireEvent.click(del);
+      await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
+      expect(confirm.mock.calls[0]).toEqual([
+        expect.objectContaining({
+          destructive: true,
+          message: expect.stringContaining('killer break'),
+        }),
+      ]);
+      await new Promise((r) => setTimeout(r, 20));
+      expect(deletes).toEqual([]);
+
+      confirm.mockImplementation(async () => true);
+      fireEvent.click(del);
+      await waitFor(() => expect(deletes).toHaveLength(1));
+      expect(deletes[0]).toContain('/api/sample/stash/11');
+    } finally {
+      delete window.showConfirmDialog;
+    }
+  });
 });
 
 function stubbedResponse(url: string, analysisBody: unknown, analysisStatus = 200) {

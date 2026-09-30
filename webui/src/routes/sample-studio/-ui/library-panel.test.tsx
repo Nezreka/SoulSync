@@ -95,7 +95,7 @@ describe('LibraryPanel', () => {
 
   it('filters by quality', () => {
     const { props, unmount } = renderPanel();
-    fireEvent.click(screen.getByRole('button', { name: 'Hi-Res 24-bit' }));
+    fireEvent.change(screen.getByLabelText('Quality'), { target: { value: 'hires' } });
     expect(props.onFiltersChange).toHaveBeenCalledWith({ ...DEFAULT_FILTERS, quality: 'hires' });
 
     const hires: StudioFilters = { ...DEFAULT_FILTERS, quality: 'hires' };

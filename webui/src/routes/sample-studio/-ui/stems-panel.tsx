@@ -9,6 +9,7 @@ import {
   type StemName,
   type StemsInfo,
 } from '../-sample-studio.types';
+import { PlayIcon, StopIcon } from './icons';
 import styles from './stems-panel.module.css';
 
 interface StemsPanelProps {
@@ -42,13 +43,15 @@ function separationStatusMessage(info: StemsInfo | undefined, isFetching: boolea
 }
 
 /**
- * Shown instead of any separation button when the server can't run Demucs
- * (torch/torchaudio/demucs not installed). A calm setup note — never a
- * button that would fail.
+ * Shown instead of the Demucs button when the server can't run it
+ * (torch/torchaudio/demucs not installed). Folded away by default: the rough
+ * splits work right now, so they lead and the install steps wait behind a
+ * disclosure instead of filling the panel with code.
  */
 function StemsSetupNote() {
   return (
-    <div className={styles.setupNote}>
+    <details className={styles.setupNote}>
+      <summary className={styles.setupSummary}>Want studio-quality stems? Set up Demucs</summary>
       <p className={styles.setupTitle}>Stem separation needs a one-time setup</p>
       <p className={styles.hint}>
         It stays switched off until the extra software is installed on your server. On a normal
@@ -63,7 +66,7 @@ function StemsSetupNote() {
         FROM boulderbadgedad/soulsync:latest{'\n'}RUN pip install torch torchaudio --index-url
         https://download.pytorch.org/whl/cpu && pip install demucs
       </pre>
-    </div>
+    </details>
   );
 }
 
@@ -235,77 +238,28 @@ export default function StemsPanel({ trackId, activeStem, onSelectStem }: StemsP
       </header>
 
       <div className={styles.body}>
-        {!done && !busy && !failed && stemsAvailable && (
-          <>
-            <p className={styles.hint}>
-              Split this track into drums, vocals, bass, and everything else, then chop from any one
-              of them. Runs on your server with Demucs — about a minute for a full song, and it's
-              saved forever once done.
-            </p>
-            <button
-              type="button"
-              className={styles.primary}
-              onClick={() => void startSeparation('demucs')}
-            >
-              Separate stems
-            </button>
-          </>
+        {!done && !busy && (
+          <p className={styles.hint}>
+            {stemsAvailable
+              ? "Split this track into drums, vocals, bass, and everything else, then chop from any one of them. Runs on your server with Demucs, about a minute for a full song, and it's saved once done."
+              : 'Split this track, then chop from just one part of it.'}
+          </p>
         )}
 
-        {!done && !busy && !failed && !stemsAvailable && <StemsSetupNote />}
-
-        <div className={styles.roughSection}>
-          <p className={styles.roughTitle}>Rough splits (built-in)</p>
-          <p className={styles.hint}>
-            No setup, no downloads — a quick approximate split for finding drum breaks. Rough on
-            purpose: it guesses, it doesn&apos;t isolate. Use Demucs above for the real thing when
-            it&apos;s installed.
-          </p>
-          <div className={styles.roughActions}>
-            <button
-              type="button"
-              className={styles.primary}
-              disabled={busy || trackId === null}
-              onClick={() => void startSeparation('rough-drums')}
-              title="Split into drums-ish and everything-else-ish (built-in DSP)"
-            >
-              Drums / Music (rough)
-            </button>
-            <button
-              type="button"
-              className={styles.primary}
-              disabled={busy || trackId === null}
-              onClick={() => void startSeparation('rough-center')}
-              title="Keep just the center of the stereo image (built-in DSP)"
-            >
-              Center (rough)
-            </button>
-          </div>
-          {roughBusy && (
-            <div className={styles.progress} role="status" aria-live="polite">
-              <div className={styles.spinner} aria-hidden="true" />
-              <span>{message} — quick, stay here.</span>
-            </div>
-          )}
-          {roughFailed && (
-            <div className={styles.error} role="alert">
-              <p className={styles.errorTitle}>Rough split failed</p>
-              <p className={styles.errorDetail}>{message}</p>
-              <button
-                type="button"
-                className={styles.primary}
-                onClick={() => void startSeparation(method ?? 'rough-drums')}
-              >
-                Try again
-              </button>
-            </div>
-          )}
-        </div>
+        {!done && !busy && !failed && stemsAvailable && (
+          <button
+            type="button"
+            className={styles.primary}
+            onClick={() => void startSeparation('demucs')}
+          >
+            Separate stems
+          </button>
+        )}
 
         {busy && !roughBusy && (
           <div className={styles.progress} role="status" aria-live="polite">
             <div className={styles.spinner} aria-hidden="true" />
-            <span>{message} — this takes a while, feel free to keep editing.</span>
+            <span>{message}. This takes a while, keep editing meanwhile.</span>
           </div>
         )}
 
@@ -323,16 +277,6 @@ export default function StemsPanel({ trackId, activeStem, onSelectStem }: StemsP
           </div>
         )}
 
-        {failed && !roughFailed && (method === null || method === 'demucs') && !stemsAvailable && (
-          <StemsSetupNote />
-        )}
-
-        {requestError && (
-          <div className={styles.error} role="alert">
-            <p className={styles.errorDetail}>{requestError}</p>
-          </div>
-        )}
-
         {done && (
           <>
             <div className={styles.transport}>
@@ -343,7 +287,8 @@ export default function StemsPanel({ trackId, activeStem, onSelectStem }: StemsP
                   void mixer.playAll().catch(() => setRequestError('Could not play stems'))
                 }
               >
-                {mixer.playing ? '⏹ Stop' : '▶ Play all'}
+                {mixer.playing ? <StopIcon size={12} /> : <PlayIcon size={12} />}
+                {mixer.playing ? 'Stop' : 'Play all'}
               </button>
               <span className={styles.hint}>
                 {isRoughMethod(method)
@@ -413,6 +358,62 @@ export default function StemsPanel({ trackId, activeStem, onSelectStem }: StemsP
             )}
           </>
         )}
+
+        <div className={styles.roughSection}>
+          <div className={styles.roughHead}>
+            <p className={styles.roughTitle}>Rough splits (built-in)</p>
+            <p className={styles.hint}>
+              No setup, done in seconds. They guess, they don&apos;t isolate.
+            </p>
+          </div>
+          <div className={styles.roughActions}>
+            <button
+              type="button"
+              className={styles.secondary}
+              disabled={busy || trackId === null}
+              onClick={() => void startSeparation('rough-drums')}
+              title="Split into drums-ish and everything-else-ish (built-in DSP)"
+            >
+              Drums / Music (rough)
+            </button>
+            <button
+              type="button"
+              className={styles.secondary}
+              disabled={busy || trackId === null}
+              onClick={() => void startSeparation('rough-center')}
+              title="Keep just the center of the stereo image (built-in DSP)"
+            >
+              Center (rough)
+            </button>
+          </div>
+          {roughBusy && (
+            <div className={styles.progress} role="status" aria-live="polite">
+              <div className={styles.spinner} aria-hidden="true" />
+              <span>{message}</span>
+            </div>
+          )}
+          {roughFailed && (
+            <div className={styles.error} role="alert">
+              <p className={styles.errorTitle}>Rough split failed</p>
+              <p className={styles.errorDetail}>{message}</p>
+              <button
+                type="button"
+                className={styles.secondary}
+                onClick={() => void startSeparation(method ?? 'rough-drums')}
+              >
+                Try again
+              </button>
+            </div>
+          )}
+        </div>
+
+        {requestError && (
+          <div className={styles.error} role="alert">
+            <p className={styles.errorDetail}>{requestError}</p>
+          </div>
+        )}
+
+        {!stemsAvailable && !busy && <StemsSetupNote />}
       </div>
     </section>
   );

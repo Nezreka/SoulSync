@@ -364,16 +364,18 @@ export interface TrimResult {
 /**
  * Tighten a selection to its sounding region (server-side silence trim).
  * Returns the adjusted bounds — the caller moves the in/out handles to them.
- * An all-silence window comes back unchanged.
+ * An all-silence window comes back unchanged. `stem` trims against the stem
+ * you're chopping from, not the full mix.
  */
 export async function trimSilence(
   trackId: number,
   start: number,
   end: number,
+  stem: StemName | null = null,
 ): Promise<TrimResult> {
   const payload = await readJson<Envelope<TrimResult>>(
     apiClient.post('sample/trim', {
-      json: { track_id: trackId, start_s: start, end_s: end },
+      json: { track_id: trackId, start_s: start, end_s: end, stem },
     }),
   );
   return payload.data;

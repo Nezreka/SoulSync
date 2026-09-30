@@ -381,3 +381,47 @@ export function describeRenderParams(fx: RenderFx): string[] {
   }
   return bits;
 }
+
+/** What the waveform grid can show at the current zoom without turning into a barcode. */
+export interface GridDensity {
+  /** Draw every beat, not just bars. */
+  beats: boolean;
+  /** Draw a bar line every N bars (1, 2, 4, 8, 16, …). */
+  barEvery: number;
+  /** Room to print bar numbers above the lines. */
+  labels: boolean;
+}
+
+/** Minimum pixels between two grid lines before they read as noise. */
+const MIN_BEAT_PX = 14;
+const MIN_BAR_PX = 28;
+const MIN_LABEL_PX = 44;
+
+/**
+ * Grid density for a zoom level. A full 3-minute track at ~80 BPM puts ~57
+ * bar lines and ~230 beat lines across the canvas, which drew as solid
+ * stripes. Beats only show once they're far enough apart to read, and bars
+ * thin out in powers of two (4, 8, 16 …) so the grid always stays calm.
+ */
+export function gridDensity(pxPerBeat: number, beatsPerBar = 4): GridDensity {
+  if (!Number.isFinite(pxPerBeat) || pxPerBeat <= 0) {
+    return { beats: false, barEvery: 0, labels: false };
+  }
+  const pxPerBar = pxPerBeat * beatsPerBar;
+  let barEvery = 1;
+  while (pxPerBar * barEvery < MIN_BAR_PX && barEvery < 1024) barEvery *= 2;
+  return {
+    beats: pxPerBeat >= MIN_BEAT_PX,
+    barEvery,
+    labels: pxPerBar * barEvery >= MIN_LABEL_PX,
+  };
+}
+
+/**
+ * Transient ticks only help when you can tell them apart. Show them once
+ * they average at least `minGapPx` apart in the visible window.
+ */
+export function showOnsetTicks(visibleOnsets: number, widthPx: number, minGapPx = 6): boolean {
+  if (visibleOnsets <= 0 || widthPx <= 0) return false;
+  return widthPx / visibleOnsets >= minGapPx;
+}

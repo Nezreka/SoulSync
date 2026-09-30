@@ -3,6 +3,7 @@ import type { StashEntry } from '../-sample-studio.types';
 import { stashExportUrl } from '../-sample-studio.api';
 import { describeRenderParams, formatTime, fxFromStashEntry } from '../-sample-studio.helpers';
 import { STEM_LABEL, STASH_FORMAT_LABEL } from '../-sample-studio.types';
+import { DownloadIcon, PlayIcon, ReopenIcon, TrashIcon } from './icons';
 import styles from './sample-studio-page.module.css';
 
 interface StashPanelProps {
@@ -39,9 +40,12 @@ export function StashPanel({
         <span>
           Sample Stash <span className={styles.resultCount}>{entries?.length ?? 0}</span>
         </span>
-        <a className={styles.transportBtn} href={stashExportUrl()} download>
-          ⬇ Export ZIP
-        </a>
+        {entries && entries.length > 0 && (
+          <a className={styles.transportBtn} href={stashExportUrl()} download>
+            <DownloadIcon size={14} />
+            Export ZIP
+          </a>
+        )}
       </div>
 
       <div className={styles.scroll}>
@@ -71,7 +75,7 @@ export function StashPanel({
                   title={`Play ${entry.name}`}
                   aria-label={`Play ${entry.name}`}
                 >
-                  ▶
+                  <PlayIcon size={12} />
                 </button>
                 <div className={styles.stashMeta}>
                   <div className={styles.stashName}>{entry.name}</div>
@@ -96,19 +100,22 @@ export function StashPanel({
                 <div className={styles.stashActions}>
                   <button
                     type="button"
-                    className={styles.transportBtn}
+                    className={styles.stashIconBtn}
                     onClick={() => onRestore(entry)}
                     title={`Re-open “${entry.name}” in the editor with its recipe (region, pitch, tempo, FX)`}
+                    aria-label={`Re-open ${entry.name}`}
                   >
-                    ↺ Re-open
+                    <ReopenIcon size={14} />
                   </button>
                   <button
                     type="button"
-                    className={styles.transportBtn}
+                    className={styles.stashIconBtn}
+                    data-tone="danger"
                     onClick={() => onDelete(entry.id)}
                     title={`Delete ${entry.name}`}
+                    aria-label={`Delete ${entry.name}`}
                   >
-                    🗑
+                    <TrashIcon size={14} />
                   </button>
                 </div>
               </div>

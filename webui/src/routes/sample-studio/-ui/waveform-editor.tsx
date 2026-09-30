@@ -26,11 +26,25 @@ import {
   formatKeyBpm,
   formatTime,
   fxFromStashEntry,
+  gridDensity,
+  showOnsetTicks,
   visiblePeakSlice,
 } from '../-sample-studio.helpers';
 import { DEFAULT_FX } from '../-sample-studio.types';
 import { ChopTray } from './chop-tray';
 import { FxPanel } from './fx-panel';
+import {
+  ChevronIcon,
+  LoopIcon,
+  MetronomeIcon,
+  PauseIcon,
+  PlayIcon,
+  SaveIcon,
+  ScissorsIcon,
+  SlidersIcon,
+  ZoomInIcon,
+  ZoomOutIcon,
+} from './icons';
 import { PitchTempoPanel } from './pitch-tempo-panel';
 import styles from './sample-studio-page.module.css';
 import { SaveDialog } from './save-dialog';
@@ -397,7 +411,7 @@ export function WaveformEditor({
     setPreviewErr(null);
     void (async () => {
       try {
-        const bounds = await trimSilence(track.id, start, end);
+        const bounds = await trimSilence(track.id, start, end, stemRef.current);
         setInPoint(bounds.start_s);
         setOutPoint(Math.max(bounds.end_s, bounds.start_s + 0.05));
         // The in/out effect retires the preview and slice.
@@ -473,36 +487,40 @@ export function WaveformEditor({
       ctx.fillRect(x, y1, 1, Math.max(1, y2 - y1));
     }
 
-    // Beat grid.
+    // Beat grid. Density follows zoom (gridDensity) so a whole track reads
+    // as a calm bar grid, not stripes; beats appear as you zoom in.
     const interval = beatInterval(bpm);
     if (interval) {
+      const grid = gridDensity(interval * pxPerSec);
       const firstBeat = Math.ceil(v.start / interval);
       const lastBeat = Math.floor(v.end / interval);
+      const barStep = 4 * grid.barEvery;
       ctx.textBaseline = 'top';
+      ctx.font = '10px system-ui';
       for (let b = firstBeat; b <= lastBeat; b++) {
-        const x = t2x(b * interval);
-        const isBar = b % 4 === 0;
-        ctx.strokeStyle = isBar ? 'rgba(245,185,66,0.5)' : 'rgba(255,255,255,0.14)';
-        ctx.lineWidth = isBar ? 1.5 : 1;
+        const isBar = b % barStep === 0;
+        if (!isBar && !(grid.beats && b % 4 !== 0)) continue;
+        const x = Math.round(t2x(b * interval)) + 0.5;
+        ctx.strokeStyle = isBar ? 'rgba(245,185,66,0.22)' : 'rgba(255,255,255,0.06)';
+        ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(x, 0);
+        ctx.moveTo(x, isBar && grid.labels ? 16 : 0);
         ctx.lineTo(x, h);
         ctx.stroke();
-        // Numbered bars once zoomed in enough to read them.
-        if (isBar && pxPerSec > 28) {
-          ctx.fillStyle = '#f5b942';
-          ctx.font = '11px system-ui';
-          ctx.fillText(String(b / 4 + 1), x + 4, 4);
+        if (isBar && grid.labels) {
+          ctx.fillStyle = 'rgba(245,185,66,0.7)';
+          ctx.fillText(String(b / 4 + 1), x + 3, 3);
         }
       }
     }
 
-    // Onset markers (transient ticks along the top).
+    // Transient ticks along the bottom edge, only once they're far enough
+    // apart to tell one from the next.
     if (analysis && analysis.onsets.length > 0) {
-      ctx.fillStyle = 'rgba(245,185,66,0.85)';
-      for (const t of analysis.onsets) {
-        if (t < v.start || t > v.end) continue;
-        ctx.fillRect(t2x(t) - 1, 0, 2, 8);
+      const visible = analysis.onsets.filter((t) => t >= v.start && t <= v.end);
+      if (showOnsetTicks(visible.length, w)) {
+        ctx.fillStyle = 'rgba(245,185,66,0.55)';
+        for (const t of visible) ctx.fillRect(Math.round(t2x(t)), h - 5, 1, 5);
       }
     }
 
@@ -815,7 +833,8 @@ export function WaveformEditor({
             onClick={togglePlay}
             disabled={!track.file_path}
           >
-            {playing ? '⏸ Pause' : '▶ Play'}
+            {playing ? <PauseIcon size={14} /> : <PlayIcon size={14} />}
+            {playing ? 'Pause' : 'Play'}
           </button>
           <button
             type="button"
@@ -824,7 +843,8 @@ export function WaveformEditor({
             onClick={() => setLoopOn((v) => !v)}
             title="Loop the in/out region"
           >
-            🔁 Loop
+            <LoopIcon size={14} />
+            Loop
           </button>
           <span className={styles.timeReadout}>
             {formatTime(playhead)} / {formatTime(duration)}
@@ -836,7 +856,9 @@ export function WaveformEditor({
             aria-expanded={toolsOpen}
             title="Edit tools: click track, bar loops, zoom"
           >
-            🛠 Tools {toolsOpen ? '▾' : '▸'}
+            <SlidersIcon size={14} />
+            Tools
+            <ChevronIcon open={toolsOpen} />
           </button>
           <button
             type="button"
@@ -846,7 +868,8 @@ export function WaveformEditor({
             disabled={!track.file_path || !(outPoint > inPoint)}
             title="Save the in/out region as a stash chop"
           >
-            💾 Save chop
+            <SaveIcon size={14} />
+            Save chop
           </button>
         </div>
 
@@ -860,7 +883,8 @@ export function WaveformEditor({
               disabled={!bpm || mode !== 'original' || slicePreview != null}
               title="Metronome click (browser only, original audio)"
             >
-              🥁 Click
+              <MetronomeIcon size={14} />
+              Click
             </button>
             <span className={styles.loopPresets}>
               <span className={styles.presetLabel}>Loop:</span>
@@ -882,16 +906,18 @@ export function WaveformEditor({
               className={styles.transportBtn}
               onClick={() => zoom(0.5)}
               title="Zoom in (+)"
+              aria-label="Zoom in"
             >
-              ＋
+              <ZoomInIcon size={14} />
             </button>
             <button
               type="button"
               className={styles.transportBtn}
               onClick={() => zoom(2)}
               title="Zoom out (−)"
+              aria-label="Zoom out"
             >
-              －
+              <ZoomOutIcon size={14} />
             </button>
             <button
               type="button"
@@ -900,7 +926,8 @@ export function WaveformEditor({
               disabled={trimming || !(outPoint > inPoint) || !track.file_path}
               title="Tighten the in/out points to the sounding audio (cuts leading/trailing silence)"
             >
-              {trimming ? 'Trimming…' : '✂ Trim silence'}
+              <ScissorsIcon size={14} />
+              {trimming ? 'Trimming…' : 'Trim silence'}
             </button>
             <button
               type="button"
@@ -999,7 +1026,9 @@ export function WaveformEditor({
           >
             <span>Pitch &amp; tempo</span>
             {fxActive && <span className={styles.fxBadge}>active</span>}
-            <span className={styles.chev}>{fxOpen ? '▾' : '▸'}</span>
+            <span className={styles.chev}>
+              <ChevronIcon open={fxOpen} />
+            </span>
           </button>
           {fxOpen && (
             <PitchTempoPanel
@@ -1025,7 +1054,9 @@ export function WaveformEditor({
           >
             <span>FX</span>
             {renderFxActive && <span className={styles.fxBadge}>active</span>}
-            <span className={styles.chev}>{fxPanelOpen ? '▾' : '▸'}</span>
+            <span className={styles.chev}>
+              <ChevronIcon open={fxPanelOpen} />
+            </span>
           </button>
           {fxPanelOpen && (
             <FxPanel

@@ -17,6 +17,7 @@ import {
 } from '../-sample-studio.api';
 import { describeRenderParams, formatTime, suggestChopName } from '../-sample-studio.helpers';
 import { STEM_LABEL, STASH_FORMAT_LABEL } from '../-sample-studio.types';
+import { SaveIcon, SpeakerIcon } from './icons';
 import styles from './sample-studio-page.module.css';
 
 interface SaveDialogProps {
@@ -263,7 +264,8 @@ export function SaveDialog({
             onClick={audition}
             disabled={auditioning}
           >
-            {auditioning ? 'Rendering…' : '🔊 Audition'}
+            <SpeakerIcon size={14} />
+            {auditioning ? 'Rendering…' : 'Audition'}
           </button>
           <span style={{ flex: 1 }} />
           <button type="button" className={styles.transportBtn} onClick={onClose}>
@@ -276,7 +278,8 @@ export function SaveDialog({
             onClick={save}
             disabled={saving || !name.trim()}
           >
-            {saving ? 'Saving…' : '💾 Save to stash'}
+            <SaveIcon size={14} />
+            {saving ? 'Saving…' : 'Save to stash'}
           </button>
         </div>
 

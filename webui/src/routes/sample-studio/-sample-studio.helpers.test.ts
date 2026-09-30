@@ -11,7 +11,9 @@ import {
   formatKeyBpm,
   formatTime,
   fxFromStashEntry,
+  gridDensity,
   qualityTier,
+  showOnsetTicks,
   slicesFromOnsets,
   suggestChopName,
   suggestChops,
@@ -302,5 +304,37 @@ describe('fxFromStashEntry', () => {
         delay: { time: '1/3', feedback: 9, mix: 9 },
       } as never),
     ).toEqual(DEFAULT_FX);
+  });
+});
+
+describe('gridDensity', () => {
+  it('keeps a whole track calm: no beat lines, bars thinned to powers of two', () => {
+    // 3 min at 80.7 BPM across a ~1370px canvas: ~3.1 px per beat
+    const g = gridDensity(3.1);
+    expect(g.beats).toBe(false);
+    expect(g.barEvery).toBeGreaterThanOrEqual(2);
+    expect(g.barEvery & (g.barEvery - 1)).toBe(0);
+    expect(3.1 * 4 * g.barEvery).toBeGreaterThanOrEqual(28);
+  });
+
+  it('shows every bar, then beats and numbers, as you zoom in', () => {
+    expect(gridDensity(8)).toEqual({ beats: false, barEvery: 1, labels: false });
+    expect(gridDensity(14)).toEqual({ beats: true, barEvery: 1, labels: true });
+  });
+
+  it('is safe on nonsense input', () => {
+    expect(gridDensity(0)).toEqual({ beats: false, barEvery: 0, labels: false });
+    expect(gridDensity(Number.NaN)).toEqual({ beats: false, barEvery: 0, labels: false });
+  });
+});
+
+describe('showOnsetTicks', () => {
+  it('hides the transient firehose on a full-track view', () => {
+    expect(showOnsetTicks(492, 1370)).toBe(false);
+  });
+
+  it('shows ticks once they are far enough apart', () => {
+    expect(showOnsetTicks(40, 1370)).toBe(true);
+    expect(showOnsetTicks(0, 1370)).toBe(false);
   });
 });

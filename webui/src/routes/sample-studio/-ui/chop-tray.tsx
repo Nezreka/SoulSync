@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import type { SamplePeaks } from '../-sample-studio.types';
 
 import { formatTime, slicesFromOnsets, suggestChops } from '../-sample-studio.helpers';
+import { BoltIcon, ChevronIcon, PlayIcon } from './icons';
 import styles from './sample-studio-page.module.css';
 
 interface ChopTrayProps {
@@ -101,7 +102,8 @@ export function ChopTray({
                 : 'Top pick by energy × transient density — the loudest 8-bar stretch, not a music-theory verdict'
             }
           >
-            ⚡ Loudest 8 bars
+            <BoltIcon size={14} />
+            Loudest 8 bars
           </button>
         </span>
       </div>
@@ -142,15 +144,16 @@ export function ChopTray({
                     onAuditionSlice(s.start, s.end);
                   }}
                   title={`Audition ${s.label} with current pitch/tempo`}
+                  aria-label={`Audition ${s.label}`}
                 >
-                  ▶
+                  <PlayIcon size={10} />
                 </button>
               </div>
             ))}
           </div>
           <div className={styles.emptyHint}>
-            Click a suggestion to make it the loop region, or audition it with ▶ first — auditions
-            use your current pitch/tempo.
+            Click a suggestion to loop it, or press play on one to hear it first with your current
+            pitch, tempo and FX.
           </div>
         </>
       )}
@@ -161,7 +164,7 @@ export function ChopTray({
         onClick={() => setShowAll((v) => !v)}
         aria-expanded={showAll}
       >
-        {showAll ? '▾' : '▸'} All transient slices ({slices.length})
+        <ChevronIcon open={showAll} /> All transient slices ({slices.length})
       </button>
       {showAll && (
         <>
@@ -220,16 +223,17 @@ export function ChopTray({
                       onAuditionSlice(s.start, s.end);
                     }}
                     title={`Audition ${formatTime(s.start)} → ${formatTime(s.end)} with current pitch/tempo`}
+                    aria-label={`Audition ${formatTime(s.start)} to ${formatTime(s.end)}`}
                   >
-                    ▶
+                    <PlayIcon size={10} />
                   </button>
                 </div>
               ))}
             </div>
           )}
           <div className={styles.emptyHint}>
-            Slices follow the detected transients. Audition with ▶ (uses your current pitch/tempo),
-            select several, then merge them into the loop.
+            Slices follow the detected transients. Press play to hear one, select several, then
+            merge them into the loop.
           </div>
         </>
       )}

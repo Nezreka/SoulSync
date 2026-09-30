@@ -115,6 +115,73 @@
   cursor: not-allowed;
 }
 
+/* Library filters: three compact selects on one line instead of three
+   wrapping rows of pills (~200px of chrome above the track list). */
+.filterSelects {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filterSelects > .filterSelect {
+  flex: 0 1 auto;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+.filterSelect {
+  appearance: none;
+  background-color: rgba(255, 255, 255, 0.05);
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 13px) 55%,
+    calc(100% - 9px) 55%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #b9b6ae;
+  border-radius: 999px;
+  padding: 4px 24px 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  max-width: 100%;
+}
+
+.filterSelect:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.filterSelect:focus-visible {
+  outline: none;
+  border-color: #f5b942;
+}
+
+.filterSelect[data-active='true'] {
+  background-color: rgba(245, 185, 66, 0.12);
+  border-color: rgba(245, 185, 66, 0.6);
+  color: #f5b942;
+}
+
+.filterSelect option {
+  background: #1a1916;
+  color: #e8e6e1;
+}
+
+.filterReset {
+  background: none;
+  border: none;
+  color: #8a877f;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 2px;
+}
+
+.filterReset:hover {
+  color: #e8e6e1;
+}
+
 .resultCount {
   font-size: 12px;
   color: #8a877f;
@@ -871,6 +938,9 @@
   flex: none;
   width: 32px;
   height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 50%;
   border: 1px solid #f5b942;
   background: none;
@@ -1023,7 +1093,34 @@
 
 .stashActions {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  gap: 2px;
   flex: none;
+  margin: -4px -4px 0 0;
+}
+
+/* Quiet icon actions on a stash row: the name and recipe get the width. */
+.stashIconBtn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: #8a877f;
+  cursor: pointer;
+}
+
+.stashIconBtn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8e4da;
+}
+
+.stashIconBtn[data-tone='danger']:hover {
+  color: #e89090;
+}
+
+.stashPanel a.transportBtn {
+  text-decoration: none;
 }
