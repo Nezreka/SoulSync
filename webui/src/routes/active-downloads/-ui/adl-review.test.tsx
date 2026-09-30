@@ -8,6 +8,7 @@ import {
   AdlDeletedRow,
   AdlQuarantineList,
   AdlQuarantineRow,
+  quarantineSummary,
   AdlReviewBanner,
   AdlUnverifiedRow,
 } from './adl-review';
@@ -302,8 +303,11 @@ describe('AdlQuarantineList grouping', () => {
     const { container } = render(
       <AdlQuarantineList {...listProps} groups={[{ key: 'g1', members }]} />,
     );
-    const button = container.querySelector('.verif-quar-alt-btn') as HTMLElement;
-    expect(button.textContent).toBe('▾ 2 more');
+    // the count sits by the track name now, the old grey "▾ 2 more" on the
+    // far right got missed (7 files showing as 2 rows read as a bug)
+    const button = container.querySelector('.verif-quar-attempts') as HTMLElement;
+    expect(button.textContent).toBe('3 attempts ▾');
+    expect(button.closest('.verif-quar-title-row')).not.toBeNull();
     expect(container.querySelector('.verif-quar-alt-members')?.className).not.toContain('vqg-open');
   });
 
@@ -316,7 +320,10 @@ describe('AdlQuarantineList grouping', () => {
         groups={[{ key: 'g1', members }]}
       />,
     );
-    expect(container.querySelector('.verif-quar-alt-btn')?.textContent).toBe('▴ 1 more');
+    expect(container.querySelector('.verif-quar-attempts')?.textContent).toBe('2 attempts ▴');
+    expect(container.querySelector('.verif-quar-alt-heading')?.textContent).toBe(
+      'Other attempt at this track',
+    );
     expect(container.querySelector('.verif-quar-alt-members')?.className).toContain('vqg-open');
   });
 
@@ -327,8 +334,8 @@ describe('AdlQuarantineList grouping', () => {
         groups={[{ key: 'g1', members: [entry(), entry({ id: 'q2' })] }]}
       />,
     );
-    expect(container.querySelector('.verif-quar-alt-btn')?.getAttribute('title')).toBe(
-      'Show 1 more alternative candidate for this track',
+    expect(container.querySelector('.verif-quar-attempts')?.getAttribute('title')).toBe(
+      '2 downloads tried to be this track. Show the other one',
     );
   });
 });
@@ -357,26 +364,50 @@ describe('AdlReviewBanner', () => {
   it('shows all three pills with counts', () => {
     const { container } = render(<AdlReviewBanner {...props} />);
     const pills = [...container.querySelectorAll('.adl-pill')].map((p) => p.textContent);
-    expect(pills).toEqual(['⚠ Unverified (3)', '🛡 Quarantine (2)', '🗑 Deleted (4)']);
+    const counts = [...container.querySelectorAll('.adl-review-seg-count')].map(
+      (c) => c.textContent,
+    );
+    expect(pills).toEqual(['Unverified3', 'Quarantine2', 'Deleted4']);
+    expect(counts).toEqual(['3', '2', '4']);
   });
 
   it('hides the unverified pill when no such queue can exist', () => {
     const { container } = render(<AdlReviewBanner {...props} acoustidEnabled={false} />);
     const pills = [...container.querySelectorAll('.adl-pill')].map((p) => p.textContent);
     // the deleted bin exists regardless of acoustid - only unverified hides
-    expect(pills).toEqual(['🛡 Quarantine (2)', '🗑 Deleted (4)']);
+    expect(pills).toEqual(['Quarantine2', 'Deleted4']);
   });
 
   it('shows the deleted pill with no count until the bin has been loaded', () => {
     const { container } = render(<AdlReviewBanner {...props} deletedCount={null} />);
     const pills = [...container.querySelectorAll('.adl-pill')].map((p) => p.textContent);
-    expect(pills[2]).toBe('🗑 Deleted');
+    expect(pills[2]).toBe('Deleted');
+  });
+
+  it('says tracks AND files over the quarantine list, so 7 over two rows adds up', () => {
+    // boulder, sept 30: "Quarantine (7)" over two rows looked like 5 were
+    // missing. they were grouped under their track.
+    const { container } = render(
+      <AdlReviewBanner
+        {...props}
+        subView="quarantine"
+        quarantineCount={7}
+        quarantineTrackCount={2}
+      />,
+    );
+    expect(container.querySelector('.adl-review-summary')?.textContent).toBe('2 tracks · 7 files');
+  });
+
+  it('keeps the summary to files when nothing is grouped', () => {
+    expect(quarantineSummary(3, 3)).toBe('3 files');
+    expect(quarantineSummary(1, 1)).toBe('1 file');
+    expect(quarantineSummary(1, 4)).toBe('1 track · 4 files');
   });
 
   it('omits the quarantine count until it is actually known', () => {
     // Showing (0) before the fetch lands would read as "none quarantined".
     const { container } = render(<AdlReviewBanner {...props} quarantineLoaded={false} />);
-    expect(container.querySelectorAll('.adl-pill')[1].textContent).toBe('🛡 Quarantine');
+    expect(container.querySelectorAll('.adl-pill')[1].textContent).toBe('Quarantine');
   });
 
   it('offers Clean orphaned only in the unverified view', () => {
