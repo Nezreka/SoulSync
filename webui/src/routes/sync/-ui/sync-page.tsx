@@ -20,7 +20,6 @@
 
 import { useCallback, useMemo, useRef, useState } from 'react';
 
-import type { LbCardData } from '../-sync.lb-tabs';
 import type { MirroredMatch, ServerPlaylist } from '../-sync.server';
 import type { SyncTabId } from '../-sync.shell';
 
@@ -37,7 +36,7 @@ import { AutoSyncModal } from './autosync-modal';
 import { BeatportTab } from './beatport-tab';
 import { ImportFileTab } from './import-file-tab';
 import { LastfmSyncTab } from './lastfm-sync-tab';
-import { ListenBrainzSyncTab } from './lb-sync-tab';
+import { ListenBrainzSyncTab, useLbCardOpen } from './lb-sync-tab';
 import { MirroredTab } from './mirrored-tab';
 import { ServerCompareEditor } from './server-compare-editor';
 import { ServerPlaylistList } from './server-playlist-list';
@@ -205,13 +204,17 @@ export function SyncPage() {
   );
 
   const openSourceModal = page.modals.openModal;
-  const openLbCard = useCallback(
+  const openLbModal = useCallback(
     // The vertical applies its own `listenbrainz_` prefix downstream, so the
     // page passes the BARE mbid. Last.fm radios live in the same table and
     // share the LB vertical (sync-lastfm.js) — one source id, two tabs.
-    (card: LbCardData) => openSourceModal('listenbrainz', card.mbid),
+    (mbid: string) => openSourceModal('listenbrainz', mbid),
     [openSourceModal],
   );
+  // fetch the tracks and seed the state before opening. the modal renders
+  // nothing for a state that doesn't exist, so opening straight away made
+  // Discover do nothing on any playlist that was never discovered.
+  const openLbCard = useLbCardOpen(page.verticals.listenbrainz, openLbModal);
 
   const onImported = useCallback(() => {
     // importFileSubmit's tail (449-455): show the mirrored tab, then reload it.
