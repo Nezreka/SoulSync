@@ -1069,7 +1069,11 @@ describe('opening a release (#1297)', () => {
 
     fireEvent.click(document.querySelector('.release-card') as HTMLElement);
 
-    await waitFor(() => expect(window.reopenActiveDownloadModal).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(window.reopenActiveDownloadModal).toHaveBeenCalledWith('artist_album_42_1', {
+        runningOnly: true,
+      }),
+    );
     expect(download).not.toHaveBeenCalled();
     expect(requested.some((u) => u.includes('/api/album/'))).toBe(false);
   });

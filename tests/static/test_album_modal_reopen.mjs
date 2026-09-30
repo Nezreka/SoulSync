@@ -111,3 +111,49 @@ describe('_withLockedAlbumType', () => {
         assert.match(src, /trackAlbum = _withLockedAlbumType\(trackAlbum, process\.album\);/);
     });
 });
+
+describe('reopenActiveDownloadModal', () => {
+    // #1386 + the artist-page section lock: the artist page and search ask
+    // for a download still in progress only. a finished window holds the old
+    // album (no lock) and the old analysis, so they must open fresh instead;
+    // a download bubble still reopens a finished run to review it
+    function load() {
+        const src = read('core.js');
+        const start = src.indexOf('window.reopenActiveDownloadModal = function');
+        assert.ok(start !== -1);
+        let i = src.indexOf('{', src.indexOf(')', start));
+        let depth = 0;
+        for (; i < src.length; i++) {
+            if (src[i] === '{') depth++;
+            else if (src[i] === '}') { depth--; if (depth === 0) { i++; break; } }
+        }
+        const ctx = { window: {}, activeDownloadProcesses: {}, toasts: [] };
+        ctx.showToast = (m) => ctx.toasts.push(m);
+        vm.createContext(ctx);
+        vm.runInContext(src.slice(start, i), ctx);
+        return ctx;
+    }
+
+    test('runningOnly skips a finished run so the caller opens fresh', () => {
+        const ctx = load();
+        for (const status of ['complete', 'cancelled']) {
+            ctx.activeDownloadProcesses.a = { status, modalElement: { style: { display: 'none' } } };
+            assert.equal(ctx.window.reopenActiveDownloadModal('a', { runningOnly: true }), false, status);
+            assert.equal(ctx.activeDownloadProcesses.a.modalElement.style.display, 'none');
+        }
+    });
+
+    test('runningOnly still brings back a download in progress', () => {
+        const ctx = load();
+        ctx.activeDownloadProcesses.a = { status: 'running', modalElement: { style: { display: 'none' } } };
+        assert.equal(ctx.window.reopenActiveDownloadModal('a', { runningOnly: true }), true);
+        assert.equal(ctx.activeDownloadProcesses.a.modalElement.style.display, 'flex');
+    });
+
+    test('a bubble (no options) still reopens a finished run to review it', () => {
+        const ctx = load();
+        ctx.activeDownloadProcesses.a = { status: 'complete', modalElement: { style: { display: 'none' } } };
+        assert.equal(ctx.window.reopenActiveDownloadModal('a'), true);
+        assert.equal(ctx.activeDownloadProcesses.a.modalElement.style.display, 'flex');
+    });
+});

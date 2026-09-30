@@ -318,7 +318,7 @@ export function ArtistDetailPage() {
     const cardAlbum = releaseToAlbumData(release);
     const virtualId = releaseVirtualPlaylistId(artist, cardAlbum);
     // checked before the fetch, so an album mid-download just comes back up
-    if (window.reopenActiveDownloadModal?.(virtualId)) return;
+    if (window.reopenActiveDownloadModal?.(virtualId, { runningOnly: true })) return;
 
     window.showLoadingOverlay?.('Loading album...');
     try {

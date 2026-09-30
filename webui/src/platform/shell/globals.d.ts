@@ -399,7 +399,11 @@ declare global {
       virtualPlaylistId: string,
     ) => { status?: string; modalElement?: unknown; modalId?: string } | null;
     rehydrateDiscoverDownloadModal?: (virtualPlaylistId: string) => Promise<boolean>;
-    reopenActiveDownloadModal?: (virtualPlaylistId: string) => boolean;
+    /** runningOnly: skip a finished run, so the caller opens a fresh check */
+    reopenActiveDownloadModal?: (
+      virtualPlaylistId: string,
+      options?: { runningOnly?: boolean },
+    ) => boolean;
     /**
      * sync-spotify.js — hydrates listenbrainzPlaylistStates from the backend
      * (/api/listenbrainz/playlists). The vanilla discover init called this
