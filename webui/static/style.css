@@ -76285,6 +76285,52 @@ body.max-performance .dash-card::after {
 }
 
 
+/* #1402: the × that hides a routed source chip. it sits on the chip's top
+   right corner (the link badge owns bottom right) and only shows on hover,
+   so the strip doesn't grow a row of crosses. touch has no hover, so there
+   it is always shown. */
+.sync-tab-close {
+    position: relative;
+    z-index: 3;
+    align-self: flex-start;
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    margin: -4px 0 0 -20px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: #1a1d28;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 12px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.sync-tab-button:hover + .sync-tab-close,
+.sync-tab-close:hover,
+.sync-tab-close:focus-visible {
+    opacity: 1;
+}
+
+.sync-tab-close:hover {
+    background: rgba(239, 68, 68, 0.85);
+    border-color: rgba(239, 68, 68, 0.9);
+    color: #fff;
+}
+
+@media (hover: none) {
+    .sync-tab-close {
+        opacity: 1;
+    }
+}
+
+
 /* =====================================================================
  * Auto-Sync Manager — v2 visual overhaul
  *

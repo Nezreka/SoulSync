@@ -192,6 +192,56 @@ describe('the tab strip', () => {
     );
   });
 
+  it('hides a routed chip with its ×, for good, and Add playlist brings it back (#1402)', () => {
+    // cremonies #1402: sources you never use pile up in the strip with no
+    // way to clear them. the three permanent chips have no ×.
+    let open!: (tab: string) => void;
+    const view = renderShell({
+      panels: { deezer: <div id="probe" /> },
+      registerOpenTab: (fn) => {
+        open = fn as (tab: string) => void;
+      },
+    });
+    act(() => {
+      open('spotify');
+    });
+    act(() => {
+      open('deezer');
+    });
+    const chips = () =>
+      Array.from(view.container.querySelectorAll('.sync-tab-button')).map((b) =>
+        b.getAttribute('data-tab'),
+      );
+    expect(chips()).toEqual(['mirrored', 'server', 'beatport', 'spotify', 'deezer']);
+    expect(view.container.querySelectorAll('.sync-tab-close')).toHaveLength(2);
+
+    fireEvent.click(view.getByLabelText('Hide Deezer tab'));
+    expect(chips()).toEqual(['mirrored', 'server', 'beatport', 'spotify']);
+    // it was the active one, so we land back on the library
+    expect(view.container.querySelector('[data-tab="mirrored"]')?.className).toContain('active');
+    // chip gone, panel kept
+    expect(view.container.querySelector('#probe')).not.toBeNull();
+
+    // stays gone after a reload
+    view.unmount();
+    const again = renderShell({
+      registerOpenTab: (fn) => {
+        open = fn as (tab: string) => void;
+      },
+    });
+    const chipsAgain = () =>
+      Array.from(again.container.querySelectorAll('.sync-tab-button')).map((b) =>
+        b.getAttribute('data-tab'),
+      );
+    expect(chipsAgain()).toEqual(['mirrored', 'server', 'beatport', 'spotify']);
+
+    // opening the source again brings it back
+    act(() => {
+      open('deezer');
+    });
+    expect(chipsAgain()).toContain('deezer');
+  });
+
   it('keeps a routed panel MOUNTED after its chip disappears', () => {
     // The chip is navigation; the panel is state. Losing the panel when the
     // chip goes would throw away a playlist the user just loaded.

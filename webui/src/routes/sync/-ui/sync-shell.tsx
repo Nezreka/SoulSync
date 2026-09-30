@@ -27,8 +27,10 @@ import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } fr
 
 import {
   SYNC_DEFAULT_TAB,
+  SYNC_PRIMARY_TAB_IDS,
   SYNC_HEADER_ACTIONS,
   SYNC_TABS,
+  forgetRoutedTab,
   readRememberedRoutedTabs,
   rememberRoutedTab,
   syncStripTabs,
@@ -130,6 +132,8 @@ export function SyncShell({
   const [opened, setOpened] = useState<Set<SyncTabId>>(
     () => new Set([SYNC_DEFAULT_TAB, ...readRememberedRoutedTabs()]),
   );
+  /** routed chips the user hid with × (#1402). */
+  const [hidden, setHidden] = useState<ReadonlySet<SyncTabId>>(() => new Set());
 
   // Both props live in refs so `open` can be STABLE. A host that writes
   // `onTabChange={() => …}` inline hands a new function every render, and an
@@ -145,12 +149,33 @@ export function SyncShell({
     onTabChangeRef.current?.();
     setTab(id);
     setOpened((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+    setHidden((prev) => {
+      if (!prev.has(id)) return prev;
+      const nextHidden = new Set(prev);
+      nextHidden.delete(id);
+      return nextHidden;
+    });
     rememberRoutedTab(id);
   }, []);
 
   useEffect(() => {
     registerOpenTabRef.current?.(open);
   }, [open]);
+
+  /** the × on a routed chip (#1402). hides the chip only, the panel stays
+   *  mounted like it does everywhere else here, so reopening the source from
+   *  Add playlist finds what it had. the three permanent tabs have no ×. */
+  const close = useCallback(
+    (id: SyncTabId) => {
+      forgetRoutedTab(id);
+      setHidden((prev) => new Set(prev).add(id));
+      if (tab === id) {
+        onTabChangeRef.current?.();
+        setTab(SYNC_DEFAULT_TAB);
+      }
+    },
+    [tab],
+  );
 
   return (
     // `page-shell` plus the page id, matching the convention every flipped
@@ -220,7 +245,10 @@ export function SyncShell({
       >
         <div className="sync-main-panel">
           <div className="sync-tabs" role="tablist">
-            {syncStripTabs(tab, opened).map((t) => (
+            {syncStripTabs(
+              tab,
+              [...opened].filter((id) => !hidden.has(id)),
+            ).map((t) => (
               <Fragment key={t.id}>
                 <button
                   type="button"
@@ -239,6 +267,19 @@ export function SyncShell({
                   <span className={`tab-icon ${t.icon}`} />
                   <span className="sync-tab-label">{t.label}</span>
                 </button>
+                {SYNC_PRIMARY_TAB_IDS.includes(t.id) ? null : (
+                  <button
+                    type="button"
+                    className="sync-tab-close"
+                    title={`Hide ${t.label}. Add playlist brings it back`}
+                    aria-label={`Hide ${t.label} tab`}
+                    onClick={() => {
+                      close(t.id);
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
                 {/* 2253: the divider sits after Server Playlists only. */}
               </Fragment>
             ))}
