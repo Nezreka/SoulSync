@@ -8785,8 +8785,18 @@
                                             <div class="form-group">
                                                 <label class="checkbox-label">
                                                     <input type="checkbox" id="create-backup" checked>
-                                                    Create playlist backups before sync
+                                                    Keep a "&lt;name&gt; Backup" copy on the server before a Replace sync
                                                 </label>
+                                                <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                                    onclick="toggleSettingHelp(this)"
+                                                    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                <div class="help-text setting-help-body" hidden>
+                                                    Replace deletes the playlist on your media server and rebuilds it.
+                                                    This copies the old server playlist first, so anything you added to
+                                                    it on the server isn't lost. SoulSync already keeps its own copy of
+                                                    the source playlist, so turn this off if you don't edit playlists on
+                                                    the server. Reconcile and Append edit in place, so they normally skip it.
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
