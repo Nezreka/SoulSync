@@ -238,13 +238,15 @@ export function AutoSyncModal({
     </div>
   );
 
-  const header = (blurb: string) => (
+  // the counts ride in the header now instead of a strip of their own, one
+  // less layer stacked above the board
+  const header = (blurb: string, aside?: React.ReactNode) => (
     <div className="auto-sync-header">
       <div>
-        <div className="auto-sync-eyebrow">Playlist automation</div>
         <h3>Auto-Sync Manager</h3>
         <p>{blurb}</p>
       </div>
+      {aside}
       {/* ONE Refresh. The vanilla grew four — monitor, hourly board, weekly
           board and history — all calling this same handler, so which one you
           reached for depended only on where you happened to be looking. */}
@@ -284,15 +286,14 @@ export function AutoSyncModal({
     );
   }
 
-  return overlay(
-    <div className="auto-sync-modal">
-      {header(BLURB)}
+  const summaryStrip = (
+    <>
       {/* One fact per slot, and the better fact.
-          - "scheduled playlists" and "active schedules" were the same number
-            until something was paused. Paused is the interesting half, so it
-            rides along and only appears when it is not zero.
-          - "mirrored tracks" was never about scheduling at all. Failed runs
-            are, and they are the one number here you would act on. */}
+        - "scheduled playlists" and "active schedules" were the same number
+          until something was paused. Paused is the interesting half, so it
+          rides along and only appears when it is not zero.
+        - "mirrored tracks" was never about scheduling at all. Failed runs
+          are, and they are the one number here you would act on. */}
       <div className="auto-sync-summary">
         <div>
           <span>{summary.scheduledCount}</span>
@@ -312,7 +313,12 @@ export function AutoSyncModal({
           </div>
         )}
       </div>
+    </>
+  );
 
+  return overlay(
+    <div className="auto-sync-modal">
+      {header(BLURB, summaryStrip)}
       <AutoSyncMonitorPanel playlists={state.playlists} onDetails={onOpenDetails} />
 
       <div className="auto-sync-tabs">

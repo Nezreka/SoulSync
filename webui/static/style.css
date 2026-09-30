@@ -77353,6 +77353,323 @@ body.max-performance .dash-card::after {
     padding-bottom: 10px;
 }
 
+/* ── auto-sync board, streamlined ─────────────────────────────────────────
+   same components, same drag targets, same buttons. what changed:
+   - empty intervals were full height rows that pushed the real ones off
+     screen. they're a row of drop chips now, filled ones keep their rows
+   - scheduled cards lost the checkbox + dropdown (behind ⋯ now) and the big
+     purple RUN NOW bar, so nine cards stop shouting at once
+   - sidebar rows are name over meta instead of side by side and wrapping
+   - the modal is opaque, the playlists page was showing through it */
+.auto-sync-overlay .auto-sync-modal {
+    background: linear-gradient(165deg, #151823 0%, #0e1017 55%, #0b0c11 100%);
+}
+
+.auto-sync-modal .auto-sync-header {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 16px 24px;
+}
+
+.auto-sync-modal .auto-sync-header p {
+    margin: 3px 0 0;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 12px;
+}
+
+.auto-sync-modal .auto-sync-header .auto-sync-summary {
+    flex-wrap: nowrap;
+    margin-left: auto;
+    padding: 0;
+}
+
+.auto-sync-modal .auto-sync-header .auto-sync-header-actions {
+    margin-left: 4px;
+}
+
+.auto-sync-modal .auto-sync-monitor.auto-sync-monitor--idle {
+    padding: 8px 24px;
+}
+
+.auto-sync-modal .auto-sync-body {
+    grid-template-columns: 280px minmax(0, 1fr);
+}
+
+/* sidebar */
+.auto-sync-modal .auto-sync-playlist {
+    display: grid;
+    grid-template-columns: 8px minmax(0, 1fr);
+    column-gap: 10px;
+    row-gap: 2px;
+    align-items: center;
+    margin-bottom: 4px;
+    padding: 8px 12px;
+    border-radius: 10px;
+}
+
+.auto-sync-modal .auto-sync-playlist::before {
+    grid-row: 1;
+    margin-top: 0;
+}
+
+.auto-sync-modal .auto-sync-playlist > div {
+    grid-column: 2;
+}
+
+.auto-sync-modal .auto-sync-playlist-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
+}
+
+.auto-sync-modal .auto-sync-playlist-meta {
+    margin-top: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.auto-sync-modal .auto-sync-playlist.scheduled .auto-sync-playlist-meta {
+    color: rgba(var(--accent-light-rgb), 0.85);
+}
+
+/* lanes: filled ones are rows, empty ones are chips on a shared line */
+.auto-sync-modal .auto-sync-lanes {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    gap: 8px;
+}
+
+.auto-sync-modal .auto-sync-lane.filled {
+    flex: 1 1 100%;
+    padding: 10px 12px;
+}
+
+/* top-aligned, so opening one card's ⋯ doesn't float its neighbours */
+.auto-sync-modal .auto-sync-lane.filled .auto-sync-lane-track {
+    align-items: flex-start;
+}
+
+.auto-sync-modal .auto-sync-lane.filled .auto-sync-lane-badge {
+    flex-basis: 64px;
+    padding-right: 10px;
+}
+
+.auto-sync-modal .auto-sync-lane.filled .auto-sync-lane-badge b {
+    font-size: 18px;
+}
+
+.auto-sync-modal .auto-sync-lane.empty {
+    flex: 0 0 auto;
+    gap: 0;
+    padding: 0;
+    border: 1px dashed rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+    cursor: default;
+}
+
+.auto-sync-modal .auto-sync-lane.empty .auto-sync-lane-badge {
+    flex: none;
+    flex-direction: row;
+    align-items: baseline;
+    gap: 6px;
+    padding: 7px 14px 7px 12px;
+    border-right: 0;
+}
+
+.auto-sync-modal .auto-sync-lane.empty .auto-sync-lane-badge::before {
+    content: '+';
+    color: rgba(255, 255, 255, 0.35);
+    font-weight: 700;
+}
+
+.auto-sync-modal .auto-sync-lane.empty .auto-sync-lane-badge b {
+    font-size: 13px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.78);
+}
+
+.auto-sync-modal .auto-sync-lane.empty .auto-sync-lane-badge span,
+.auto-sync-modal .auto-sync-lane.empty .auto-sync-lane-track {
+    display: none;
+}
+
+.auto-sync-modal .auto-sync-lane.empty.drag-over .auto-sync-lane-badge b,
+.auto-sync-modal .auto-sync-lane.empty.drag-over .auto-sync-lane-badge::before {
+    color: #fff;
+}
+
+/* scheduled cards */
+/* name / meta / timing up top, then one row: [Run now] ...... [⋯] [×].
+   the actions wrapper goes display:contents so run, ⋯ and × are all grid
+   items, the markup (and its button order) stays as it was. */
+.auto-sync-modal .auto-sync-lane .auto-sync-scheduled-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 8px 4px;
+    min-width: 220px;
+    max-width: 280px;
+    padding: 10px 10px 10px 14px;
+}
+
+.auto-sync-modal .auto-sync-scheduled-main {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    min-width: 0;
+}
+
+.auto-sync-modal .auto-sync-scheduled-actions {
+    display: contents;
+}
+
+.auto-sync-modal .auto-sync-scheduled-actions > button.run {
+    grid-column: 1;
+    grid-row: 2;
+    justify-self: start;
+}
+
+.auto-sync-modal .auto-sync-scheduled-card > .auto-sync-card-more {
+    grid-column: 2;
+    grid-row: 2;
+}
+
+.auto-sync-modal .auto-sync-scheduled-actions > button:not(.run) {
+    grid-column: 3;
+    grid-row: 2;
+}
+
+.auto-sync-modal .auto-sync-scheduled-name {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 13px;
+}
+
+.auto-sync-modal .auto-sync-scheduled-meta {
+    margin-top: 2px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 11px;
+}
+
+.auto-sync-modal .auto-sync-scheduled-timing {
+    gap: 6px;
+    margin-top: 2px;
+}
+
+.auto-sync-modal .auto-sync-scheduled-timing span,
+.auto-sync-modal .auto-sync-scheduled-timing small {
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.auto-sync-modal .auto-sync-scheduled-timing span {
+    color: rgba(var(--accent-light-rgb), 0.9);
+}
+
+.auto-sync-modal .auto-sync-scheduled-timing small {
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.auto-sync-modal .auto-sync-scheduled-timing span + small::before {
+    content: '· ';
+}
+
+/* the hourly lane already says the interval, the card saying "Every 1 day"
+   again is noise. weekly cards keep theirs, it carries the day and time. */
+.auto-sync-modal .auto-sync-lane[data-hours] .auto-sync-scheduled-timing span {
+    display: none;
+}
+
+/* ...which leaves "next in 22h", short enough to ride the meta line */
+.auto-sync-modal .auto-sync-lane[data-hours] .auto-sync-scheduled-meta {
+    display: inline;
+}
+
+.auto-sync-modal .auto-sync-lane[data-hours] .auto-sync-scheduled-timing {
+    display: inline;
+    margin: 0;
+}
+
+.auto-sync-modal .auto-sync-lane[data-hours] .auto-sync-scheduled-timing small::before {
+    content: ' · ';
+}
+
+.auto-sync-card-settings {
+    display: none;
+}
+
+.auto-sync-card-settings.open {
+    display: block;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.auto-sync-card-settings .auto-sync-organize-toggle {
+    margin-top: 0;
+}
+
+.auto-sync-card-settings select {
+    width: 100%;
+    margin-top: 6px;
+}
+
+.auto-sync-modal .auto-sync-scheduled-card button.run,
+.auto-sync-modal .auto-sync-scheduled-card button:not(.run),
+.auto-sync-card-more {
+    height: 26px;
+    min-width: 26px;
+    padding: 0 8px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    line-height: 1;
+    box-shadow: none;
+}
+
+.auto-sync-modal .auto-sync-scheduled-card button.run {
+    width: auto;
+    border: 1px solid rgba(var(--accent-rgb), 0.4);
+    background: rgba(var(--accent-rgb), 0.14);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.auto-sync-modal .auto-sync-scheduled-card button.run:not(:disabled):hover {
+    background: rgba(var(--accent-rgb), 0.3);
+    color: #fff;
+    transform: none;
+}
+
+.auto-sync-modal .auto-sync-scheduled-card button:not(.run),
+.auto-sync-card-more {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+}
+
+.auto-sync-card-more {
+    font-size: 16px;
+    font-weight: 800;
+}
+
+.auto-sync-card-more:hover,
+.auto-sync-card-more.open {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
 /* ===========================================================================
    Manage Enrichment Workers modal (enrichment-manager.js)
    =========================================================================== */

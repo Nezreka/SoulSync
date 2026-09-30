@@ -153,6 +153,24 @@ describe('AutoSyncScheduledCard (1951-1976 / 979-1024)', () => {
     expect(onCardClick).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps folder + quality behind ⋯ until asked, without opening the card', () => {
+    // the board was a wall of checkboxes and dropdowns, one set per card.
+    // they're still one click away, and the ⋯ must not reopen the weekly editor.
+    const onCardClick = vi.fn();
+    const { container } = renderCard(row(), { onCardClick });
+    const panel = () => container.querySelector('.auto-sync-card-settings') as HTMLElement;
+    expect(panel().className).not.toContain('open');
+    // still mounted, so the quality select hydrates exactly as before
+    expect(panel().querySelector('.auto-sync-organize-toggle')).not.toBeNull();
+    const more = container.querySelector('.auto-sync-card-more') as HTMLElement;
+    fireEvent.click(more);
+    expect(panel().className).toContain('open');
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(more);
+    expect(panel().className).not.toContain('open');
+    expect(onCardClick).not.toHaveBeenCalled();
+  });
+
   it('leaves the organize toggle from reaching the card click', () => {
     const onCardClick = vi.fn();
     const { container } = renderCard(row(), { onCardClick });
@@ -341,6 +359,17 @@ describe('AutoSyncLane (809-826 / 933-949)', () => {
     const { container: filled } = renderLane({ count: 1 });
     expect(filled.querySelector('.child-card')).not.toBeNull();
     expect(filled.querySelector('.auto-sync-lane-hint')).toBeNull();
+  });
+
+  it('an empty lane carries its hint as a tooltip, since it shows as a chip', () => {
+    // empty intervals render as small "+ 1h" drop chips now, the hint text is
+    // hidden, so hovering the chip has to still say what dropping does
+    const { container: empty } = renderLane();
+    expect(empty.querySelector('.auto-sync-lane')?.getAttribute('title')).toBe(
+      'Drag a playlist here',
+    );
+    const { container: filled } = renderLane({ count: 1 });
+    expect(filled.querySelector('.auto-sync-lane')?.hasAttribute('title')).toBe(false);
   });
 });
 

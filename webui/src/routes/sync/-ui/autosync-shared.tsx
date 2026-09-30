@@ -160,6 +160,9 @@ export function AutoSyncScheduledCard({
   onCardClick?: () => void;
 }) {
   const isRunning = playlist.pipeline_state?.status === 'running';
+  // folder + quality live behind ⋯ now. every card showing a checkbox and a
+  // dropdown made the board a wall of form controls.
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const health = autoSyncPlaylistHealth(history, playlist.id as number);
   const healthClass =
     health.level === 'failing' ? 'failing' : health.level === 'warning' ? 'warning' : '';
@@ -185,9 +188,29 @@ export function AutoSyncScheduledCard({
         <div className="auto-sync-scheduled-meta">
           {autoSyncSourceLabel(playlist.source)} &middot; {playlist.track_count || 0} tracks
         </div>
-        <AutoSyncOrganizeRow playlist={playlist} onOrganizeChange={actions.onOrganizeChange} />
         <div className="auto-sync-scheduled-timing">{timing}</div>
+        <div
+          className={`auto-sync-card-settings${settingsOpen ? ' open' : ''}`}
+          onClick={(e) => {
+            e.stopPropagation();
+          }}
+        >
+          <AutoSyncOrganizeRow playlist={playlist} onOrganizeChange={actions.onOrganizeChange} />
+        </div>
       </div>
+      <button
+        type="button"
+        className={`auto-sync-card-more${settingsOpen ? ' open' : ''}`}
+        title="Folder and quality settings"
+        aria-label="Folder and quality settings"
+        aria-expanded={settingsOpen}
+        onClick={(e) => {
+          e.stopPropagation();
+          setSettingsOpen((v) => !v);
+        }}
+      >
+        &#8943;
+      </button>
       <div className="auto-sync-scheduled-actions">
         <button
           className="run"
@@ -247,7 +270,9 @@ function SidebarCard({
         startDrag(e, playlist.id);
       }}
     >
-      <div className="auto-sync-playlist-name">{displayName || playlist.name}</div>
+      <div className="auto-sync-playlist-name" title={displayName || playlist.name || ''}>
+        {displayName || playlist.name}
+      </div>
       <div className="auto-sync-playlist-meta">
         {playlist.track_count || 0} tracks &middot; {badge.assigned}
       </div>
@@ -443,6 +468,8 @@ export function AutoSyncLane({
       className={`auto-sync-lane ${filled ? 'filled' : 'empty'} ${extraClass} ${
         dragOver ? 'drag-over' : ''
       }`}
+      // an empty lane shows as a small drop chip, so the hint rides as a tooltip
+      title={!filled && typeof hint === 'string' ? hint : undefined}
       {...dataAttrs}
       onDragOver={(e) => {
         e.preventDefault();

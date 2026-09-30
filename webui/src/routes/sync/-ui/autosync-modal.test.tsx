@@ -100,9 +100,12 @@ describe('the three shell states (588, 640-649, 652-731)', () => {
 
   it('renders the full manager once loaded', () => {
     const { container } = renderModal();
-    expect(container.querySelector('.auto-sync-eyebrow')?.textContent).toBe('Playlist automation');
     expect(container.querySelector('.auto-sync-header h3')?.textContent).toBe('Auto-Sync Manager');
     expect(container.querySelectorAll('.auto-sync-tab-panel')).toHaveLength(4);
+    // the counts ride in the header now, not a strip of their own, and the
+    // "playlist automation" eyebrow is gone. one less layer over the board.
+    expect(container.querySelector('.auto-sync-header .auto-sync-summary')).not.toBeNull();
+    expect(container.querySelector('.auto-sync-eyebrow')).toBeNull();
   });
 });
 
