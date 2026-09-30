@@ -1348,6 +1348,18 @@ def _build_post_process_context(
     # record_type is the library's, so it keeps the track-count split and a
     # reorganize files a release where the download did
     _type_source = type_source if type_source and type_source != 'tags' else ''
+    # the source's own album lookup is reliable for a source that labels EPs
+    # itself (deezer's catch-all 'album' only comes from its TRACK lookups).
+    # when the release type agrees with it, lock it, so a reorganize files a
+    # short album where the artist page shows it: Flow State Sampler, a
+    # three-track deezer album, would otherwise go back to Single/ by count.
+    # spotify and tag mode keep the count split, same as their downloads
+    from core.imports.paths import _source_labels_eps
+    _api_type = str(api_album.get('record_type') or api_album.get('album_type') or '').strip().lower()
+    _type_locked = bool(
+        _type_source and _source_labels_eps(_type_source)
+        and _api_type and _api_type == (eff_type or 'album')
+    )
     return {
         '_album_type_source': _type_source,
         'spotify_artist': {
@@ -1371,6 +1383,7 @@ def _build_post_process_context(
             'disambiguation': str(api_album.get('disambiguation') or '').strip(),
             'album_type': eff_type or 'album',
             'record_type': eff_type or 'album',
+            'album_type_locked': _type_locked,
             # $atypes labels a folder with every qualifier the release carries,
             # and Live/Soundtrack/Remix exist only as secondary types. Without
             # them here a reorganize renders $atypes empty and RENAMES
