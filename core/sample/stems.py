@@ -1,35 +1,24 @@
-"""Sample Studio — stem separation (Phase 4).
+"""Sample Studio — stem separation.
 
-Splits a track into drums / vocals / bass / other using Demucs v4 (hybrid
-transformer), the best-sounding free separation model. On-request per track:
+Splits a track into drums / vocals / bass / other with htdemucs (Demucs v4,
+hybrid transformer), the best free separation model. On request per track:
 the user taps "Separate stems", a background job runs for a few minutes, and
-the four stems are cached per track forever.
+the four stems are cached per track.
 
-License note (read before redistributing)
------------------------------------------
-The Demucs *code* is MIT. The pretrained *weights* are NOT: Meta's author
-states they are "provided only for scientific purposes"
-(facebookresearch/demucs#327) and they carry a non-commercial restriction
-from the MUSDB training data. That is compatible with SoulSync, which is free
-forever and non-commercial — but it means SoulSync must NEVER bundle the
-weights. Instead, on first use the user's own server downloads htdemucs
-(~80 MB) directly from Meta's public hosting into the data dir, where it is
-verified and cached. The user, not SoulSync, performs the download.
+runs on onnxruntime, not torch. same htdemucs weights exported to ONNX
+(StemSplitio/htdemucs-onnx, MIT), so it needs a ~20 MB pip package instead
+of a ~2 GB torch install, and it's in the docker image by default.
 
-Backend selection
------------------
-* ``DemucsSeparator`` — the real thing. Requires torch + demucs installed;
-  NOT installable in this dev VM (CUDA-only torch wheel, no cp312 CPU
-  torchaudio), so this path is Docker-verified later. Recommended lighter
-  alternative for the image: onnxruntime + an ONNX-exported htdemucs
-  (see module notes below) instead of the full torch stack.
-* ``StubSeparator`` — test/CI stand-in. Writes four copies of the source so
-  the whole pipeline (worker, API, UI) is exercisable without torch.
+memory: onnxruntime's graph optimizations turn the fp16 weights into big
+fp32 copies and push one 7.8s chunk past 4 GB. with them off (and the memory
+arena off) a whole song peaks around 1-1.5 GB at about realtime on CPU, so
+that's how the session is built. the session is dropped after every job so
+nothing stays resident between separations.
 
-Recommended Docker story (documented here so the image work is mechanical):
-``pip install onnxruntime`` + download the ONNX htdemucs export once, OR pin
-a CPU torch pair (torch + torchaudio from the CPU index) with demucs. The
-full torch stack is ~2 GB installed; onnxruntime is ~100 MB.
+weights license: the demucs weights carry meta's non-commercial note. fine
+for SoulSync (free, non-commercial), but they're never bundled. each server
+downloads the model itself on first use, pinned to one commit and checked
+against its sha256.
 """
 
 from __future__ import annotations
@@ -37,8 +26,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
-import threading
-from typing import Dict, Optional, Protocol
+from typing import Callable, Dict, Optional, Protocol
 
 from utils.logging_config import get_logger
 
@@ -47,12 +35,10 @@ logger = get_logger("sample.stems")
 STEMS = ("drums", "vocals", "bass", "other")
 SEPARATOR_VERSION = 1
 
-# every way to split a track, and the outputs each one makes. rough outputs
-# get their own slugs so they can sit next to real stems in the same cache.
+# every way to split a track, and the outputs each one makes. just demucs:
+# the built-in rough splits (hpss, mid/side) sounded bad and were pulled.
 METHOD_STEMS = {
     "demucs": STEMS,
-    "rough-drums": ("drums-rough", "music-rough"),
-    "rough-center": ("center-rough",),
 }
 SEPARATION_METHODS = tuple(METHOD_STEMS)
 ALL_STEMS = tuple(s for outs in METHOD_STEMS.values() for s in outs)
@@ -61,9 +47,6 @@ STEM_LABELS = {
     "vocals": "Vocals",
     "bass": "Bass",
     "other": "Other",
-    "drums-rough": "Drums (rough)",
-    "music-rough": "Music (rough)",
-    "center-rough": "Center (rough)",
 }
 
 
@@ -75,16 +58,18 @@ def method_for_stem(stem: str) -> Optional[str]:
 
 
 MODEL_NAME = "htdemucs"
-# the real htdemucs checkpoint (demucs/remote/files.txt + htdemucs.yaml). the
-# part after the dash is the first 8 hex of its sha256, same check torch.hub
-# does. the old name here didn't exist on any server, so the download 403'd
-# and demucs could never run.
-MODEL_FILENAME = "955717e8-8726e21a.th"
-MODEL_SHA256_PREFIX = "8726e21a"
+MODEL_FILENAME = "htdemucs_fp16weights.onnx"
+MODEL_SHA256 = "d05c269d0178d2a72ad484b10b11dd370193fc923201c3b27a99f848745db70a"
+_MODEL_COMMIT = "d54ed9eb60e258ea82131c6ee14578628816456a"
 MODEL_URLS = (
-    f"https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/{MODEL_FILENAME}",
+    f"https://huggingface.co/StemSplitio/htdemucs-onnx/resolve/{_MODEL_COMMIT}/{MODEL_FILENAME}",
 )
 _MIN_MODEL_BYTES = 10_000_000
+
+# the exported graph takes exactly this: stereo, 44.1k, 7.8s chunks
+MODEL_SR = 44100
+CHUNK = 343980
+MODEL_SOURCES = ("drums", "bass", "other", "vocals")
 
 
 class SeparatorBackend(Protocol):
@@ -92,7 +77,8 @@ class SeparatorBackend(Protocol):
 
     name: str
 
-    def separate(self, track_path: str, out_dir: str) -> Dict[str, str]:
+    def separate(self, track_path: str, out_dir: str,
+                 progress: Optional[Callable[[float], None]] = None) -> Dict[str, str]:
         """Write one WAV per output into out_dir. Returns {stem: file_path}."""
         ...
 
@@ -107,12 +93,7 @@ def models_dir() -> str:
 
 
 def model_path() -> str:
-    # torch.hub.set_dir(models_dir()) makes demucs look in <dir>/checkpoints,
-    # so downloading straight there means demucs finds it and never fetches
-    # its own second copy.
-    d = os.path.join(models_dir(), "checkpoints")
-    os.makedirs(d, exist_ok=True)
-    return os.path.join(d, MODEL_FILENAME)
+    return os.path.join(models_dir(), MODEL_FILENAME)
 
 
 def _sha256_file(path: str) -> str:
@@ -127,7 +108,7 @@ def _model_ok(path: str) -> bool:
     return (
         os.path.isfile(path)
         and os.path.getsize(path) > _MIN_MODEL_BYTES
-        and _sha256_file(path).startswith(MODEL_SHA256_PREFIX)
+        and _sha256_file(path) == MODEL_SHA256
     )
 
 
@@ -184,7 +165,8 @@ class StubSeparator:
 
     name = "stub"
 
-    def separate(self, track_path: str, out_dir: str) -> Dict[str, str]:
+    def separate(self, track_path: str, out_dir: str,
+                 progress: Optional[Callable[[float], None]] = None) -> Dict[str, str]:
         from .render import decode_stereo, _load_soundfile
 
         os.makedirs(out_dir, exist_ok=True)
@@ -199,87 +181,121 @@ class StubSeparator:
         return paths
 
 
-_demucs_lock = threading.Lock()
-_demucs_model = None
+def _threads() -> int:
+    # half the cores: a separation shouldn't starve downloads and playback
+    return max(1, (os.cpu_count() or 2) // 2)
 
 
-def _load_demucs_model():
-    """one model per process. loading it takes seconds, so jobs share it."""
-    global _demucs_model
-    with _demucs_lock:
-        if _demucs_model is not None:
-            return _demucs_model
-        # import first: no point downloading 84 MB for a server that can't run it
-        try:
-            import torch
-            from demucs.pretrained import get_model
-        except ImportError as exc:
-            raise ImportError(
-                "Demucs needs torch + torchaudio + demucs installed "
-                "(see the setup note in Sample Studio)"
-            ) from exc
-        ensure_model()
-        torch.hub.set_dir(models_dir())
-        model = get_model(name=MODEL_NAME)
-        model.cpu()
-        model.eval()
-        _demucs_model = model
-        return model
+def _open_session():
+    """a fresh onnxruntime session. import first: no point downloading 166 MB
+    for a server that can't run it."""
+    try:
+        import onnxruntime as ort
+    except ImportError as exc:
+        raise ImportError("stem separation needs onnxruntime (pip install onnxruntime)") from exc
+    path = ensure_model()
+    so = ort.SessionOptions()
+    so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+    so.enable_cpu_mem_arena = False
+    so.enable_mem_pattern = False
+    so.intra_op_num_threads = _threads()
+    return ort.InferenceSession(path, sess_options=so, providers=["CPUExecutionProvider"])
+
+
+def separate_array(audio, sr: int, run_chunk: Callable, progress: Optional[Callable[[float], None]] = None):
+    """htdemucs over a whole track. audio: (samples, channels) float32.
+
+    returns ({stem: (samples, 2) float32}, MODEL_SR). resamples to 44.1k,
+    normalizes like demucs' own separate.py (and undoes it after), and runs
+    7.8s chunks with a quarter overlap, crossfaded back together.
+    `run_chunk` maps a (1, 2, CHUNK) array to (1, 4, 2, CHUNK).
+    """
+    import numpy as np
+
+    y = np.asarray(audio, dtype=np.float32)
+    if y.ndim == 1:
+        y = y[:, None]
+    if y.shape[1] == 1:
+        y = np.repeat(y, 2, axis=1)  # htdemucs wants stereo
+    elif y.shape[1] > 2:
+        y = y[:, :2]
+    if sr != MODEL_SR:
+        import soxr
+
+        y = soxr.resample(y, sr, MODEL_SR, quality="HQ").astype(np.float32)
+    x = np.ascontiguousarray(y.T)  # (2, n)
+    ref = x.mean(0)
+    mean, std = float(ref.mean()), float(ref.std()) + 1e-8
+    x = (x - mean) / std
+
+    total = x.shape[1]
+    overlap = CHUNK // 4
+    stride = CHUNK - overlap
+    n_chunks = max(1, -(-total // stride))
+    window = np.ones(CHUNK, dtype=np.float32)
+    fade = np.linspace(0.0, 1.0, overlap, dtype=np.float32)
+    window[:overlap] = fade
+    window[-overlap:] = fade[::-1]
+    out = np.zeros((len(MODEL_SOURCES), 2, total), dtype=np.float32)
+    weight = np.zeros(total, dtype=np.float32)
+    for i in range(n_chunks):
+        start = i * stride
+        end = min(start + CHUNK, total)
+        chunk = x[:, start:end]
+        if chunk.shape[1] < CHUNK:
+            chunk = np.pad(chunk, ((0, 0), (0, CHUNK - chunk.shape[1])))
+        stems = run_chunk(chunk[None].astype(np.float32))[0]  # (4, 2, CHUNK)
+        n = end - start
+        # only fade where two chunks overlap. the window starts at exactly 0,
+        # so fading the first chunk's start would zero the song's opening
+        # samples, and the last chunk's end has nothing to blend into
+        w = window[:n].copy()
+        if i == 0:
+            w[:overlap] = 1.0
+        if end == total:
+            w[overlap:] = 1.0
+        out[:, :, start:end] += stems[:, :, :n] * w
+        weight[start:end] += w
+        if progress:
+            progress((i + 1) / n_chunks)
+    out /= np.maximum(weight, 1e-8)
+    out = out * std + mean
+    return {name: out[k].T for k, name in enumerate(MODEL_SOURCES)}, MODEL_SR
 
 
 class DemucsSeparator:
-    """Real separator — Demucs v4 hybrid transformer on CPU.
+    """htdemucs on onnxruntime, CPU. model downloaded on first use."""
 
-    Requires torch + demucs + torchaudio installed (the Docker image's job,
-    not this module's). Model weights are downloaded on first use via
-    ensure_model() — never bundled.
-    """
+    name = "htdemucs-onnx"
 
-    name = "demucs-htdemucs"
-
-    def separate(self, track_path: str, out_dir: str) -> Dict[str, str]:
+    def separate(self, track_path: str, out_dir: str,
+                 progress: Optional[Callable[[float], None]] = None) -> Dict[str, str]:
         import numpy as np
-        import torch
-        import torchaudio
-        from demucs.apply import apply_model
 
         from .render import decode_stereo, _load_soundfile
 
-        model = _load_demucs_model()
+        # a local session (~1 GB) goes away when this returns, nothing stays
+        # resident between separations
+        session = _open_session()
         os.makedirs(out_dir, exist_ok=True)
-        # decode with our own reader (soundfile, ffmpeg fallback) so every
-        # format the library holds works, not just what torchaudio can open
         audio, sr = decode_stereo(track_path)
-        if audio.shape[1] == 1:
-            audio = np.repeat(audio, 2, axis=1)  # htdemucs wants stereo
-        elif audio.shape[1] > 2:
-            audio = audio[:, :2]
-        wav = torch.from_numpy(np.ascontiguousarray(audio.T))
-        if sr != model.samplerate:
-            wav = torchaudio.functional.resample(wav, sr, model.samplerate)
-        ref = wav.mean(0)
-        wav = (wav - ref.mean()) / (ref.std() + 1e-8)
-        with torch.no_grad():
-            sources = apply_model(model, wav[None], device="cpu")[0]
-        # undo the input normalization, same as demucs' own separate.py.
-        # without it every stem comes out at unit variance and clips.
-        sources = sources * ref.std() + ref.mean()
+        stems, out_sr = separate_array(
+            audio, sr, lambda c: session.run(["stems"], {"mix": c})[0], progress,
+        )
         sf = _load_soundfile()
         paths: Dict[str, str] = {}
-        for source, stem in zip(sources, model.sources, strict=True):
-            name = stem if stem in STEMS else "other"
+        for name in STEMS:
             out = os.path.join(out_dir, f"{name}.wav")
-            sf.write(out, np.clip(source.cpu().numpy().T, -1.0, 1.0), model.samplerate,
-                     subtype="PCM_16")
+            sf.write(out, np.clip(stems[name], -1.0, 1.0), out_sr, subtype="PCM_16")
             paths[name] = out
-        logger.info("Demucs separated %s -> %s", track_path, out_dir)
+        logger.info("htdemucs separated %s -> %s", track_path, out_dir)
         return paths
 
 
 def get_backend(name: Optional[str] = None) -> SeparatorBackend:
     """Demucs backend by name: 'demucs' (real) or anything else -> stub.
 
-    the stub is for tests only. the api refuses demucs when torch isn't
+    the stub is for tests only. the api refuses demucs when onnxruntime isn't
     installed instead of quietly handing out four copies of the track.
     """
     if (name or "demucs") == "demucs":
@@ -291,12 +307,6 @@ def get_separator(method: str, backend: Optional[str] = None) -> SeparatorBacken
     """the separator for a method. `backend` only matters for demucs ('stub')."""
     if method == "demucs":
         return get_backend(backend)
-    from .rough import RoughCenterSeparator, RoughDrumsSeparator
-
-    if method == "rough-drums":
-        return RoughDrumsSeparator()
-    if method == "rough-center":
-        return RoughCenterSeparator()
     raise ValueError(f"unknown separation method {method!r}")
 
 
@@ -304,6 +314,7 @@ def separate_track(
     track_id: int,
     backend: Optional[SeparatorBackend] = None,
     method: str = "demucs",
+    progress: Optional[Callable[[float], None]] = None,
 ) -> Dict[str, str]:
     """Split a library track with `method`. Returns {stem: file_path}.
 
@@ -321,7 +332,10 @@ def separate_track(
     backend = backend or get_separator(method)
     out_dir = os.path.join(store.stems_dir(), str(int(track_id)))
     os.makedirs(out_dir, exist_ok=True)
-    paths = backend.separate(path, out_dir)
+    try:
+        paths = backend.separate(path, out_dir, progress=progress)
+    except TypeError:  # a separator that predates progress reporting
+        paths = backend.separate(path, out_dir)
     wanted = METHOD_STEMS[method]
     missing = [s for s in wanted if not paths.get(s) or not os.path.isfile(paths[s])]
     if missing:
@@ -334,17 +348,11 @@ def separate_track(
 
 
 def stems_available() -> bool:
-    """True when the real Demucs separator can run.
-
-    Checks every heavy import the separator needs (torch, torchaudio,
-    demucs) — a partial install (e.g. demucs without torchaudio) still
-    fails at separation time, so it must not count as available.
-    Never raises.
-    """
+    """True when the separator can run: onnxruntime and soxr importable.
+    Never raises."""
     try:
-        import torch  # noqa: F401
-        import torchaudio  # noqa: F401
-        import demucs  # noqa: F401
+        import onnxruntime  # noqa: F401
+        import soxr  # noqa: F401
 
         return True
     except ImportError:
@@ -352,5 +360,5 @@ def stems_available() -> bool:
 
 
 def _default_backend_name() -> str:
-    """'demucs' when the full torch stack is importable, else 'stub'."""
+    """'demucs' when onnxruntime is importable, else 'stub'."""
     return "demucs" if stems_available() else "stub"

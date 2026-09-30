@@ -24,6 +24,8 @@ Pillow==12.2.0
 # Sample Studio audio analysis (server-side DSP)
 librosa==0.11.0
 soundfile==0.14.0
+# Sample Studio stem separation: htdemucs as ONNX, no torch needed
+onnxruntime==1.30.0
 
 # Text processing
 Unidecode==1.4.0

@@ -84,32 +84,16 @@ export const STASH_FORMAT_LABEL: Record<StashFormat, string> = {
 };
 
 /** The four Demucs stems. Order matches the backend STEMS tuple. */
-export type StemName = 'drums' | 'vocals' | 'bass' | 'other' | RoughStemName;
-
-/** Rough-split output slugs (backend METHOD_STEMS). Never called "stems"
- *  in the UI — they are approximate DSP splits, labeled "(rough)". */
-export type RoughStemName = 'drums-rough' | 'music-rough' | 'center-rough';
+export type StemName = 'drums' | 'vocals' | 'bass' | 'other';
 
 export const STEM_NAMES: StemName[] = ['drums', 'vocals', 'bass', 'other'];
-
-export const ROUGH_STEM_NAMES: RoughStemName[] = ['drums-rough', 'music-rough', 'center-rough'];
 
 export const STEM_LABEL: Record<StemName, string> = {
   drums: 'Drums',
   vocals: 'Vocals',
   bass: 'Bass',
   other: 'Other',
-  'drums-rough': 'Drums (rough)',
-  'music-rough': 'Music (rough)',
-  'center-rough': 'Center (rough)',
 };
-
-/** Separation methods (backend SEPARATION_METHODS). */
-export type SeparationMethod = 'demucs' | 'rough-drums' | 'rough-center';
-
-export function isSeparationMethod(value: unknown): value is SeparationMethod {
-  return value === 'demucs' || value === 'rough-drums' || value === 'rough-center';
-}
 
 /** Beat-synced delay note values the backend accepts. */
 export type DelayTime = '1/4' | '1/8' | '1/2';
@@ -157,10 +141,10 @@ export interface StemsInfo {
   method?: string | null;
   /** Honest display labels for the stems (backend STEM_LABELS). */
   labels?: Record<string, string> | null;
-  /** False when torch/demucs isn't installed — the UI must not offer separation. */
+  /** False when the server can't run separation — the UI must not offer it. */
   stems_available: boolean;
-  /** Constant true — rough splits need no extra dependencies. */
-  rough_available?: boolean;
+  /** 0..1 while a separation runs. */
+  progress?: number | null;
 }
 
 export interface StashEntry {

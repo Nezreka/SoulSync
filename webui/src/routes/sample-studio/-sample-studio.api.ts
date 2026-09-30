@@ -19,7 +19,6 @@ import type {
   SampleAnalysis,
   SampleKey,
   SamplePeaks,
-  SeparationMethod,
   StashEntry,
   StashFormat,
   StemName,
@@ -319,15 +318,10 @@ export function stemAudioUrl(trackId: number, stem: StemName): string {
   return `/api/sample/stems/${trackId}/${stem}/audio`;
 }
 
-/** Enqueue separation for a track. Idempotent. `method` picks the
- *  separator: 'demucs' (needs the torch stack), 'rough-drums' or
- *  'rough-center' (built-in DSP, always available). */
-export async function requestStems(
-  trackId: number,
-  method: SeparationMethod = 'demucs',
-): Promise<StemsInfo> {
+/** Enqueue stem separation for a track. Idempotent. */
+export async function requestStems(trackId: number): Promise<StemsInfo> {
   const payload = await readJson<Envelope<StemsInfo>>(
-    apiClient.post('sample/stems', { json: { track_id: trackId, method } }),
+    apiClient.post('sample/stems', { json: { track_id: trackId } }),
   );
   return payload.data;
 }

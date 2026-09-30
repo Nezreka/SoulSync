@@ -5,10 +5,9 @@ process, so one in-process queue cannot double-run. The DB rows are the
 idempotency guard — a track whose outputs exist at the current
 SEPARATOR_VERSION is skipped, so a restart or duplicate enqueue is harmless.
 
-two lanes: demucs takes minutes on CPU, rough splits take seconds. separate
-queues so a quick rough split never waits behind someone's demucs job. jobs
-are keyed (track_id, method), so a track can have demucs stems and rough
-splits side by side. the UI polls GET /api/v1/sample/stems/status.
+jobs are keyed (track_id, method) and each method gets its own queue, so a
+future quick method never waits behind a multi-minute demucs job. the UI polls
+GET /api/v1/sample/stems/status.
 
 Deliberately NOT the repair sweep framework (wrong model — see worker.py).
 """
@@ -25,13 +24,14 @@ from utils.logging_config import get_logger
 
 logger = get_logger("sample.stems_worker")
 
-_LANES = ("demucs", "rough")
+_LANES = ("demucs",)
 _queues: Dict[str, "queue.Queue[Tuple[int, Optional[str], str]]"] = {
     lane: queue.Queue() for lane in _LANES
 }
 _pending: set = set()  # (track_id, method) queued or running (dedupe)
 _status: Dict[Tuple[int, str], str] = {}  # -> queued|running|done|error: ...
 _last_method: Dict[int, str] = {}  # the method the page asked for most recently
+_progress: Dict[Tuple[int, str], float] = {}  # 0..1 while a job runs
 _lock = threading.Lock()
 _threads: Dict[str, threading.Thread] = {}
 
@@ -40,7 +40,7 @@ _task_queue = _queues["demucs"]
 
 
 def _lane(method: str) -> str:
-    return "demucs" if method == "demucs" else "rough"
+    return method if method in _LANES else "demucs"
 
 
 def _process_one(track_id: int, backend_name: Optional[str] = None, method: str = "demucs") -> None:
@@ -50,8 +50,14 @@ def _process_one(track_id: int, backend_name: Optional[str] = None, method: str 
     if store.stems_complete(track_id, method):
         return
     backend = stems_mod.get_separator(method, backend_name)
+    key = (int(track_id), method)
+
+    def _report(fraction: float) -> None:
+        with _lock:
+            _progress[key] = max(0.0, min(1.0, float(fraction)))
+
     t0 = time.perf_counter()
-    paths = stems_mod.separate_track(track_id, backend=backend, method=method)
+    paths = stems_mod.separate_track(track_id, backend=backend, method=method, progress=_report)
     logger.info(
         "Separated track %s with %s: %d outputs (%.0fs)",
         track_id, backend.name, len(paths), time.perf_counter() - t0,
@@ -77,6 +83,7 @@ def _run(lane: str) -> None:
         finally:
             with _lock:
                 _pending.discard(key)
+                _progress.pop(key, None)
             q.task_done()
 
 
@@ -157,6 +164,13 @@ def get_status(track_id: int, method: Optional[str] = None) -> str:
         logger.debug("stems status check fell back to queue state: %s", exc)
     with _lock:
         return _status.get((int(track_id), method), "idle")
+
+
+def get_progress(track_id: int, method: Optional[str] = None) -> Optional[float]:
+    """0..1 while that job runs, None otherwise."""
+    method = method or current_method(track_id)
+    with _lock:
+        return _progress.get((int(track_id), method))
 
 
 def queue_depth() -> int:

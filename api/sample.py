@@ -627,7 +627,6 @@ def _stems_payload(track_id: int, status: str, method: str) -> dict:
         "stems": [],
         "labels": {},
         "stems_available": stems_mod.stems_available(),
-        "rough_available": True,
     }
     if status == "done":
         info = sample_store.get_stems(track_id, method)
@@ -644,7 +643,7 @@ def _stems_payload(track_id: int, status: str, method: str) -> dict:
 def separate_stems(track_id: int, backend: str | None = None, method: str | None = None) -> tuple:
     """Enqueue a split for a track. Idempotent.
 
-    method: demucs (needs torch) | rough-drums | rough-center (built in).
+    method: demucs (the only one now). needs onnxruntime.
     backend: 'stub' forces the test separator for demucs, nothing else.
     Returns 202 while queued/running, 200 when done. poll GET /sample/stems/status.
     """
@@ -662,7 +661,7 @@ def separate_stems(track_id: int, backend: str | None = None, method: str | None
         # refuse honestly instead of downloading a model the server can't run
         raise SampleHttpError(
             "STEMS_UNAVAILABLE",
-            "stem separation needs torch, torchaudio and demucs installed on the server",
+            "stem separation needs onnxruntime installed on the server (pip install onnxruntime)",
             409,
         )
     try:
@@ -689,7 +688,10 @@ def stems_status(track_id: int, method: str | None = None) -> tuple:
             raise SampleHttpError("BAD_REQUEST", f"unknown method {method!r}", 400)
         method = method or sw.current_method(track_id)
         status = sw.get_status(track_id, method)
-        return _stems_payload(track_id, status, method), 200
+        payload = _stems_payload(track_id, status, method)
+        if status == "running":
+            payload["progress"] = sw.get_progress(track_id, method)
+        return payload, 200
     except SampleHttpError:
         raise
     except Exception as e:
@@ -911,8 +913,8 @@ def register_routes(bp):
     def sample_stems_post():
         """Enqueue stem separation for a track. Idempotent.
 
-        Body: {track_id, method?, backend?}. method: demucs (default) |
-        rough-drums | rough-center. backend 'stub' forces the test separator.
+        Body: {track_id, method?, backend?}. method: demucs (default).
+        backend 'stub' forces the test separator.
         Returns 202 while queued/running, 200 when already done.
         """
         data = request.get_json(silent=True) or {}
@@ -944,7 +946,7 @@ def register_routes(bp):
     @bp.route("/sample/stems/<int:track_id>/<stem>/audio", methods=["GET"])
     @require_api_key
     def sample_stem_audio(track_id, stem):
-        """Serve one split output (a demucs stem or a rough output) as WAV."""
+        """Serve one separated stem as WAV."""
         try:
             path, mimetype = stem_audio_path(track_id, stem)
             return send_file(path, mimetype=mimetype, conditional=True)

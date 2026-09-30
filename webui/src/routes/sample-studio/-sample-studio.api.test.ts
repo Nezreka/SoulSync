@@ -195,18 +195,14 @@ describe('saveChop', () => {
 });
 
 describe('stems + stash requests', () => {
-  it('requestStems posts the track id and method', async () => {
+  it('requestStems posts the track id', async () => {
     routes['/api/sample/stems'] = ok(
       { success: true, data: { track_id: 7, status: 'queued', stems: [] }, error: null },
       202,
     );
     const info = await requestStems(7);
     expect(info.status).toBe('queued');
-    expect(calls[0].body).toMatchObject({ track_id: 7, method: 'demucs' });
-
-    const rough = await requestStems(7, 'rough-drums');
-    expect(rough.status).toBe('queued');
-    expect(calls[1].body).toMatchObject({ track_id: 7, method: 'rough-drums' });
+    expect(calls[0].body).toEqual({ track_id: 7 });
   });
 
   it('trimSilence posts the region and returns the adjusted bounds', async () => {
@@ -222,8 +218,8 @@ describe('stems + stash requests', () => {
 
   it('trimSilence trims against the stem being chopped', async () => {
     routes['/api/sample/trim'] = ok({ success: true, data: { start_s: 1, end_s: 2 }, error: null });
-    await trimSilence(7, 0, 3.5, 'drums-rough');
-    expect(calls[0].body).toMatchObject({ stem: 'drums-rough' });
+    await trimSilence(7, 0, 3.5, 'drums');
+    expect(calls[0].body).toMatchObject({ stem: 'drums' });
   });
 
   it('lookupStudioTrack resolves by exact track id', async () => {

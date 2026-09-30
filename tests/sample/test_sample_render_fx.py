@@ -1,10 +1,9 @@
 """sample studio: the backend half of the sep 29 page work, plus the review fixes.
 
-the page shipped fx (normalize/reverse/fade/space/delay), trim silence, the key
-display and rough splits, but nothing on the server read any of it: fx were
-dropped so previews and saved chops came out dry, /sample/trim 404'd, the key
-was never computed, and the rough buttons started a demucs run. these walk
-each one through the real blueprint, plus:
+the page shipped fx (normalize/reverse/fade/space/delay), trim silence and the
+key display, but nothing on the server read any of it: fx were dropped so
+previews and saved chops came out dry, /sample/trim 404'd, and the key was
+never computed. these walk each one through the real blueprint, plus:
 
 - previews decode just the selected region, not the whole song
 - a replaced source file re-analyzes and gets a fresh waveform
@@ -383,109 +382,31 @@ def test_drop_stale_peaks_spares_other_stems(tmp_path, monkeypatch):
     assert len(left) == 3
 
 
-# ── rough splits ───────────────────────────────────────────────────────
+# ── separation methods ─────────────────────────────────────────────────
 
 
-def _wait_split(c, method, timeout=60):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        data = c.get("/api/v1/sample/stems/status",
-                     query_string={"track_id": 1, "method": method}).get_json()["data"]
-        if data["status"] == "done":
-            return data
-        assert not data["status"].startswith("error"), data
-        time.sleep(0.2)
-    raise AssertionError(f"{method} never finished")
-
-
-def test_rough_drums_split_end_to_end(client):
-    """the rough buttons used to start demucs. now they run the built-in split."""
-    c, wav = client
-    r = c.post("/api/v1/sample/stems", json={"track_id": 1, "method": "rough-drums"})
-    assert r.status_code in (200, 202), r.get_json()
-    assert r.get_json()["data"]["method"] == "rough-drums"
-    data = _wait_split(c, "rough-drums")
-    assert data["stems"] == ["drums-rough", "music-rough"]
-    assert data["labels"] == {"drums-rough": "Drums (rough)", "music-rough": "Music (rough)"}
-    assert data["rough_available"] is True
-    # the two halves add back up to the mix
-    from core.sample.render import decode_stereo
-    from core.sample import store
-
-    src, _ = decode_stereo(str(wav))
-    d, _ = decode_stereo(store.stem_file_path(1, "drums-rough"))
-    m, _ = decode_stereo(store.stem_file_path(1, "music-rough"))
-    assert np.abs((d + m) - src).max() < 0.01
-    # and the drums half holds the clicks more than the chord
-    assert np.abs(d).max() > np.abs(m[SR + 500: SR + 5000]).max()
-    # every seam takes the new slugs
-    assert c.get("/api/v1/sample/stems/1/drums-rough/audio").status_code == 200
-    assert c.get("/api/v1/sample/peaks", query_string={"track_id": 1, "buckets": 64,
-                                                       "stem": "music-rough"}).status_code == 200
-    y, _ = _preview_audio(c, start_s=1, end_s=2, stem="drums-rough")
-    assert len(y) > 0
-    r = c.post("/api/v1/sample/trim", json={"track_id": 1, "start_s": 0, "end_s": 8, "stem": "drums-rough"})
-    assert r.status_code == 200
-
-
-def test_rough_center_keeps_the_middle(tmp_path):
-    from core.sample.rough import RoughCenterSeparator
-    from core.sample.render import decode_stereo
-
-    n = SR * 2
-    t = np.arange(n) / SR
-    mid = 0.3 * np.sin(2 * np.pi * 220 * t)
-    side = 0.3 * np.sin(2 * np.pi * 1320 * t)
-    y = np.stack([mid + side, mid], axis=1).astype(np.float32)  # side hard left only
-    src = tmp_path / "wide.wav"
-    sf.write(str(src), y, SR)
-    out = RoughCenterSeparator().separate(str(src), str(tmp_path / "out"))
-    c, _ = decode_stereo(out["center-rough"])
-    spec = np.abs(np.fft.rfft(c[:, 0]))
-    freqs = np.fft.rfftfreq(len(c), 1 / SR)
-    at = lambda f: spec[np.argmin(np.abs(freqs - f))]  # noqa: E731
-    assert at(220) > 10 * at(1320)
-
-
-def test_methods_sit_side_by_side_and_status_follows_the_last(client):
+def test_rough_methods_are_gone(client):
+    """the built-in rough splits sounded bad and were pulled. asking for them
+    is a plain 400 now, not a silent demucs run."""
     c, _ = client
-    c.post("/api/v1/sample/stems", json={"track_id": 1, "method": "rough-drums"})
-    _wait_split(c, "rough-drums")
-    c.post("/api/v1/sample/stems", json={"track_id": 1, "method": "rough-center"})
-    _wait_split(c, "rough-center")
-    data = c.get("/api/v1/sample/stems/status", query_string={"track_id": 1}).get_json()["data"]
-    assert data["method"] == "rough-center" and data["stems"] == ["center-rough"]
-    # asking for the first method again is instant, its files are still there
-    r = c.post("/api/v1/sample/stems", json={"track_id": 1, "method": "rough-drums"})
-    assert r.status_code == 200 and r.get_json()["data"]["status"] == "done"
-
-
-def test_unknown_method_is_400(client):
-    c, _ = client
-    r = c.post("/api/v1/sample/stems", json={"track_id": 1, "method": "karaoke"})
-    assert r.status_code == 400
+    for method in ("rough-drums", "rough-center", "karaoke"):
+        r = c.post("/api/v1/sample/stems", json={"track_id": 1, "method": method})
+        assert r.status_code == 400, method
+    assert c.get("/api/v1/sample/stems/1/drums-rough/audio").status_code == 400
 
 
 # ── demucs model ───────────────────────────────────────────────────────
 
 
-def test_model_is_the_real_htdemucs_checkpoint():
-    """the old filename didn't exist on meta's server (403) or the mirror (404),
-    so demucs could never download its weights."""
+def test_model_is_pinned_and_hash_checked():
+    """one exact file from one exact commit, checked against its full sha256.
+    (the torch version's filename didn't exist anywhere, so it could never
+    download at all.)"""
     from core.sample import stems
 
-    assert stems.MODEL_FILENAME == "955717e8-8726e21a.th"
-    assert stems.MODEL_FILENAME.split("-")[1].split(".")[0] == stems.MODEL_SHA256_PREFIX
-    assert all(u.endswith(stems.MODEL_FILENAME) for u in stems.MODEL_URLS)
-
-
-def test_model_lives_where_demucs_looks(tmp_path, monkeypatch):
-    """torch.hub.set_dir(models_dir()) -> demucs reads <dir>/checkpoints/<file>.
-    anywhere else and demucs downloads its own second copy."""
-    from core.sample import stems
-
-    monkeypatch.setattr(stems, "models_dir", lambda: str(tmp_path))
-    assert stems.model_path() == os.path.join(str(tmp_path), "checkpoints", stems.MODEL_FILENAME)
+    assert stems.MODEL_FILENAME == "htdemucs_fp16weights.onnx"
+    assert len(stems.MODEL_SHA256) == 64
+    assert all(stems._MODEL_COMMIT in u and u.endswith(stems.MODEL_FILENAME) for u in stems.MODEL_URLS)
 
 
 def test_model_hash_must_match(tmp_path, monkeypatch):
@@ -498,30 +419,146 @@ def test_model_hash_must_match(tmp_path, monkeypatch):
         f.write(b"x" * 100)
     with pytest.raises(RuntimeError, match="checksum"):
         stems.ensure_model()
-    monkeypatch.setattr(stems, "MODEL_SHA256_PREFIX", stems._sha256_file(stems.model_path())[:8])
+    monkeypatch.setattr(stems, "MODEL_SHA256", stems._sha256_file(stems.model_path()))
     assert stems.ensure_model() == stems.model_path()
 
 
-def test_demucs_import_checked_before_any_download(monkeypatch):
-    """no torch: fail on the import, never fetch 84 MB first."""
-    import builtins
+def test_onnxruntime_checked_before_any_download(monkeypatch):
+    """can't run it: fail on the import, never fetch 166 MB first."""
+    import sys
 
     from core.sample import stems
 
-    monkeypatch.setattr(stems, "_demucs_model", None)
     fetched = []
     monkeypatch.setattr(stems, "ensure_model", lambda: fetched.append(1))
-    real_import = builtins.__import__
-
-    def no_torch(name, *a, **k):
-        if name == "torch" or name.startswith("demucs"):
-            raise ImportError(name)
-        return real_import(name, *a, **k)
-
-    monkeypatch.setattr(builtins, "__import__", no_torch)
+    monkeypatch.setitem(sys.modules, "onnxruntime", None)
     with pytest.raises(ImportError):
-        stems._load_demucs_model()
+        stems._open_session()
     assert fetched == []
+
+
+def test_session_is_built_lean(monkeypatch):
+    """graph optimizations turn the fp16 weights into fp32 copies: one 7.8s
+    chunk went past 4 GB with them on, ~1 GB with them off. pin the settings."""
+    import sys
+    import types
+
+    from core.sample import stems
+
+    made = {}
+
+    class _Opts:
+        pass
+
+    class _Session:
+        def __init__(self, path, sess_options=None, providers=None):
+            made["opts"] = sess_options
+            made["providers"] = providers
+
+    fake = types.ModuleType("onnxruntime")
+    fake.SessionOptions = _Opts
+    fake.InferenceSession = _Session
+    fake.GraphOptimizationLevel = types.SimpleNamespace(ORT_DISABLE_ALL="off", ORT_ENABLE_ALL="all")
+    monkeypatch.setitem(sys.modules, "onnxruntime", fake)
+    monkeypatch.setattr(stems, "ensure_model", lambda: "/m.onnx")
+    stems._open_session()
+    opts = made["opts"]
+    assert opts.graph_optimization_level == "off"
+    assert opts.enable_cpu_mem_arena is False and opts.enable_mem_pattern is False
+    assert 1 <= opts.intra_op_num_threads <= max(1, (os.cpu_count() or 2))
+    assert made["providers"] == ["CPUExecutionProvider"]
+
+
+# ── the separation loop, with a fake model ─────────────────────────────
+
+
+def _split_by_channel_model(chunk):
+    """stand-in for htdemucs: drums = left, bass = right, other/vocals = 0.
+    shape (1, 2, N) -> (1, 4, 2, N)."""
+    x = chunk[0]
+    out = np.zeros((1, 4, 2, x.shape[1]), np.float32)
+    out[0, 0, 0] = x[0]
+    out[0, 1, 1] = x[1]
+    return out
+
+
+def test_separate_array_round_trips_long_audio():
+    """chunks + quarter overlap + crossfade + normalize/denormalize must hand
+    the audio back exactly where it was, across many chunk boundaries."""
+    from core.sample.stems import CHUNK, MODEL_SR, separate_array
+
+    n = int(CHUNK * 3.4)
+    t = np.arange(n) / MODEL_SR
+    y = np.stack([0.4 * np.sin(2 * np.pi * 110 * t), 0.2 * np.sin(2 * np.pi * 330 * t) + 0.05], axis=1)
+    seen = []
+    stems, sr = separate_array(y.astype(np.float32), MODEL_SR, _split_by_channel_model, seen.append)
+    assert sr == MODEL_SR
+    assert set(stems) == {"drums", "bass", "other", "vocals"}
+    # the fake model routes left -> drums, right -> bass. after crossfading
+    # and undoing the normalization they must come back sample for sample
+    assert stems["drums"].shape == (n, 2)
+    assert np.abs(stems["drums"][:, 0] - y[:, 0]).max() < 1e-4
+    assert np.abs(stems["bass"][:, 1] - y[:, 1]).max() < 1e-4
+    assert seen[-1] == pytest.approx(1.0) and seen == sorted(seen) and len(seen) >= 4
+
+
+def test_separate_array_keeps_the_first_and_last_samples():
+    """the reference loop faded the first chunk in from exactly 0, so the song's
+    opening samples came out silent. a single short chunk too."""
+    from core.sample.stems import MODEL_SR, separate_array
+
+    for n in (1000, 400000):
+        y = np.full((n, 2), 0.3, np.float32)
+        y[:, 1] = -0.2
+        stems, _ = separate_array(y, MODEL_SR, _split_by_channel_model)
+        assert stems["drums"][0, 0] == pytest.approx(0.3, abs=1e-4), n
+        assert stems["drums"][-1, 0] == pytest.approx(0.3, abs=1e-4), n
+        assert stems["bass"][0, 1] == pytest.approx(-0.2, abs=1e-4), n
+
+
+def test_separate_array_resamples_and_upmixes_mono():
+    from core.sample.stems import MODEL_SR, separate_array
+
+    sr = 22050
+    y = (0.3 * np.sin(2 * np.pi * 220 * np.arange(sr * 2) / sr)).astype(np.float32)
+    stems, out_sr = separate_array(y, sr, _split_by_channel_model)
+    assert out_sr == MODEL_SR
+    assert stems["drums"].shape == (MODEL_SR * 2, 2)
+
+
+def test_stems_worker_reports_progress(client, monkeypatch):
+    """the page shows "Separating… 42%" from the status poll."""
+    import threading
+
+    from core.sample import stems as stems_mod
+    from core.sample import stems_worker as sw
+
+    c, _ = client
+    gate = threading.Event()
+    reached = threading.Event()
+
+    class _Slow(stems_mod.StubSeparator):
+        def separate(self, track_path, out_dir, progress=None):
+            progress(0.42)
+            reached.set()
+            gate.wait(10)
+            progress(1.0)
+            return super().separate(track_path, out_dir)
+
+    monkeypatch.setattr(stems_mod, "stems_available", lambda: True)
+    monkeypatch.setattr(stems_mod, "get_separator", lambda method, backend=None: _Slow())
+    assert c.post("/api/v1/sample/stems", json={"track_id": 1}).status_code == 202
+    assert reached.wait(10)
+    data = c.get("/api/v1/sample/stems/status", query_string={"track_id": 1}).get_json()["data"]
+    assert data["status"] == "running" and data["progress"] == pytest.approx(0.42)
+    gate.set()
+    for _ in range(100):
+        data = c.get("/api/v1/sample/stems/status", query_string={"track_id": 1}).get_json()["data"]
+        if data["status"] == "done":
+            break
+        time.sleep(0.1)
+    assert data["status"] == "done" and "progress" not in data
+    assert sw.get_progress(1) is None
 
 
 # ── unreachable files ──────────────────────────────────────────────────

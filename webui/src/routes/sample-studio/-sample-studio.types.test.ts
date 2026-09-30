@@ -4,8 +4,6 @@ import {
   analysisErrorMessage,
   DEFAULT_FILTERS,
   isAnalysisError,
-  isSeparationMethod,
-  ROUGH_STEM_NAMES,
   STASH_FORMAT_LABEL,
   STEM_LABEL,
   STEM_NAMES,
@@ -35,32 +33,7 @@ describe('type constants', () => {
 
   it('STEM_NAMES matches the backend STEMS order', () => {
     expect(STEM_NAMES).toEqual(['drums', 'vocals', 'bass', 'other']);
-    expect(Object.keys(STEM_LABEL)).toEqual([
-      'drums',
-      'vocals',
-      'bass',
-      'other',
-      'drums-rough',
-      'music-rough',
-      'center-rough',
-    ]);
-  });
-
-  it('rough outputs get honest labels — never "stems"', () => {
-    expect(STEM_LABEL['drums-rough']).toBe('Drums (rough)');
-    expect(STEM_LABEL['music-rough']).toBe('Music (rough)');
-    expect(STEM_LABEL['center-rough']).toBe('Center (rough)');
-    for (const name of ROUGH_STEM_NAMES) {
-      expect(STEM_LABEL[name]).not.toMatch(/stem/i);
-    }
-  });
-
-  it('isSeparationMethod guards the backend method strings', () => {
-    expect(isSeparationMethod('demucs')).toBe(true);
-    expect(isSeparationMethod('rough-drums')).toBe(true);
-    expect(isSeparationMethod('rough-center')).toBe(true);
-    expect(isSeparationMethod('bogus')).toBe(false);
-    expect(isSeparationMethod(undefined)).toBe(false);
+    expect(Object.keys(STEM_LABEL)).toEqual(['drums', 'vocals', 'bass', 'other']);
   });
 
   it('STASH_FORMAT_LABEL covers every format', () => {
