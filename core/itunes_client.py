@@ -258,6 +258,12 @@ class iTunesClient:
     # Fallback storefronts to try when primary country returns no results
     FALLBACK_COUNTRIES = ['US', 'GB', 'FR', 'DE', 'JP', 'AU', 'CA', 'BR', 'KR', 'SE']
 
+    # stores a search tries when the home store has nothing close (#1398).
+    # plenty of european music isn't in the US store at all. capped because
+    # every search costs ~3s of rate limit.
+    SEARCH_FALLBACK_COUNTRIES = ['US', 'GB', 'DE', 'FR', 'SE']
+    SEARCH_FALLBACK_LIMIT = 3
+
     def __init__(self, country: str = None):
         self._fixed_country = country.upper() if country else None
         self.session = requests.Session()
@@ -285,12 +291,13 @@ class iTunesClient:
         return True
     
     @rate_limited
-    def _search(self, term: str, entity: str, limit: int = 50) -> List[Dict[str, Any]]:
-        """Generic search method for iTunes API"""
+    def _search(self, term: str, entity: str, limit: int = 50,
+                country: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Generic search method for iTunes API. `country` overrides the home store."""
         try:
             params = {
                 'term': term,
-                'country': self.country,
+                'country': (country or self.country).upper(),
                 'media': 'music',
                 'entity': entity,
                 'limit': min(limit, 200),  # iTunes max is 200
@@ -376,11 +383,12 @@ class iTunesClient:
     # ==================== Track Methods ====================
     
     @rate_limited
-    def search_tracks(self, query: str, limit: int = 20) -> List[Track]:
-        """Search for tracks using iTunes API"""
-        # Check search cache
+    def search_tracks(self, query: str, limit: int = 20, country: Optional[str] = None) -> List[Track]:
+        """Search for tracks using iTunes API. `country` searches another store."""
+        # another store's results are cached under their own key
+        cache_query = f"{query}@{country.upper()}" if country else query
         cache = get_metadata_cache()
-        cached_results = cache.get_search_results('itunes', 'track', query, limit)
+        cached_results = cache.get_search_results('itunes', 'track', cache_query, limit)
         if cached_results is not None:
             tracks = []
             for raw in cached_results:
@@ -391,7 +399,7 @@ class iTunesClient:
             if tracks:
                 return tracks
 
-        results = self._search(query, 'song', limit)
+        results = self._search(query, 'song', limit, country=country)
         tracks = []
 
         # Collect artist IDs for batch lookup
@@ -420,10 +428,38 @@ class iTunesClient:
         entries = [(str(td.get('trackId', '')), td) for td in raw_items if td.get('trackId')]
         if entries:
             cache.store_entities_bulk('itunes', 'track', entries)
-            cache.store_search_results('itunes', 'track', query, limit,
+            cache.store_search_results('itunes', 'track', cache_query, limit,
                                        [str(td.get('trackId', '')) for td in raw_items if td.get('trackId')])
 
         return tracks
+
+    def search_tracks_any_store(self, query: str, limit: int = 20,
+                                expected_title: str = '', expected_artist: str = '') -> List[Track]:
+        """search_tracks, then other stores when the home store has nothing close.
+
+        #1398: E-Type's "Princess Of Egypt" and Helena Paparizou's "Ti Ti" aren't
+        in the US store at all, so a US search came back full of other songs.
+        the same search in GB finds both first try. when another store has it,
+        its results go first, then whatever the home store found.
+        """
+        from core.metadata.relevance import is_strong_match
+
+        home = self.search_tracks(query, limit)
+        if not expected_title or any(is_strong_match(t, expected_title, expected_artist) for t in home):
+            return home
+        others = [c for c in self.SEARCH_FALLBACK_COUNTRIES if c != self.country]
+        for country in others[: self.SEARCH_FALLBACK_LIMIT]:
+            found = self.search_tracks(query, limit, country=country)
+            if any(is_strong_match(t, expected_title, expected_artist) for t in found):
+                logger.info("iTunes: %r not in the %s store, found it in %s", query, self.country, country)
+                seen = set()
+                merged = []
+                for t in found + home:
+                    if t.id not in seen:
+                        seen.add(t.id)
+                        merged.append(t)
+                return merged[:limit]
+        return home
     
     def _get_clean_artist_names(self, artist_ids: List[str]) -> Dict[str, str]:
         """
