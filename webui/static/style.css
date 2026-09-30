@@ -77670,41 +77670,41 @@ body.max-performance .dash-card::after {
     color: #fff;
 }
 
-/* while a playlist is being dragged, every place it can land lights up.
-   the chips pulse (they're small and easy to miss), filled lanes get a
-   steady ring, and the one under the cursor goes bright. */
+/* while a playlist is being dragged, every place it can land lights up in a
+   bright sky blue (not the accent, the board is already full of accent), and
+   stays lit until it's dropped. chips pulse, filled lanes get a ring, the one
+   under the cursor fills solid. */
 @keyframes autoSyncDropPulse {
     0%, 100% {
-        box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.45), 0 0 14px rgba(var(--accent-rgb), 0.25);
+        box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.55), 0 0 18px 2px rgba(56, 189, 248, 0.55);
     }
     50% {
-        box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.12), 0 0 22px rgba(var(--accent-rgb), 0.45);
+        box-shadow: 0 0 0 5px rgba(56, 189, 248, 0.25), 0 0 32px 6px rgba(56, 189, 248, 0.8);
     }
 }
 
 .auto-sync-modal.is-dragging .auto-sync-lane.empty {
-    border-style: solid;
-    border-color: rgba(var(--accent-rgb), 0.6);
-    background: rgba(var(--accent-rgb), 0.12);
-    animation: autoSyncDropPulse 1.4s ease-in-out infinite;
+    border: 1px solid #7dd3fc;
+    background: rgba(56, 189, 248, 0.22);
+    animation: autoSyncDropPulse 1.2s ease-in-out infinite;
 }
 
 .auto-sync-modal.is-dragging .auto-sync-lane.empty .auto-sync-lane-badge b,
 .auto-sync-modal.is-dragging .auto-sync-lane.empty .auto-sync-lane-badge::before {
-    color: #fff;
+    color: #e0f2fe;
 }
 
 .auto-sync-modal.is-dragging .auto-sync-lane.filled {
-    border-color: rgba(var(--accent-rgb), 0.5);
-    box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.25), 0 0 18px rgba(var(--accent-rgb), 0.15);
+    border: 1px solid #7dd3fc;
+    box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.35), 0 0 26px rgba(56, 189, 248, 0.35);
 }
 
 .auto-sync-modal.is-dragging .auto-sync-lane.drag-over {
-    border-color: rgb(var(--accent-rgb));
-    background: rgba(var(--accent-rgb), 0.28);
+    border-color: #e0f2fe;
+    background: rgba(56, 189, 248, 0.35);
     animation: none;
-    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.3), 0 0 28px rgba(var(--accent-rgb), 0.55);
-    transform: scale(1.04);
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.7), 0 0 40px 8px rgba(56, 189, 248, 0.75);
+    transform: scale(1.05);
 }
 
 .auto-sync-modal.is-dragging .auto-sync-lane.filled.drag-over {
@@ -77713,18 +77713,18 @@ body.max-performance .dash-card::after {
 
 /* the chip you're over fills solid, so it reads as "this one" */
 .auto-sync-modal.is-dragging .auto-sync-lane.empty.drag-over {
-    background: rgb(var(--accent-rgb));
+    background: #38bdf8;
 }
 
 .auto-sync-modal.is-dragging .auto-sync-lane.empty.drag-over .auto-sync-lane-badge b,
 .auto-sync-modal.is-dragging .auto-sync-lane.empty.drag-over .auto-sync-lane-badge::before {
-    color: #06120b;
+    color: #04212f;
 }
 
 @media (prefers-reduced-motion: reduce) {
     .auto-sync-modal.is-dragging .auto-sync-lane.empty {
         animation: none;
-        box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.2), 0 0 18px rgba(var(--accent-rgb), 0.35);
+        box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.45), 0 0 26px 4px rgba(56, 189, 248, 0.6);
     }
 }
 
