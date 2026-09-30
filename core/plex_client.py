@@ -987,7 +987,8 @@ class PlexClient(MediaServerClient):
             
             # Check if backup is enabled in config
             from core.settings import config_manager
-            create_backup = config_manager.get('playlist_sync.create_backup', True)
+            from core.sync.playlist_edit import playlist_backup_enabled
+            create_backup = playlist_backup_enabled(config_manager)
             
             if create_backup:
                 backup_name = f"{playlist_name} Backup"

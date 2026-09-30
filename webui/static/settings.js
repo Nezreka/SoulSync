@@ -3327,7 +3327,7 @@ async function loadSettingsData() {
         if (_wlTtl) _wlTtl.value = settings.wishlist?.ignore_ttl_days ?? 30;
 
         // Populate Playlist Sync settings
-        document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup !== false;
+        document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup === true;
         const _syncModeEl = document.getElementById('playlist-sync-mode');
         if (_syncModeEl) _syncModeEl.value = settings.playlist_sync?.mode || 'replace';
 

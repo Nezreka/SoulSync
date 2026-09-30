@@ -810,7 +810,9 @@ class ConfigManager:
                 },
             },
             "playlist_sync": {
-                "create_backup": True,
+                # off by default (#1406): replace-sync server backups pile up
+                # as "<name> Backup" playlists most people never asked for
+                "create_backup": False,
                 # How a re-sync writes to the server playlist:
                 #   replace   — delete + recreate (default; today's behavior)
                 #   reconcile — edit in place (add/remove delta), preserving the

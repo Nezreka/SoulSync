@@ -83,7 +83,7 @@
     "downsample_hires": false
   },
   "playlist_sync": {
-    "create_backup": true
+    "create_backup": false
   },
   "listenbrainz": {
     "token": ""

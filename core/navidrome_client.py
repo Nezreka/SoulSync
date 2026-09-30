@@ -1637,7 +1637,8 @@ class NavidromeClient(MediaServerClient):
             
             # Check if backup is enabled in config
             from core.settings import config_manager
-            create_backup = config_manager.get('playlist_sync.create_backup', True)
+            from core.sync.playlist_edit import playlist_backup_enabled
+            create_backup = playlist_backup_enabled(config_manager)
 
             # If we have existing playlists and want to backup, use the first one found
             if existing_playlists and create_backup:

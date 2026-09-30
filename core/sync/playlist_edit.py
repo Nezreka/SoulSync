@@ -192,3 +192,13 @@ __all__ = [
     "normalize_sync_mode",
     "VALID_SYNC_MODES",
 ]
+
+
+def playlist_backup_enabled(config) -> bool:
+    """should a replace sync copy the server playlist to "<name> Backup" first.
+
+    off unless someone turned it on (#1406). it clutters the server with
+    backup playlists, and soulsync already keeps its own copy of the source.
+    one place so plex / jellyfin / navidrome can't disagree on the default.
+    """
+    return bool(config.get('playlist_sync.create_backup', False))
