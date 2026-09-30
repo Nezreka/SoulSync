@@ -78,3 +78,52 @@ def test_numberless_or_provenance_number_does_not_create_conflict():
     assert not _conflicting_title_numbers(_normalize('Ultima Esperanza, Pt. I'), _normalize('Ultima Esperanza, Pt. 1'))
     assert not _conflicting_title_numbers(
         _normalize('Rabbit Run'), _normalize('Rabbit Run - From "8 Mile" Soundtrack'))
+
+
+@pytest.mark.parametrize('metadata_match', [True, False])
+def test_different_remaster_years_still_produce_a_duplicate_finding(metadata_match):
+    tracks = [
+        _make_track(1, title="Can't Buy Me Love (Remastered 2015)", artist='The Beatles',
+                    album='1', file_path='/music/1/song.flac'),
+        _make_track(2, title="Can't Buy Me Love (Remastered 2009)", artist='The Beatles',
+                    album="A Hard Day's Night", file_path='/music/ahdn/song.flac'),
+    ]
+    findings = _findings(tracks, metadata_match=metadata_match)
+    assert len(findings) == 1
+    assert {t['id'] for t in findings[0]['details']['tracks']} == {1, 2}
+
+
+@pytest.mark.parametrize('qualifier', [
+    '(2011 Remaster)', '(Remastered 2011)', '[2011 Mix]', '- Edition 2011',
+    '(2011 Version)', '(Remaster 2011)', '(2011 Remastered)', '(Mix 2011)',
+    '(2011 Edition)', '(Version 2011)',
+    '(Remastered-2011)', '(2011-Remaster)',
+])
+def test_edition_year_does_not_conflict_with_part_number(qualifier):
+    assert not _conflicting_title_numbers(_normalize(f'Pt. 1 {qualifier}'), _normalize('Pt. 1'))
+    assert _conflicting_title_numbers(_normalize(f'Pt. 1 {qualifier}'), _normalize('Pt. 2'))
+
+
+@pytest.mark.parametrize(('first', 'second'), [
+    ('Song (Live 1977)', 'Song (Live 1978)'),
+    ('Song (Live 1977) (2011 Remaster)', 'Song (Live 1978) (2011 Remaster)'),
+    ('Song (Live Version 1977)', 'Song (Live Version 1978)'),
+    ('Song (Live 1977 Mix)', 'Song (Live 1978 Mix)'),
+    ('Song 1977', 'Song 1978'),
+    ('1999 (2011 Remaster)', '1984 (2011 Remaster)'),
+    ('Song (Mix 1)', 'Song (Mix 2)'),
+])
+def test_performance_years_and_non_year_numbers_still_conflict(first, second):
+    assert _conflicting_title_numbers(_normalize(first), _normalize(second))
+
+
+@pytest.mark.parametrize('metadata_match', [True, False])
+def test_numberless_track_cannot_bridge_conflicting_parts(metadata_match):
+    tracks = [
+        _make_track(1, title='A Long Segue', file_path='/music/a/Segue.flac'),
+        _make_track(2, title='A Long Segue 1', file_path='/music/b/Segue.flac'),
+        _make_track(3, title='A Long Segue 2', file_path='/music/c/Segue.flac'),
+    ]
+    findings = _findings(tracks, metadata_match=metadata_match)
+    assert len(findings) == 1
+    assert {t['id'] for t in findings[0]['details']['tracks']} == {1, 2}
