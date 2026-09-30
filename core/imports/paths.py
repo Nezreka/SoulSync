@@ -986,7 +986,10 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         or (album_info.get("total_tracks") if isinstance(album_info, dict) else None)
         or 0
     )
-    album_type_display = get_album_type_display(raw_album_type, total_tracks, source)
+    # reorganize names the source its release type came from; a download's
+    # type came from the source it was downloaded from
+    _type_source = (context.get("_album_type_source") if isinstance(context, dict) else None) or source
+    album_type_display = get_album_type_display(raw_album_type, total_tracks, _type_source)
 
     # $atypes: every qualifier the release actually carries, bracketed, and
     # nothing at all for a plain album — the beets convention, so a library

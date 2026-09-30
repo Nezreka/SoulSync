@@ -1249,6 +1249,7 @@ def _build_post_process_context(
     local_title: Optional[str] = None,
     local_year: Optional[str] = None,
     record_type: Optional[str] = None,
+    type_source: Optional[str] = None,
     album_artist: Optional[str] = None,
 ) -> dict:
     """Build the same shape `import_album_process` builds so post-process
@@ -1342,7 +1343,13 @@ def _build_post_process_context(
 
     effective_artist_name = primary_track_artist if (is_comp and primary_track_artist) else album_artist_name
 
+    # which source the release type came from, for $albumtype only (a source
+    # with its own EP label is taken at its word). tag mode has none: its
+    # record_type is the library's, so it keeps the track-count split and a
+    # reorganize files a release where the download did
+    _type_source = type_source if type_source and type_source != 'tags' else ''
     return {
+        '_album_type_source': _type_source,
         'spotify_artist': {
             'name': effective_artist_name,
             'id': '',
@@ -1585,6 +1592,7 @@ def preview_album_reorganize(
             local_year=(str(album_data.get('year')) if album_data.get('year') else None),
             record_type=plan.get('record_type') or album_data.get('record_type'),
             album_artist=artist_name,
+            type_source=plan.get('source'),
         )
         # `_build_final_path_for_track` switches between ALBUM and SINGLE
         # modes based on `album_info.get('is_album')` — must be passed,
@@ -1783,6 +1791,7 @@ class _RunContext:
     stop_check: Optional[Callable[[], bool]] = None
     transfer_dir: Optional[str] = None      # anchors the #746 /deleted-quarantine skip
     record_type: Optional[str] = None
+    source: Optional[str] = None            # the metadata source the plan resolved
 
     def emit(self, **updates) -> None:
         """Fire the progress callback. Caller is responsible for
@@ -1870,6 +1879,7 @@ def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, st
         local_title=title, local_year=ctx.local_year,
         record_type=ctx.record_type,
         album_artist=ctx.artist_name,
+        type_source=ctx.source,
     )
     context_key = f"reorganize_{ctx.album_id}_{track_id}_{uuid.uuid4().hex[:8]}"
     try:
@@ -2203,6 +2213,7 @@ def reorganize_album(
         stop_check=stop_check,
         transfer_dir=transfer_dir,
         record_type=plan.get('record_type') or album_data.get('record_type'),
+        source=plan.get('source'),
     )
 
     try:

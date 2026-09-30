@@ -744,3 +744,31 @@ def test_the_path_builder_files_by_the_sources_own_label(tmp_path, monkeypatch, 
     type_folder = os.path.basename(os.path.dirname(os.path.dirname(path)))
     assert type_folder == folder, path
 
+
+
+@pytest.mark.parametrize(("type_source", "folder"), [
+    ("deezer", "Single"),    # api-mode reorganize: agrees with the download
+    ("tags", "EP"),          # tag mode: the library's record_type, count split
+    ("spotify", "EP"),       # spotify's EP-as-single still splits
+    (None, "EP"),
+])
+def test_reorganize_files_a_release_where_the_download_did(tmp_path, monkeypatch, type_source, folder):
+    """a deezer single downloaded into Single/ must not be moved to EP/ by the
+    next reorganize: reorganize names the source its release type came from."""
+    from core.library_reorganize import _build_album_info, _build_post_process_context
+
+    monkeypatch.setattr(paths, "_get_config_manager", lambda: _Cfg({
+        "file_organization.templates": {"album_path": "$albumartist/$albumtype/$album/$track - $title"},
+        "file_organization.enabled": True,
+        "soulseek.transfer_path": str(tmp_path),
+    }))
+    ctx = _build_post_process_context(
+        {"id": "AL9", "name": "Harder, Better, Faster, Stronger", "release_date": "2001-10-13",
+         "total_tracks": 5, "images": [{"url": ""}]},
+        {"name": "Harder, Better, Faster, Stronger", "track_number": 1, "disc_number": 1,
+         "artists": [{"name": "Daft Punk"}]},
+        "Daft Punk", "Harder, Better, Faster, Stronger", 1, record_type="single",
+        type_source=type_source)
+    path, _ = paths.build_final_path_for_track(
+        ctx, ctx["spotify_artist"], _build_album_info(ctx), ".flac", create_dirs=False)
+    assert os.path.basename(os.path.dirname(os.path.dirname(path))) == folder, path
