@@ -15,6 +15,7 @@ import {
 } from './-explorer.connections';
 import {
   ALBUM_CLICK_DELAY_MS,
+  EXPLORER_WHEEL_LOCK_KEY,
   createAlbumClickController,
   useExplorerPan,
   useExplorerZoom,
@@ -526,6 +527,7 @@ describe('useExplorerZoom', () => {
     const { getByTestId, unmount } = renderZoom();
     act(() => controls.toggleWheelZoomLock());
     expect(controls.wheelZoomLocked).toBe(true);
+    expect(localStorage.getItem(EXPLORER_WHEEL_LOCK_KEY)).toBe('1');
     const plain = new WheelEvent('wheel', { deltaY: -120, cancelable: true, bubbles: true });
     act(() => {
       getByTestId('viewport').dispatchEvent(plain);

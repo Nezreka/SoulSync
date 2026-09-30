@@ -27,6 +27,7 @@ import {
   mirroredSourceIcon,
   pipelinePhaseFor,
   timeAgo,
+  mirroredDiscoveryReopenable,
 } from './-sync.mirrored';
 
 const STATS = readFileSync(resolve(process.cwd(), 'static/stats-automations.js'), 'utf8');
@@ -519,5 +520,20 @@ describe('retryFailedMirroredDiscovery (2155-2194)', () => {
     const vertical = fakeVertical({ spotifyMatches: 7 });
     await retryFailedMirroredDiscovery('mirrored_3', vertical as never);
     expect(toasts).toEqual([['Error retrying discovery: network down', 'error']]);
+  });
+});
+
+describe('mirroredDiscoveryReopenable (#1405)', () => {
+  it('only reopens a started discovery that has a playlist behind it', () => {
+    const playlist = { track_count: 3 };
+    expect(mirroredDiscoveryReopenable(undefined)).toBe(false);
+    expect(mirroredDiscoveryReopenable({ phase: 'fresh', playlist })).toBe(false);
+    expect(mirroredDiscoveryReopenable({ phase: 'discovered', playlist })).toBe(true);
+    // clear discovery + sync left exactly this: a pipeline phase on an empty
+    // state, which opened a 0 track discovery modal
+    expect(mirroredDiscoveryReopenable({ phase: 'pipeline_running' })).toBe(false);
+    expect(mirroredDiscoveryReopenable({ phase: 'discovered', playlist: { track_count: 0 } })).toBe(
+      false,
+    );
   });
 });
