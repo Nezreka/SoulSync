@@ -3562,6 +3562,7 @@ function processModalStatusUpdate(playlistId, data) {
             // Hide cancel button and mark as complete
             document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';
             process.status = 'complete';
+            _announceDownloadsFinished(playlistId, completedCount);
             updatePlaylistCardUI(playlistId);
 
             // Save M3U once on completion (not during progress polling)
@@ -3649,6 +3650,7 @@ function processModalStatusUpdate(playlistId, data) {
                 if (process.status !== 'complete') {
                     process.status = 'complete';
                     updatePlaylistCardUI(playlistId); // Update card to show ready for review
+                    _announceDownloadsFinished(playlistId, completedCount);
 
                     // Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
                     if (playlistId.startsWith('youtube_')) {
@@ -3925,6 +3927,16 @@ function updateTrackSelectionCount(playlistId) {
     if (wishlistBtn) {
         wishlistBtn.disabled = selected === 0;
     }
+}
+
+// a finished download changes what the library owns. pages that show "in
+// library" badges (search) re-check on this; before it, search kept an album
+// you'd just downloaded unbadged until a browser refresh (#1386)
+function _announceDownloadsFinished(playlistId, completedCount) {
+    if (!(completedCount > 0)) return;
+    window.dispatchEvent(new CustomEvent('ss:downloads-finished', {
+        detail: { playlistId, completed: completedCount },
+    }));
 }
 
 // a batch the server no longer has is over: cancelled from the downloads

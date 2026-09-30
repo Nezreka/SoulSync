@@ -187,3 +187,36 @@ describe('processModalStatusUpdate with a batch cancelled on the server', () => 
         assert.ok(ctx.toasts.every((t) => !/complete/i.test(t)), ctx.toasts.join(' | '));
     });
 });
+
+describe('_announceDownloadsFinished', () => {
+    // #1386: search kept an album you'd just downloaded unbadged until a
+    // browser refresh. the modal now tells the page a download landed.
+    function ctx() {
+        const c = { fired: [] };
+        c.CustomEvent = class { constructor(type, init) { this.type = type; this.detail = init && init.detail; } };
+        c.window = { dispatchEvent: (e) => c.fired.push(e) };
+        vm.createContext(c);
+        vm.runInContext(lift('_announceDownloadsFinished'), c);
+        return c;
+    }
+
+    test('fires once something actually downloaded', () => {
+        const c = ctx();
+        c._announceDownloadsFinished('enhanced_search_x', 3);
+        assert.equal(c.fired.length, 1);
+        assert.equal(c.fired[0].type, 'ss:downloads-finished');
+        assert.equal(c.fired[0].detail.completed, 3);
+    });
+
+    test('stays quiet when nothing downloaded', () => {
+        const c = ctx();
+        c._announceDownloadsFinished('p1', 0);
+        c._announceDownloadsFinished('p1', undefined);
+        assert.equal(c.fired.length, 0);
+    });
+
+    test('both ways a modal completes announce it', () => {
+        const calls = SOURCE.split('_announceDownloadsFinished(playlistId, completedCount);').length - 1;
+        assert.equal(calls, 2);
+    });
+});
