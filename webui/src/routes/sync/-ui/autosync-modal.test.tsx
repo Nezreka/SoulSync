@@ -55,6 +55,39 @@ function renderModal(over: Partial<React.ComponentProps<typeof AutoSyncModal>> =
   return { props, ...render(<AutoSyncModal {...props} />) };
 }
 
+describe('drop targets light up while dragging', () => {
+  // boulder: empty intervals became small chips and it was unclear where to
+  // drag. the modal flags a drag so css can make every target glow.
+  const dt = { setData() {}, getData: () => '', effectAllowed: '', dropEffect: '' };
+  const withPlaylist = () =>
+    renderModal({
+      state: emptyState({ playlists: [{ id: 1, name: 'Road Trip', source: 'deezer' }] }),
+    });
+
+  it('flags the modal on drag start and clears it on drop', () => {
+    const { container } = withPlaylist();
+    const modal = () => container.querySelector('.auto-sync-modal') as HTMLElement;
+    expect(modal().className).not.toContain('is-dragging');
+    fireEvent.dragStart(container.querySelector('.auto-sync-playlist') as HTMLElement, {
+      dataTransfer: dt,
+    });
+    expect(modal().className).toContain('is-dragging');
+    fireEvent.drop(container.querySelector('.auto-sync-lane') as HTMLElement, { dataTransfer: dt });
+    expect(modal().className).not.toContain('is-dragging');
+  });
+
+  it('still clears when the dragend never reaches the modal', () => {
+    // a card that moves lanes is unmounted on drop, its dragend fires on a
+    // detached node. the document listener is what stops the glow sticking.
+    const { container } = withPlaylist();
+    fireEvent.dragStart(container.querySelector('.auto-sync-playlist') as HTMLElement, {
+      dataTransfer: dt,
+    });
+    fireEvent.dragEnd(document);
+    expect(container.querySelector('.auto-sync-modal')?.className).not.toContain('is-dragging');
+  });
+});
+
 describe('the three shell states (588, 640-649, 652-731)', () => {
   it('shows the loading body, with no tabs or summary', () => {
     const { container } = renderModal({ loading: true });

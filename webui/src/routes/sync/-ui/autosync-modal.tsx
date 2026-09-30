@@ -193,6 +193,21 @@ export function AutoSyncModal({
   onRunAgain,
 }: AutoSyncModalProps) {
   const [tab, setTab] = useState<AutoSyncTab>('schedule');
+  // true while a playlist is mid-drag, so every drop target can light up.
+  // empty intervals are small chips now and easy to miss otherwise.
+  const [dragging, setDragging] = useState(false);
+  useEffect(() => {
+    if (!dragging) return;
+    // a card that moves lanes on drop is unmounted before its own dragend can
+    // bubble up here, so the document has to be able to end it too
+    const stop = () => setDragging(false);
+    document.addEventListener('dragend', stop);
+    document.addEventListener('drop', stop);
+    return () => {
+      document.removeEventListener('dragend', stop);
+      document.removeEventListener('drop', stop);
+    };
+  }, [dragging]);
   const [bulk, setBulk] = useState<{ source: string; top: number; left: number } | null>(null);
 
   const summary = autoSyncSummary(state);
@@ -317,7 +332,12 @@ export function AutoSyncModal({
   );
 
   return overlay(
-    <div className="auto-sync-modal">
+    <div
+      className={`auto-sync-modal${dragging ? ' is-dragging' : ''}`}
+      onDragStart={() => setDragging(true)}
+      onDragEnd={() => setDragging(false)}
+      onDrop={() => setDragging(false)}
+    >
       {header(BLURB, summaryStrip)}
       <AutoSyncMonitorPanel playlists={state.playlists} onDetails={onOpenDetails} />
 
