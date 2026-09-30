@@ -86,10 +86,36 @@ def test_different_subtitles_cannot_clear_one_another():
     ) is None
 
 
-def test_unknown_subtitle_is_not_proof_of_the_same_recording():
+@pytest.mark.parametrize('subtitle', [
+    'Llamando a la tierra (Serenade From the Stars)',
+    'Llamando a la tierra [Serenade From the Stars]',
+    'Llamando a la tierra (Serenade From the Stars) - Remastered 2009',
+])
+@pytest.mark.parametrize('reverse', [False, True])
+def test_m_clan_subtitle_does_not_reintroduce_missing_owned_track(subtitle, reverse):
+    requested, owned = subtitle, 'Llamando a la tierra'
+    if reverse:
+        requested, owned = owned, requested
     assert find_owned_match(
-        _db('Song', 'Album'), 'Song (Serenade From the Stars)',
-        [{'name': 'Soul Asylum'}], 'Album', 'navidrome',
+        _db(owned, 'Usar y tirar', artist='M-Clan'), requested,
+        [{'name': 'M-Clan'}], 'Usar y tirar', 'navidrome',
+        strict_identity=True, require_album=True,
+    ) is not None
+
+
+def test_subtitle_compatibility_still_requires_the_requested_album():
+    assert find_owned_match(
+        _db('Llamando a la tierra', 'Other Album', artist='M-Clan'),
+        'Llamando a la tierra (Serenade From the Stars)',
+        [{'name': 'M-Clan'}], 'Usar y tirar', 'navidrome',
+        strict_identity=True, require_album=True,
+    ) is None
+
+
+def test_unknown_album_qualifier_is_not_a_track_subtitle():
+    assert find_owned_match(
+        _db('Song', 'Album'), 'Song', [{'name': 'Soul Asylum'}],
+        'Album (Unrelated Subtitle)', 'navidrome',
         strict_identity=True, require_album=True,
     ) is None
 

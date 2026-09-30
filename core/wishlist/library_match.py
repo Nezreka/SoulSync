@@ -35,6 +35,7 @@ from core.text.title_match import (
     is_trailing_version_qualifier,
     recording_version_markers,
     strip_redundant_context_qualifiers,
+    strip_subtitle_qualifiers,
 )
 from utils.logging_config import get_logger
 
@@ -107,7 +108,8 @@ def _strip_metadata_annotations(title: str) -> str:
     return ' '.join(base.split()) or title
 
 
-def _same_title(requested: str, owned: str, album_context: str = '') -> bool:
+def _same_title(requested: str, owned: str, album_context: str = '',
+                *, allow_subtitles: bool = False) -> bool:
     """Accept metadata wording without discarding a distinct recording version."""
     requested_key = _identity_key(requested)
     if requested_key and requested_key == _identity_key(owned):
@@ -127,6 +129,27 @@ def _same_title(requested: str, owned: str, album_context: str = '') -> bool:
         key = _identity_key(_normalized_title(wanted))
         if key and key == _identity_key(_normalized_title(found)):
             return True
+    if allow_subtitles:
+        # The shared subtitle helper expects accent-folded input. Keep the
+        # brackets, and check recording markers against the original scripts.
+        wanted_raw = _strip_metadata_annotations(requested)
+        found_raw = _strip_metadata_annotations(owned)
+        wanted, found = (
+            ''.join(c for c in unicodedata.normalize('NFKD', title)
+                    if not unicodedata.combining(c))
+            for title in (wanted_raw, found_raw)
+        )
+        wanted_base = strip_subtitle_qualifiers(wanted, found)
+        found_base = strip_subtitle_qualifiers(found, wanted)
+        # Preserve #825's one-sided subtitle compatibility. Two conflicting
+        # subtitles are not evidence of ownership. The shared marker detector
+        # also protects non-English versions the subtitle token list misses.
+        if ((wanted_base == wanted or found_base == found)
+                and recording_version_markers(wanted_raw) == recording_version_markers(wanted_base)
+                and recording_version_markers(found_raw) == recording_version_markers(found_base)):
+            key = _identity_key(_normalized_title(wanted_base))
+            if key and key == _identity_key(_normalized_title(found_base)):
+                return True
     return False
 
 
@@ -163,7 +186,8 @@ def _strict_identity_matches(db_track: Any, track_name: str, artist_name: str,
     if require_album and not same_album:
         return False
     album_context = matched_album if same_album else ''
-    return bool(matched_title and _same_title(track_name, matched_title, album_context)
+    return bool(matched_title and _same_title(track_name, matched_title, album_context,
+                                              allow_subtitles=True)
                 and _same_artist(artist_name, db_track))
 
 
