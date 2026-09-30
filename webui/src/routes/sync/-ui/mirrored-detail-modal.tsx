@@ -49,6 +49,8 @@ export interface MirroredDetailModalProps {
   onRunPipeline: () => void;
   /** 1153 — Discover (discoverMirroredPlaylist). */
   onDiscover: () => void;
+  /** "View discovery" once one exists, the card no longer jumps there (#1403). */
+  discoverLabel?: string;
 }
 
 function TrackRow({ track }: { track: MirroredTrack }) {
@@ -91,6 +93,7 @@ export function MirroredDetailModal({
   onEditSource,
   onRunPipeline,
   onDiscover,
+  discoverLabel = 'Discover',
 }: MirroredDetailModalProps) {
   const tracks = (data.tracks ?? []) as MirroredTrack[];
   const source = data.source || 'unknown';
@@ -192,7 +195,7 @@ export function MirroredDetailModal({
               Close
             </button>
             <button type="button" className="mm-btn mm-btn-primary" onClick={onDiscover}>
-              Discover
+              {discoverLabel}
             </button>
           </div>
         </div>

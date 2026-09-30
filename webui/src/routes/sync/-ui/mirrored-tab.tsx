@@ -79,6 +79,7 @@ import {
   libraryVisibleRows,
 } from '../-sync.library';
 import {
+  mirroredDiscoveryReopenable,
   mirroredHash,
   mirroredPhaseLine,
   mirroredDiscoveryTracks,
@@ -659,9 +660,7 @@ export function MirroredTab({
       // state, or a poll that died before the first payload), and reopening it
       // just re-showed "Playlist (0 tracks) / Starting discovery..." forever.
       // Falling through re-prepares and heals it.
-      const hasPlaylist =
-        Number((existing?.playlist as { track_count?: number } | undefined)?.track_count ?? 0) > 0;
-      if (existing && existing.phase !== 'fresh' && hasPlaylist) {
+      if (existing && mirroredDiscoveryReopenable(existing)) {
         onOpen(hash);
         if (existing.phase === 'discovering') vertical.resumeDiscovery(hash);
         return;
@@ -718,17 +717,27 @@ export function MirroredTab({
     [config, vertical, onOpen],
   );
 
-  /** handleMirroredCardClick (610-643). */
+  /**
+   * the card always opens the tracks detail. it used to jump straight to the
+   * discovery modal once a discovery existed, which hid Delete and Edit Source
+   * for good (#1403), and after a clear + sync the pipeline phase with no
+   * playlist behind it opened an empty discovery modal nobody could use
+   * (#1405). the detail's Discover button reopens the discovery instead.
+   */
   const onCardClick = useCallback(
     (row: MirroredPlaylistRow) => {
-      const hash = mirroredHash(row.id);
-      const state = vertical.states[hash];
-      if (state && state.phase && state.phase !== 'fresh') {
-        onOpen(hash);
-        return;
-      }
-      // Nothing running → the TRACKS detail modal (641).
       void openDetail(row.id);
+    },
+    [openDetail],
+  );
+
+  /** "View progress" on a working card goes straight to discovery, but only
+   *  when there is a playlist to show, otherwise it's the detail. */
+  const onViewProgress = useCallback(
+    (row: MirroredPlaylistRow) => {
+      const hash = mirroredHash(row.id);
+      if (mirroredDiscoveryReopenable(vertical.states[hash])) onOpen(hash);
+      else void openDetail(row.id);
     },
     [vertical, onOpen, openDetail],
   );
@@ -1031,7 +1040,7 @@ export function MirroredTab({
                             // pipeline, which IS refresh + discover + sync + queue the
                             // missing tracks — so "Find N missing" is literal, not a
                             // friendlier name for something else.
-                            if (state === 'working') onCardClick(row);
+                            if (state === 'working') onViewProgress(row);
                             else void pipeline.run(row.id, row.name ?? '');
                           },
                         }
@@ -1188,6 +1197,11 @@ export function MirroredTab({
             void pipeline.run(detail.playlistId, detail.data.name ?? '');
           }}
           onDiscover={() => void runDiscovery(detail.playlistId)}
+          discoverLabel={
+            mirroredDiscoveryReopenable(vertical.states[mirroredHash(detail.playlistId)])
+              ? 'View discovery'
+              : 'Discover'
+          }
         />
       )}
       {editingRef && (

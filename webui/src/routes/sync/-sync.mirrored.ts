@@ -360,6 +360,20 @@ export function mirroredHash(id: number | string): string {
 }
 
 /**
+ * is there a discovery worth reopening? needs a non-fresh phase AND the
+ * playlist behind it. a pipeline run after "clear discovery" paints a phase
+ * onto an empty state, and opening that showed a 0 track discovery modal with
+ * nothing to do (#1405).
+ */
+export function mirroredDiscoveryReopenable(
+  state: { phase?: string; playlist?: unknown } | undefined,
+): boolean {
+  if (!state || !state.phase || state.phase === 'fresh') return false;
+  const count = Number((state.playlist as { track_count?: number } | undefined)?.track_count ?? 0);
+  return count > 0;
+}
+
+/**
  * The pipeline's state writer — applyMirroredPipelineState (auto-sync.js
  * 2443-2464). `patchState` both materialises an absent entry and merges, which
  * is what the vanilla's `{ ...(youtubePlaylistStates[hash] || {}), ... }`
