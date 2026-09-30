@@ -24,6 +24,32 @@ def _blocklist_profile() -> int:
     except Exception:  # noqa: BLE001 - no flask, no profile context
         return 1
 
+
+def rank_library_genres(rows) -> List[Tuple[str, int]]:
+    """(genres_value, weight) rows -> [(genre, total_weight)], biggest first.
+
+    genres_value is a json array or a comma list. names count case-blind so
+    "House" and "house" are one genre, the first spelling seen is the label.
+    """
+    totals: Counter = Counter()
+    labels: Dict[str, str] = {}
+    for raw, weight in rows:
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(raw)
+            names = parsed if isinstance(parsed, list) else [parsed]
+        except (ValueError, TypeError):
+            names = str(raw).split(',')
+        for name in names:
+            label = str(name or '').strip()
+            if not label:
+                continue
+            key = label.lower()
+            labels.setdefault(key, label)
+            totals[key] += int(weight or 1)
+    return [(labels[key], count) for key, count in totals.most_common()]
+
 class PersonalizedPlaylistsService:
     """Service for generating personalized playlists from library and discovery pool"""
 
@@ -734,43 +760,48 @@ class PersonalizedPlaylistsService:
                 if 'genres' in columns:
                     # Get genres directly from tracks
                     cursor.execute("""
-                        SELECT genres FROM tracks WHERE genres IS NOT NULL
+                        SELECT genres, 1 AS weight FROM tracks WHERE genres IS NOT NULL
                     """)
-                    rows = cursor.fetchall()
+                    ranked = rank_library_genres(
+                        (row['genres'], row['weight']) for row in cursor.fetchall())
+                    if ranked:
+                        return ranked[:limit]
 
-                    # Parse genres (assuming JSON array or comma-separated)
-                    all_genres = []
-                    for row in rows:
-                        genres_str = row['genres']
-                        if genres_str:
-                            # Try JSON parse first
-                            try:
-                                import json
-                                genres = json.loads(genres_str)
-                                all_genres.extend(genres)
-                            except:
-                                # Fallback to comma-separated
-                                genres = [g.strip() for g in genres_str.split(',')]
-                                all_genres.extend(genres)
-
-                    # Count genres
-                    genre_counts = Counter(all_genres)
-                    return genre_counts.most_common(limit)
-                else:
-                    # Fallback: use artist names as "genres"
-                    logger.warning("No genres column - using top artists as categories")
+                # tracks has no genres column on real installs, the genres live
+                # on artists. weight each artist's genres by how many of your
+                # tracks they have. before this it jumped straight to artist
+                # names, and get_genre_playlist then searched the discovery
+                # pool for a *genre* called "Louis Armstrong": every Daily Mix
+                # came back empty.
+                cursor.execute("PRAGMA table_info(artists)")
+                artist_columns = [row['name'] for row in cursor.fetchall()]
+                if 'genres' in artist_columns:
                     cursor.execute("""
-                        SELECT ar.name, COUNT(*) as count
+                        SELECT ar.genres AS genres, COUNT(t.id) AS weight
                         FROM tracks t
-                        LEFT JOIN artists ar ON t.artist_id = ar.id
-                        WHERE ar.name IS NOT NULL
-                        GROUP BY ar.name
-                        ORDER BY count DESC
-                        LIMIT ?
-                    """, (limit,))
+                        JOIN artists ar ON t.artist_id = ar.id
+                        WHERE ar.genres IS NOT NULL AND ar.genres NOT IN ('', '[]')
+                        GROUP BY ar.id
+                    """)
+                    ranked = rank_library_genres(
+                        (row['genres'], row['weight']) for row in cursor.fetchall())
+                    if ranked:
+                        return ranked[:limit]
 
-                    rows = cursor.fetchall()
-                    return [(row['name'], row['count']) for row in rows]
+                # last resort, no genre data anywhere: artist names as categories
+                logger.warning("No genre data in library - using top artists as categories")
+                cursor.execute("""
+                    SELECT ar.name, COUNT(*) as count
+                    FROM tracks t
+                    LEFT JOIN artists ar ON t.artist_id = ar.id
+                    WHERE ar.name IS NOT NULL
+                    GROUP BY ar.name
+                    ORDER BY count DESC
+                    LIMIT ?
+                """, (limit,))
+
+                rows = cursor.fetchall()
+                return [(row['name'], row['count']) for row in rows]
 
         except Exception as e:
             logger.error(f"Error getting top genres: {e}")
