@@ -397,9 +397,29 @@ export function clampExplorerZoom(zoom: number): number {
   return Math.max(EXPLORER_MIN_ZOOM, Math.min(EXPLORER_MAX_ZOOM, zoom));
 }
 
-/** attachExplorerWheelZoom (:1083) — the wheel step, inverted so scrolling up zooms in. */
-export function explorerWheelStep(deltaY: number): number {
-  return deltaY > 0 ? -0.08 : 0.08;
+/**
+ * the wheel step, inverted so scrolling up zooms in. a mouse notch (~100px)
+ * still moves 0.08 like the vanilla did, but a trackpad fires dozens of tiny
+ * deltas per swipe, so the step scales with the delta or pinch flies to max
+ * zoom (#1409). deltaMode 1 is lines, roughly 33px each.
+ */
+export function explorerWheelStep(deltaY: number, deltaMode = 0): number {
+  const px = deltaMode === 1 ? deltaY * 33 : deltaY;
+  if (!px) return 0;
+  const step = Math.min(0.08, Math.abs(px) * 0.002);
+  return px > 0 ? -step : step;
+}
+
+/**
+ * google maps rule (#1409): a plain wheel or two-finger swipe scrolls the
+ * tree, ctrl/cmd + wheel zooms. a trackpad pinch arrives as ctrl + wheel, so
+ * pinch zooms for free. the lock flips it back to wheel-always-zooms.
+ */
+export function explorerWheelZooms(
+  event: { ctrlKey: boolean; metaKey: boolean },
+  wheelZoomLocked: boolean,
+): boolean {
+  return wheelZoomLocked || event.ctrlKey || event.metaKey;
 }
 
 /**
