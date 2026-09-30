@@ -80,9 +80,11 @@ def test_ensure_model_rejects_tiny_file(tmp_path, monkeypatch):
     from core.sample import stems as stems_mod
 
     monkeypatch.setattr(stems_mod, "models_dir", lambda: str(tmp_path))
-    tiny = tmp_path / stems_mod.MODEL_FILENAME
-    tiny.write_bytes(b"nope")
-    with pytest.raises(RuntimeError):
+    monkeypatch.setattr(stems_mod, "_model_verified", False)
+    tiny = stems_mod.model_path()
+    with open(tiny, "wb") as f:
+        f.write(b"nope")
+    with pytest.raises(RuntimeError, match="checksum"):
         stems_mod.ensure_model()
 
 

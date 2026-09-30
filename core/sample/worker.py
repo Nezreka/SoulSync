@@ -60,6 +60,7 @@ def configure(*, config_manager_=None, resolve_path_fn=None, warm=True) -> None:
     global _config_manager, _resolve_path_fn, _warmup_started
     _config_manager = config_manager_
     _resolve_path_fn = resolve_path_fn
+    _resolve_cache.clear()
     if warm and not _warmup_started:
         _warmup_started = True
         threading.Thread(
@@ -105,6 +106,50 @@ def resolve_audio_path(stored_path: str) -> Optional[str]:
 # Backwards-compatible alias (core/sample/stems.py imports the old name).
 _resolve_existing_path = resolve_audio_path
 
+# stored path -> resolved path. status polls and the stale-file check hit
+# this every few seconds, and a miss can mean a suffix scan over the whole
+# library, so hits are kept for a bit (and re-checked on disk before use).
+_RESOLVE_TTL_S = 60.0
+_resolve_cache: Dict[str, tuple] = {}
+
+
+def resolve_track_file(stored_path: str) -> Optional[str]:
+    """resolve_audio_path with a short memory. only hits are remembered."""
+    if not stored_path:
+        return None
+    hit = _resolve_cache.get(stored_path)
+    if hit and time.monotonic() - hit[0] < _RESOLVE_TTL_S and os.path.isfile(hit[1]):
+        return hit[1]
+    resolved = resolve_audio_path(stored_path)
+    if resolved:
+        _resolve_cache[stored_path] = (time.monotonic(), resolved)
+    else:
+        _resolve_cache.pop(stored_path, None)
+    return resolved
+
+
+def unreachable_message(stored_path: str) -> str:
+    """what to tell someone whose track plays but can't be chopped.
+
+    playback can stream a track from the media server when the file isn't on
+    this machine. sample studio can't, it needs the actual file.
+    """
+    return (
+        f"SoulSync can't open this file on disk ({stored_path}). Playback can "
+        "stream it from your media server, but Sample Studio needs the file "
+        "itself. Add the folder that holds your music under Settings > Library "
+        "so SoulSync can reach it."
+    )
+
+
+def track_source(track_id: int) -> tuple:
+    """(resolved_path, signature) for a library track, (None, None) when unreachable."""
+    from . import store
+
+    stored = store.get_track_file_path(track_id)
+    path = resolve_track_file(stored) if stored else None
+    return path, (store.source_signature(path) if path else None)
+
 
 def _process_one(track_id: int) -> None:
     from . import store
@@ -115,12 +160,12 @@ def _process_one(track_id: int) -> None:
     stored = store.get_track_file_path(track_id)
     if not stored:
         raise RuntimeError(f"unknown track_id {track_id}")
-    path = _resolve_existing_path(stored)
+    path = resolve_track_file(stored)
     if not path:
-        raise RuntimeError(f"audio file not reachable on disk: {stored}")
+        raise RuntimeError(unreachable_message(stored))
     t0 = time.perf_counter()
     result = analyze_track(path)
-    store.save_analysis(track_id, result)
+    store.save_analysis(track_id, result, source_sig=store.source_signature(path))
     logger.info(
         "Analyzed track %s: %.1f BPM, %d onsets, %.1fs (%.1fs)", track_id, result["bpm"], len(result["onsets"]), result["duration_s"], time.perf_counter() - t0
     )

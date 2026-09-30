@@ -93,6 +93,43 @@ def decode_stereo(file_path: str) -> Tuple[Any, int]:
     return sf.read(io.BytesIO(proc.stdout), dtype="float32", always_2d=True)
 
 
+def decode_region(file_path: str, start_s: float, end_s: float) -> Tuple[Any, int, Optional[float]]:
+    """Decode just [start_s, end_s) of a file. Returns (audio, sr, duration_s).
+
+    previews re-render on every slider drag, and decoding a whole 6 minute
+    flac to cut 2 seconds out of it was most of the wait. soundfile seeks
+    straight to the region; ffmpeg (m4a/opus/...) seeks with -ss. duration_s
+    is None when only ffmpeg could read the file.
+    """
+    if not os.path.isfile(file_path):
+        raise FileNotFoundError(f"audio file not found: {file_path}")
+    sf = _load_soundfile()
+    start_s = max(0.0, float(start_s))
+    end_s = max(start_s, float(end_s))
+    try:
+        info = sf.info(file_path)
+        sr = int(info.samplerate)
+        frames = int(info.frames)
+        s0 = min(int(start_s * sr), frames)
+        s1 = min(int(end_s * sr), frames)
+        y, _ = sf.read(file_path, start=s0, stop=s1, dtype="float32", always_2d=True)
+        return y, sr, frames / sr if sr else None
+    except Exception:
+        logger.info("soundfile could not read %s — falling back to ffmpeg", file_path)
+    proc = subprocess.run(
+        ["ffmpeg", "-v", "error", "-ss", f"{start_s:.6f}", "-t", f"{end_s - start_s:.6f}",
+         "-i", file_path, "-f", "wav", "-"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        timeout=120,
+    )
+    if proc.returncode != 0 or not proc.stdout:
+        raise RuntimeError(f"ffmpeg could not decode {file_path}: {proc.stderr.decode(errors='replace')[:300]}")
+    y, sr = sf.read(io.BytesIO(proc.stdout), dtype="float32", always_2d=True)
+    return y, int(sr), None
+
+
 def _rubberband_cli_available() -> bool:
     return shutil.which("rubberband") is not None
 
@@ -202,30 +239,28 @@ def render_chop(
     out_path: Optional[str] = None,
     out_format: str = "wav16",
     preview: bool = False,
+    fx: Optional[Any] = None,
+    delay_bpm: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """Render a chop: slice -> pitch-shift -> time-stretch -> file.
+    """Render a chop: slice -> pitch-shift -> time-stretch -> fx -> file.
+
+    `fx` is a core.sample.fx.RenderFx (None = just the default edge fade).
+    `delay_bpm` is the tempo the delay locks to: the target BPM when the chop
+    is being stretched, else the track's own.
 
     Returns {"path", "engine", "duration_s", "format", "renderer_version"}.
     Raises ValueError on bad input (400-class), RuntimeError on DSP failure.
     """
+    from .fx import RenderFx, apply_fx
+
     if out_format not in _FORMATS:
         raise ValueError(f"unknown format {out_format!r} (want one of {sorted(_FORMATS)})")
     if not os.path.isfile(track_path):
         raise FileNotFoundError(f"audio file not found: {track_path}")
 
-    y, sr = decode_stereo(track_path)
-    duration_s = len(y) / sr
     start_s = max(0.0, float(start_s))
-    end_s = min(float(end_s), duration_s)
-    if not end_s > start_s:
-        raise ValueError(f"empty slice: start={start_s}, end={end_s}, duration={duration_s:.2f}")
-
+    end_s = float(end_s)
     max_len = MAX_PREVIEW_SECONDS if preview else MAX_CHOP_SECONDS
-    if end_s - start_s > max_len:
-        raise ValueError(
-            f"slice too long ({end_s - start_s:.1f}s > {max_len:.0f}s cap) — "
-            "narrow the in/out points"
-        )
 
     tempo_ratio = 1.0
     if target_bpm:
@@ -233,8 +268,17 @@ def render_chop(
             raise ValueError("target_bpm given but the track's BPM is unknown — analyze it first")
         tempo_ratio = float(target_bpm) / float(source_bpm)
 
-    s0, s1 = int(start_s * sr), int(end_s * sr)
-    clip = y[s0:s1]
+    clip, sr, duration_s = decode_region(track_path, start_s, end_s)
+    if len(clip) == 0:
+        dur = f"{duration_s:.2f}" if duration_s is not None else "?"
+        raise ValueError(f"empty slice: start={start_s}, end={end_s}, duration={dur}")
+    # length of what's really there, so an out-point past the end of the
+    # track is clamped like before instead of refused
+    if len(clip) / sr > max_len:
+        raise ValueError(
+            f"slice too long ({len(clip) / sr:.1f}s > {max_len:.0f}s cap) — "
+            "narrow the in/out points"
+        )
 
     chosen = select_engine(engine)
     tmpdir = tempfile.mkdtemp(prefix="sample_render_")
@@ -252,6 +296,8 @@ def render_chop(
             pass
 
     import numpy as np
+
+    clip = apply_fx(clip, sr, fx or RenderFx(), bpm=delay_bpm)
 
     peak = float(np.max(np.abs(clip))) if clip.size else 0.0
     if peak > 1.0:

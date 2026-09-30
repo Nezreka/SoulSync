@@ -58,9 +58,10 @@ def test_default_backend_name_stub_when_unavailable(monkeypatch):
 @pytest.fixture
 def _api_stubs(monkeypatch):
     monkeypatch.setattr(sample_api, "_track_exists", lambda track_id: True)
-    monkeypatch.setattr(stems_worker_mod, "get_status", lambda track_id: "idle")
-    monkeypatch.setattr(stems_worker_mod, "enqueue_separation", lambda track_id, backend=None: "idle")
-    monkeypatch.setattr(sample_store, "get_stems", lambda track_id: None)
+    monkeypatch.setattr(stems_worker_mod, "get_status", lambda track_id, method=None: "idle")
+    monkeypatch.setattr(stems_worker_mod, "current_method", lambda track_id: "demucs")
+    monkeypatch.setattr(stems_worker_mod, "enqueue_separation", lambda track_id, backend=None, method="demucs": "idle")
+    monkeypatch.setattr(sample_store, "get_stems", lambda track_id, method="demucs", source_sig=None: None)
 
 
 def test_stems_status_payload_carries_flag(_api_stubs):
@@ -77,6 +78,20 @@ def test_stems_status_flag_true_when_available(_api_stubs, monkeypatch):
 
 
 def test_separate_stems_payload_carries_flag(_api_stubs):
-    payload, http_status = sample_api.separate_stems(7)
+    payload, http_status = sample_api.separate_stems(7, method="rough-drums")
     assert http_status == 200
     assert payload["stems_available"] is False
+    assert payload["rough_available"] is True
+
+
+def test_demucs_without_torch_is_refused_not_attempted(_api_stubs, monkeypatch):
+    """no torch: demucs used to queue anyway, download the model, then die on
+    the import. now it says so up front and never touches the queue."""
+    queued = []
+    monkeypatch.setattr(stems_worker_mod, "enqueue_separation",
+                        lambda *a, **k: queued.append(a) or "queued")
+    with pytest.raises(sample_api.SampleHttpError) as exc_info:
+        sample_api.separate_stems(7)
+    assert exc_info.value.status == 409
+    assert exc_info.value.code == "STEMS_UNAVAILABLE"
+    assert queued == []

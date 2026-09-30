@@ -1872,6 +1872,21 @@ def sample_chop_web():
         return jsonify({"success": False, "data": None, "error": str(e)}), 500
 
 
+@app.route('/api/sample/trim', methods=['POST'])
+def sample_trim_web():
+    try:
+        from api.sample import parse_trim_body, trim_selection, SampleHttpError
+        data = request.get_json(silent=True) or {}
+        try:
+            payload, status = trim_selection(**parse_trim_body(data))
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/trim failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
 @app.route('/api/sample/folders', methods=['GET'])
 def sample_folders_web():
     try:
@@ -1953,7 +1968,7 @@ def sample_stems_web():
         except (TypeError, ValueError):
             return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
         try:
-            payload, status = separate_stems(track_id)
+            payload, status = separate_stems(track_id, method=data.get('method'))
             return jsonify({"success": True, "data": payload, "error": None}), status
         except SampleHttpError as e:
             return jsonify({"success": False, "data": None, "error": e.message}), e.status
@@ -1971,7 +1986,7 @@ def sample_stems_status_web():
         except (TypeError, ValueError):
             return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
         try:
-            payload, status = stems_status(track_id)
+            payload, status = stems_status(track_id, method=request.args.get('method') or None)
             return jsonify({"success": True, "data": payload, "error": None}), status
         except SampleHttpError as e:
             return jsonify({"success": False, "data": None, "error": e.message}), e.status

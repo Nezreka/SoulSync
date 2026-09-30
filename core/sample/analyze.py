@@ -20,7 +20,8 @@ logger = get_logger("sample.analyze")
 
 # Bump when the analysis algorithm changes; the worker skips tracks already
 # analyzed at the current version.
-ANALYZER_VERSION = 2
+# v3: adds the musical key.
+ANALYZER_VERSION = 3
 
 # Analysis runs at 22050 Hz (librosa's canonical rate): ~4x fewer samples
 # through the STFT than 44.1k source audio, with no measurable BPM loss
@@ -107,7 +108,7 @@ def analyze_track(file_path: str) -> Dict[str, Any]:
     """Full analysis for one track: BPM, onset times, duration.
 
     Returns {"bpm": float, "onsets": [seconds...], "duration_s": float,
-             "analyzer_version": int}.
+             "key": {"name", "confidence"} | None, "analyzer_version": int}.
 
     Performance: the audio is downsampled to 22050 Hz once, and the onset
     envelope is computed ONCE and shared with beat tracking (beat_track's
@@ -137,10 +138,13 @@ def analyze_track(file_path: str) -> Dict[str, Any]:
     )
     bpm = round(float(np.atleast_1d(tempo_raw)[0]), 1)
 
+    from .key import detect_key
+
     return {
         "bpm": bpm,
         "onsets": onsets,
         "duration_s": round(duration_s, 3),
+        "key": detect_key(y, _ANALYSIS_SR),
         "analyzer_version": ANALYZER_VERSION,
     }
 

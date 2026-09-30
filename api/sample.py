@@ -71,13 +71,13 @@ def _resolve_source_path(track_id: int, stem: str | None) -> str:
     if stem:
         from core.sample import stems as stems_mod
 
-        if stem not in stems_mod.STEMS:
+        if stem not in stems_mod.ALL_STEMS:
             raise SampleHttpError("BAD_REQUEST", f"unknown stem {stem!r}", 400)
         path = sample_store.stem_file_path(track_id, stem)
         if not path or not os.path.isfile(path):
             raise SampleHttpError(
                 "STEMS_MISSING",
-                "separate the stems first — tap 'Separate stems' in Studio",
+                "split the track first, from the Stems panel under the editor",
                 409,
             )
         return path
@@ -89,11 +89,9 @@ def _resolve_source_path(track_id: int, stem: str | None) -> str:
     # playback resolver web_server injects, so a track that plays also chops.
     from core.sample import worker as sample_worker
 
-    path = sample_worker.resolve_audio_path(stored)
+    path = sample_worker.resolve_track_file(stored)
     if not path:
-        raise SampleHttpError(
-            "FILE_MISSING", f"audio file not reachable on disk: {stored}", 409
-        )
+        raise SampleHttpError("FILE_MISSING", sample_worker.unreachable_message(stored), 409)
     return path
 
 
@@ -161,15 +159,27 @@ def fetch_analysis(track_id: int, retry: bool = False):
         from core.sample import worker as sample_worker
 
         row = sample_store.get_analysis(track_id)
-        if row is not None:
-            return {**row, "status": "done"}, 200
+        if row is not None and sample_store.is_current(track_id, row):
+            return _analysis_payload(row, "done"), 200
+        # never analyzed, made by an older analyzer, or the file changed since.
+        # queue it, and hand back whatever we had so the page isn't blank
         status = sample_worker.enqueue_analysis(track_id, retry=retry)
-        return {"track_id": track_id, "status": status}, 202
+        if status == "done":  # finished between the two checks
+            row = sample_store.get_analysis(track_id)
+            return _analysis_payload(row, "done"), 200
+        payload = _analysis_payload(row, status) if row else {"track_id": track_id, "status": status}
+        return payload, 202
     except SampleHttpError:
         raise
     except Exception as e:
         logger.error("sample/analysis failed for track %s: %s", track_id, e)
         raise SampleHttpError("ANALYSIS_ERROR", str(e), 500) from e
+
+
+def _analysis_payload(row: dict, status: str) -> dict:
+    out = {k: v for k, v in row.items() if k != "source_sig"}
+    out["status"] = status
+    return out
 
 
 def enqueue_track_analysis(track_id: int):
@@ -201,18 +211,24 @@ def fetch_peaks(track_id: int, buckets: int, stem: str | None = None):
         from core.sample import store as sample_store
         from core.sample.analyze import compute_peaks
 
-        if stem is not None and stem not in stems_mod.STEMS:
+        if stem is not None and stem not in stems_mod.ALL_STEMS:
             raise SampleHttpError("BAD_REQUEST", f"unknown stem {stem!r}", 400)
-        cache_file = sample_store.peaks_path(track_id, buckets, stem)
+        if not 16 <= buckets <= 20000:
+            raise SampleHttpError("BAD_REQUEST", f"buckets must be 16..20000, got {buckets}", 400)
+        path = _resolve_source_path(track_id, stem)
+        # the file's signature is in the cache name, so a replaced file gets
+        # a fresh waveform instead of the old one
+        cache_file = sample_store.peaks_path(track_id, buckets, stem,
+                                             sig=sample_store.source_signature(path))
         if os.path.isfile(cache_file):
             with open(cache_file, "r", encoding="utf-8") as f:
                 return json.load(f), 200
-        path = _resolve_source_path(track_id, stem)
         peaks = compute_peaks(path, buckets=buckets)
         tmp = cache_file + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(peaks, f)
         os.replace(tmp, cache_file)
+        sample_store.drop_stale_peaks(track_id, buckets, stem, keep=cache_file)
         return peaks, 200
     except SampleHttpError:
         raise
@@ -265,8 +281,14 @@ def _parse_render_params(data: dict):
     if stem is not None:
         from core.sample import stems as stems_mod
 
-        if stem not in stems_mod.STEMS:
+        if stem not in stems_mod.ALL_STEMS:
             raise SampleHttpError("BAD_REQUEST", f"unknown stem {stem!r}", 400)
+    from core.sample.fx import parse_fx
+
+    try:
+        fx = parse_fx(data)
+    except ValueError as e:
+        raise SampleHttpError("BAD_REQUEST", str(e), 400) from None
     return {
         "track_id": track_id,
         "start_s": start_s,
@@ -274,6 +296,7 @@ def _parse_render_params(data: dict):
         "pitch_st": pitch_st,
         "target_bpm": target_bpm,
         "stem": stem,
+        "fx": fx,
     }
 
 
@@ -296,8 +319,29 @@ def _source_bpm_for_stretch(track_id: int, target_bpm) -> float | None:
     return float(row["bpm"])
 
 
+def _delay_bpm(track_id: int, target_bpm, fx) -> float | None:
+    """tempo the delay locks to: the stretched tempo, else the track's own.
+
+    409 when the delay is on and neither is known.
+    """
+    if fx is None or not fx.needs_bpm:
+        return None
+    if target_bpm:
+        return float(target_bpm)
+    from core.sample import store as sample_store
+
+    row = sample_store.get_analysis(track_id)
+    if not row or not row.get("bpm"):
+        raise SampleHttpError(
+            "BPM_UNKNOWN",
+            "delay follows the beat, so it needs the track's tempo. give the analysis a moment",
+            409,
+        )
+    return float(row["bpm"])
+
+
 def render_preview(track_id: int, start_s: float, end_s: float, pitch_st: float,
-                   target_bpm, stem: str | None = None) -> tuple:
+                   target_bpm, stem: str | None = None, fx=None) -> tuple:
     """Fast librosa render of the in/out region for auditioning.
 
     Returns ({"preview_id", "engine", "duration_s"}, 200). The file is served
@@ -309,6 +353,7 @@ def render_preview(track_id: int, start_s: float, end_s: float, pitch_st: float,
 
     path = _resolve_source_path(track_id, stem)
     source_bpm = _source_bpm_for_stretch(track_id, target_bpm)
+    delay_bpm = _delay_bpm(track_id, target_bpm, fx)
     sample_store.cleanup_previews()
     preview_id = f"p{track_id}_{uuid.uuid4().hex}.wav"
     out_path = os.path.join(sample_store.previews_dir(), preview_id)
@@ -317,6 +362,7 @@ def render_preview(track_id: int, start_s: float, end_s: float, pitch_st: float,
             path, start_s, end_s,
             pitch_st=pitch_st, target_bpm=target_bpm, source_bpm=source_bpm,
             engine="preview", out_path=out_path, out_format="wav16", preview=True,
+            fx=fx, delay_bpm=delay_bpm,
         )
     except ValueError as e:
         raise SampleHttpError("BAD_REQUEST", str(e), 400) from e
@@ -341,7 +387,7 @@ def preview_file_path(preview_id: str) -> str:
 
 def save_chop(track_id: int, start_s: float, end_s: float, pitch_st: float,
               target_bpm, name: str, tags: list, format: str,
-              stem: str | None = None, folder: str | None = None) -> tuple:
+              stem: str | None = None, folder: str | None = None, fx=None) -> tuple:
     """Final render (Rubber Band when available) + stash row (file + bookmark).
 
     When `stem` is given the chop is cut from that separated stem; the stem is
@@ -377,6 +423,7 @@ def save_chop(track_id: int, start_s: float, end_s: float, pitch_st: float,
 
     path = _resolve_source_path(track_id, stem)
     source_bpm = _source_bpm_for_stretch(track_id, target_bpm)
+    delay_bpm = _delay_bpm(track_id, target_bpm, fx)
     ext = ".flac" if format == "flac" else ".wav"
 
     meta = sample_store.get_track_metadata(track_id)
@@ -398,6 +445,7 @@ def save_chop(track_id: int, start_s: float, end_s: float, pitch_st: float,
             path, start_s, end_s,
             pitch_st=pitch_st, target_bpm=target_bpm, source_bpm=source_bpm,
             engine="auto", out_path=tmp_path, out_format=format, preview=False,
+            fx=fx, delay_bpm=delay_bpm,
         )
     except ValueError as e:
         _unlink_quiet(tmp_path)
@@ -446,7 +494,7 @@ def save_chop(track_id: int, start_s: float, end_s: float, pitch_st: float,
             name=name, tags=tags, track_id=track_id,
             start_s=start_s, end_s=end_s, pitch_st=pitch_st,
             target_bpm=target_bpm, format=format, file_path=out_path,
-            stem=stem, folder=dest_folder,
+            stem=stem, folder=dest_folder, fx=fx,
         )
     except Exception:
         _unlink_quiet(out_path)
@@ -462,6 +510,48 @@ def _unlink_quiet(path: str) -> None:
             os.unlink(path)
     except OSError:
         pass
+
+
+def trim_selection(track_id: int, start_s: float, end_s: float,
+                   stem: str | None = None) -> tuple:
+    """Tighten [start_s, end_s) to the part that actually sounds.
+
+    Returns ({"start_s", "end_s", "trimmed"}, 200). an all-silent selection
+    comes back unchanged with trimmed=False.
+    """
+    from core.sample import render as sample_render
+    from core.sample.trim import sounding_bounds
+
+    if not end_s > start_s >= 0:
+        raise SampleHttpError("BAD_REQUEST", "need 0 <= start_s < end_s", 400)
+    if end_s - start_s > sample_render.MAX_CHOP_SECONDS:
+        raise SampleHttpError("BAD_REQUEST", "selection too long to trim", 400)
+    path = _resolve_source_path(track_id, stem)
+    y, sr, _ = sample_render.decode_region(path, start_s, end_s)
+    bounds = sounding_bounds(y, sr)
+    if bounds is None:
+        return {"start_s": start_s, "end_s": end_s, "trimmed": False}, 200
+    new_start = round(start_s + bounds[0], 4)
+    new_end = round(min(end_s, start_s + bounds[1]), 4)
+    trimmed = new_start > start_s + 1e-4 or new_end < end_s - 1e-4
+    return {"start_s": new_start, "end_s": new_end, "trimmed": trimmed}, 200
+
+
+def parse_trim_body(data: dict) -> dict:
+    try:
+        track_id = int(data.get("track_id") or 0)
+        start_s = float(data.get("start_s", 0))
+        end_s = float(data.get("end_s", 0))
+    except (TypeError, ValueError):
+        raise SampleHttpError("BAD_REQUEST", "track_id, start_s and end_s are required", 400) from None
+    _require_track(track_id)
+    stem = data.get("stem") or None
+    if stem is not None:
+        from core.sample import stems as stems_mod
+
+        if stem not in stems_mod.ALL_STEMS:
+            raise SampleHttpError("BAD_REQUEST", f"unknown stem {stem!r}", 400)
+    return {"track_id": track_id, "start_s": start_s, "end_s": end_s, "stem": stem}
 
 
 def list_sample_folders() -> tuple:
@@ -526,31 +616,61 @@ def export_stash_zip() -> tuple:
 
 # ── Phase 4: stem separation ─────────────────────────────────────────
 
-def separate_stems(track_id: int, backend: str | None = None) -> tuple:
-    """Enqueue Demucs separation for a track. Idempotent.
+def _stems_payload(track_id: int, status: str, method: str) -> dict:
+    from core.sample import stems as stems_mod
+    from core.sample import store as sample_store
 
-    Returns ({"track_id", "status", "stems?"}, 202). Status is one of
-    queued|running|done|error: … — poll GET /sample/stems/status.
+    payload: dict = {
+        "track_id": track_id,
+        "status": status,
+        "method": method,
+        "stems": [],
+        "labels": {},
+        "stems_available": stems_mod.stems_available(),
+        "rough_available": True,
+    }
+    if status == "done":
+        info = sample_store.get_stems(track_id, method)
+        if info:
+            payload["stems"] = list(info["stems"].keys())
+            payload["labels"] = {s: stems_mod.STEM_LABELS[s] for s in payload["stems"]}
+            payload["backend"] = info["backend"]
+        else:
+            # rows vanished (files deleted, source replaced) — say so, allow retry
+            payload["status"] = "idle"
+    return payload
+
+
+def separate_stems(track_id: int, backend: str | None = None, method: str | None = None) -> tuple:
+    """Enqueue a split for a track. Idempotent.
+
+    method: demucs (needs torch) | rough-drums | rough-center (built in).
+    backend: 'stub' forces the test separator for demucs, nothing else.
+    Returns 202 while queued/running, 200 when done. poll GET /sample/stems/status.
     """
     _require_track(track_id)
+    from core.sample import stems as stems_mod
+
+    method = method or "demucs"
+    if method not in stems_mod.SEPARATION_METHODS:
+        raise SampleHttpError(
+            "BAD_REQUEST",
+            f"method must be one of {', '.join(stems_mod.SEPARATION_METHODS)}",
+            400,
+        )
+    if method == "demucs" and backend != "stub" and not stems_mod.stems_available():
+        # refuse honestly instead of downloading a model the server can't run
+        raise SampleHttpError(
+            "STEMS_UNAVAILABLE",
+            "stem separation needs torch, torchaudio and demucs installed on the server",
+            409,
+        )
     try:
         from core.sample import stems_worker as sw
-        from core.sample import stems as stems_mod
 
-        status = sw.enqueue_separation(track_id, backend=backend)
-        payload: dict = {
-            "track_id": track_id,
-            "status": status,
-            "stems_available": stems_mod.stems_available(),
-        }
-        if status == "done":
-            from core.sample import store as sample_store
-
-            info = sample_store.get_stems(track_id)
-            if info:
-                payload["stems"] = list(info["stems"].keys())
-                payload["backend"] = info["backend"]
-        return payload, 202 if status in ("queued", "running") else 200
+        status = sw.enqueue_separation(track_id, backend=backend, method=method)
+        payload = _stems_payload(track_id, status, method)
+        return payload, 202 if payload["status"] in ("queued", "running") else 200
     except SampleHttpError:
         raise
     except Exception as e:
@@ -558,29 +678,18 @@ def separate_stems(track_id: int, backend: str | None = None) -> tuple:
         raise SampleHttpError("STEMS_ERROR", str(e), 500) from e
 
 
-def stems_status(track_id: int) -> tuple:
-    """Current separation status + stem list when done."""
+def stems_status(track_id: int, method: str | None = None) -> tuple:
+    """Current split status (the last method asked for, unless one is named)."""
     _require_track(track_id)
     try:
-        from core.sample import stems_worker as sw
-        from core.sample import store as sample_store
         from core.sample import stems as stems_mod
+        from core.sample import stems_worker as sw
 
-        status = sw.get_status(track_id)
-        payload: dict = {
-            "track_id": track_id,
-            "status": status,
-            "stems_available": stems_mod.stems_available(),
-        }
-        if status == "done":
-            info = sample_store.get_stems(track_id)
-            if info:
-                payload["stems"] = list(info["stems"].keys())
-                payload["backend"] = info["backend"]
-            else:
-                # Rows vanished (files deleted?) — report honestly, allow retry.
-                payload["status"] = "idle"
-        return payload, 200
+        if method is not None and method not in stems_mod.SEPARATION_METHODS:
+            raise SampleHttpError("BAD_REQUEST", f"unknown method {method!r}", 400)
+        method = method or sw.current_method(track_id)
+        status = sw.get_status(track_id, method)
+        return _stems_payload(track_id, status, method), 200
     except SampleHttpError:
         raise
     except Exception as e:
@@ -593,7 +702,7 @@ def stem_audio_path(track_id: int, stem: str) -> tuple:
     from core.sample import stems as stems_mod
 
     _require_track(track_id)
-    if stem not in stems_mod.STEMS:
+    if stem not in stems_mod.ALL_STEMS:
         raise SampleHttpError("BAD_REQUEST", f"unknown stem {stem!r}", 400)
     try:
         from core.sample import store as sample_store
@@ -604,7 +713,7 @@ def stem_audio_path(track_id: int, stem: str) -> tuple:
     if not path or not os.path.isfile(path):
         raise SampleHttpError(
             "STEMS_MISSING",
-            "no separated stems for this track yet — run separation first",
+            "this track hasn't been split that way yet",
             404,
         )
     return path, "audio/wav"
@@ -682,7 +791,8 @@ def register_routes(bp):
     def sample_preview_post():
         """Fast render of the in/out region for auditioning pitch/BPM changes.
 
-        Body: {track_id, start_s, end_s, pitch_st?, target_bpm?}.
+        Body: {track_id, start_s, end_s, pitch_st?, target_bpm?, stem?,
+        normalize?, fade_ms?, reverse?, space?, delay?}.
         Returns {preview_id, engine, duration_s}; the audio is served by
         GET /sample/preview/<preview_id>. Slices over 60s are refused (400).
         """
@@ -709,7 +819,8 @@ def register_routes(bp):
     def sample_chop_post():
         """Final render + stash row (file + bookmark).
 
-        Body: {track_id, start_s, end_s, pitch_st?, target_bpm?, name, tags?, format?, folder?}.
+        Body: {track_id, start_s, end_s, pitch_st?, target_bpm?, stem?, name, tags?,
+        format?, folder?, normalize?, fade_ms?, reverse?, space?, delay?}.
         format: wav16 | wav24 | flac (default wav16).
         folder: destination sample folder — one of the configured
         library.sample_paths (default: the first). Anything else is a 400.
@@ -724,6 +835,20 @@ def register_routes(bp):
                 format=data.get("format") or "wav16",
                 folder=data.get("folder"),
             )
+            return api_success(payload, status=status)
+        except SampleHttpError as e:
+            return _handle_service_error(e)
+
+    @bp.route("/sample/trim", methods=["POST"])
+    @require_api_key
+    def sample_trim_post():
+        """Tighten a selection to its sounding audio.
+
+        Body: {track_id, start_s, end_s, stem?}. Returns {start_s, end_s, trimmed}.
+        """
+        data = request.get_json(silent=True) or {}
+        try:
+            payload, status = trim_selection(**parse_trim_body(data))
             return api_success(payload, status=status)
         except SampleHttpError as e:
             return _handle_service_error(e)
@@ -786,8 +911,8 @@ def register_routes(bp):
     def sample_stems_post():
         """Enqueue stem separation for a track. Idempotent.
 
-        Body: {track_id, backend?} — backend 'stub' forces the test
-        separator; anything else (or omitted) uses Demucs when available.
+        Body: {track_id, method?, backend?}. method: demucs (default) |
+        rough-drums | rough-center. backend 'stub' forces the test separator.
         Returns 202 while queued/running, 200 when already done.
         """
         data = request.get_json(silent=True) or {}
@@ -797,7 +922,7 @@ def register_routes(bp):
             return api_error("BAD_REQUEST", "track_id is required", 400)
         backend = data.get("backend")
         try:
-            payload, status = separate_stems(track_id, backend=backend)
+            payload, status = separate_stems(track_id, backend=backend, method=data.get("method"))
             return api_success(payload, status=status)
         except SampleHttpError as e:
             return _handle_service_error(e)
@@ -811,7 +936,7 @@ def register_routes(bp):
         except (TypeError, ValueError):
             return api_error("BAD_REQUEST", "track_id is required", 400)
         try:
-            payload, status = stems_status(track_id)
+            payload, status = stems_status(track_id, method=request.args.get("method") or None)
             return api_success(payload, status=status)
         except SampleHttpError as e:
             return _handle_service_error(e)
@@ -819,7 +944,7 @@ def register_routes(bp):
     @bp.route("/sample/stems/<int:track_id>/<stem>/audio", methods=["GET"])
     @require_api_key
     def sample_stem_audio(track_id, stem):
-        """Serve one separated stem (drums|vocals|bass|other) as WAV."""
+        """Serve one split output (a demucs stem or a rough output) as WAV."""
         try:
             path, mimetype = stem_audio_path(track_id, stem)
             return send_file(path, mimetype=mimetype, conditional=True)

@@ -30,3 +30,4 @@ def isolated_sample_resolver(monkeypatch):
 
     monkeypatch.setattr(sample_worker, "_resolve_path_fn", None)
     monkeypatch.setattr(sample_worker, "_config_manager", _EmptyConfig())
+    monkeypatch.setattr(sample_worker, "_resolve_cache", {})

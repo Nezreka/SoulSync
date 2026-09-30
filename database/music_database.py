@@ -587,6 +587,25 @@ class MusicDatabase:
             """)
             # (ledger back-fill for sample_stems_v1 rides _KNOWN_MIGRATION_SIGNALS below)
 
+            # sample studio: detected key + a signature of the source file (so
+            # a replaced file re-analyzes and re-separates), and the fx recipe
+            # each saved chop was rendered with. tolerant ALTERs like above.
+            for _table, _col, _type in (
+                ("sample_analysis", "key_name", "TEXT"),
+                ("sample_analysis", "key_confidence", "REAL"),
+                ("sample_analysis", "source_sig", "TEXT"),
+                ("sample_stems", "source_sig", "TEXT"),
+                ("sample_stash", "normalize", "TEXT"),
+                ("sample_stash", "fade_ms", "REAL"),
+                ("sample_stash", "reverse", "INTEGER"),
+                ("sample_stash", "space", "REAL"),
+                ("sample_stash", "delay_json", "TEXT"),
+            ):
+                try:
+                    cursor.execute(f"ALTER TABLE {_table} ADD COLUMN {_col} {_type}")
+                except sqlite3.OperationalError:
+                    pass  # already there
+
             # Metadata table for storing system information like last refresh dates
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS metadata (

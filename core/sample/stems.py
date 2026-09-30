@@ -37,6 +37,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import threading
 from typing import Dict, Optional, Protocol
 
 from utils.logging_config import get_logger
@@ -46,27 +47,53 @@ logger = get_logger("sample.stems")
 STEMS = ("drums", "vocals", "bass", "other")
 SEPARATOR_VERSION = 1
 
+# every way to split a track, and the outputs each one makes. rough outputs
+# get their own slugs so they can sit next to real stems in the same cache.
+METHOD_STEMS = {
+    "demucs": STEMS,
+    "rough-drums": ("drums-rough", "music-rough"),
+    "rough-center": ("center-rough",),
+}
+SEPARATION_METHODS = tuple(METHOD_STEMS)
+ALL_STEMS = tuple(s for outs in METHOD_STEMS.values() for s in outs)
+STEM_LABELS = {
+    "drums": "Drums",
+    "vocals": "Vocals",
+    "bass": "Bass",
+    "other": "Other",
+    "drums-rough": "Drums (rough)",
+    "music-rough": "Music (rough)",
+    "center-rough": "Center (rough)",
+}
+
+
+def method_for_stem(stem: str) -> Optional[str]:
+    for method, outs in METHOD_STEMS.items():
+        if stem in outs:
+            return method
+    return None
+
+
 MODEL_NAME = "htdemucs"
-MODEL_FILENAME = "04573f0d-f3cf-4e94-8bdd-57779fcda8dd.th"
-# Meta's public hosting, then the community Hugging Face mirror as fallback.
+# the real htdemucs checkpoint (demucs/remote/files.txt + htdemucs.yaml). the
+# part after the dash is the first 8 hex of its sha256, same check torch.hub
+# does. the old name here didn't exist on any server, so the download 403'd
+# and demucs could never run.
+MODEL_FILENAME = "955717e8-8726e21a.th"
+MODEL_SHA256_PREFIX = "8726e21a"
 MODEL_URLS = (
     f"https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/{MODEL_FILENAME}",
-    f"https://huggingface.co/adefossez/HTDemucs/resolve/main/{MODEL_FILENAME}",
 )
-# Trust-on-first-use: the SHA-256 observed on the first successful download is
-# pinned in a sidecar file and verified on every later load. This guards
-# against corruption / partial downloads, not against a hostile first fetch —
-# the URLs above are Meta's own public hosting.
-_CHECKSUM_SUFFIX = ".sha256"
+_MIN_MODEL_BYTES = 10_000_000
 
 
 class SeparatorBackend(Protocol):
-    """Anything that can split a track file into the four stems."""
+    """Anything that can split a track file into stems."""
 
     name: str
 
     def separate(self, track_path: str, out_dir: str) -> Dict[str, str]:
-        """Write one WAV per stem into out_dir. Returns {stem: file_path}."""
+        """Write one WAV per output into out_dir. Returns {stem: file_path}."""
         ...
 
 
@@ -80,11 +107,12 @@ def models_dir() -> str:
 
 
 def model_path() -> str:
-    return os.path.join(models_dir(), MODEL_FILENAME)
-
-
-def _checksum_path() -> str:
-    return model_path() + _CHECKSUM_SUFFIX
+    # torch.hub.set_dir(models_dir()) makes demucs look in <dir>/checkpoints,
+    # so downloading straight there means demucs finds it and never fetches
+    # its own second copy.
+    d = os.path.join(models_dir(), "checkpoints")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, MODEL_FILENAME)
 
 
 def _sha256_file(path: str) -> str:
@@ -95,26 +123,31 @@ def _sha256_file(path: str) -> str:
     return h.hexdigest()
 
 
-def ensure_model() -> str:
-    """Download htdemucs on first use; verify against the pinned checksum after.
+def _model_ok(path: str) -> bool:
+    return (
+        os.path.isfile(path)
+        and os.path.getsize(path) > _MIN_MODEL_BYTES
+        and _sha256_file(path).startswith(MODEL_SHA256_PREFIX)
+    )
 
-    Returns the model file path. Raises RuntimeError when the download fails.
+
+_model_verified = False
+
+
+def ensure_model() -> str:
+    """Download htdemucs on first use and check its hash. Returns the path.
+
+    Raises RuntimeError when the download fails or the file is bad.
     """
+    global _model_verified
     path = model_path()
-    if os.path.isfile(path) and os.path.getsize(path) > 10_000_000:
-        pinned = None
-        try:
-            with open(_checksum_path(), "r", encoding="utf-8") as f:
-                pinned = f.read().strip()
-        except OSError:
-            pinned = None
-        if pinned:
-            actual = _sha256_file(path)
-            if actual != pinned:
-                raise RuntimeError(
-                    "htdemucs model failed checksum — delete it and retry the download"
-                )
-        return path
+    if os.path.isfile(path):
+        if _model_verified:
+            return path
+        if _model_ok(path):
+            _model_verified = True
+            return path
+        raise RuntimeError("htdemucs model failed its checksum, delete it and retry the download")
 
     import urllib.request
 
@@ -126,13 +159,11 @@ def ensure_model() -> str:
             req = urllib.request.Request(url, headers={"User-Agent": "SoulSync/1.0"})
             with urllib.request.urlopen(req, timeout=120) as resp, open(tmp, "wb") as f:
                 shutil.copyfileobj(resp, f)
-            if os.path.getsize(tmp) < 10_000_000:
-                raise RuntimeError(f"suspiciously small download ({os.path.getsize(tmp)} bytes)")
+            if not _model_ok(tmp):
+                raise RuntimeError("download failed its checksum")
             os.replace(tmp, path)
-            digest = _sha256_file(path)
-            with open(_checksum_path(), "w", encoding="utf-8") as f:
-                f.write(digest)
-            logger.info("htdemucs model cached at %s (sha256 pinned)", path)
+            _model_verified = True
+            logger.info("htdemucs model cached at %s", path)
             return path
         except Exception as exc:  # noqa: BLE001 — try the next mirror
             last_error = exc
@@ -168,6 +199,34 @@ class StubSeparator:
         return paths
 
 
+_demucs_lock = threading.Lock()
+_demucs_model = None
+
+
+def _load_demucs_model():
+    """one model per process. loading it takes seconds, so jobs share it."""
+    global _demucs_model
+    with _demucs_lock:
+        if _demucs_model is not None:
+            return _demucs_model
+        # import first: no point downloading 84 MB for a server that can't run it
+        try:
+            import torch
+            from demucs.pretrained import get_model
+        except ImportError as exc:
+            raise ImportError(
+                "Demucs needs torch + torchaudio + demucs installed "
+                "(see the setup note in Sample Studio)"
+            ) from exc
+        ensure_model()
+        torch.hub.set_dir(models_dir())
+        model = get_model(name=MODEL_NAME)
+        model.cpu()
+        model.eval()
+        _demucs_model = model
+        return model
+
+
 class DemucsSeparator:
     """Real separator — Demucs v4 hybrid transformer on CPU.
 
@@ -178,98 +237,100 @@ class DemucsSeparator:
 
     name = "demucs-htdemucs"
 
-    def __init__(self) -> None:
-        self._model = None
-
-    def _load(self):
-        if self._model is not None:
-            return self._model
-        ensure_model()  # fail fast with a clear error before importing torch
-        try:
-            import torch
-            from demucs.pretrained import get_model
-        except ImportError as exc:
-            raise ImportError(
-                "Demucs needs torch + demucs installed "
-                "(Docker: CPU torch pair or onnxruntime — see module docstring)"
-            ) from exc
-        # get_model resolves its own hub cache; point torch hub at our data dir
-        # so the weights live on the persistent volume, not in ~/.cache.
-        torch.hub.set_dir(models_dir())
-        model = get_model(name=MODEL_NAME)
-        model.cpu()
-        model.eval()
-        self._model = model
-        return model
-
     def separate(self, track_path: str, out_dir: str) -> Dict[str, str]:
+        import numpy as np
         import torch
         import torchaudio
         from demucs.apply import apply_model
 
-        model = self._load()
+        from .render import decode_stereo, _load_soundfile
+
+        model = _load_demucs_model()
         os.makedirs(out_dir, exist_ok=True)
-        wav, sr = torchaudio.load(track_path)
-        # Demucs wants its native sample rate; resample when needed.
+        # decode with our own reader (soundfile, ffmpeg fallback) so every
+        # format the library holds works, not just what torchaudio can open
+        audio, sr = decode_stereo(track_path)
+        if audio.shape[1] == 1:
+            audio = np.repeat(audio, 2, axis=1)  # htdemucs wants stereo
+        elif audio.shape[1] > 2:
+            audio = audio[:, :2]
+        wav = torch.from_numpy(np.ascontiguousarray(audio.T))
         if sr != model.samplerate:
             wav = torchaudio.functional.resample(wav, sr, model.samplerate)
         ref = wav.mean(0)
         wav = (wav - ref.mean()) / (ref.std() + 1e-8)
         with torch.no_grad():
             sources = apply_model(model, wav[None], device="cpu")[0]
-        try:
-            import soundfile as sf
-
-            write = lambda p, a: sf.write(p, a.T, model.samplerate, subtype="PCM_16")
-        except ImportError:
-            write = lambda p, a: torchaudio.save(  # noqa: E731
-                p, torch.from_numpy(a), model.samplerate, bits_per_sample=16
-            )
+        # undo the input normalization, same as demucs' own separate.py.
+        # without it every stem comes out at unit variance and clips.
+        sources = sources * ref.std() + ref.mean()
+        sf = _load_soundfile()
         paths: Dict[str, str] = {}
         for source, stem in zip(sources, model.sources, strict=True):
             name = stem if stem in STEMS else "other"
             out = os.path.join(out_dir, f"{name}.wav")
-            write(out, source.cpu().numpy())
+            sf.write(out, np.clip(source.cpu().numpy().T, -1.0, 1.0), model.samplerate,
+                     subtype="PCM_16")
             paths[name] = out
-        for stem in STEMS:  # the contract is always four stems
-            paths.setdefault(stem, paths.get("other", ""))
         logger.info("Demucs separated %s -> %s", track_path, out_dir)
         return paths
 
 
 def get_backend(name: Optional[str] = None) -> SeparatorBackend:
-    """Backend by name: 'demucs' (real) or anything else -> stub.
+    """Demucs backend by name: 'demucs' (real) or anything else -> stub.
 
-    Production default is demucs; the stub is for tests and for installs
-    without torch until the Docker image story lands.
+    the stub is for tests only. the api refuses demucs when torch isn't
+    installed instead of quietly handing out four copies of the track.
     """
     if (name or "demucs") == "demucs":
         return DemucsSeparator()
     return StubSeparator()
 
 
-def separate_track(track_id: int, backend: Optional[SeparatorBackend] = None) -> Dict[str, str]:
-    """Separate a library track into four stems. Returns {stem: file_path}.
+def get_separator(method: str, backend: Optional[str] = None) -> SeparatorBackend:
+    """the separator for a method. `backend` only matters for demucs ('stub')."""
+    if method == "demucs":
+        return get_backend(backend)
+    from .rough import RoughCenterSeparator, RoughDrumsSeparator
+
+    if method == "rough-drums":
+        return RoughDrumsSeparator()
+    if method == "rough-center":
+        return RoughCenterSeparator()
+    raise ValueError(f"unknown separation method {method!r}")
+
+
+def separate_track(
+    track_id: int,
+    backend: Optional[SeparatorBackend] = None,
+    method: str = "demucs",
+) -> Dict[str, str]:
+    """Split a library track with `method`. Returns {stem: file_path}.
 
     Raises on any failure — the worker records it as the job status.
     """
     from . import store
-    from .worker import resolve_audio_path
+    from .worker import resolve_track_file, unreachable_message
+
     stored = store.get_track_file_path(track_id)
     if not stored:
         raise RuntimeError(f"unknown track_id {track_id}")
-    path = resolve_audio_path(stored)
+    path = resolve_track_file(stored)
     if not path:
-        raise RuntimeError(f"audio file not reachable on disk: {stored}")
-    backend = backend or get_backend(_default_backend_name())
+        raise RuntimeError(unreachable_message(stored))
+    backend = backend or get_separator(method)
     out_dir = os.path.join(store.stems_dir(), str(int(track_id)))
     os.makedirs(out_dir, exist_ok=True)
     paths = backend.separate(path, out_dir)
-    missing = [s for s in STEMS if not paths.get(s) or not os.path.isfile(paths[s])]
+    wanted = METHOD_STEMS[method]
+    missing = [s for s in wanted if not paths.get(s) or not os.path.isfile(paths[s])]
     if missing:
         raise RuntimeError(f"separator did not produce stems: {missing}")
-    store.save_stems(track_id, paths, backend.name)
-    return paths
+    store.save_stems(
+        track_id, {s: paths[s] for s in wanted}, backend.name,
+        method=method, source_sig=store.source_signature(path),
+    )
+    return {s: paths[s] for s in wanted}
 
 
 def stems_available() -> bool:
