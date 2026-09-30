@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 
 # ---------------------------------------------------------------------------
 # Fakes
 # ---------------------------------------------------------------------------
+
+def _owned(title, artist, album='Album'):
+    return SimpleNamespace(title=title, artist_name=artist, album_title=album,
+                           file_path='/music/owned.flac')
 
 class _FakeWishlistService:
     def __init__(self, tracks_per_profile=None, mark_results=None):
@@ -97,7 +103,7 @@ def test_track_found_in_db_gets_removed(install):
     ws, mdb, _ = install(
         profiles=[{'id': 1}],
         tracks_per_profile={1: [track]},
-        hits={('Money', 'Pink Floyd'): (object(), 0.95)},
+        hits={('Money', 'Pink Floyd'): (_owned('Money', 'Pink Floyd', 'DSOTM'), 0.95)},
     )
     cleanup_wishlist_after_db_update(_FakeConfig())
     assert ws.mark_calls == [('sp-1', True)]
@@ -127,7 +133,7 @@ def test_low_confidence_match_does_not_remove(install):
     ws, _, _ = install(
         profiles=[{'id': 1}],
         tracks_per_profile={1: [track]},
-        hits={('Money', 'Pink Floyd'): (object(), 0.5)},
+        hits={('Money', 'Pink Floyd'): (_owned('Money', 'Pink Floyd', 'DSOTM'), 0.5)},
     )
     cleanup_wishlist_after_db_update(_FakeConfig())
     assert ws.mark_calls == []
@@ -156,7 +162,7 @@ def test_artist_dict_format_normalized(install):
     ws, mdb, _ = install(
         profiles=[{'id': 1}],
         tracks_per_profile={1: [track]},
-        hits={('X', 'Aretha'): (object(), 0.9)},
+        hits={('X', 'Aretha'): (_owned('X', 'Aretha'), 0.9)},
     )
     cleanup_wishlist_after_db_update(_FakeConfig())
     assert ws.mark_calls == [('sp-1', True)]
@@ -173,7 +179,7 @@ def test_breaks_on_first_artist_match(install):
     ws, mdb, _ = install(
         profiles=[{'id': 1}],
         tracks_per_profile={1: [track]},
-        hits={('X', 'First'): (object(), 0.9)},
+        hits={('X', 'First'): (_owned('X', 'First'), 0.9)},
     )
     cleanup_wishlist_after_db_update(_FakeConfig())
     assert ws.mark_calls == [('sp-1', True)]
@@ -188,7 +194,7 @@ def test_walks_all_profiles(install):
     ws, mdb, _ = install(
         profiles=[{'id': 1}, {'id': 2}],
         tracks_per_profile={1: [track_p1], 2: [track_p2]},
-        hits={('A', 'X'): (object(), 0.9), ('B', 'Y'): (object(), 0.9)},
+        hits={('A', 'X'): (_owned('A', 'X'), 0.9), ('B', 'Y'): (_owned('B', 'Y'), 0.9)},
     )
     cleanup_wishlist_after_db_update(_FakeConfig())
     marked = {c[0] for c in ws.mark_calls}
@@ -230,7 +236,7 @@ def test_db_check_failure_continues_to_next_artist(install, monkeypatch):
             self.calls += 1
             if artist_name == 'Bad':
                 raise RuntimeError("db boom")
-            return (object(), 0.9)
+            return (_owned(track_name, artist_name), 0.9)
 
     edb = _ExplodingDB()
     import database.music_database as mdb_mod
@@ -264,3 +270,23 @@ def test_uses_active_server_from_config(install):
     _, mdb, _ = install(profiles=[{'id': 1}], tracks_per_profile={1: [track]}, hits={})
     cleanup_wishlist_after_db_update(_FakeConfig(server='jellyfin'))
     assert mdb.check_calls[0][2] == 'jellyfin'
+
+
+@pytest.mark.parametrize(('owned_title', 'owned_album', 'removed'), [
+    ('The Sun Maid', 'Grave Dancers Union', False),
+    ('Runaway Train', 'Another Release', False),
+    ('Runaway Train', 'Grave Dancers Union', True),
+])
+def test_download_cleanup_checks_identity_and_accepts_edition_noise(
+        install, owned_title, owned_album, removed):
+    from core.downloads.cleanup import cleanup_wishlist_after_db_update
+
+    title = 'Runaway Train (2022 Remaster)'
+    track = {'spotify_track_id': 'wish', 'name': title, 'artists': ['Soul Asylum'],
+             'album': 'Grave Dancers Union (2022 Remaster)', 'source_type': 'album'}
+    ws, _, _ = install(
+        profiles=[{'id': 1}], tracks_per_profile={1: [track]},
+        hits={(title, 'Soul Asylum'): (_owned(owned_title, 'Soul Asylum', owned_album), 0.99)},
+    )
+    cleanup_wishlist_after_db_update(_FakeConfig())
+    assert ws.mark_calls == ([('wish', True)] if removed else [])

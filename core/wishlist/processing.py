@@ -682,6 +682,7 @@ def _cleanup_one(wishlist_service, music_database, _mlm, profile_id, track, acti
 
         match = find_owned_match(
             music_database, track_name, artists, track_album, active_server,
+            strict_identity=True, require_album=track.get('source_type') == 'album',
             log=logger, log_prefix=log_prefix)
 
         if match:

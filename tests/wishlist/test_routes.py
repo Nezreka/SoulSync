@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 import core.wishlist.routes as routes_module
 from core.wishlist.routes import (
@@ -621,13 +622,31 @@ def test_add_album_track_skips_owned_when_duplicates_off(monkeypatch):
     monkeypatch.setattr(config_manager, 'get',
                         lambda key, default=None: False if key == 'wishlist.allow_duplicate_tracks' else default)
     runtime, service, db, _logger, _ = _build_runtime()
-    db.check_track_exists = lambda *a, **k: (object(), 0.95)   # already owned
+    owned = SimpleNamespace(title='Song', album_title='Album', artist_name='A',
+                            file_path='/music/Song.flac')
+    db.check_track_exists = lambda *a, **k: (owned, 0.95)
 
     payload, status = add_album_track_to_wishlist(runtime, **_own_track_args())
 
     assert status == 200
     assert payload.get("skipped") is True
     assert service.add_calls == []                             # nothing added
+
+
+def test_add_album_track_keeps_request_when_fuzzy_hit_is_another_song(monkeypatch):
+    from core.settings import config_manager
+    monkeypatch.setattr(config_manager, 'get',
+                        lambda key, default=None: False if key == 'wishlist.allow_duplicate_tracks' else default)
+    runtime, service, db, _logger, _ = _build_runtime()
+    similar = SimpleNamespace(title='Songs', album_title='Album', artist_name='A',
+                              file_path='/music/Songs.flac')
+    db.check_track_exists = lambda *a, **k: (similar, 0.95)
+
+    payload, status = add_album_track_to_wishlist(runtime, **_own_track_args())
+
+    assert status == 200
+    assert not payload.get('skipped')
+    assert len(service.add_calls) == 1
 
 
 def test_add_album_track_adds_missing_when_duplicates_off(monkeypatch):

@@ -12146,6 +12146,7 @@ class MusicDatabase:
                 track.album_title = row['album_title']
                 track.album_thumb_url = row['album_thumb_url'] if 'album_thumb_url' in row.keys() else ''
                 track.server_source = row['server_source'] if 'server_source' in row.keys() else ''
+                track.track_artist = row['track_artist'] if 'track_artist' in row.keys() else None
                 tracks.append(track)
             return tracks
         except Exception as e:

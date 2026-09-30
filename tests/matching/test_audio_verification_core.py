@@ -4,7 +4,9 @@ One place for normalization + the PASS/SKIP/FAIL decision used by BOTH import-ti
 verification and the library AcoustID scan, so the two paths can't drift apart.
 """
 
-from core.matching.audio_verification import normalize, evaluate, Decision
+import pytest
+
+from core.matching.audio_verification import normalize, similarity, evaluate, Decision
 
 
 def _rec(title, artist, duration=None):
@@ -63,6 +65,48 @@ def test_normalize_strips_paren_bracket_angle_and_keeps_cjk():
     assert normalize("澤野弘之 <Vocal: MIKA KOBAYASHI>") == "澤野弘之"
     assert normalize("Clarity (Live at X) [Remastered]") == "clarity"
     assert normalize("Attack on Titan <TV Size>") == "attack on titan"
+
+
+@pytest.mark.parametrize("title,canonical", [
+    ("(Nice Dream)", "nice dream"),
+    ("[Rhubarb]", "rhubarb"),
+    ("[untitled]", "untitled"),
+    ("(Fork and Knife)", "fork and knife"),
+    ("(levitation)", "levitation"),
+    ("-", "-"),
+])
+def test_whole_title_is_not_erased_by_annotation_stripping(title, canonical):
+    assert normalize(title) == canonical
+    assert similarity(title, title) == 1.0
+
+
+def test_whole_title_matches_unwrapped_candidate():
+    assert similarity("(Nice Dream)", "Nice Dream") == 1.0
+    assert similarity("[Rhubarb]", "Rhubarb") == 1.0
+    assert normalize("[Rhubarb] - Remastered 2011") == "rhubarb"
+    assert similarity("[Rhubarb] - Remastered 2011", "Rhubarb") == 1.0
+    assert similarity("-", "&") == 0.0
+
+
+def test_whole_title_finding_passes_when_artist_and_title_match():
+    out = evaluate("(Nice Dream)", "Radiohead",
+                   [_rec("(Nice Dream)", "Radiohead")], fingerprint_score=0.979)
+    assert out.decision == Decision.PASS
+
+
+def test_whole_title_fix_does_not_accept_a_different_artist_or_song():
+    wrong_artist = evaluate("(Exchange)", "Massive Attack",
+                            [_rec("Exchange", "Zao")], fingerprint_score=1.0)
+    wrong_song = evaluate("&", "Pinegrove",
+                          [_rec("Need 2", "Pinegrove")], fingerprint_score=0.998)
+    assert wrong_artist.decision == Decision.FAIL
+    assert wrong_song.decision == Decision.FAIL
+
+
+def test_whole_title_fix_keeps_version_gate():
+    out = evaluate("[Rhubarb] - Instrumental", "Aphex Twin",
+                   [_rec("[Rhubarb]", "Aphex Twin")], fingerprint_score=0.99)
+    assert out.decision == Decision.FAIL
 
 
 def test_normalize_strips_version_and_featuring():
