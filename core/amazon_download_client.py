@@ -494,4 +494,5 @@ class AmazonDownloadClient(DownloadSourcePlugin):
             speed=int(rec.get('speed', 0)),
             time_remaining=rec.get('time_remaining'),
             file_path=rec.get('file_path'),
+            error=rec.get('error'),
         )

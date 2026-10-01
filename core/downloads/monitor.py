@@ -785,6 +785,7 @@ class WebUIDownloadMonitor:
                         'size': download.size,
                         'bytesTransferred': download.transferred,
                         'averageSpeed': download.speed,
+                        'error': getattr(download, 'error', None),
                     }
                     live_transfers[key] = transfer_row
                     id_key = _download_id_key(download.id)
@@ -909,6 +910,11 @@ class WebUIDownloadMonitor:
             if task.get('_user_manual_pick'):
                 return False
 
+            # the source's own reason (deezer: expired arl, no license for
+            # that quality...) so the give-up says it instead of a generic line
+            if live_info.get('error'):
+                task['last_source_error'] = str(live_info['error'])
+
             retry_count = task.get('error_retry_count', 0)
             last_retry = task.get('last_error_retry_time', 0)
 
@@ -1004,6 +1010,11 @@ class WebUIDownloadMonitor:
                             f'Tidal download failed for "{track_label}"{sources_str} — '
                             f'check Tidal authentication and quality settings.'
                         )
+                elif task.get('last_source_error'):
+                    task['error_message'] = (
+                        f'Download failed 3 times for "{track_label}"{sources_str}. '
+                        f'Last error: {task["last_source_error"]}'
+                    )
                 else:
                     task['error_message'] = f'Soulseek transfer errored 3 times for "{track_label}"{sources_str} — all sources failed or became unavailable'
 

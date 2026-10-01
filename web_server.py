@@ -2187,6 +2187,7 @@ def get_cached_transfer_data():
                         'size': download.size,
                         'bytesTransferred': download.transferred,
                         'averageSpeed': download.speed,
+                        'error': getattr(download, 'error', None),
                     }
             except Exception as e:
                 logger.error(f"Could not fetch streaming source downloads: {e}")
@@ -2874,6 +2875,7 @@ def _find_streaming_download_in_all_downloads(all_downloads, track_data):
                     'bytesTransferred': download.transferred,
                     'averageSpeed': download.speed,
                     'file_path': getattr(download, 'file_path', None),
+                    'error': getattr(download, 'error', None),
                 }
 
         return None
@@ -7397,6 +7399,7 @@ def get_download_status():
                         'bytesTransferred': download.transferred,
                         'averageSpeed': download.speed,
                         'direction': 'Download',  # Required by frontend
+                        'error': getattr(download, 'error', None),
                     }
                     all_transfers.append(streaming_transfer)
 
