@@ -23,7 +23,7 @@ import {
   fetchWeekStats,
 } from '../-discover.api';
 import { useDominantColor } from '../-discover.backdrop';
-import { bpMetaStats } from '../-discover.build-playlist';
+import { bpMetaStats, BP_NO_PLAYLIST_TRACKS } from '../-discover.build-playlist';
 import {
   byltSections,
   byltRow,
@@ -1184,6 +1184,9 @@ export function DiscoverPage() {
             generating={bp.generating}
             resultSubtitle={bp.resultSubtitle}
             hasResults={bp.tracks !== null}
+            name={bp.name}
+            namePlaceholder={bp.playlistName}
+            onNameChange={bp.setName}
             syncing={sync.syncingKeys.includes('build-playlist')}
             syncProgress={toRawProgress(sync.progressFor('build-playlist'))}
             metadata={
@@ -1208,10 +1211,13 @@ export function DiscoverPage() {
               else toast(d.toast, d.level);
             }}
             onSync={() => {
-              const out = sync.startMixSync(
-                { key: 'build_playlist_custom', title: 'Custom Playlist' },
-                bp.tracks ?? undefined,
-              );
+              // its own id, name and status base: through startMixSync the
+              // progress keyed 'build_playlist_custom' while this section read
+              // 'build-playlist', and the toast named the raw key (#1421)
+              const req = bp.syncRequest();
+              const out = req
+                ? sync.startSync(req)
+                : { message: BP_NO_PLAYLIST_TRACKS, level: 'warning' as const };
               if (out) toast(out.message, out.level);
             }}
             infoOpen={bp.infoOpen}

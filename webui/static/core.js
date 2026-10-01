@@ -91,7 +91,12 @@ let discoverPageInitialized = false;
  */
 window.startDiscoverVirtualSync = function (virtualPlaylistId, name, spotifyTracks) {
     playlistTrackCache[virtualPlaylistId] = spotifyTracks;
-    if (!spotifyPlaylists.find(p => p.id === virtualPlaylistId)) {
+    const existing = spotifyPlaylists.find(p => p.id === virtualPlaylistId);
+    if (existing) {
+        // same id, new run: the sync reads the name off this row
+        existing.name = name;
+        existing.track_count = spotifyTracks.length;
+    } else {
         spotifyPlaylists.push({ id: virtualPlaylistId, name, track_count: spotifyTracks.length });
     }
     return startPlaylistSync(virtualPlaylistId);

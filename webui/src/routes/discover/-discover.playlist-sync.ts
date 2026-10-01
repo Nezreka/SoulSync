@@ -128,9 +128,20 @@ export function toSyncTracks(tracks: Record<string, unknown>[]): SpotifyShapedTr
       spotifyTrack = { ...(track.track_data_json as SpotifyShapedTrack) };
     } else {
       spotifyTrack = {
-        id: track.spotify_track_id as string,
+        // the row's own source id. a deezer or itunes primary leaves
+        // spotify_track_id empty, and a track with no id never reaches the
+        // wishlist (#1421)
+        id: (track.spotify_track_id ||
+          track.deezer_track_id ||
+          track.itunes_track_id ||
+          track.track_id ||
+          track.id) as string,
         name: track.track_name as string,
-        artists: [{ name: track.artist_name }],
+        // a generated track carries the real list; artist_name is it joined
+        artists:
+          Array.isArray(track.artists) && track.artists.length
+            ? track.artists
+            : [{ name: track.artist_name }],
         album: {
           name: track.album_name as string,
           images: track.album_cover_url ? [{ url: track.album_cover_url as string }] : [],

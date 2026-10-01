@@ -41535,6 +41535,56 @@ div.artist-hero-badge {
     font-size: 13px;
 }
 
+/* -- Result name: the heading is the name box (#1421) -- */
+.bp-result-head {
+    flex: 1;
+    min-width: 0;
+}
+
+.bp-result-eyebrow {
+    display: block;
+    margin-bottom: 2px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.45);
+    cursor: text;
+}
+
+.bp-name-input {
+    display: block;
+    width: 100%;
+    max-width: 520px;
+    margin: 0 0 0 -8px;
+    padding: 4px 8px;
+    font: inherit;
+    font-size: 18px;
+    font-weight: 600;
+    color: #fff;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    outline: none;
+    text-overflow: ellipsis;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.bp-name-input:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+.bp-name-input:focus {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(var(--accent-rgb), 0.55);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.15);
+}
+
+.bp-name-input::placeholder {
+    color: rgba(255, 255, 255, 0.35);
+}
+
 /* -- Metadata Stats -- */
 .build-playlist-metadata {
     display: grid;

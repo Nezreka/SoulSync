@@ -13,12 +13,17 @@ import {
   BP_SEARCH_FAILED,
   bpGenerateBody,
   bpGenerateError,
+  bpPlaylistName,
   bpQueryIsEmpty,
   bpRemoveArtist,
   bpResultSubtitle,
   bpSearchOutcome,
   bpSearchUrl,
+  bpSyncDoneToast,
+  bpSyncId,
+  BP_SYNC_STATUS_BASE,
 } from './-discover.build-playlist';
+import { toSyncTracks } from './-discover.playlist-sync';
 
 /**
  * The Build-a-Playlist controller.
@@ -38,8 +43,8 @@ import {
  * `build_playlist_custom` id the module documents as deliberately NOT the
  * sync path's `discover_build_playlist`.
  *
- * Sync is not here: the page hands {syncKey:'build_playlist', tracks} to
- * usePlaylistSync, which already routes it (SYNC_TRACK_SOURCES has the type).
+ * Sync is the page's to start; `syncRequest` hands it what usePlaylistSync's
+ * startSync takes, under the user's name for the playlist (#1421).
  */
 
 export type BpToast = { message: string; level: 'error' | 'warning' };
@@ -47,6 +52,14 @@ export type BpToast = { message: string; level: 'error' | 'warning' };
 export type BpDownload =
   | { kind: 'no-tracks'; toast: string; level: 'warning' }
   | { kind: 'ok'; virtualId: string; name: string; tracks: unknown[] };
+
+export interface BpSyncRequest {
+  virtualId: string;
+  name: string;
+  statusBase: string;
+  doneToast: string;
+  tracks: unknown[];
+}
 
 export interface BuildPlaylistController {
   query: string;
@@ -65,9 +78,16 @@ export interface BuildPlaylistController {
   tracks: unknown[] | null;
   metadata: BpPlaylistMeta | undefined;
   resultSubtitle: string;
+  /** the name box. prefilled per build; blank falls back to the default. */
+  name: string;
+  setName: (name: string) => void;
+  /** the name it actually goes out under. */
+  playlistName: string;
   generate: () => Promise<void>;
   /** The pure half of the download handoff; the caller opens the modal. */
   download: () => BpDownload;
+  /** null until there are tracks to sync. */
+  syncRequest: () => BpSyncRequest | null;
 }
 
 export function useBuildPlaylist(onToast: (toast: BpToast) => void): BuildPlaylistController {
@@ -84,6 +104,10 @@ export function useBuildPlaylist(onToast: (toast: BpToast) => void): BuildPlayli
   const [tracks, setTracks] = useState<unknown[] | null>(null);
   const [metadata, setMetadata] = useState<BpPlaylistMeta | undefined>(undefined);
   const [resultSubtitle, setResultSubtitle] = useState('');
+  const [name, setName] = useState('');
+  // named for the seeds it was BUILT from, not whatever is selected since
+  const [builtFrom, setBuiltFrom] = useState<SeedArtist[]>([]);
+  const playlistName = bpPlaylistName(name, builtFrom);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gen = useRef(0);
   const selectedRef = useRef(selected);
@@ -188,6 +212,10 @@ export function useBuildPlaylist(onToast: (toast: BpToast) => void): BuildPlayli
       setTracks(data.playlist!.tracks!);
       setMetadata((data.playlist as { metadata?: BpPlaylistMeta }).metadata);
       setResultSubtitle(bpResultSubtitle(selected));
+      // a fresh build starts from a fresh default name, filled in so the
+      // user edits it rather than guessing what blank means
+      setBuiltFrom(selected);
+      setName(bpDownloadName(selected));
     } catch (e) {
       setTracks(null);
       toastRef.current({ message: (e as Error).message, level: 'error' });
@@ -203,11 +231,22 @@ export function useBuildPlaylist(onToast: (toast: BpToast) => void): BuildPlayli
     return {
       kind: 'ok',
       virtualId: BP_DOWNLOAD_PLAYLIST_ID,
-      name: bpDownloadName(selected),
+      name: playlistName,
       // RAW tracks, no conversion (11114) — the download modal owns shaping.
       tracks,
     };
-  }, [tracks, selected]);
+  }, [tracks, playlistName]);
+
+  const syncRequest = useCallback((): BpSyncRequest | null => {
+    if (!tracks || tracks.length === 0) return null;
+    return {
+      virtualId: bpSyncId(playlistName),
+      name: playlistName,
+      statusBase: BP_SYNC_STATUS_BASE,
+      doneToast: bpSyncDoneToast(playlistName),
+      tracks: toSyncTracks(tracks as Record<string, unknown>[]),
+    };
+  }, [tracks, playlistName]);
 
   return {
     query,
@@ -224,7 +263,11 @@ export function useBuildPlaylist(onToast: (toast: BpToast) => void): BuildPlayli
     tracks,
     metadata,
     resultSubtitle,
+    name,
+    setName,
+    playlistName,
     generate,
     download,
+    syncRequest,
   };
 }
