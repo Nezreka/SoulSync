@@ -11,15 +11,36 @@ export interface ServerPlaylist {
   id: string;
   name: string;
   track_count?: number;
+  /** the server user it belongs to, where the server says (navidrome) */
+  owner?: string | null;
   /** Set by the split below, not by the backend. */
   _synced?: boolean;
 }
+
+/** someone else's playlists, for the admin (#1414) */
+export interface ServerPlaylistGroup {
+  /** the server user */
+  owner: string;
+  /** the SoulSync profile linked to that user, null when none is */
+  profile: string | null;
+  playlists: ServerPlaylist[];
+}
+
+/**
+ * who the list was made for (#1414): the admin sees everything, a profile with
+ * its own server user sees theirs, and a profile on the shared account sees
+ * only what its own mirrors made.
+ */
+export type ServerPlaylistScope = 'admin' | 'own' | 'shared';
 
 export interface ServerPlaylistsResponse {
   success?: boolean;
   error?: string;
   server_type?: string;
   playlists?: ServerPlaylist[];
+  others?: ServerPlaylistGroup[];
+  scope?: ServerPlaylistScope;
+  acting_as?: string | null;
 }
 
 /**

@@ -295,6 +295,96 @@ describe('ServerPlaylistList', () => {
   });
 });
 
+describe('ServerPlaylistList by owner (#1414)', () => {
+  const ADMIN = {
+    success: true,
+    server_type: 'navidrome',
+    scope: 'admin',
+    playlists: [{ id: '1', name: 'Discover Weekly', track_count: 30 }],
+    others: [
+      {
+        owner: 'thomas',
+        profile: 'ThomasClan',
+        playlists: [{ id: '7', name: 'Discover Weekly', track_count: 30, owner: 'thomas' }],
+      },
+      { owner: 'guest', profile: null, playlists: [{ id: '8', name: 'Party', track_count: 51 }] },
+    ],
+  };
+
+  it('gives the admin everyone else, grouped by owner', async () => {
+    responder = (url) => (url === '/api/server/playlists' ? ADMIN : []);
+    render(<ServerPlaylistList onOpenCompare={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('Everyone else')).toBeInTheDocument());
+    expect(screen.getByText('ThomasClan · thomas')).toBeInTheDocument();
+    expect(screen.getByText('No SoulSync profile · guest')).toBeInTheDocument();
+    expect(screen.getByText('Admin only')).toBeInTheDocument();
+  });
+
+  it("opens someone else's playlist on its own, never matched to the admin's mirror", async () => {
+    const onOpenCompare = vi.fn();
+    responder = (url) =>
+      url === '/api/server/playlists'
+        ? ADMIN
+        : url === '/api/mirrored-playlists'
+          ? [{ id: 9, name: 'Discover Weekly', source: 'spotify' }]
+          : [];
+    render(<ServerPlaylistList onOpenCompare={onOpenCompare} />);
+    await waitFor(() => expect(screen.getByText('Everyone else')).toBeInTheDocument());
+    const theirs = document.querySelectorAll('.server-pl-others .server-pl-card')[0] as HTMLElement;
+    fireEvent.click(theirs);
+    await waitFor(() => expect(onOpenCompare).toHaveBeenCalled());
+    expect(onOpenCompare.mock.calls[0][0]).toMatchObject({ id: '7' });
+    expect(onOpenCompare.mock.calls[0][1]).toBeNull();
+  });
+
+  it('asks a shared-account profile to link its server user, even with nothing synced', async () => {
+    const open = vi.fn();
+    vi.stubGlobal('openPersonalSettings', open);
+    responder = (url) =>
+      url === '/api/server/playlists'
+        ? { success: true, server_type: 'navidrome', scope: 'shared', playlists: [], others: [] }
+        : [];
+    render(<ServerPlaylistList onOpenCompare={vi.fn()} />);
+    await waitFor(() =>
+      expect(
+        screen.getByText('Link your Navidrome login to see your playlists'),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText('No playlists found on your media server.')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Link Navidrome login' }));
+    expect(open).toHaveBeenCalled();
+  });
+
+  it('every class the owner view renders exists in the stylesheet', async () => {
+    const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
+    responder = (url) => (url === '/api/server/playlists' ? ADMIN : []);
+    const { unmount } = render(<ServerPlaylistList onOpenCompare={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('Everyone else')).toBeInTheDocument());
+    unmount();
+    responder = (url) =>
+      url === '/api/server/playlists'
+        ? { success: true, server_type: 'plex', scope: 'shared', playlists: [], others: [] }
+        : [];
+    render(<ServerPlaylistList onOpenCompare={vi.fn()} />);
+    await waitFor(() => expect(document.querySelector('.server-pl-link-prompt')).not.toBeNull());
+    for (const c of [
+      'server-pl-others',
+      'server-pl-admin-only',
+      'server-pl-others-note',
+      'server-pl-owner-group',
+      'server-pl-owner-chip',
+      'server-pl-link-prompt',
+      'server-pl-link-prompt-title',
+      'server-pl-link-prompt-body',
+      'server-pl-link-prompt-btn',
+    ]) {
+      expect(new RegExp(`\\.${c}[\\s,:{.\\[+]`).test(css), `.${c} is not in static/style.css`).toBe(
+        true,
+      );
+    }
+  });
+});
+
 describe('ServerDisambigModal — direct (185-223)', () => {
   const NOW = Date.UTC(2026, 7, 6, 12, 0, 0);
   const CANDIDATES = [
