@@ -34,7 +34,7 @@ import {
 
 export interface PipelineController {
   /** The Auto-Sync button: POST, apply the state, then poll (2467). */
-  run: (playlistId: number, name: string) => Promise<void>;
+  run: (playlistId: number, name: string, opts?: { refreshOnly?: boolean }) => Promise<void>;
   /**
    * Restart polling for a row the backend already reports as running, unless
    * a poller for it is live (653-655). Safe to call on every render.
@@ -123,12 +123,15 @@ export function useMirroredPipeline({ onState, reload }: UsePipelineOptions): Pi
   );
 
   const run = useCallback(
-    async (playlistId: number, name: string) => {
+    async (playlistId: number, name: string, opts: { refreshOnly?: boolean } = {}) => {
       try {
-        const data = await runMirroredPipeline(playlistId);
+        const data = await runMirroredPipeline(playlistId, opts);
         if (!alive.current) return;
         latest.current.onState(playlistId, data.state || PIPELINE_STARTING_STATE);
-        window.showToast?.(pipelineStartedToast(name), 'success');
+        window.showToast?.(
+          opts.refreshOnly ? `Refreshing ${name} from source` : pipelineStartedToast(name),
+          'success',
+        );
         poll(playlistId, name);
       } catch (err) {
         if (!alive.current) return;

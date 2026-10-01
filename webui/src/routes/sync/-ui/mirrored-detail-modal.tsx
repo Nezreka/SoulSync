@@ -47,6 +47,8 @@ export interface MirroredDetailModalProps {
   onEditSource: () => void;
   /** 1151 — Auto-Sync (runMirroredPlaylistPipeline). */
   onRunPipeline: () => void;
+  /** pull the source + discover the new tracks, nothing pushed (#1413) */
+  onRefreshFromSource?: () => void;
   /** 1153 — Discover (discoverMirroredPlaylist). */
   onDiscover: () => void;
   /** "View discovery" once one exists, the card no longer jumps there (#1403). */
@@ -92,6 +94,7 @@ export function MirroredDetailModal({
   onDelete,
   onEditSource,
   onRunPipeline,
+  onRefreshFromSource,
   onDiscover,
   discoverLabel = 'Discover',
 }: MirroredDetailModalProps) {
@@ -187,6 +190,16 @@ export function MirroredDetailModal({
             <button type="button" className="mm-btn mm-btn-ghost" onClick={onEditSource}>
               Edit Source
             </button>
+            {onRefreshFromSource ? (
+              <button
+                type="button"
+                className="mm-btn mm-btn-ghost"
+                title="Pull the latest tracks from the source and discover the new ones. Your matches are kept, nothing is pushed to your server or downloaded"
+                onClick={onRefreshFromSource}
+              >
+                Refresh from source
+              </button>
+            ) : null}
             {/* Runs the pipeline now; the header's "Auto-Sync" schedules it. */}
             <button
               type="button"

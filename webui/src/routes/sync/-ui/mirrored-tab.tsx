@@ -1202,6 +1202,10 @@ export function MirroredTab({
             setDetail(null);
             void pipeline.run(detail.playlistId, detail.data.name ?? '');
           }}
+          onRefreshFromSource={() => {
+            setDetail(null);
+            void pipeline.run(detail.playlistId, detail.data.name ?? '', { refreshOnly: true });
+          }}
           onDiscover={() => void runDiscovery(detail.playlistId)}
           discoverLabel={
             mirroredDiscoveryReopenable(vertical.states[mirroredHash(detail.playlistId)])

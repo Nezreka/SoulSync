@@ -68,6 +68,9 @@ def run_mirrored_playlist_pipeline(
         playlist_id = config.get('playlist_id')
         process_all = config.get('all', False)
         skip_wishlist = config.get('skip_wishlist', False)
+        # refresh from source: pull the new track list and discover what's new,
+        # nothing pushed to the server, nothing downloaded (#1413)
+        refresh_only = bool(config.get('refresh_only', False))
         # Owner of this run. The manual UI trigger passes it explicitly so a
         # background thread never falls back to admin (P0-01); scheduled
         # automations keep the historic default.
@@ -124,23 +127,32 @@ def run_mirrored_playlist_pipeline(
         else:
             tracks_discovered = f'failed: {discovery_error}'
 
-        sync_summary = sync_and_wishlist_fn(
-            deps,
-            automation_id,
-            [pl for pl in playlists if pl.get('id')],
-            sync_one_fn=lambda pl: sync_one_fn(
-                {'playlist_id': str(pl['id']), '_automation_id': None},
+        if refresh_only:
+            deps.update_progress(
+                automation_id,
+                progress=90,
+                log_line='Refresh only: nothing pushed to the server or downloaded',
+                log_type='info',
+            )
+            sync_summary = {'synced': 0, 'skipped': 0, 'wishlist_queued': 0}
+        else:
+            sync_summary = sync_and_wishlist_fn(
                 deps,
-            ),
-            sync_id_for_fn=lambda pl: f"auto_mirror_{pl['id']}",
-            skip_wishlist=skip_wishlist,
-            progress_start=56,
-            progress_end=85,
-            sync_phase_label='Phase 3/4: Syncing to server...',
-            sync_phase_start_log='Phase 3: Sync',
-            wishlist_phase_label='Phase 4/4: Processing wishlist...',
-            wishlist_phase_start_log='Phase 4: Wishlist',
-        )
+                automation_id,
+                [pl for pl in playlists if pl.get('id')],
+                sync_one_fn=lambda pl: sync_one_fn(
+                    {'playlist_id': str(pl['id']), '_automation_id': None},
+                    deps,
+                ),
+                sync_id_for_fn=lambda pl: f"auto_mirror_{pl['id']}",
+                skip_wishlist=skip_wishlist,
+                progress_start=56,
+                progress_end=85,
+                sync_phase_label='Phase 3/4: Syncing to server...',
+                sync_phase_start_log='Phase 3: Sync',
+                wishlist_phase_label='Phase 4/4: Processing wishlist...',
+                wishlist_phase_start_log='Phase 4: Wishlist',
+            )
 
         duration = int(time.time() - pipeline_start)
         # M13/M14: the final status reflects a failed/timed-out discovery
@@ -156,7 +168,7 @@ def run_mirrored_playlist_pipeline(
             automation_id,
             status='finished',
             progress=100,
-            phase='Pipeline complete',
+            phase='Refreshed from source' if refresh_only else 'Pipeline complete',
             log_line=final_log_line,
             log_type=final_log_type,
         )

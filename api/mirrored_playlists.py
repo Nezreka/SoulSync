@@ -484,7 +484,8 @@ class _PlaylistPipelineDepsProxy:
         )
 
 
-def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False, profile_id=1):
+def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False, profile_id=1,
+                                           refresh_only=False):
     # The caller is a bare thread, so neither Flask's `g` nor the request-scoped
     # profile survives. Without this the whole pipeline — sync, organize batch,
     # failed-track Wishlist writes — silently ran as admin (profile 1) for every
@@ -506,6 +507,7 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False, pro
                 'playlist_id': str(playlist_id),
                 'all': False,
                 'skip_wishlist': bool(skip_wishlist),
+                'refresh_only': bool(refresh_only),
                 'profile_id': int(profile_id),
                 '_automation_id': _playlist_pipeline_state_key(playlist_id, profile_id),
             },
@@ -522,7 +524,7 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False, pro
                 profile_id=profile_id,
                 status='finished',
                 progress=100,
-                phase='Pipeline complete',
+                phase='Refreshed from source' if refresh_only else 'Pipeline complete',
                 result=result,
             )
         elif status == 'skipped':
@@ -580,15 +582,18 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
             return jsonify({"error": "A playlist pipeline is already running"}), 409
 
         data = request.get_json(silent=True) or {}
+        # refresh from source (#1413): pull + discover the new tracks only
+        refresh_only = bool(data.get('refresh_only', False))
         state = _replace_playlist_pipeline_state(playlist_id, {
             'run_id': _playlist_pipeline_state_key(playlist_id, profile_id),
             'playlist_id': int(playlist_id),
             'playlist_name': playlist.get('name') or '',
             'status': 'running',
             'progress': 0,
-            'phase': 'Starting pipeline...',
+            'phase': 'Refreshing from source...' if refresh_only else 'Starting pipeline...',
             'log': [{
-                'message': f"Starting pipeline for {playlist.get('name') or playlist_id}",
+                'message': (f"Refreshing {playlist.get('name') or playlist_id} from source" if refresh_only
+                            else f"Starting pipeline for {playlist.get('name') or playlist_id}"),
                 'type': 'info',
                 'timestamp': time.time(),
             }],
@@ -600,7 +605,7 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
 
         threading.Thread(
             target=_run_mirrored_playlist_pipeline_for_ui,
-            args=(playlist_id, bool(data.get('skip_wishlist', False)), int(profile_id)),
+            args=(playlist_id, bool(data.get('skip_wishlist', False)), int(profile_id), refresh_only),
             daemon=True,
             name=f"playlist-pipeline-{playlist_id}",
         ).start()

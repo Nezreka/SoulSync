@@ -591,6 +591,34 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     expect(screen.getByText('Discover')).toBeInTheDocument();
   });
 
+  it('Refresh from source runs the pipeline with refresh_only, nothing pushed (#1413)', async () => {
+    // radoslav-orlov #1413: added a song on youtube, wanted to pull it in
+    // without a server push or downloads, and keep the discovery
+    stubFetch();
+    responder = (url) =>
+      url === '/api/mirrored-playlists'
+        ? [ROW]
+        : url === '/api/mirrored-playlists/3'
+          ? { name: 'Road Trip', source: 'youtube', tracks: [] }
+          : url.endsWith('/pipeline/run')
+            ? { state: { status: 'running', progress: 0, phase: 'Refreshing from source...' } }
+            : url.endsWith('/pipeline/status')
+              ? { status: 'running', progress: 30, phase: 'Refreshing from source...' }
+              : { states: [] };
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Road Trip'));
+    await waitFor(() => expect(document.querySelector('#mirrored-track-modal')).not.toBeNull());
+    fireEvent.click(screen.getByText('Refresh from source'));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url.endsWith('/pipeline/run'))).toMatchObject({
+        method: 'POST',
+        body: { refresh_only: true },
+      }),
+    );
+    expect(document.querySelector('#mirrored-track-modal')).toBeNull();
+  });
+
   it('Update list refetches (the refresh button keeps its vanilla id)', async () => {
     stubFetch();
     responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
