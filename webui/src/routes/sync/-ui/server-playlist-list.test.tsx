@@ -471,9 +471,7 @@ describe('LinkServerUserPrompt + OtherOwnersBlock — direct (#1414)', () => {
     const open = vi.fn();
     vi.stubGlobal('openPersonalSettings', open);
     render(<LinkServerUserPrompt serverType="navidrome" />);
-    expect(
-      screen.getByText('Link your Navidrome login to see your playlists'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Link your Navidrome login to see your playlists')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Link Navidrome login' }));
     expect(open).toHaveBeenCalled();
   });
