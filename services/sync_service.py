@@ -787,6 +787,9 @@ class PlaylistSyncService:
                         'title': getattr(mr.plex_track, 'title', ''),
                         'artist_name': getattr(mr.plex_track, 'artist', ''),
                         'album_title': getattr(mr.plex_track, 'album', ''),
+                        # the library row it matched, so a later sync can tell
+                        # the file was deleted (#1417)
+                        'id': str(getattr(mr.plex_track, 'ratingKey', '') or ''),
                     }
                 keeper = _fold_keepers.get(id(mr))
                 if keeper is not None:

@@ -200,13 +200,22 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
         # forces exactly one extra sync per mirror and is then self-consistent.
         last_quality_profile_id = last_status.get('quality_profile_id')
         quality_profile_changed = last_quality_profile_id != quality_profile_id
-        if (
+        # unchanged tracks are not enough: a matched file deleted since the last
+        # sync changes nothing above, and skipping then never re-matched or
+        # wishlisted it (#1417). checked last, it is the only part that reads
+        # the library.
+        unchanged = (
             not force_sync
             and not mirror_changed
             and not quality_profile_changed
             and last_hash == tracks_hash
             and last_matched >= len(tracks_json)
-        ):
+        )
+        library_lost = False
+        if unchanged:
+            from core.sync.library_presence import matched_tracks_still_present
+            library_lost = not matched_tracks_still_present(db, tracks)
+        if unchanged and not library_lost:
             # Exact same tracks, all matched last time — nothing to DOWNLOAD.
             # The run still happened, so it still gets recorded: skipping the
             # bookkeeping too is what left the dashboard card with no run to
@@ -240,6 +249,12 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
                     f'Forcing sync: playlist changed ({tracks_added} added) or '
                     f'{skipped_count} track(s) need discovery'
                 ),
+                log_type='info',
+            )
+        elif library_lost:
+            deps.update_progress(
+                auto_id,
+                log_line='A track from the last sync is no longer in the library, running sync',
                 log_type='info',
             )
         elif mirror_changed:

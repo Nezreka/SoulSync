@@ -288,8 +288,12 @@ def _record_library_membership(tracks_json, match_details) -> None:
             db_track_id = (tracks_json[idx] or {}).get('db_track_id')
             if not db_track_id:
                 continue
+            found = detail.get('status') == 'found'
             db.update_mirrored_track_extra_data(db_track_id, {
-                'in_library': detail.get('status') == 'found',
+                'in_library': found,
+                # which library row: the next sync's skip checks it still
+                # exists, or a deleted file was never noticed (#1417)
+                'library_track_id': ((detail.get('matched_track') or {}).get('id') or None) if found else None,
                 # Stamped so the count can say WHEN it was true. The flag is a
                 # cache: deleting files outside SoulSync will not update it
                 # until the next sync, and a number that cannot say how old it
