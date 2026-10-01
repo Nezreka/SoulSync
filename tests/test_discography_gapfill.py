@@ -188,11 +188,23 @@ def test_frontend_contract():
 
 def test_download_discography_modal_includes_gaps():
     """Boulder's live catch: the Download Discography modal skipped gap-fill
-    releases. When the chip is on, the modal fetches gaps, dedups against its
-    own list, and each entry POSTs with ITS source (backend honors per-entry
-    source at entry['source'])."""
-    # The modal is React now (library.js is deleted); the same three pins
-    # hold in its module + component.
+    releases. When the chip is on, the gaps reach the modal and each entry
+    POSTs with ITS source (backend honors per-entry source at entry['source']).
+
+    the modal used to fetch its own gaps. now it lists what the page shows
+    (the page already merged the gaps in), so it can't drift from the page
+    (discord, SeadogsBooty). the gap fetch lives in the page's gap-fill
+    module, the modal keeps each gap's _gap_source."""
+    gapfill = (
+        _ROOT / "webui" / "src" / "routes" / "artist-detail"
+        / "-artist-detail.gap-fill.ts"
+    ).read_text(encoding="utf-8")
+    page = (
+        _ROOT / "webui" / "src" / "routes" / "artist-detail" / "-ui" / "artist-detail-page.tsx"
+    ).read_text(encoding="utf-8")
+    hero = (
+        _ROOT / "webui" / "src" / "routes" / "artist-detail" / "-ui" / "artist-hero.tsx"
+    ).read_text(encoding="utf-8")
     module = (
         _ROOT / "webui" / "src" / "routes" / "artist-detail"
         / "-artist-detail.discography-modal.ts"
@@ -200,6 +212,10 @@ def test_download_discography_modal_includes_gaps():
     component = (
         _ROOT / "webui" / "src" / "routes" / "artist-detail" / "-ui" / "discography-modal.tsx"
     ).read_text(encoding="utf-8")
-    assert "discography/gap-fill" in module
+    assert "discography/gap-fill" in gapfill
+    assert "mergeGapReleases(streamed, gapFill.releases)" in page
+    assert "discography={displayed}" in page
+    assert "discography={discography}" in hero
+    assert "_gap_source: (release._gap_source" in module
     assert "source: e.gapSource || sourceForBatch" in module
     assert "data-gap-source=" in component
