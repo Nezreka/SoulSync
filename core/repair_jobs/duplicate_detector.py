@@ -73,6 +73,7 @@ class DuplicateDetectorJob(RepairJob):
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
+        self._membership = None
 
         settings = self._get_settings(context)
         title_threshold = float(settings.get('title_similarity', 0.85))
@@ -403,6 +404,7 @@ class DuplicateDetectorJob(RepairJob):
 
                 if context.create_finding:
                     try:
+                        playlists = self._playlist_membership(context)
                         group.sort(key=lambda t: (t['bitrate'] or 0), reverse=True)
                         inserted = context.create_finding(
                             job_id=self.job_id,
@@ -422,6 +424,9 @@ class DuplicateDetectorJob(RepairJob):
                                     'file_path': t['file_path'],
                                     'bitrate': t['bitrate'],
                                     'duration': t['duration'],
+                                    # so keep best keeps the copy a playlist
+                                    # points at (jadux)
+                                    'playlists': list(playlists.get(str(t['id']), [])),
                                 } for t in group],
                                 'count': len(group),
                                 'album_thumb_url': group[0].get('album_thumb_url'),
@@ -439,6 +444,22 @@ class DuplicateDetectorJob(RepairJob):
 
         if context.update_progress and processed_holder['count'] % 200 == 0:
             context.update_progress(processed_holder['count'], total)
+
+    def _playlist_membership(self, context: JobContext) -> dict:
+        """{track_id: [playlist titles]}, read once per scan, only once a
+        duplicate shows up. no reader or a failed read = {} (nothing tagged)."""
+        cached = getattr(self, '_membership', None)
+        if cached is not None:
+            return cached
+        membership = {}
+        reader = getattr(context, 'playlist_membership', None)
+        if reader:
+            try:
+                membership = reader() or {}
+            except Exception as e:
+                logger.debug("playlist membership read failed: %s", e)
+        self._membership = membership
+        return membership
 
     def _lossy_companion_exts(self, context: JobContext) -> set:
         """Extensions the lossy-copy feature writes next to lossless

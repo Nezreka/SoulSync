@@ -69,4 +69,25 @@ describe('FindingDetail duplicate rows', () => {
     );
     expect(container.textContent).toContain('985 kbps');
   });
+
+  it('marks the copy a playlist points at, and keeps it over the better one (jadux)', () => {
+    const base = duplicateFinding();
+    const tracks = (base.details as { tracks: Record<string, unknown>[] }).tracks;
+    const finding = duplicateFinding({
+      details: {
+        count: 2,
+        tracks: [tracks[0], { ...tracks[1], playlists: ['Road Trip', 'Gym'] }],
+      },
+    });
+    const { container } = render(
+      <FindingDetail finding={finding} onKeepDuplicate={vi.fn()} onApplyCoverArt={vi.fn()} />,
+    );
+    const rows = container.querySelectorAll('.repair-detail-subitem');
+    expect(rows[0].querySelector('.repair-in-playlist')).toBeNull();
+    expect(rows[0].textContent).toContain('REMOVE');
+    expect(rows[1].querySelector('.repair-in-playlist')?.textContent).toBe(
+      'In playlist: Road Trip, Gym',
+    );
+    expect(rows[1].textContent).toContain('KEEP');
+  });
 });

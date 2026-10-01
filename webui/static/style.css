@@ -59800,6 +59800,12 @@ tr.tag-diff-same {
 .repair-subitem-body .mono {
     overflow-wrap: anywhere;
 }
+/* which server playlists point at this copy, keep best keeps it */
+.repair-in-playlist {
+    color: rgb(var(--accent-light-rgb, 129, 140, 248));
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}
 .repair-subitem-play {
     flex: 0 0 auto;
     display: inline-flex;

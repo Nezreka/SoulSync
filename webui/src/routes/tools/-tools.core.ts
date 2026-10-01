@@ -54,12 +54,19 @@ export interface DuplicateTrackLike {
   bitrate?: number | null;
   duration?: number | null;
   track_number?: number | null;
+  /** server playlists this copy is in, set by the duplicate detector */
+  playlists?: readonly string[] | null;
 }
 
-/** Sort key for picking the keeper — higher tuple wins. Format tier FIRST, so
- *  lossless beats lossy even when the lossless copy has no bitrate recorded. */
-export function duplicateSortKey(track: DuplicateTrackLike): [number, number, number, number] {
+/** Sort key for picking the keeper — higher tuple wins. A copy in a server
+ *  playlist first (deleting it would drop the song from that playlist), then
+ *  format tier, so lossless beats lossy even when the lossless copy has no
+ *  bitrate recorded. Mirrors core/library/duplicate_keep.py. */
+export function duplicateSortKey(
+  track: DuplicateTrackLike,
+): [number, number, number, number, number] {
   return [
+    track.playlists?.length ? 1 : 0,
     duplicateFormatRank(track.file_path),
     track.bitrate || 0,
     track.duration || 0,

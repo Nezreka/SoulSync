@@ -197,6 +197,9 @@ class JobContext:
     is_paused: Optional[Callable[[], bool]] = None
     update_progress: Optional[Callable[[int, int], None]] = None
     report_progress: Optional[Callable] = None  # Rich progress: (phase, log_line, log_type, scanned, total)
+    # {track_id: [server playlist titles]}, read lazily by jobs that care
+    # (duplicate detector keeps the copy a playlist points at). None = unknown
+    playlist_membership: Optional[Callable[[], Dict[str, List[str]]]] = None
 
     def check_stop(self) -> bool:
         """Return True if the worker should stop."""
