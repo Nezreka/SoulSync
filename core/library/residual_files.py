@@ -21,8 +21,9 @@ import os
 JUNK_FILES = {'.ds_store', 'thumbs.db', 'desktop.ini', '.directory', 'album.nfo~'}
 # Cover art + booklet scans.
 IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif'}
-# Lyric / metadata / playlist sidecars that are worthless without their audio.
-SIDECAR_EXTS = {'.lrc', '.nfo', '.cue', '.m3u', '.m3u8'}
+# Lyric / metadata / playlist / release checksum (sfv, srr) sidecars that are worthless
+# without their audio.
+SIDECAR_EXTS = {'.lrc', '.nfo', '.cue', '.m3u', '.m3u8', '.sfv', '.srr'}
 
 
 def _ext(name: str) -> str:

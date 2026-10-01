@@ -145,6 +145,19 @@ def test_apply_sweeps_residual_then_folder_when_enabled(tmp_path):
     assert res['removed'] is True and not d.exists()
 
 
+def test_release_leftovers_count_as_residual(tmp_path):
+    # #1289: a scene release leaves nfo/sfv/srr/m3u behind once its audio moves
+    assert dir_is_removable(['album.nfo', 'album.sfv', 'album.srr', '00-album.m3u'], [],
+                            ignore_disposable=True) is True
+    root = tmp_path / 'lib'; root.mkdir()
+    d = root / 'Artist' / 'Old Release'; d.mkdir(parents=True)
+    for n in ('album.nfo', 'album.sfv', 'album.srr', '00-album.m3u'):
+        (d / n).write_text('x')
+    res = remove_empty_folder(str(d), junk_files=[], remove_junk=True,
+                              remove_disposable=True, root=str(root), **_fx())
+    assert res['removed'] is True and not d.exists()
+
+
 def test_apply_without_residual_opt_leaves_image_folder(tmp_path):
     # The default apply (no residual opt) must NOT delete a cover.jpg folder.
     root = tmp_path / 'lib'; root.mkdir()
