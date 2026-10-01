@@ -19,6 +19,9 @@ big discover glow-up, a full player theater, sample studio from your own library
 - immersive mode takes over the whole modal (click the art, the button, or F), plus 8 new themes and visual options for quality, energy, palettes, dim, auto-cycle and reduce motion (#1389, #1390).
 - backgrounds actually follow the song now: a dedicated analyser with real bass/vocal/cymbal bands and spectral-flux beat detection, plus a visual pass on kaleido, battery and bloom (#1392). also fixed the visualizer tap doubling the signal, which made everything ~6 dB louder while it was on.
 
+- a best-in-class pass on the theater's visuals: beat effects fire once per beat (bloom was stacking 15+ rings a beat), motion runs on real time so 120/144 Hz screens look the same, real trails on scope / spikes / warp / fountain / bloom / tunnel, the accent is the cover's own second color, colors and themes fade instead of snapping, and the soft themes draw at low res (plasma 35 -> 54 fps). scope is a real oscilloscope now (whole window, triggered, it was reading 1.3 ms of audio), vinyl spins the actual cover on its label, and dot plane is a real 3d spectrogram.
+- the mini player wears the cover too: tinted glass, edge glow, gradient play button, and a small live glow that breathes with the bass. it follows the theater's visuals switch and only animates while music plays.
+
 ## sample studio
 
 - new: your library is the sample pack. browse tracks, chop on a waveform editor with a bpm grid and onset detection, pitch and time-stretch, and save to a sample stash (#1374).

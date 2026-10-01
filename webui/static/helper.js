@@ -3467,6 +3467,8 @@ const WHATS_NEW = {
         { title: 'Music video banners', desc: 'The hero and spotlight play the artist video, a bento spotlight and a watch rail that plays itself, tap for sound. Playback scales to what your device can carry.', page: 'discover' },
         { title: 'Concerts near you', desc: 'Set a country under Settings > Concerts and the inbox only shows shows there, and triages like mail.', page: 'settings' },
         { title: 'Player Theater', desc: 'Now Playing is a full theater: animated backgrounds that follow the song, a 10-band EQ, immersive mode (press F), 8 new themes and visual options (#1388, #1389, #1392).' },
+        { title: 'Theater visuals, sharper', desc: 'Beats land once, trails are real, the accent comes from your cover, Scope is a real oscilloscope, Vinyl spins your album cover, and Dot Plane is a 3D spectrogram.' },
+        { title: 'Mini player glow', desc: 'The mini player takes on your cover colors with a soft live glow that moves with the music. Follows the Visuals switch.' },
         { title: 'Sample Studio', desc: 'Your library is the sample pack. Chop on a waveform with a BPM grid, pitch and time-stretch, add FX, and split real stems without installing torch (#1374, #1379, #1383).', page: 'sample-studio' },
         { title: 'Auto-sync board', desc: 'More room for the board, small drop chips for empty intervals, drop targets glow while you drag, and the dashboard opens the same manager (#1401).', page: 'sync' },
         { title: 'Sync page cleanups', desc: 'Hide source tabs you do not use, mirrored cards always open the playlist, the three sync buttons have three names, and server playlist backups default off (#1402, #1403, #1404, #1406).', page: 'sync' },
