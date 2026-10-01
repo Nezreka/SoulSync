@@ -53,15 +53,18 @@ export function AutoSyncMonitorCard({
         </div>
         {latest ? <small>{latest}</small> : null}
       </div>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDetails(Number(playlist.id));
-        }}
-      >
-        Details
-      </button>
+      {/* a personalized row has no mirrored playlist to open */}
+      {playlist._personalized ? null : (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDetails(Number(playlist.id));
+          }}
+        >
+          Details
+        </button>
+      )}
     </article>
   );
 }

@@ -750,6 +750,12 @@ export async function fetchAutomations(): Promise<Response> {
   return fetch('/api/automations');
 }
 
+/** GET /api/automations/progress: live state of running / just-finished runs,
+ *  keyed by automation id. what the notification area reads. */
+export async function fetchAutomationProgress(): Promise<Response> {
+  return fetch('/api/automations/progress');
+}
+
 /**
  * GET /api/playlist-pipeline/history?limit=<n> (609).
  *

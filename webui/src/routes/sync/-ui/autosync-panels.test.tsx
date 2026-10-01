@@ -175,6 +175,14 @@ describe('AutoSyncMonitorCard (1162-1182)', () => {
     };
   };
 
+  it('a personalized row has no Details, there is no mirrored playlist to open', () => {
+    const daily = { ...row(-1, 'Daily Mix 1'), _personalized: true };
+    const { container } = renderCard({ status: 'running', phase: 'Syncing' }, daily);
+    expect(container.textContent).toContain('Daily Mix 1');
+    expect(container.textContent).toContain('Syncing');
+    expect(container.querySelector('button')).toBeNull();
+  });
+
   it('maps each status to its label and its class', () => {
     const cases: [string, string, string][] = [
       ['running', 'Running', 'running'],
