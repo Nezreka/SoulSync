@@ -51,6 +51,11 @@ from core.automation.handlers._pipeline_shared import run_sync_and_wishlist
 # mirrored ones (`auto_mirror_<id>`).
 _SYNC_ID_PREFIX = 'auto_personalized'
 
+# kinds that mirror something already rebuilt on its own schedule. regenerating
+# them is just a read, and skipping it would sync yesterday's list: daily_mix is
+# the Discover page's Daily Mix, rebuilt daily there
+_ALWAYS_REFRESH_KINDS = frozenset({'daily_mix'})
+
 
 def auto_personalized_pipeline(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
     """Run SNAPSHOT → SYNC → WISHLIST for selected personalized playlists."""
@@ -205,7 +210,7 @@ def _build_payloads_for_kinds(
             #     Without this branch, a first-run pipeline reads the
             #     empty snapshot and silently skips — user picks a kind,
             #     hits run, gets "No tracks to sync" with no clue why.
-            if refresh_first:
+            if refresh_first or kind in _ALWAYS_REFRESH_KINDS:
                 record = manager.refresh_playlist(kind, variant, profile_id)
             else:
                 existing = manager.ensure_playlist(kind, variant, profile_id)
