@@ -131,6 +131,14 @@ def get_mirrored_playlists_endpoint():
         # take ~50ms per playlist (new connection + 4 sub-queries) — at 30
         # playlists that's 1.5s of modal load time just for status counts.
         batch_counts = database.get_all_mirrored_playlist_status_counts(profile_id=profile_id)
+        # the name each one lands on the server under, when two mirrors share a name
+        try:
+            from core.playlists.sync_names import all_sync_names
+            _active = config_manager.get_active_media_server() if config_manager else None
+            sync_names = all_sync_names(database, _active)
+        except Exception as e:
+            logger.debug(f"mirrored list: sync names unavailable: {e}")
+            sync_names = {}
         for pl in playlists:
             counts = batch_counts.get(pl['id'], {
                 'total': 0, 'discovered': 0, 'wishlisted': 0,
@@ -153,6 +161,7 @@ def get_mirrored_playlists_endpoint():
             # The name the UI should show / sync uses: custom alias if set, else
             # the upstream name. Single source of truth so card + sync agree.
             pl['display_name'] = effective_mirrored_name(pl)
+            pl['sync_name'] = sync_names.get(pl['id']) or pl['display_name']
             pl['pipeline_state'] = _snapshot_playlist_pipeline_state(pl['id'])
         return jsonify(playlists)
     except Exception as e:

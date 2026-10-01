@@ -112,9 +112,16 @@ def test_admin_split_groups_navidrome_playlists_by_owner():
 web_server = pytest.importorskip('web_server')
 
 
+# every test gets its own playlist name: the suite shares one database, and two
+# shared-account profiles with the same mirror name sync under distinct names
+OWN = f'Bedtime {uuid4().hex[:6]}'
+
+
 @pytest.fixture()
 def server(monkeypatch):
-    base = _Nav([_pl('10', 'Bedtime', 'soulsync'), _pl('11', 'Chill Mix', 'soulsync'),
+    global OWN
+    OWN = f'Bedtime {uuid4().hex[:6]}'
+    base = _Nav([_pl('10', OWN, 'soulsync'), _pl('11', 'Chill Mix', 'soulsync'),
                  _pl('12', 'Kids', 'thomas')])
     monkeypatch.setattr(web_server.config_manager, 'get_active_media_server', lambda: 'navidrome')
     monkeypatch.setattr(web_server.media_server_engine, 'client', lambda name=None: base)
@@ -122,10 +129,10 @@ def server(monkeypatch):
 
 
 @pytest.fixture()
-def member():
+def member(server):  # after server, which picks this test's name
     db = web_server.get_database()
     pid = db.create_profile(name=f'm_{uuid4().hex[:8]}')
-    db.mirror_playlist('spotify', f'sp-{uuid4().hex[:6]}', 'Bedtime', [], profile_id=pid)
+    db.mirror_playlist('spotify', f'sp-{uuid4().hex[:6]}', OWN, [], profile_id=pid)
     return pid
 
 
@@ -140,7 +147,7 @@ def _as(pid):
 def test_a_member_lists_only_their_own(server, member):
     body = _as(member).get('/api/server/playlists').get_json()
     assert body['scope'] == 'shared'
-    assert [p['name'] for p in body['playlists']] == ['Bedtime']
+    assert [p['name'] for p in body['playlists']] == [OWN]
     assert body['others'] == []
 
 
@@ -149,18 +156,18 @@ def test_a_member_cannot_delete_someone_elses_playlist(server, member):
     r = c.post('/api/server/playlist/11/delete', json={'playlist_name': 'Chill Mix'})
     assert r.status_code == 403
     # the swap: the victim's id with the member's own playlist name
-    r = c.post('/api/server/playlist/11/delete', json={'playlist_name': 'Bedtime'})
+    r = c.post('/api/server/playlist/11/delete', json={'playlist_name': OWN})
     assert server.deleted == ['10'], 'acted on the id it was handed, not the one it checked'
 
 
 def test_a_member_can_delete_their_own(server, member):
-    r = _as(member).post('/api/server/playlist/10/delete', json={'playlist_name': 'Bedtime'})
+    r = _as(member).post('/api/server/playlist/10/delete', json={'playlist_name': OWN})
     assert r.status_code == 200 and server.deleted == ['10']
 
 
 def test_the_admin_sees_everyone_grouped_by_owner(server):
     body = _as(1).get('/api/server/playlists').get_json()
     assert body['scope'] == 'admin'
-    assert [p['name'] for p in body['playlists']] == ['Bedtime', 'Chill Mix']
+    assert [p['name'] for p in body['playlists']] == [OWN, 'Chill Mix']
     assert [(g['owner'], [p['name'] for p in g['playlists']]) for g in body['others']] == [
         ('thomas', ['Kids'])]

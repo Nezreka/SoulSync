@@ -1007,6 +1007,9 @@ export function MirroredTab({
                   key={row.id}
                   row={row}
                   name={displayName}
+                  syncsAs={
+                    row.sync_name && row.sync_name !== displayName ? row.sync_name : undefined
+                  }
                   nameTitle={
                     row.custom_name
                       ? `${displayName} — originally "${row.name ?? ''}"`

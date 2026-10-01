@@ -471,3 +471,34 @@ describe('the organize-by-playlist marker', () => {
     expect(container.querySelector('.pl-card-organize')?.getAttribute('title')).toMatch(/wishlist/);
   });
 });
+
+describe('the name it syncs under', () => {
+  it('says so when another mirror shares its name, and stays quiet otherwise', () => {
+    const r = row();
+    const { rerender } = render(
+      <PlaylistCard
+        row={r}
+        name="Release Radar"
+        syncsAs="Release Radar - ThomasClan"
+        when="synced 3h ago"
+        schedule="Every 6 hours"
+        onOpen={vi.fn()}
+        onMore={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('On the server as “Release Radar - ThomasClan”')).toBeInTheDocument();
+    rerender(
+      <PlaylistCard
+        row={r}
+        name="Release Radar"
+        when="synced 3h ago"
+        schedule="Every 6 hours"
+        onOpen={vi.fn()}
+        onMore={vi.fn()}
+      />,
+    );
+    expect(document.querySelector('.pl-card-syncs-as')).toBeNull();
+    const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
+    expect(css).toContain('.pl-card-syncs-as {');
+  });
+});

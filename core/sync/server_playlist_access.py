@@ -63,15 +63,18 @@ def client_for_profile(server: str, base_client: Any, profile_id: Optional[int])
     return pick(profile_id, base_client)
 
 
-def own_playlist_names(db: Any, profile_id: Optional[int]) -> Set[str]:
-    """names the profile's mirrors and past syncs write on the server."""
+def own_playlist_names(db: Any, profile_id: Optional[int], server: Optional[str] = None) -> Set[str]:
+    """names the profile's mirrors and past syncs write on the server. a mirror
+    that shares a name with another one syncs under a suffixed name, so it is
+    the final sync name that counts here (core/playlists/sync_names)."""
     names: Set[str] = set()
     if not profile_id:
         return names
     try:
-        from core.playlists.naming import effective_mirrored_name
+        from core.playlists.sync_names import all_sync_names
+        final = all_sync_names(db, server)
         for pl in db.get_mirrored_playlists(profile_id) or []:
-            n = _norm(effective_mirrored_name(pl))
+            n = _norm(final.get(pl.get('id')) or pl.get('custom_name') or pl.get('name'))
             if n:
                 names.add(n)
     except Exception as e:
@@ -99,7 +102,7 @@ def scope_for(server: str, base_client: Any, db: Any, profile_id: Optional[int],
     if acting_as:
         return PlaylistScope(client=client, is_admin=False, acting_as=str(acting_as))
     return PlaylistScope(client=base_client, is_admin=False,
-                         own_names=own_playlist_names(db, profile_id))
+                         own_names=own_playlist_names(db, profile_id, server))
 
 
 def _owned_by_view(server: str, scope: PlaylistScope, playlist: Any) -> bool:

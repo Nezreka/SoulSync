@@ -19793,6 +19793,15 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .pl-card-name { display: flex; align-items: center; gap: 7px; min-width: 0; }
 
+.pl-card-syncs-as {
+    margin-top: 2px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.55);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 /* Set-and-forget settings need a tell. Quiet by default — it marks a mode, not
    a problem — and it sits after the name so it never pushes the name around. */
 .pl-card-organize {

@@ -23,6 +23,8 @@ export interface MirroredPlaylistRow {
   id: number;
   name?: string;
   display_name?: string;
+  /** the name it syncs under on the server, when another mirror shares its name */
+  sync_name?: string;
   custom_name?: string;
   source?: string;
   source_playlist_id?: string;
