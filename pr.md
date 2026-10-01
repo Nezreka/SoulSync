@@ -39,6 +39,8 @@ big discover glow-up, a full player theater, sample studio from your own library
 - playlist server backups default off. replace sync was making a "<name> Backup" on navidrome/plex/jellyfin every time, on by default, and the setting now says what it actually is (#1406).
 - listenbrainz rolling mirrors pick the newest week instead of whichever row was written last (#1407), and the listenbrainz / last.fm discover button does something again.
 - the quality profile select stopped hanging on "Loading…", and personalized cards stop offering folder/quality settings they can't save.
+- a mirrored playlist's detail window has "refresh from source": pulls the new track list, keeps every match, discovers only the new songs, and stops. nothing pushed, nothing downloaded (#1413).
+- personalized auto-sync runs (daily mix and friends) get live status cards on the board too, they only showed in the notification area.
 - auto-sync's daily mix is the discover page's daily mix now. they were two different generators under one name, so clicking daily mix 1 on discover showed one playlist and syncing it put another on the server. you also get as many mixes as discover built (up to 6), not a fixed 4.
 - scheduled "process all mirrored playlists" and refresh mirrored used admin's mirrors for every profile, so a non-admin's pipeline ran on nothing and said success. it uses the automation owner's mirrors now (#1411).
 
