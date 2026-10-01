@@ -85,6 +85,23 @@ def _authed_client(monkeypatch, playlist_side_effect=None, playlist_return=None)
     return client
 
 
+def _stub_public(monkeypatch, *, full=None, embed=None):
+    """stub the two public sources the fallback actually calls, so nothing
+    reaches spotify. full=None makes the full fetch raise, like it does when
+    spotify blocks it, and the embed scraper answers instead."""
+    import core.spotify_public_api as public_api
+    import core.spotify_public_scraper as scraper
+
+    def _full(*a, **k):
+        if full is None:
+            raise RuntimeError('full public fetch unavailable')
+        return full
+
+    monkeypatch.setattr(public_api, 'fetch_public_playlist_full', _full)
+    monkeypatch.setattr(scraper, 'scrape_spotify_embed',
+                        lambda *a: embed if embed is not None else {'error': 'embed down'})
+
+
 def _call(monkeypatch):
     with web_server.app.test_request_context():
         resp = web_server.get_playlist_tracks('abc')
@@ -97,8 +114,7 @@ def _call(monkeypatch):
 
 def test_premium_403_falls_back_to_public(monkeypatch):
     _authed_client(monkeypatch, playlist_side_effect=_PremiumRequired())
-    import core.spotify_public_scraper as scraper
-    monkeypatch.setattr(scraper, 'fetch_spotify_public', lambda *a: _public_playlist())
+    _stub_public(monkeypatch, full=_public_playlist())
 
     data = _call(monkeypatch)
 
@@ -159,9 +175,7 @@ def test_official_path_unchanged_on_success(monkeypatch):
 def test_public_fallback_failure_still_errors(monkeypatch):
     """Premium 403 + broken public fetch = honest error, not a fake playlist."""
     _authed_client(monkeypatch, playlist_side_effect=_PremiumRequired())
-    import core.spotify_public_scraper as scraper
-    monkeypatch.setattr(scraper, 'fetch_spotify_public',
-                        lambda *a: {'error': 'No tracks found in this Spotify link'})
+    _stub_public(monkeypatch, embed={'error': 'No tracks found in this Spotify link'})
 
     with web_server.app.test_request_context():
         resp = web_server.get_playlist_tracks('abc')
@@ -169,3 +183,18 @@ def test_public_fallback_failure_still_errors(monkeypatch):
     body, status = resp
     assert status == 500
     assert 'error' in body.get_json()
+
+
+def test_premium_403_full_fetch_down_uses_embed(monkeypatch):
+    """full public fetch fails -> the embed scraper answers, and a 100 track
+    result from it is flagged as possibly cut off."""
+    _authed_client(monkeypatch, playlist_side_effect=_PremiumRequired())
+    embed = _public_playlist()
+    embed['tracks'] = [dict(embed['tracks'][0], id=f'trk{i}') for i in range(100)]
+    _stub_public(monkeypatch, embed=embed)
+
+    data = _call(monkeypatch)
+
+    assert data['name'] == 'Public Mix'
+    assert data['track_count'] == 100
+    assert data['incomplete'] is True
