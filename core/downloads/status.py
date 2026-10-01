@@ -759,7 +759,7 @@ def build_batched_status(requested_batch_ids: list, deps: StatusDeps) -> dict:
 
     response["debug_info"] = debug_info
 
-    logger.info(f"[Batched Status] Returning status for {len(response['batches'])} batches")
+    logger.debug(f"[Batched Status] Returning status for {len(response['batches'])} batches")
 
     discrepancies = [bid for bid, info in debug_info.items() if info.get("worker_discrepancy")]
     if discrepancies:

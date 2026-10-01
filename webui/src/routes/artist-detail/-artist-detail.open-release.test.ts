@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest';
 import {
   albumTracksParams,
   isReleaseClickable,
+  lockSectionType,
   openReleaseArtist,
   reconcileAlbumWithTracksResponse,
+  releaseSectionType,
   releaseToAlbumData,
   stillCheckingMessage,
 } from './-artist-detail.open-release';
@@ -163,5 +165,30 @@ describe('albumTracksParams', () => {
       { ...artist, source: null },
     );
     expect(params.source).toBe('qobuz');
+  });
+});
+
+describe('releaseSectionType', () => {
+  it('is the section the page shows the release in', () => {
+    expect(releaseSectionType({ album_type: 'EP' })).toBe('ep');
+    expect(releaseSectionType({ album_type: 'single' })).toBe('single');
+    expect(releaseSectionType({ album_type: 'compile' })).toBe('compilation');
+    expect(releaseSectionType({ album_type: 'album' })).toBe('album');
+    // anything else sits under Albums, like the backend buckets it
+    expect(releaseSectionType({ album_type: 'appears_on' })).toBe('album');
+    expect(releaseSectionType({ type: 'single' })).toBe('single');
+    expect(releaseSectionType({})).toBe('album');
+  });
+});
+
+describe('lockSectionType', () => {
+  it('pins the type to the section and marks it locked, whatever the fetch said', () => {
+    // discord: Deezer's 3-track album Flow State Sampler, shown under Albums
+    const fetched = { id: 7, name: 'Flow State Sampler', album_type: 'single', total_tracks: 3 };
+    expect(lockSectionType(fetched, { album_type: 'album' })).toEqual({
+      ...fetched,
+      album_type: 'album',
+      album_type_locked: true,
+    });
   });
 });

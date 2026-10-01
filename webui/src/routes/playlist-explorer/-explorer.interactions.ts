@@ -13,6 +13,7 @@ import {
   explorerFitScrollLeft,
   explorerFitZoom,
   explorerWheelStep,
+  explorerWheelZooms,
   isRealAlbumId,
 } from './-explorer.core';
 
@@ -77,6 +78,19 @@ export interface ExplorerZoomControls {
   zoomBy: (delta: number) => void;
   resetZoom: () => void;
   fitToView: () => void;
+  /** true = plain wheel zooms (the old way). false = wheel scrolls, ctrl/pinch zooms. */
+  wheelZoomLocked: boolean;
+  toggleWheelZoomLock: () => void;
+}
+
+export const EXPLORER_WHEEL_LOCK_KEY = 'soulsync-explorer-wheel-zoom';
+
+function readWheelZoomLock(): boolean {
+  try {
+    return localStorage.getItem(EXPLORER_WHEEL_LOCK_KEY) === '1';
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -95,6 +109,21 @@ export function useExplorerZoom(
   treeRef: React.RefObject<HTMLDivElement | null>,
 ): ExplorerZoomControls {
   const [zoom, setZoom] = useState(1);
+  const [wheelZoomLocked, setWheelZoomLocked] = useState(readWheelZoomLock);
+  const lockRef = useRef(wheelZoomLocked);
+  lockRef.current = wheelZoomLocked;
+
+  const toggleWheelZoomLock = useCallback(() => {
+    setWheelZoomLocked((current) => {
+      const next = !current;
+      try {
+        localStorage.setItem(EXPLORER_WHEEL_LOCK_KEY, next ? '1' : '0');
+      } catch {
+        // private window, just don't remember it
+      }
+      return next;
+    });
+  }, []);
 
   const zoomBy = useCallback((delta: number) => {
     setZoom((current) => clampExplorerZoom(current + delta));
@@ -131,14 +160,16 @@ export function useExplorerZoom(
     const viewport = viewportRef.current;
     if (!viewport) return;
     const onWheel = (event: WheelEvent) => {
+      // plain scroll falls through to the viewport's own scrolling (#1409)
+      if (!explorerWheelZooms(event, lockRef.current)) return;
       event.preventDefault();
-      zoomBy(explorerWheelStep(event.deltaY));
+      zoomBy(explorerWheelStep(event.deltaY, event.deltaMode));
     };
     viewport.addEventListener('wheel', onWheel, { passive: false });
     return () => viewport.removeEventListener('wheel', onWheel);
   }, [viewportRef, zoomBy]);
 
-  return { zoom, zoomBy, resetZoom, fitToView };
+  return { zoom, zoomBy, resetZoom, fitToView, wheelZoomLocked, toggleWheelZoomLock };
 }
 
 /**

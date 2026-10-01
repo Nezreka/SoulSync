@@ -41,12 +41,14 @@
       ],
       "keys": [
         [
+          0,
           5,
           320,
           210,
           3
         ],
         [
+          0,
           10,
           0,
           210,
@@ -74,12 +76,14 @@
       ],
       "keys": [
         [
+          0,
           5,
           282,
           200,
           1
         ],
         [
+          0,
           10,
           0,
           200,
@@ -108,12 +112,14 @@
       ],
       "keys": [
         [
+          0,
           5,
           128,
           180,
           2
         ],
         [
+          0,
           5,
           320,
           180,
@@ -142,12 +148,14 @@
       ],
       "keys": [
         [
+          0,
           5,
           320,
           120,
           2
         ],
         [
+          0,
           5,
           320,
           240,
@@ -176,12 +184,14 @@
       ],
       "keys": [
         [
+          0,
           5,
           320,
           200,
           1
         ],
         [
+          0,
           5,
           320,
           200,
@@ -210,12 +220,14 @@
       ],
       "keys": [
         [
+          0,
           5,
           320,
           200,
           4
         ],
         [
+          0,
           5,
           320,
           200,
@@ -244,12 +256,14 @@
       ],
       "keys": [
         [
+          0,
           1,
           9999,
           999,
           99
         ],
         [
+          0,
           3,
           64,
           10,
@@ -277,12 +291,14 @@
       ],
       "keys": [
         [
+          0,
           1,
           9999,
           999,
           99
         ],
         [
+          0,
           5,
           64,
           10,
@@ -311,12 +327,14 @@
       ],
       "keys": [
         [
+          0,
           10,
           0,
           100,
           1
         ],
         [
+          0,
           5,
           320,
           100,
@@ -345,12 +363,14 @@
       ],
       "keys": [
         [
+          0,
           10,
           0,
           100,
           1
         ],
         [
+          0,
           5,
           320,
           100,
@@ -379,12 +399,14 @@
       ],
       "keys": [
         [
+          0,
           9,
           1000,
           100,
           1
         ],
         [
+          0,
           9,
           1411,
           100,
@@ -413,12 +435,14 @@
       ],
       "keys": [
         [
+          0,
           6,
           128,
           100,
           1
         ],
         [
+          0,
           6,
           192,
           100,
@@ -454,18 +478,21 @@
       ],
       "keys": [
         [
+          0,
           7,
           256,
           200,
           5
         ],
         [
+          0,
           9,
           0,
           200,
           5
         ],
         [
+          0,
           8,
           900,
           200,
@@ -487,6 +514,7 @@
       ],
       "keys": [
         [
+          0,
           5,
           128,
           100,
@@ -494,6 +522,125 @@
         ]
       ],
       "keeper_id": "only"
+    },
+    {
+      "name": "the copy in a playlist beats a better quality copy (jadux)",
+      "tracks": [
+        {
+          "id": "flac",
+          "file_path": "/m/a/x.flac",
+          "bitrate": 1000,
+          "duration": 200,
+          "track_number": 1
+        },
+        {
+          "id": "mp3",
+          "file_path": "/m/a/y.mp3",
+          "bitrate": 128,
+          "duration": 200,
+          "track_number": 1,
+          "playlists": [
+            "Road Trip"
+          ]
+        }
+      ],
+      "keys": [
+        [
+          0,
+          10,
+          1000,
+          200,
+          1
+        ],
+        [
+          1,
+          5,
+          128,
+          200,
+          1
+        ]
+      ],
+      "keeper_id": "mp3"
+    },
+    {
+      "name": "an empty playlists list is not in a playlist",
+      "tracks": [
+        {
+          "id": "mp3",
+          "file_path": "/m/a/y.mp3",
+          "bitrate": 320,
+          "duration": 200,
+          "track_number": 1,
+          "playlists": []
+        },
+        {
+          "id": "flac",
+          "file_path": "/m/a/x.flac",
+          "bitrate": 0,
+          "duration": 200,
+          "track_number": 1
+        }
+      ],
+      "keys": [
+        [
+          0,
+          5,
+          320,
+          200,
+          1
+        ],
+        [
+          0,
+          10,
+          0,
+          200,
+          1
+        ]
+      ],
+      "keeper_id": "flac"
+    },
+    {
+      "name": "both in playlists, quality decides",
+      "tracks": [
+        {
+          "id": "mp3",
+          "file_path": "/m/a/y.mp3",
+          "bitrate": 320,
+          "duration": 200,
+          "track_number": 1,
+          "playlists": [
+            "Gym"
+          ]
+        },
+        {
+          "id": "flac",
+          "file_path": "/m/a/x.flac",
+          "bitrate": 0,
+          "duration": 200,
+          "track_number": 1,
+          "playlists": [
+            "Road Trip",
+            "Chill"
+          ]
+        }
+      ],
+      "keys": [
+        [
+          1,
+          5,
+          320,
+          200,
+          1
+        ],
+        [
+          1,
+          10,
+          0,
+          200,
+          1
+        ]
+      ],
+      "keeper_id": "flac"
     }
   ]
 }

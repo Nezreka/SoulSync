@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { RepairFinding, RepairJob } from '../-tools.types';
 
-import { FindingsSurface } from './findings-surface';
+import { FindingsSurface, latestRunKey } from './findings-surface';
 
 const fetchMock = vi.fn();
 const toastSpy = vi.fn();
@@ -2143,5 +2143,83 @@ describe('the detail renderer', () => {
       details: { artist_thumb_url: 'http://x/a.jpg' },
     });
     expect(detail.querySelector('.repair-finding-media-card--link')).toBeNull();
+  });
+});
+
+describe('a finished job refreshes the findings (#1386)', () => {
+  const run = (id: number, finished_at: string | null) => ({
+    id,
+    finished_at,
+    status: 'completed',
+  });
+
+  it('latestRunKey names the newest finished run and ignores unfinished ones', () => {
+    expect(latestRunKey([])).toBe('');
+    expect(latestRunKey([run(1, null)])).toBe('');
+    expect(
+      latestRunKey([run(1, '2026-09-29T10:00:00'), run(2, '2026-09-29T11:00:00'), run(3, null)]),
+    ).toBe('2@2026-09-29T11:00:00');
+  });
+
+  it('a background run landing keeps the findings you ticked', async () => {
+    routes({ [FINDINGS]: page([finding({ id: 1 }), finding({ id: 2 })]) });
+    const onStatusChanged = vi.fn();
+    const view = (runs: ReturnType<typeof run>[]) => (
+      <FindingsSurface jobs={JOBS} runs={runs} trackCount={4} onStatusChanged={onStatusChanged} />
+    );
+    const { rerender } = render(view([]));
+    await flush();
+    fireEvent.change(document.getElementById('repair-findings-search') as HTMLElement, {
+      target: { value: 'a' },
+    });
+    await flush();
+    fireEvent.click(document.querySelectorAll('.repair-finding-select input')[0]);
+    expect(document.querySelector('.repair-bulk-count')?.textContent).toBe('1 selected');
+    const listCalls = () =>
+      fetchMock.mock.calls.filter(([url]) => /\/api\/repair\/findings\?/.test(String(url))).length;
+    const before = listCalls();
+
+    rerender(view([run(9, '2026-09-29T12:00:00')]));
+    await flush();
+    expect(document.querySelector('.repair-bulk-count')?.textContent).toBe('1 selected');
+    expect(listCalls()).toBe(before);
+    expect(onStatusChanged).toHaveBeenCalled();
+  });
+
+  it('reloads counts, groups and the album grid when a new run lands, even the first ever', async () => {
+    routes({ [GROUPS]: [], [COUNTS]: {}, [TYPES]: [], '/api/repair/findings/albums': [] }, []);
+    const calls = (path: string) =>
+      fetchMock.mock.calls.filter(([url]) => String(url).includes(path)).length;
+    const onStatusChanged = vi.fn();
+    const view = (runs: ReturnType<typeof run>[]) => (
+      <FindingsSurface
+        jobs={JOBS}
+        runs={runs}
+        trackCount={4}
+        onStatusChanged={onStatusChanged}
+        defaultView="albums"
+      />
+    );
+    const { rerender } = render(view([]));
+    await flush();
+    const before = {
+      counts: calls(COUNTS),
+      groups: calls(GROUPS),
+      albums: calls('/api/repair/findings/albums'),
+    };
+    expect(before.albums).toBeGreaterThan(0);
+
+    // same history again: nothing new, nothing refetched
+    rerender(view([]));
+    await flush();
+    expect(calls('/api/repair/findings/albums')).toBe(before.albums);
+
+    // a fresh install's first job finishes
+    rerender(view([run(1, '2026-09-29T10:00:00')]));
+    await flush();
+    expect(calls(COUNTS)).toBeGreaterThan(before.counts);
+    expect(calls(GROUPS)).toBeGreaterThan(before.groups);
+    expect(calls('/api/repair/findings/albums')).toBeGreaterThan(before.albums);
+    expect(onStatusChanged).toHaveBeenCalled();
   });
 });

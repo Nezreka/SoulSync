@@ -7,7 +7,7 @@ import { server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 
 import { fetchDiscoveryWeekly, fetchReleaseRadar, fetchSeasonalPlaylist } from './-discover.api';
-import { useDiscoverMixes } from './-discover.use-mixes';
+import { mixCardsFrom, useDiscoverMixes } from './-discover.use-mixes';
 
 /**
  * The Your Mixes registry hook.
@@ -70,6 +70,8 @@ function stub({
       '/api/discover/personalized/listening-mix',
     ].map((path) => http.get(path, () => json({ tracks: personalized }))),
     http.get('/api/discover/personalized/daily-mixes', () => json({ mixes: daily })),
+    http.get('/api/discover/moods', () => json({ mixes: [] })),
+    http.get('/api/discover/for-you', () => json({ mixes: [] })),
     http.get('/api/discover/decades/available', () => {
       hits.push('decades');
       return json({ decades });
@@ -88,6 +90,29 @@ function mount(belowFoldReady = true) {
 
 afterEach(() => {
   server.resetHandlers();
+});
+
+describe('mixCardsFrom (moods, on repeat, blends)', () => {
+  it('turns the moods payload into play-only cards that say what they are', () => {
+    const mixes = mixCardsFrom({
+      mixes: [
+        {
+          key: 'mood_chill',
+          name: 'Chill',
+          subtitle: 'Downtempo, lo-fi and chillout',
+          tracks: [track('c')],
+        },
+        { key: 'mood_empty', name: 'Empty', tracks: [] },
+        { name: 'no key', tracks: [track('x')] },
+      ],
+    });
+    expect(mixes.map((m) => m.key)).toEqual(['mood_chill']);
+    expect(mixes[0]).toMatchObject({ title: 'Chill', blurb: 'Downtempo, lo-fi and chillout' });
+    // owned tracks: no syncKey, so the modal offers Play and nothing else
+    expect(mixes[0].syncKey).toBeUndefined();
+    expect(mixCardsFrom(undefined)).toEqual([]);
+    expect(mixCardsFrom({ mixes: 'nope' })).toEqual([]);
+  });
 });
 
 describe('useDiscoverMixes', () => {
@@ -112,6 +137,25 @@ describe('useDiscoverMixes', () => {
     const byKey = Object.fromEntries(result.current.mixes.map((m) => [m.key, m.subtitle]));
     expect(byKey.daily_mix_1).toBe('Because you listen to Tool & Deftones');
     expect(byKey.daily_mix_2).toBe('Soen');
+    // the card names who's in it; the reason stays for the modal
+    expect(result.current.mixes.find((m) => m.key === 'daily_mix_1')?.blurb).toBe('Tool, Deftones');
+  });
+
+  it('leads the shelf with the daily mixes, ahead of every generic feeder', async () => {
+    stub({
+      radar: [track('r')],
+      personalized: [track('p')],
+      daily: [{ key: 'daily_mix_1', name: 'Daily Mix 1', tracks: [track('d')] }],
+    });
+    const { result } = mount();
+    await waitFor(() => expect(result.current.mixes.map((m) => m.key)).toContain('release_radar'));
+    await waitFor(() => expect(result.current.mixes[0]?.key).toBe('daily_mix_1'));
+    expect(result.current.mixes.map((m) => m.key).slice(0, 2)).toEqual([
+      'daily_mix_1',
+      'release_radar',
+    ]);
+    // no subtitle stored, no blurb invented
+    expect(result.current.mixes[0].blurb).toBeUndefined();
   });
 
   it('holds the SHARED below-fold queries until tier 1 settles', async () => {

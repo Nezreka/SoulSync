@@ -176,6 +176,13 @@ class ListenBrainzPlaylistSource(PlaylistSource):
                 return None
             like_pattern = spec["like_format"].format(user=user_token)
 
+            # newest = the week/year IN THE TITLE, not last_updated (#1407).
+            # a first cache fill writes every week in the same second, so
+            # last_updated ties and sqlite hands back whichever, and an old
+            # week whose track count changed gets bumped to "newest". the
+            # LIKE pins the prefix, so the rest of the title is an iso date
+            # (or a year) and sorts right as text.
+            #
             # Query the LB cache for the newest matching row. The
             # manager's connection helper returns a plain sqlite3
             # connection — explicit try/finally for close parity with
@@ -187,7 +194,7 @@ class ListenBrainzPlaylistSource(PlaylistSource):
                     """
                     SELECT playlist_mbid FROM listenbrainz_playlists
                     WHERE profile_id = ? AND title LIKE ?
-                    ORDER BY last_updated DESC
+                    ORDER BY title DESC, last_updated DESC
                     LIMIT 1
                     """,
                     (manager.profile_id, like_pattern),

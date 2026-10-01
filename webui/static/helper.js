@@ -3460,23 +3460,29 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
-    '3.4.8': [
-        { date: 'September 2026 · 3.4.8' },
-        { title: 'Wishlist premier overhaul', desc: 'After-hours record-store design with a glass hero and live stats, a failing-track triage banner with retry-all, per-artist and per-album grab, shift-click range selection, nebula sorting, and bulk calls chunked so big grabs no longer fail (#1336).', page: 'wishlist' },
-        { title: 'Dashboard reskinned', desc: 'Editorial hero, composed rail headers with live counts and a feed switcher, larger album cards with timestamp chips, and a wider right column. Reskin only — everything works as before (#1355).', page: 'dashboard' },
-        { title: 'Automations page rebuilt', desc: 'Sidebar navigation with an overview dashboard, health hero, upcoming-runs timeline and attention queue, smart collections, URL-backed navigation, and a proper empty state (#1347).' },
-        { title: 'Library album views', desc: 'Flip between artists and albums, sort by recently added or year, hover-prefetch covers the cold load, and clicking an album deep-links into the artist page (#1307, #1337, #1338).', page: 'library' },
-        { title: 'Chat P2P sharing and badges', desc: 'Wanted requests can be fulfilled peer-to-peer with one click, user flair badges with anti-impersonation, per-room history retention, and the SoulSync logo replaces the text tag (#1333, #1344, #1369).', page: 'chat' },
-        { title: 'Discovery and search wrap-up', desc: 'Named search modes, provenance on every download decision, cross-source dedupe, bulk ops, retry profiles, a failed-download blocklist, and index-backed exclude-owned checks that stop the CPU spikes (#1334, #1350).', page: 'search' },
-        { title: 'EPs file as EPs again', desc: 'The import no longer falls back to per-track counts when the album total is unknown, and the artist page reconciles the real album count before downloading (#1365, #1367).', page: 'import' },
-        { title: 'Editions keep their folders', desc: 'A standard edition no longer reuses a deluxe/anniversary folder, and the file finder recognizes extensionless dispatch keys so downloads like PRYVT - ANGEL.flac import (#1362, #1366).', page: 'import' },
-        { title: 'Smarter matching', desc: 'The duplicate detector strips "from ..." provenance tails, AcoustID stops false-failing bracket-only titles, and "already in library" stops flagging different songs as owned (#1361, #1353, #1292).', page: 'tools' },
-        { title: 'File organization controls', desc: 'A new auto-disambiguation toggle stops the importer injecting release disambiguation into folder names, $atypes brings beets-style release labels, and a bare "album" is no longer trusted as a type signal (#1352, #1302, #1340).', page: 'settings' },
-        { title: 'Navidrome scans you can trust', desc: 'Incremental scans stop filtering out new albums, deep scans hold off while Navidrome rescans, and the deletion fence now covers every server type (#1346, #1348).' },
-        { title: 'Corrupt FLAC detector grows up', desc: 'Remembered passes, parallel decoding, quarantine-first repair, and a run-maintenance-job automation action make it practical on big libraries (#1332).', page: 'tools' },
-        { title: 'Audiobooks on Soulseek', desc: 'Single-file .m4b books are found instead of dropped, and the database lives in the persisted volume (#1330).' },
-        { title: 'Settings loads again', desc: 'A missing checkbox used to break the whole settings page; it is back, with a drift-guard test so it cannot regress (#1339).', page: 'settings' },
-        { title: 'Earlier versions', desc: '3.4.7 rebuilt profiles, requests and issues with kids limits and invites, and added a new Help & Docs page. 3.4.6 rebuilt search with per-profile listening history.' },
+    '3.4.9': [
+        { date: 'September 2026 · 3.4.9' },
+        { title: 'Discover home', desc: 'Opens with a grid of what you go back to, then flow, on repeat, your daily mixes, a mood for the hour, repeat rewind and a blend. One section nav replaces the fourteen pills that only scrolled.', page: 'discover' },
+        { title: 'Banners about you', desc: 'Your week in music, rows that lead with you and say why, daily mixes first with who is in them, and real mood mixes built from your own albums.', page: 'discover' },
+        { title: 'Music video banners', desc: 'The hero and spotlight play the artist video, a bento spotlight and a watch rail that plays itself, tap for sound. Playback scales to what your device can carry.', page: 'discover' },
+        { title: 'Concerts near you', desc: 'Set a country under Settings > Concerts and the inbox only shows shows there, and triages like mail.', page: 'settings' },
+        { title: 'Player Theater', desc: 'Now Playing is a full theater: animated backgrounds that follow the song, a 10-band EQ, immersive mode (press F), 8 new themes and visual options (#1388, #1389, #1392).' },
+        { title: 'Theater visuals, sharper', desc: 'Beats land once, trails are real, the accent comes from your cover, Scope is a real oscilloscope, Vinyl spins your album cover, and Dot Plane is a 3D spectrogram.' },
+        { title: 'Mini player glow', desc: 'The mini player takes on your cover colors with a soft live glow that moves with the music. Follows the Visuals switch.' },
+        { title: 'Sample Studio', desc: 'Your library is the sample pack. Chop on a waveform with a BPM grid, pitch and time-stretch, add FX, and split real stems without installing torch (#1374, #1379, #1383).', page: 'sample-studio' },
+        { title: 'Auto-sync board', desc: 'More room for the board, small drop chips for empty intervals, drop targets glow while you drag, and the dashboard opens the same manager (#1401).', page: 'sync' },
+        { title: 'Sync page cleanups', desc: 'Hide source tabs you do not use, mirrored cards always open the playlist, the three sync buttons have three names, and server playlist backups default off (#1402, #1403, #1404, #1406).', page: 'sync' },
+        { title: 'Automations run as their owner', desc: 'Process all mirrored playlists and Refresh Mirrored use the owning profile\'s mirrors instead of admin\'s (#1411).', page: 'automations' },
+        { title: 'Releases file where you saw them', desc: 'A release from the artist page or search files under the section it showed in, and paths and reorganize respect the type the source gave.', page: 'library' },
+        { title: 'Download fixes', desc: 'Playlist tracks file under their album credit, settings shows the compilation template, the download modal handles outside cancels and reopens fresh, and search badges update after a download (#1384, #1385, #1386).' },
+        { title: 'Genre playlists for Deezer', desc: 'Deezer tracks get genres and daily mixes rank real genres, so genre playlists and mixes stop coming back empty.', page: 'discover' },
+        { title: 'Smarter matching', desc: 'AcoustID keeps whole bracket titles, wishlist cleanup keeps distinct subtitles apart, and duplicates tell numbered and roman numeral parts apart (#1372, #1382).', page: 'tools' },
+        { title: 'Companion extension', desc: 'Browser extensions can call the API with an API key, the image proxy handles media-server artwork, and there is a full reference for all 87 /api/v1 endpoints (#1375, #1377, #1380, #1400).' },
+        { title: 'Torrents stay put', desc: 'A torrent slow to start on a private tracker is no longer deleted and grabbed again after 90 seconds. Torrents follow their own stall setting, and Pause really keeps them.', page: 'settings' },
+        { title: 'Duplicates keep your playlists', desc: 'Keep Best keeps the copy a server playlist points at, and each copy shows which playlists it is in, so bulk cleanup no longer breaks playlists.', page: 'tools' },
+        { title: 'Navidrome playlist account', desc: 'Settings > Navidrome can send your synced playlists to a different Navidrome user than the one SoulSync scans with.', page: 'settings' },
+        { title: 'Failed downloads say why', desc: 'A failed Deezer (or other streaming) download shows the real reason, like an expired ARL, instead of just Errored (#1349).' },
+        { title: 'Earlier versions', desc: '3.4.8 overhauled the wishlist, dashboard and automations pages, added library album views and chat P2P sharing. 3.4.7 rebuilt profiles, requests and issues.' },
     ],
 };
 
@@ -3506,29 +3512,30 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: '3.4.8: premier overhauls and import correctness',
-        description: 'Wishlist, dashboard and automations redesigned, library album views with sorting, chat P2P sharing and badges, and a long tail of filing, scan and matching fixes.',
+        title: '3.4.9: discover, player theater and sample studio',
+        description: 'A big discover glow-up, a full player theater, Sample Studio from your own library, a calmer sync page, and a stack of filing and download fixes.',
         features: [
-            'Wishlist premier overhaul (#1336): record-store design, failing-track triage with retry-all, per-artist and per-album grab, shift-click selection, and bulk calls chunked so big grabs stop failing.',
-            'Dashboard reskinned (#1355): editorial hero, composed rail headers with live counts, larger album cards — zero behavior changes.',
-            'Automations page rebuilt (#1347): sidebar navigation, overview dashboard with health hero and attention queue, smart collections, URL-backed navigation.',
-            'Library: albums grid with sorting and hover-prefetch, and album clicks deep-link into the artist page (#1307, #1337, #1338).',
-            'Chat: 1-click P2P sharing for wanted requests, flair badges with anti-impersonation, per-room history retention, and the SoulSync logo badge (#1333, #1344, #1369).',
-            'Discovery/search wrap-up (#1334): named modes, provenance on every decision, cross-source dedupe, bulk ops, retry profiles, blocklist — plus index-backed exclude-owned checks that end the CPU spikes (#1350).',
-            'Filing fixes: EPs stop filing as singles (#1365, #1367), deluxe folders stop swallowing standard editions (#1362), extensionless dispatch keys import (#1366), smarter duplicate and AcoustID matching (#1361, #1353), and "already in library" stops flagging different songs (#1292).',
-            'Scans and health: Navidrome scans stop dropping new albums, the deletion fence covers every server type, and the corrupt-FLAC detector is practical on big libraries (#1346, #1348, #1332).',
+            'Discover opens like a home page: what you go back to, daily mixes first with who is in them, your week in music, real mood mixes, and one section nav instead of fourteen scroll pills.',
+            'Music video backdrops behind the hero and spotlight, a bento spotlight and a watch rail that plays itself, and concerts near you with a country setting.',
+            'Player Theater (#1388, #1389, #1392): animated backgrounds that follow the song, a 10-band EQ, immersive mode (press F) and 8 new themes.',
+            'Sample Studio (#1374): chop your own tracks on a waveform editor, pitch and time-stretch, FX, and real stems without torch.',
+            'Sync page (#1401 to #1406): roomier auto-sync board with glowing drop targets, hideable source tabs, clear sync button names, server backups default off.',
+            'Automations: process all mirrored playlists runs on the owner\'s mirrors, not admin\'s (#1411).',
+            'Filing: releases file under the section you saw them in, playlist tracks under their album credit, and deezer genre playlists stop coming back empty.',
+            'Matching from @mandos21 (#1372, #1382), and the Companion browser extension can now use the API (#1375, #1377, #1380).',
+            'Fixes: torrents are no longer deleted after 90s at 0%, Keep Best keeps the copy your playlists use, Navidrome can take a separate playlist account, and failed downloads say why.',
         ],
     },
     {
-        title: 'Earlier in 3.4.7',
-        description: 'Profiles, requests and issues rebuilt with kids limits and invites, a new Help & Docs page, every credited artist on their own page, and tagging and matching fixes.',
+        title: 'Earlier in 3.4.8',
+        description: 'Wishlist, dashboard and automations redesigned, library album views with sorting, chat P2P sharing and badges, and filing, scan and matching fixes.',
         features: [],
     },
 ];
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '3.4.8';
+    return btn ? btn.textContent.trim().replace('v', '') : '3.4.9';
 }
 
 // Compare two semver-ish strings ("2.4.0" vs "2.4.1" vs "2.39"). Returns

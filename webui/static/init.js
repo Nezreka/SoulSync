@@ -4157,7 +4157,8 @@ const _DEEPLINK_VALID_PAGES = new Set([
     'dashboard', 'sync', 'search', 'discover', 'automations',
     'library', 'import', 'settings', 'help', 'issues', 'stats', 'watchlist',
     'wishlist', 'active-downloads', 'artist-detail', 'playlist-explorer',
-    'hydrabase', 'tools', 'chat', 'podcasts', 'audiobooks', 'requests'
+    'hydrabase', 'tools', 'chat', 'podcasts', 'audiobooks', 'requests',
+    'sample-studio'
 ]);
 
 function _getPageFromPath() {

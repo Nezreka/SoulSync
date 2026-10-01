@@ -17,6 +17,7 @@ import {
   readRememberedRoutedTabs,
   rememberRoutedTab,
   syncStripTabs,
+  forgetRoutedTab,
 } from './-sync.shell';
 
 describe('normalizeSyncTab', () => {
@@ -218,5 +219,19 @@ describe('remembered routed tabs (the sticky Spotify Link chip)', () => {
   it('the strip shows every opened routed tab, not just the active one', () => {
     const tabs = syncStripTabs('mirrored', ['spotify-public']).map((t) => t.id);
     expect(tabs).toEqual(['mirrored', 'server', 'beatport', 'spotify-public']);
+  });
+});
+
+describe('forgetRoutedTab (#1402)', () => {
+  it('drops one remembered chip and leaves the rest', () => {
+    window.localStorage.clear();
+    rememberRoutedTab('spotify');
+    rememberRoutedTab('deezer');
+    forgetRoutedTab('deezer');
+    expect(readRememberedRoutedTabs()).toEqual(['spotify']);
+    // forgetting something never remembered is a no-op, not a throw
+    forgetRoutedTab('tidal');
+    expect(readRememberedRoutedTabs()).toEqual(['spotify']);
+    window.localStorage.clear();
   });
 });

@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 import core.wishlist.routes as routes_module
 from core.wishlist.routes import (
@@ -621,13 +622,31 @@ def test_add_album_track_skips_owned_when_duplicates_off(monkeypatch):
     monkeypatch.setattr(config_manager, 'get',
                         lambda key, default=None: False if key == 'wishlist.allow_duplicate_tracks' else default)
     runtime, service, db, _logger, _ = _build_runtime()
-    db.check_track_exists = lambda *a, **k: (object(), 0.95)   # already owned
+    owned = SimpleNamespace(title='Song', album_title='Album', artist_name='A',
+                            file_path='/music/Song.flac')
+    db.check_track_exists = lambda *a, **k: (owned, 0.95)
 
     payload, status = add_album_track_to_wishlist(runtime, **_own_track_args())
 
     assert status == 200
     assert payload.get("skipped") is True
     assert service.add_calls == []                             # nothing added
+
+
+def test_add_album_track_keeps_request_when_fuzzy_hit_is_another_song(monkeypatch):
+    from core.settings import config_manager
+    monkeypatch.setattr(config_manager, 'get',
+                        lambda key, default=None: False if key == 'wishlist.allow_duplicate_tracks' else default)
+    runtime, service, db, _logger, _ = _build_runtime()
+    similar = SimpleNamespace(title='Songs', album_title='Album', artist_name='A',
+                              file_path='/music/Songs.flac')
+    db.check_track_exists = lambda *a, **k: (similar, 0.95)
+
+    payload, status = add_album_track_to_wishlist(runtime, **_own_track_args())
+
+    assert status == 200
+    assert not payload.get('skipped')
+    assert len(service.add_calls) == 1
 
 
 def test_add_album_track_adds_missing_when_duplicates_off(monkeypatch):
@@ -833,3 +852,18 @@ def test_set_retry_profile_accepts_a_custom_ladder():
     assert status == 200
     assert payload["profile"]["name"] == "custom"
     assert payload["profile"]["ladder"] == {"2": 600, "3": 3600}
+
+
+def test_an_artist_page_albums_locked_type_survives_the_wishlist_add():
+    """add to wishlist from an artist-page album's modal: the release type is
+    locked to the section it showed under, and has to stay locked on the
+    stored row so the download files it there"""
+    from core.wishlist.routes import _build_track_data
+
+    locked = _build_track_data({"id": "t1", "name": "Track"},
+                               {"id": "fs1", "name": "Flow State Sampler", "album_type": "album",
+                                "album_type_locked": True, "total_tracks": 3})
+    assert locked["album"]["album_type"] == "album"
+    assert locked["album"]["album_type_locked"] is True
+    plain = _build_track_data({"id": "t2", "name": "Track"}, {"id": "x", "name": "X"})
+    assert plain["album"]["album_type_locked"] is False

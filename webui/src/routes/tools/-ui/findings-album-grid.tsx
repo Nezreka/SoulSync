@@ -29,6 +29,8 @@ export interface FindingsAlbumGridProps {
   /** Drill into one group — the surface switches back to the flat list, filtered. */
   onOpen: (group: FindingAlbumGroup) => void;
   selectedGroupKey?: string | null;
+  /** bumps when a job finishes, so the grid picks up what it found (#1386) */
+  refreshToken?: number;
 }
 
 /** Album art first, artist as the fallback, then a letter tile. Never a broken
@@ -86,6 +88,7 @@ export function FindingsAlbumGrid({
   q,
   onOpen,
   selectedGroupKey,
+  refreshToken = 0,
 }: FindingsAlbumGridProps) {
   const [groups, setGroups] = useState<FindingAlbumGroup[] | null>(null);
 
@@ -98,7 +101,7 @@ export function FindingsAlbumGrid({
     return () => {
       live = false;
     };
-  }, [groupBy, jobId, status, findingType, q]);
+  }, [groupBy, jobId, status, findingType, q, refreshToken]);
 
   if (groups === null) {
     return <div className="repair-album-grid-empty">Grouping findings…</div>;

@@ -1052,6 +1052,8 @@ describe('opening a release (#1297)', () => {
     expect(name).toBe('[Aphex Twin] SAW');
     expect(tracks).toEqual([{ id: 1 }]);
     expect(album).toMatchObject({ id: 1, name: 'SAW' });
+    // locked to the section the card sat in, so it files where it was shown
+    expect(album).toMatchObject({ album_type: 'album', album_type_locked: true });
     expect(artist).toMatchObject({ id: 42, name: 'Aphex Twin' });
     expect(overlay).toBe(false);
     expect(register).toHaveBeenCalledWith(artist, album, 'artist_album_42_1', 'album');
@@ -1067,7 +1069,11 @@ describe('opening a release (#1297)', () => {
 
     fireEvent.click(document.querySelector('.release-card') as HTMLElement);
 
-    await waitFor(() => expect(window.reopenActiveDownloadModal).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(window.reopenActiveDownloadModal).toHaveBeenCalledWith('artist_album_42_1', {
+        runningOnly: true,
+      }),
+    );
     expect(download).not.toHaveBeenCalled();
     expect(requested.some((u) => u.includes('/api/album/'))).toBe(false);
   });

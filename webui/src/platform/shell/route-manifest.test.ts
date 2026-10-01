@@ -86,6 +86,7 @@ describe('shellRouteManifest', () => {
       'requests',
       'podcasts',
       'audiobooks',
+      'sample-studio',
     ]);
     // Sync was the 13th and last big music page; nothing in the music nav is
     // legacy now. `settings` stands in as a route that genuinely still is.

@@ -1,6 +1,6 @@
 """Discover page layout: validation, merge, persistence, routes.
 
-core/discovery/layout.py is the single source of truth for the 19 section
+core/discovery/layout.py is the single source of truth for the 20 section
 ids, the 4 zones and the default order. GET/PUT /api/discover/layout persist
 a per-profile customization; the frontend renders from it.
 """
@@ -27,8 +27,8 @@ def _full():
 # ── source of truth ──────────────────────────────────────────────────────────
 
 def test_nineteen_sections_four_zones():
-    assert len(layout_mod.SECTION_IDS) == 19
-    assert len(set(layout_mod.SECTION_IDS)) == 19
+    assert len(layout_mod.SECTION_IDS) == 20
+    assert len(set(layout_mod.SECTION_IDS)) == 20
     assert layout_mod.ZONES == ('for-you', 'new-missing', 'library', 'tools')
     assert set(layout_mod.DEFAULT_ZONE) == set(layout_mod.SECTION_IDS)
     assert set(layout_mod.DEFAULT_ZONE.values()) == set(layout_mod.ZONES)
@@ -36,7 +36,7 @@ def test_nineteen_sections_four_zones():
 
 def test_default_layout_is_the_current_page_order():
     entries = layout_mod.default_layout()
-    assert len(entries) == 19
+    assert len(entries) == 20
     assert all(e['enabled'] for e in entries)
     flat = [e['id'] for e in entries]
     assert flat == list(layout_mod.SECTION_IDS)
@@ -49,7 +49,7 @@ def test_default_layout_is_the_current_page_order():
 
 def test_sanitize_accepts_a_full_layout():
     entries = layout_mod.sanitize(_full())
-    assert len(entries) == 19
+    assert len(entries) == 20
     assert {e['id'] for e in entries} == set(layout_mod.SECTION_IDS)
 
 
@@ -68,7 +68,7 @@ def test_sanitize_dedupes_duplicates_first_wins():
     dup = _full()
     dup.insert(0, {'id': dup[0]['id'], 'zone': 'tools', 'enabled': False})
     entries = layout_mod.sanitize(dup)
-    assert len(entries) == 19
+    assert len(entries) == 20
     first = next(e for e in entries if e['id'] == dup[0]['id'])
     assert first['zone'] == 'tools' and first['enabled'] is False
 
@@ -110,9 +110,9 @@ def test_merge_keeps_saved_zone_order_and_enabled():
     assert for_you[0]['enabled'] is False
     # the other for-you sections follow in default order
     assert [e['id'] for e in for_you[2:]] == [
-        'adv-wave', 'listening-recs-section', 'recommended-artists-section',
+        'mood-mixes-section', 'adv-wave', 'listening-recs-section', 'recommended-artists-section',
         'discover-bylt-sections']
-    assert len(merged) == 19
+    assert len(merged) == 20
 
 
 def test_merge_surfaces_newly_shipped_sections():
@@ -122,7 +122,7 @@ def test_merge_surfaces_newly_shipped_sections():
              for i, sid in enumerate(layout_mod.SECTION_IDS)
              if sid != 'deezer-editorial']
     merged = layout_mod.merge_over_defaults(saved)
-    assert len(merged) == 19
+    assert len(merged) == 20
     deezer = next(e for e in merged if e['id'] == 'deezer-editorial')
     assert deezer['zone'] == 'tools' and deezer['enabled'] is True
 
@@ -134,7 +134,7 @@ def test_db_roundtrip(db):
     entries = layout_mod.sanitize(_full())
     assert db.save_discovery_layout(1, entries) is True
     rows = db.get_discovery_layout(1)
-    assert len(rows) == 19
+    assert len(rows) == 20
     assert {r['section_id'] for r in rows} == set(layout_mod.SECTION_IDS)
     mixes = next(r for r in rows if r['section_id'] == 'your-mixes-section')
     assert mixes['zone'] == 'for-you' and mixes['enabled'] is True

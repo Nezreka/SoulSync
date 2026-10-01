@@ -61,6 +61,12 @@ export function ownershipFromResponse(
   return { ownedAlbums, ownedTracks, wishlistTracks, libraryTracks };
 }
 
+/** downloads.js fires this when a download modal finishes with tracks downloaded */
+export const DOWNLOADS_FINISHED_EVENT = 'ss:downloads-finished';
+
+/** the import can land a little after the download reports done: ask once more */
+export const RECHECK_AFTER_MS = 20_000;
+
 /**
  * Ownership for the current result set, refreshed whenever it changes.
  *
@@ -71,6 +77,29 @@ export function ownershipFromResponse(
  */
 export function useLibraryCheck(albums: SearchAlbum[], tracks: SearchTrack[]): OwnershipState {
   const [ownership, setOwnership] = useState<OwnershipState>(EMPTY_OWNERSHIP);
+  // bumps to ask again for the same rows: after a download finishes (right
+  // away, and once more when the import has had time to land) and when the
+  // tab comes back into view. without it an album you'd just downloaded
+  // stayed unbadged until a browser refresh (#1386)
+  const [recheck, setRecheck] = useState(0);
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const bump = () => setRecheck((n) => n + 1);
+    const onFinished = () => {
+      bump();
+      timers.push(setTimeout(bump, RECHECK_AFTER_MS));
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') bump();
+    };
+    window.addEventListener(DOWNLOADS_FINISHED_EVENT, onFinished);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener(DOWNLOADS_FINISHED_EVENT, onFinished);
+      document.removeEventListener('visibilitychange', onVisible);
+      timers.forEach(clearTimeout);
+    };
+  }, []);
 
   const key = [
     ...albums.map((album) => albumIdentity(album)),
@@ -104,7 +133,7 @@ export function useLibraryCheck(albums: SearchAlbum[], tracks: SearchTrack[]): O
       live = false;
       controller.abort();
     };
-  }, [key]);
+  }, [key, recheck]);
 
   return ownership;
 }

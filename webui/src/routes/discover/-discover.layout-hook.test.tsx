@@ -34,12 +34,13 @@ function makeWrapper() {
 }
 
 describe('defaultDiscoverLayout', () => {
-  it('is the current page order: 19 sections, all enabled', () => {
+  it('is the current page order: 20 sections, all enabled', () => {
     const entries = defaultDiscoverLayout();
-    expect(entries).toHaveLength(19);
+    expect(entries).toHaveLength(20);
     expect(entries.every((e) => e.enabled)).toBe(true);
     expect(entries.map((e) => e.id)).toEqual([
       'your-mixes-section',
+      'mood-mixes-section',
       'adv-wave',
       'listening-recs-section',
       'recommended-artists-section',
@@ -67,6 +68,7 @@ describe('layoutSectionsByZone', () => {
     const byZone = layoutSectionsByZone(defaultDiscoverLayout());
     expect(byZone['for-you']).toEqual([
       'your-mixes-section',
+      'mood-mixes-section',
       'adv-wave',
       'listening-recs-section',
       'recommended-artists-section',

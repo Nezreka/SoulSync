@@ -604,6 +604,7 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
         bitrate?: number;
         duration?: number;
         track_number?: number;
+        playlists?: string[];
       }>(d.tracks);
       if (!tracks.length) {
         return <DetailGrid rows={[['Count', text(d.count) || '?']]} />;
@@ -645,6 +646,11 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
                       {track.track_number ? ` · Track #${track.track_number}` : ''}
                     </span>
                     {track.file_path ? <span className="mono">{track.file_path}</span> : null}
+                    {track.playlists?.length ? (
+                      <span className="repair-in-playlist">
+                        In playlist: {track.playlists.join(', ')}
+                      </span>
+                    ) : null}
                   </div>
                   <SubitemPlayButton
                     filePath={track.file_path}
@@ -659,7 +665,7 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
           </div>
           <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: '11px', padding: '4px 0' }}>
             Play to compare, click a version to keep it, or use &quot;Keep Best&quot; for
-            auto-selection
+            auto-selection. Keep Best keeps a copy that&apos;s in a playlist.
           </div>
         </>
       );

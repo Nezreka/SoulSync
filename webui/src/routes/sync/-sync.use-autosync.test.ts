@@ -7,7 +7,8 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as api from './-sync.api';
-import { useAutoSync } from './-sync.use-autosync';
+import { autoSyncApplyAutomationProgress } from './-sync.autosync';
+import { useAutoSync, useAutoSyncActions } from './-sync.use-autosync';
 
 const NOW = Date.UTC(2026, 0, 1, 12, 0, 0);
 
@@ -35,6 +36,7 @@ function stubApi(over: Partial<Stubs> = {}) {
   vi.spyOn(api, 'fetchPipelineHistory').mockResolvedValue(jsonRes(s.history));
   vi.spyOn(api, 'fetchPersonalizedKinds').mockResolvedValue(null);
   vi.spyOn(api, 'fetchPersonalizedPlaylists').mockResolvedValue(null);
+  vi.spyOn(api, 'fetchAutomationProgress').mockResolvedValue(jsonRes({}));
   vi.spyOn(api, 'createAutomation').mockResolvedValue(jsonRes({ success: true }));
   vi.spyOn(api, 'updateAutomation').mockResolvedValue(jsonRes({ success: true }));
   vi.spyOn(api, 'deleteAutomation').mockResolvedValue(jsonRes({ success: true }));
@@ -651,5 +653,142 @@ describe('history paging and filtering (1246-1254)', () => {
     await waitFor(() => {
       expect(api.fetchPipelineHistory).toHaveBeenLastCalledWith(100);
     });
+  });
+});
+
+describe('useAutoSyncActions', () => {
+  it('binds each board to its OWN unschedule, and shares the rest', () => {
+    // shared by the playlists page and the app-wide host. wiring both groups
+    // to one unschedule leaves a weekly automation running after "remove".
+    const fns = {
+      runNow: vi.fn(),
+      unscheduleHourly: vi.fn(),
+      unscheduleWeekly: vi.fn(),
+      setOrganize: vi.fn(),
+      saveHourly: vi.fn(),
+      saveWeekly: vi.fn(),
+    };
+    const { result } = renderHook(() =>
+      useAutoSyncActions(fns as unknown as ReturnType<typeof useAutoSync>),
+    );
+    const { boardActions, weeklyActions } = result.current;
+    expect(boardActions.onUnschedule).toBe(fns.unscheduleHourly);
+    expect(weeklyActions.onUnschedule).toBe(fns.unscheduleWeekly);
+    expect(boardActions.onDrop).toBe(fns.saveHourly);
+    expect(weeklyActions.onSave).toBe(fns.saveWeekly);
+    expect(boardActions.onRun).toBe(weeklyActions.onRun);
+  });
+});
+
+describe('live cards for personalized rows (Daily Mix)', () => {
+  // a personalized row nobody mirrored runs as its own automation. its live
+  // state only reached the notification area, so Run now showed nothing here
+  const dailyMixKinds = jsonRes({
+    success: true,
+    kinds: [
+      {
+        kind: 'daily_mix',
+        name_template: 'Daily Mix {variant}',
+        requires_variant: true,
+        variants: ['1'],
+      },
+    ],
+  });
+  const dailyMixAutomation = {
+    id: 80,
+    name: 'Auto-Sync: Daily Mix 1',
+    action_type: 'personalized_pipeline',
+    action_config: { kinds: [{ kind: 'daily_mix', variant: '1' }], refresh_first: true },
+    trigger_type: 'schedule',
+    trigger_config: { interval: 24, unit: 'hours' },
+    owned_by: 'auto_sync',
+    enabled: true,
+  };
+  const running = {
+    80: {
+      status: 'running',
+      phase: 'Syncing Daily Mix 1',
+      progress: 40,
+      started_at: '2026-01-01T12:00:00+00:00',
+      finished_at: null,
+      log: [{ type: 'info', text: 'Starting Auto-Sync: Daily Mix 1' }],
+    },
+  };
+
+  async function mountWithDailyMix(progress: unknown) {
+    stubApi({ automations: [dailyMixAutomation] });
+    vi.spyOn(api, 'fetchPersonalizedKinds').mockResolvedValue(dailyMixKinds);
+    vi.spyOn(api, 'fetchAutomationProgress').mockResolvedValue(jsonRes(progress));
+    const hook = renderHook(() => useAutoSync({ open: true, now: () => NOW, runPipeline }));
+    await waitFor(() => {
+      expect(hook.result.current.loading).toBe(false);
+    });
+    return hook;
+  }
+
+  const dailyMix = (rows: { name?: string }[]) => rows.find((p) => p.name === 'Daily Mix 1');
+
+  it('a running Daily Mix automation shows on its row', async () => {
+    const { result } = await mountWithDailyMix(running);
+    const row = dailyMix(result.current.state.playlists) as {
+      pipeline_state?: { status?: string; phase?: string; log?: { message?: string }[] };
+    };
+    expect(row.pipeline_state?.status).toBe('running');
+    expect(row.pipeline_state?.phase).toBe('Syncing Daily Mix 1');
+    expect(row.pipeline_state?.log?.[0]?.message).toBe('Starting Auto-Sync: Daily Mix 1');
+  });
+
+  it('no run, no card', async () => {
+    const { result } = await mountWithDailyMix({});
+    expect(
+      (dailyMix(result.current.state.playlists) as { pipeline_state?: unknown }).pipeline_state,
+    ).toBeUndefined();
+  });
+
+  it('Run now picks the run up straight away', async () => {
+    const { result } = await mountWithDailyMix({});
+    const progress = vi.spyOn(api, 'fetchAutomationProgress').mockResolvedValue(jsonRes(running));
+    const row = dailyMix(result.current.state.playlists) as { id: number };
+    await act(async () => {
+      await result.current.runNow(row.id);
+    });
+    expect(api.runAutomation).toHaveBeenCalledWith(80);
+    expect(progress).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(
+        (dailyMix(result.current.state.playlists) as { pipeline_state?: { status?: string } })
+          .pipeline_state?.status,
+      ).toBe('running');
+    });
+  });
+});
+
+describe('autoSyncApplyAutomationProgress', () => {
+  it('maps automation progress onto scheduled personalized rows only', () => {
+    const rows = [
+      { id: -1, name: 'Daily Mix 1', _personalized: true },
+      { id: 5, name: 'Mirrored', pipeline_state: { status: 'idle' } },
+      { id: -2, name: 'Daily Mix 2', _personalized: true },
+    ];
+    const out = autoSyncApplyAutomationProgress(
+      rows,
+      [{ '-1': { automation_id: 80 } }, { '5': { automation_id: 81 } }],
+      {
+        '80': {
+          status: 'finished',
+          started_at: '2026-01-01T12:00:00Z',
+          finished_at: '2026-01-01T12:01:00Z',
+        },
+        '81': { status: 'running' },
+      },
+    );
+    expect(out[0].pipeline_state).toMatchObject({
+      status: 'finished',
+      started_at: Date.UTC(2026, 0, 1, 12) / 1000,
+      finished_at: Date.UTC(2026, 0, 1, 12, 1) / 1000,
+    });
+    expect(out[1]).toBe(rows[1]); // a mirrored row keeps its own pipeline_state
+    expect(out[2]).toBe(rows[2]); // not scheduled
+    expect(autoSyncApplyAutomationProgress(rows, [], null)).toBe(rows);
   });
 });

@@ -54,12 +54,19 @@ export interface DuplicateTrackLike {
   bitrate?: number | null;
   duration?: number | null;
   track_number?: number | null;
+  /** server playlists this copy is in, set by the duplicate detector */
+  playlists?: readonly string[] | null;
 }
 
-/** Sort key for picking the keeper — higher tuple wins. Format tier FIRST, so
- *  lossless beats lossy even when the lossless copy has no bitrate recorded. */
-export function duplicateSortKey(track: DuplicateTrackLike): [number, number, number, number] {
+/** Sort key for picking the keeper — higher tuple wins. A copy in a server
+ *  playlist first (deleting it would drop the song from that playlist), then
+ *  format tier, so lossless beats lossy even when the lossless copy has no
+ *  bitrate recorded. Mirrors core/library/duplicate_keep.py. */
+export function duplicateSortKey(
+  track: DuplicateTrackLike,
+): [number, number, number, number, number] {
   return [
+    track.playlists?.length ? 1 : 0,
     duplicateFormatRank(track.file_path),
     track.bitrate || 0,
     track.duration || 0,
@@ -871,4 +878,14 @@ export function bulkFixLoopMessage(
   let message = `Fixed ${fixed}${failed ? `, ${failed} failed` : ''}`;
   if (failed && lastError) message += `: ${lastError}`;
   return { message, type: fixed > 0 ? 'success' : 'error' };
+}
+
+/**
+ * `/tools?job=<id>` from a vanilla link (the download origins modal points at
+ * the expired download cleaner). only a job that actually exists counts, a
+ * stale or typoed id just lands on the page like before.
+ */
+export function linkedJobId(search: string, jobIds: readonly string[]): string | null {
+  const wanted = new URLSearchParams(search).get('job');
+  return wanted && jobIds.includes(wanted) ? wanted : null;
 }

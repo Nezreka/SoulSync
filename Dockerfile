@@ -54,12 +54,15 @@ WORKDIR /app
 # unzip is needed by the Deno installer below.
 # flac: the Corrupt File Detector's preferred decode test (`flac -t` also
 # verifies the STREAMINFO MD5 — catches damage that still decodes; #1000).
+# rubberband-cli: sample studio renders saved chops with it. without it the
+# pitch/tempo falls back to librosa, which smears drum hits.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gosu \
     ffmpeg \
     flac \
     libchromaprint-tools \
+    rubberband-cli \
     unzip \
     && rm -rf /var/lib/apt/lists/*
 

@@ -20,7 +20,7 @@
  * guard, so the weekly board gains the hourly board's behaviour.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import {
   autoSyncGroupSidebarRows,
@@ -99,6 +99,12 @@ function AutoSyncOrganizeRow({
       ? window.playlistQualityProfileSelectHtml(playlist.source_playlist_id, playlist.source, true)
       : '';
 
+  // one object per html string. react 19 rewrites dangerouslySetInnerHTML
+  // whenever the prop OBJECT changes, not the string, so a fresh {__html} on
+  // every render put the select back to its empty "Loading…" state after the
+  // vanilla hydrate had filled it. opening ⋯ or starting a drag re-renders,
+  // and the hydrate effect doesn't re-run because its deps didn't change.
+  const profileMarkup = useMemo(() => ({ __html: profileHtml }), [profileHtml]);
   const { source_playlist_id: sourcePlaylistId, source, quality_profile_id: profileId } = playlist;
   useEffect(() => {
     if (!profileHtml) return;
@@ -124,7 +130,7 @@ function AutoSyncOrganizeRow({
         />
         <span>Organize by playlist</span>
       </label>
-      {profileHtml ? <span dangerouslySetInnerHTML={{ __html: profileHtml }} /> : null}
+      {profileHtml ? <span dangerouslySetInnerHTML={profileMarkup} /> : null}
     </>
   );
 }
@@ -160,6 +166,13 @@ export function AutoSyncScheduledCard({
   onCardClick?: () => void;
 }) {
   const isRunning = playlist.pipeline_state?.status === 'running';
+  // folder + quality live behind ⋯ now. every card showing a checkbox and a
+  // dropdown made the board a wall of form controls.
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  // a personalized row (Daily Mix etc.) isn't a mirrored playlist yet, there's
+  // nothing to save a folder or quality choice onto. the vanilla board drew the
+  // quality select anyway and never filled it, so it sat on "Loading…" forever.
+  const hasSettings = !playlist._personalized;
   const health = autoSyncPlaylistHealth(history, playlist.id as number);
   const healthClass =
     health.level === 'failing' ? 'failing' : health.level === 'warning' ? 'warning' : '';
@@ -185,9 +198,33 @@ export function AutoSyncScheduledCard({
         <div className="auto-sync-scheduled-meta">
           {autoSyncSourceLabel(playlist.source)} &middot; {playlist.track_count || 0} tracks
         </div>
-        <AutoSyncOrganizeRow playlist={playlist} onOrganizeChange={actions.onOrganizeChange} />
         <div className="auto-sync-scheduled-timing">{timing}</div>
+        {hasSettings ? (
+          <div
+            className={`auto-sync-card-settings${settingsOpen ? ' open' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation();
+            }}
+          >
+            <AutoSyncOrganizeRow playlist={playlist} onOrganizeChange={actions.onOrganizeChange} />
+          </div>
+        ) : null}
       </div>
+      {hasSettings ? (
+        <button
+          type="button"
+          className={`auto-sync-card-more${settingsOpen ? ' open' : ''}`}
+          title="Folder and quality settings"
+          aria-label="Folder and quality settings"
+          aria-expanded={settingsOpen}
+          onClick={(e) => {
+            e.stopPropagation();
+            setSettingsOpen((v) => !v);
+          }}
+        >
+          &#8943;
+        </button>
+      ) : null}
       <div className="auto-sync-scheduled-actions">
         <button
           className="run"
@@ -247,7 +284,9 @@ function SidebarCard({
         startDrag(e, playlist.id);
       }}
     >
-      <div className="auto-sync-playlist-name">{displayName || playlist.name}</div>
+      <div className="auto-sync-playlist-name" title={displayName || playlist.name || ''}>
+        {displayName || playlist.name}
+      </div>
       <div className="auto-sync-playlist-meta">
         {playlist.track_count || 0} tracks &middot; {badge.assigned}
       </div>
@@ -443,6 +482,8 @@ export function AutoSyncLane({
       className={`auto-sync-lane ${filled ? 'filled' : 'empty'} ${extraClass} ${
         dragOver ? 'drag-over' : ''
       }`}
+      // an empty lane shows as a small drop chip, so the hint rides as a tooltip
+      title={!filled && typeof hint === 'string' ? hint : undefined}
       {...dataAttrs}
       onDragOver={(e) => {
         e.preventDefault();

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 
-import { DiscoveryInbox } from './discovery-inbox';
+import { concertTile, DiscoveryInbox } from './discovery-inbox';
 
 /** The inbox on the Discover page. */
 
@@ -160,5 +160,15 @@ describe('DiscoveryInbox', () => {
     expect(screen.queryByText('R7')).toBeNull();
     fireEvent.click(screen.getByText('Show all 8'));
     expect(screen.getByText('R7')).toBeTruthy();
+  });
+});
+
+describe('concertTile', () => {
+  it('is the date, read as a calendar date', () => {
+    expect(concertTile('2027-02-19')).toEqual({ month: 'Feb', day: '19' });
+    expect(concertTile('2027-01-05T20:00:00Z')).toEqual({ month: 'Jan', day: '5' });
+    expect(concertTile('')).toBeNull();
+    expect(concertTile(undefined)).toBeNull();
+    expect(concertTile('2027-13-01')).toBeNull();
   });
 });

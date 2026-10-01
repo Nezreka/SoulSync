@@ -100,6 +100,10 @@ class SoulseekClient(DownloadSourcePlugin):
     def __init__(self):
         self.base_url: Optional[str] = None
         self.api_key: Optional[str] = None
+        # connection failures in a row, and when the last one was: background
+        # pollers (chat) back off while slskd is down (#1387)
+        self._conn_failures = 0
+        self._conn_failed_at = 0.0
         self.download_path: Path = Path("./downloads")
         self.active_searches: Dict[str, bool] = {}  # search_id -> still_active
 
@@ -210,6 +214,8 @@ class SoulseekClient(DownloadSourcePlugin):
                 **kwargs
             ) as response:
                 response_text = await response.text()
+                # any answer at all means slskd is up again
+                self._conn_failures = 0
 
 
                 if response.status in [200, 201, 204]:  # Accept 200 OK, 201 Created, and 204 No Content
@@ -278,6 +284,8 @@ class SoulseekClient(DownloadSourcePlugin):
                 )
                 self._last_unreachable_logged = True
             logger.debug(f"slskd connection failed: {method} {url}: {e}")
+            self._conn_failures = getattr(self, '_conn_failures', 0) + 1
+            self._conn_failed_at = time.time()
             return None
         except Exception as e:
             logger.error(f"Error making API request: {e}")
@@ -2789,6 +2797,16 @@ class SoulseekClient(DownloadSourcePlugin):
             logger.error(f"Error exploring API endpoints: {e}")
             return {'error': str(e)}
     
+    def unreachable_backoff_active(self, now: Optional[float] = None) -> bool:
+        """true while slskd was just unreachable, so a background poller
+        skips its call instead of hitting a dead host every few seconds
+        (#1387). waits 15s after one failure, doubling up to 5 minutes;
+        any answer from slskd resets it."""
+        if not getattr(self, '_conn_failures', 0):
+            return False
+        delay = min(300.0, 15.0 * 2 ** (self._conn_failures - 1))
+        return (time.time() if now is None else now) - self._conn_failed_at < delay
+
     def is_configured(self) -> bool:
         """Check if slskd is configured (has base_url)"""
         return self.base_url is not None

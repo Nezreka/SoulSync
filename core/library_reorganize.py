@@ -1249,6 +1249,7 @@ def _build_post_process_context(
     local_title: Optional[str] = None,
     local_year: Optional[str] = None,
     record_type: Optional[str] = None,
+    type_source: Optional[str] = None,
     album_artist: Optional[str] = None,
 ) -> dict:
     """Build the same shape `import_album_process` builds so post-process
@@ -1342,7 +1343,25 @@ def _build_post_process_context(
 
     effective_artist_name = primary_track_artist if (is_comp and primary_track_artist) else album_artist_name
 
+    # which source the release type came from, for $albumtype only (a source
+    # with its own EP label is taken at its word). tag mode has none: its
+    # record_type is the library's, so it keeps the track-count split and a
+    # reorganize files a release where the download did
+    _type_source = type_source if type_source and type_source != 'tags' else ''
+    # the source's own album lookup is reliable for a source that labels EPs
+    # itself (deezer's catch-all 'album' only comes from its TRACK lookups).
+    # when the release type agrees with it, lock it, so a reorganize files a
+    # short album where the artist page shows it: Flow State Sampler, a
+    # three-track deezer album, would otherwise go back to Single/ by count.
+    # spotify and tag mode keep the count split, same as their downloads
+    from core.imports.paths import _source_labels_eps
+    _api_type = str(api_album.get('record_type') or api_album.get('album_type') or '').strip().lower()
+    _type_locked = bool(
+        _type_source and _source_labels_eps(_type_source)
+        and _api_type and _api_type == (eff_type or 'album')
+    )
     return {
+        '_album_type_source': _type_source,
         'spotify_artist': {
             'name': effective_artist_name,
             'id': '',
@@ -1364,6 +1383,7 @@ def _build_post_process_context(
             'disambiguation': str(api_album.get('disambiguation') or '').strip(),
             'album_type': eff_type or 'album',
             'record_type': eff_type or 'album',
+            'album_type_locked': _type_locked,
             # $atypes labels a folder with every qualifier the release carries,
             # and Live/Soundtrack/Remix exist only as secondary types. Without
             # them here a reorganize renders $atypes empty and RENAMES
@@ -1585,6 +1605,7 @@ def preview_album_reorganize(
             local_year=(str(album_data.get('year')) if album_data.get('year') else None),
             record_type=plan.get('record_type') or album_data.get('record_type'),
             album_artist=artist_name,
+            type_source=plan.get('source'),
         )
         # `_build_final_path_for_track` switches between ALBUM and SINGLE
         # modes based on `album_info.get('is_album')` — must be passed,
@@ -1783,6 +1804,7 @@ class _RunContext:
     stop_check: Optional[Callable[[], bool]] = None
     transfer_dir: Optional[str] = None      # anchors the #746 /deleted-quarantine skip
     record_type: Optional[str] = None
+    source: Optional[str] = None            # the metadata source the plan resolved
 
     def emit(self, **updates) -> None:
         """Fire the progress callback. Caller is responsible for
@@ -1870,6 +1892,7 @@ def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, st
         local_title=title, local_year=ctx.local_year,
         record_type=ctx.record_type,
         album_artist=ctx.artist_name,
+        type_source=ctx.source,
     )
     context_key = f"reorganize_{ctx.album_id}_{track_id}_{uuid.uuid4().hex[:8]}"
     try:
@@ -2203,6 +2226,7 @@ def reorganize_album(
         stop_check=stop_check,
         transfer_dir=transfer_dir,
         record_type=plan.get('record_type') or album_data.get('record_type'),
+        source=plan.get('source'),
     )
 
     try:

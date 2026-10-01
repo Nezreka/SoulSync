@@ -2013,6 +2013,8 @@ def download_discography(artist_id):
                     'name': a.get('name') or a.get('title') or '',
                     'source': (a.get('source') or '').strip().lower() or artist_source,
                     'artist_name': a.get('artist_name') or artist_name,
+                    # the section the artist page showed it in, when sent
+                    'album_type': (a.get('album_type') or '').strip().lower(),
                 }
                 for a in albums_payload if a.get('id')
             ]
@@ -2023,6 +2025,7 @@ def download_discography(artist_id):
                     'name': '',
                     'source': artist_source,
                     'artist_name': artist_name,
+                    'album_type': '',
                 }
                 for aid in legacy_album_ids if aid
             ]
@@ -2035,6 +2038,7 @@ def download_discography(artist_id):
         from core.metadata.discography_filters import (
             content_type_skip_reason,
             load_global_content_filter_settings,
+            owned_release_tracks,
             track_already_owned,
             track_artist_matches,
         )
@@ -2064,6 +2068,7 @@ def download_discography(artist_id):
         # Crucially we pass an empty list (not None) when nothing is owned, so the
         # owns-nothing case still takes the fast in-memory path → instant.
         owned_candidate_tracks = []
+        cand_albums = []
         try:
             cand_albums = db.get_candidate_albums_for_artist(
                 artist_name, server_source=active_server
@@ -2114,7 +2119,12 @@ def download_discography(artist_id):
                     album_images = album.get('images') or (
                         [{'url': album['image_url']}] if album.get('image_url') else []
                     )
-                    album_type = album.get('album_type', 'album')
+                    # the artist page's section wins and is locked, so the release
+                    # files in the folder matching where the user saw it
+                    # (discord: Deezer's Flow State Sampler, an album with three
+                    # tracks, filed as a Single by track count)
+                    section_type = entry.get('album_type') or ''
+                    album_type = section_type or album.get('album_type', 'album')
                     release_date = album.get('release_date', '') or ''
                     album_artists = album.get('artists') or [{'name': hint_artist}]
                     resolved_album_id = result.get('resolved_album_id') or album.get('id') or album_id
@@ -2134,6 +2144,18 @@ def download_discography(artist_id):
                     skipped_artist = 0
                     skipped_filter = 0
                     skipped_owned = 0
+
+                    # owned means owned ON THIS release, found the way the
+                    # artist page finds it: a single whose song is also on an
+                    # album is still missing. None = lookup failed, fall back
+                    # to the artist-wide check
+                    release_tracks = owned_release_tracks(
+                        db, album_name, hint_artist, len(tracks), release_date,
+                        active_server, candidate_albums=cand_albums or None,
+                        candidate_tracks=owned_candidate_tracks,
+                    )
+                    ownership_candidates = (owned_candidate_tracks if release_tracks is None
+                                            else release_tracks)
 
                     for track in tracks:
                         track_name = track.get('name', '')
@@ -2157,6 +2179,8 @@ def download_discography(artist_id):
                         skip_reason = content_type_skip_reason(track_name, album_name, content_settings)
                         if skip_reason:
                             skipped_filter += 1
+                            # name it: a count alone hid #1381's wrong skips
+                            logger.info(f"[Discography] Skipped '{track_name}' on '{album_name}' ({skip_reason} filter)")
                             continue
 
                         # Skowl (Discord): clicking Download Discography
@@ -2166,7 +2190,7 @@ def download_discography(artist_id):
                         # backfill repair job uses. Format-agnostic so
                         # Blasphemy mode (FLAC→MP3) doesn't false-miss.
                         if track_already_owned(db, track_name, hint_artist, album_name, active_server,
-                                               candidate_tracks=owned_candidate_tracks):
+                                               candidate_tracks=ownership_candidates):
                             skipped_owned += 1
                             continue
 
@@ -2180,6 +2204,7 @@ def download_discography(artist_id):
                                 'artists': album_artists,
                                 'images': album_images,
                                 'album_type': album_type,
+                                'album_type_locked': bool(section_type),
                                 'release_date': release_date,
                                 'total_tracks': len(tracks),
                             },

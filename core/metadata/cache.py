@@ -1367,7 +1367,7 @@ class MetadataCache:
                         results.append(dict(row))
                         if len(results) >= limit:
                             break
-                return results
+                return self._with_art(cursor, results, 'album')
             finally:
                 conn.close()
         except Exception as e:
@@ -1405,7 +1405,7 @@ class MetadataCache:
                     ORDER BY release_date DESC, COALESCE(popularity, 0) DESC
                     LIMIT ?
                 """, params + [limit])
-                return [dict(r) for r in cursor.fetchall()]
+                return self._with_art(cursor, [dict(r) for r in cursor.fetchall()], 'album')
             finally:
                 conn.close()
         except Exception as e:
@@ -1437,12 +1437,26 @@ class MetadataCache:
                     ORDER BY COALESCE(popularity, 0) DESC, access_count DESC
                     LIMIT ?
                 """, params + [limit])
-                return [dict(r) for r in cursor.fetchall()]
+                return self._with_art(cursor, [dict(r) for r in cursor.fetchall()], 'album')
             finally:
                 conn.close()
         except Exception as e:
             logger.error(f"Label explorer error: {e}")
             return []
+
+    @staticmethod
+    def _with_art(cursor, rows, entity_type):
+        """fill missing image_url from stored payloads (and, for artists, a
+        same-named twin or the library thumb). art never fails a shelf."""
+        try:
+            from core.metadata.entity_art import fill_artist_photos, fill_from_payloads
+            if entity_type == 'artist':
+                fill_artist_photos(cursor, rows)
+            else:
+                fill_from_payloads(cursor, rows, entity_type)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("art fill skipped for %s: %s", entity_type, e)
+        return rows
 
     def get_deep_cuts(self, artist_names, source=None, popularity_cap=30, limit=20):
         """Find low-popularity tracks from artists the user listens to."""
@@ -1470,7 +1484,7 @@ class MetadataCache:
                     ORDER BY COALESCE(popularity, 50) ASC, access_count DESC
                     LIMIT ?
                 """, params + [popularity_cap, limit])
-                return [dict(r) for r in cursor.fetchall()]
+                return self._with_art(cursor, [dict(r) for r in cursor.fetchall()], 'track')
             finally:
                 conn.close()
         except Exception as e:
@@ -1686,6 +1700,9 @@ class MetadataCache:
                     for artist in artists:
                         artist['library_id'] = lib_id_map.get(artist['name'].lower())
 
+                self._with_art(cursor, artists, 'artist')
+                self._with_art(cursor, albums, 'album')
+                self._with_art(cursor, tracks, 'track')
                 _payload = {'artists': artists, 'albums': albums, 'tracks': tracks,
                             'related_genres': related}
                 # Only successful dives are cached — a failure must be retried,

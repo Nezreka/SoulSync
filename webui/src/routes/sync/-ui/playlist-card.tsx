@@ -130,7 +130,7 @@ export function playlistCardMeta(row: MirroredPlaylistRow, when: string): string
   // counts tracks the discovery step matched to a source — owning the file is a
   // different question the database answers with a separate `in_library`.
   // THE SHORTFALL, NAMED AND COUNTED. This line is where a gap is reported —
-  // the button says "Sync now" whatever the state, because it always ran the
+  // the button says "Sync & download" whatever the state, because it always ran the
   // same pipeline and three names for one action bought nothing.
   //
   // Stated as what is MISSING rather than what is present: this line's job is
@@ -166,12 +166,13 @@ export function playlistCardPrimaryLabel(row: MirroredPlaylistRow): string {
       // NOT "Cancel": the pipeline controller has no cancel, and a button that
       // cannot do what it says is worse than one that offers less.
       return 'View progress';
-    // NOT "Find N missing". It called the very same pipeline.run as Sync now,
+    // NOT "Find N missing". It called the very same pipeline.run as this,
     // so the label promised a narrower action than it performed, and the count
     // it carried now lives on the meta line where it does not have to compete
-    // with a verb.
+    // with a verb. "Sync & download", not "Sync now" (#1404): three buttons
+    // said sync and did three different things. this one does all of it.
     default:
-      return 'Sync now';
+      return 'Sync & download';
   }
 }
 

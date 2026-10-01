@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.4.8"
+_SOULSYNC_BASE_VERSION = "3.4.9"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -545,6 +545,40 @@ def inject_webui_assets():
         'vite_assets': build_webui_vite_assets,
     }
 
+
+# --- CORS for the JSON API (browser extensions, cross-origin clients) ---
+# Firefox doesn't apply host-permission CORS bypass to extension page fetches
+# the way Chrome does, so the Companion extension's fetch() calls fail with
+# NetworkError unless the server answers preflights and marks API responses.
+# The preflight handler is registered BEFORE the login/launch-PIN gates on
+# purpose: a preflight carries no credentials and returns no data (204), so
+# it must not be gated — the real request still goes through auth.
+from core.security.cors import preflight_headers as _cors_preflight_headers
+from core.security.cors import response_headers as _cors_response_headers
+
+
+@app.before_request
+def _cors_preflight():
+    headers = _cors_preflight_headers(request.path, request.method)
+    if headers is None:
+        return None
+    return "", 204, headers
+
+
+@app.after_request
+def _add_cors_headers(response):
+    """Stamp Access-Control-Allow-Origin on API responses (browser extensions).
+
+    Endpoints that set their own Access-Control-Allow-Origin win — we don't
+    override an explicit choice.
+    """
+    try:
+        for key, value in _cors_response_headers(request.path).items():
+            response.headers.setdefault(key, value)
+    except Exception as e:
+        logger.debug("CORS response headers failed: %s", e)
+    return response
+
 # Brute-force limiter for every PIN check: the launch unlock and picking a
 # pinned profile. keyed by (ip, profile) so a correct pin on your own card
 # doesn't wipe the failures on someone else's.
@@ -581,6 +615,12 @@ def _enforce_login():
     security.require_login is on. When on, an unauthenticated session can only
     reach the page shell + the login flow + the key-authed public API."""
     if not _require_login_enabled():
+        return
+    # API keys are admin-minted: a valid key gets the same trust as the
+    # /api/v1/* path exemption, so key-authed callers without cookie sessions
+    # (e.g. the Companion extension's <img> tags on /api/image-proxy) pass.
+    from api.auth import request_has_valid_api_key
+    if request_has_valid_api_key():
         return
     from core.security.login_gate import login_request_is_blocked
     from core.security.launch_lock import is_html_navigation
@@ -620,6 +660,10 @@ def _enforce_launch_pin():
         require_pin = False
     if not require_pin:
         return
+    # Same API-key trust as the login gate above.
+    from api.auth import request_has_valid_api_key
+    if request_has_valid_api_key():
+        return
     from core.security.launch_lock import request_is_locked, is_html_navigation
     # An auth proxy (Authelia/Authentik/oauth2-proxy) that already authenticated the
     # user counts as verified — opt-in via security.auth_proxy_header, OFF (empty)
@@ -655,6 +699,14 @@ def _set_profile_context():
     """Set g.profile_id from session for every request"""
     g.request_start_monotonic = time.perf_counter()
     g.request_start_cpu = time.thread_time()
+
+    # API keys are admin-minted: a valid key acts with admin rights (the same
+    # trust as /api/v1/*), so key-authed callers without a cookie session
+    # never reach the profile-picker logic below and its 401
+    # profile_required. Grants no more than the v1 exemption already does.
+    from api.auth import apply_api_key_request_context
+    if apply_api_key_request_context():
+        return
 
     # 1. Login mode: unauthenticated sessions have NO profile or admin rights (#GHSA-j7g5-8j44-jqhm).
     if _require_login_enabled() and not session.get('login_authenticated', False):
@@ -992,6 +1044,7 @@ VALID_PAGE_IDS = {
     'issues',
     'podcasts',
     'audiobooks',
+    'sample-studio',
     # Video side — per-profile page toggles (admin-only surfaces are gated separately,
     # not via allowed_pages: overlay studio, video-import, video-settings, video-automations).
     'video-dashboard',
@@ -1671,6 +1724,291 @@ except Exception as e:
     logger.error(f"Public REST API v1 failed to register: {e}")
 
 
+# --- Sample Studio legacy web UI routes (session auth) ---
+# The web UI (webui/src/app/api-client.ts) has no API key, so the v1
+# /api/v1/library/tracks and /api/v1/sample/* endpoints are unreachable from
+# the browser. These thin wrappers share the same MusicDatabase/service
+# functions and rely on the standard profile-session validation in
+# before_request — same dual-route convention as the legacy /api/library/*
+# routes.
+@app.route('/api/library/tracks', methods=['GET'])
+def library_tracks_web():
+    """Session-auth track search backing the Sample Studio library panel.
+
+    Accepts a free-text `q` (matched against both title and artist) or the
+    v1-style `title`/`artist` params. Same DB search as the API-key
+    /api/v1/library/tracks route.
+    """
+    try:
+        from api.sample import SampleHttpError, search_library_tracks
+
+        q = (request.args.get('q') or '').strip()
+        title = (request.args.get('title') or '').strip()
+        artist = (request.args.get('artist') or '').strip()
+        try:
+            limit = min(100, max(1, int(request.args.get('limit') or 50)))
+        except (TypeError, ValueError):
+            limit = 50
+        try:
+            tracks = search_library_tracks(q=q, title=title, artist=artist, limit=limit)
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+        return jsonify({"success": True, "data": {"tracks": tracks}, "error": None})
+    except Exception as e:
+        logger.error(f"web /api/library/tracks failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/analysis', methods=['GET'])
+def sample_analysis_web():
+    try:
+        from api.sample import fetch_analysis, SampleHttpError
+        try:
+            track_id = int(request.args.get('track_id') or 0)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
+        try:
+            retry = (request.args.get('retry') or '') == '1'
+            payload, status = fetch_analysis(track_id, retry=retry)
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/analysis failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/analyze', methods=['POST'])
+def sample_analyze_web():
+    try:
+        from api.sample import enqueue_track_analysis, SampleHttpError
+        data = request.get_json(silent=True) or {}
+        try:
+            track_id = int(data.get('track_id') or 0)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
+        try:
+            payload, status = enqueue_track_analysis(track_id)
+            if status != 200:
+                # Sticky worker error: the track did NOT queue. Report the
+                # failure honestly instead of a 200 "success".
+                return jsonify({"success": False, "data": payload, "error": payload["status"]}), status
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/analyze failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/peaks', methods=['GET'])
+def sample_peaks_web():
+    try:
+        from api.sample import fetch_peaks, SampleHttpError
+        try:
+            track_id = int(request.args.get('track_id') or 0)
+            buckets = int(request.args.get('buckets') or 1500)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "data": None, "error": "track_id and buckets must be integers"}), 400
+        try:
+            payload, status = fetch_peaks(track_id, buckets, stem=request.args.get('stem') or None)
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/peaks failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/preview', methods=['POST'])
+def sample_preview_web():
+    try:
+        from api.sample import _parse_render_params, render_preview, SampleHttpError
+        data = request.get_json(silent=True) or {}
+        try:
+            params = _parse_render_params(data)
+            payload, status = render_preview(**params)
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/preview failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/preview/<preview_id>', methods=['GET'])
+def sample_preview_file_web(preview_id):
+    try:
+        from api.sample import preview_file_path, SampleHttpError
+        try:
+            path = preview_file_path(preview_id)
+            return send_file(path, mimetype="audio/wav", conditional=True)
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/preview/<id> failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/chop', methods=['POST'])
+def sample_chop_web():
+    try:
+        from api.sample import _parse_render_params, save_chop, SampleHttpError
+        data = request.get_json(silent=True) or {}
+        try:
+            params = _parse_render_params(data)
+            payload, status = save_chop(
+                **params,
+                name=data.get("name"),
+                tags=data.get("tags"),
+                format=data.get("format") or "wav16",
+                folder=data.get("folder"),
+            )
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/chop failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/trim', methods=['POST'])
+def sample_trim_web():
+    try:
+        from api.sample import parse_trim_body, trim_selection, SampleHttpError
+        data = request.get_json(silent=True) or {}
+        try:
+            payload, status = trim_selection(**parse_trim_body(data))
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/trim failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/folders', methods=['GET'])
+def sample_folders_web():
+    try:
+        from api.sample import list_sample_folders, SampleHttpError
+        try:
+            payload, status = list_sample_folders()
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/folders failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stash', methods=['GET'])
+def sample_stash_web():
+    try:
+        from api.sample import list_stash_entries, SampleHttpError
+        try:
+            payload, status = list_stash_entries()
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stash failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stash/<int:entry_id>', methods=['DELETE'])
+def sample_stash_delete_web(entry_id):
+    try:
+        from api.sample import remove_stash_entry, SampleHttpError
+        try:
+            payload, status = remove_stash_entry(entry_id)
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stash/<id> DELETE failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stash/<int:entry_id>/audio', methods=['GET'])
+def sample_stash_audio_web(entry_id):
+    try:
+        from api.sample import stash_audio_path, SampleHttpError
+        try:
+            path, mimetype = stash_audio_path(entry_id)
+            return send_file(path, mimetype=mimetype, conditional=True)
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stash/<id>/audio failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stash/export', methods=['GET'])
+def sample_stash_export_web():
+    try:
+        from api.sample import export_stash_zip, SampleHttpError
+        try:
+            buf, filename = export_stash_zip()
+            return send_file(buf, mimetype="application/zip", as_attachment=True,
+                             download_name=filename)
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stash/export failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stems', methods=['POST'])
+def sample_stems_web():
+    try:
+        from api.sample import separate_stems, SampleHttpError
+        data = request.get_json(silent=True) or {}
+        try:
+            track_id = int(data.get('track_id') or 0)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
+        try:
+            payload, status = separate_stems(track_id, method=data.get('method'))
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stems failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stems/status', methods=['GET'])
+def sample_stems_status_web():
+    try:
+        from api.sample import stems_status, SampleHttpError
+        try:
+            track_id = int(request.args.get('track_id') or 0)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
+        try:
+            payload, status = stems_status(track_id, method=request.args.get('method') or None)
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stems/status failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stems/<int:track_id>/<stem>/audio', methods=['GET'])
+def sample_stem_audio_web(track_id, stem):
+    try:
+        from api.sample import stem_audio_path, SampleHttpError
+        try:
+            path, mimetype = stem_audio_path(track_id, stem)
+            return send_file(path, mimetype=mimetype, conditional=True)
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stems/<id>/<stem>/audio failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
 # --- Automation Progress Tracking ---
 # State + helpers live in core/automation/progress.py. Re-exported here
 # so the existing call sites (registered as engine progress callbacks
@@ -1849,6 +2187,7 @@ def get_cached_transfer_data():
                         'size': download.size,
                         'bytesTransferred': download.transferred,
                         'averageSpeed': download.speed,
+                        'error': getattr(download, 'error', None),
                     }
             except Exception as e:
                 logger.error(f"Could not fetch streaming source downloads: {e}")
@@ -2536,6 +2875,7 @@ def _find_streaming_download_in_all_downloads(all_downloads, track_data):
                     'bytesTransferred': download.transferred,
                     'averageSpeed': download.speed,
                     'file_path': getattr(download, 'file_path', None),
+                    'error': getattr(download, 'error', None),
                 }
 
         return None
@@ -7059,6 +7399,7 @@ def get_download_status():
                         'bytesTransferred': download.transferred,
                         'averageSpeed': download.speed,
                         'direction': 'Download',  # Required by frontend
+                        'error': getattr(download, 'error', None),
                     }
                     all_transfers.append(streaming_transfer)
 
@@ -18524,7 +18865,7 @@ def start_missing_tracks_process(playlist_id):
 
     # Log album context if provided
     if is_album_download and album_context and artist_context:
-        logger.info(f"[Artist Album] Received album context: '{album_context.get('name')}' by '{artist_context.get('name')}' ({album_context.get('album_type', 'album')})")
+        logger.info(f"[Artist Album] Received album context: '{album_context.get('name')}' by '{artist_context.get('name')}' ({album_context.get('album_type', 'album')}{', locked to its artist page section' if album_context.get('album_type_locked') else ''})")
         logger.info(f"   Release: {album_context.get('release_date', 'Unknown')}, Tracks: {album_context.get('total_tracks', len(tracks))}")
 
     # Log playlist folder mode if enabled
@@ -18963,6 +19304,61 @@ def get_spotify_playlists():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+def _spotify_playlist_public_response(playlist_id):
+    """Build a get_playlist_tracks-style response from the no-auth public path.
+
+    Used when the official Spotify API refuses the playlist metadata call
+    because the app owner's account has no active Premium subscription
+    (HTTP 403 "Active premium subscription required for the owner of the
+    app"). This is the same public source SoulSync's own playlist-link import
+    uses — no official API, no credentials. Fields the public source cannot
+    provide are honest empty values, never fabricated.
+    """
+    from core.spotify_public_scraper import scrape_spotify_embed
+    try:
+        from core.spotify_public_api import fetch_public_playlist_full
+        public = fetch_public_playlist_full(playlist_id)
+        complete = True
+    except Exception:
+        # Full public-API path failed — fall back to the embed scraper, which
+        # caps at ~100 tracks, so the result may be truncated.
+        public = scrape_spotify_embed('playlist', playlist_id)
+        complete = False
+    if not isinstance(public, dict) or public.get('error') or not public.get('tracks'):
+        err = public.get('error') if isinstance(public, dict) else None
+        raise RuntimeError(err or 'Public Spotify playlist fetch failed')
+    tracks = []
+    for t in public['tracks']:
+        artists = t.get('artists', [])
+        tracks.append({
+            'id': t.get('id', ''),
+            'name': t.get('name', ''),
+            'artists': artists if artists else [{'name': 'Unknown'}],
+            'album': {'name': '', 'images': []},
+            'duration_ms': t.get('duration_ms', 0),
+            'popularity': 0,
+            'spotify_track_id': t.get('id', ''),
+        })
+    # The full public-API path paginates to completion; only the embed
+    # scraper caps at ~100 tracks. A 100+ track count from the full path is
+    # a genuinely large playlist, not truncation.
+    possibly_truncated = not complete and len(tracks) >= 100
+    return jsonify({
+        'id': public.get('id', playlist_id),
+        'name': public.get('name', 'Unknown'),
+        'description': '',
+        'owner': public.get('subtitle', ''),
+        'public': True,
+        'collaborative': False,
+        'track_count': len(tracks),
+        'image_url': public.get('image_url') or None,
+        'snapshot_id': '',
+        'tracks': tracks,
+        'incomplete': possibly_truncated,
+        'expected_total': None,
+    })
+
+
 @app.route('/api/spotify/playlist/<playlist_id>', methods=['GET'])
 def get_playlist_tracks(playlist_id):
     """Fetches full track details for a specific playlist."""
@@ -19031,7 +19427,23 @@ def get_playlist_tracks(playlist_id):
         # Fetch raw playlist data to preserve full album objects
         from core.api_call_tracker import api_call_tracker
         api_call_tracker.record_call('spotify', endpoint='playlist')
-        playlist_data = client.sp.playlist(playlist_id)
+        try:
+            playlist_data = client.sp.playlist(playlist_id)
+        except Exception as playlist_err:
+            # The official API 403s when the Spotify account owning the app's
+            # credentials has no active Premium subscription ("Active premium
+            # subscription required for the owner of the app"). Fall back to
+            # the no-auth public path — the same one SoulSync's own
+            # playlist-link import uses — so the playlist still resolves.
+            # Every other error propagates unchanged.
+            from core.spotify_client import _is_premium_required_error
+            if not _is_premium_required_error(playlist_err):
+                raise
+            logger.warning(
+                f"Spotify playlist {playlist_id}: official API blocked "
+                f"(app owner lacks Premium); falling back to public fetch"
+            )
+            return _spotify_playlist_public_response(playlist_id)
 
         # Fetch all tracks with full album data
         tracks = []
@@ -21248,6 +21660,8 @@ def _start_discover_warmer():
         '/api/discover/deep-cuts',
         '/api/discover/seasonal/current',
         '/api/discover/decades/available',
+        '/api/discover/moods',
+        '/api/discover/for-you',
     ]
 
     def loop():
@@ -21784,7 +22198,8 @@ def _emit_chat_push_loop():
             if not _has_connected_clients():
                 continue
             _slsk = download_orchestrator.client("soulseek") if download_orchestrator else None
-            if not _slsk or not _slsk.base_url:
+            # slskd down or never started: back off, don't poll it every 6s (#1387)
+            if not _slsk or not _slsk.base_url or _slsk.unreachable_backoff_active():
                 continue
             room = str(config_manager.get('soulseek.chat_room', 'SoulSync') or 'SoulSync')
             if room != _chat_push_state['room']:
@@ -21960,7 +22375,7 @@ def _chat_auto_prove_loop():
             if not config_manager.get('soulseek.chat_auto_prove', True):
                 continue
             _slsk = download_orchestrator.client("soulseek") if download_orchestrator else None
-            if not _slsk or not _slsk.base_url:
+            if not _slsk or not _slsk.base_url or _slsk.unreachable_backoff_active():
                 continue
             replies = chat_autoprove.scan_and_respond(_slsk, run_async, state=state)
             for r in replies:
@@ -22712,6 +23127,13 @@ _cfg_is(
     _get_audio_quality_string=_get_audio_quality_string,
 )
 app.register_blueprint(_bp_is())
+
+# sample studio: resolve track files with the same resolver playback uses, so
+# a track that plays can also be analyzed, previewed and chopped. warm=False
+# keeps librosa out of boot for people who never open the studio.
+from core.sample.worker import configure as _cfg_sample
+_cfg_sample(config_manager_=config_manager,
+            resolve_path_fn=_resolve_library_file_path, warm=False)
 
 # music requests: what a profile without download rights asked for
 from api.music_requests import configure as _cfg_mr, create_blueprint as _bp_mr

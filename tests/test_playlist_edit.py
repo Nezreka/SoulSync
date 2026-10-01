@@ -239,3 +239,63 @@ def test_append_stringifies_ids():
 
 def test_append_ignores_empty_ids():
     assert plan_playlist_append(['a'], ['', 'b']) == ['b']
+
+
+# ── playlist_backup_enabled: replace-sync "<name> Backup" copies (#1406) ─────
+
+class _Cfg:
+    def __init__(self, data):
+        self._data = data
+
+    def get(self, key, default=None):
+        node = self._data
+        for part in key.split('.'):
+            if not isinstance(node, dict) or part not in node:
+                return default
+            node = node[part]
+        return node
+
+
+def test_playlist_backup_is_off_unless_turned_on():
+    """cremonies #1406: navidrome filled up with "<name> Backup" playlists
+    nobody asked for. off unless the setting says true."""
+    from core.sync.playlist_edit import playlist_backup_enabled
+    assert playlist_backup_enabled(_Cfg({})) is False
+    assert playlist_backup_enabled(_Cfg({'playlist_sync': {}})) is False
+    assert playlist_backup_enabled(_Cfg({'playlist_sync': {'create_backup': False}})) is False
+    assert playlist_backup_enabled(_Cfg({'playlist_sync': {'create_backup': True}})) is True
+
+
+def test_fresh_install_default_has_backups_off():
+    from core.settings import ConfigManager
+    defaults = ConfigManager._get_default_config(ConfigManager.__new__(ConfigManager))
+    assert defaults['playlist_sync']['create_backup'] is False
+
+
+def _navidrome_with_existing_playlist(copies):
+    from types import SimpleNamespace
+    from core.navidrome_client import NavidromeClient
+    c = NavidromeClient.__new__(NavidromeClient)
+    c.ensure_connection = lambda: True
+    c.get_playlists_by_name = lambda name: [SimpleNamespace(id='PL1')]
+    c.copy_playlist = lambda src, dst: copies.append((src, dst)) or True
+    c.create_playlist = lambda name, tracks, playlist_id=None: True
+    c._make_request = lambda *a, **k: {'status': 'ok'}
+    return c
+
+
+def test_replace_sync_makes_no_server_backup_when_the_key_is_unset(monkeypatch):
+    """the real seam: navidrome's replace path reads the setting through the
+    helper, so an install that never set it gets no Backup playlist."""
+    import core.settings
+    from core.navidrome_client import NavidromeClient
+    monkeypatch.setattr(core.settings, 'config_manager', _Cfg({}))
+    copies = []
+    c = _navidrome_with_existing_playlist(copies)
+    assert NavidromeClient.update_playlist.__wrapped__(c, 'Road Trip', ['t']) is True
+    assert copies == []
+
+    monkeypatch.setattr(core.settings, 'config_manager',
+                        _Cfg({'playlist_sync': {'create_backup': True}}))
+    assert NavidromeClient.update_playlist.__wrapped__(c, 'Road Trip', ['t']) is True
+    assert copies == [('Road Trip', 'Road Trip Backup')]

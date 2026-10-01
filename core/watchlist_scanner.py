@@ -225,29 +225,34 @@ def is_remix_version(track_name: str, album_name: str = "") -> bool:
     # Combine track and album names for comprehensive checking
     text_to_check = f"{track_name} {album_name}".lower()
 
-    # Remix patterns (but NOT remaster/remastered)
-    remix_patterns = [
-        r'\bremix\b',                   # Remix, Remixed
-        r'\bmix\b(?!.*\bremaster)',     # Mix (but not if followed by remaster)
-        r'\bedit\b',                    # Radio Edit, Extended Edit
-        r'\bversion\b(?=.*\bmix\b)',    # Version with Mix (e.g., "Dance Version Mix")
-        r'\bclub mix\b',                # Club Mix
-        r'\bdance mix\b',               # Dance Mix
-        r'\bradio edit\b',              # Radio Edit
-        r'\bextended\b(?=.*\bmix\b)',   # Extended Mix
-        r'\bdub\b',                     # Dub version
-        r'\bvip mix\b',                 # VIP Mix
-    ]
-
     # But exclude remaster/remastered - those are originals
     if re.search(r'\bremaster(ed)?\b', text_to_check, re.IGNORECASE):
         return False
 
-    for pattern in remix_patterns:
-        if re.search(pattern, text_to_check, re.IGNORECASE):
-            return True
+    # "remix" says it outright, wherever it sits
+    if re.search(r'\b(remix(es|ed)?|rmx)\b', text_to_check, re.IGNORECASE):
+        return True
+
+    # mix / edit / dub only mean a remix inside a version qualifier: "(Club
+    # Mix)", "[Dub]", "- Radio Edit". bare, they're ordinary title words,
+    # like 311's "Mix It Up" and "Rub a Dub" (#1381), the same trap
+    # is_live_version fixed for "Live Forever"
+    for name in (track_name, album_name or ''):
+        for qualifier in _version_qualifiers(name):
+            if re.search(r'\b(mix|edit|dub)\b', qualifier, re.IGNORECASE):
+                return True
 
     return False
+
+
+def _version_qualifiers(name: str) -> list:
+    """the bracketed parts of a title and its " - " suffix, where version
+    words live: "Song (Club Mix) - Radio Edit" -> ["Club Mix", "Radio Edit"]."""
+    found = re.findall(r'[\(\[]([^\)\]]*)[\)\]]', name)
+    dash = re.search(r'\s[-–—]\s+(.+)$', name)
+    if dash:
+        found.append(dash.group(1))
+    return found
 
 def is_acoustic_version(track_name: str, album_name: str = "") -> bool:
     """
@@ -962,7 +967,14 @@ class WatchlistScanner:
         try:
             if source == 'spotify':
                 return client.get_artist(artist_id, allow_fallback=False)
-            return client.get_artist(artist_id)
+            data = client.get_artist(artist_id)
+            # deezer artists carry no genres, only their albums do. without
+            # this every deezer track landed in the discovery pool genre-less
+            # and genre playlists (daily mix etc.) came back empty.
+            if (source == 'deezer' and isinstance(data, dict) and not data.get('genres')
+                    and hasattr(client, 'get_artist_genres')):
+                data['genres'] = client.get_artist_genres(artist_id)
+            return data
         except Exception as e:
             logger.debug("Could not fetch artist data for %s on %s: %s", artist_id, source, e)
             return None
@@ -3020,6 +3032,21 @@ class WatchlistScanner:
             logger.error(f"Error fetching similar artists for {watchlist_artist.artist_name}: {e}")
             return False
 
+    def _backfill_deezer_pool_genres(self) -> None:
+        """give a batch of genre-less deezer pool tracks their genres, before
+        the playlists get curated. every discovery scan path runs this, so the
+        pool catches up over a few scans. never lets a failure stop the scan."""
+        try:
+            if 'deezer' not in (self._discovery_source_priority() or []):
+                return
+            client = get_client_for_source('deezer')
+            if not client or not hasattr(client, 'get_artist_genres'):
+                return
+            from core.discovery.deezer_genre_backfill import backfill_deezer_discovery_genres
+            backfill_deezer_discovery_genres(self.database, client.get_artist_genres)
+        except Exception as e:
+            logger.debug("deezer pool genre backfill skipped: %s", e)
+
     def populate_discovery_pool(self, top_artists_limit: int = 50, albums_per_artist: int = 10, profile_id: int = 1, progress_callback=None):
         """
         Populate discovery pool with tracks from top similar artists.
@@ -3049,6 +3076,7 @@ class WatchlistScanner:
                 self.cache_discovery_recent_albums(profile_id=profile_id)
                 if progress_callback:
                     progress_callback('phase', 'Curating playlists...')
+                self._backfill_deezer_pool_genres()
                 self.curate_discovery_playlists(profile_id=profile_id)
                 return
 
@@ -3075,6 +3103,7 @@ class WatchlistScanner:
                 self.cache_discovery_recent_albums(profile_id=profile_id)
                 if progress_callback:
                     progress_callback('phase', 'Curating playlists...')
+                self._backfill_deezer_pool_genres()
                 self.curate_discovery_playlists(profile_id=profile_id)
                 return
 
@@ -3439,6 +3468,7 @@ class WatchlistScanner:
             logger.info("Curating discovery playlists...")
             if progress_callback:
                 progress_callback('phase', 'Curating playlists...')
+            self._backfill_deezer_pool_genres()
             self.curate_discovery_playlists(profile_id=profile_id)
 
         except Exception as e:

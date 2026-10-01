@@ -259,6 +259,13 @@ def playlist_image_dict(state: Dict[str, Any]) -> str:
     return state['playlist'].get('image_url', '')
 
 
+def mirrored_activity_label(key_or_id: Any, label: str) -> str:
+    """mirrored playlists ride the youtube discovery states (mirrored_<id>
+    keys), so a listenbrainz or spotify mirror posted "YouTube Sync Started"
+    and "YouTube playlist synced" (#1404). they just say playlist."""
+    return 'Playlist' if str(key_or_id or '').startswith('mirrored_') else label
+
+
 def reconcile_sync_phase(
     state: Dict[str, Any],
     sync_state: Dict[str, Any],
@@ -287,6 +294,9 @@ def reconcile_sync_phase(
     """
     if state.get('phase') != 'syncing':
         return None
+    _pl = state.get('playlist')
+    if isinstance(_pl, dict):
+        activity_subject = mirrored_activity_label(_pl.get('id'), activity_subject)
     status = (sync_state or {}).get('status')
     if status == 'finished':
         state['phase'] = 'sync_complete'
@@ -899,6 +909,7 @@ def start_sync(
 
         playlist_name = playlist_name_getter(state)
 
+        activity_label = mirrored_activity_label(key, activity_label)
         add_activity_item("", f"{activity_label} Sync Started", f"'{playlist_name}' - {len(spotify_tracks)} tracks", "Now")
 
         state['phase'] = 'syncing'

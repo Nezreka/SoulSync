@@ -959,7 +959,8 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         # Get track data from private API
         track_data = self._get_track_data(track_id)
         if not track_data:
-            self._set_error(download_id, 'Failed to get track data')
+            self._set_error(download_id, 'Deezer would not return this track (expired ARL, '
+                                         'or not available in your region)')
             return None
 
         track_token = track_data.get('TRACK_TOKEN', '')
@@ -994,7 +995,11 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                 break
 
         if not media_url:
-            self._set_error(download_id, 'No media URL available (may require higher subscription tier)')
+            # no license token = the login itself is broken, not the plan
+            self._set_error(download_id, (
+                'Deezer login has no license token, refresh your ARL in Settings'
+                if not getattr(self, '_license_token', None) else
+                'No media URL available (may require higher subscription tier)'))
             return None
 
         if actual_quality != requested_quality:
@@ -1098,6 +1103,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             transferred=record.get('transferred', 0),
             speed=record.get('speed', 0),
             file_path=record.get('file_path'),
+            error=record.get('error'),
         )
 
     async def get_all_downloads(self) -> List[DownloadStatus]:

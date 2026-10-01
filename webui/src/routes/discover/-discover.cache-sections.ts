@@ -27,9 +27,6 @@
  * would double-escape. This note exists so the omission reads as a decision.
  */
 
-/** `_clampGrid(gridEl, limit = 12)` (10619). */
-export const GRID_CLAMP_LIMIT = 12;
-
 export const ALBUM_PLACEHOLDER = '/static/placeholder-album.png';
 
 /** Section keys written into the shared store. */
@@ -172,29 +169,6 @@ export function cacheDiscoverCard(item: CacheItem): CacheCard {
 }
 
 // ── The clamp toggle ────────────────────────────────────────────────────────
-
-export interface GridClamp {
-  /** No toggle at all when everything fits. */
-  toggleVisible: boolean;
-  visibleCount: number;
-  label: string;
-}
-
-/**
- * `_clampGrid` (10619).
- *
- * At or below the limit there is no button and every card shows. Above it, the
- * button reads "Show all N" with N the FULL count (not the hidden remainder),
- * and flips to "Show less".
- */
-export function gridClamp(total: number, expanded: boolean, limit = GRID_CLAMP_LIMIT): GridClamp {
-  if (total <= limit) return { toggleVisible: false, visibleCount: total, label: '' };
-  return {
-    toggleVisible: true,
-    visibleCount: expanded ? total : limit,
-    label: expanded ? 'Show less' : `Show all ${total}`,
-  };
-}
 
 // ── Genre Explorer pills ────────────────────────────────────────────────────
 

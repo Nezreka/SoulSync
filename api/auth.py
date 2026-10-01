@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
-from flask import request, current_app
+from flask import request, current_app, g
 
 from .helpers import api_error
 
@@ -114,3 +114,56 @@ def require_api_key(f):
         return f(*args, **kwargs)
 
     return decorated
+
+
+def request_has_valid_api_key() -> bool:
+    """True when the current request carries a valid API key.
+
+    Accepts the same two transports as :func:`require_api_key`
+    (``Authorization: Bearer <key>`` header or ``?api_key=`` query param).
+
+    The session gates (login / launch PIN) use this so key-authed callers that
+    cannot do cookie sessions — e.g. the Companion extension's ``<img>`` tags
+    hitting ``/api/image-proxy`` — are treated with the same trust as the
+    ``/api/v1/*`` public API. A valid key is admin-minted, so this grants no
+    more than the v1 path-prefix exemption already does.
+    """
+    api_key = request.args.get("api_key") or ""
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        api_key = auth_header[len("Bearer "):].strip()
+    if not api_key:
+        return False
+    try:
+        config_mgr = current_app.soulsync["config_manager"]
+    except Exception:
+        return False
+    stored_keys = config_mgr.get("api_keys", []) or []
+    key_hash = _hash_key(api_key)
+    return any(s.get("key_hash") == key_hash for s in stored_keys)
+
+
+def apply_api_key_request_context() -> bool:
+    """Stamp the admin profile context for a valid-API-key request.
+
+    Returns True when the current request carries a valid API key, after
+    setting the same ``g`` context :func:`require_api_key` sets (admin
+    rights; profile 1 when none is set). ``before_request`` gates call this
+    first and return early on True.
+
+    Without this, key-authed callers that cannot do cookie sessions — e.g.
+    the Companion extension's ``fetch()`` calls — reach the profile gate
+    with no session profile and 401 ``profile_required`` on every non-v1
+    API path, even though the login/launch-PIN gates already trust the key.
+    A valid key is admin-minted, so this grants no more than the
+    ``/api/v1/*`` path-prefix exemption already does.
+    """
+    if not request_has_valid_api_key():
+        return False
+    g.is_admin = True
+    g.can_download = True
+    g.allowed_sides = 'both'
+    if getattr(g, 'profile_id', None) is None:
+        g.profile_id = 1
+        g.profile_name = "API"
+    return True

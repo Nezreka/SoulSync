@@ -7,7 +7,6 @@ import {
   GENRE_DIVE_DEFAULT_SUBTITLE,
   GENRE_DIVE_EMPTY,
   GENRE_EXPLORER_SECTION,
-  GRID_CLAMP_LIMIT,
   NO_ALBUM_ID,
   NO_ARTIST_DATA,
   TRACK_SECTIONS,
@@ -23,7 +22,6 @@ import {
   genreDiveSubtitle,
   genreDiveUrl,
   genrePill,
-  gridClamp,
   isTrackSection,
   resolveCacheAlbumUrl,
   resolvedIdIsUseful,
@@ -122,38 +120,6 @@ describe('the card', () => {
 
   it('defaults name and artist to empty strings', () => {
     expect(cacheDiscoverCard({})).toMatchObject({ title: '', subtitle: '' });
-  });
-});
-
-describe('the show-all clamp', () => {
-  it('shows no toggle when everything fits', () => {
-    expect(gridClamp(12, false)).toEqual({ toggleVisible: false, visibleCount: 12, label: '' });
-    expect(gridClamp(0, false).toggleVisible).toBe(false);
-    expect(GRID_CLAMP_LIMIT).toBe(12);
-  });
-
-  it('appears at one over the limit', () => {
-    expect(gridClamp(13, false)).toEqual({
-      toggleVisible: true,
-      visibleCount: 12,
-      label: 'Show all 13',
-    });
-  });
-
-  it('labels with the FULL count, not the hidden remainder', () => {
-    expect(gridClamp(30, false).label).toBe('Show all 30');
-  });
-
-  it('flips to Show less when expanded', () => {
-    expect(gridClamp(30, true)).toEqual({
-      toggleVisible: true,
-      visibleCount: 30,
-      label: 'Show less',
-    });
-  });
-
-  it('honours a custom limit', () => {
-    expect(gridClamp(8, false, 5).visibleCount).toBe(5);
   });
 });
 

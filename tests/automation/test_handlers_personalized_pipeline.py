@@ -291,6 +291,21 @@ class TestPayloadBuilding:
         assert manager.ensure_calls == [('hidden_gems', '', 1)]
         assert manager.refresh_calls == []
 
+    def test_daily_mix_refreshes_every_run(self):
+        # it mirrors Discover's Daily Mix, rebuilt daily there. syncing a
+        # fresh-not-stale snapshot would push yesterday's mix to the server
+        deps = _build_deps()
+        manager = _StubManagerWithTracks(
+            tracks_per_kind={'daily_mix': [{'name': 'T', 'id': None}]},
+        )
+        _build_payloads_for_kinds(
+            deps, manager,
+            [{'kind': 'daily_mix', 'variant': '2'}, {'kind': 'hidden_gems'}],
+            profile_id=1, automation_id=None, refresh_first=False,
+        )
+        assert manager.refresh_calls == [('daily_mix', '2', 1)]
+        assert manager.ensure_calls == [('hidden_gems', '', 1)]
+
     def test_payload_shape(self):
         deps = _build_deps()
         manager = _StubManagerWithTracks(

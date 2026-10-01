@@ -60,7 +60,9 @@ class TestDeezerSearchTracksEndpoint:
         searches. Free-text + local rerank is the more reliable
         combination at this endpoint. Client-level kwarg support
         remains for future opt-in callers."""
-        fake_client = MagicMock()
+        from core.deezer_client import DeezerClient
+
+        fake_client = MagicMock(spec=DeezerClient)
         fake_client.search_tracks.return_value = [
             fake_track('Dirty White Boy', 'Foreigner'),
         ]
@@ -69,10 +71,13 @@ class TestDeezerSearchTracksEndpoint:
                 '/api/deezer/search_tracks?track=Dirty+White+Boy&artist=Foreigner&limit=20'
             )
         assert resp.status_code == 200
-        call = fake_client.search_tracks.call_args
-        # First positional arg is the joined free-text query
-        assert call.args[0] == 'Dirty White Boy Foreigner'
-        assert call.kwargs.get('limit') == 20
+        calls = fake_client.search_tracks.call_args_list
+        # field-scoped first (deezer's free-text index skips songs, see
+        # core.metadata.song_search), then the joined free-text query
+        assert calls[0].kwargs.get('track') == 'Dirty White Boy'
+        assert calls[0].kwargs.get('artist') == 'Foreigner'
+        assert calls[1].args[0] == 'Dirty White Boy Foreigner'
+        assert calls[1].kwargs.get('limit') == 20
 
     def test_reranks_results_burying_karaoke(self, app_test_client, fake_track):
         """Endpoint runs results through rerank_tracks. Real Foreigner
@@ -143,9 +148,9 @@ class TestiTunesSearchTracksEndpoint:
                        album='Head Games', album_type='album',
                        track_id='real-1'),
         ]
-        # Endpoint dispatches via _get_metadata_fallback_client; stub it
-        monkeypatch.setattr('api.source_playlists._get_metadata_fallback_client', lambda: fake_client)
-        monkeypatch.setattr('api.source_playlists._get_metadata_fallback_source', lambda: 'itunes')
+        # the endpoint asks the iTunes client (store fallback included)
+        fake_client.search_tracks_any_store.return_value = fake_client.search_tracks.return_value
+        monkeypatch.setattr('api.source_playlists._get_itunes_client', lambda: fake_client)
         monkeypatch.setattr('api.source_playlists._is_hydrabase_active', lambda: False)
         # Avoid hydrabase worker side-effect during test
         monkeypatch.setattr('web_server.hydrabase_worker', None, raising=False)
@@ -169,8 +174,7 @@ class TestiTunesSearchTracksEndpoint:
         b = fake_track('Whatever', 'Y', track_id='second')
         fake_client = MagicMock()
         fake_client.search_tracks.return_value = [a, b]
-        monkeypatch.setattr('api.source_playlists._get_metadata_fallback_client', lambda: fake_client)
-        monkeypatch.setattr('api.source_playlists._get_metadata_fallback_source', lambda: 'itunes')
+        monkeypatch.setattr('api.source_playlists._get_itunes_client', lambda: fake_client)
         monkeypatch.setattr('api.source_playlists._is_hydrabase_active', lambda: False)
         monkeypatch.setattr('web_server.hydrabase_worker', None, raising=False)
         monkeypatch.setattr('web_server.dev_mode_enabled', False, raising=False)
@@ -184,6 +188,28 @@ class TestiTunesSearchTracksEndpoint:
 # /api/spotify/search_tracks — already builds field-scoped query;
 # verify rerank also applies for consistency
 # ---------------------------------------------------------------------------
+
+
+    def test_asks_itunes_even_when_another_source_is_primary(self, app_test_client, fake_track, monkeypatch):
+        """#1398: the "iTunes" search used to ask the primary source, so with
+        deezer primary the iTunes results were really deezer's."""
+        itunes = MagicMock()
+        itunes.search_tracks_any_store.return_value = [fake_track('Ti Ti', 'Helena Paparizou', track_id='it-1')]
+        deezer = MagicMock()
+        monkeypatch.setattr('api.source_playlists._get_itunes_client', lambda: itunes)
+        monkeypatch.setattr('api.source_playlists._get_metadata_fallback_client', lambda: deezer)
+        monkeypatch.setattr('api.source_playlists._get_metadata_fallback_source', lambda: 'deezer')
+        monkeypatch.setattr('api.source_playlists._is_hydrabase_active', lambda: False)
+        monkeypatch.setattr('web_server.hydrabase_worker', None, raising=False)
+        monkeypatch.setattr('web_server.dev_mode_enabled', False, raising=False)
+
+        resp = app_test_client.get('/api/itunes/search_tracks?track=Ti+Ti&artist=Helena+Paparizou')
+        body = resp.get_json()
+        assert [t['id'] for t in body['tracks']] == ['it-1']
+        assert body['tracks'][0]['source'] == 'itunes'
+        deezer.search_tracks.assert_not_called()
+        kwargs = itunes.search_tracks_any_store.call_args.kwargs
+        assert kwargs['expected_title'] == 'Ti Ti' and kwargs['expected_artist'] == 'Helena Paparizou'
 
 
 class TestSpotifySearchTracksEndpoint:

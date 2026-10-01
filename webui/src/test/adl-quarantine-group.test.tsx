@@ -93,8 +93,8 @@ describe('the quarantine group row', () => {
       onDeleteGroup,
     );
     const button = container.querySelector('.verif-quar-alt-del') as HTMLElement;
-    // 3 members = "2 more" folded, but deleting takes all THREE.
-    expect(container.querySelector('.verif-quar-alt-btn')?.textContent).toContain('2 more');
+    // 3 attempts, two folded away, but deleting takes all THREE.
+    expect(container.querySelector('.verif-quar-attempts')?.textContent).toContain('3 attempts');
     expect(button.textContent).toContain('Delete all 3');
 
     fireEvent.click(button);

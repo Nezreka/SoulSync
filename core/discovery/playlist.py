@@ -279,7 +279,11 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                         if use_spotify:
                             extended = deps.spotify_client.search_tracks(query, limit=50)
                         else:
-                            extended = itunes_client_instance.search_tracks(query, limit=50)
+                            # the source's own best song search: field-scoped on
+                            # deezer (its free-text skipped studio "Numb"), other
+                            # stores on itunes (#1398)
+                            from core.metadata.song_search import search_song
+                            extended = search_song(itunes_client_instance, track_name, artist_name, limit=50)
                         if extended:
                             match, confidence = _canonical_best_score(
                                 deps, track_name, artist_name, duration_ms, extended

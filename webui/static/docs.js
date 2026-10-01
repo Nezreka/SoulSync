@@ -1005,13 +1005,12 @@
                 ['page', 'int', 0, 'Page number', '1'],
                 ['limit', 'int', 0, 'Results per page (max 200)', '50'],
                 ['fields', 'string', 0, 'Comma-separated field names'],
+                ['profile_id', 'int', 0, 'Profile scope for the watchlist filter (or X-Profile-Id header)', '1'],
             ] }),
             _ddE('GET', '/library/artists/{artist_id}', 'One artist with metadata and album list', { q: [
                 ['fields', 'string', 0, 'Comma-separated field names'],
             ] }),
-            _ddE('GET', '/library/artists/{artist_id}/albums', 'Albums by an artist (paginated)', { q: [
-                ['page', 'int', 0, 'Page number', '1'],
-                ['limit', 'int', 0, 'Results per page (max 200)', '50'],
+            _ddE('GET', '/library/artists/{artist_id}/albums', 'Albums by an artist (not paginated)', { q: [
                 ['fields', 'string', 0, 'Comma-separated field names'],
             ] }),
             _ddE('GET', '/library/albums', 'List or search albums (paginated)', { q: [
@@ -1038,7 +1037,7 @@
                 ['fields', 'string', 0, 'Comma-separated field names'],
             ] }),
             _ddE('GET', '/library/genres', 'Genre list with occurrence counts', { q: [
-                ['limit', 'int', 0, 'Max genres', '50'],
+                ['source', 'string', 0, '"artists" or "albums" — anything else is a 400', 'artists'],
             ] }),
             _ddE('GET', '/library/recently-added', 'Newest additions first', { q: [
                 ['type', 'string', 0, '"albums", "artists", or "tracks"', 'albums'],
@@ -1047,7 +1046,7 @@
             ] }),
             _ddE('GET', '/library/lookup', 'Resolve an artist/album/track by external provider ID', { q: [
                 ['type', 'string', 1, '"artist", "album", or "track"'],
-                ['provider', 'string', 1, '"spotify", "musicbrainz", "itunes", "deezer", "tidal", "qobuz", or "genius"'],
+                ['provider', 'string', 1, '"spotify", "musicbrainz", "itunes", "deezer", "audiodb", "tidal", "qobuz", or "genius" (genius + type=album is a 400)'],
                 ['id', 'string', 1, 'The external ID value'],
                 ['fields', 'string', 0, 'Comma-separated field names'],
             ] }),
@@ -1069,7 +1068,17 @@
             ], bx: '{\n  "query": "Radiohead",\n  "limit": 5\n}' }),
         ] },
         { title: 'Downloads', desc: 'See what is downloading, and stop anything that should not be.', eps: [
-            _ddE('GET', '/downloads', 'Active and queued downloads with progress'),
+            _ddE('GET', '/downloads', 'Tracked download tasks, newest first (all statuses unless filtered)', { q: [
+                ['status', 'string', 0, 'Comma-separated statuses to include, e.g. "downloading,queued"'],
+                ['limit', 'int', 0, 'Max tasks (max 500)', '100'],
+                ['offset', 'int', 0, 'Skip the first N tasks', '0'],
+            ] }),
+            _ddE('GET', '/downloads/failed-blocklist', 'Persistent failed-download blocklist, newest first', { q: [
+                ['limit', 'int', 0, 'Max entries (max 1000)', '200'],
+            ] }),
+            _ddE('DELETE', '/downloads/failed-blocklist', 'Unblock one fingerprint from the failed-download blocklist', { b: [
+                ['fingerprint', 'string', 1, 'The blocklist fingerprint to remove'],
+            ], bx: '{\n  "fingerprint": "abc123…"\n}' }),
             _ddE('POST', '/downloads/{download_id}/cancel', 'Cancel a specific download', { b: [
                 ['username', 'string', 1, 'Soulseek username for the transfer'],
             ], bx: '{\n  "username": "slsk_user42"\n}' }),

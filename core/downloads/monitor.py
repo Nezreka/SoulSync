@@ -785,6 +785,7 @@ class WebUIDownloadMonitor:
                         'size': download.size,
                         'bytesTransferred': download.transferred,
                         'averageSpeed': download.speed,
+                        'error': getattr(download, 'error', None),
                     }
                     live_transfers[key] = transfer_row
                     id_key = _download_id_key(download.id)
@@ -909,6 +910,11 @@ class WebUIDownloadMonitor:
             if task.get('_user_manual_pick'):
                 return False
 
+            # the source's own reason (deezer: expired arl, no license for
+            # that quality...) so the give-up says it instead of a generic line
+            if live_info.get('error'):
+                task['last_source_error'] = str(live_info['error'])
+
             retry_count = task.get('error_retry_count', 0)
             last_retry = task.get('last_error_retry_time', 0)
 
@@ -1004,6 +1010,11 @@ class WebUIDownloadMonitor:
                             f'Tidal download failed for "{track_label}"{sources_str} — '
                             f'check Tidal authentication and quality settings.'
                         )
+                elif task.get('last_source_error'):
+                    task['error_message'] = (
+                        f'Download failed 3 times for "{track_label}"{sources_str}. '
+                        f'Last error: {task["last_source_error"]}'
+                    )
                 else:
                     task['error_message'] = f'Soulseek transfer errored 3 times for "{track_label}"{sources_str} — all sources failed or became unavailable'
 
@@ -1013,6 +1024,15 @@ class WebUIDownloadMonitor:
                     logger.error(f"[Retry Exhausted] Notifying batch manager of permanent failure for task {task_id}")
                     return True  # Signal that we need to call completion outside the lock
                 return False
+
+        # torrent and usenet grabs run their own clock: the plugin's stall timer
+        # (settings, default 10 min, abandon or pause) and the 6h deadline, and a
+        # give-up there comes back as an errored row, handled above. the 90s
+        # rules below are soulseek rules. on a torrent they removed it and its
+        # data after 90s at 0%, normal for a private tracker, then grabbed it
+        # again, 4 times over (discord, Tostadaman).
+        if _is_release_task(task):
+            return False
 
         if self._retry_slow_soulseek_transfer(
                 task_id, task, live_info, state_str, current_time, deferred_ops):

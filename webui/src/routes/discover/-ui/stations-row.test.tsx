@@ -197,3 +197,31 @@ describe('the ⋯ on a station', () => {
     server.resetHandlers();
   });
 });
+
+describe('library radio, the first station', () => {
+  it('leads the row when the page can start it, and plays from the photo or the name', () => {
+    const onPlayLibraryRadio = vi.fn();
+    const { container } = render(
+      <StationsRow
+        stations={STATIONS}
+        onView={vi.fn()}
+        onPlayRadio={vi.fn()}
+        onPlayLibraryRadio={onPlayLibraryRadio}
+      />,
+    );
+    const cards = container.querySelectorAll('.discover-station-card');
+    expect(cards[0]).toHaveClass('discover-station-card--library');
+    fireEvent.click(screen.getByLabelText('Play library radio'));
+    fireEvent.click(screen.getByText('Library Radio'));
+    expect(onPlayLibraryRadio).toHaveBeenCalledTimes(2);
+  });
+
+  it('is absent when the page cannot start it', () => {
+    const { container } = render(
+      <StationsRow stations={STATIONS} onView={vi.fn()} onPlayRadio={vi.fn()} />,
+    );
+    expect(container.querySelector('.discover-station-card--library')).toBeNull();
+    // and no card wears a RADIO badge in a row called Stations
+    expect(container.querySelector('.discover-station-badge')).toBeNull();
+  });
+});

@@ -490,6 +490,7 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
                 'release_date': explicit_album.get('release_date', ''),
                 'image_url': _album_image_url,
                 'album_type': explicit_album.get('album_type', 'album'),
+                'album_type_locked': bool(explicit_album.get('album_type_locked')),
                 'total_tracks': explicit_album.get('total_tracks', 0),
                 'total_discs': explicit_album.get('total_discs', 1),
                 'artists': explicit_album.get('artists', [{'name': spotify_artist_ctx.get('name', '')}])
@@ -514,6 +515,7 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
                 'release_date': fallback_album.get('release_date', ''),
                 'image_url': fallback_album.get('image_url'),
                 'album_type': fallback_album.get('album_type', 'album'),
+                'album_type_locked': bool(fallback_album.get('album_type_locked')),
                 'total_tracks': fallback_album.get('total_tracks', 0),
                 'total_discs': fallback_album.get('total_discs', 1),
                 'artists': [{'name': track_artist}] if track_artist else []

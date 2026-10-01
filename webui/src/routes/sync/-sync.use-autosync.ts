@@ -21,13 +21,14 @@
  * exactly what a ref is for.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { AutoSyncWeeklyDraft } from './-ui/autosync-weekly';
 
 import {
   createAutomation,
   deleteAutomation,
+  fetchAutomationProgress,
   fetchAutomations,
   fetchMirroredPlaylists,
   fetchPersonalizedKinds,
@@ -38,6 +39,7 @@ import {
   updateAutomation,
 } from './-sync.api';
 import {
+  autoSyncApplyAutomationProgress,
   autoSyncBucketLabel,
   autoSyncCanSchedulePlaylist,
   autoSyncIntervalLabel,
@@ -161,9 +163,26 @@ export function useAutoSync({ open, now = () => Date.now(), runPipeline }: UseAu
         /* personalized kinds optional */
       }
 
-      setState(
-        buildAutoSyncScheduleState(allPlaylists, automations as never, historyData as never),
+      const built = buildAutoSyncScheduleState(
+        allPlaylists,
+        automations as never,
+        historyData as never,
       );
+      // personalized rows run as automations; their live status lives there.
+      // best-effort, a failed read just leaves the cards off
+      try {
+        const progressRes = await fetchAutomationProgress();
+        if (progressRes.ok) {
+          built.playlists = autoSyncApplyAutomationProgress(
+            built.playlists,
+            [built.playlistSchedules, built.weeklySchedules],
+            (await progressRes.json()) as never,
+          );
+        }
+      } catch {
+        /* progress optional */
+      }
+      setState(built);
       setClock(nowRef.current());
       setLoadError(null);
     } catch (err) {
@@ -357,6 +376,8 @@ export function useAutoSync({ open, now = () => Date.now(), runPipeline }: UseAu
           const data = (await res.json()) as { error?: string };
           if (!res.ok || data.error) throw new Error(data.error || 'Failed to run');
           toast(`Running ${playlist.name}…`, 'success');
+          // pick up the run straight away so the card shows and polling starts
+          await refresh();
         } catch (err) {
           toast(`Error: ${err instanceof Error ? err.message : String(err)}`, 'error');
         }
@@ -367,7 +388,7 @@ export function useAutoSync({ open, now = () => Date.now(), runPipeline }: UseAu
       // not a window lookup.
       runPipeline(playlistId, playlist.name || `Playlist #${playlistId}`);
     },
-    [runPipeline],
+    [runPipeline, refresh],
   );
 
   /** 1933-1949. */
@@ -514,4 +535,39 @@ export function useAutoSync({ open, now = () => Date.now(), runPipeline }: UseAu
       dragging.current = value;
     },
   };
+}
+
+/**
+ * the modal's two action groups, built from a useAutoSync result. shared by
+ * the playlists page and the app-wide host so the two can't wire it
+ * differently.
+ *
+ * THE TRAP: both groups extend AutoSyncCardActions, so three of their four
+ * members are identical, and the fourth, `onUnschedule`, must bind to a
+ * DIFFERENT function in each. wire both to the same one and unscheduling a
+ * weekly playlist leaves its weekly automation running while the ui says it
+ * is gone.
+ */
+export function useAutoSyncActions(autoSync: ReturnType<typeof useAutoSync>) {
+  const { runNow, unscheduleHourly, unscheduleWeekly, setOrganize, saveHourly, saveWeekly } =
+    autoSync;
+  const boardActions = useMemo(
+    () => ({
+      onRun: runNow,
+      onUnschedule: unscheduleHourly,
+      onOrganizeChange: setOrganize,
+      onDrop: saveHourly,
+    }),
+    [runNow, unscheduleHourly, setOrganize, saveHourly],
+  );
+  const weeklyActions = useMemo(
+    () => ({
+      onRun: runNow,
+      onUnschedule: unscheduleWeekly,
+      onOrganizeChange: setOrganize,
+      onSave: saveWeekly,
+    }),
+    [runNow, unscheduleWeekly, setOrganize, saveWeekly],
+  );
+  return { boardActions, weeklyActions };
 }

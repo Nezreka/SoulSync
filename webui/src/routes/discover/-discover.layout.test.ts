@@ -27,6 +27,7 @@ describe('the section order', () => {
     const flat = DISCOVER_LAYOUT.flatMap((e) => (e.kind === 'single' ? [e.id] : e.ids));
     expect(flat).toEqual([
       'your-mixes-section',
+      'mood-mixes-section',
       'adv-wave',
       'listening-recs-section',
       'recommended-artists-section',
@@ -154,6 +155,7 @@ describe('the empty policy is NOT uniform', () => {
       'cache-label-explorer',
       'cache-undiscovered',
       'listening-recs-section',
+      'mood-mixes-section',
       'recommended-artists-section',
       'your-albums-section',
       'your-artists-section',

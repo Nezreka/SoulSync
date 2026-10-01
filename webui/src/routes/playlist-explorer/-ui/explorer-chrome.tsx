@@ -70,7 +70,7 @@ export function ExplorerActionBar({
         </button>
       </div>
       <span className="explorer-nav-hint">
-        Scroll to zoom · Right-drag to pan · Double-click album for tracks
+        Ctrl + scroll or pinch to zoom · Right-drag to pan · Double-click album for tracks
       </span>
     </div>
   );
@@ -103,12 +103,16 @@ export interface ExplorerZoomControlsProps {
   onZoom: (delta: number) => void;
   onFitToView: () => void;
   onResetZoom: () => void;
+  wheelZoomLocked?: boolean;
+  onToggleWheelZoomLock?: () => void;
 }
 
 export function ExplorerZoomControls({
   onZoom,
   onFitToView,
   onResetZoom,
+  wheelZoomLocked = false,
+  onToggleWheelZoomLock,
 }: ExplorerZoomControlsProps) {
   return (
     <div className="explorer-zoom-controls">
@@ -134,6 +138,34 @@ export function ExplorerZoomControls({
       <button type="button" className="explorer-zoom-btn" onClick={onResetZoom} title="Reset zoom">
         1:1
       </button>
+      {onToggleWheelZoomLock ? (
+        <button
+          type="button"
+          className={`explorer-zoom-btn${wheelZoomLocked ? ' active' : ''}`}
+          onClick={onToggleWheelZoomLock}
+          aria-pressed={wheelZoomLocked}
+          title={
+            wheelZoomLocked
+              ? 'Scroll wheel zooms. Click so it scrolls instead'
+              : 'Scroll wheel scrolls (ctrl + scroll or pinch zooms). Click so it zooms'
+          }
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <line x1="21" y1="21" x2="16" y2="16" />
+            {wheelZoomLocked ? null : <line x1="4" y1="4" x2="18" y2="18" />}
+          </svg>
+        </button>
+      ) : null}
     </div>
   );
 }

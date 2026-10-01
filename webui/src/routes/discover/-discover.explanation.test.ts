@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   explanationLine,
+  explanationParts,
   explanationTitle,
   nameList,
   sourceMixLine,
@@ -40,6 +41,27 @@ describe('explanationLine', () => {
     expect(explanationLine({ kind: 'because', seeds: seeds('Tool') })).toBe('');
     // a key the prototype carries is not a kind
     expect(explanationLine({ kind: 'toString', seeds: seeds('Tool') })).toBe('');
+  });
+});
+
+describe('explanationParts', () => {
+  it('splits the line into lead, up to two names and a remainder', () => {
+    expect(explanationParts({ kind: 'similar_to', seeds: seeds('A', 'B', 'C', 'D') })).toEqual({
+      lead: 'Because you have',
+      names: ['A', 'B'],
+      more: 2,
+    });
+    expect(explanationParts({ kind: 'listened', seeds: seeds('Tool') })).toEqual({
+      lead: 'Because you listen to',
+      names: ['Tool'],
+      more: 0,
+    });
+  });
+
+  it('is null when there is no name to set apart, or the kind is unknown', () => {
+    expect(explanationParts({ kind: 'similar_to', seeds: [] })).toBeNull();
+    expect(explanationParts({ kind: 'toString', seeds: seeds('Tool') })).toBeNull();
+    expect(explanationParts(undefined)).toBeNull();
   });
 });
 

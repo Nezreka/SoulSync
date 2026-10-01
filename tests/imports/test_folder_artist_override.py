@@ -82,3 +82,56 @@ def test_enabled_top_level_category_word_is_not_an_artist():
         identified_artist="Asal",
         enabled=True,
     ) is None
+
+
+# --- the folder the album sits in, not the top of staging (Tostadaman) ------
+# a torrent client's completed folder mounted inside staging named every
+# artist "qbittorrent": /MUSIC/qbittorrent/qbittorrent - TrackName.
+
+
+def test_client_mount_above_artist_album_keeps_the_real_artist():
+    # candidate paths are album folders; the artist folder sits above it
+    assert resolve_folder_artist(
+        "qbittorrent/lidarr-done/Linkin Park/Meteora",
+        identified_artist="Linkin Park",
+        enabled=True,
+    ) is None
+
+
+def test_client_mount_still_lets_the_real_artist_folder_win():
+    # the legacy point of the feature: bad tags, good Artist/Album folders
+    assert resolve_folder_artist(
+        "qbittorrent/lidarr-done/Linkin Park/Meteora",
+        identified_artist="Linkin Prk",
+        enabled=True,
+    ) == "Linkin Park"
+
+
+def test_album_directly_in_a_client_folder_is_not_an_artist():
+    assert resolve_folder_artist(
+        "qbittorrent/Meteora",
+        identified_artist="Linkin Park",
+        enabled=True,
+    ) is None
+    assert resolve_folder_artist(
+        "transmission/complete/Meteora",
+        identified_artist="Linkin Park",
+        enabled=True,
+    ) is None
+
+
+def test_disc_folders_belong_to_their_album():
+    assert resolve_folder_artist(
+        "Pink Floyd/The Wall/CD1",
+        identified_artist="Some DJ",
+        enabled=True,
+    ) == "Pink Floyd"
+    assert resolve_folder_artist(
+        "Pink Floyd/The Wall/Disc 2/01 - Hey You.flac",
+        identified_artist="Some DJ",
+        enabled=True,
+    ) == "Pink Floyd"
+
+
+def test_album_folder_at_the_staging_root_has_no_folder_artist():
+    assert resolve_folder_artist("Meteora", identified_artist="Linkin Park", enabled=True) is None

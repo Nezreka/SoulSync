@@ -6,6 +6,7 @@ import { waitForShellContext } from '@/platform/shell/bridge';
 import { shellStatusQueryOptions } from '@/platform/shell/status';
 
 import { IssueDomainHost } from './issues/-ui/issue-domain-host';
+import { AutoSyncHost } from './sync/-ui/autosync-host';
 
 export const Route = createRootRouteWithContext<AppRouterContext>()({
   beforeLoad: async ({ context }) => {
@@ -20,6 +21,9 @@ export const Route = createRootRouteWithContext<AppRouterContext>()({
     <>
       <Outlet />
       <IssueDomainHost />
+      {/* the dashboard opens auto-sync through a window global, this makes
+          it the same react manager the playlists page uses */}
+      <AutoSyncHost />
     </>
   ),
 });

@@ -418,6 +418,31 @@ def test_reconcile_finished_flips_phase_and_posts_activity():
     assert calls == [("", "Sync Complete", "YouTube playlist 'Mix' synced successfully", "Now")]
 
 
+def test_reconcile_names_a_mirrored_playlist_as_a_playlist_not_youtube():
+    """cremonies #1404: a listenbrainz mirror synced from the discovery modal
+    posted "YouTube playlist 'Weekly Jams' synced successfully", because
+    mirrored states live in the youtube states dict."""
+    calls, add = _activity_recorder()
+    state = {'phase': 'syncing', 'playlist': {'id': 'mirrored_7', 'name': 'Weekly Jams'}}
+    reconcile_sync_phase(
+        state, {"status": "finished"},
+        activity_subject='YouTube playlist', playlist_name_getter=_pl_name_safe,
+        add_activity_item=add)
+    assert calls == [("", "Sync Complete", "Playlist 'Weekly Jams' synced successfully", "Now")]
+
+
+def test_start_sync_names_a_mirrored_playlist_as_a_playlist_not_youtube():
+    """#1404, the start half: "YouTube Sync Started" for a listenbrainz mirror."""
+    from core.discovery.endpoints import start_sync
+    infra = _cancel_infra()
+    kw, _, calls = _start_kwargs(infra, name='Weekly Jams', activity_label='YouTube',
+                                 error_label='YouTube', sync_id_prefix='youtube')
+    states = {'mirrored_7': {'phase': 'discovered', 'discovery_results': [1]}}
+    body, code = start_sync(states, 'mirrored_7', **kw)
+    assert code == 200
+    assert calls == [("", "Playlist Sync Started", "'Weekly Jams' - 1 tracks", "Now")]
+
+
 def test_reconcile_error_reverts_to_discovered():
     calls, add = _activity_recorder()
     state = {'phase': 'syncing', 'playlist': {'name': 'Mix'}}

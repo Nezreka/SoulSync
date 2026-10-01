@@ -292,6 +292,7 @@ NOT_A_SURFACE = {
     '/api/discover/popularity-backfill/status',
     '/api/discover/genre-explorer',          # genre names + counts
     '/api/discover/resolve-cache-album',     # one id lookup for a clicked card
+    '/api/discover/backdrop-video',          # a video id for a named artist; refuses blocked ones itself
     '/api/discover/diagnose',
     '/api/discover/artist-blacklist',        # the block list itself
     '/api/discover/feedback',                # what you answered, listed back to you

@@ -475,6 +475,73 @@ def test_api_backfills_album_context_when_missing():
     assert ctx["spotify_album"]["id"] == "from_sync_modal"
 
 
+def _patch_primary_source(monkeypatch, source, album):
+    from core.metadata import album_tracks, registry
+    monkeypatch.setattr(registry, "get_primary_source", lambda: source)
+    monkeypatch.setattr(album_tracks, "get_album_for_source", lambda *_a, **_k: album)
+
+
+def test_playlist_track_gets_the_albums_own_credit_not_the_singer(monkeypatch):
+    """#1385: 'Let It Go' from a playlist was filed under Idina Menzel/Frozen.
+    the track's album had no artists, so the track artist was made the album
+    artist before the source backfill could supply the real one."""
+    _patch_primary_source(monkeypatch, "itunes", {
+        "id": "it-frozen", "release_date": "2013-11-25", "total_tracks": 32,
+        "album_type": "album", "artists": [{"name": "Various Artists", "id": "va"}],
+    })
+    deps = _build_deps()
+    _seed_task("t20", track_info={
+        "track_number": 5,
+        "album": {"id": "it-frozen", "name": "Frozen (Original Motion Picture Soundtrack)"},
+    })
+    track = _Track(album="Frozen (Original Motion Picture Soundtrack)", artists=["Idina Menzel"])
+
+    dc.attempt_download_with_candidates("t20", [_Candidate()], track, batch_id=None, deps=deps)
+
+    album = matched_downloads_context["user1::song.flac"]["spotify_album"]
+    assert album["artists"] == [{"name": "Various Artists", "id": "va"}]
+
+
+def test_playlist_track_falls_back_to_its_artist_when_the_source_has_no_credit(monkeypatch):
+    _patch_primary_source(monkeypatch, "itunes", None)
+    deps = _build_deps()
+    _seed_task("t21", track_info={"track_number": 5, "album": {"id": "it-x", "name": "Some Album"}})
+    track = _Track(album="Some Album", artists=["Solo Artist"])
+
+    dc.attempt_download_with_candidates("t21", [_Candidate()], track, batch_id=None, deps=deps)
+
+    album = matched_downloads_context["user1::song.flac"]["spotify_album"]
+    assert album["artists"] == [{"name": "Solo Artist"}]
+
+
+def test_the_artist_page_section_lock_reaches_the_album_context():
+    """an artist-page download locks the release type to its section; the
+    context the path builder reads has to keep that lock"""
+    deps = _build_deps()
+    _seed_task("t30", track_info={
+        "_is_explicit_album_download": True,
+        "_explicit_album_context": {"id": "fs1", "name": "Flow State Sampler", "album_type": "album",
+                                    "album_type_locked": True, "release_date": "2021-01-01",
+                                    "total_tracks": 3},
+        "_explicit_artist_context": {"id": "ab", "name": "Above & Beyond"},
+        "track_number": 1,
+    })
+    dc.attempt_download_with_candidates("t30", [_Candidate()], _Track(album="Flow State Sampler"),
+                                        batch_id=None, deps=deps)
+    album = matched_downloads_context["user1::song.flac"]["spotify_album"]
+    assert album["album_type"] == "album" and album["album_type_locked"] is True
+
+
+def test_the_lock_also_survives_the_playlist_fallback_context():
+    deps = _build_deps()
+    _seed_task("t31", track_info={"track_number": 1, "album": {
+        "id": "fs1", "name": "Flow State Sampler", "album_type": "album", "album_type_locked": True,
+        "release_date": "2021-01-01", "total_tracks": 3, "artists": [{"name": "Above & Beyond"}]}})
+    dc.attempt_download_with_candidates("t31", [_Candidate()], _Track(album="Flow State Sampler"),
+                                        batch_id=None, deps=deps)
+    assert matched_downloads_context["user1::song.flac"]["spotify_album"]["album_type_locked"] is True
+
+
 # ---------------------------------------------------------------------------
 # Sort by confidence is stable for equal scores
 # ---------------------------------------------------------------------------

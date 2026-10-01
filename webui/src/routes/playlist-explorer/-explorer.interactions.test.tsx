@@ -15,6 +15,7 @@ import {
 } from './-explorer.connections';
 import {
   ALBUM_CLICK_DELAY_MS,
+  EXPLORER_WHEEL_LOCK_KEY,
   createAlbumClickController,
   useExplorerPan,
   useExplorerZoom,
@@ -29,6 +30,7 @@ import { ExplorerTree } from './-ui/explorer-tree';
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  localStorage.clear();
 });
 
 describe('createAlbumClickController', () => {
@@ -510,11 +512,43 @@ describe('useExplorerZoom', () => {
     expect(getByTestId('zoom').textContent).toBe('1');
   });
 
-  it('zooms on wheel, and stops the page scrolling underneath', () => {
+  it('lets a plain wheel scroll the tree instead of zooming (#1409)', () => {
+    const { getByTestId } = renderZoom();
+    const viewport = getByTestId('viewport');
+    const plain = new WheelEvent('wheel', { deltaY: -120, cancelable: true, bubbles: true });
+    act(() => {
+      viewport.dispatchEvent(plain);
+    });
+    expect(plain.defaultPrevented).toBe(false);
+    expect(getByTestId('zoom').textContent).toBe('1');
+  });
+
+  it('zooms on a plain wheel once the lock is on, and remembers it (#1409)', () => {
+    const { getByTestId, unmount } = renderZoom();
+    act(() => controls.toggleWheelZoomLock());
+    expect(controls.wheelZoomLocked).toBe(true);
+    expect(localStorage.getItem(EXPLORER_WHEEL_LOCK_KEY)).toBe('1');
+    const plain = new WheelEvent('wheel', { deltaY: -120, cancelable: true, bubbles: true });
+    act(() => {
+      getByTestId('viewport').dispatchEvent(plain);
+    });
+    expect(plain.defaultPrevented).toBe(true);
+    expect(getByTestId('zoom').textContent).toBe('1.08');
+    unmount();
+    renderZoom();
+    expect(controls.wheelZoomLocked).toBe(true);
+  });
+
+  it('zooms on ctrl + wheel, and stops the page scrolling underneath', () => {
     const { getByTestId } = renderZoom();
     const viewport = getByTestId('viewport');
 
-    const up = new WheelEvent('wheel', { deltaY: -120, cancelable: true, bubbles: true });
+    const up = new WheelEvent('wheel', {
+      deltaY: -120,
+      ctrlKey: true,
+      cancelable: true,
+      bubbles: true,
+    });
     act(() => {
       viewport.dispatchEvent(up);
     });
@@ -522,7 +556,9 @@ describe('useExplorerZoom', () => {
     expect(getByTestId('zoom').textContent).toBe('1.08');
 
     act(() => {
-      viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, cancelable: true }));
+      viewport.dispatchEvent(
+        new WheelEvent('wheel', { deltaY: 120, ctrlKey: true, cancelable: true }),
+      );
     });
     expect(getByTestId('zoom').textContent).toBe('1');
   });

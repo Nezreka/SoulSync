@@ -26,6 +26,12 @@ export interface DiscoverMix {
   key: string;
   title: string;
   subtitle?: string;
+  /**
+   * what the CARD says under the title when it has something better than the
+   * subtitle (a daily mix's "Katy Perry, M83 and more"). the modal keeps the
+   * subtitle, which is the reason.
+   */
+  blurb?: string;
   tracks?: unknown[];
   trackCount?: number;
   syncKey?: string;
@@ -108,6 +114,26 @@ export function mixCoverTiles(tracks: unknown[] | undefined): string[] {
   }
   while (covers.length < MIX_COVER_TILES) covers.push(MIX_COVER_PLACEHOLDER);
   return covers;
+}
+
+/**
+ * how the cover should be drawn from its distinct real covers.
+ *
+ * a mosaic needs four. with one to three, padding with placeholder tiles
+ * painted black squares into the corner of a quarter of the decade and radio
+ * cards. one full cover reads as a choice; three covers and a black hole read
+ * as broken.
+ */
+export type MixCoverLayout =
+  | { kind: 'grid'; covers: string[] }
+  | { kind: 'single'; cover: string }
+  | { kind: 'empty' };
+
+export function mixCoverLayout(tracks: unknown[] | undefined): MixCoverLayout {
+  const real = mixCoverTiles(tracks).filter((c) => c !== MIX_COVER_PLACEHOLDER);
+  if (real.length >= MIX_COVER_TILES) return { kind: 'grid', covers: real };
+  if (real.length > 0) return { kind: 'single', cover: real[0] };
+  return { kind: 'empty' };
 }
 
 /** Does this mix supply its own cover instead of a mosaic? (4840) */

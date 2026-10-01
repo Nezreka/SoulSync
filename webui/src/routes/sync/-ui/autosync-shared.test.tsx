@@ -153,6 +153,53 @@ describe('AutoSyncScheduledCard (1951-1976 / 979-1024)', () => {
     expect(onCardClick).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps folder + quality behind ⋯ until asked, without opening the card', () => {
+    // the board was a wall of checkboxes and dropdowns, one set per card.
+    // they're still one click away, and the ⋯ must not reopen the weekly editor.
+    const onCardClick = vi.fn();
+    const { container } = renderCard(row(), { onCardClick });
+    const panel = () => container.querySelector('.auto-sync-card-settings') as HTMLElement;
+    expect(panel().className).not.toContain('open');
+    // still mounted, so the quality select hydrates exactly as before
+    expect(panel().querySelector('.auto-sync-organize-toggle')).not.toBeNull();
+    const more = container.querySelector('.auto-sync-card-more') as HTMLElement;
+    fireEvent.click(more);
+    expect(panel().className).toContain('open');
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(more);
+    expect(panel().className).not.toContain('open');
+    expect(onCardClick).not.toHaveBeenCalled();
+  });
+
+  it('offers no folder / quality settings on a personalized row (Daily Mix)', () => {
+    // there's no mirrored playlist to save them onto yet. the quality select
+    // used to render anyway and sit on "Loading…" forever.
+    window.playlistQualityProfileSelectHtml = () => '<select></select>';
+    const { container } = renderCard(row({ id: -1, _personalized: true }));
+    expect(container.querySelector('.auto-sync-card-more')).toBeNull();
+    expect(container.querySelector('.auto-sync-card-settings')).toBeNull();
+    expect(container.querySelector('select')).toBeNull();
+    // run and unschedule are untouched
+    expect(container.querySelector('button.run')).not.toBeNull();
+    expect(container.querySelectorAll('.auto-sync-scheduled-actions button')).toHaveLength(2);
+  });
+
+  it('keeps a filled quality select filled when the card re-renders', () => {
+    // boulder, sept 30: every card sat on "Loading…". the vanilla hydrate fills
+    // the select in place; react 19 rewrote dangerouslySetInnerHTML on any
+    // re-render with a new {__html} object, putting it back to empty. opening
+    // ⋯ or starting a drag re-renders, and hydrate never runs again.
+    window.playlistQualityProfileSelectHtml = () =>
+      '<select class="qp"><option value="">Loading…</option></select>';
+    window.hydratePlaylistQualityProfileSelects = vi.fn(async () => {});
+    const { container } = renderCard(row());
+    const select = () => container.querySelector('select.qp') as HTMLSelectElement;
+    // what the vanilla hydrate does
+    select().innerHTML = '<option value="1">Default (Default)</option>';
+    fireEvent.click(container.querySelector('.auto-sync-card-more') as HTMLElement);
+    expect(select().options[0].text).toBe('Default (Default)');
+  });
+
   it('leaves the organize toggle from reaching the card click', () => {
     const onCardClick = vi.fn();
     const { container } = renderCard(row(), { onCardClick });
@@ -341,6 +388,17 @@ describe('AutoSyncLane (809-826 / 933-949)', () => {
     const { container: filled } = renderLane({ count: 1 });
     expect(filled.querySelector('.child-card')).not.toBeNull();
     expect(filled.querySelector('.auto-sync-lane-hint')).toBeNull();
+  });
+
+  it('an empty lane carries its hint as a tooltip, since it shows as a chip', () => {
+    // empty intervals render as small "+ 1h" drop chips now, the hint text is
+    // hidden, so hovering the chip has to still say what dropping does
+    const { container: empty } = renderLane();
+    expect(empty.querySelector('.auto-sync-lane')?.getAttribute('title')).toBe(
+      'Drag a playlist here',
+    );
+    const { container: filled } = renderLane({ count: 1 });
+    expect(filled.querySelector('.auto-sync-lane')?.hasAttribute('title')).toBe(false);
   });
 });
 

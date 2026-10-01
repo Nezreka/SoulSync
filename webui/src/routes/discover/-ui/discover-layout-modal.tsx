@@ -15,6 +15,7 @@ import {
 
 const SECTION_LABELS: Record<DiscoverSectionId, string> = {
   'your-mixes-section': 'Your Mixes',
+  'mood-mixes-section': 'Moods',
   'adv-wave': 'Adventurousness Wave',
   'listening-recs-section': 'Listening Recommendations',
   'recommended-artists-section': 'Recommended Artists',

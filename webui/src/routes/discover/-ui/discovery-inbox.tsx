@@ -32,6 +32,19 @@ const KIND_GLYPH: Record<string, string> = {
   artist_news: '📰',
 };
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * a concert's art is its date. there's no cover for a gig, and the pink
+ * ticket emoji said nothing the LIVE label didn't. a calendar tile says when.
+ */
+export function concertTile(date: string | undefined): { month: string; day: string } | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(date ?? '');
+  if (!m) return null;
+  const month = MONTHS[Number(m[2]) - 1];
+  return month ? { month, day: String(Number(m[3])) } : null;
+}
+
 function refreshBadge() {
   window.refreshDiscoverInboxBadge?.();
 }
@@ -165,15 +178,23 @@ function InboxRow({
   const cover = item.image_url && !broken ? browserSafeImageUrl(item.image_url) : '';
   const ticketUrl = item.kind === 'concert' ? item.payload?.url : '';
   const newsUrl = item.kind === 'artist_news' ? item.payload?.url : '';
+  const tile = item.kind === 'concert' ? concertTile(item.item_date) : null;
   return (
     <li className={`discover-inbox-item discover-inbox-item--${item.kind}`}>
-      <span className="discover-inbox-art" aria-hidden="true">
-        {cover ? (
-          <img src={cover} alt="" loading="lazy" onError={() => setBroken(true)} />
-        ) : (
-          (KIND_GLYPH[item.kind] ?? '✨')
-        )}
-      </span>
+      {tile && !cover ? (
+        <span className="discover-inbox-art discover-inbox-date" aria-hidden="true">
+          <span className="discover-inbox-date-month">{tile.month}</span>
+          <span className="discover-inbox-date-day">{tile.day}</span>
+        </span>
+      ) : (
+        <span className="discover-inbox-art" aria-hidden="true">
+          {cover ? (
+            <img src={cover} alt="" loading="lazy" onError={() => setBroken(true)} />
+          ) : (
+            (KIND_GLYPH[item.kind] ?? '✨')
+          )}
+        </span>
+      )}
       <span className="discover-inbox-text">
         <span className="discover-inbox-kind">{inboxKindLabel(item.kind)}</span>
         <span className="discover-inbox-name" title={item.title}>
@@ -212,24 +233,42 @@ function InboxRow({
             Artist
           </a>
         ) : null}
+        {/* one visible action per row; save and dismiss are quiet icons
+            beside it, the way a mail client does triage */}
         {view === 'new' ? (
           <button
             type="button"
-            className="btn btn--sm btn--secondary"
+            className="discover-inbox-icon"
             aria-label={`Save ${item.title}`}
+            title="Save for later"
             onClick={() => onMove(item, 'saved')}
           >
-            Save
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+              <path
+                d="M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1z"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.9"
+                strokeLinejoin="round"
+              />
+            </svg>
           </button>
         ) : null}
         <button
           type="button"
-          className="discover-inbox-dismiss"
+          className="discover-inbox-icon"
           aria-label={view === 'saved' ? `Remove ${item.title}` : `Dismiss ${item.title}`}
           title={view === 'saved' ? 'Remove' : 'Dismiss'}
           onClick={() => onMove(item, 'dismissed')}
         >
-          ✕
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+            <path
+              d="M6 6l12 12M18 6L6 18"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
         </button>
       </span>
     </li>

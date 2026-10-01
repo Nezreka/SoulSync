@@ -71,7 +71,8 @@ export function ExplorerPage() {
   );
   const [wishlistOpen, setWishlistOpen] = useState(false);
 
-  const { zoom, zoomBy, resetZoom, fitToView } = useExplorerZoom(viewportRef, treeRef);
+  const { zoom, zoomBy, resetZoom, fitToView, wheelZoomLocked, toggleWheelZoomLock } =
+    useExplorerZoom(viewportRef, treeRef);
   useExplorerPan(viewportRef);
   const { geometry, scheduleRedraw } = useExplorerConnections(treeRef, zoom, !!meta);
 
@@ -253,7 +254,13 @@ export function ExplorerPage() {
       ) : null}
 
       <div className="explorer-viewport" id="explorer-viewport" ref={viewportRef}>
-        <ExplorerZoomControls onZoom={zoomBy} onFitToView={fitToView} onResetZoom={resetZoom} />
+        <ExplorerZoomControls
+          onZoom={zoomBy}
+          onFitToView={fitToView}
+          onResetZoom={resetZoom}
+          wheelZoomLocked={wheelZoomLocked}
+          onToggleWheelZoomLock={toggleWheelZoomLock}
+        />
         <ExplorerTree
           meta={meta}
           artists={artists}

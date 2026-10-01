@@ -68,6 +68,9 @@ const KNOWN_IDS = new Set<string>([
  * component SOURCE and cannot tell a prop from an attribute.
  */
 const NEW_IDS = [
+  // the moods shelf (sept 29): real mood mixes where a fake pill bar used to be
+  'mood-mixes-section',
+  'mood-mixes-grid',
   // the discovery inbox (best-in-class phase 6): a section the vanilla never had
   'discover-inbox',
   'discover-inbox-title',
@@ -83,8 +86,6 @@ const NEW_IDS = [
   'discover-zone-library',
   'discover-zone-new-missing',
   'discover-zone-tools',
-  // the play-now bridge (aug 25): library radio's discover card
-  'library-radio-section',
   // recommended stations row (aug 25)
   'recommended-stations-section',
   // M05: the dial is a native range input now, and aria-labelledby /

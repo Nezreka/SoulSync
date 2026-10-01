@@ -10,12 +10,13 @@ import {
   discogFooter,
   discogItemStatus,
   loadDiscographyForModal,
+  releasesFromPageDiscography,
   streamDiscographyDownload,
 } from './-artist-detail.discography-modal';
 
 /**
- * The Download Discography layer: metadata-id resolution, gap-fill merge
- * (#1067), the #877 filter gate, Deluxe-first payload ordering, and the #830
+ * The Download Discography layer: the page's releases (gap cards included,
+ * #1067), the #877 filter gate, Deluxe-first payload ordering, and the #830
  * honest per-album status.
  */
 
@@ -24,81 +25,84 @@ afterEach(() => {
   localStorage.removeItem('discog_gapfill');
 });
 
+describe('releasesFromPageDiscography', () => {
+  it('flattens the page buckets in order, tagging each with its section', () => {
+    const releases = releasesFromPageDiscography({
+      albums: [{ id: 'a', title: 'Meteora', image_url: null }],
+      eps: [{ id: 'e', name: 'Collision Course', track_count: 6 }],
+      singles: [{ id: 's', title: 'Two Faced' }],
+    });
+    expect(releases.map((r) => [r.id, r._type, r.name])).toEqual([
+      ['a', 'album', 'Meteora'],
+      ['e', 'ep', 'Collision Course'],
+      ['s', 'single', 'Two Faced'],
+    ]);
+    expect(releases[0].image_url).toBeUndefined();
+    expect(releases[1].total_tracks).toBe(6);
+  });
+});
+
 describe('loadDiscographyForModal', () => {
-  it('resolves the metadata id first and fetches through it', async () => {
+  const stubEnhanced = (artist: object | null) => {
     const calls: string[] = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
         const url = String(input);
         calls.push(url);
-        if (url.includes('/enhanced')) {
-          return new Response(
-            JSON.stringify({ success: true, artist: { spotify_artist_id: 'sp1' } }),
-          );
-        }
         return new Response(
-          JSON.stringify({
-            albums: [{ id: 'a1', name: 'SAW' }],
-            eps: [{ id: 'e1', name: 'On' }],
-            singles: [],
-            source: 'spotify',
-          }),
+          JSON.stringify(artist ? { success: true, artist } : { success: false }),
         );
       }),
     );
-    const data = await loadDiscographyForModal(42, 'Aphex Twin');
-    expect(calls[0]).toBe('/api/library/artist/42/enhanced');
-    expect(calls[1]).toBe('/api/artist/sp1/discography?artist_name=Aphex%20Twin');
-    expect(data?.artist).toEqual({ id: 'sp1', name: 'Aphex Twin', source: 'spotify' });
-    expect(data?.releases.map((r) => r._type)).toEqual(['album', 'ep']);
+    return calls;
+  };
+
+  it('lists exactly what the page shows, and never refetches the discography', async () => {
+    // discord, SeadogsBooty: the page showed deezer's 2 EPs, the modal refetched
+    // with no source and pulled musicbrainz's Underground EPs on top
+    const calls = stubEnhanced({ spotify_artist_id: 'sp1' });
+    const data = await loadDiscographyForModal(42, 'Linkin Park', {
+      source: 'deezer',
+      albums: [{ id: 'a1', name: 'Meteora', track_count: 13, release_date: '2003-03-25' }],
+      eps: [
+        { id: 'e1', title: 'A Thousand Suns: Puerta De Alcalá', track_count: 6 },
+        { id: 'e2', title: 'Collision Course', track_count: 6 },
+      ],
+      singles: [],
+    });
+    expect(calls).toEqual(['/api/library/artist/42/enhanced']);
+    expect(data?.artist).toEqual({ id: 'sp1', name: 'Linkin Park', source: 'deezer' });
+    expect(data?.releases.map((r) => [r._type, r.name, r.total_tracks])).toEqual([
+      ['album', 'Meteora', 13],
+      ['ep', 'A Thousand Suns: Puerta De Alcalá', 6],
+      ['ep', 'Collision Course', 6],
+    ]);
   });
 
-  it('merges gap-fill releases when enabled, deduped against the base list', async () => {
-    localStorage.setItem('discog_gapfill', '1');
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
-        const url = String(input);
-        if (url.includes('/enhanced')) return new Response(JSON.stringify({ success: false }));
-        if (url.includes('gap-fill')) {
-          return new Response(
-            JSON.stringify({
-              success: true,
-              gaps: {
-                albums: [
-                  // Duplicate of the base release — must be dropped.
-                  { id: 'g0', title: 'SAW', release_date: '1992-11-09', gap_source: 'deezer' },
-                  { id: 'g1', title: 'Druqks', release_date: '2001-10-22', gap_source: 'deezer' },
-                ],
-              },
-            }),
-          );
-        }
-        return new Response(
-          JSON.stringify({
-            albums: [{ id: 'a1', name: 'SAW', release_date: '1992-11-09' }],
-            eps: [],
-            singles: [],
-            source: 'spotify',
-          }),
-        );
-      }),
-    );
-    const data = await loadDiscographyForModal(42, 'Aphex Twin');
-    expect(data?.releases.map((r) => r.name)).toEqual(['SAW', 'Druqks']);
-    expect(data?.releases[1]._gap_source).toBe('deezer');
+  it('keeps gap cards the page merged in, with their own source (#1067)', async () => {
+    stubEnhanced(null);
+    const data = await loadDiscographyForModal(42, 'Aphex Twin', {
+      source: 'spotify',
+      albums: [
+        { id: 'a1', name: 'SAW' },
+        { id: 'g1', title: 'Druqks', _gap_source: 'deezer', _gap_track_count: 30 },
+      ],
+    });
+    expect(data?.artist.id).toBe(42);
+    expect(data?.releases[1]).toMatchObject({
+      name: 'Druqks',
+      total_tracks: 30,
+      _gap_source: 'deezer',
+      _type: 'album',
+    });
+    expect(data?.releases[0]._gap_source).toBeUndefined();
   });
 
-  it('an empty discography resolves to null', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        async (_input: RequestInfo | URL, _init?: RequestInit) =>
-          new Response(JSON.stringify({ albums: [], eps: [], singles: [] })),
-      ),
-    );
-    expect(await loadDiscographyForModal(42, 'X')).toBeNull();
+  it('an empty page discography resolves to null without fetching', async () => {
+    const calls = stubEnhanced(null);
+    expect(await loadDiscographyForModal(42, 'X', { albums: [], eps: [], singles: [] })).toBeNull();
+    expect(calls).toEqual([]);
   });
 });
 
@@ -162,6 +166,21 @@ describe('the download payload', () => {
     expect(payload.albums[0].source).toBe('spotify');
     expect(payload.albums[2].source).toBe('deezer');
     expect(payload.source).toBe('spotify');
+  });
+
+  it('sends the section each release was shown in, so the server files it there', () => {
+    const payload = buildDiscographyPayload(
+      [
+        { id: 'fs', name: 'Flow State Sampler', tracks: 3, gapSource: null, albumType: 'album' },
+        { id: 'tb', name: 'Tranquility Base', tracks: 9, gapSource: null, albumType: 'ep' },
+        { id: 'old', name: 'No Section', tracks: 1, gapSource: null },
+      ],
+      { id: 'ab', name: 'Above & Beyond', source: 'deezer' },
+    );
+    const byId = Object.fromEntries(payload.albums.map((a) => [a.id, a]));
+    expect(byId.fs.album_type).toBe('album');
+    expect(byId.tb.album_type).toBe('ep');
+    expect('album_type' in byId.old).toBe(false);
   });
 });
 

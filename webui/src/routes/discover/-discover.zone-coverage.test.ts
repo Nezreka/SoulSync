@@ -38,9 +38,9 @@ describe('layout default zones cover every section exactly once', () => {
 
   it('assigns every section to exactly one zone, no extras', () => {
     const ids = layoutIds();
-    expect(ids).toHaveLength(19);
+    expect(ids).toHaveLength(20);
     const zones = Object.values(DEFAULT_SECTION_ZONE);
-    expect(zones).toHaveLength(19);
+    expect(zones).toHaveLength(20);
     // pin-ok: verifying that the set of layout ids matches the keys of DEFAULT_SECTION_ZONE
     expect(new Set(ids)).toEqual(new Set(Object.keys(DEFAULT_SECTION_ZONE)));
     for (const zone of DISCOVER_ZONES) {
@@ -53,7 +53,7 @@ describe('layout default zones cover every section exactly once', () => {
       },
       { 'for-you': 0, 'new-missing': 0, library: 0, tools: 0 },
     );
-    expect(perZone).toEqual({ 'for-you': 5, 'new-missing': 6, library: 3, tools: 5 });
+    expect(perZone).toEqual({ 'for-you': 6, 'new-missing': 6, library: 3, tools: 5 });
   });
 });
 
@@ -74,8 +74,10 @@ describe('the page renders all four zones from the profile layout', () => {
     expect(PAGE).toContain('<StationsRow');
   });
 
-  it('offers the Layout customizer from the pill rail', () => {
-    expect(PAGE).toContain('⚙️');
+  it('offers the Layout customizer from the section nav', () => {
+    expect(PAGE).toContain(
+      '<DiscoverNav items={navItems} onOpenLayout={() => setLayoutOpen(true)} />',
+    );
     expect(PAGE).toContain('DiscoverLayoutModal');
     expect(PAGE).toContain('setLayoutOpen(true)');
   });

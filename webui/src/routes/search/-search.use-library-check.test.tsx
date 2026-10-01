@@ -1,13 +1,18 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { server } from '@/test/msw';
 
 import type { SearchAlbum, SearchTrack } from './-search.types';
 
 import { albumIdentity, trackIdentity } from './-search.helpers';
-import { ownershipFromResponse, useLibraryCheck } from './-search.use-library-check';
+import {
+  DOWNLOADS_FINISHED_EVENT,
+  ownershipFromResponse,
+  RECHECK_AFTER_MS,
+  useLibraryCheck,
+} from './-search.use-library-check';
 import { EMPTY_OWNERSHIP } from './-ui/search-results';
 
 const album = (over: Partial<SearchAlbum> = {}): SearchAlbum => ({
@@ -194,5 +199,65 @@ describe('useLibraryCheck', () => {
     rerender({ albums: [album()] });
     await new Promise((r) => setTimeout(r, 20));
     expect(asks).toBe(1);
+  });
+
+  it('re-asks when a download finishes, and once more after the import has had time (#1386)', async () => {
+    // search, download the album, close the modal: the results are the same
+    // rows, so nothing re-asked and the badge only came with a browser refresh
+    let owned = false;
+    let asks = 0;
+    server.use(
+      http.post('/api/enhanced-search/library-check', () => {
+        asks += 1;
+        return HttpResponse.json({ albums: [owned] });
+      }),
+    );
+    const rows = [album()];
+    const { result } = renderHook(() => useLibraryCheck(rows, []));
+    await waitFor(() => expect(asks).toBe(1));
+    expect(result.current.ownedAlbums.size).toBe(0);
+
+    const timeouts = vi.spyOn(globalThis, 'setTimeout');
+    owned = true;
+    act(() => {
+      window.dispatchEvent(new CustomEvent(DOWNLOADS_FINISHED_EVENT));
+    });
+    await waitFor(() => expect(result.current.ownedAlbums.has(albumIdentity(rows[0]))).toBe(true));
+    expect(asks).toBe(2);
+
+    const later = timeouts.mock.calls.find(([, ms]) => ms === RECHECK_AFTER_MS);
+    timeouts.mockRestore();
+    expect(later).toBeDefined();
+    act(() => (later![0] as () => void)());
+    await waitFor(() => expect(asks).toBe(3));
+  });
+
+  it('re-asks when the tab comes back into view, not when it hides', async () => {
+    let asks = 0;
+    server.use(
+      http.post('/api/enhanced-search/library-check', () => {
+        asks += 1;
+        return HttpResponse.json({ albums: [false] });
+      }),
+    );
+    const rows = [album()];
+    renderHook(() => useLibraryCheck(rows, []));
+    await waitFor(() => expect(asks).toBe(1));
+    const state = vi.spyOn(document, 'visibilityState', 'get');
+    try {
+      state.mockReturnValue('hidden');
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(asks).toBe(1);
+      state.mockReturnValue('visible');
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await waitFor(() => expect(asks).toBe(2));
+    } finally {
+      state.mockRestore();
+    }
   });
 });

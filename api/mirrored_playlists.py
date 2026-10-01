@@ -349,6 +349,32 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
         return jsonify({"error": str(e)}), 500
 
 
+def _resolve_spotify_public_alias(database, playlist_ref, profile_id):
+    """Find a link-pasted Spotify mirror by raw Spotify ID.
+
+    The ``spotify_public`` source (SoulSync's link-paste path) stores
+    ``source_playlist_id`` as the md5 of the canonical playlist URL, not the
+    raw Spotify ID — so a ``source=spotify`` resolve with the raw ID misses
+    it. Both public fetch paths (full public API and embed scraper) hash the
+    same canonical URL, so recomputing it here matches either one.
+    Returns the playlist row or None. Never raises.
+    """
+    import hashlib
+    import re
+    from core.playlists.sources.base import SOURCE_SPOTIFY_PUBLIC
+    try:
+        ref = str(playlist_ref or '').strip()
+        # Spotify IDs are 22-char base62; anything else isn't worth a lookup.
+        if not re.fullmatch(r'[A-Za-z0-9]{22}', ref):
+            return None
+        canonical = f'https://open.spotify.com/playlist/{ref}'
+        url_hash = hashlib.md5(canonical.encode()).hexdigest()[:12]
+        return database.get_mirrored_playlist_by_source(
+            SOURCE_SPOTIFY_PUBLIC, url_hash, profile_id)
+    except Exception:
+        return None
+
+
 @bp.route('/api/mirrored-playlists/resolve', methods=['GET'])
 def resolve_mirrored_playlist_endpoint():
     """Resolve mirrored playlist by numeric id or upstream source id (e.g. Spotify playlist id)."""
@@ -365,6 +391,14 @@ def resolve_mirrored_playlist_endpoint():
             profile_id=profile_id,
             default_source=source,
         )
+        if not playlist and source == 'spotify':
+            # Cross-source alias: playlists saved via SoulSync's link-paste
+            # use the no-auth "spotify_public" source, which keys on the md5
+            # of the canonical playlist URL instead of the raw Spotify ID.
+            # The Companion extension checks with the raw ID, so translate it
+            # here — otherwise link-pasted playlists look unsaved to it.
+            playlist = _resolve_spotify_public_alias(
+                database, playlist_ref, profile_id)
         if not playlist:
             return jsonify({"found": False, "playlist": None})
         # Belt and braces: the resolver is owner-scoped, but this endpoint is the
@@ -450,7 +484,8 @@ class _PlaylistPipelineDepsProxy:
         )
 
 
-def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False, profile_id=1):
+def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False, profile_id=1,
+                                           refresh_only=False):
     # The caller is a bare thread, so neither Flask's `g` nor the request-scoped
     # profile survives. Without this the whole pipeline — sync, organize batch,
     # failed-track Wishlist writes — silently ran as admin (profile 1) for every
@@ -472,6 +507,7 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False, pro
                 'playlist_id': str(playlist_id),
                 'all': False,
                 'skip_wishlist': bool(skip_wishlist),
+                'refresh_only': bool(refresh_only),
                 'profile_id': int(profile_id),
                 '_automation_id': _playlist_pipeline_state_key(playlist_id, profile_id),
             },
@@ -488,7 +524,7 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False, pro
                 profile_id=profile_id,
                 status='finished',
                 progress=100,
-                phase='Pipeline complete',
+                phase='Refreshed from source' if refresh_only else 'Pipeline complete',
                 result=result,
             )
         elif status == 'skipped':
@@ -546,15 +582,18 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
             return jsonify({"error": "A playlist pipeline is already running"}), 409
 
         data = request.get_json(silent=True) or {}
+        # refresh from source (#1413): pull + discover the new tracks only
+        refresh_only = bool(data.get('refresh_only', False))
         state = _replace_playlist_pipeline_state(playlist_id, {
             'run_id': _playlist_pipeline_state_key(playlist_id, profile_id),
             'playlist_id': int(playlist_id),
             'playlist_name': playlist.get('name') or '',
             'status': 'running',
             'progress': 0,
-            'phase': 'Starting pipeline...',
+            'phase': 'Refreshing from source...' if refresh_only else 'Starting pipeline...',
             'log': [{
-                'message': f"Starting pipeline for {playlist.get('name') or playlist_id}",
+                'message': (f"Refreshing {playlist.get('name') or playlist_id} from source" if refresh_only
+                            else f"Starting pipeline for {playlist.get('name') or playlist_id}"),
                 'type': 'info',
                 'timestamp': time.time(),
             }],
@@ -566,7 +605,7 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
 
         threading.Thread(
             target=_run_mirrored_playlist_pipeline_for_ui,
-            args=(playlist_id, bool(data.get('skip_wishlist', False)), int(profile_id)),
+            args=(playlist_id, bool(data.get('skip_wishlist', False)), int(profile_id), refresh_only),
             daemon=True,
             name=f"playlist-pipeline-{playlist_id}",
         ).start()

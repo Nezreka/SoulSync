@@ -187,11 +187,11 @@ function SyncHistoryRow({
         <button
           type="button"
           className="sync-history-resync-btn"
-          title="Re-sync this playlist"
+          title="Push the same tracks as this sync to your media server again"
           disabled={Boolean(resync)}
           onClick={() => onResync(entry.id)}
         >
-          {resync ? 'Syncing…' : 'Re-sync'}
+          {resync ? 'Pushing…' : 'Push again'}
         </button>
       </div>
 

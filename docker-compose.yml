@@ -71,6 +71,15 @@ services:
       # Keep this OUT of your music library: a book is a folder of chapter files,
       # and a music scanner will happily index it as an album of 300 tracks.
       # - ./audiobooks:/app/audiobooks
+      # ─── Sample Studio folders (OUTPUT) — optional: uncomment + set your path ───
+      # Saved Sample Studio chops are rendered here, organized as Artist/Track
+      # folders by the sample path template. UNCOMMENT the line below, point the
+      # host side (left of the colon) at your samples folder, then set
+      # Settings → Library → Folders → Sample Studio Folders to /app/samples.
+      # Keep this OUT of your music library: a music scanner will happily index
+      # your chops as albums. Add more folders in-app for per-project
+      # destinations — the first folder in the list is the default.
+      # - ./samples:/app/samples
 
       - ./Staging:/app/Staging
       - ./MusicVideos:/app/MusicVideos

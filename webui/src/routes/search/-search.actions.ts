@@ -12,6 +12,8 @@
 
 import type { SearchAlbum, SearchTrack } from './-search.types';
 
+import { lockSectionType } from '../artist-detail/-artist-detail.open-release';
+
 /** Album detail as /api/spotify/album/<id> returns it. */
 export interface AlbumDetail {
   id?: string;
@@ -56,7 +58,7 @@ export function albumDetailParams(album: SearchAlbum, activeSource: string): URL
 
 /** The album object the modal renders and the wishlist stores. */
 export function buildAlbumObject(detail: AlbumDetail, album: SearchAlbum): Record<string, unknown> {
-  return {
+  const built = {
     name: detail.name,
     id: detail.id,
     album_type: detail.album_type || 'album',
@@ -65,6 +67,11 @@ export function buildAlbumObject(detail: AlbumDetail, album: SearchAlbum): Recor
     total_tracks: detail.total_tracks,
     artists: detail.artists || [{ name: album.artist }],
   };
+  // the release files under what search showed it as (the Albums row, or the
+  // Singles / EPs shelf), locked, not a track-count guess downstream: Deezer's
+  // three-track album Flow State Sampler sat in the Albums row and filed as a
+  // Single. no type on the result, nothing to lock
+  return album.album_type ? lockSectionType(built, album) : built;
 }
 
 /**
@@ -188,7 +195,7 @@ export function unsupportedStreamFormat(result: StreamResult): string | null {
 /** Open an album's download modal. */
 export async function openSearchAlbum(album: SearchAlbum, activeSource: string): Promise<void> {
   // Checked BEFORE the fetch, so a re-click still works when the source is down.
-  if (window.reopenActiveDownloadModal?.(albumVirtualId(album))) return;
+  if (window.reopenActiveDownloadModal?.(albumVirtualId(album), { runningOnly: true })) return;
 
   window.showLoadingOverlay?.('Loading album...');
   try {
@@ -245,7 +252,7 @@ export async function openSearchAlbum(album: SearchAlbum, activeSource: string):
 /** Open a single track's download modal. */
 export async function openSearchTrack(track: SearchTrack): Promise<void> {
   const virtualId = trackVirtualId(track);
-  if (window.reopenActiveDownloadModal?.(virtualId)) return;
+  if (window.reopenActiveDownloadModal?.(virtualId, { runningOnly: true })) return;
 
   window.showLoadingOverlay?.('Loading track...');
   try {

@@ -126,6 +126,31 @@ GROUPS: list[dict] = [
         "name": "single track group",
         "tracks": [{"id": "only", "file_path": "/m/a/x.mp3", "bitrate": 128, "duration": 100, "track_number": 1}],
     },
+    {
+        "name": "the copy in a playlist beats a better quality copy (jadux)",
+        "tracks": [
+            {"id": "flac", "file_path": "/m/a/x.flac", "bitrate": 1000, "duration": 200, "track_number": 1},
+            {"id": "mp3", "file_path": "/m/a/y.mp3", "bitrate": 128, "duration": 200, "track_number": 1,
+             "playlists": ["Road Trip"]},
+        ],
+    },
+    {
+        "name": "an empty playlists list is not in a playlist",
+        "tracks": [
+            {"id": "mp3", "file_path": "/m/a/y.mp3", "bitrate": 320, "duration": 200, "track_number": 1,
+             "playlists": []},
+            {"id": "flac", "file_path": "/m/a/x.flac", "bitrate": 0, "duration": 200, "track_number": 1},
+        ],
+    },
+    {
+        "name": "both in playlists, quality decides",
+        "tracks": [
+            {"id": "mp3", "file_path": "/m/a/y.mp3", "bitrate": 320, "duration": 200, "track_number": 1,
+             "playlists": ["Gym"]},
+            {"id": "flac", "file_path": "/m/a/x.flac", "bitrate": 0, "duration": 200, "track_number": 1,
+             "playlists": ["Road Trip", "Chill"]},
+        ],
+    },
 ]
 
 # Extension ranking probed on its own, including the shapes that make the JS

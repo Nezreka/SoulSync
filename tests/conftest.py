@@ -55,6 +55,17 @@ if not _os.environ.get('SOULSYNC_IMAGE_CACHE_DIR'):
     _os.environ['SOULSYNC_IMAGE_CACHE_DIR'] = _TEST_IMAGE_CACHE_DIR
     _atexit.register(lambda: _shutil.rmtree(_TEST_IMAGE_CACHE_DIR, ignore_errors=True))
 
+# the audiobook db had the same gap: its own path (AUDIOBOOK_DATABASE_PATH,
+# default database/audiobooks.db) was never redirected, so any test importing
+# web_server started the audiobook download monitor against the real file
+# (seen Oct 1 2026 as "Audiobook download tick failed: disk I/O error", the
+# WSL lock being the only thing in the way). outside the READY block for the
+# same reason as the image cache.
+if not _os.environ.get('AUDIOBOOK_DATABASE_PATH'):
+    _TEST_AUDIOBOOK_DIR = _tempfile.mkdtemp(prefix='soulsync-test-audiobooks-')
+    _os.environ['AUDIOBOOK_DATABASE_PATH'] = _os.path.join(_TEST_AUDIOBOOK_DIR, 'test_audiobooks.db')
+    _atexit.register(lambda: _shutil.rmtree(_TEST_AUDIOBOOK_DIR, ignore_errors=True))
+
 import copy
 import os as _os
 import pytest

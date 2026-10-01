@@ -264,6 +264,12 @@ def _split_acoustid_credit(credit: str) -> List[str]:
         return [credit] if credit else []
 
 
+def _server_playlist_membership():
+    """{track_id: [playlist titles]} on the active media server (cached)."""
+    from core.library import playlist_membership
+    return playlist_membership.server_playlist_membership()
+
+
 def _resolve_file_path(file_path, transfer_folder, download_folder=None,
                        config_manager=None, plex_client=None):
     """Resolve a stored DB path to an actual file on disk.
@@ -1016,6 +1022,7 @@ class RepairWorker:
             update_progress=lambda scanned, total: self._update_progress(
                 scanned, total, report=_report_progress),
             report_progress=_report_progress,
+            playlist_membership=_server_playlist_membership,
         )
 
         start_time = time.time()
@@ -3709,6 +3716,14 @@ class RepairWorker:
             # MP3 even when the FLAC's bitrate is missing in the DB), then
             # bitrate, duration, and track number as tie-breakers.
             from core.library.duplicate_keep import pick_duplicate_to_keep
+            # playlists change between the scan and the fix, ask again (cached,
+            # so a bulk keep best over hundreds of findings reads the server
+            # once). an empty answer keeps the scan's tags rather than
+            # treating every copy as playlist free
+            membership = _server_playlist_membership()
+            if membership:
+                from core.library.playlist_membership import tag_tracks
+                tag_tracks(tracks, membership)
             best = pick_duplicate_to_keep(tracks)
             best_id = best.get('track_id') or best.get('id')
 

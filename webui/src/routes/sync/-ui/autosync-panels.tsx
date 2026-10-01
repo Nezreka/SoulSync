@@ -53,15 +53,18 @@ export function AutoSyncMonitorCard({
         </div>
         {latest ? <small>{latest}</small> : null}
       </div>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDetails(Number(playlist.id));
-        }}
-      >
-        Details
-      </button>
+      {/* a personalized row has no mirrored playlist to open */}
+      {playlist._personalized ? null : (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDetails(Number(playlist.id));
+          }}
+        >
+          Details
+        </button>
+      )}
     </article>
   );
 }
@@ -76,7 +79,8 @@ export function AutoSyncMonitorPanel({
 }) {
   const { visible, title, detail } = autoSyncMonitorSummary(playlists);
   return (
-    <section className="auto-sync-monitor">
+    // idle collapses to one line so the board below gets the room (#1401)
+    <section className={`auto-sync-monitor${visible.length ? '' : ' auto-sync-monitor--idle'}`}>
       <div className="auto-sync-monitor-head">
         <div>
           <span className="auto-sync-monitor-kicker">Live pipeline monitor</span>

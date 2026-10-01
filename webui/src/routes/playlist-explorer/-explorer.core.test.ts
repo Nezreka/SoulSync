@@ -27,6 +27,7 @@ import {
   explorerSourceLabel,
   explorerSvgSize,
   explorerWheelStep,
+  explorerWheelZooms,
   groupPlaylistsBySource,
   groupSelectionByArtist,
   isRealAlbumId,
@@ -404,7 +405,24 @@ describe('zoom', () => {
   it('inverts the wheel so scrolling up zooms in', () => {
     expect(explorerWheelStep(120)).toBe(-0.08);
     expect(explorerWheelStep(-120)).toBe(0.08);
-    expect(explorerWheelStep(0)).toBe(0.08);
+    expect(explorerWheelStep(0)).toBe(0);
+  });
+
+  it('scales tiny trackpad deltas instead of taking a full notch each (#1409)', () => {
+    // a trackpad swipe fires lots of 2-4px events, a full 0.08 each ran
+    // straight to max zoom
+    expect(explorerWheelStep(4)).toBeCloseTo(-0.008);
+    expect(explorerWheelStep(-2)).toBeCloseTo(0.004);
+    // line mode (firefox mouse wheel) still reads as a full notch
+    expect(explorerWheelStep(3, 1)).toBe(-0.08);
+  });
+
+  it('only zooms on ctrl/cmd or pinch unless the wheel is locked to zoom (#1409)', () => {
+    const plain = { ctrlKey: false, metaKey: false };
+    expect(explorerWheelZooms(plain, false)).toBe(false);
+    expect(explorerWheelZooms({ ctrlKey: true, metaKey: false }, false)).toBe(true);
+    expect(explorerWheelZooms({ ctrlKey: false, metaKey: true }, false)).toBe(true);
+    expect(explorerWheelZooms(plain, true)).toBe(true);
   });
 
   it('fits to the smaller axis, never past 1.5, never below 0.2', () => {

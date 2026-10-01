@@ -82,13 +82,15 @@ def test_track_number_is_final_tiebreak():
 # --- shape / edge cases -------------------------------------------------------
 
 
-def test_sort_key_tuple_order_is_format_first():
+def test_sort_key_tuple_order_is_playlist_then_format():
     key = duplicate_keep_sort_key(_t("/x/a.flac", bitrate=100, duration=5, track_number=3))
-    assert key == (10, 100, 5, 3)
+    assert key == (0, 10, 100, 5, 3)
+    in_playlist = dict(_t("/x/a.mp3"), playlists=["Road Trip"])
+    assert duplicate_keep_sort_key(in_playlist) == (1, 5, 0, 0, 0)
 
 
 def test_missing_numeric_fields_default_to_zero():
-    assert duplicate_keep_sort_key(_t("/x/a.mp3")) == (5, 0, 0, 0)
+    assert duplicate_keep_sort_key(_t("/x/a.mp3")) == (0, 5, 0, 0, 0)
 
 
 def test_empty_group_returns_none():

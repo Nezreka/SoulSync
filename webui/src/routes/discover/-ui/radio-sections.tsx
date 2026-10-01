@@ -227,6 +227,10 @@ export function ListenBrainzSection({
 }: ListenBrainzSectionProps) {
   const liveTabs = LB_TABS.filter((tab) => hasData[tab.id]);
   const anyData = liveTabs.length > 0;
+  // the server only names a user when an account is linked. without that
+  // the connect card is right; with it, "connect listenbrainz" was telling a
+  // connected user to connect, and refresh did nothing for an unlinked one.
+  const connected = Boolean(username);
 
   return (
     <DiscoverSection
@@ -236,16 +240,18 @@ export function ListenBrainzSection({
       count={1}
       loaded={loaded}
       actions={
-        <button
-          type="button"
-          className="action-button primary"
-          id="listenbrainz-refresh-btn"
-          title="Refresh playlists from ListenBrainz"
-          onClick={onRefresh}
-        >
-          <span className="button-icon">🔄</span>
-          <span className="button-text">Refresh</span>
-        </button>
+        !connected && !anyData && !error ? undefined : (
+          <button
+            type="button"
+            className="action-button primary"
+            id="listenbrainz-refresh-btn"
+            title="Refresh playlists from ListenBrainz"
+            onClick={onRefresh}
+          >
+            <span className="button-icon">🔄</span>
+            <span className="button-text">Refresh</span>
+          </button>
+        )
       }
     >
       <div className="listenbrainz-tabs" id="listenbrainz-tabs">
@@ -257,6 +263,13 @@ export function ListenBrainzSection({
         ) : error ? (
           <div className="discover-empty">
             <p>{LB_LOAD_FAILED}</p>
+          </div>
+        ) : !anyData && connected ? (
+          <div className="discover-empty">
+            <p>
+              No ListenBrainz playlists yet. They show up here once ListenBrainz has made some for{' '}
+              {username}.
+            </p>
           </div>
         ) : !anyData ? (
           /*
