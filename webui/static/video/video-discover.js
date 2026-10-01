@@ -129,6 +129,22 @@
         { title: 'Hindi Cinema', q: 'kind=movie&sort=popularity.desc&lang=hi' },
     ];
 
+    // One-line descriptions under each group heading (music Discover
+    // language: a strong title, one quiet line, then the rows).
+    // IIFE scope: renderShelves() reads this when stamping group headers.
+    var GROUP_SUBS = {
+        foryou: 'Picked for your shelves',
+        topten: "What everyone's watching right now",
+        'new': 'Fresh releases and recent standouts',
+        collection: 'Complete the sets you started',
+        taste: 'Based on what you already own',
+        popular: 'Trending across the catalog',
+        mood: 'Find the right vibe for tonight',
+        studios: 'From the studios you follow',
+        genre: 'Every genre, one rail at a time',
+        different: 'Go off the beaten path',
+    };
+
     // The page is organised into a FIXED, authored sequence of groups (each with a header).
     // Static rails are placed into their group here; the async personalized rows fill their
     // group's body when they arrive — so the on-screen order is stable no matter which fetch
@@ -239,31 +255,73 @@
 
     // The Undo bar. A toast can't carry a button and this needs one: hiding a
     // title is a taste decision, and "not tonight" must be reversible.
-    var _undoTimer = null;
+    var _undoPrev = null;   // _undoPrev: expire() of the live Undo bar
     function showUndoBar(title, onUndo) {
+        // A second hide inside the first Undo window used to orphan the
+        // earlier tiles: the old bar was removed without expire() ever
+        // running, so its cards stayed hidden-but-present for the session.
+        // Expire the previous undo first — its cards are dropped for real —
+        // then the new bar takes over.
+        if (_undoPrev) { var prev = _undoPrev; _undoPrev = null; try { prev(); } catch (e) {} }
         var ex = document.getElementById('vdsc-undo'); if (ex) ex.remove();
-        clearTimeout(_undoTimer);
         var bar = document.createElement('div');
         bar.id = 'vdsc-undo';
         bar.className = 'vdsc-undo';
         bar.setAttribute('role', 'status');
         bar.innerHTML = '<span class="vdsc-undo-txt">Hidden ' + esc(title || 'that title') + '</span>' +
-            '<button class="vdsc-undo-btn" type="button">Undo</button>';
+            '<button class="vdsc-undo-btn" type="button">Undo</button>' +
+            '<button class="vdsc-undo-x" type="button" aria-label="Dismiss">✕</button>';
         document.body.appendChild(bar);
-        var done = function () { clearTimeout(_undoTimer); if (bar.parentNode) bar.remove(); };
+        var settled = false;        // this bar's fate is decided — late events are no-ops
+        var undoing = false;        // an Undo request is in flight
+        var pendingExpire = false;  // expire() arrived mid-undo; honoured when the undo lands
+        var timer = null;           // this bar's own 9s clock (never the shared one)
+        var done = function () { if (timer) { clearTimeout(timer); timer = null; } if (bar.parentNode) bar.remove(); };
+        var expire = function () {   // keep the server state, drop the bar
+            if (settled) return;
+            // An Undo is in flight: dropping the cards now would strand them
+            // if the server restores the title a moment later. Wait for it.
+            if (undoing) { pendingExpire = true; return; }
+            settled = true;
+            if (_undoPrev === expire) _undoPrev = null;
+            done(); onUndo.expire();
+        };
         bar.querySelector('.vdsc-undo-btn').addEventListener('click', function () {
             var button = this;
             if (button.disabled) return;
-            clearTimeout(_undoTimer);
+            if (timer) { clearTimeout(timer); timer = null; }
             button.disabled = true; button.textContent = 'Restoring…';
+            undoing = true;
             Promise.resolve(onUndo()).then(function (saved) {
-                if (saved) { done(); return; }
+                undoing = false;
+                // Note: expire() defers while undoing, so settled is always
+                // false here — the only question is whether an expire was
+                // deferred mid-flight (pendingExpire).
+                if (saved) {
+                    // Server restored the title; undo() already put the cards
+                    // back. A deferred expire must NOT drop them now.
+                    settled = true; pendingExpire = false;
+                    if (_undoPrev === expire) _undoPrev = null;
+                    done();
+                    return;
+                }
+                if (pendingExpire) {
+                    // The bar was superseded (or dismissed) mid-flight and the
+                    // Undo failed: honour the deferred expire — the hide
+                    // stands, so the cards are dropped for real.
+                    pendingExpire = false; expire();
+                    return;
+                }
                 button.disabled = false; button.textContent = 'Retry Undo';
                 // Keep failed Undo available instead of expiring its recovery path.
                 button.focus();
             });
         });
-        _undoTimer = setTimeout(function () { done(); onUndo.expire(); }, 9000);
+        // A failed undo used to leave a permanent "Retry Undo" bar with no
+        // way off screen — the ✕ expires it like the timer would.
+        bar.querySelector('.vdsc-undo-x').addEventListener('click', expire);
+        timer = setTimeout(expire, 9000);
+        _undoPrev = expire;
         return done;
     }
 
@@ -434,7 +492,9 @@
             '<div class="vdsc-hero-body" data-vdsc-hero-body></div>' +
             '<div class="vdsc-dots">' + items.map(function (it, i) {
                 return '<button class="vdsc-dot' + (i === 0 ? ' vdsc-dot--on' : '') + '" type="button" data-vdsc-go="' + i + '" aria-label="Slide ' + (i + 1) + '"></button>';
-            }).join('') + '</div>';
+            }).join('') + '</div>' +
+            '<button class="vdsc-hero-nav vdsc-hero-nav--prev" type="button" data-vdsc-prev aria-label="Previous title">‹</button>' +
+            '<button class="vdsc-hero-nav vdsc-hero-nav--next" type="button" data-vdsc-next aria-label="Next title">›</button>';
         state.hero.idx = 0;
         paintHeroBody();
         startHeroTimer();
@@ -445,12 +505,16 @@
         var owned = it.library_id != null;
         var source = owned ? 'library' : 'tmdb';
         var id = owned ? it.library_id : it.tmdb_id;
-        var pills = [it.kind === 'movie' ? 'Movie' : 'TV Series', it.year,
+        var meta = [it.kind === 'movie' ? 'Movie' : 'TV Series', it.year,
             it.rating ? '★ ' + (Math.round(it.rating * 10) / 10) : null,
-            owned ? 'In Library' : null].filter(Boolean);
+            owned ? 'In your library' : null].filter(Boolean);
         var hue = hueOf(it.title);
+        // Set on the hero host (not just the body) so the dots, scrims and
+        // eyebrow — all children of the host — inherit the per-title hue.
+        var heroEl = $('[data-vdsc-hero]'); if (heroEl) heroEl.style.setProperty('--vgm-h', hue);
         body.style.setProperty('--vgm-h', hue);
         var pageEl = $('[data-vdsc-page]'); if (pageEl) pageEl.style.setProperty('--vdsc-amb', hue);   // ambient bleed
+        var amb = $('[data-vdsc-amb]'); if (amb) amb.classList.add('vdsc-amb--on');
         // Netflix-style billboard: the TMDB wordmark logo when the title has
         // one (backend enriches hero items), text falls back. Alt carries the
         // title so a broken logo image still reads.
@@ -459,10 +523,11 @@
               'onerror="this.outerHTML=\'<h2 class=&quot;vdsc-hero-title&quot;>' + esc(it.title) + '</h2>\'">'
             : '<h2 class="vdsc-hero-title">' + esc(it.title) + '</h2>';
         body.innerHTML =
-            '<div class="vdsc-hero-eyebrow">' + (owned ? 'In your library' : '#' + (state.hero.idx + 1) + ' Trending now') + '</div>' +
+            '<div class="vdsc-hero-eyebrow"><span class="vdsc-hero-eyebrow-dot" aria-hidden="true"></span>' +
+            (owned ? 'In your library' : '#' + (state.hero.idx + 1) + ' Trending now') + '</div>' +
             titleHtml +
-            '<div class="vdsc-hero-pills">' + pills.map(function (p) {
-                return '<span class="vdsc-hero-pill">' + esc(p) + '</span>'; }).join('') + '</div>' +
+            '<div class="vdsc-hero-meta">' + meta.map(function (m) {
+                return '<span class="vdsc-hero-meta-item">' + esc(m) + '</span>'; }).join('') + '</div>' +
             (it.overview ? '<p class="vdsc-hero-ov">' + esc(it.overview) + '</p>' : '') +
             '<div class="vdsc-hero-actions">' +
             '<button class="discog-submit-btn vdsc-hero-cta" type="button" ' +
@@ -685,7 +750,8 @@
             // Groups with no static rails (async-only, e.g. gaps) start hidden — revealed when filled.
             var emptyCls = sec.rails.length ? '' : ' vdsc-group--empty';
             return '<section class="vdsc-group' + emptyCls + '" data-group="' + sec.id + '">' +
-                '<h2 class="vdsc-group-head">' + esc(sec.label) + '</h2>' +
+                '<div class="vdsc-group-head"><h2>' + esc(sec.label) + '</h2>' +
+                (GROUP_SUBS[sec.id] ? '<p>' + esc(GROUP_SUBS[sec.id]) + '</p>' : '') + '</div>' +
                 '<div class="vdsc-group-body" data-group-body="' + sec.id + '">' + rails + '</div>' +
             '</section>';
         }).join('');
@@ -957,7 +1023,8 @@
                 '<span class="vdsc-tile-name">' + esc(name) + '</span></button>';
         }).join('');
         strip.innerHTML =
-            '<div class="vdsc-strip-head"><h2 class="vdsc-group-head">Browse</h2></div>' +
+            '<div class="vdsc-strip-head"><div class="vdsc-group-head"><h2>Browse</h2>' +
+            '<p>Jump into a genre, or open the full filter grid</p></div></div>' +
             '<div class="vdsc-tiles">' + tiles +
             '<button class="vdsc-tile vdsc-tile--all" type="button" data-vdsc-apply>' +
             '<span class="vdsc-tile-name">Browse all →</span></button></div>';
@@ -991,6 +1058,12 @@
         explore = { mNext: 1, sNext: 1, mMore: true, sMore: true, busy: false,
                     seen: {}, gen: explore.gen + 1 };
         var grid = $('[data-vdsc-explore-grid]'); if (grid) grid.innerHTML = '';
+        var ld = $('[data-vdsc-explore-loading]'); if (ld) ld.classList.add('hidden');
+        // A prefs rebuild empties the feed while it may already be on screen —
+        // the sentinel won't refire (no intersection *change* happens), so
+        // resume explicitly instead of leaving "Keep exploring" empty.
+        var sec = $('[data-vdsc-explore]');
+        if (sec && sec.getAttribute('data-started')) loadExplore();
     }
     function startExplore() {
         var sec = $('[data-vdsc-explore]'); if (!sec) return;
@@ -1053,9 +1126,7 @@
         var box = $('[data-vdsc-chipset="genre"]'); if (!box) return;
         box.innerHTML = '<button class="vdsc-chip vdsc-chip--reset vdsc-chip--on" type="button" data-val="">All genres</button>' +
             (state.genres[state.sel.kind] || []).map(function (g) {
-                var c = GENRE_COLORS[(g.name || '').toLowerCase()];
-                return '<button class="vdsc-chip" type="button" data-val="' + g.id + '"' +
-                    (c ? ' style="--c: ' + c + '"' : '') + '>' + esc(g.name) + '</button>';
+                return '<button class="vdsc-chip" type="button" data-val="' + g.id + '">' + esc(g.name) + '</button>';
             }).join('');
         state.sel.genre = '';
     }
@@ -1147,7 +1218,9 @@
                 return;
             }
             var dot = e.target.closest('[data-vdsc-go]');
-            if (dot) { goHero(parseInt(dot.getAttribute('data-vdsc-go'), 10)); startHeroTimer(); }
+            if (dot) { goHero(parseInt(dot.getAttribute('data-vdsc-go'), 10)); startHeroTimer(); return; }
+            if (e.target.closest('[data-vdsc-prev]')) { goHero(state.hero.idx - 1); startHeroTimer(); return; }
+            if (e.target.closest('[data-vdsc-next]')) { goHero(state.hero.idx + 1); startHeroTimer(); return; }
         });
 
         var hero = $('[data-vdsc-hero]');
