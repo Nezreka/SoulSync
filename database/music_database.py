@@ -1372,7 +1372,6 @@ class MusicDatabase:
             self._add_mirrored_playlist_explored_column(cursor)
             self._add_mirrored_playlist_cover_tiles_column(cursor)
             self._add_mirrored_playlist_server_link_columns(cursor)
-            self._add_mirrored_playlist_sync_name_columns(cursor)
             self._add_mirrored_playlist_organize_column(cursor)
             self._add_mirrored_playlist_custom_name_column(cursor)
             self._add_mirrored_playlist_quality_profile_column(cursor)
@@ -2702,36 +2701,6 @@ class MusicDatabase:
                     logger.info(f"Added {name} column to mirrored_playlists table")
         except Exception as e:
             logger.error(f"Error adding server link columns to mirrored_playlists: {e}")
-
-    def _add_mirrored_playlist_sync_name_columns(self, cursor):
-        """the name a mirror last synced under on the server, and the account
-        and own name it was made from. a mirror keeps that name while those
-        don't change, so deleting one of two same-named mirrors can't hand its server
-        playlist to the other (core/playlists/sync_names)."""
-        try:
-            cursor.execute("PRAGMA table_info(mirrored_playlists)")
-            cols = [c[1] for c in cursor.fetchall()]
-            for name in ('server_sync_name', 'server_sync_base'):
-                if name not in cols:
-                    cursor.execute(f"ALTER TABLE mirrored_playlists ADD COLUMN {name} TEXT DEFAULT NULL")
-                    logger.info(f"Added {name} column to mirrored_playlists table")
-        except Exception as e:
-            logger.error(f"Error adding sync name columns to mirrored_playlists: {e}")
-
-    def set_mirrored_playlist_sync_name(self, playlist_id: int, sync_name: str, base: str) -> bool:
-        """remember the name this mirror synced under (core/playlists/sync_names)."""
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "UPDATE mirrored_playlists SET server_sync_name = ?, server_sync_base = ? WHERE id = ?",
-                    (str(sync_name), str(base), int(playlist_id)),
-                )
-                conn.commit()
-                return cursor.rowcount > 0
-        except Exception as e:
-            logger.error(f"Error saving sync name for mirrored playlist {playlist_id}: {e}")
-            return False
 
     def _add_mirrored_playlist_cover_tiles_column(self, cursor):
         """Up to four distinct album covers, for the 2x2 collage.
@@ -23037,22 +23006,11 @@ class MusicDatabase:
             owner_conditions, owner_params = self._sync_history_owner_conditions(profile_id)
             owner_sql = (" AND " + " AND ".join(owner_conditions)) if owner_conditions else ""
             cursor.execute(
-                "SELECT DISTINCT playlist_name, playlist_id FROM sync_history WHERE playlist_name != ''"
+                "SELECT DISTINCT playlist_name FROM sync_history WHERE playlist_name != ''"
                 + owner_sql,
                 owner_params,
             )
-            rows = cursor.fetchall()
-            # a sync of a mirror that's since been deleted no longer makes its
-            # server playlist a synced one (#1420)
-            live = {r[0] for r in cursor.execute("SELECT id FROM mirrored_playlists").fetchall()}
-            names = []
-            for name, sync_id in rows:
-                mirror = re.search(r'(?:^|_)mirror(?:ed)?_(\d+)$', str(sync_id or ''))
-                if mirror and int(mirror.group(1)) not in live:
-                    continue
-                if name not in names:
-                    names.append(name)
-            return names
+            return [row[0] for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"Error getting sync history playlist names: {e}")
             return []

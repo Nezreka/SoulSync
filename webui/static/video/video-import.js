@@ -211,7 +211,17 @@
                     '<button class="vimp-kindtab" type="button" data-vimp-kind="movie">Movie</button>' +
                     '<button class="vimp-kindtab" type="button" data-vimp-kind="episode">Episode</button>' +
                 '</div>' +
+                '<div class="vimp-hero" data-vimp-hero hidden>' +
+                    '<div class="vimp-hero-bg" data-vimp-hero-bg></div>' +
+                    '<div class="vimp-hero-scrim"></div>' +
+                    '<div class="vimp-hero-body">' +
+                        '<div class="vimp-hero-eyebrow" data-vimp-hero-eyebrow></div>' +
+                        '<h3 class="vimp-hero-title" data-vimp-hero-title></h3>' +
+                        '<div class="vimp-hero-pills" data-vimp-hero-pills></div>' +
+                    '</div>' +
+                '</div>' +
                 '<div class="vimp-search">' +
+                    '<svg class="vimp-search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="7" cy="7" r="4.6"/><path d="M10.8 10.8 14 14" stroke-linecap="round"/></svg>' +
                     '<input type="text" class="vimp-search-input" data-vimp-q placeholder="Search your library &amp; TMDB&hellip;" autocomplete="off" spellcheck="false">' +
                 '</div>' +
                 '<div class="vimp-results" data-vimp-results></div>' +
@@ -240,8 +250,39 @@
         if (ep) ep.hidden = !(r.kind === 'episode' && r.picked);
         var sEl = $('[data-vimp-season]'); if (sEl && r.season !== '') sEl.value = r.season;
         var eEl = $('[data-vimp-episode]'); if (eEl && r.episode !== '') eEl.value = r.episode;
+        renderHero();
         renderResults();
         updateConfirm();
+    }
+
+    // Picked-title hero: Discover-banner-inspired — blurred poster wash, eyebrow,
+    // gradient title, frosted pills (year / In library / S·E). Hidden until picked.
+    function renderHero() {
+        var hero = $('[data-vimp-hero]');
+        var r = state.resolve;
+        if (!hero || !r) return;
+        var pk = r.picked;
+        if (!pk) { hero.hidden = true; return; }
+        hero.hidden = false;
+        var bg = hero.querySelector('[data-vimp-hero-bg]');
+        if (bg) {
+            if (pk.poster) { bg.style.backgroundImage = 'url("' + String(pk.poster).replace(/"/g, '') + '")'; bg.classList.remove('vimp-hero-bg--none'); }
+            else { bg.style.backgroundImage = 'none'; bg.classList.add('vimp-hero-bg--none'); }
+        }
+        var eb = hero.querySelector('[data-vimp-hero-eyebrow]');
+        if (eb) eb.textContent = r.kind === 'episode' ? 'Placing as episode' : 'Placing as movie';
+        var t = hero.querySelector('[data-vimp-hero-title]');
+        if (t) t.textContent = pk.title || 'Unknown';
+        var pills = hero.querySelector('[data-vimp-hero-pills]');
+        if (pills) {
+            var html = '';
+            if (pk.year) html += '<span class="vimp-hero-pill">' + esc(pk.year) + '</span>';
+            if (pk.owned) html += '<span class="vimp-hero-pill vimp-hero-pill--owned">In library</span>';
+            if (r.kind === 'episode' && (r.season !== '' || r.episode !== ''))
+                html += '<span class="vimp-hero-pill">S' + esc(String(r.season || '?')) +
+                    ' · E' + esc(String(r.episode || '?')) + '</span>';
+            pills.innerHTML = html;
+        }
     }
 
     function renderResults() {
@@ -259,7 +300,8 @@
             return '<button class="vimp-res' + (on ? ' vimp-res--on' : '') + (it.owned ? ' vimp-res--owned' : '') +
                 '" type="button" data-vimp-pick="' + idx + '">' + art +
                 '<span class="vimp-res-info"><span class="vimp-res-title">' + esc(it.title) + '</span>' +
-                (meta ? '<span class="vimp-res-meta">' + esc(meta) + '</span>' : '') + '</span></button>';
+                (meta ? '<span class="vimp-res-meta">' + esc(meta) + '</span>' : '') + '</span>' +
+                '<span class="vimp-res-check">✓</span></button>';
         }).join('');
     }
 
@@ -273,13 +315,15 @@
     }
 
     // Normalise a /api/video/search result into the picker's shape; keep only the
-    // kind we're resolving (movies for 'movie', shows for 'episode'). Owned titles
-    // (library_id present) are flagged so they can float to the top.
+    // kind we're resolving (movies for 'movie', shows for 'episode'). The API
+    // normalises TMDB's media_type to `kind` ("movie"/"show"/"person") — read that
+    // first; the media_type fallbacks are for raw TMDB payloads that never arrive
+    // here. Owned titles (library_id present) are flagged so they can float to the top.
     function normResults(raw, kind) {
         var want = kind === 'episode' ? ['tv', 'show'] : ['movie'];
         var out = [];
         (raw || []).forEach(function (it) {
-            var mt = String(it.media_type || it.type || (it.first_air_date ? 'tv' : 'movie')).toLowerCase();
+            var mt = String(it.kind || it.media_type || it.type || (it.first_air_date ? 'tv' : 'movie')).toLowerCase();
             if (want.indexOf(mt) === -1) return;
             var date = it.year || it.release_date || it.first_air_date || '';
             out.push({
@@ -414,8 +458,8 @@
             r.query = e.target.value;
             clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 300); return;
         }
-        if (e.target.matches('[data-vimp-season]')) { r.season = e.target.value; updateConfirm(); return; }
-        if (e.target.matches('[data-vimp-episode]')) { r.episode = e.target.value; updateConfirm(); return; }
+        if (e.target.matches('[data-vimp-season]')) { r.season = e.target.value; renderHero(); updateConfirm(); return; }
+        if (e.target.matches('[data-vimp-episode]')) { r.episode = e.target.value; renderHero(); updateConfirm(); return; }
     }
 
     function startPoll() {

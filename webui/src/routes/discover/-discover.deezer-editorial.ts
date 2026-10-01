@@ -17,8 +17,6 @@ import {
 } from '@/routes/sync/-sync.api';
 import { buildMirrorPayload } from '@/routes/sync/-sync.import';
 
-import type { DiscoverMix } from './-discover.mixes';
-
 export interface DeezerEditorialPlaylist {
   id: string;
   title: string;
@@ -179,46 +177,4 @@ export async function openDeezerPlaylistInSync(
     document.querySelector<HTMLElement>('.sync-tab-button[data-tab="mirrored"]')?.click();
   }, 200);
   return null;
-}
-
-// ── #1418: look before you mirror ──────────────────────────────────────────
-
-/** the mix modal key a previewed Deezer playlist opens under */
-export const DEEZER_MIX_PREFIX = 'deezer-';
-export const DEEZER_MIRROR_VERB = 'deezer-mirror';
-export const DEEZER_MIRROR_LABEL = 'Mirror to Sync';
-
-export function deezerMixKey(id: string): string {
-  return `${DEEZER_MIX_PREFIX}${id}`;
-}
-
-/**
- * a card click opens the playlist in the mix modal instead of mirroring it on
- * the spot: you see the tracks, can play what you own, and mirror it only if
- * you want it. Play is prepended by the modal itself.
- */
-export function deezerPreviewMix(playlist: DeezerEditorialPlaylist): DiscoverMix {
-  return {
-    key: deezerMixKey(playlist.id),
-    title: playlist.title,
-    subtitle: playlist.creator ? `Deezer · ${playlist.creator}` : 'Deezer',
-    trackCount: playlist.track_count,
-    actions: [
-      {
-        label: DEEZER_MIRROR_LABEL,
-        primary: true,
-        closeFirst: true,
-        onclick: `${DEEZER_MIRROR_VERB}:${playlist.id}`,
-      },
-    ],
-  };
-}
-
-/** the fast track list: no per-album track-number pass, so seconds, not a minute */
-export async function fetchDeezerPreviewTracks(id: string): Promise<unknown[]> {
-  const data = await readJson<{ success?: boolean; tracks?: unknown[]; error?: string }>(
-    apiClient.get(`discover/deezer/playlist/${encodeURIComponent(id)}/preview`),
-  );
-  if (data.success === false) throw new Error(data.error || 'Could not load that playlist');
-  return data.tracks ?? [];
 }

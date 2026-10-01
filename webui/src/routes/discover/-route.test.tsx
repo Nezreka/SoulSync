@@ -70,32 +70,6 @@ function bodyFor(url: string): Record<string, unknown> {
     };
   }
   if (url.includes('/api/discover/resolve-cache-album')) return { success: false };
-  if (url.includes('/api/discover/deezer/genres')) return { success: true, genres: [] };
-  if (url.includes('/api/discover/deezer/editorial')) {
-    return {
-      success: true,
-      playlists: [
-        {
-          id: '777',
-          title: 'Lofi Girl Beats',
-          creator: 'Deezer Editors',
-          track_count: 2,
-          image_url: '',
-          link: 'https://www.deezer.com/playlist/777',
-          source: 'deezer',
-        },
-      ],
-    };
-  }
-  if (url.includes('/api/discover/deezer/playlist/777/preview')) {
-    return {
-      success: true,
-      tracks: [
-        { id: 't1', name: 'Snowfall', artists: [{ name: 'Oatmello' }], duration_ms: 150000 },
-        { id: 't2', name: 'Coffee Break', artists: [{ name: 'Kupla' }], duration_ms: 140000 },
-      ],
-    };
-  }
   // Every shelf/section: an empty success — the page must render regardless.
   return { success: true };
 }
@@ -200,28 +174,5 @@ describe('discover route (live)', () => {
     } finally {
       delete window.openDownloadMissingModalForYouTube;
     }
-  });
-
-  it('a Deezer editorial card opens its tracks first, and mirrors only when asked (#1418)', async () => {
-    renderRoute();
-    await screen.findByText('Hero Artist');
-    const card = await screen.findByLabelText(/Lofi Girl Beats by Deezer Editors/);
-    card.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    // the track list, from the fast preview, in the mix modal
-    await screen.findByText('Snowfall');
-    expect(screen.getByText('Coffee Break')).toBeInTheDocument();
-    expect(requested.some((u) => u.includes('/api/discover/deezer/playlist/777/preview'))).toBe(
-      true,
-    );
-    // nothing was mirrored by looking
-    expect(requested.some((u) => u.includes('/api/deezer/playlist/777'))).toBe(false);
-    expect(requested.some((u) => u.includes('/api/mirror-playlist'))).toBe(false);
-
-    const mirror = await screen.findByRole('button', { name: 'Mirror to Sync' });
-    mirror.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    // the shelf's own mirror runs: the full load, with real track numbers
-    await waitFor(() =>
-      expect(requested.some((u) => u.includes('/api/deezer/playlist/777'))).toBe(true),
-    );
   });
 });

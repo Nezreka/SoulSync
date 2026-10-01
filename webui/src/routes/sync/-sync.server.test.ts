@@ -158,30 +158,6 @@ describe('fetchServerPlaylistData (41-52)', () => {
     expect(result.historyNames).toEqual(['B']);
   });
 
-  it('a mirror counts as synced under the name it has on the server (#1420)', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string) => {
-        if (url === '/api/server/playlists') {
-          return new Response(JSON.stringify({ success: true, playlists: [] }));
-        }
-        if (url === '/api/mirrored-playlists') {
-          return new Response(
-            JSON.stringify([
-              { name: 'Blumple', sync_name: 'Blumple (Deezer)' },
-              { name: 'A', display_name: 'Road Trip' },
-            ]),
-          );
-        }
-        return new Response(JSON.stringify([]));
-      }),
-    );
-    expect((await fetchServerPlaylistData()).mirroredNames).toEqual([
-      'Blumple (Deezer)',
-      'Road Trip',
-    ]);
-  });
-
   it('a broken mirrored or history response still yields the playlists (48, 51)', async () => {
     vi.stubGlobal(
       'fetch',
@@ -233,27 +209,6 @@ describe('fetchMirroredMatches (158-171)', () => {
       ),
     );
     expect((await fetchMirroredMatches('Road Trip')).map((p) => p.id)).toEqual([1, 2]);
-  });
-
-  it('matches the name the mirror syncs under, not its upstream name (#1420)', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        async () =>
-          new Response(
-            JSON.stringify([
-              { id: 1, name: 'Blumple', sync_name: 'Blumple' },
-              { id: 2, name: 'Blumple', sync_name: 'Blumple (Deezer)' },
-              { id: 3, name: 'Old', display_name: 'Road Trip', sync_name: 'Road Trip' },
-            ]),
-          ),
-      ),
-    );
-    expect((await fetchMirroredMatches('Blumple (Deezer)')).map((p) => p.id)).toEqual([2]);
-    expect((await fetchMirroredMatches('Blumple')).map((p) => p.id)).toEqual([1]);
-    expect((await fetchMirroredMatches('Road Trip')).map((p) => p.id)).toEqual([3]);
-    // a playlist synced before the rename still finds its mirror
-    expect((await fetchMirroredMatches('Old')).map((p) => p.id)).toEqual([3]);
   });
 
   it('SWALLOWS a failure and answers empty — the server-only path (168-170)', async () => {

@@ -2447,39 +2447,6 @@ def get_deezer_editorial_playlists():
         return jsonify({"success": True, "playlists": [], "count": 0, "error": str(e)})
 
 
-@bp.route('/api/discover/deezer/playlist/<playlist_id>/preview', methods=['GET'])
-def get_deezer_playlist_preview(playlist_id):
-    """A Deezer playlist's track list, to look at before mirroring it (#1418).
-
-    clicking an editorial card used to mirror the playlist on the spot, so
-    there was no way to see what was in it first. this is the fast read: the
-    playlist and its tracks, without the per-album track-number pass that a
-    mirror needs for tagging (most of the full load's time). mirroring still
-    goes through /api/deezer/playlist/<id> and gets the real numbers."""
-    try:
-        client = _get_deezer_client()
-        if client is None:
-            return jsonify({"success": False, "error": "Deezer client unavailable"}), 503
-        playlist = client.get_playlist(playlist_id, resolve_track_numbers=False)
-        if not playlist:
-            return jsonify({"success": False, "error": "Playlist not found"}), 404
-        tracks = [{
-            'id': t.get('id'),
-            'name': t.get('name'),
-            'artists': [{'name': a} for a in (t.get('artists') or [])],
-            'album_name': t.get('album') or '',
-            'album_cover_url': t.get('album_cover_url') or '',
-            'duration_ms': t.get('duration_ms') or 0,
-            'source': 'deezer',
-        } for t in playlist.get('tracks') or []]
-        return jsonify({"success": True, "id": playlist.get('id'), "name": playlist.get('name'),
-                        "owner": playlist.get('owner'), "image_url": playlist.get('image_url'),
-                        "tracks": tracks})
-    except Exception as e:
-        logger.error(f"Error previewing Deezer playlist {playlist_id}: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
 @bp.route('/api/discover/deezer/genres', methods=['GET'])
 def get_deezer_editorial_genres():
     """The genre chips the editorial shelf offers."""
@@ -4625,20 +4592,6 @@ def _calculate_similarity(str1, str2):
 
     return intersection / union if union > 0 else 0
 
-def _mirror_sync_name(url_hash):
-    """the name a mirrored_<id> sync writes on the server, or None."""
-    try:
-        from core.playlists.sync_names import claim_sync_name
-        db = get_database()
-        mirror = db.get_mirrored_playlist(int(str(url_hash)[len('mirrored_'):]))
-        if not mirror:
-            return None
-        return claim_sync_name(db, config_manager.get_active_media_server(), mirror)
-    except Exception as e:
-        logger.debug(f"mirror sync name for {url_hash}: {e}")
-        return None
-
-
 @bp.route('/api/youtube/sync/start/<url_hash>', methods=['POST'])
 def start_youtube_sync(url_hash):
     """Start sync process for a YouTube playlist using discovered Spotify tracks"""
@@ -4647,23 +4600,18 @@ def start_youtube_sync(url_hash):
     # is_pipeline_running() gate - the discovery modal's "Sync This Playlist"
     # must respect the same gate or it schedules a second sync over the
     # running pipeline (user report, aug 25).
-    name_getter = _pl_name_strict
     if str(url_hash).startswith('mirrored_'):
         try:
             if _get_automation_deps().state.is_pipeline_running():
                 return jsonify({"error": "A playlist pipeline is already running"}), 409
         except Exception as _pg_exc:
             logger.debug(f"pipeline-running check unavailable: {_pg_exc}")
-        # the server playlist is the mirror's sync name, the same one the
-        # automation sync writes (#1420). the upstream name landed on another
-        # mirror's playlist or skipped a rename
-        name_getter = lambda state: _mirror_sync_name(url_hash) or _pl_name_strict(state)  # noqa: E731
     return _start_source_sync(
         youtube_playlist_states, url_hash, sync_id_prefix="youtube",
         not_found_message="YouTube playlist not found",
         not_ready_message="YouTube playlist not ready for sync",
         convert_fn=convert_youtube_results_to_spotify_tracks,
-        name_getter=name_getter, image_getter=_pl_image_dict,
+        name_getter=_pl_name_strict, image_getter=_pl_image_dict,
         activity_label="YouTube", error_label="YouTube")
 
 @bp.route('/api/youtube/sync/status/<url_hash>', methods=['GET'])

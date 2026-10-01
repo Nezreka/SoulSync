@@ -136,22 +136,4 @@ describe('DeezerEditorialShelf', () => {
     await waitFor(() => expect(card).not.toHaveAttribute('aria-busy'));
     expect(onToast).toHaveBeenCalledWith('Deezer said no');
   });
-
-  it('with a preview, a click opens the playlist instead of mirroring it (#1418)', async () => {
-    const onPreview = vi.fn();
-    render(<DeezerEditorialShelf onPreview={onPreview} />);
-    fireEvent.click(await screen.findByLabelText(/Top Worldwide/));
-    expect(onPreview).toHaveBeenCalledTimes(1);
-    expect(onPreview.mock.calls[0][0]).toMatchObject({ id: '1', title: 'Top Worldwide' });
-    expect(api.openDeezerPlaylistInSync).not.toHaveBeenCalled();
-    expect(screen.getByText(/Open one to see its tracks/)).toBeInTheDocument();
-    // the preview's Mirror button runs the shelf's own mirror
-    await act(async () => {
-      onPreview.mock.calls[0][1]();
-    });
-    expect(api.openDeezerPlaylistInSync).toHaveBeenCalledWith(
-      expect.objectContaining({ id: '1' }),
-      expect.any(Function),
-    );
-  });
 });
