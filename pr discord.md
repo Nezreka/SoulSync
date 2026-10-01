@@ -8,6 +8,6 @@ New: Sample Studio. Your library is the sample pack. Chop tracks on a waveform e
 
 The Sync page is calmer: a roomier auto-sync board with glowing drop targets, hideable source tabs, clearer sync button names, and playlist server backups now default off. Scheduled "process all mirrored playlists" runs now use the owner's playlists instead of admin's.
 
-Under the hood: releases file under the section you saw them in (Deezer singles and EPs stay put), playlist tracks file under their album's credit, the download modal handles outside cancels properly, genre playlists and daily mixes work for Deezer users, smarter duplicate and AcoustID matching from @mandos21, and the Companion browser extension can now talk to the API.
+Under the hood: releases file under the section you saw them in (Deezer singles and EPs stay put), playlist tracks file under their album's credit, the download modal handles outside cancels properly, genre playlists and daily mixes work for Deezer users, smarter duplicate and AcoustID matching from @mandos21, the Companion browser extension can now talk to the API, torrents on slow private trackers no longer get deleted and re-grabbed, the duplicate cleaner keeps the copy your playlists use, and failed Deezer downloads tell you why.
 
 Full notes on GitHub. Enjoy! :tada:

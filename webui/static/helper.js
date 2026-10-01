@@ -3476,6 +3476,10 @@ const WHATS_NEW = {
         { title: 'Genre playlists for Deezer', desc: 'Deezer tracks get genres and daily mixes rank real genres, so genre playlists and mixes stop coming back empty.', page: 'discover' },
         { title: 'Smarter matching', desc: 'AcoustID keeps whole bracket titles, wishlist cleanup keeps distinct subtitles apart, and duplicates tell numbered and roman numeral parts apart (#1372, #1382).', page: 'tools' },
         { title: 'Companion extension', desc: 'Browser extensions can call the API with an API key, the image proxy handles media-server artwork, and there is a full reference for all 87 /api/v1 endpoints (#1375, #1377, #1380, #1400).' },
+        { title: 'Torrents stay put', desc: 'A torrent slow to start on a private tracker is no longer deleted and grabbed again after 90 seconds. Torrents follow their own stall setting, and Pause really keeps them.', page: 'settings' },
+        { title: 'Duplicates keep your playlists', desc: 'Keep Best keeps the copy a server playlist points at, and each copy shows which playlists it is in, so bulk cleanup no longer breaks playlists.', page: 'tools' },
+        { title: 'Navidrome playlist account', desc: 'Settings > Navidrome can send your synced playlists to a different Navidrome user than the one SoulSync scans with.', page: 'settings' },
+        { title: 'Failed downloads say why', desc: 'A failed Deezer (or other streaming) download shows the real reason, like an expired ARL, instead of just Errored (#1349).' },
         { title: 'Earlier versions', desc: '3.4.8 overhauled the wishlist, dashboard and automations pages, added library album views and chat P2P sharing. 3.4.7 rebuilt profiles, requests and issues.' },
     ],
 };
@@ -3517,6 +3521,7 @@ const VERSION_MODAL_SECTIONS = [
             'Automations: process all mirrored playlists runs on the owner\'s mirrors, not admin\'s (#1411).',
             'Filing: releases file under the section you saw them in, playlist tracks under their album credit, and deezer genre playlists stop coming back empty.',
             'Matching from @mandos21 (#1372, #1382), and the Companion browser extension can now use the API (#1375, #1377, #1380).',
+            'Fixes: torrents are no longer deleted after 90s at 0%, Keep Best keeps the copy your playlists use, Navidrome can take a separate playlist account, and failed downloads say why.',
         ],
     },
     {

@@ -1,6 +1,6 @@
 # soulsync 3.4.9: `dev` → `main`
 
-big discover glow-up, a full player theater, sample studio from your own library, a calmer sync page, and a stack of filing and download fixes. scope: the 135 commits since the 3.4.8 release commit (`7ea9ad9c3`).
+big discover glow-up, a full player theater, sample studio from your own library, a calmer sync page, and a stack of filing and download fixes. scope: the commits since the 3.4.8 release commit (`7ea9ad9c3`).
 
 ## discover
 
@@ -42,8 +42,11 @@ big discover glow-up, a full player theater, sample studio from your own library
 
 - a release from the artist page or search files under the section it showed in. deezer's 3-track album showed under Albums and filed as a Single. paths and reorganize now respect the type the source gave, so deezer singles and EPs stay put (thanks SeadogsBooty on discord).
 - download discography only counts a single as owned when that single is, instead of when its song is on some album.
+- download discography lists exactly what the artist page shows. it used to refetch on its own with no source, so a deezer page with 2 EPs downloaded musicbrainz's underground fan club EPs too.
 - a playlist track files under its album's credit, not its singer, so Let It Go lands in Frozen instead of Idina Menzel (#1385). settings now shows the compilation path template that soundtracks were using all along (#1385).
 - the download modal: cancelling from outside it or a batch the server dropped ends it properly, and reopening an album after its run starts fresh (#1384, #1386). search results pick up their in-library badge when a download finishes (#1386).
+- torrents stopped getting deleted 90 seconds after they sit at 0%. a soulseek rule was removing them and their data, then grabbing them again, 4 times on one private tracker album (thanks Tostadaman on discord). torrents only follow their own stall setting now, and "pause" actually keeps the torrent.
+- a failed deezer download says why now (expired arl, no license token, quality your plan doesn't have) instead of "state: Errored". the reason was always written down, it just never made it to the screen. same for every streaming source (#1349).
 - mix, dub and edit only mean remix inside a version qualifier, so 311's "Mix It Up" and "Rub a Dub" stop getting dropped (#1381).
 - search tries other itunes stores when the US one doesn't have it, deezer stops skipping songs, and covers sit above the artist (#1398).
 - the downloads review tab is readable now: a segmented control with counts, and the attempt count sits by the track name.
@@ -63,6 +66,8 @@ big discover glow-up, a full player theater, sample studio from your own library
 ## the rest
 
 - library a-z sort ignores leading punctuation, so "Weird Al" files under W and *NSYNC under N (#1408).
+- duplicates: keep best keeps the copy a server playlist points at, and each copy shows "In playlist: ...", so bulk accepting hundreds of duplicates doesn't quietly break playlists (thanks jadux on discord).
+- settings > navidrome has an optional playlist account, so the admin's synced playlists can go to a different navidrome user than the one scanning (thanks Cremonies on discord).
 - tools: findings show up when a maintenance job finishes and a background run doesn't clear what you ticked (#1386), and the expired download cleaner link lands on the cleaner.
 - explorer: scroll scrolls and ctrl/pinch zooms, like google maps, with a lock to flip it back (#1409).
 - soulseek stops polling slskd every 6 seconds when nothing's listening (#1387).
