@@ -46,6 +46,7 @@ big discover glow-up, a full player theater, sample studio from your own library
 - a playlist track files under its album's credit, not its singer, so Let It Go lands in Frozen instead of Idina Menzel (#1385). settings now shows the compilation path template that soundtracks were using all along (#1385).
 - the download modal: cancelling from outside it or a batch the server dropped ends it properly, and reopening an album after its run starts fresh (#1384, #1386). search results pick up their in-library badge when a download finishes (#1386).
 - torrents stopped getting deleted 90 seconds after they sit at 0%. a soulseek rule was removing them and their data, then grabbing them again, 4 times on one private tracker album (thanks Tostadaman on discord). torrents only follow their own stall setting now, and "pause" actually keeps the torrent.
+- staging imports name the artist after the folder the album sits in, not the top folder. a torrent client's folder mounted inside staging made every artist "qbittorrent" (thanks Tostadaman on discord).
 - a failed deezer download says why now (expired arl, no license token, quality your plan doesn't have) instead of "state: Errored". the reason was always written down, it just never made it to the screen. same for every streaming source (#1349).
 - mix, dub and edit only mean remix inside a version qualifier, so 311's "Mix It Up" and "Rub a Dub" stop getting dropped (#1381).
 - search tries other itunes stores when the US one doesn't have it, deezer stops skipping songs, and covers sit above the artist (#1398).

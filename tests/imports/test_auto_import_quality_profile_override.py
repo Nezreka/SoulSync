@@ -180,3 +180,11 @@ def test_folder_artist_override_enabled_uses_folder_name(tmp_path):
     worker = _worker_with_capture(tmp_path, {"import.folder_artist_override": True})
     ctx = _run_one_track_in_folder(worker, tmp_path, "Folder Artist")
     assert ctx["spotify_artist"]["name"] == "Folder Artist"
+
+
+def test_folder_artist_is_the_album_parent_not_a_client_mount(tmp_path):
+    # Tostadaman: qbittorrent's folder mounted inside staging named the artist
+    # "qbittorrent". the real worker, his layout, the default (on) setting
+    worker = _worker_with_capture(tmp_path, {})
+    ctx = _run_one_track_in_folder(worker, tmp_path, "qbittorrent/lidarr-done/Folder Artist")
+    assert ctx["spotify_artist"]["name"] == "Folder Artist"
