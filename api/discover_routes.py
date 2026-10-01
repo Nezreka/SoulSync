@@ -738,7 +738,8 @@ def get_discover_listening_recommendations():
     try:
         database = get_database()
         active_source = _get_active_discovery_source()
-        raw = database.get_metadata('listening_recs_artists')
+        from core.discovery.listening_recommendations import RECS_ARTISTS_KEY, read_recs_raw
+        raw = read_recs_raw(database.get_metadata, RECS_ARTISTS_KEY, get_current_profile_id())
         if not raw:
             return jsonify({"success": True, "artists": [], "source": active_source, "count": 0})
         try:
@@ -857,7 +858,8 @@ def get_discover_listening_mix():
     try:
         database = get_database()
         active_source = _get_active_discovery_source()
-        raw = database.get_metadata('listening_recs_tracks_full')
+        from core.discovery.listening_recommendations import RECS_TRACKS_KEY, read_recs_raw
+        raw = read_recs_raw(database.get_metadata, RECS_TRACKS_KEY, get_current_profile_id())
         tracks = []
         if raw:
             try:

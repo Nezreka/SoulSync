@@ -4477,12 +4477,15 @@ class WatchlistScanner:
         try:
             import json as _json
             from core.discovery.listening_recommendations import (
+                RECS_ARTISTS_KEY,
+                RECS_TRACKS_KEY,
                 aggregate_candidate_tracks,
                 build_recency_weighted_seeds,
                 choose_mix_fetch_source,
                 group_similars_by_seed,
                 names_match,
                 rank_recommended_artists,
+                recs_key,
                 to_mix_track,
             )
 
@@ -4592,7 +4595,7 @@ class WatchlistScanner:
                         'image_url': m.get('image_url'),
                         'genres': (genres[:3] if isinstance(genres, list) else None)}
 
-            self.database.set_metadata('listening_recs_artists',
+            self.database.set_metadata(recs_key(RECS_ARTISTS_KEY, profile_id),
                                        _json.dumps([_enrich(r) for r in recs]))
 
             # Candidate tracks for the "Listening Mix" playlist row: each recommended artist's
@@ -4690,7 +4693,7 @@ class WatchlistScanner:
             mix = aggregate_candidate_tracks(recs, top_tracks_by_artist, per_artist=3, limit=50)
             track_ids = [m.get('track_id') for m in mix if m.get('track_id')]
             if mix:
-                self.database.set_metadata('listening_recs_tracks_full', _json.dumps(mix))
+                self.database.set_metadata(recs_key(RECS_TRACKS_KEY, profile_id), _json.dumps(mix))
                 self.database.save_curated_playlist('listening_recs_tracks', track_ids, profile_id=profile_id)
 
             logger.info("[Listening Recs] %d recommended artists, %d mix tracks (%d artists via top-tracks fetch)",

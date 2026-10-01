@@ -273,7 +273,7 @@ def test_the_listening_recs_scan_writes_it(db, monkeypatch):
     scanner._database = db
     scanner._build_listening_recommendations(1, [])
 
-    stored = json.loads(db.get_metadata('listening_recs_artists'))
+    stored = json.loads(db.get_metadata('listening_recs_artists:1'))
     rec = next(r for r in stored if r['name'] == 'SebastiAn')
     e = _valid(rec['explanation'])
     assert e['kind'] == 'listened'
