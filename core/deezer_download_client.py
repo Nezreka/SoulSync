@@ -998,7 +998,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             # no license token = the login itself is broken, not the plan
             self._set_error(download_id, (
                 'Deezer login has no license token, refresh your ARL in Settings'
-                if not self._license_token else
+                if not getattr(self, '_license_token', None) else
                 'No media URL available (may require higher subscription tier)'))
             return None
 
