@@ -17734,51 +17734,73 @@ def _record_sync_history_completion(batch_id, batch):
 # == SERVER PLAYLIST MANAGER ==
 # ===============================
 
+def _server_playlist_scope(active_server):
+    from core.sync.server_playlist_access import scope_for
+    base = media_server_engine.client(active_server) if active_server else None
+    return scope_for(active_server, base, get_database(), get_current_profile_id(),
+                     bool(getattr(g, 'is_admin', False)))
+
+
+def _server_playlist_guard(active_server, playlist_id, playlist_name):
+    """(client, playlist_id, playlist_name, refusal) for one playlist edit (#1414).
+
+    the admin gets the shared client and what it asked for. anyone else gets
+    their own server connection and the playlist resolved from their own
+    listing, or a 403 when it is not theirs."""
+    from core.sync.server_playlist_access import resolve_allowed
+    scope = _server_playlist_scope(active_server)
+    if scope.is_admin:
+        return scope.client, playlist_id, playlist_name, None
+    hit = resolve_allowed(active_server, scope, playlist_id, playlist_name)
+    if hit is None:
+        logger.warning(f"[ServerPlaylist] profile {get_current_profile_id()} refused playlist "
+                       f"id={playlist_id} name='{playlist_name}': not theirs")
+        return scope.client, playlist_id, playlist_name, (
+            jsonify({"success": False, "error": "not_your_playlist"}), 403)
+    return scope.client, hit[0], hit[1], None
+
+
 @app.route('/api/server/playlists', methods=['GET'])
 def get_server_playlists():
-    """Get all playlists from the active media server."""
+    """Playlists on the active media server, as this profile may see them.
+
+    #1414: this listed every playlist on the server to every profile. a
+    profile now sees its own (through its own server user, or on the shared
+    account the ones its mirrors made); the admin also gets everyone else's
+    under ``others``, grouped by owner."""
     try:
         active_server = config_manager.get_active_media_server()
         logger.info(f"[ServerPlaylists] Active server: {active_server}")
         if not active_server:
             return jsonify({"success": False, "error": "No media server configured"}), 400
-
-        playlists_data = []
-        if active_server == 'plex' and media_server_engine.client('plex') and media_server_engine.client('plex').is_connected():
-            # Use raw Plex API to get playlist metadata without fetching all tracks
-            try:
-                raw_playlists = media_server_engine.client('plex').server.playlists()
-                logger.info(f"[ServerPlaylists] Plex returned {len(raw_playlists)} total playlists")
-                for playlist in raw_playlists:
-                    if getattr(playlist, 'playlistType', None) == 'audio':
-                        playlists_data.append({
-                            'id': str(playlist.ratingKey),
-                            'name': playlist.title,
-                            'track_count': playlist.leafCount,
-                        })
-                logger.info(f"[ServerPlaylists] Found {len(playlists_data)} audio playlists")
-            except Exception as e:
-                logger.error(f"[ServerPlaylists] Error fetching Plex playlists: {e}", exc_info=True)
-                return jsonify({"success": False, "error": f"Plex error: {str(e)}"}), 500
-        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin') and media_server_engine.client('jellyfin').is_connected():
-            for pl in media_server_engine.client('jellyfin').get_all_playlists():
-                playlists_data.append({
-                    'id': pl.id,
-                    'name': pl.title,
-                    'track_count': pl.leaf_count,
-                })
-        elif active_server == 'navidrome' and media_server_engine.client('navidrome') and media_server_engine.client('navidrome').is_connected():
-            for pl in media_server_engine.client('navidrome').get_all_playlists():
-                playlists_data.append({
-                    'id': pl.id,
-                    'name': pl.title,
-                    'track_count': pl.leaf_count,
-                })
-        else:
-            logger.warning(f"[ServerPlaylists] Server '{active_server}' not connected. plex_client={media_server_engine.client('plex') is not None}, jellyfin_client={media_server_engine.client('jellyfin') is not None}, navidrome_client={media_server_engine.client('navidrome') is not None}")
+        base = media_server_engine.client(active_server)
+        if not base or not base.is_connected():
+            logger.warning(f"[ServerPlaylists] Server '{active_server}' not connected")
             return jsonify({"success": False, "error": f"{active_server} not connected"}), 400
 
-        return jsonify({"success": True, "server_type": active_server, "playlists": playlists_data})
+        from core.sync.server_playlist_access import admin_split, visible_playlists
+        scope = _server_playlist_scope(active_server)
+
+        def _row(pl):
+            return {'id': str(getattr(pl, 'id', '')), 'name': getattr(pl, 'title', ''),
+                    'track_count': getattr(pl, 'leaf_count', 0) or 0,
+                    'owner': getattr(pl, 'owner', None)}
+
+        others = []
+        if scope.is_admin:
+            mine, groups = admin_split(active_server, base, get_database())
+            others = [{'owner': grp['owner'], 'profile': grp['profile'],
+                       'playlists': [_row(p) for p in grp['playlists']]} for grp in groups]
+        else:
+            mine = visible_playlists(active_server, scope)
+        return jsonify({
+            "success": True,
+            "server_type": active_server,
+            "playlists": [_row(p) for p in mine],
+            "others": others,
+            "scope": 'admin' if scope.is_admin else ('own' if scope.acting_as else 'shared'),
+            "acting_as": scope.acting_as,
+        })
     except Exception as e:
         logger.error(f"Error getting server playlists: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
@@ -17790,20 +17812,26 @@ def get_server_playlist_tracks(playlist_id):
     try:
         active_server = config_manager.get_active_media_server()
         playlist_name = request.args.get('name', '')
+        # #1414: a profile reaches only its own playlists, through its own
+        # server user when it has one, and acts on the playlist it was checked for
+        _sp_client, playlist_id, playlist_name, _sp_refusal = _server_playlist_guard(
+            active_server, playlist_id, playlist_name)
+        if _sp_refusal is not None:
+            return _sp_refusal
 
         # Get tracks from server
         server_tracks = []
-        if active_server == 'plex' and media_server_engine.client('plex'):
+        if active_server == 'plex' and _sp_client:
             try:
                 # Try by ID first, fall back to name lookup (ID changes when playlist is recreated)
                 raw_playlist = None
                 try:
-                    raw_playlist = media_server_engine.client('plex').server.fetchItem(int(playlist_id))
+                    raw_playlist = _sp_client.server.fetchItem(int(playlist_id))
                 except Exception as e:
                     logger.debug("plex playlist fetchItem failed: %s", e)
                 if not raw_playlist and playlist_name:
                     try:
-                        raw_playlist = media_server_engine.client('plex').server.playlist(playlist_name)
+                        raw_playlist = _sp_client.server.playlist(playlist_name)
                     except Exception as e:
                         logger.debug("plex playlist by-name lookup failed: %s", e)
                 if not raw_playlist:
@@ -17815,8 +17843,8 @@ def get_server_playlist_tracks(playlist_id):
                 if raw_playlist:
                     if not playlist_name:
                         playlist_name = raw_playlist.title
-                    plex_base = getattr(media_server_engine.client('plex').server, '_baseurl', '') or ''
-                    plex_token = getattr(media_server_engine.client('plex').server, '_token', '') or ''
+                    plex_base = getattr(_sp_client.server, '_baseurl', '') or ''
+                    plex_token = getattr(_sp_client.server, '_token', '') or ''
                     if not plex_base:
                         # Fallback: get from config
                         _pc = config_manager.get_plex_config()
@@ -17841,8 +17869,8 @@ def get_server_playlist_tracks(playlist_id):
                         })
             except Exception as e:
                 logger.error(f"[ServerPlaylistTracks] Plex error: {e}", exc_info=True)
-        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
-            tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id)
+        elif active_server == 'jellyfin' and _sp_client:
+            tracks = _sp_client.get_playlist_tracks(playlist_id)
             for t in (tracks or []):
                 raw = t._data if hasattr(t, '_data') else {}
                 artists = raw.get('Artists', [])
@@ -17867,8 +17895,8 @@ def get_server_playlist_tracks(playlist_id):
                     'duration': t.duration,
                     'thumb': thumb,
                 })
-        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
-            tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id)
+        elif active_server == 'navidrome' and _sp_client:
+            tracks = _sp_client.get_playlist_tracks(playlist_id)
             for t in (tracks or []):
                 raw = t._data if hasattr(t, '_data') else {}
                 # Navidrome cover art via Subsonic API
@@ -18055,7 +18083,13 @@ def server_playlist_align(playlist_id):
             return jsonify({"success": False, "error": "no matched tracks to align"}), 400
 
         active_server = config_manager.get_active_media_server()
-        client = media_server_engine.client(active_server) if active_server else None
+        # #1414: a profile reaches only its own playlists, through its own
+        # server user when it has one, and acts on the playlist it was checked for
+        _sp_client, playlist_id, playlist_name, _sp_refusal = _server_playlist_guard(
+            active_server, playlist_id, playlist_name)
+        if _sp_refusal is not None:
+            return _sp_refusal
+        client = _sp_client if active_server else None
         if active_server not in ('navidrome', 'plex', 'jellyfin') or not client:
             return jsonify({"success": False,
                             "error": "Align isn't supported on this server yet"}), 400
@@ -18149,6 +18183,12 @@ def server_playlist_replace_track(playlist_id):
             return jsonify({"success": False, "error": "playlist_name required"}), 400
 
         active_server = config_manager.get_active_media_server()
+        # #1414: a profile reaches only its own playlists, through its own
+        # server user when it has one, and acts on the playlist it was checked for
+        _sp_client, playlist_id, playlist_name, _sp_refusal = _server_playlist_guard(
+            active_server, playlist_id, playlist_name)
+        if _sp_refusal is not None:
+            return _sp_refusal
 
         # Persist the correction, exactly as Find & Add does. This endpoint
         # used to edit the server playlist and store NOTHING, so a fixed bad
@@ -18175,10 +18215,10 @@ def server_playlist_replace_track(playlist_id):
                 _src_track_id, active_server, new_track_id, _new_track_title,
                 _src_title, _src_artist, source=_src_source)
 
-        if active_server == 'plex' and media_server_engine.client('plex'):
+        if active_server == 'plex' and _sp_client:
             # ID-first, name-fallback (Plex deletes + recreates on edit
             # so the cached rating key can be stale).
-            plex_server = media_server_engine.client('plex').server
+            plex_server = _sp_client.server
             raw_playlist = None
             try:
                 raw_playlist = plex_server.fetchItem(int(playlist_id))
@@ -18198,7 +18238,7 @@ def server_playlist_replace_track(playlist_id):
             replaced = False
             for item in raw_playlist.items():
                 if str(item.ratingKey) == str(old_track_id) and not replaced:
-                    new_item = media_server_engine.client('plex').server.fetchItem(int(new_track_id))
+                    new_item = _sp_client.server.fetchItem(int(new_track_id))
                     if new_item:
                         new_tracks.append(new_item)
                         replaced = True
@@ -18211,14 +18251,14 @@ def server_playlist_replace_track(playlist_id):
                 # Delete old and recreate directly (avoid update_playlist's backup logic)
                 raw_playlist.delete()
                 from plexapi.playlist import Playlist
-                new_pl = Playlist.create(media_server_engine.client('plex').server, playlist_name, items=new_tracks)
+                new_pl = Playlist.create(_sp_client.server, playlist_name, items=new_tracks)
                 _persist_replacement()
                 return jsonify({"success": True, "message": "Track replaced", "new_playlist_id": str(new_pl.ratingKey)})
             else:
                 return jsonify({"success": False, "error": "Old track not found in playlist"}), 404
 
-        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
-            _jf = media_server_engine.client('jellyfin')
+        elif active_server == 'jellyfin' and _sp_client:
+            _jf = _sp_client
             current_tracks, _effective_id = _jellyfin_playlist_tracks_fresh(_jf, playlist_id, playlist_name)
             new_track_ids = []
             replaced = False
@@ -18240,8 +18280,8 @@ def server_playlist_replace_track(playlist_id):
                                 "new_playlist_id": _jellyfin_recreated_playlist_id(playlist_name)})
             return jsonify({"success": False, "error": "Old track not found"}), 404
 
-        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
-            current_tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id)
+        elif active_server == 'navidrome' and _sp_client:
+            current_tracks = _sp_client.get_playlist_tracks(playlist_id)
             new_track_ids = []
             replaced = False
             for t in (current_tracks or []):
@@ -18254,7 +18294,7 @@ def server_playlist_replace_track(playlist_id):
 
             if replaced:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_track_ids]
-                if not media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
+                if not _sp_client.create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
                     return jsonify({"success": False, "error": "Navidrome playlist write failed or could not be verified"}), 502
                 _persist_replacement()
                 return jsonify({"success": True, "message": "Track replaced"})
@@ -18353,12 +18393,18 @@ def server_playlist_add_track(playlist_id):
             return jsonify({"success": False, "error": "playlist_name required"}), 400
 
         active_server = config_manager.get_active_media_server()
+        # #1414: a profile reaches only its own playlists, through its own
+        # server user when it has one, and acts on the playlist it was checked for
+        _sp_client, playlist_id, playlist_name, _sp_refusal = _server_playlist_guard(
+            active_server, playlist_id, playlist_name)
+        if _sp_refusal is not None:
+            return _sp_refusal
 
-        if active_server == 'plex' and media_server_engine.client('plex'):
+        if active_server == 'plex' and _sp_client:
             # ID-first, name-fallback — Plex deletes + recreates playlists
             # on edit so the rating key the frontend cached can be stale.
             # The GET tracks endpoint uses the same lookup chain.
-            plex_server = media_server_engine.client('plex').server
+            plex_server = _sp_client.server
             raw_playlist = None
             try:
                 raw_playlist = plex_server.fetchItem(int(playlist_id))
@@ -18413,9 +18459,9 @@ def server_playlist_add_track(playlist_id):
             _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title or new_item.title, source_title, source_artist, source_provider)
             return jsonify({"success": True, "message": "Track added", "new_playlist_id": new_id})
 
-        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
+        elif active_server == 'jellyfin' and _sp_client:
             from core.sync.playlist_edit import plan_playlist_add
-            jf = media_server_engine.client('jellyfin')
+            jf = _sp_client
             current_tracks = jf.get_playlist_tracks(playlist_id) or []
             track_ids = [str(t.ratingKey) for t in current_tracks]
             # Matching an unmatched source to a track already in the playlist
@@ -18436,16 +18482,16 @@ def server_playlist_add_track(playlist_id):
             _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist, source_provider)
             return jsonify({"success": True, "message": "Track linked" if not plan['should_insert'] else "Track added"})
 
-        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
+        elif active_server == 'navidrome' and _sp_client:
             from core.sync.playlist_edit import plan_playlist_add
-            current_tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id) or []
+            current_tracks = _sp_client.get_playlist_tracks(playlist_id) or []
             track_ids = [str(t.ratingKey) for t in current_tracks]
             # Matching an unmatched source to a track already in the playlist
             # is a LINK, not a second copy — don't duplicate it (#768).
             plan = plan_playlist_add(track_ids, track_id, is_link=bool(source_track_id), position=position)
             if plan['should_insert']:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in plan['new_ids']]
-                if not media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
+                if not _sp_client.create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
                     return jsonify({"success": False, "error": "Navidrome playlist write failed or could not be verified"}), 502
             _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist, source_provider)
             return jsonify({"success": True, "message": "Track linked" if not plan['should_insert'] else "Track added"})
@@ -18470,11 +18516,17 @@ def server_playlist_remove_track(playlist_id):
             return jsonify({"success": False, "error": "playlist_name required"}), 400
 
         active_server = config_manager.get_active_media_server()
+        # #1414: a profile reaches only its own playlists, through its own
+        # server user when it has one, and acts on the playlist it was checked for
+        _sp_client, playlist_id, playlist_name, _sp_refusal = _server_playlist_guard(
+            active_server, playlist_id, playlist_name)
+        if _sp_refusal is not None:
+            return _sp_refusal
 
-        if active_server == 'plex' and media_server_engine.client('plex'):
+        if active_server == 'plex' and _sp_client:
             # ID-first, name-fallback (Plex deletes + recreates on edit
             # so the cached rating key can be stale).
-            plex_server = media_server_engine.client('plex').server
+            plex_server = _sp_client.server
             raw_playlist = None
             try:
                 raw_playlist = plex_server.fetchItem(int(playlist_id))
@@ -18504,13 +18556,13 @@ def server_playlist_remove_track(playlist_id):
             raw_playlist.delete()
             if new_items:
                 from plexapi.playlist import Playlist
-                new_pl = Playlist.create(media_server_engine.client('plex').server, playlist_name, items=new_items)
+                new_pl = Playlist.create(_sp_client.server, playlist_name, items=new_items)
                 return jsonify({"success": True, "message": "Track removed", "new_playlist_id": str(new_pl.ratingKey)})
             return jsonify({"success": True, "message": "Track removed (playlist now empty)"})
 
-        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
+        elif active_server == 'jellyfin' and _sp_client:
             from core.sync.playlist_edit import remove_one_occurrence
-            _jf = media_server_engine.client('jellyfin')
+            _jf = _sp_client
             current_tracks, _effective_id = _jellyfin_playlist_tracks_fresh(_jf, playlist_id, playlist_name)
             track_ids = [str(t.ratingKey) for t in current_tracks]
             # Remove ONE occurrence, not every copy — duplicates are the same
@@ -18524,16 +18576,16 @@ def server_playlist_remove_track(playlist_id):
             return jsonify({"success": True, "message": "Track removed",
                             "new_playlist_id": _jellyfin_recreated_playlist_id(playlist_name)})
 
-        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
+        elif active_server == 'navidrome' and _sp_client:
             from core.sync.playlist_edit import remove_one_occurrence
-            current_tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id) or []
+            current_tracks = _sp_client.get_playlist_tracks(playlist_id) or []
             track_ids = [str(t.ratingKey) for t in current_tracks]
             # Remove ONE occurrence, not every copy (#768).
             new_ids, removed = remove_one_occurrence(track_ids, remove_track_id)
             if not removed:
                 return jsonify({"success": False, "error": "Track not found in playlist"}), 404
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_ids]
-            if not media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
+            if not _sp_client.create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
                 return jsonify({"success": False, "error": "Navidrome playlist write failed or could not be verified"}), 502
             return jsonify({"success": True, "message": "Track removed"})
 
@@ -18558,9 +18610,15 @@ def server_playlist_delete(playlist_id):
             return jsonify({"success": False, "error": "playlist_name required"}), 400
 
         active_server = config_manager.get_active_media_server()
+        # #1414: a profile reaches only its own playlists, through its own
+        # server user when it has one, and acts on the playlist it was checked for
+        _sp_client, playlist_id, playlist_name, _sp_refusal = _server_playlist_guard(
+            active_server, playlist_id, playlist_name)
+        if _sp_refusal is not None:
+            return _sp_refusal
 
-        if active_server == 'plex' and media_server_engine.client('plex'):
-            plex_server = media_server_engine.client('plex').server
+        if active_server == 'plex' and _sp_client:
+            plex_server = _sp_client.server
             raw_playlist = None
             try:
                 raw_playlist = plex_server.fetchItem(int(playlist_id))
@@ -18577,8 +18635,8 @@ def server_playlist_delete(playlist_id):
             logger.info(f"[ServerPlaylist] Deleted Plex playlist '{playlist_name}' ({playlist_id})")
             return jsonify({"success": True, "message": "Playlist deleted"})
 
-        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
-            _jf = media_server_engine.client('jellyfin')
+        elif active_server == 'jellyfin' and _sp_client:
+            _jf = _sp_client
             if _jf.delete_playlist(playlist_id):
                 logger.info(f"[ServerPlaylist] Deleted Jellyfin playlist '{playlist_name}' ({playlist_id})")
                 return jsonify({"success": True, "message": "Playlist deleted"})
@@ -18594,8 +18652,8 @@ def server_playlist_delete(playlist_id):
                 return jsonify({"success": True, "message": "Playlist deleted"})
             return jsonify({"success": False, "error": "Playlist not found"}), 404
 
-        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
-            _nd = media_server_engine.client('navidrome')
+        elif active_server == 'navidrome' and _sp_client:
+            _nd = _sp_client
             if _nd.delete_playlist(playlist_id):
                 logger.info(f"[ServerPlaylist] Deleted Navidrome playlist '{playlist_name}' ({playlist_id})")
                 return jsonify({"success": True, "message": "Playlist deleted"})
