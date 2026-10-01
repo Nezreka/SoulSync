@@ -286,7 +286,7 @@ function npv2BinS(S, key, i, count) {
     const st = npv2ThemeState('bins-' + key, () => ({ v: [] }));
     while (st.v.length < count) st.v.push(0);
     const cur = st.v[i] || 0;
-    const k = target > cur ? 0.55 : 0.10;
+    const k = npv2Ease(target > cur ? 0.55 : 0.10, S);
     const nv = cur + (target - cur) * k;
     st.v[i] = nv;
     return nv;
@@ -446,6 +446,105 @@ function npv2PalA(p, alpha) {
     return 'rgba(' + Math.round(c.r) + ',' + Math.round(c.g) + ',' + Math.round(c.b) + ',' + alpha + ')';
 }
 
+// Frame factor: how many 60 fps frames this frame stands for. Every per-frame
+// step (decay, drift, spawn rate) multiplies by it, so motion runs at the same
+// speed on a 60, 120 or 144 Hz screen. 1 when the frame carries no dt (tests).
+function npv2F(S) {
+    const dt = S && S.dt;
+    return (typeof dt === 'number' && isFinite(dt) && dt > 0) ? Math.min(6, dt * 60) : 1;
+}
+
+// Per-frame easing factor k (tuned at 60 fps) for this frame's dt. Pure.
+function npv2Ease(k, S) {
+    return 1 - Math.pow(1 - k, npv2F(S));
+}
+
+// True only on the frame a beat fires. Spawn-once effects use this: checking
+// `beat > x` fires on every frame the envelope stays high, 5-10 times a beat
+// (more on a 144 Hz screen).
+function npv2Onset(S) {
+    return !!(S && S.onset === true);
+}
+
+// Probabilistic spawn count for `perFrame` items at this frame's dt: 0.3 per
+// frame at 144 Hz still averages right instead of rounding to nothing.
+function npv2Spawn(perFrame, S) {
+    const n = Math.max(0, perFrame) * npv2F(S);
+    const whole = Math.floor(n);
+    return whole + (Math.random() < n - whole ? 1 : 0);
+}
+
+// Oscilloscope trace: trigger on the first rising zero crossing (with a
+// little hysteresis, so noise can't trigger it) like a real scope, so the
+// wave stands still frame to frame, then resample half the window into
+// `out` as -1..1. Pure.
+function npv2ScopeTrace(src, out) {
+    const n = src ? src.length : 0;
+    if (!n) { out.fill(0); return out; }
+    const half = Math.max(2, Math.floor(n / 2));
+    let start = 0, armed = false;
+    for (let i = 0; i < half; i++) {
+        if (src[i] < 124) armed = true;
+        else if (armed && src[i] >= 128) { start = i; break; }
+    }
+    const span = Math.min(n - start, half);
+    for (let p = 0; p < out.length; p++) {
+        const idx = start + Math.floor((p * span) / out.length);
+        out[p] = (src[Math.min(n - 1, idx)] - 128) / 128;
+    }
+    return out;
+}
+
+// Soft layers at low resolution. Clouds, blobs and glows are blurry by design,
+// so drawing them at a third of the size and scaling up looks the same and
+// costs ~10x less fill. Falls back to drawing straight onto ctx when no
+// offscreen canvas exists (tests, ancient browsers).
+const NPV2_SOFT = {};
+
+function npv2Soft(ctx, w, h, scale, key, draw, mode) {
+    let buf = NPV2_SOFT[key];
+    if (buf === undefined) {
+        buf = null;
+        try {
+            if (typeof document !== 'undefined' && document.createElement) {
+                const c = document.createElement('canvas');
+                const cx = c.getContext && c.getContext('2d');
+                if (cx) buf = { c, ctx: cx };
+            }
+        } catch (e) { buf = null; }
+        NPV2_SOFT[key] = buf;
+    }
+    if (!buf || typeof ctx.drawImage !== 'function') { draw(ctx, w, h); return; }
+    const bw = Math.max(2, Math.round(w * scale)), bh = Math.max(2, Math.round(h * scale));
+    if (buf.c.width !== bw || buf.c.height !== bh) { buf.c.width = bw; buf.c.height = bh; }
+    buf.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    buf.ctx.globalCompositeOperation = 'source-over';
+    buf.ctx.globalAlpha = 1;
+    buf.ctx.clearRect(0, 0, bw, bh);
+    draw(buf.ctx, bw, bh);
+    ctx.save();
+    if (mode) ctx.globalCompositeOperation = mode;
+    // bilinear is plenty for content that is blurry by design; 'high'
+    // resampling cost more than the gradients it replaced
+    ctx.imageSmoothingEnabled = true;
+    try { ctx.imageSmoothingQuality = 'low'; } catch (e) {}
+    ctx.drawImage(buf.c, 0, 0, w, h);
+    ctx.restore();
+}
+
+// Real persistence (MilkDrop-style feedback): themes listed here see the
+// previous frame drawn back under the new one, faded by `keep` (per 60 fps
+// frame) and nudged by `zoom` / `spin`, so motion leaves genuine trails
+// instead of faked echo copies.
+const NPV2_TRAILS = {
+    scope: { keep: 0.80 },
+    spikes: { keep: 0.70, zoom: 0.012, spin: 0.003 },
+    warp: { keep: 0.74, zoom: 0.02 },
+    fountain: { keep: 0.68 },
+    bloom: { keep: 0.70, zoom: 0.008 },
+    tunnel: { keep: 0.55, zoom: 0.03 },
+};
+
 const NPV2_PAINT = {
     // --- WMP Bars: mirrored bars firing from the center line ----------------
     barscope(ctx, w, h, S) {
@@ -465,7 +564,7 @@ const NPV2_PAINT = {
         const bw = w / N;
         for (let i = 0; i < N; i++) {
             const v = npv2BinS(S, 'barscope', i, N);
-            st.peaks[i] = Math.max(v, st.peaks[i] - 0.008);
+            st.peaks[i] = Math.max(v, st.peaks[i] - 0.008 * npv2F(S));
             const bh = Math.max(2, v * maxH);
             const x = i * bw + bw * 0.18;
             const ww = bw * 0.64;
@@ -504,11 +603,15 @@ const NPV2_PAINT = {
     },
 
     // --- WMP Scope: phosphor waveform ---------------------------------------
+    // A real oscilloscope: the whole 2048-sample window, triggered on a rising
+    // zero crossing so the wave stands still, resampled to a smooth trace.
+    // The afterglow is real persistence (NPV2_TRAILS), not shifted copies.
     scope(ctx, w, h, S) {
         const cy = h * 0.52;
         const beat = npv2BeatAmp(S);
-        const st = npv2ThemeState('scope', () => ({ gain: 1 }));
-        ctx.fillStyle = 'rgba(2,6,4,0.55)';
+        const st = npv2ThemeState('scope', () => ({ gain: 1, pts: null }));
+        // light backdrop: the trail system fades the old trace underneath
+        ctx.fillStyle = 'rgba(2,6,4,0.30)';
         ctx.fillRect(0, 0, w, h);
         ctx.strokeStyle = 'rgba(255,255,255,0.05)';
         ctx.lineWidth = 1;
@@ -524,27 +627,22 @@ const NPV2_PAINT = {
             ctx.moveTo(tx, ty + tk * sy); ctx.lineTo(tx, ty); ctx.lineTo(tx + tk * sx, ty);
             ctx.stroke();
         });
-        const n = S.wave.length;
-        // phosphor persistence: the runtime clears each frame, so echo the
-        // trace at small time offsets instead — reads as glowing afterglow
+        const src = (S.waveFull && S.waveFull.length > 64) ? S.waveFull : S.wave;
+        const n = Math.max(64, Math.round(384 * npv2Q(S)));
+        if (!st.pts || st.pts.length !== n) st.pts = new Float32Array(n);
+        npv2ScopeTrace(src, st.pts);
         // auto-gain: normalize to the observed peak so the trace always
-        // fills the scope face, quiet track or loud — like a real scope.
+        // fills the scope face, quiet track or loud, like a real scope
         let peak = 0;
-        for (let pi = 0; pi < n; pi += 4) {
-            const d = Math.abs(S.wave[pi] / 255 - 0.5);
-            if (d > peak) peak = d;
-        }
-        const want = (0.72 + S.energy * 0.28) / Math.max(peak * 2, 0.12);
-        const tgt = Math.min(want, 6);
-        st.gain += (tgt - st.gain) * (tgt > st.gain ? 0.25 : 0.04);
-        const trace = (ampScale, alpha, width, glow, xOff) => {
+        for (let i = 0; i < n; i++) { const d = Math.abs(st.pts[i]); if (d > peak) peak = d; }
+        const tgt = Math.min((0.72 + S.energy * 0.28) / Math.max(peak * 2, 0.12), 6);
+        st.gain += (tgt - st.gain) * npv2Ease(tgt > st.gain ? 0.25 : 0.04, S);
+        const amp = h * 0.30 * st.gain;
+        const trace = (alpha, width, glow) => {
             ctx.beginPath();
             for (let i = 0; i < n; i++) {
-                const x = (i / (n - 1)) * w + (xOff || 0);
-                const a = S.wave[Math.max(0, i - 1)] / 255 - 0.5;
-                const b = S.wave[i] / 255 - 0.5;
-                const c = S.wave[Math.min(n - 1, i + 1)] / 255 - 0.5;
-                const y = cy - ((a + b * 2 + c) / 4) * 2 * h * 0.30 * ampScale * st.gain;
+                const x = (i / (n - 1)) * w;
+                const y = cy - st.pts[i] * amp;
                 if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
             }
             ctx.strokeStyle = npv2Css(S, alpha);
@@ -555,12 +653,11 @@ const NPV2_PAINT = {
             ctx.stroke();
             ctx.shadowBlur = 0;
         };
-        trace(1, 0.14, 7, 0, 0);                    // soft phosphor halo
-        trace(0.985, 0.22, 3.5, 0, -5);             // afterglow echo, one frame back
-        trace(0.97, 0.10, 5, 0, -11);              // afterglow echo, two frames back
-        trace(1, 0.85, 2, 16, 0);                  // hot core with bloom
-        trace(1.35, 0.20, 1, 0, 0);                 // faint overtone shimmer
-        // beat tick: a bright dot riding the trace start
+        trace(0.16, 8, 0);                          // soft phosphor halo
+        trace(0.9, 2, 14 + beat * 10);              // hot core with bloom
+        ctx.strokeStyle = 'rgba(255,255,255,' + (0.35 + beat * 0.4).toFixed(3) + ')';
+        ctx.lineWidth = 0.8;
+        ctx.stroke();                               // white-hot filament on the core
         if (beat > 0.05) {
             ctx.fillStyle = 'rgba(255,255,255,' + (beat * 0.8).toFixed(3) + ')';
             ctx.beginPath(); ctx.arc(6, cy, 2 + beat * 3, 0, 6.2832); ctx.fill();
@@ -632,45 +729,53 @@ const NPV2_PAINT = {
         const beat = npv2BeatAmp(S);
         ctx.fillStyle = '#04040c';
         ctx.fillRect(0, 0, w, h);
-        ctx.globalCompositeOperation = 'lighter';
         const R = Math.max(w, h) * 0.30;
-        ctx.save();
-        ctx.translate(w / 2, h / 2);
-        ctx.rotate(Math.sin(S.t * 0.05) * 0.35);
-        ctx.translate(-w / 2, -h / 2);
-        st.seeds.forEach((sd, i) => {
-            const accent = i % 3 === 2;
+        // blob positions first (full-res coordinates), shared by the soft
+        // layer and the filaments
+        const blobs = st.seeds.map((sd, i) => {
             const sp = 0.22 + i * 0.06;
             const x = w / 2 + Math.cos(S.t * sp + sd * 2.1) * w * 0.30 * (0.5 + S.energy * 0.7);
             const y = h / 2 + Math.sin(S.t * sp * 1.3 + sd * 3.7) * h * 0.28;
             const r = R * (0.55 + 0.45 * npv2BinS(S, 'plasma', Math.min(i * 5, 31), 32) + S.energy * 0.25) * (1 + beat * 0.35);
-            // elliptical + slowly turning: blobs feel like fluid, not circles
-            const rx = r * (1 + 0.28 * Math.sin(S.t * 0.6 + sd * 4));
-            const ry = r * (1 - 0.22 * Math.sin(S.t * 0.6 + sd * 4));
-            const tilt = Math.sin(S.t * 0.3 + sd) * 0.8;
-            const col = accent ? npv2Css2(S, 0.30) : npv2Css(S, 0.34);
-            const clear = accent ? npv2Css2(S, 0) : npv2Css(S, 0);
-            ctx.save();
-            ctx.translate(x, y);
-            ctx.rotate(tilt);
-            ctx.scale(rx / r, ry / r);
-            // soft halo
-            const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
-            g.addColorStop(0, col);
-            g.addColorStop(1, clear);
-            ctx.fillStyle = g;
-            ctx.beginPath(); ctx.arc(0, 0, r, 0, 6.2832); ctx.fill();
-            // hot core: tight, brighter — this is what reads as plasma
-            const core = accent ? npv2Css2(S, 0.55 + beat * 0.3) : npv2Css(S, 0.55 + beat * 0.3);
-            const coreClear = accent ? npv2Css2(S, 0) : npv2Css(S, 0);
-            const cg = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 0.38);
-            cg.addColorStop(0, core);
-            cg.addColorStop(1, coreClear);
-            ctx.fillStyle = cg;
-            ctx.beginPath(); ctx.arc(0, 0, r * 0.38, 0, 6.2832); ctx.fill();
-            ctx.restore();
             st['p' + i] = { x, y };
+            return { sd, i, x, y, r, accent: i % 3 === 2 };
         });
+        const rotA = Math.sin(S.t * 0.05) * 0.35;
+        // the blobs are pure glow: draw them at a third of the size
+        npv2Soft(ctx, w, h, 0.34, 'plasma', (c, sw, sh) => {
+            const k = sw / w;
+            c.globalCompositeOperation = 'lighter';
+            c.translate(sw / 2, sh / 2); c.rotate(rotA); c.translate(-sw / 2, -sh / 2);
+            for (const bl of blobs) {
+                const r = bl.r * k;
+                const rx = r * (1 + 0.28 * Math.sin(S.t * 0.6 + bl.sd * 4));
+                const ry = r * (1 - 0.22 * Math.sin(S.t * 0.6 + bl.sd * 4));
+                const tilt = Math.sin(S.t * 0.3 + bl.sd) * 0.8;
+                const col = bl.accent ? npv2Css2(S, 0.30) : npv2Css(S, 0.34);
+                const clear = bl.accent ? npv2Css2(S, 0) : npv2Css(S, 0);
+                c.save();
+                c.translate(bl.x * k, bl.y * k);
+                c.rotate(tilt);
+                c.scale(rx / r, ry / r);
+                const g = c.createRadialGradient(0, 0, 0, 0, 0, r);
+                g.addColorStop(0, col);
+                g.addColorStop(1, clear);
+                c.fillStyle = g;
+                c.beginPath(); c.arc(0, 0, r, 0, 6.2832); c.fill();
+                const core = bl.accent ? npv2Css2(S, 0.55 + beat * 0.3) : npv2Css(S, 0.55 + beat * 0.3);
+                const cg = c.createRadialGradient(0, 0, 0, 0, 0, r * 0.38);
+                cg.addColorStop(0, core);
+                cg.addColorStop(1, clear);
+                c.fillStyle = cg;
+                c.beginPath(); c.arc(0, 0, r * 0.38, 0, 6.2832); c.fill();
+                c.restore();
+            }
+        }, 'lighter');
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.save();
+        ctx.translate(w / 2, h / 2);
+        ctx.rotate(rotA);
+        ctx.translate(-w / 2, -h / 2);
         // electric filaments between near neighbors — curved arcs that bow
         // and breathe; straight lines read as a constellation, not plasma
         ctx.lineWidth = 1.2;
@@ -693,14 +798,14 @@ const NPV2_PAINT = {
         }
         ctx.restore();
         // bright sparks orbiting the blob field — tiny, fast, alive
-        if (st.sparks.length < 14 && Math.random() < 0.10 + S.energy * 0.15) {
+        if (st.sparks.length < 14 && npv2Spawn(0.10 + S.energy * 0.15, S) > 0) {
             const a = Math.random() * 6.2832;
             st.sparks.push({ a, r: Math.max(w, h) * (0.18 + Math.random() * 0.22), sp: 0.6 + Math.random() * 1.4, life: 1 });
         }
         for (let i = st.sparks.length - 1; i >= 0; i--) {
             const sp = st.sparks[i];
-            sp.a += sp.sp * 0.016;
-            sp.life -= 0.012;
+            sp.a += sp.sp * 0.016 * npv2F(S);
+            sp.life -= 0.012 * npv2F(S);
             if (sp.life <= 0) { st.sparks.splice(i, 1); continue; }
             const sx = w / 2 + Math.cos(sp.a) * sp.r;
             const sy = h / 2 + Math.sin(sp.a) * sp.r * 0.8;
@@ -815,13 +920,13 @@ const NPV2_PAINT = {
             ctx.beginPath(); ctx.arc(s.x * w, s.y * h, s.r, 0, 6.2832); ctx.fill();
         }
         // occasional shooting star
-        st.nextShoot -= 0.016;
+        st.nextShoot -= 0.016 * npv2F(S);
         if (st.nextShoot <= 0 && st.shoot <= 0) {
             st.shoot = 1; st.shootX = Math.random() * w * 0.7 + w * 0.15; st.shootY = Math.random() * h * 0.25;
             st.nextShoot = 5 + Math.random() * 8;
         }
         if (st.shoot > 0) {
-            st.shoot -= 0.03;
+            st.shoot -= 0.03 * npv2F(S);
             const sx = st.shootX + (1 - st.shoot) * w * 0.18;
             const sy = st.shootY + (1 - st.shoot) * h * 0.10;
             const tg = ctx.createLinearGradient(sx, sy, sx - w * 0.12, sy - h * 0.07);
@@ -935,12 +1040,13 @@ const NPV2_PAINT = {
         wash(0.25 + 0.1 * Math.sin(S.t * 0.05), 0.35, 0.55, false, (0.10 + S.energy * 0.08).toFixed(3));
         wash(0.75 + 0.1 * Math.cos(S.t * 0.04), 0.65, 0.6, true, (0.08 + S.energy * 0.07).toFixed(3));
         // beat shockwave
-        if (beat > 0.85 && st.rings.length < 3) {
+        const f = npv2F(S);
+        if (npv2Onset(S) && st.rings.length < 3) {
             st.rings.push({ r: 20, x: 0.3 + Math.random() * 0.4, y: 0.3 + Math.random() * 0.4 });
         }
         for (let i = st.rings.length - 1; i >= 0; i--) {
             const rg = st.rings[i];
-            rg.r += 9 * q;
+            rg.r += 9 * q * f;
             const a = Math.max(0, 0.5 - rg.r / (Math.max(w, h) * 0.6));
             if (a <= 0) { st.rings.splice(i, 1); continue; }
             ctx.strokeStyle = npv2Css(S, a.toFixed(3));
@@ -948,7 +1054,7 @@ const NPV2_PAINT = {
             ctx.beginPath(); ctx.arc(rg.x * w, rg.y * h, rg.r, 0, 6.2832); ctx.stroke();
         }
         for (const p of st.ps) {
-            const sp = (1 + S.energy * 3 + beat * 5) * p.depth;
+            const sp = (1 + S.energy * 3 + beat * 5) * p.depth * f;
             p.x = (p.x + p.vx * sp + 1) % 1;
             p.y = (p.y + p.vy * sp + 1) % 1;
             const tw = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(S.t * 2 * p.depth + p.p));
@@ -976,7 +1082,7 @@ const NPV2_PAINT = {
         }
         // comets: bright heads with fading trails, born on strong beats —
         // plus a slow ambient one so the trail system shows in quiet passages
-        st.idleComet -= 0.016;
+        st.idleComet -= 0.016 * f;
         if (st.idleComet <= 0 && st.comets.length < 2) {
             const p = st.ps[Math.floor(Math.random() * st.ps.length)];
             const sp = 0.004 + Math.random() * 0.004;
@@ -984,7 +1090,7 @@ const NPV2_PAINT = {
             st.comets.push({ x: p.x, y: p.y, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, life: 1 });
             st.idleComet = 9 + Math.random() * 6;
         }
-        if (beat > 0.7 && st.comets.length < 4 && Math.random() < 0.3) {
+        if (npv2Onset(S) && st.comets.length < 4 && Math.random() < 0.6) {
             const p = st.ps[Math.floor(Math.random() * st.ps.length)];
             const sp = 0.006 + Math.random() * 0.008;
             const ang = Math.random() * 6.2832;
@@ -992,9 +1098,9 @@ const NPV2_PAINT = {
         }
         for (let i = st.comets.length - 1; i >= 0; i--) {
             const c = st.comets[i];
-            c.x = (c.x + c.vx + 1) % 1;
-            c.y = (c.y + c.vy + 1) % 1;
-            c.life -= 0.014;
+            c.x = (c.x + c.vx * f + 1) % 1;
+            c.y = (c.y + c.vy * f + 1) % 1;
+            c.life -= 0.014 * f;
             if (c.life <= 0) { st.comets.splice(i, 1); continue; }
             for (let k = 0; k < 7; k++) {
                 const tx = (((c.x - c.vx * k * 2) % 1) + 1) % 1;
@@ -1022,8 +1128,8 @@ const NPV2_PAINT = {
         const R = Math.min(w, h) * 0.34;
         const st = npv2ThemeState('vinyl', () => ({ rot: 0 }));
         const beat = npv2BeatAmp(S);
-        if (!S.idle) st.rot += 0.008 + S.energy * 0.014;
-        else st.rot += 0.002;
+        if (!S.idle) st.rot += (0.008 + S.energy * 0.014) * npv2F(S);
+        else st.rot += 0.002 * npv2F(S);
         // drop shadow
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         ctx.beginPath(); ctx.ellipse(cx, cy + R * 1.02, R * 1.02, R * 0.12, 0, 0, 6.2832); ctx.fill();
@@ -1067,17 +1173,35 @@ const NPV2_PAINT = {
         ctx.strokeStyle = 'rgba(255,255,255,0.08)';
         ctx.lineWidth = Math.max(2, R * 0.02);
         ctx.beginPath(); ctx.arc(cx, cy, R * 0.345, 0, 6.2832); ctx.stroke();
-        // label: palette disc, dark ring, initial
-        ctx.fillStyle = npv2Css(S, 0.92);
-        ctx.beginPath(); ctx.arc(cx, cy, R * 0.32, 0, 6.2832); ctx.fill();
+        // label: the actual album cover, spinning with the record. falls back
+        // to a palette disc + the title's initial while the art loads
+        const LR = R * 0.32;
+        const art = S.art;
+        if (art && typeof ctx.drawImage === 'function') {
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(st.rot);
+            ctx.beginPath(); ctx.arc(0, 0, LR, 0, 6.2832); ctx.clip();
+            ctx.drawImage(art, -LR, -LR, LR * 2, LR * 2);
+            // pressed-paper sheen so it sits ON the wax, not over it
+            const sheen = ctx.createRadialGradient(-LR * 0.3, -LR * 0.35, 0, 0, 0, LR);
+            sheen.addColorStop(0, 'rgba(255,255,255,0.10)');
+            sheen.addColorStop(1, 'rgba(0,0,0,0.28)');
+            ctx.fillStyle = sheen;
+            ctx.fillRect(-LR, -LR, LR * 2, LR * 2);
+            ctx.restore();
+        } else {
+            ctx.fillStyle = npv2Css(S, 0.92);
+            ctx.beginPath(); ctx.arc(cx, cy, LR, 0, 6.2832); ctx.fill();
+            ctx.fillStyle = 'rgba(0,0,0,0.78)';
+            ctx.font = '700 ' + Math.round(R * 0.22) + 'px system-ui, sans-serif';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            const initial = (S.title || '♪').trim().charAt(0).toUpperCase() || '♪';
+            ctx.fillText(initial, cx, cy + 1);
+        }
         ctx.strokeStyle = 'rgba(0,0,0,0.35)';
         ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(cx, cy, R * 0.32, 0, 6.2832); ctx.stroke();
-        ctx.fillStyle = 'rgba(0,0,0,0.78)';
-        ctx.font = '700 ' + Math.round(R * 0.22) + 'px system-ui, sans-serif';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        const initial = (S.title || '♪').trim().charAt(0).toUpperCase() || '♪';
-        ctx.fillText(initial, cx, cy + 1);
+        ctx.beginPath(); ctx.arc(cx, cy, LR, 0, 6.2832); ctx.stroke();
         // spindle
         ctx.fillStyle = '#d8d8d8';
         ctx.beginPath(); ctx.arc(cx, cy, R * 0.035, 0, 6.2832); ctx.fill();
@@ -1113,8 +1237,10 @@ const NPV2_PAINT = {
         const cx = w / 2, cy = h / 2;
         const st = npv2ThemeState('tunnel', () => ({ z: 0, streaks: [] }));
         const beat = npv2BeatAmp(S);
-        st.z = (st.z + 0.012 + S.energy * 0.03 + beat * 0.05) % 1;
-        ctx.fillStyle = '#020208';
+        const f = npv2F(S);
+        st.z = (st.z + (0.012 + S.energy * 0.03 + beat * 0.05) * f) % 1;
+        // translucent: the trail feedback (NPV2_TRAILS) streaks the rings outward
+        ctx.fillStyle = 'rgba(2,2,8,0.62)';
         ctx.fillRect(0, 0, w, h);
         // core glow the rings fly out of
         const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(w, h) * 0.16);
@@ -1129,7 +1255,7 @@ const NPV2_PAINT = {
             const rad = Math.pow(z, 2.2) * Math.min(w, h) * 0.52 + 8;
             const alpha = Math.pow(z, 1.6) * 0.85;
             for (let sgi = 0; sgi < SEGS; sgi++) {
-                const v = npv2Bin(S, sgi, SEGS);
+                const v = npv2BinS(S, 'tunnel', sgi, SEGS);
                 const a0 = (sgi / SEGS) * 6.2832 + S.t * 0.05 * z;
                 const a1 = ((sgi + 0.72) / SEGS) * 6.2832 + S.t * 0.05 * z;
                 const rr = rad * (0.92 + v * 0.35);
@@ -1144,13 +1270,14 @@ const NPV2_PAINT = {
             }
         }
         // speed streaks: bright radial lines rushing toward the viewer
-        if ((beat > 0.55 || Math.random() < 0.06 + S.energy * 0.10) && st.streaks.length < 26) {
+        let born = npv2Spawn(0.06 + S.energy * 0.10, S) + (npv2Onset(S) ? 6 : 0);
+        while (born-- > 0 && st.streaks.length < 26) {
             st.streaks.push({ a: Math.random() * 6.2832, z: 0.02, sp: 0.05 + Math.random() * 0.06 });
         }
         ctx.lineCap = 'round';
         for (let i = st.streaks.length - 1; i >= 0; i--) {
             const sk = st.streaks[i];
-            sk.z += sk.sp * (0.5 + S.energy);
+            sk.z += sk.sp * (0.5 + S.energy) * f;
             if (sk.z >= 1) { st.streaks.splice(i, 1); continue; }
             const r0 = Math.pow(sk.z, 2.2) * Math.min(w, h) * 0.52 + 8;
             const r1 = Math.pow(Math.min(1, sk.z + 0.09), 2.2) * Math.min(w, h) * 0.52 + 8;
@@ -1198,7 +1325,8 @@ const NPV2_PAINT = {
         }
         ctx.restore();
         // rising sparks, two depth layers
-        const spawn = Math.round((4 + Math.floor(S.energy * 10) + (beat > 0.7 ? 30 : 0)) * q);
+        const f = npv2F(S);
+        const spawn = npv2Spawn((4 + Math.floor(S.energy * 10)) * q, S) + (npv2Onset(S) ? Math.round(160 * q) : 0);
         for (let i = 0; i < spawn; i++) {
             if (st.parts.length > Math.round(460 * q)) break;
             const far = Math.random() < 0.45;
@@ -1217,9 +1345,9 @@ const NPV2_PAINT = {
         }
         for (let i = st.parts.length - 1; i >= 0; i--) {
             const p = st.parts[i];
-            p.x += p.vx + Math.sin(S.t * 2.6 + p.ph + p.y * 0.008) * 0.7;
-            p.y += p.vy * 0.016;
-            p.life -= p.decay * (1 + S.energy * 2);
+            p.x += (p.vx + Math.sin(S.t * 2.6 + p.ph + p.y * 0.008) * 0.7) * f;
+            p.y += p.vy * 0.016 * f;
+            p.life -= p.decay * (1 + S.energy * 2) * f;
             if (p.life <= 0 || p.y < -12) { st.parts.splice(i, 1); continue; }
             const a = Math.min(1, p.life * 1.5) * (p.far ? 0.45 : 1);
             // ember ramp: white-hot core -> accent -> palette as it cools
@@ -1253,12 +1381,12 @@ const NPV2_PAINT = {
         }
         // electric arcs: jagged discharge rising from the horizon — on hard
         // beats, plus a slow ambient one so the sky isn't empty in quiet parts
-        st.idleArc -= 0.016;
+        st.idleArc -= 0.016 * f;
         if (st.idleArc <= 0 && st.arcs.length < 2) {
             st.idleArc = 8 + Math.random() * 6;
             st.arcs.push({ pts: null, life: 1, ambient: true });
         }
-        if (beat > 0.72 && st.arcs.length < 4) {
+        if (npv2Onset(S) && st.arcs.length < 4) {
             st.arcs.push({ pts: null, life: 1, ambient: false });
         }
         for (let i = st.arcs.length - 1; i >= 0; i--) {
@@ -1279,7 +1407,7 @@ const NPV2_PAINT = {
         ctx.lineWidth = Math.max(1, w * 0.0016);
         for (let i = st.arcs.length - 1; i >= 0; i--) {
             const arc = st.arcs[i];
-            arc.life -= 0.09;
+            arc.life -= 0.09 * f;
             if (arc.life <= 0) { st.arcs.splice(i, 1); continue; }
             ctx.strokeStyle = 'rgba(255,255,255,' + (arc.life * 0.85).toFixed(3) + ')';
             ctx.beginPath();
@@ -1310,6 +1438,19 @@ const NPV2_PAINT = {
         const cols = 28, rows = 16;
         const cw = w / cols;
         const beat = npv2BeatAmp(S);
+        // a real 3D spectrogram: the near row is now, each row behind it is
+        // a moment earlier, so the music scrolls away into the distance
+        const hst = npv2ThemeState('dotplane-hist', () => ({ rows: [], acc: 0 }));
+        const now = new Float32Array(cols);
+        for (let gx = 0; gx < cols; gx++) now[gx] = npv2BinS(S, 'dotplane', gx, cols);
+        hst.acc += (S && typeof S.dt === 'number' && S.dt > 0) ? S.dt : 0.016;
+        if (!hst.rows.length || hst.acc >= 0.06) {
+            hst.acc = 0;
+            hst.rows.unshift(now);
+            if (hst.rows.length > rows) hst.rows.length = rows;
+        } else {
+            hst.rows[0] = now;
+        }
         ctx.fillStyle = '#040409';
         ctx.fillRect(0, 0, w, h);
         // floor glow under the horizon
@@ -1329,7 +1470,8 @@ const NPV2_PAINT = {
             const sc = 0.22 + 0.78 * Math.pow(p, 1.6);   // perspective scale
             const maxR = Math.min(cw, h / rows) * 0.42 * sc;
             for (let gx = 0; gx < cols; gx++) {
-                const v = npv2BinS(S, 'dotplane', gx, cols);
+                const rowNow = hst.rows[Math.min(hst.rows.length - 1, rows - 1 - gy)];
+                const v = rowNow ? rowNow[gx] : 0;
                 // far columns converge toward center for the perspective read
                 const x = bcx + (gx * cw + cw / 2 - bcx) * (0.45 + 0.55 * p);
                 // beat wavefront radiating from the center, in depth space
@@ -1362,8 +1504,10 @@ const NPV2_PAINT = {
         const blobs = Math.max(4, Math.round(7 * npv2Q(S)));
         ctx.fillStyle = 'rgba(3,5,12,0.35)';
         ctx.fillRect(0, 0, w, h);
-        ctx.globalCompositeOperation = 'lighter';
         const pts = [];
+        npv2Soft(ctx, w, h, 0.34, 'alchemy', (c, sw) => {
+        const k = sw / w;
+        c.globalCompositeOperation = 'lighter';
         for (let i = 0; i < blobs; i++) {
             const accent = i % 3 === 2;
             const v = npv2BinS(S, 'alchemy', i, blobs);
@@ -1373,14 +1517,14 @@ const NPV2_PAINT = {
             const r = Math.min(w, h) * (0.10 + v * 0.22 + S.energy * 0.06) * (1 + beat * 0.3);
             pts.push({ x, y, r, accent });
             const pal = accent ? npv2Pal2(S) : (S && S.pal);
-            const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+            const g = c.createRadialGradient(x * k, y * k, 0, x * k, y * k, r * k);
             g.addColorStop(0, npv2PalA(pal, 0.5));
             g.addColorStop(0.6, npv2PalA(pal, 0.2));
             g.addColorStop(1, npv2PalA(pal, 0));
-            ctx.fillStyle = g;
-            ctx.beginPath();
-            ctx.arc(x, y, r, 0, 6.2832);
-            ctx.fill();
+            c.fillStyle = g;
+            c.beginPath();
+            c.arc(x * k, y * k, r * k, 0, 6.2832);
+            c.fill();
         }
         // bridges: soft glows where blobs near each other, so they read as
         // one merging fluid instead of separate circles
@@ -1394,14 +1538,14 @@ const NPV2_PAINT = {
                 const mr = Math.min(a.r, b.r) * 0.7 * (1 - d / touch * 0.5);
                 const pal = (a.accent || b.accent) ? npv2Pal2(S) : (S && S.pal);
                 const al = 0.35 * (1 - d / touch);
-                const bg = ctx.createRadialGradient(mx, my, 0, mx, my, mr);
+                const bg = c.createRadialGradient(mx * k, my * k, 0, mx * k, my * k, mr * k);
                 bg.addColorStop(0, npv2PalA(pal, al.toFixed(3)));
                 bg.addColorStop(1, npv2PalA(pal, 0));
-                ctx.fillStyle = bg;
-                ctx.beginPath(); ctx.arc(mx, my, mr, 0, 6.2832); ctx.fill();
+                c.fillStyle = bg;
+                c.beginPath(); c.arc(mx * k, my * k, mr * k, 0, 6.2832); c.fill();
             }
         }
-        ctx.globalCompositeOperation = 'source-over';
+        }, 'lighter');
     },
 
     // --- Particle fountain: beat-fed spray from the bottom ------------------------
@@ -1411,7 +1555,8 @@ const NPV2_PAINT = {
         const beat = npv2BeatAmp(S);
         const bass = npv2Bin(S, 0, 8) * 0.6 + npv2Bin(S, 1, 8) * 0.4;
         const cx = w / 2;
-        const spawn = Math.round((2 + Math.floor(bass * 10) + (beat > 0.6 ? 26 : 0)) * q);
+        const f = npv2F(S);
+        const spawn = npv2Spawn((2 + Math.floor(bass * 10)) * q, S) + (npv2Onset(S) ? Math.round(160 * q) : 0);
         for (let i = 0; i < spawn && st.parts.length < Math.round(700 * q); i++) {
             const ang = -Math.PI / 2 + (Math.random() - 0.5) * 1.15;
             // velocity tuned so the spray crests around mid-screen even in
@@ -1436,11 +1581,12 @@ const NPV2_PAINT = {
         for (let i = st.parts.length - 1; i >= 0; i--) {
             const p = st.parts[i];
             p.px = p.x; p.py = p.y;
-            p.vy += h * 0.9 * 0.016; // gravity
-            p.vx += Math.sin(S.t * 1.5 + p.y * 0.01) * 0.35; // wind
-            p.x += p.vx * 0.016;
-            p.y += p.vy * 0.016;
-            p.life -= p.decay;
+            const dt = 0.016 * f;
+            p.vy += h * 0.9 * dt; // gravity
+            p.vx += Math.sin(S.t * 1.5 + p.y * 0.01) * 0.35 * f; // wind
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+            p.life -= p.decay * f;
             if (p.life <= 0 || p.y > h + 10) {
                 // landing splash: two quick horizontal sparks
                 if (p.y > h * 0.88 && st.sparks.length < 120) {
@@ -1468,9 +1614,9 @@ const NPV2_PAINT = {
         // splash sparks skitter along the floor
         for (let i = st.sparks.length - 1; i >= 0; i--) {
             const sp = st.sparks[i];
-            sp.x += sp.vx * 0.016;
-            sp.vx *= 0.96;
-            sp.life -= 0.03;
+            sp.x += sp.vx * 0.016 * f;
+            sp.vx *= Math.pow(0.96, f);
+            sp.life -= 0.03 * f;
             if (sp.life <= 0) { st.sparks.splice(i, 1); continue; }
             ctx.fillStyle = npv2Css(S, (sp.life * 0.9).toFixed(3));
             ctx.beginPath(); ctx.arc(sp.x, sp.y, 1.5, 0, 6.2832); ctx.fill();
@@ -1487,8 +1633,12 @@ const NPV2_PAINT = {
     kaleido(ctx, w, h, S) {
         const cx = w / 2, cy = h / 2;
         const beat = npv2BeatAmp(S);
-        const st = npv2ThemeState('kaleido', () => ({ dir: 1 }));
-        if (beat > 0.9) st.dir *= -1; // flip spin on hard beats
+        const st = npv2ThemeState('kaleido', () => ({ dir: 1, cool: 0 }));
+        // flip the spin on a beat, at most every 2s. it used to test
+        // beat > 0.9, true for several frames per beat, so it flipped an even
+        // number of times and mostly never visibly reversed
+        st.cool -= (S && typeof S.dt === 'number' && S.dt > 0) ? S.dt : 0.016;
+        if (npv2Onset(S) && st.cool <= 0) { st.dir *= -1; st.cool = 2; }
         const bass = npv2Bin(S, 0, 8);
         const R = Math.min(w, h) * 0.46 * (1 + bass * 0.06);
         const rot = S.t * 0.12 * st.dir;
@@ -1624,7 +1774,7 @@ const NPV2_PAINT = {
             return [cx + zx * k * cx, cy + zy * k * cy];
         };
         for (const s of st.stars) {
-            s.z -= speed * (0.4 + s.z);
+            s.z -= speed * (0.4 + s.z) * npv2F(S);
             if (s.z <= 0.02) { s.x = Math.random() * 2 - 1; s.y = Math.random() * 2 - 1; s.z = 1; }
             const [sx, sy] = proj(s.x, s.y, s.z);
             const [px, py] = proj(s.x, s.y, s.z + speed * 3);
@@ -1642,15 +1792,15 @@ const NPV2_PAINT = {
             ctx.stroke();
         }
         // jump streaks: on hard beats a few stars punch through extra long
-        if (beat > 0.8 && st.jumps.length < 7) {
+        if (npv2Onset(S) && st.jumps.length < 7) {
             for (let k = 0; k < 3; k++) {
                 st.jumps.push({ a: Math.random() * 6.2832, z: 0.25 + Math.random() * 0.3, life: 1 });
             }
         }
         for (let i = st.jumps.length - 1; i >= 0; i--) {
             const j = st.jumps[i];
-            j.z -= 0.05;
-            j.life -= 0.05;
+            j.z -= 0.05 * npv2F(S);
+            j.life -= 0.05 * npv2F(S);
             if (j.z <= 0.03 || j.life <= 0) { st.jumps.splice(i, 1); continue; }
             const r0 = (1 / j.z) * Math.min(w, h) * 0.5;
             const r1 = (1 / Math.min(1, j.z + 0.25)) * Math.min(w, h) * 0.5;
@@ -1688,24 +1838,27 @@ const NPV2_PAINT = {
             { n: 7, sp: 0.09, al: 0.30, sz: 0.30, accent: false },
             { n: 9, sp: 0.14, al: 0.24, sz: 0.20, accent: true },
         ];
-        for (const L of layers) {
-            for (let i = 0; i < L.n; i++) {
-                const px = st.seed + i * 31.7 + L.sp * 57 + (L.accent ? 91 : 0);
-                const x = w * (0.5 + 0.45 * Math.sin(S.t * L.sp + px));
-                const y = h * (0.5 + 0.45 * Math.cos(S.t * L.sp * 0.8 + px * 1.7));
-                const r = Math.min(w, h) * L.sz * (0.8 + 0.4 * Math.sin(S.t * 0.3 + px)) * (1 + beat * 0.2);
-                const v = npv2Bin(S, i, L.n);
-                const pal = L.accent ? npv2Pal2(S) : (S && S.pal);
-                const aMid = (L.al * (0.6 + v) * (1 + beat * 0.8)).toFixed(3);
-                const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-                g.addColorStop(0, npv2PalA(pal, aMid));
-                g.addColorStop(1, npv2PalA(pal, 0));
-                ctx.fillStyle = g;
-                ctx.beginPath();
-                ctx.arc(x, y, r, 0, 6.2832);
-                ctx.fill();
+        // ~25 screen-sized glows: pure softness, so a third of the size
+        npv2Soft(ctx, w, h, 0.3, 'nebula', (c, sw, sh) => {
+            for (const L of layers) {
+                for (let i = 0; i < L.n; i++) {
+                    const px = st.seed + i * 31.7 + L.sp * 57 + (L.accent ? 91 : 0);
+                    const x = sw * (0.5 + 0.45 * Math.sin(S.t * L.sp + px));
+                    const y = sh * (0.5 + 0.45 * Math.cos(S.t * L.sp * 0.8 + px * 1.7));
+                    const r = Math.min(sw, sh) * L.sz * (0.8 + 0.4 * Math.sin(S.t * 0.3 + px)) * (1 + beat * 0.2);
+                    const v = npv2BinS(S, 'nebula', i, L.n);
+                    const pal = L.accent ? npv2Pal2(S) : (S && S.pal);
+                    const aMid = (L.al * (0.6 + v) * (1 + beat * 0.8)).toFixed(3);
+                    const g = c.createRadialGradient(x, y, 0, x, y, r);
+                    g.addColorStop(0, npv2PalA(pal, aMid));
+                    g.addColorStop(1, npv2PalA(pal, 0));
+                    c.fillStyle = g;
+                    c.beginPath();
+                    c.arc(x, y, r, 0, 6.2832);
+                    c.fill();
+                }
             }
-        }
+        });
         // filament wisps: short curved streams inside the clouds, drifting
         // slowly. Real nebulas are all filaments — this is the texture the
         // eye expects; kept short and bowed so they never read as scratches.
@@ -1749,7 +1902,7 @@ const NPV2_PAINT = {
             ctx.fillRect(p.x * w, p.y * h, sz, sz);
         }
         // occasional bright star with a cross sparkle
-        st.spark -= 0.016;
+        st.spark -= 0.016 * npv2F(S);
         if (st.spark <= 0) {
             st.spark = 4 + Math.random() * 7;
             st.sx = Math.random(); st.sy = Math.random() * 0.8;
@@ -1776,14 +1929,15 @@ const NPV2_PAINT = {
         const cx = w / 2, cy = h / 2;
         const beat = npv2BeatAmp(S);
         const bass = npv2Bin(S, 0, 10) * 0.7 + npv2Bin(S, 1, 10) * 0.3;
-        if (beat > 0.75 && st.rings.length < Math.round(26 * q)) {
+        const f = npv2F(S);
+        if (npv2Onset(S) && st.rings.length < Math.round(26 * q)) {
             // staggered echo: three rings per beat, petals offset
             for (let k = 0; k < 3; k++) {
                 st.rings.push({ r: 8 - k * 7, w: 3 + bass * 5, rot: Math.random() * 6.28, petals: 10 + k * 4, accent: k === 1 });
             }
         }
         // idle breathing: a soft ring every few seconds even with no beats
-        st.idleT += 0.016;
+        st.idleT += 0.016 * f;
         if (st.idleT > 2.5) {
             st.idleT = 0;
             st.rings.push({ r: 8, w: 2, rot: 0, petals: 12, accent: false, gentle: true });
@@ -1823,8 +1977,8 @@ const NPV2_PAINT = {
         }
         for (let i = st.rings.length - 1; i >= 0; i--) {
             const rg = st.rings[i];
-            rg.r += (4 + bass * 14) * 0.9 * (rg.gentle ? 0.6 : 1);
-            rg.rot += 0.004 * (i % 2 ? 1 : -1);
+            rg.r += (4 + bass * 14) * 0.9 * (rg.gentle ? 0.6 : 1) * f;
+            rg.rot += 0.004 * (i % 2 ? 1 : -1) * f;
             const a = Math.max(0, 1 - rg.r / maxR);
             if (a <= 0) { st.rings.splice(i, 1); continue; }
             const alpha = (a * (rg.gentle ? 0.45 : 0.9)).toFixed(3);
@@ -1838,7 +1992,7 @@ const NPV2_PAINT = {
                 ctx.arc(cx, cy, rg.r, a0, a0 + seg * 0.62);
                 ctx.stroke();
                 // shed sparkles off the petal tips while the ring is young
-                if (rg.r < maxR * 0.55 && Math.random() < 0.06 && st.sparks.length < 140) {
+                if (rg.r < maxR * 0.55 && Math.random() < 0.06 * f && st.sparks.length < 140) {
                     const ta = a0 + seg * 0.31;
                     const sp = 30 + Math.random() * 60;
                     st.sparks.push({
@@ -1852,9 +2006,9 @@ const NPV2_PAINT = {
         // sparkles drift outward and die
         for (let i = st.sparks.length - 1; i >= 0; i--) {
             const sp = st.sparks[i];
-            sp.x += sp.vx * 0.016; sp.y += sp.vy * 0.016;
-            sp.vx *= 0.985; sp.vy *= 0.985;
-            sp.life -= 0.014;
+            sp.x += sp.vx * 0.016 * f; sp.y += sp.vy * 0.016 * f;
+            sp.vx *= Math.pow(0.985, f); sp.vy *= Math.pow(0.985, f);
+            sp.life -= 0.014 * f;
             if (sp.life <= 0) { st.sparks.splice(i, 1); continue; }
             ctx.fillStyle = sp.accent
                 ? npv2Css2(S, (sp.life * 0.9).toFixed(3))
@@ -1897,6 +2051,12 @@ const NPV2 = {
     tab: 'queue',
     lastTrackId: '',
     palette: { r: 29, g: 185, b: 84 },
+    palette2: null,         // the cover's second color (v1 extracts it)
+    palCur: null,           // eased palette actually painted (fades on track change)
+    pal2Cur: null,
+    trail: null,            // {c, ctx, ready, theme} previous frame for NPV2_TRAILS
+    fade: null,             // {c, ctx} the last frame of the previous theme
+    fadeA: 0,               // its remaining opacity while it crossfades out
     vizRaf: 0,
     vizLast: 0,
     vizT: 0,
@@ -1951,6 +2111,10 @@ const NPV2_VIZ = {
     idle: true,
     title: '',
     beat: 0,        // 0..1 beat envelope, set from spectral flux each frame
+    onset: false,   // true only on the frame a beat fires
+    dt: 0.016,      // this frame's seconds, for frame-rate-independent motion
+    waveFull: null, // the whole 2048-sample window, for the scope
+    art: null,      // the loaded cover <img>, for the vinyl label
     pal: { r: 29, g: 185, b: 84 },
     pal2: { r: 185, g: 84, b: 29 }, // accent palette: channel-rotated
     q: 1,           // quality factor for particle counts
@@ -1969,6 +2133,7 @@ function npv2IdleSynth(S, t) {
 function npv2ReadAudio(S, t, dt) {
     if (typeof dt !== 'number' || !isFinite(dt) || dt <= 0) dt = 0.016;
     let idle = true;
+    const prevBeat = S.beat || 0;
     try {
         if (typeof npAnalyser !== 'undefined' && npAnalyser && npv2IsPlaying()) {
             const va = npv2EnsureVizAnalyser();
@@ -1983,6 +2148,8 @@ function npv2ReadAudio(S, t, dt) {
                 }
                 va.getByteFrequencyData(npv2VizRaw);
                 va.getByteTimeDomainData(S.wave);
+                if (!S.waveFull || S.waveFull.length !== NPV2_VIZ_FFT) S.waveFull = new Uint8Array(NPV2_VIZ_FFT);
+                va.getByteTimeDomainData(S.waveFull);
                 npv2MapLogBands(npv2VizRaw, npv2VizBandRanges, S.freq);
                 let sum = 0;
                 for (let i = 0; i < S.freq.length; i++) sum += S.freq[i];
@@ -2010,7 +2177,11 @@ function npv2ReadAudio(S, t, dt) {
         npv2IdleSynth(S, t);
         S.energy = 0.22;
         S.beat = Math.max(0, (S.beat || 0) - dt * 2.4);
+        S.waveFull = null; // the scope falls back to the synthesized wave
     }
+    // a beat only ever jumps up when it fires; everything else decays
+    S.onset = !idle && S.beat > prevBeat + 1e-6;
+    S.dt = dt;
     S.idle = idle;
 }
 
@@ -2048,18 +2219,112 @@ function npv2VizFrame(now) {
     // bass-threshold pass here re-fired on any steady loud bassline and
     // decayed every beat twice as fast
     S.t = NPV2.vizT;
-    // palette: album art by default, or a curated override
-    const pal = (NPV2.vizPalette !== 'auto' && NPV2_PALETTES[NPV2.vizPalette]) ? NPV2_PALETTES[NPV2.vizPalette] : NPV2.palette;
-    S.pal = pal;
-    S.pal2 = { r: pal.g, g: pal.b, b: pal.r };
+    // palette: album art by default, or a curated override. the accent is
+    // the cover's own second color when there is one. both ease toward their
+    // target over ~1s, so a new song's colors fade in instead of snapping
+    const curated = NPV2.vizPalette !== 'auto' && NPV2_PALETTES[NPV2.vizPalette];
+    const pal = curated || NPV2.palette;
+    const pal2 = (!curated && NPV2.palette2) || npv2Analogous(pal);
+    NPV2.palCur = npv2EaseColor(NPV2.palCur, pal, S);
+    NPV2.pal2Cur = npv2EaseColor(NPV2.pal2Cur, pal2, S);
+    S.pal = NPV2.palCur;
+    S.pal2 = NPV2.pal2Cur;
+    S.art = npv2ArtImage();
     // automatic theme rotation
     const ac = npv2AutocycleSeconds(NPV2.vizAutocycle);
     if (ac > 0 && NPV2.vizT - NPV2.vizLastCycle >= ac) npv2CycleTheme(true);
     const paint = NPV2_PAINT[NPV2.theme];
     ctx.clearRect(0, 0, w, h);
+    const trail = NPV2_TRAILS[NPV2.theme];
+    if (trail) npv2DrawTrail(ctx, w, h, trail, S);
     try { if (typeof paint === 'function') paint(ctx, w, h, S); } catch (e) { /* a bad frame is not a broken player */ }
+    if (trail) npv2KeepTrail(NPV2.canvas, w, h);
+    // the previous theme's last frame fades out on top of the new one
+    if (NPV2.fadeA > 0 && NPV2.fade) {
+        ctx.save();
+        ctx.globalAlpha = NPV2.fadeA;
+        ctx.drawImage(NPV2.fade.c, 0, 0, w, h);
+        ctx.restore();
+        NPV2.fadeA = Math.max(0, NPV2.fadeA - S.dt / 0.8);
+    }
     // wake-lock transition check, throttled to the frame loop
     npv2UpdateWakeLock();
+}
+
+// A palette's close neighbour (hue rotated ~35 degrees, lifted), for when
+// there is no second cover color. In harmony with the first, never the old
+// channel swap that turned a green cover's accent muddy red. Pure.
+function npv2Analogous(p) {
+    const t = (35 / 360) * 2 * Math.PI;
+    const cos = Math.cos(t), sin = Math.sin(t);
+    const k = (1 - cos) / 3, q = Math.sqrt(1 / 3) * sin;
+    const c = (v) => Math.max(0, Math.min(255, Math.round(v * 1.12 + 10)));
+    return {
+        r: c(p.r * (cos + k) + p.g * (k - q) + p.b * (k + q)),
+        g: c(p.r * (k + q) + p.g * (cos + k) + p.b * (k - q)),
+        b: c(p.r * (k - q) + p.g * (k + q) + p.b * (cos + k)),
+    };
+}
+
+// Ease a color toward its target over ~1s. Pure apart from the input.
+function npv2EaseColor(cur, target, S) {
+    if (!cur) return { r: target.r, g: target.g, b: target.b };
+    const k = npv2Ease(0.06, S);
+    return {
+        r: cur.r + (target.r - cur.r) * k,
+        g: cur.g + (target.g - cur.g) * k,
+        b: cur.b + (target.b - cur.b) * k,
+    };
+}
+
+// The theater's loaded cover image, or null while it loads / fails.
+function npv2ArtImage() {
+    try {
+        const img = document.getElementById('np-album-art');
+        return img && img.complete && img.naturalWidth > 0 && !/trans2\.png/.test(img.src || '') ? img : null;
+    } catch (e) { return null; }
+}
+
+function npv2Buffer(slot, w, h) {
+    let b = NPV2[slot];
+    if (!b) {
+        try {
+            const c = document.createElement('canvas');
+            const cx = c.getContext('2d');
+            if (!cx) return null;
+            b = { c, ctx: cx, ready: false };
+            NPV2[slot] = b;
+        } catch (e) { return null; }
+    }
+    if (b.c.width !== w || b.c.height !== h) { b.c.width = w; b.c.height = h; b.ready = false; }
+    return b;
+}
+
+function npv2DrawTrail(ctx, w, h, trail, S) {
+    const b = npv2Buffer('trail', w, h);
+    if (!b || !b.ready || b.theme !== NPV2.theme) return;
+    const f = npv2F(S);
+    ctx.save();
+    ctx.globalAlpha = Math.pow(trail.keep, f);
+    ctx.translate(w / 2, h / 2);
+    // reduce motion keeps the fade but drops the zoom / spin feedback
+    if (!NPV2.reduceMotion) {
+        const z = Math.pow(1 + (trail.zoom || 0), f);
+        ctx.scale(z, z);
+        if (trail.spin) ctx.rotate(trail.spin * f);
+    }
+    ctx.drawImage(b.c, -w / 2, -h / 2);
+    ctx.restore();
+}
+
+function npv2KeepTrail(canvas, w, h) {
+    const b = npv2Buffer('trail', w, h);
+    if (!b || !canvas) return;
+    b.ctx.globalCompositeOperation = 'copy';
+    b.ctx.drawImage(canvas, 0, 0);
+    b.ctx.globalCompositeOperation = 'source-over';
+    b.ready = true;
+    b.theme = NPV2.theme;
 }
 
 function npv2VizStart() {
@@ -2079,6 +2344,17 @@ function npv2VizStop() {
 function npv2SetTheme(id, opts) {
     const ids = npv2ThemeIds();
     const next = ids.indexOf(id) >= 0 ? id : 'aurora';
+    // crossfade: keep the outgoing theme's last frame and fade it out over
+    // the new one, instead of a hard cut
+    if (next !== NPV2.theme && NPV2.canvas && NPV2.vizRaf && NPV2.theme !== 'none') {
+        const b = npv2Buffer('fade', NPV2.canvas.width, NPV2.canvas.height);
+        if (b) {
+            b.ctx.globalCompositeOperation = 'copy';
+            b.ctx.drawImage(NPV2.canvas, 0, 0);
+            b.ctx.globalCompositeOperation = 'source-over';
+            NPV2.fadeA = 1;
+        }
+    }
     NPV2.theme = next;
     NPV2.vizLastCycle = NPV2.vizT; // autocycle restarts from a manual change
     npv2SetG('theme', next);
@@ -2430,6 +2706,10 @@ function npv2RefreshPalette() {
         const g = parseInt(cs.getPropertyValue('--np-ambient-g'), 10);
         const b = parseInt(cs.getPropertyValue('--np-ambient-b'), 10);
         if ([r, g, b].every((n) => isFinite(n))) NPV2.palette = { r, g, b };
+        const r2 = parseInt(cs.getPropertyValue('--np-ambient2-r'), 10);
+        const g2 = parseInt(cs.getPropertyValue('--np-ambient2-g'), 10);
+        const b2 = parseInt(cs.getPropertyValue('--np-ambient2-b'), 10);
+        NPV2.palette2 = [r2, g2, b2].every((n) => isFinite(n)) ? { r: r2, g: g2, b: b2 } : null;
     } catch (e) {}
 }
 

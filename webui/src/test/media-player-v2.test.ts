@@ -334,8 +334,14 @@ describe('visualization themes', () => {
       'npv2Pal2',
       'npv2Q',
       'npv2BeatAmp',
+      'npv2F',
+      'npv2Ease',
+      'npv2Onset',
+      'npv2Spawn',
+      'npv2ScopeTrace',
+      'npv2Soft',
     ],
-    ['NPV2_PAINT', 'NPV2_THEME_STATE'],
+    ['NPV2_PAINT', 'NPV2_THEME_STATE', 'NPV2_SOFT'],
   );
   const { npv2ThemeList, npv2ThemeIds, NPV2_PAINT } = lifted;
 
@@ -1259,6 +1265,8 @@ describe('smoothed spectrum bins', () => {
         extractConst('NPV2_THEME_STATE', v2),
         extractFunction('npv2ThemeState', v2),
         extractFunction('npv2Bin', v2),
+        extractFunction('npv2F', v2),
+        extractFunction('npv2Ease', v2),
         extractFunction('npv2BinS', v2),
         'return { npv2BinS };',
       ].join('\n'),
@@ -1465,6 +1473,14 @@ describe('the frame loop owns no beat logic of its own', () => {
         'const NPV2_VIZ = { freq: new Uint8Array(NPV2_VIZ_BANDS), wave: new Uint8Array(64), energy: 0, idle: true, beat: 0, pal: { r: 1, g: 2, b: 3 }, q: 1 };',
         "const NPV2 = { bgOn: true, theme: 'aurora', vizLast: 0, vizT: 0, vizEnergy: 1, reduceMotion: false, vizPalette: 'auto', palette: { r: 1, g: 2, b: 3 }, vizAutocycle: '0', vizLastCycle: 0, canvas: { width: 10, height: 10 }, ctx: { clearRect() {} } };",
         'const NPV2_PALETTES = {}; const NPV2_PAINT = {};',
+        extractConst('NPV2_TRAILS', v2),
+        extractFunction('npv2F', v2),
+        extractFunction('npv2Ease', v2),
+        extractFunction('npv2Analogous', v2),
+        extractFunction('npv2EaseColor', v2),
+        'function npv2ArtImage() { return null; }',
+        'function npv2DrawTrail() {}',
+        'function npv2KeepTrail() {}',
         'function npv2ModalOpen() { return true; }',
         'function npv2SizeCanvas() { return true; }',
         'function npv2AutocycleSeconds() { return 0; }',
@@ -1513,5 +1529,357 @@ describe('the frame loop owns no beat logic of its own', () => {
     api.npv2VizFrame(2 * (1000 / 60));
     // one decay of dt * 2.4 at 60 fps: 1 - 0.04
     expect(api.NPV2_VIZ.beat).toBeCloseTo(1 - (1 / 60) * 2.4, 3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Best-in-class pass: frame-rate independence, once-per-beat effects, a real
+// scope, spectrogram rows, the cover on the vinyl, real accent colors, trails
+// ---------------------------------------------------------------------------
+
+const PAINT_FNS = [
+  'npv2ThemeList',
+  'npv2ThemeIds',
+  'npv2ThemeState',
+  'npv2Bin',
+  'npv2BinS',
+  'npv2Css',
+  'npv2Css2',
+  'npv2PalA',
+  'npv2Pal2',
+  'npv2Q',
+  'npv2BeatAmp',
+  'npv2F',
+  'npv2Ease',
+  'npv2Onset',
+  'npv2Spawn',
+  'npv2ScopeTrace',
+  'npv2Soft',
+];
+
+function paintHarness() {
+  return v2Harness(PAINT_FNS, ['NPV2_PAINT', 'NPV2_THEME_STATE', 'NPV2_SOFT']);
+}
+
+function recordingCtx() {
+  const calls: { name: string; args: unknown[] }[] = [];
+  const grad = { addColorStop: () => {} };
+  const ctx = new Proxy(
+    {},
+    {
+      get(_t, p: string) {
+        if (p === 'createLinearGradient' || p === 'createRadialGradient') return () => grad;
+        return (...args: unknown[]) => {
+          calls.push({ name: p, args });
+        };
+      },
+      set() {
+        return true;
+      },
+    },
+  );
+  return { ctx, calls };
+}
+
+const vizFrame = (over: Record<string, unknown> = {}) => ({
+  freq: Uint8Array.from({ length: 64 }, (_, i) => (i < 8 ? 220 : 60)),
+  wave: Uint8Array.from({ length: 64 }, (_, i) => 128 + Math.round(90 * Math.sin(i / 4))),
+  energy: 0.6,
+  beat: 0,
+  onset: false,
+  dt: 1 / 60,
+  t: 1,
+  idle: false,
+  pal: { r: 120, g: 80, b: 200 },
+  pal2: { r: 80, g: 160, b: 220 },
+  ...over,
+});
+
+describe('frame-rate independence', () => {
+  it('the frame factor follows dt and defaults to one frame', () => {
+    const { npv2F, npv2Ease } = v2Harness(['npv2F', 'npv2Ease']);
+    expect(npv2F({ dt: 1 / 60 })).toBeCloseTo(1, 5);
+    expect(npv2F({ dt: 1 / 144 })).toBeCloseTo(60 / 144, 5);
+    expect(npv2F({})).toBe(1);
+    // two 120 Hz eases land where one 60 Hz ease does
+    const k60 = npv2Ease(0.2, { dt: 1 / 60 });
+    const k120 = npv2Ease(0.2, { dt: 1 / 120 });
+    expect(1 - (1 - k120) * (1 - k120)).toBeCloseTo(k60, 6);
+  });
+
+  it('smoothed bins reach the same place in one second at 60 or 144 Hz', () => {
+    const run = (hz: number) => {
+      const { npv2BinS } = paintHarness();
+      const S = { freq: new Array(64).fill(255), dt: 1 / hz };
+      let v = 0;
+      for (let i = 0; i < hz / 4; i++) v = npv2BinS(S, 'fr' + hz, 0, 8);
+      return v;
+    };
+    expect(run(144)).toBeCloseTo(run(60), 2);
+  });
+});
+
+describe('beat effects fire once per beat', () => {
+  // a beat envelope stays high for several frames; only the first is the onset
+  const beatFrames = (n: number) =>
+    Array.from({ length: n }, (_, i) => vizFrame({ beat: 1 - i * 0.04, onset: i === 0 }));
+
+  it('bloom adds its three rings once, not on every high frame', () => {
+    const { NPV2_PAINT, NPV2_THEME_STATE } = paintHarness();
+    for (const S of beatFrames(8)) NPV2_PAINT.bloom(recordingCtx().ctx, 1280, 800, S);
+    expect(NPV2_THEME_STATE.bloom.rings.filter((r: any) => !r.gentle)).toHaveLength(3);
+  });
+
+  it('warp throws three jump streaks per beat', () => {
+    const { NPV2_PAINT, NPV2_THEME_STATE } = paintHarness();
+    const [first, ...rest] = beatFrames(8);
+    NPV2_PAINT.warp(recordingCtx().ctx, 1280, 800, first);
+    expect(NPV2_THEME_STATE.warp.jumps).toHaveLength(3);
+    // the rest of the beat's high frames add none (they only age out)
+    for (const S of rest) NPV2_PAINT.warp(recordingCtx().ctx, 1280, 800, S);
+    expect(NPV2_THEME_STATE.warp.jumps.length).toBeLessThanOrEqual(3);
+  });
+
+  it('kaleidoscope flips once on a beat, then waits before flipping again', () => {
+    const { NPV2_PAINT, NPV2_THEME_STATE } = paintHarness();
+    for (const S of beatFrames(6)) NPV2_PAINT.kaleido(recordingCtx().ctx, 1280, 800, S);
+    expect(NPV2_THEME_STATE.kaleido.dir).toBe(-1);
+    // another beat half a second later is inside the cooldown
+    for (let i = 0; i < 30; i++) NPV2_PAINT.kaleido(recordingCtx().ctx, 1280, 800, vizFrame());
+    NPV2_PAINT.kaleido(recordingCtx().ctx, 1280, 800, vizFrame({ beat: 1, onset: true }));
+    expect(NPV2_THEME_STATE.kaleido.dir).toBe(-1);
+    // after the cooldown it flips back
+    for (let i = 0; i < 120; i++) NPV2_PAINT.kaleido(recordingCtx().ctx, 1280, 800, vizFrame());
+    NPV2_PAINT.kaleido(recordingCtx().ctx, 1280, 800, vizFrame({ beat: 1, onset: true }));
+    expect(NPV2_THEME_STATE.kaleido.dir).toBe(1);
+  });
+});
+
+describe('a real oscilloscope', () => {
+  const sine = (phase: number, n = 2048, period = 300) =>
+    Uint8Array.from({ length: n }, (_, i) =>
+      Math.round(128 + 100 * Math.sin(((i + phase) / period) * 2 * Math.PI)),
+    );
+
+  it('triggers on a rising zero crossing so the wave stands still', () => {
+    const { npv2ScopeTrace } = v2Harness(['npv2ScopeTrace']);
+    const a = npv2ScopeTrace(sine(0), new Float32Array(256));
+    const b = npv2ScopeTrace(sine(117), new Float32Array(256));
+    expect(Math.abs(a[0])).toBeLessThan(0.05);
+    expect(a[5]).toBeGreaterThan(a[0]); // rising
+    let diff = 0;
+    for (let i = 0; i < 256; i++) diff = Math.max(diff, Math.abs(a[i] - b[i]));
+    expect(diff).toBeLessThan(0.08); // two phases, the same picture
+  });
+
+  it('reads the whole window, not 64 samples', () => {
+    const { npv2ScopeTrace } = v2Harness(['npv2ScopeTrace']);
+    // a 300-sample period: a 64-sample slice shows a fifth of one cycle,
+    // the half window shows over three full cycles
+    const out = npv2ScopeTrace(sine(0), new Float32Array(256));
+    let crossings = 0;
+    for (let i = 1; i < out.length; i++) if (out[i - 1] < 0 && out[i] >= 0) crossings++;
+    expect(crossings).toBeGreaterThanOrEqual(2);
+  });
+
+  it('silence is a flat line, not noise', () => {
+    const { npv2ScopeTrace } = v2Harness(['npv2ScopeTrace']);
+    const out = npv2ScopeTrace(new Uint8Array(2048).fill(128), new Float32Array(64));
+    expect(Array.from(out).every((v) => v === 0)).toBe(true);
+  });
+});
+
+describe('dot plane is a 3D spectrogram', () => {
+  it('the near row is now and rows behind it are earlier moments', () => {
+    const { NPV2_PAINT, NPV2_THEME_STATE } = paintHarness();
+    const loud = vizFrame({ freq: new Uint8Array(64).fill(240), dt: 0.1 });
+    const quiet = vizFrame({ freq: new Uint8Array(64).fill(0), dt: 0.1 });
+    for (let i = 0; i < 6; i++) NPV2_PAINT.dotplane(recordingCtx().ctx, 1280, 800, loud);
+    for (let i = 0; i < 20; i++) NPV2_PAINT.dotplane(recordingCtx().ctx, 1280, 800, quiet);
+    const rows = NPV2_THEME_STATE['dotplane-hist'].rows;
+    expect(rows.length).toBe(16);
+    expect(rows[0][0]).toBeLessThan(rows[rows.length - 1][0] + 1e-9);
+    expect(rows[0][0]).toBeLessThan(0.1); // newest: quiet
+  });
+});
+
+describe('vinyl wears the album cover', () => {
+  it('draws the cover on the label when it has loaded', () => {
+    const { NPV2_PAINT } = paintHarness();
+    const art = { naturalWidth: 300 };
+    const { ctx, calls } = recordingCtx();
+    NPV2_PAINT.vinyl(ctx, 1280, 800, vizFrame({ art }));
+    expect(calls.some((c) => c.name === 'drawImage' && c.args[0] === art)).toBe(true);
+    expect(calls.some((c) => c.name === 'clip')).toBe(true);
+  });
+
+  it('falls back to the title initial without art', () => {
+    const { NPV2_PAINT } = paintHarness();
+    const { ctx, calls } = recordingCtx();
+    NPV2_PAINT.vinyl(ctx, 1280, 800, vizFrame({ art: null, title: 'Numb' }));
+    expect(calls.some((c) => c.name === 'fillText' && c.args[0] === 'N')).toBe(true);
+  });
+});
+
+describe('soft layers', () => {
+  it('without an offscreen canvas it draws straight onto the frame at full size', () => {
+    const { npv2Soft, NPV2_SOFT } = paintHarness();
+    NPV2_SOFT.test = null; // what a failed offscreen canvas caches
+    const seen: number[][] = [];
+    const ctx = { save() {}, restore() {} };
+    npv2Soft(ctx, 1280, 800, 0.3, 'test', (c: unknown, w: number, h: number) => {
+      expect(c).toBe(ctx);
+      seen.push([w, h]);
+    });
+    expect(seen).toEqual([[1280, 800]]);
+  });
+});
+
+describe('accent colors belong to the cover', () => {
+  it('the analogous fallback stays in the same color family', () => {
+    const { npv2Analogous } = v2Harness(['npv2Analogous']);
+    const green = { r: 30, g: 200, b: 80 };
+    const acc = npv2Analogous(green);
+    // the old channel swap made a green cover's accent red-dominant
+    expect(acc.r).toBeLessThan(acc.g);
+  });
+
+  it('v1 picks a hue-distinct second color from the cover when it has one', () => {
+    const factory = new Function(
+      [
+        extractFunction('npHue', v1),
+        extractFunction('npPickAccentColor', v1),
+        'return { npPickAccentColor };',
+      ].join('\n'),
+    );
+    const { npPickAccentColor } = factory() as any;
+    const bin = (r: number, g: number, b: number, w: number) => ({
+      r: r * 10,
+      g: g * 10,
+      b: b * 10,
+      n: 10,
+      w,
+    });
+    const red = bin(220, 40, 40, 10);
+    const orange = bin(230, 120, 40, 6); // too close in hue to count
+    const blue = bin(40, 80, 220, 4);
+    const out = npPickAccentColor([red, orange, blue], red);
+    expect(out[2]).toBeGreaterThan(out[0]); // blue wins
+    // a one-color cover gets a neighbour, not a clash
+    const solo = npPickAccentColor([red], red);
+    expect(solo[0]).toBeGreaterThan(solo[2]);
+  });
+});
+
+describe('real trails', () => {
+  it('the previous frame comes back faded by keep, scaled for the frame rate', () => {
+    const factory = new Function(
+      'buf',
+      [
+        "const NPV2 = { theme: 'scope', reduceMotion: false };",
+        extractFunction('npv2F', v2),
+        'function npv2Buffer() { return buf; }',
+        extractFunction('npv2DrawTrail', v2),
+        'return { npv2DrawTrail };',
+      ].join('\n'),
+    );
+    const buf = { c: {}, ready: true, theme: 'scope' };
+    const { npv2DrawTrail } = factory(buf) as any;
+    const alphas: number[] = [];
+    const drawn: unknown[] = [];
+    const ctx = {
+      save() {},
+      restore() {},
+      translate() {},
+      scale() {},
+      rotate() {},
+      drawImage(img: unknown) {
+        drawn.push(img);
+      },
+      set globalAlpha(v: number) {
+        alphas.push(v);
+      },
+    };
+    npv2DrawTrail(ctx, 100, 100, { keep: 0.8 }, { dt: 1 / 60 });
+    npv2DrawTrail(ctx, 100, 100, { keep: 0.8 }, { dt: 1 / 120 });
+    expect(drawn).toEqual([buf.c, buf.c]);
+    expect(alphas[0]).toBeCloseTo(0.8, 5);
+    expect(alphas[1]).toBeCloseTo(Math.sqrt(0.8), 5);
+  });
+
+  it('a different theme never inherits the old trail', () => {
+    const factory = new Function(
+      'buf',
+      [
+        "const NPV2 = { theme: 'warp', reduceMotion: false };",
+        extractFunction('npv2F', v2),
+        'function npv2Buffer() { return buf; }',
+        extractFunction('npv2DrawTrail', v2),
+        'return { npv2DrawTrail };',
+      ].join('\n'),
+    );
+    const { npv2DrawTrail } = factory({ c: {}, ready: true, theme: 'scope' }) as any;
+    let drew = false;
+    const ctx = {
+      drawImage() {
+        drew = true;
+      },
+    };
+    npv2DrawTrail(ctx, 100, 100, { keep: 0.8 }, { dt: 1 / 60 });
+    expect(drew).toBe(false);
+  });
+});
+
+describe('the onset flag', () => {
+  it('is true only on the frame the beat fires', () => {
+    const factory = new Function(
+      'stubs',
+      [
+        'const { npAudioContext, npAnalyser } = stubs;',
+        'let isPlaying = true;',
+        extractConst('NPV2_VIZ_BANDS', v2),
+        extractConst('NPV2_VIZ_FMIN', v2),
+        extractConst('NPV2_VIZ_FMAX', v2),
+        extractConst('NPV2_VIZ_FFT', v2),
+        'let npv2VizAnalyser = null, npv2VizBandRanges = null, npv2VizSr = 0, npv2VizRaw = null, npv2VizBeatSt = null;',
+        extractFunction('npv2LogBandRanges', v2),
+        extractFunction('npv2MapLogBands', v2),
+        extractFunction('npv2FluxBeat', v2),
+        extractFunction('npv2VizBeatState', v2),
+        extractFunction('npv2EnsureVizAnalyser', v2),
+        extractFunction('npv2IdleSynth', v2),
+        extractFunction('npv2IsPlaying', v2),
+        extractFunction('npv2ReadAudio', v2),
+        'return { npv2ReadAudio };',
+      ].join('\n'),
+    );
+    let level = 30;
+    const node = {
+      getByteFrequencyData(a: Uint8Array) {
+        a.fill(level);
+      },
+      getByteTimeDomainData(a: Uint8Array) {
+        a.fill(128);
+      },
+      connect() {},
+    };
+    const { npv2ReadAudio } = factory({
+      npAudioContext: { sampleRate: 48000, createAnalyser: () => node },
+      npAnalyser: node,
+    }) as any;
+    const S: any = { freq: new Uint8Array(64), wave: new Uint8Array(64), beat: 0 };
+    const onsets: boolean[] = [];
+    for (let f = 0; f < 60; f++) {
+      npv2ReadAudio(S, f / 60, 1 / 60);
+      onsets.push(S.onset);
+    }
+    level = 230; // a hit
+    for (let f = 0; f < 10; f++) {
+      npv2ReadAudio(S, 1 + f / 60, 1 / 60);
+      onsets.push(S.onset);
+    }
+    expect(onsets.slice(60).filter(Boolean)).toHaveLength(1);
+    expect(onsets[60]).toBe(true);
+    expect(S.waveFull).toHaveLength(2048);
   });
 });

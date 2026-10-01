@@ -2156,16 +2156,67 @@ function npExtractAmbientColor(imgEl) {
             // Nudge toward vivid: lift saturation/brightness a touch so the
             // glow reads as a color, not a wash.
             [r, g, b] = npPunchUpColor(r, g, b);
-            const modal = document.querySelector('.np-modal');
-            if (modal) {
-                modal.style.setProperty('--np-ambient-r', r);
-                modal.style.setProperty('--np-ambient-g', g);
-                modal.style.setProperty('--np-ambient-b', b);
+            // a real second color from the same cover, so the theater's
+            // accent belongs to the art instead of a channel swap of the first
+            const [r2, g2, b2] = npPunchUpColor(...npPickAccentColor(Array.from(bins.values()), best));
+            // the mini player wears the same colors as the theater
+            for (const el of [document.querySelector('.np-modal'), document.getElementById('media-player')]) {
+                if (!el) continue;
+                el.style.setProperty('--np-ambient-r', r);
+                el.style.setProperty('--np-ambient-g', g);
+                el.style.setProperty('--np-ambient-b', b);
+                el.style.setProperty('--np-ambient2-r', r2);
+                el.style.setProperty('--np-ambient2-g', g2);
+                el.style.setProperty('--np-ambient2-b', b2);
             }
         }
     } catch (e) {
         // Cross-origin or canvas error — ignore silently
     }
+}
+
+// Hue of an rgb color in degrees, or -1 for a grey. Pure.
+function npHue(r, g, b) {
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const d = max - min;
+    if (d < 12) return -1;
+    let h;
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+    return h < 0 ? h + 360 : h;
+}
+
+// Second color for the theater: the strongest bin whose hue sits clearly away
+// from the main one (and still carries a real share of the cover). A cover
+// with one color gets a close neighbour of it instead, lighter, so the accent
+// is in harmony with the art, never a random channel swap. Pure.
+function npPickAccentColor(bins, best) {
+    const avg = (bin) => [bin.r / bin.n, bin.g / bin.n, bin.b / bin.n];
+    const [br, bg, bb] = avg(best);
+    const h0 = npHue(br, bg, bb);
+    let pick = null, pickScore = -1;
+    for (const bin of bins) {
+        if (bin === best || bin.w < best.w * 0.12) continue;
+        const [r, g, b] = avg(bin);
+        const h = npHue(r, g, b);
+        if (h < 0 || h0 < 0) continue;
+        const dh = Math.min(Math.abs(h - h0), 360 - Math.abs(h - h0));
+        if (dh < 40) continue;
+        if (bin.w > pickScore) { pickScore = bin.w; pick = [r, g, b]; }
+    }
+    if (pick) return pick.map(Math.round);
+    // analogous fallback: rotate the hue ~35 degrees and lift it a little
+    const t = (35 / 360) * 2 * Math.PI;
+    const cos = Math.cos(t), sin = Math.sin(t);
+    const k = (1 - cos) / 3, q = Math.sqrt(1 / 3) * sin;
+    const rot = [
+        br * (cos + k) + bg * (k - q) + bb * (k + q),
+        br * (k + q) + bg * (cos + k) + bb * (k - q),
+        br * (k - q) + bg * (k + q) + bb * (cos + k),
+    ];
+    return rot.map((v) => Math.max(0, Math.min(255, Math.round(v * 1.12 + 10))));
 }
 
 // Lift a color toward vividness for the ambient glow (boost saturation,
@@ -2321,11 +2372,14 @@ function npFinishCrossfade(nextIdx, restoreVol) {
 }
 
 function npResetAmbientGlow() {
-    const modal = document.querySelector('.np-modal');
-    if (modal) {
-        modal.style.setProperty('--np-ambient-r', '29');
-        modal.style.setProperty('--np-ambient-g', '185');
-        modal.style.setProperty('--np-ambient-b', '84');
+    for (const el of [document.querySelector('.np-modal'), document.getElementById('media-player')]) {
+        if (!el) continue;
+        el.style.setProperty('--np-ambient-r', '29');
+        el.style.setProperty('--np-ambient-g', '185');
+        el.style.setProperty('--np-ambient-b', '84');
+        el.style.setProperty('--np-ambient2-r', '29');
+        el.style.setProperty('--np-ambient2-g', '140');
+        el.style.setProperty('--np-ambient2-b', '185');
     }
 }
 
