@@ -80,6 +80,9 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
                 # after discovery it is whichever provider matched (often Deezer).
                 # SpotifyTrack reads named fields, so this rides along unused.
                 'db_track_id': t.get('id'),
+                # the playlist's own id, which `id` above is not: Find & Add
+                # files a manual match under it, so the sync needs both (#1289)
+                'source_track_id': t.get('source_track_id') or '',
             }
             if md.get('track_number'):
                 _track_entry['track_number'] = md['track_number']
@@ -119,6 +122,7 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
                     'duration_ms': t.get('duration_ms', 0),
                     'id': hint['id'],
                     'db_track_id': t.get('id'),
+                    'source_track_id': t.get('source_track_id') or '',
                 })
             elif t.get('source_track_id') and (t.get('track_name') or '').strip():
                 # Has a valid source ID and track name — usable for wishlist.
@@ -129,6 +133,7 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
                     'duration_ms': t.get('duration_ms', 0),
                     'id': t['source_track_id'],
                     'db_track_id': t.get('id'),
+                    'source_track_id': t['source_track_id'],
                 })
             else:
                 skipped_count += 1  # No usable ID or name — truly can't process.

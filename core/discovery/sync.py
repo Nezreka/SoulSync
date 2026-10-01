@@ -154,10 +154,13 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
         original_title = spotify_track.name
         spotify_id = getattr(spotify_track, 'id', '') or ''
 
-        # --- Sync match cache fast-path ---
-        if spotify_id:
+        # the discovered id first, then the playlist's own id: Find & Add files its
+        # match under the latter, which a wing-it stub never equals (#1289)
+        from core.sync.match_overrides import match_lookup_ids
+        for _match_id in match_lookup_ids(spotify_track):
+            # --- Sync match cache fast-path ---
             try:
-                cached = db.read_sync_match_cache(spotify_id, active_server)
+                cached = db.read_sync_match_cache(_match_id, active_server)
                 if cached:
                     db_track_check = db.get_track_by_id(cached['server_track_id'])
                     if db_track_check:
@@ -171,17 +174,16 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
                     logger.warning(f"Sync cache stale for '{original_title}' — track gone")
             except Exception as e:
                 logger.debug("sync match cache fast-path failed: %s", e)
-        # --- End cache fast-path ---
+            # --- End cache fast-path ---
 
-        # Durable manual library match (#787) — survives a library rescan (the
-        # sync_match_cache above does not), so a user's Find & Add pairing keeps
-        # sticking across auto-syncs instead of being re-matched from scratch (#895
-        # follow-up). Self-heals a stale library id via the stored file path.
-        if spotify_id:
+            # Durable manual library match (#787) — survives a library rescan (the
+            # sync_match_cache above does not), so a user's Find & Add pairing keeps
+            # sticking across auto-syncs instead of being re-matched from scratch (#895
+            # follow-up). Self-heals a stale library id via the stored file path.
             try:
                 from core.artists.map import get_current_profile_id
                 m = db.find_manual_library_match_by_source_track_id(
-                    get_current_profile_id(), str(spotify_id), active_server)
+                    get_current_profile_id(), str(_match_id), active_server)
                 if m:
                     lib_id = m.get('library_track_id')
                     dt = db.get_track_by_id(lib_id) if lib_id is not None else None
@@ -390,7 +392,8 @@ def run_sync_task(
                 popularity=t.get('popularity', 0),
                 preview_url=t.get('preview_url'),
                 external_urls=t.get('external_urls'),
-                image_url=_track_image or None
+                image_url=_track_image or None,
+                source_track_id=t.get('source_track_id') or None,
             )
             tracks.append(track)
             if i < 3:  # Log first 3 tracks for debugging

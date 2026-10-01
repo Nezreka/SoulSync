@@ -471,6 +471,9 @@ class Track:
     album_type: Optional[str] = None
     total_tracks: Optional[int] = None
     explicit: Optional[bool] = None
+    # the mirrored playlist's own id when ``id`` is what discovery matched
+    # instead. saved manual matches are filed under it (#1289)
+    source_track_id: Optional[str] = None
 
     @classmethod
     def from_spotify_track(cls, track_data: Dict[str, Any]) -> 'Track':

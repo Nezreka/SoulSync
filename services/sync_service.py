@@ -970,35 +970,38 @@ class PlaylistSyncService:
             active_server = config_manager.get_active_media_server()
 
             # --- User-confirmed match fast-path (Find & Add / manual match) ---
-            if spotify_id:
-                cache_db = MusicDatabase()
+            from core.sync.match_overrides import match_lookup_ids
+            cache_db = MusicDatabase()
 
-                def _materialize(server_track_id):
-                    """Turn a stored library track id into the actual server item the
-                    sync needs (DB row for Jellyfin/Navidrome/SoulSync, Plex fetchItem)."""
-                    if server_track_id is None:
-                        return None
-                    dbt = cache_db.get_track_by_id(server_track_id)
-                    if not dbt:
-                        return None
-                    if server_type in ("jellyfin", "navidrome", "soulsync"):
-                        class DbTrackFromCache:
-                            def __init__(self, db_t):
-                                self.ratingKey = db_t.id
-                                self.title = db_t.title
-                                self.id = db_t.id
-                                self.artist = getattr(db_t, 'artist_name', '') or ''
-                                self.album = getattr(db_t, 'album_title', '') or ''
-                        return DbTrackFromCache(dbt)
-                    try:
-                        at = media_client.server.fetchItem(int(server_track_id))
-                        return at if (at and hasattr(at, 'ratingKey')) else None
-                    except Exception:
-                        return None
+            def _materialize(server_track_id):
+                """Turn a stored library track id into the actual server item the
+                sync needs (DB row for Jellyfin/Navidrome/SoulSync, Plex fetchItem)."""
+                if server_track_id is None:
+                    return None
+                dbt = cache_db.get_track_by_id(server_track_id)
+                if not dbt:
+                    return None
+                if server_type in ("jellyfin", "navidrome", "soulsync"):
+                    class DbTrackFromCache:
+                        def __init__(self, db_t):
+                            self.ratingKey = db_t.id
+                            self.title = db_t.title
+                            self.id = db_t.id
+                            self.artist = getattr(db_t, 'artist_name', '') or ''
+                            self.album = getattr(db_t, 'album_title', '') or ''
+                    return DbTrackFromCache(dbt)
+                try:
+                    at = media_client.server.fetchItem(int(server_track_id))
+                    return at if (at and hasattr(at, 'ratingKey')) else None
+                except Exception:
+                    return None
 
+            # the discovered id first, then the playlist's own id: Find & Add files
+            # its match under the latter, which a wing-it stub never equals (#1289)
+            for _match_id in match_lookup_ids(spotify_track):
                 # 1) Volatile sync_match_cache — fast, but wiped on every library rescan.
                 try:
-                    cached = cache_db.read_sync_match_cache(spotify_id, active_server)
+                    cached = cache_db.read_sync_match_cache(_match_id, active_server)
                     if cached:
                         actual_track = _materialize(cached['server_track_id'])
                         if actual_track:
@@ -1017,7 +1020,7 @@ class PlaylistSyncService:
                     from core.artists.map import get_current_profile_id
                     _profile_id = _sync_profile_id.get() or get_current_profile_id()
                     m = cache_db.find_manual_library_match_by_source_track_id(
-                        _profile_id, str(spotify_id), active_server)
+                        _profile_id, str(_match_id), active_server)
                     if m:
                         actual_track = _materialize(m.get('library_track_id'))
                         if not actual_track and m.get('library_file_path'):
@@ -1031,12 +1034,12 @@ class PlaylistSyncService:
                         if not actual_track and server_type == "plex":
                             actual_track = reresolve_manual_match_live_plex(
                                 cache_db, media_client, m,
-                                profile_id=_profile_id, source_track_id=spotify_id,
+                                profile_id=_profile_id, source_track_id=_match_id,
                                 server_source=active_server)
-                            if actual_track and spotify_id:
+                            if actual_track and _match_id:
                                 try:
                                     cache_db.save_sync_match_cache(
-                                        spotify_id, original_title, _artist_name(spotify_track.artists[0]) if spotify_track.artists else '',
+                                        _match_id, original_title, _artist_name(spotify_track.artists[0]) if spotify_track.artists else '',
                                         active_server, actual_track.ratingKey, getattr(actual_track, 'title', original_title), 1.0)
                                 except Exception as _cache_err:
                                     logger.debug("sync cache heal failed: %s", _cache_err)

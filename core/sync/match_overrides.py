@@ -29,6 +29,21 @@ from utils.logging_config import get_logger
 logger = get_logger("sync.match_overrides")
 
 
+def match_lookup_ids(track: Any) -> List[str]:
+    """ids a user's saved match can be filed under, in lookup order.
+
+    a sync track's ``id`` is whatever discovery matched (a catalogue id, or a
+    ``wing_it_`` stub), but Find & Add files its match under the playlist's own
+    ``source_track_id``. checking only ``id`` missed every match on a wing-it
+    track or a track discovered on another provider (#1289)."""
+    ids: List[str] = []
+    for value in (getattr(track, 'id', None), getattr(track, 'source_track_id', None)):
+        text = str(value or '').strip()
+        if text and text not in ids:
+            ids.append(text)
+    return ids
+
+
 def resolve_match_overrides(
     source_tracks: List[Dict[str, Any]],
     server_tracks: List[Dict[str, Any]],
