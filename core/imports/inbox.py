@@ -61,6 +61,10 @@ def derive_status(history_status: Optional[str], live_status: Optional[str], in_
     history row, then "waiting" for files nobody has looked at yet."""
     if live_status and live_status in _LIVE_STATUS:
         return _LIVE_STATUS[live_status]
+    # partial means some tracks errored. with files still in staging the import
+    # did not finish, so it is a failure the user can retry, not "imported".
+    if history_status == 'partial' and in_staging:
+        return 'failed'
     if history_status:
         return _HISTORY_STATUS.get(history_status, history_status)
     return 'waiting' if in_staging else 'imported'
