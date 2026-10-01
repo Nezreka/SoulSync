@@ -119,6 +119,68 @@ def test_resolve_returns_none_for_missing_album(tmp_path):
     assert out is None
 
 
+def test_alternate_lookup_uses_provider_artist_id_not_local_key(tmp_path, monkeypatch):
+    import core.metadata.canonical_resolver as resolver
+
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    album_id = _seed(db, spotify="spotify_album")
+    with db._get_connection() as conn:
+        conn.execute(
+            "UPDATE artists SET musicbrainz_id = ?, spotify_artist_id = ? WHERE id = 'art1'",
+            ("8e3bb70b-cb74-4296-9bbd-ae00050fd4ca", "spotify_artist"),
+        )
+        conn.execute(
+            "UPDATE albums SET musicbrainz_release_id = ? WHERE id = ?",
+            ("musicbrainz_release", album_id),
+        )
+
+    calls = []
+
+    def alternates(source, album, **kwargs):
+        calls.append((source, kwargs["artist_id"], kwargs["artist_name"]))
+        return []
+
+    monkeypatch.setattr(resolver, "default_fetch_alternates", alternates)
+    resolve_and_store_canonical_for_album(
+        db, album_id, fetch_tracklist=lambda source, album: DLX,
+        source_priority=["spotify", "musicbrainz"], mode="best_fit", store=False,
+        min_score=0.99,
+    )
+    assert calls == [
+        ("spotify", "spotify_artist", "Imagine Dragons"),
+        ("musicbrainz", "8e3bb70b-cb74-4296-9bbd-ae00050fd4ca", "Imagine Dragons"),
+    ]
+
+
+def test_alternate_lookup_without_provider_id_searches_by_name(tmp_path, monkeypatch):
+    import core.metadata.canonical_resolver as resolver
+
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    album_id = _seed(db, spotify="spotify_album")
+    with db._get_connection() as conn:
+        conn.execute(
+            "UPDATE albums SET musicbrainz_release_id = ? WHERE id = ?",
+            ("musicbrainz_release", album_id),
+        )
+
+    calls = []
+
+    def alternates(source, album, **kwargs):
+        calls.append((source, kwargs["artist_id"], kwargs["artist_name"]))
+        return []
+
+    monkeypatch.setattr(resolver, "default_fetch_alternates", alternates)
+    resolve_and_store_canonical_for_album(
+        db, album_id, fetch_tracklist=lambda source, album: DLX,
+        source_priority=["spotify", "musicbrainz"], mode="best_fit", store=False,
+        min_score=0.99,
+    )
+    assert calls == [
+        ("spotify", "", "Imagine Dragons"),
+        ("musicbrainz", "", "Imagine Dragons"),
+    ]
+
+
 # ── default_fetch_tracklist normalization (no DB / no live API) ────────────
 
 def test_default_fetcher_normalizes_dict_items(monkeypatch):

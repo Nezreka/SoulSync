@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import core.library_reorganize as lr
 import core.metadata.canonical_resolver as cr
+import pytest
 
 # Provider-shaped raw tracklists (what get_album_tracks_for_source returns).
 SINGLE_RAW = [{"name": "Scatterbrain", "track_number": 1, "duration_ms": 129_000}]
@@ -41,11 +42,12 @@ def _wire(monkeypatch, *, alternates):
     monkeypatch.setattr(cr, "default_fetch_alternates", alternates)
 
 
-def test_misfit_single_resolves_to_the_single_edition(monkeypatch):
+@pytest.mark.parametrize('provider_id', ['spotify_artist', None])
+def test_misfit_single_resolves_to_the_single_edition(monkeypatch, provider_id):
     alt_calls = []
 
     def alternates(source, aid, **kw):
-        alt_calls.append((source, aid))
+        alt_calls.append((source, aid, kw))
         return [
             {"album_id": "sp_single", "tracks": SINGLE_NORM},
             {"album_id": "sp_deluxe", "tracks": DELUXE_NORM},
@@ -56,6 +58,7 @@ def test_misfit_single_resolves_to_the_single_edition(monkeypatch):
     album_data = {
         "spotify_album_id": "sp_deluxe", "title": "Scatterbrain",
         "artist_id": "a1", "artist_name": "The Band",
+        "artist_spotify_id": provider_id,
     }
     file_tracks = [{"duration_ms": 129_000, "title": "Scatterbrain"}]  # owns the single
 
@@ -69,6 +72,7 @@ def test_misfit_single_resolves_to_the_single_edition(monkeypatch):
     assert api_album == ALBUM_META["sp_single"]      # used the single, not the deluxe
     assert len(items) == 1
     assert alt_calls, "misfit must trigger an alternate-edition fetch"
+    assert alt_calls[0][2]["artist_id"] == (provider_id or '')
     assert pins and pins[0][1] == "sp_single", "apply must persist the better pin"
 
 

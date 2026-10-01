@@ -264,15 +264,16 @@ def _resolve_better_edition(album_data, source_ids, file_tracks, primary_source)
     from core.metadata.canonical_resolver import (
         default_fetch_alternates,
         default_fetch_tracklist,
+        provider_artist_id,
         resolve_canonical_for_album,
     )
-    art_id = str(album_data.get('artist_id') or '')
     art_name = album_data.get('artist_name') or ''
     title = album_data.get('title') or ''
 
     def _alts(source, aid):
         return default_fetch_alternates(
-            source, aid, artist_id=art_id, artist_name=art_name, album_title=title,
+            source, aid, artist_id=provider_artist_id(album_data, source),
+            artist_name=art_name, album_title=title,
         )
 
     try:
@@ -811,7 +812,13 @@ def load_album_and_tracks(db, album_id):
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT al.*, ar.name as artist_name
+            SELECT al.*, ar.name as artist_name,
+                   ar.spotify_artist_id as artist_spotify_id,
+                   ar.itunes_artist_id as artist_itunes_id,
+                   ar.deezer_id as artist_deezer_id,
+                   ar.discogs_id as artist_discogs_id,
+                   ar.soul_id as artist_hydrabase_id,
+                   ar.musicbrainz_id as artist_musicbrainz_id
             FROM albums al
             JOIN artists ar ON al.artist_id = ar.id
             WHERE al.id = ?

@@ -28,6 +28,25 @@ MODE_ACTIVE_ONLY = "active_only"            # only ever the active source
 MODE_BEST_FIT = "best_fit"                  # whichever source fits the files best
 VALID_MODES = (MODE_ACTIVE_PREFERRED, MODE_ACTIVE_ONLY, MODE_BEST_FIT)
 
+_ARTIST_ID_COLUMNS = {
+    'spotify': 'artist_spotify_id',
+    'itunes': 'artist_itunes_id',
+    'deezer': 'artist_deezer_id',
+    'discogs': 'artist_discogs_id',
+    'hydrabase': 'artist_hydrabase_id',
+    'musicbrainz': 'artist_musicbrainz_id',
+}
+
+
+def provider_artist_id(album_data: Dict[str, Any], source: str) -> str:
+    """Use only an artist ID known to belong to the requested provider.
+
+    ``artist_id`` on an album row is SoulSync's local foreign key. Passing it
+    to a metadata client causes invalid-ID requests (and can select an unrelated
+    artist if the provider happens to recognize the same string).
+    """
+    return str(album_data.get(_ARTIST_ID_COLUMNS.get(source, '')) or '')
+
 
 def resolve_canonical_for_album(
     *,
@@ -371,14 +390,14 @@ def resolve_and_store_canonical_for_album(
     if fetch_alternates is None:
         # Default alternates fetcher, primed with the artist/title we already
         # loaded (no extra get_album call). Only fires on the misfit path.
-        _art_id = str(album_data.get('artist_id') or '')
         _art_name = album_data.get('artist_name') or ''
         _title = album_data.get('title') or ''
 
         def fetch_alternates(source, aid):  # noqa: ANN001
             return default_fetch_alternates(
                 source, aid,
-                artist_id=_art_id, artist_name=_art_name, album_title=_title,
+                artist_id=provider_artist_id(album_data, source),
+                artist_name=_art_name, album_title=_title,
             )
     primary_source = None
     if source_priority is None:
