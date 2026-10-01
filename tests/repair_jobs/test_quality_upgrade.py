@@ -989,3 +989,21 @@ def test_fix_handler_fails_cleanly_when_track_gone_and_no_prematched_data():
     res = worker._fix_quality_upgrade('track', 999, '/music/gone.flac', {})
     assert res['success'] is False
     assert 'No matched track' in res['error']
+
+
+def test_a_rate_limit_says_the_scan_stopped_early(monkeypatch):
+    """#1289: a rate limit ended the scan at 3,008 of ~8,050 tracks and the run
+    still read "completed". The job now hands the worker the reason."""
+    db = _FakeDB([_row(track_id=1), _row(track_id=2, path='/music/b.mp3')], BALANCED)
+    _stub_engine(monkeypatch)
+    monkeypatch.setattr(JobContext, 'is_spotify_rate_limited', lambda self: True)
+    result = qu.QualityUpgradeJob().scan(_ctx(db, []))
+    assert 'rate limit' in result.stopped_early
+    assert 'track 1 of 2' in result.stopped_early
+
+
+def test_a_full_scan_is_not_stopped_early(monkeypatch):
+    db = _FakeDB([_row(bitrate=128)], BALANCED)
+    _stub_quality(monkeypatch, meets=True)
+    result = qu.QualityUpgradeJob().scan(_ctx(db, []))
+    assert result.stopped_early == ''

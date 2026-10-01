@@ -80,6 +80,11 @@ describe('runOutcome', () => {
     expect(runOutcome(run({ status: 'completed', errors: 1 }))).toBe('failed');
   });
 
+  it('keeps a run that quit early apart from a finished one (#1289)', () => {
+    expect(runOutcome(run({ status: 'stopped' }))).toBe('stopped');
+    expect(runOutcome(run({ status: 'stopped', findings_created: 4 }))).toBe('stopped');
+  });
+
   it('treats a run with no finish as still running', () => {
     expect(runOutcome(run({ finished_at: null, status: 'running' }))).toBe('running');
     expect(runOutcome(run({ finished_at: null, status: 'completed' }))).toBe('running');
@@ -113,6 +118,15 @@ describe('runSummary', () => {
   it('leads with the failure, and counts errors only when there are several', () => {
     expect(runSummary(run({ status: 'failed', errors: 1 }))).toBe('failed after 12.3s');
     expect(runSummary(run({ status: 'failed', errors: 3 }))).toBe('failed after 12.3s · 3 errors');
+  });
+
+  it('says a run stopped early, and what it found before it did', () => {
+    expect(runSummary(run({ status: 'stopped', items_scanned: 3008 }))).toBe(
+      'stopped early · 3,008 checked · 12.3s',
+    );
+    expect(runSummary(run({ status: 'stopped', items_scanned: 3008, findings_created: 7 }))).toBe(
+      'stopped early · 3,008 checked · 7 found · 12.3s',
+    );
   });
 
   it('reports progress for a run still going', () => {

@@ -70112,6 +70112,7 @@ body.max-performance #page-particles-canvas {
 .repair-run-glyph.success { color: #22c55e; }
 .repair-run-glyph.quiet { color: rgba(255, 255, 255, 0.25); }
 .repair-run-glyph.failed { color: #f44336; }
+.repair-run-glyph.stopped { color: #f59e0b; }
 .repair-run-glyph.running { color: rgba(var(--accent-rgb), 0.9); }
 
 .repair-run-clock {

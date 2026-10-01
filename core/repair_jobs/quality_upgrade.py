@@ -754,10 +754,16 @@ class QualityUpgradeJob(RepairJob):
                 source_priority = get_source_priority(get_primary_source()) or []
                 if not source_priority:
                     logger.warning("[Quality Upgrade] No metadata provider available — cannot propose upgrades")
+                    result.stopped_early = (
+                        f"No metadata provider available, so upgrades could not be looked up. "
+                        f"Stopped at track {i + 1} of {total}.")
                     return result
 
             if context.is_spotify_rate_limited():
                 logger.info("[Quality Upgrade] Spotify rate-limited — stopping scan early")
+                result.stopped_early = (
+                    f"Spotify rate limit hit. Stopped at track {i + 1} of {total}; "
+                    f"run it again once the limit clears.")
                 return result
 
             current_label = measured_aq.label() if measured_aq is not None else 'broken/unreadable'
