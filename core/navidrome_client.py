@@ -1111,7 +1111,9 @@ class NavidromeClient(MediaServerClient):
         scopes ``getStarred2`` and ratings to the AUTHENTICATED user with no
         admin impersonation, so reading someone else's favourites really does
         need their own credentials — which is exactly what Cremonies described.
-        With no list we read the configured account only.
+        the configured account is always read first, then each listed user,
+        once per username. reading only the listed users used to drop the
+        admin's own stars the moment anyone else had a login saved.
 
         Playlist membership is the exception: ``getPlaylists`` accepts an
         admin-only ``username`` parameter, so one admin credential can see
@@ -1124,9 +1126,14 @@ class NavidromeClient(MediaServerClient):
         if not self.ensure_connection():
             return {}
 
-        accounts = list(users or [])
-        if not accounts:
-            accounts = [(self.username, self.password)]
+        accounts = []
+        seen_names = set()
+        for username, password in [(self.username, self.password), *(users or [])]:
+            name = str(username or '').strip().lower()
+            if not name or name in seen_names:
+                continue
+            seen_names.add(name)
+            accounts.append((username, password))
 
         signals = {}
         for username, password in accounts:

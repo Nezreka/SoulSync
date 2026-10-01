@@ -73,7 +73,20 @@ def test_navidrome_uses_each_users_own_credentials_for_starred(nav):
 
     nav.get_curation_signals(users=[("alice", "alicepw"), ("bob", "bobpw")])
     starred_calls = [c for c in seen if c["endpoint"] == "getStarred2"]
-    assert [c["as_user"] for c in starred_calls] == [("alice", "alicepw"), ("bob", "bobpw")]
+    # the configured account is read too: listing other users used to drop the
+    # admin's own stars from the protection
+    assert [c["as_user"] for c in starred_calls] == [
+        ("admin", "adminpw"), ("alice", "alicepw"), ("bob", "bobpw")]
+
+
+def test_navidrome_reads_each_username_once(nav):
+    seen = []
+    nav._make_request = _nav_stub({
+        "getStarred2": {"starred2": {"song": [{"path": "A/B/c.flac"}]}},
+        "getPlaylists": {"playlists": {"playlist": []}},
+    }, seen)
+    signals = nav.get_curation_signals(users=[("Admin", "adminpw"), ("alice", "a"), ("alice", "a")])
+    assert sorted(signals) == ["admin", "alice"]
 
 
 def test_navidrome_reads_playlists_as_admin_on_the_users_behalf(nav):
@@ -87,9 +100,9 @@ def test_navidrome_reads_playlists_as_admin_on_the_users_behalf(nav):
     }, seen)
 
     signals = nav.get_curation_signals(users=[("alice", "alicepw")])
-    playlist_call = next(c for c in seen if c["endpoint"] == "getPlaylists")
+    playlist_call = next(c for c in seen if c["endpoint"] == "getPlaylists"
+                         and c["params"] == {"username": "alice"})
     assert playlist_call["as_user"] is None, "used alice's credentials for an admin call"
-    assert playlist_call["params"] == {"username": "alice"}
     assert signals["alice"][0]["in_playlist"] is True
 
 
