@@ -21634,6 +21634,71 @@ _init_discovery_scoring(matching_engine_obj=matching_engine)
 _init_discover_hero(get_metadata_fallback_client_fn=_get_metadata_fallback_client)
 
 
+_DISCOVER_WARM_PATHS = [
+    '/api/discover/hero',
+    '/api/discover/similar-artists',
+    '/api/discover/listening-recommendations',
+    '/api/discover/recent-releases',
+    '/api/discover/genre-explorer',
+    '/api/discover/genre-new-releases',
+    '/api/discover/because-you-listen-to',
+    '/api/discover/undiscovered-albums',
+    '/api/discover/label-explorer',
+    '/api/discover/deep-cuts',
+    '/api/discover/seasonal/current',
+    '/api/discover/decades/available',
+    '/api/discover/moods',
+    '/api/discover/for-you',
+]
+
+
+def _discover_warm_sweep(paths=None):
+    """one pass over the discover shelves, as every profile.
+
+    the shelf caches are per profile, and a request with no profile is refused
+    on a multi-profile install (no-profile = no rights). the warmer used to ask
+    anonymously, so on any install with two profiles every warm request came
+    back 401 in a few ms, nothing was cached, and the first visit paid the full
+    20s. each profile now gets its own signed-in test client.
+
+    returns {'ok': n, 'skipped': n, 'failed': [(profile_id, path, status)]}.
+    a 403 is a profile that may not open discover, so it is skipped, not failed."""
+    stats = {'ok': 0, 'skipped': 0, 'failed': []}
+    try:
+        db = get_database()
+        profiles = [p for p in (db.get_all_profiles() or []) if not p.get('disabled')]
+    except Exception as e:
+        logger.debug(f"discover warmup: could not list profiles: {e}")
+        return stats
+    for prof in profiles:
+        pid = prof.get('id')
+        if pid is None:
+            continue
+        try:
+            epoch = int((db.get_profile(pid) or {}).get('session_epoch') or 0)
+        except Exception:
+            epoch = 0
+        with app.test_client() as client:
+            with client.session_transaction() as sess:
+                sess['profile_id'] = pid
+                sess['profile_epoch'] = epoch
+                sess['login_authenticated'] = True
+                sess['launch_pin_verified'] = True
+            for p in (paths or _DISCOVER_WARM_PATHS):
+                try:
+                    status = client.get(p).status_code
+                except Exception as e:
+                    logger.debug(f"discover warmup {p} as profile {pid} failed: {e}")
+                    status = 'error'
+                if status == 200:
+                    stats['ok'] += 1
+                elif status == 403:
+                    stats['skipped'] += 1
+                else:
+                    stats['failed'].append((pid, p, status))
+    return stats
+
+
 def _start_discover_warmer():
     """Pre-compute the discover page in the background, forever.
 
@@ -21647,34 +21712,20 @@ def _start_discover_warmer():
     import threading
     import time as _t
 
-    paths = [
-        '/api/discover/hero',
-        '/api/discover/similar-artists',
-        '/api/discover/listening-recommendations',
-        '/api/discover/recent-releases',
-        '/api/discover/genre-explorer',
-        '/api/discover/genre-new-releases',
-        '/api/discover/because-you-listen-to',
-        '/api/discover/undiscovered-albums',
-        '/api/discover/label-explorer',
-        '/api/discover/deep-cuts',
-        '/api/discover/seasonal/current',
-        '/api/discover/decades/available',
-        '/api/discover/moods',
-        '/api/discover/for-you',
-    ]
-
     def loop():
         _t.sleep(15)  # let boot finish before the first sweep
         while True:
             started = _t.time()
-            with app.test_client() as client:
-                for p in paths:
-                    try:
-                        client.get(p)
-                    except Exception as e:
-                        logger.debug(f"discover warmup {p} failed: {e}")
-            logger.info(f"Discover warmup sweep finished in {_t.time() - started:.1f}s")
+            stats = _discover_warm_sweep()
+            took = _t.time() - started
+            if stats['failed']:
+                # a sweep that warms nothing looks exactly like a fast one, so say it
+                logger.warning(
+                    f"Discover warmup sweep finished in {took:.1f}s with "
+                    f"{len(stats['failed'])} failed request(s), first: {stats['failed'][:3]}")
+            else:
+                logger.info(f"Discover warmup sweep finished in {took:.1f}s "
+                            f"({stats['ok']} warmed, {stats['skipped']} skipped)")
             _t.sleep(1500)
 
     threading.Thread(target=loop, name='discover-warmer', daemon=True).start()
