@@ -1650,9 +1650,15 @@ class DeezerClient:
             return None
 
     @rate_limited
-    def get_playlist(self, playlist_id, progress_cb=None) -> Optional[Dict[str, Any]]:
+    def get_playlist(self, playlist_id, progress_cb=None,
+                     resolve_track_numbers: bool = True) -> Optional[Dict[str, Any]]:
         """
         Get a playlist with all its tracks by ID.
+
+        ``resolve_track_numbers=False`` skips the one-request-per-album pass for
+        real album positions, which is most of the load time (about 50s on a
+        200 track playlist). only for a look at the track list (#1418): track
+        numbers are then playlist positions, wrong for tagging a download.
 
         Fetches playlist metadata and tracks, paginating if the playlist
         contains more tracks than a single response returns (400 per page).
@@ -1722,11 +1728,14 @@ class DeezerClient:
                 if progress_cb:
                     progress_cb(done, total, 'track numbers')
 
-            if progress_cb:
-                _say(0, len(album_ids))
-            track_positions = resolve_album_track_positions(
-                self.session, self.BASE_URL, album_ids, _cache,
-                progress_cb=_say if progress_cb else None)
+            if not resolve_track_numbers:
+                track_positions = {}
+            else:
+                if progress_cb:
+                    _say(0, len(album_ids))
+                track_positions = resolve_album_track_positions(
+                    self.session, self.BASE_URL, album_ids, _cache,
+                    progress_cb=_say if progress_cb else None)
 
             # Normalize tracks
             tracks: List[Dict[str, Any]] = []

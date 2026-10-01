@@ -40,6 +40,13 @@ import {
 } from '../-discover.bylt';
 import { CACHE_SECTIONS } from '../-discover.cache-sections';
 import { decadeClassicsName, decadeTrackToSpotify } from '../-discover.decade-shelf';
+import {
+  DEEZER_MIRROR_VERB,
+  DEEZER_MIX_PREFIX,
+  deezerPreviewMix,
+  fetchDeezerPreviewTracks,
+  type DeezerEditorialPlaylist,
+} from '../-discover.deezer-editorial';
 import { explanationLine } from '../-discover.explanation';
 import { quickTiles } from '../-discover.greeting';
 import { normalizeTrack } from '../-discover.helpers';
@@ -358,9 +365,22 @@ export function DiscoverPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // #1418: a Deezer editorial card opens here to be looked at, and its
+  // Mirror button runs the shelf's own mirror (with the card's progress)
+  const [deezerMixes, setDeezerMixes] = useState<Record<string, DiscoverMix>>({});
+  const deezerMirrors = useRef<Record<string, () => void>>({});
+  const [pendingOpen, setPendingOpen] = useState<string | null>(null);
+  const previewDeezer = useCallback((playlist: DeezerEditorialPlaylist, mirror: () => void) => {
+    const mix = deezerPreviewMix(playlist);
+    deezerMirrors.current[playlist.id] = mirror;
+    setDeezerMixes((prev) => (prev[mix.key] ? prev : { ...prev, [mix.key]: mix }));
+    // the registry only has the new key on the next render
+    setPendingOpen(mix.key);
+  }, []);
+
   // ── The mix modal: ONE registry over every section's mixes ──────────────
   const registry = useMemo(() => {
-    const all: Record<string, DiscoverMix> = { ...mixes.registry };
+    const all: Record<string, DiscoverMix> = { ...mixes.registry, ...deezerMixes };
     for (const m of [...lb.mixes, ...lastfm.mixes]) all[m.key] = m;
     // Hydrated LB tracks ride into the registry, so opening a card the
     // mosaic pass already fetched is instant — the vanilla gets the same
@@ -371,11 +391,15 @@ export function DiscoverPage() {
       }
     }
     return all;
-  }, [mixes.registry, lb.mixes, lastfm.mixes, lbCovers]);
+  }, [mixes.registry, deezerMixes, lb.mixes, lastfm.mixes, lbCovers]);
 
   // lb-* keys lazy-load from the playlist endpoint — one resolver serves
   // ListenBrainz AND Last.fm radio mixes (both key `lb-<tab>-<identifier>`).
   const lbLazy = useCallback((mix: DiscoverMix) => {
+    if (mix.key.startsWith(DEEZER_MIX_PREFIX)) {
+      const id = mix.key.slice(DEEZER_MIX_PREFIX.length);
+      return () => fetchDeezerPreviewTracks(id);
+    }
     if (!mix.key.startsWith('lb-')) return null;
     const identifier = mix.key.split('-').slice(2).join('-');
     return async () => {
@@ -384,6 +408,13 @@ export function DiscoverPage() {
     };
   }, []);
   const modal = useMixModal(registry, lbLazy);
+  const openMix = modal.open;
+  useEffect(() => {
+    if (pendingOpen && registry[pendingOpen]) {
+      openMix(pendingOpen);
+      setPendingOpen(null);
+    }
+  }, [pendingOpen, registry, openMix]);
 
   // which mix key / track row is resolving. two fast taps used to queue the
   // same thing twice, and nothing on screen said anything was happening.
@@ -579,6 +610,11 @@ export function DiscoverPage() {
         return;
       }
       const [verb, ...rest] = action.onclick.split(':');
+      if (verb === DEEZER_MIRROR_VERB) {
+        modal.close();
+        deezerMirrors.current[rest.join(':')]?.();
+        return;
+      }
       if (verb === 'play') {
         // resolve against the library and play what's owned RIGHT NOW; the
         // rest stays a download away. LB/lastfm cards load tracks lazily -
@@ -1172,7 +1208,9 @@ export function DiscoverPage() {
           />
         );
       case 'deezer-editorial':
-        return <DeezerEditorialShelf onToast={(m) => toast(m, 'error')} />;
+        return (
+          <DeezerEditorialShelf onToast={(m) => toast(m, 'error')} onPreview={previewDeezer} />
+        );
       case 'build-a-playlist':
         return (
           <BuildPlaylistSection

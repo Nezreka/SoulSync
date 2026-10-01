@@ -4,11 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { server } from '@/test/msw';
 
 import {
+  deezerPreviewMix,
   fetchDeezerEditorial,
   fetchDeezerEditorialGenres,
+  fetchDeezerPreviewTracks,
   openDeezerPlaylistInSync,
   searchDeezerPlaylists,
 } from './-discover.deezer-editorial';
+import { MIX_ACTION_PLAY, mixActions } from './-discover.mixes';
 
 const PLAYLIST = {
   id: '1306931615',
@@ -243,5 +246,34 @@ describe('searchDeezerPlaylists', () => {
   it('a failed search is an empty result, not a thrown page', async () => {
     server.use(http.get('/api/discover/deezer/editorial', () => HttpResponse.error()));
     await expect(searchDeezerPlaylists('x')).resolves.toEqual([]);
+  });
+});
+
+describe('the preview (#1418)', () => {
+  it('opens as a mix that plays and mirrors, mirror being the main action', () => {
+    const mix = deezerPreviewMix(PLAYLIST);
+    expect(mix.key).toBe('deezer-1306931615');
+    expect(mix.title).toBe('Rock Essentials');
+    const actions = mixActions(mix);
+    expect(actions.map((a) => a.label)).toEqual([MIX_ACTION_PLAY, 'Mirror to Sync']);
+    expect(actions[1]).toMatchObject({ primary: true, onclick: 'deezer-mirror:1306931615' });
+  });
+
+  it('reads the fast track list', async () => {
+    server.use(
+      http.get('/api/discover/deezer/playlist/1306931615/preview', () =>
+        HttpResponse.json({ success: true, tracks: [{ id: 't1', name: 'Heroes' }] }),
+      ),
+    );
+    expect(await fetchDeezerPreviewTracks('1306931615')).toEqual([{ id: 't1', name: 'Heroes' }]);
+  });
+
+  it('a failed preview is an error the modal can show', async () => {
+    server.use(
+      http.get('/api/discover/deezer/playlist/1/preview', () =>
+        HttpResponse.json({ success: false, error: 'Playlist not found' }),
+      ),
+    );
+    await expect(fetchDeezerPreviewTracks('1')).rejects.toThrow('Playlist not found');
   });
 });

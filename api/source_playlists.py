@@ -2447,6 +2447,39 @@ def get_deezer_editorial_playlists():
         return jsonify({"success": True, "playlists": [], "count": 0, "error": str(e)})
 
 
+@bp.route('/api/discover/deezer/playlist/<playlist_id>/preview', methods=['GET'])
+def get_deezer_playlist_preview(playlist_id):
+    """A Deezer playlist's track list, to look at before mirroring it (#1418).
+
+    clicking an editorial card used to mirror the playlist on the spot, so
+    there was no way to see what was in it first. this is the fast read: the
+    playlist and its tracks, without the per-album track-number pass that a
+    mirror needs for tagging (most of the full load's time). mirroring still
+    goes through /api/deezer/playlist/<id> and gets the real numbers."""
+    try:
+        client = _get_deezer_client()
+        if client is None:
+            return jsonify({"success": False, "error": "Deezer client unavailable"}), 503
+        playlist = client.get_playlist(playlist_id, resolve_track_numbers=False)
+        if not playlist:
+            return jsonify({"success": False, "error": "Playlist not found"}), 404
+        tracks = [{
+            'id': t.get('id'),
+            'name': t.get('name'),
+            'artists': [{'name': a} for a in (t.get('artists') or [])],
+            'album_name': t.get('album') or '',
+            'album_cover_url': t.get('album_cover_url') or '',
+            'duration_ms': t.get('duration_ms') or 0,
+            'source': 'deezer',
+        } for t in playlist.get('tracks') or []]
+        return jsonify({"success": True, "id": playlist.get('id'), "name": playlist.get('name'),
+                        "owner": playlist.get('owner'), "image_url": playlist.get('image_url'),
+                        "tracks": tracks})
+    except Exception as e:
+        logger.error(f"Error previewing Deezer playlist {playlist_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @bp.route('/api/discover/deezer/genres', methods=['GET'])
 def get_deezer_editorial_genres():
     """The genre chips the editorial shelf offers."""

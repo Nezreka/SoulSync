@@ -90,7 +90,18 @@ function PlaylistCard({
   );
 }
 
-export function DeezerEditorialShelf({ onToast }: { onToast?: (message: string) => void }) {
+export function DeezerEditorialShelf({
+  onToast,
+  onPreview,
+}: {
+  onToast?: (message: string) => void;
+  /**
+   * #1418: open a playlist to look at instead of mirroring it on click. gets
+   * the shelf's own mirror for the preview's Mirror button, so mirroring still
+   * shows its progress on the card.
+   */
+  onPreview?: (playlist: DeezerEditorialPlaylist, mirror: () => void) => void;
+}) {
   const [genres, setGenres] = useState<DeezerEditorialGenre[]>([]);
   const [genreId, setGenreId] = useState<number>(DEFAULT_GENRE);
   const [query, setQuery] = useState('');
@@ -155,7 +166,11 @@ export function DeezerEditorialShelf({ onToast }: { onToast?: (message: string) 
     <DiscoverSection
       id="deezer-editorial"
       title="From Deezer's editors"
-      subtitle="Curated playlists, straight from Deezer. Pick one to match it against your library."
+      subtitle={
+        onPreview
+          ? 'Curated playlists, straight from Deezer. Open one to see its tracks, then mirror it to match it against your library.'
+          : 'Curated playlists, straight from Deezer. Pick one to match it against your library.'
+      }
       count={playlists.length}
       loaded={!loading}
       actions={
@@ -210,7 +225,7 @@ export function DeezerEditorialShelf({ onToast }: { onToast?: (message: string) 
             <PlaylistCard
               key={p.id}
               playlist={p}
-              onOpen={open}
+              onOpen={onPreview ? (pl) => onPreview(pl, () => void open(pl)) : open}
               busy={opening === p.id}
               stage={opening === p.id ? stage : null}
             />
