@@ -273,13 +273,15 @@
     }
 
     // Normalise a /api/video/search result into the picker's shape; keep only the
-    // kind we're resolving (movies for 'movie', shows for 'episode'). Owned titles
-    // (library_id present) are flagged so they can float to the top.
+    // kind we're resolving (movies for 'movie', shows for 'episode'). The API
+    // normalises TMDB's media_type to `kind` ("movie"/"show"/"person") — read that
+    // first; the media_type fallbacks are for raw TMDB payloads that never arrive
+    // here. Owned titles (library_id present) are flagged so they can float to the top.
     function normResults(raw, kind) {
         var want = kind === 'episode' ? ['tv', 'show'] : ['movie'];
         var out = [];
         (raw || []).forEach(function (it) {
-            var mt = String(it.media_type || it.type || (it.first_air_date ? 'tv' : 'movie')).toLowerCase();
+            var mt = String(it.kind || it.media_type || it.type || (it.first_air_date ? 'tv' : 'movie')).toLowerCase();
             if (want.indexOf(mt) === -1) return;
             var date = it.year || it.release_date || it.first_air_date || '';
             out.push({

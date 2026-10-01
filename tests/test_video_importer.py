@@ -419,3 +419,33 @@ def test_duration_reject_is_a_context_reject_not_a_blocklist():
     p = importer.plan_import(dl, "/dl/x/bb.s01e01.mkv", list_dir=lambda d: [],
                              probe=_probed(20), expected_duration_sec=42 * 60)
     assert p["action"] == "reject" and not p.get("bad_release")
+
+
+def test_duration_accepts_commercial_free_episode_cut():
+    # reality TV: TMDB lists the 60-min broadcast slot (with commercials), the file
+    # is the 42-min commercial-free cut — 0.70 of "expected" is healthy, not truncated
+    dl = _episode_dl("Below Deck Mediterranean S11E17 1080p WEB h264-EDITH",
+                     season=11, episode=17)
+    p = importer.plan_import(dl, "/dl/x/below.deck.med.s11e17.mkv", list_dir=lambda d: [],
+                             probe=_probed(42), expected_duration_sec=60 * 60)
+    assert p["action"] == "import"
+
+
+def test_duration_still_rejects_badly_truncated_episode():
+    # 36 of 60 min (0.60) is well under the episode bar — still caught
+    dl = _episode_dl("Below Deck Mediterranean S11E17 1080p WEB h264-EDITH",
+                     season=11, episode=17)
+    p = importer.plan_import(dl, "/dl/x/below.deck.med.s11e17.mkv", list_dir=lambda d: [],
+                             probe=_probed(36), expected_duration_sec=60 * 60)
+    assert p["action"] == "reject" and "36 of 60" in p["reason"]
+
+
+def test_duration_movie_bar_unchanged():
+    # movies keep the tighter 0.75 bar — TMDB film runtimes have no commercials in them
+    dl = _movie_dl("The Matrix 1999 1080p BluRay")
+    p = importer.plan_import(dl, "/dl/x/matrix.1999.1080p.bluray.mkv", list_dir=lambda d: [],
+                             probe=_probed(84), expected_duration_sec=120 * 60)
+    assert p["action"] == "reject" and "84 of 120" in p["reason"]
+    p2 = importer.plan_import(dl, "/dl/x/matrix.1999.1080p.bluray.mkv", list_dir=lambda d: [],
+                              probe=_probed(118), expected_duration_sec=120 * 60)
+    assert p2["action"] == "import"
