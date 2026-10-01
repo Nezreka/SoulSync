@@ -2898,6 +2898,7 @@ async function loadSettingsData() {
         document.getElementById('navidrome-url').value = settings.navidrome?.base_url || '';
         document.getElementById('navidrome-username').value = settings.navidrome?.username || '';
         document.getElementById('navidrome-password').value = settings.navidrome?.password || '';
+        loadNavidromePlaylistLogin();
 
         // Set active server and toggle visibility
         const activeServer = settings.active_media_server || 'plex';
@@ -8374,6 +8375,74 @@ async function loadNavidromeMusicFolders() {
     } catch (error) {
         console.error('Error loading Navidrome music folders:', error);
         document.getElementById('navidrome-folder-selector-container').style.display = 'none';
+    }
+}
+
+// the admin's own navidrome playlist user (Cremonies). it's the same
+// per-profile login My Account saves for everyone else, so sync already writes
+// as it. kept out of the main settings save on purpose, it's not app config.
+function _paintNavidromePlaylistLogin(username) {
+    const user = document.getElementById('navidrome-playlist-username');
+    const pass = document.getElementById('navidrome-playlist-password');
+    const status = document.getElementById('navidrome-playlist-status');
+    const clear = document.getElementById('navidrome-playlist-clear');
+    if (!user || !status) return;
+    user.value = username || '';
+    if (pass) pass.value = '';
+    if (clear) clear.style.display = username ? '' : 'none';
+    status.textContent = username
+        ? `Your synced playlists go to ${username}.`
+        : 'Your synced playlists go to this Navidrome user instead of the account above. '
+          + 'Leave it empty to use the account above. Other profiles set their own in My Account.';
+}
+
+async function loadNavidromePlaylistLogin() {
+    try {
+        const response = await fetch('/api/profiles/me/server-library');
+        const data = await response.json();
+        _paintNavidromePlaylistLogin(data && data.success ? data.navidrome_username : '');
+    } catch (error) {
+        console.debug('navidrome playlist login load failed:', error);
+    }
+}
+
+async function saveNavidromePlaylistLogin() {
+    const username = (document.getElementById('navidrome-playlist-username')?.value || '').trim();
+    const password = document.getElementById('navidrome-playlist-password')?.value || '';
+    if (!username || !password) {
+        showToast('Enter the playlist account username and password', 'warning');
+        return;
+    }
+    try {
+        const response = await fetch('/api/profiles/me/navidrome-login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            showToast(data.error || 'Could not save the playlist account', 'error');
+            return;
+        }
+        _paintNavidromePlaylistLogin(data.username || username);
+        showToast(`Playlists will sync to ${data.username || username}`, 'success');
+    } catch (error) {
+        showToast('Could not save the playlist account', 'error');
+    }
+}
+
+async function clearNavidromePlaylistLogin() {
+    try {
+        const response = await fetch('/api/profiles/me/navidrome-login', { method: 'DELETE' });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            showToast(data.error || 'Could not clear the playlist account', 'error');
+            return;
+        }
+        _paintNavidromePlaylistLogin('');
+        showToast('Playlists will sync to the account above', 'success');
+    } catch (error) {
+        showToast('Could not clear the playlist account', 'error');
     }
 }
 

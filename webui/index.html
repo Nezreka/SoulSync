@@ -4431,6 +4431,28 @@
                                                 <label>Password:</label>
                                                 <input type="password" id="navidrome-password" placeholder="Password">
                                             </div>
+                                            <!-- the admin's own playlist user. the account above often has to be a
+                                                 navidrome admin for scans, so playlists landed on it (Cremonies).
+                                                 same per-profile login other profiles set in My Account. -->
+                                            <div class="form-group" id="navidrome-playlist-login">
+                                                <label>Playlist account (optional):</label>
+                                                <input type="text" id="navidrome-playlist-username"
+                                                    placeholder="Same as above" autocomplete="off">
+                                                <input type="password" id="navidrome-playlist-password"
+                                                    placeholder="Password" autocomplete="new-password"
+                                                    style="margin-top: 6px;">
+                                                <div class="setting-help-text" id="navidrome-playlist-status">
+                                                    Your synced playlists go to this Navidrome user instead of the
+                                                    account above. Leave it empty to use the account above. Other
+                                                    profiles set their own in My Account.
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button"
+                                                        onclick="saveNavidromePlaylistLogin()">Save playlist account</button>
+                                                    <button class="detect-button" type="button" id="navidrome-playlist-clear"
+                                                        onclick="clearNavidromePlaylistLogin()" style="display: none;">Use the account above</button>
+                                                </div>
+                                            </div>
                                             <div class="form-group" id="navidrome-folder-selector-container"
                                                 style="display: none;">
                                                 <label>Music Library</label>
