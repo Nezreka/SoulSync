@@ -884,6 +884,11 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
         if config_path and not _tag_enabled(cfg, config_path):
             continue
         filtered_tags[tag_name] = value
+    # ARTISTS names the same artists as ARTIST/ALBUMARTIST, which come from the
+    # primary source. musicbrainz's credit keeps the name printed on the release
+    # ("Mammoth WVH"), so servers reading ARTISTS split the band in two (#1425)
+    if filtered_tags.get("ARTISTS") and metadata.get("_artists_list"):
+        filtered_tags["ARTISTS"] = list(metadata["_artists_list"])
 
     written = []
     release_year = pp["release_year"]

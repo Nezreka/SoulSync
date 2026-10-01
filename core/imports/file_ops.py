@@ -918,21 +918,10 @@ def create_lossy_copy(final_path, settings=None):
 
         if result.returncode == 0:
             logger.info(f"[Lossy Copy] Created {quality_label} copy: {os.path.basename(out_path)}")
-            try:
-                from mutagen import File as MutagenFile
-                audio = MutagenFile(out_path)
-                if audio is not None:
-                    if codec == "mp3":
-                        from mutagen.id3 import TXXX
-                        audio.tags.add(TXXX(encoding=3, desc="QUALITY", text=[quality_label]))
-                    elif codec == "opus":
-                        audio["QUALITY"] = [quality_label]
-                    elif codec == "aac":
-                        from mutagen.mp4 import MP4FreeForm
-                        audio["----:com.apple.iTunes:QUALITY"] = [MP4FreeForm(quality_label.encode("utf-8"))]
-                    audio.save()
-            except Exception as tag_err:
-                logger.error(f"[Lossy Copy] Could not update QUALITY tag: {tag_err}")
+            # ffmpeg's -map_metadata leaves vorbis names in an mp3 and -vn drops
+            # the cover, so rebuild the copy's tags from the source (#1422)
+            from core.metadata.lossy_tags import carry_tags_to_lossy_copy
+            carry_tags_to_lossy_copy(final_path, out_path, quality_label)
 
             # Honor the delete-original setting — without this the original
             # FLAC was always kept alongside the converted MP3/OPUS/AAC even

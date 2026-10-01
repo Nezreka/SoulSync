@@ -5584,55 +5584,10 @@ class RepairWorker:
                 logger.debug("Full ffmpeg stderr for %s:\n%s", resolved, proc.stderr)
                 return {'success': False, 'error': f'ffmpeg conversion failed: {reason}'}
 
-            # Update QUALITY tag
-            try:
-                from mutagen import File as MutagenFile
-                audio = MutagenFile(out_path)
-                if audio is not None:
-                    if codec == 'mp3':
-                        from mutagen.id3 import TXXX
-                        audio.tags.add(TXXX(encoding=3, desc='QUALITY', text=[quality_label]))
-                    elif codec == 'opus':
-                        audio['QUALITY'] = [quality_label]
-                    elif codec == 'aac':
-                        from mutagen.mp4 import MP4FreeForm
-                        audio['----:com.apple.iTunes:QUALITY'] = [MP4FreeForm(quality_label.encode('utf-8'))]
-                    audio.save()
-            except Exception as e:
-                logger.debug("Failed to write QUALITY tag on lossy copy: %s", e)
-
-            # Embed cover art from source FLAC
-            if codec in ('opus', 'aac'):
-                try:
-                    from mutagen import File as MutagenFile
-                    from mutagen.flac import FLAC as MutagenFLAC
-                    source_audio = MutagenFLAC(resolved)
-                    if source_audio and source_audio.pictures:
-                        pic = source_audio.pictures[0]
-                        dest_audio = MutagenFile(out_path)
-                        if dest_audio is not None:
-                            if codec == 'opus':
-                                import base64, struct
-                                from mutagen.oggopus import OggOpus
-                                if isinstance(dest_audio, OggOpus):
-                                    picture_data = (
-                                        struct.pack('>II', pic.type, len(pic.mime.encode('utf-8')))
-                                        + pic.mime.encode('utf-8')
-                                        + struct.pack('>I', len(pic.desc.encode('utf-8')))
-                                        + pic.desc.encode('utf-8')
-                                        + struct.pack('>IIII', pic.width, pic.height, pic.depth, pic.colors)
-                                        + struct.pack('>I', len(pic.data))
-                                        + pic.data
-                                    )
-                                    dest_audio['METADATA_BLOCK_PICTURE'] = [base64.b64encode(picture_data).decode('ascii')]
-                                    dest_audio.save()
-                            elif codec == 'aac':
-                                from mutagen.mp4 import MP4Cover
-                                fmt = MP4Cover.FORMAT_JPEG if 'jpeg' in pic.mime else MP4Cover.FORMAT_PNG
-                                dest_audio['covr'] = [MP4Cover(pic.data, imageformat=fmt)]
-                                dest_audio.save()
-                except Exception as e:
-                    logger.debug("Failed to embed cover art in lossy copy: %s", e)
+            # rebuild the copy's tags from the source: -map_metadata leaves
+            # vorbis names in an mp3 and drops the cover (#1422)
+            from core.metadata.lossy_tags import carry_tags_to_lossy_copy
+            carry_tags_to_lossy_copy(resolved, out_path, quality_label)
 
             if delete_original:
                 try:
