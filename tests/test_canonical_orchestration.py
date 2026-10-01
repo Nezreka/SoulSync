@@ -6,6 +6,8 @@ the DB gathering + persistence are exercised for real without live APIs.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from core.metadata.canonical_resolver import (
     default_fetch_tracklist,
     provider_artist_id,
@@ -194,6 +196,47 @@ def test_alternate_lookup_without_provider_id_searches_by_name(tmp_path, monkeyp
         ("spotify", "", "Imagine Dragons"),
         ("musicbrainz", "", "Imagine Dragons"),
     ]
+
+
+def test_canonical_misfit_never_sends_invalid_artist_id_to_musicbrainz(tmp_path, monkeypatch):
+    import core.metadata.album_tracks as album_tracks
+
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    album_id = _seed(db)
+    with db._get_connection() as conn:
+        conn.execute(
+            "UPDATE albums SET musicbrainz_release_id = ? WHERE id = ?",
+            ("linked-release", album_id),
+        )
+        conn.execute(
+            "UPDATE artists SET musicbrainz_id = ? WHERE id = 'art1'",
+            ("4QLGuDRbRtIIDoMyH9Zgg8",),
+        )
+
+    calls = []
+    artist_mbid = "8e3bb70b-cb74-4296-9bbd-ae00050fd4ca"
+
+    def search_artists(name, **kwargs):
+        calls.append(("search", name))
+        return [{"id": artist_mbid, "name": name}]
+
+    def get_artist_albums(artist_id, **kwargs):
+        calls.append(("albums", artist_id))
+        return [{"id": "standard-release", "name": "Evolve (Standard)"}]
+
+    client = SimpleNamespace(search_artists=search_artists,
+                             get_artist_albums=get_artist_albums)
+    monkeypatch.setattr(album_tracks.metadata_registry, "get_client_for_source",
+                        lambda source: client)
+    monkeypatch.setattr("core.metadata_service.get_album_tracks_for_source",
+                        lambda source, album: STD if album == "standard-release" else None)
+
+    result = resolve_and_store_canonical_for_album(
+        db, album_id, fetch_tracklist=lambda source, album: DLX,
+        source_priority=["musicbrainz"], min_score=0.99, store=False,
+    )
+    assert result and result["album_id"] == "standard-release"
+    assert calls == [("search", "Imagine Dragons"), ("albums", artist_mbid)]
 
 
 # ── default_fetch_tracklist normalization (no DB / no live API) ────────────
