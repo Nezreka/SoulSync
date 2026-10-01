@@ -651,7 +651,12 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         with self._lock:
             row = self.active_downloads.get(download_id)
             torrent_hash = row.get('torrent_hash') if row else None
-        if adapter and torrent_hash:
+            # an errored row was already dealt with in the client when it gave
+            # up: removed (abandon) or paused (pause, "leave it for me"). the
+            # monitor cancels errored rows before retrying, and that used to
+            # delete the torrent the user asked us to keep.
+            already_handled = bool(row) and str(row.get('state', '')).endswith('Errored')
+        if adapter and torrent_hash and not already_handled:
             try:
                 await adapter.remove(torrent_hash, delete_files=remove)
             except Exception as e:

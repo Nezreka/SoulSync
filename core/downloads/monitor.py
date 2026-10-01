@@ -1014,6 +1014,15 @@ class WebUIDownloadMonitor:
                     return True  # Signal that we need to call completion outside the lock
                 return False
 
+        # torrent and usenet grabs run their own clock: the plugin's stall timer
+        # (settings, default 10 min, abandon or pause) and the 6h deadline, and a
+        # give-up there comes back as an errored row, handled above. the 90s
+        # rules below are soulseek rules. on a torrent they removed it and its
+        # data after 90s at 0%, normal for a private tracker, then grabbed it
+        # again, 4 times over (discord, Tostadaman).
+        if _is_release_task(task):
+            return False
+
         if self._retry_slow_soulseek_transfer(
                 task_id, task, live_info, state_str, current_time, deferred_ops):
             return False
