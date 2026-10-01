@@ -119,7 +119,7 @@ export async function fetchServerPlaylistData(): Promise<{
   try {
     const mirrored = await mirroredRes.json();
     if (Array.isArray(mirrored)) {
-      mirroredNames = (mirrored as { name?: string }[]).map((p) => p.name ?? '');
+      mirroredNames = (mirrored as MirroredMatch[]).map(serverNameOf);
     }
   } catch {
     // 48: a failed mirrored fetch must not sink the list.
@@ -139,18 +139,43 @@ export async function fetchServerPlaylistData(): Promise<{
 /** The mirrored rows a server playlist's NAME matches (openServerPlaylistEditor, 158). */
 export interface MirroredMatch {
   id: number;
-  /** The UPSTREAM name. The server-playlist match keys on this, so a rename
-      must not touch it (#1219). */
+  /** The UPSTREAM name. A rename must not touch it (#1219); the server match
+      only falls back to it, see matchMirrored. */
   name: string;
   /** The alias when the user has renamed this mirror, else the upstream name.
       The endpoint sends both; showing this is what makes a rename useful. */
   display_name?: string;
+  /** The name it syncs under on the server: a rename, or a suffix when two
+      mirrors share a name (core/playlists/sync_names). */
+  sync_name?: string;
   source?: string;
   source_ref?: string;
   owner?: string;
   track_count?: number;
   updated_at?: string;
   mirrored_at?: string;
+}
+
+/** The name a mirror's playlist has on the server (#1420). */
+export function serverNameOf(
+  p: Pick<MirroredMatch, 'name' | 'display_name' | 'sync_name'>,
+): string {
+  return p.sync_name || p.display_name || p.name || '';
+}
+
+/**
+ * The mirrors a server playlist belongs to: the ones that sync under its name,
+ * else (a playlist synced before renames and suffixes existed) the ones whose
+ * upstream name it has (#1420).
+ */
+export function matchMirrored(
+  rows: readonly MirroredMatch[],
+  playlistName: string,
+): MirroredMatch[] {
+  const key = playlistName.trim().toLowerCase();
+  const bySync = rows.filter((p) => serverNameOf(p).trim().toLowerCase() === key);
+  if (bySync.length > 0) return bySync;
+  return rows.filter((p) => (p.name ?? '').trim().toLowerCase() === key);
 }
 
 /**
@@ -167,8 +192,7 @@ export async function fetchMirroredMatches(playlistName: string): Promise<Mirror
     const response = await fetch('/api/mirrored-playlists');
     const rows = await response.json();
     if (!Array.isArray(rows)) return [];
-    const key = playlistName.trim().toLowerCase();
-    return (rows as MirroredMatch[]).filter((p) => (p.name ?? '').trim().toLowerCase() === key);
+    return matchMirrored(rows as MirroredMatch[], playlistName);
   } catch {
     return [];
   }

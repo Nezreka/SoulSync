@@ -278,13 +278,14 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
     # Sync under the user's custom alias when set, else the upstream name (#865
     # follow-up). The server-side playlist is named with this.
     # the server playlist is found by name, so a mirror that would land on
-    # another mirror's playlist gets a distinct name (core/playlists/sync_names)
-    from core.playlists.sync_names import sync_name_for
+    # another mirror's playlist gets a distinct name, kept once it syncs
+    # (core/playlists/sync_names)
+    from core.playlists.sync_names import claim_sync_name
     try:
         _active_server = deps.config_manager.get_active_media_server()
     except Exception:
         _active_server = None
-    sync_name = sync_name_for(db, _active_server, pl) or pl.get('name') or 'Playlist'
+    sync_name = claim_sync_name(db, _active_server, pl) or pl.get('name') or 'Playlist'
 
     deps.update_progress(
         auto_id,
