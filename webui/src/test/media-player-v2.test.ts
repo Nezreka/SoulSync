@@ -1436,3 +1436,82 @@ describe('song-accurate analysis: log bands + spectral-flux beat', () => {
     expect(st.beat).toBe(0);
   });
 });
+
+describe('the frame loop owns no beat logic of its own', () => {
+  // npv2VizFrame used to re-run the old bass-threshold trigger and decay the
+  // beat AFTER npv2ReadAudio had already done spectral flux + decay. a steady
+  // loud bassline re-fired it every few frames and every beat decayed twice
+  // as fast. real frame, real audio read, real analyser + flux; only the web
+  // audio nodes, canvas and rAF are stubs.
+  const build = (bandValue: number) => {
+    const factory = new Function(
+      'stubs',
+      [
+        'const { npAudioContext, npAnalyser, requestAnimationFrame, document } = stubs;',
+        'let isPlaying = true;',
+        extractConst('NPV2_VIZ_BANDS', v2),
+        extractConst('NPV2_VIZ_FMIN', v2),
+        extractConst('NPV2_VIZ_FMAX', v2),
+        extractConst('NPV2_VIZ_FFT', v2),
+        'let npv2VizAnalyser = null, npv2VizBandRanges = null, npv2VizSr = 0, npv2VizRaw = null, npv2VizBeatSt = null;',
+        extractFunction('npv2LogBandRanges', v2),
+        extractFunction('npv2MapLogBands', v2),
+        extractFunction('npv2FluxBeat', v2),
+        extractFunction('npv2VizBeatState', v2),
+        extractFunction('npv2EnsureVizAnalyser', v2),
+        extractFunction('npv2IdleSynth', v2),
+        extractFunction('npv2IsPlaying', v2),
+        extractFunction('npv2ReadAudio', v2),
+        'const NPV2_VIZ = { freq: new Uint8Array(NPV2_VIZ_BANDS), wave: new Uint8Array(64), energy: 0, idle: true, beat: 0, pal: { r: 1, g: 2, b: 3 }, q: 1 };',
+        "const NPV2 = { bgOn: true, theme: 'aurora', vizLast: 0, vizT: 0, vizEnergy: 1, reduceMotion: false, vizPalette: 'auto', palette: { r: 1, g: 2, b: 3 }, vizAutocycle: '0', vizLastCycle: 0, canvas: { width: 10, height: 10 }, ctx: { clearRect() {} } };",
+        'const NPV2_PALETTES = {}; const NPV2_PAINT = {};',
+        'function npv2ModalOpen() { return true; }',
+        'function npv2SizeCanvas() { return true; }',
+        'function npv2AutocycleSeconds() { return 0; }',
+        'function npv2CycleTheme() {}',
+        'function npv2UpdateWakeLock() {}',
+        extractFunction('npv2VizFrame', v2),
+        'return { npv2VizFrame, NPV2_VIZ, npv2VizBeatState };',
+      ].join('\n'),
+    );
+    const analyserNode = {
+      fftSize: 0,
+      smoothingTimeConstant: 0,
+      getByteFrequencyData(arr: Uint8Array) {
+        arr.fill(bandValue);
+      },
+      getByteTimeDomainData(arr: Uint8Array) {
+        arr.fill(128);
+      },
+      connect() {},
+    };
+    return factory({
+      npAudioContext: { sampleRate: 48000, createAnalyser: () => analyserNode },
+      npAnalyser: analyserNode,
+      requestAnimationFrame: () => 1,
+      document: { hidden: false },
+    }) as any;
+  };
+
+  it('a steady loud bassline does not keep re-firing the beat', () => {
+    const api = build(220); // bass well over the old 0.55 threshold, never changing
+    let fires = 0;
+    let prev = 0;
+    for (let f = 1; f <= 240; f++) {
+      api.npv2VizFrame(f * (1000 / 60));
+      if (api.NPV2_VIZ.beat > 0.9 && prev < 0.9) fires++;
+      prev = api.NPV2_VIZ.beat;
+    }
+    expect(fires).toBeLessThanOrEqual(1); // the opening attack, then nothing
+    expect(api.NPV2_VIZ.beat).toBe(0);
+  });
+
+  it('decays a beat once per frame, not twice', () => {
+    const api = build(40);
+    api.npv2VizFrame(1000 / 60); // settle
+    api.npv2VizBeatState().beat = 1; // a beat just fired in the flux detector
+    api.npv2VizFrame(2 * (1000 / 60));
+    // one decay of dt * 2.4 at 60 fps: 1 - 0.04
+    expect(api.NPV2_VIZ.beat).toBeCloseTo(1 - (1 / 60) * 2.4, 3);
+  });
+});

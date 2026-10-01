@@ -2043,10 +2043,10 @@ function npv2VizFrame(now) {
     // energy scaled by the user's visual energy; capped in reduce-motion
     S.energy = Math.min(1, S.energy * NPV2.vizEnergy);
     if (NPV2.reduceMotion) S.energy = Math.min(S.energy, 0.45);
-    // beat envelope: a hard bass onset sets it to 1, it decays from there
-    const bass = (S.freq[0] + S.freq[1] + S.freq[2]) / 3 / 255;
-    if (!S.idle && bass > 0.55 && S.beat < 0.35) S.beat = 1;
-    S.beat = Math.max(0, S.beat - dt * 2.4);
+    // the beat envelope is set AND decayed once, in npv2ReadAudio (spectral
+    // flux, or the bass fallback without the dedicated analyser). a second
+    // bass-threshold pass here re-fired on any steady loud bassline and
+    // decayed every beat twice as fast
     S.t = NPV2.vizT;
     // palette: album art by default, or a curated override
     const pal = (NPV2.vizPalette !== 'auto' && NPV2_PALETTES[NPV2.vizPalette]) ? NPV2_PALETTES[NPV2.vizPalette] : NPV2.palette;
