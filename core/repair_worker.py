@@ -1057,6 +1057,11 @@ class RepairWorker:
         # so history can say "you stopped this" instead of implying a crash.
         if run_status == 'completed' and self._cancel_current_job.is_set():
             run_status = 'cancelled'
+        # the job quit on its own before the end. not a crash and not done:
+        # say so, with the job's reason, instead of a clean 'completed'
+        if run_status == 'completed' and getattr(result, 'stopped_early', ''):
+            run_status = 'stopped'
+            run_error = str(result.stopped_early)[:500]
 
         # A completed sweep is the moment we know the library's real state, so
         # it is also the moment to close findings whose file has since gone.
@@ -4406,7 +4411,11 @@ class RepairWorker:
                     from core.tag_writer import write_tags_to_file
                     tag_updates = {'title': aid_title}
                     if aid_artist:
-                        tag_updates['artist_name'] = aid_artist
+                        # track_artist, not artist_name: the writer puts
+                        # artist_name into album artist, and the track stays on
+                        # its album, so a compilation track would split off
+                        # its album (#1289)
+                        tag_updates['track_artist'] = aid_artist
                         # Issue #587 — derive a per-artist list from
                         # AcoustID's credit string when it carries
                         # multiple contributors. The post-download
