@@ -25,6 +25,47 @@ def track_matches_title(title, track):
         normalized(track.get("title")), normalized((track.get("recording") or {}).get("title"))}
 
 
+def release_by_artist(release, artist_names, artist_mbid=None):
+    """the release is credited to the artist we expect. an id match wins; else a
+    credited name or the artist's current name folds equal to one we expect.
+    equal, not similar: "Mammoth Mammoth" is a different band from "Mammoth"
+    (#1426). no expected name or no credited name -> can't judge, True."""
+    from core.text.fold import fold_title
+    credits = [c for c in (release or {}).get("artist-credit") or [] if isinstance(c, dict)]
+    if isinstance(artist_names, str):
+        artist_names = [artist_names]
+    expected = {fold_title(n, drop_brackets=False) for n in artist_names or [] if n}
+    expected.discard("")
+    if not expected or not credits:
+        return True
+    if artist_mbid and any((c.get("artist") or {}).get("id") == artist_mbid for c in credits):
+        return True
+    joined = "".join((c.get("name") or (c.get("artist") or {}).get("name") or "") + (c.get("joinphrase") or "")
+                     for c in credits)
+    names = {joined} | {c.get("name") or "" for c in credits} | {(c.get("artist") or {}).get("name") or "" for c in credits}
+    folded = {fold_title(n, drop_brackets=False) for n in names if n} - {""}
+    return not folded or bool(expected & folded)
+
+
+def track_title_agrees(title, track, threshold=0.7):
+    """a release track at the file's position is the same song, not just the
+    same slot on another album (#1426). a word-prefix counts, so "Song -
+    Remastered 2011" agrees with "Song". a side with no title -> can't judge, True."""
+    from core.text.fold import fold_title, folded_similarity
+    mine = fold_title(title or "")
+    if not mine:
+        return True
+    track = track or {}
+    theirs = {fold_title(n or "") for n in (track.get("title"), (track.get("recording") or {}).get("title"))} - {""}
+    if not theirs:
+        return True
+    for name in theirs:
+        short, long_ = sorted((mine, name), key=len)
+        if folded_similarity(mine, name) >= threshold or long_.startswith(short + " "):
+            return True
+    return False
+
+
 def credit_tags(credits, album=False):
     entries = [c for c in credits or [] if isinstance(c, dict)]
     names = [c.get("name") or c.get("artist", {}).get("name") for c in entries]

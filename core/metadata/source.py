@@ -418,6 +418,18 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
                     _bounded_cache_set(mb_release_detail_cache, pp["release_mbid"], release_detail, _MB_RELEASE_DETAIL_CACHE_MAX_ENTRIES)
         if pinned_release and release_detail.get("id") != pinned_release:
             release_detail = {}
+        # a release found by name has to be by this artist. the album preflight
+        # and match_release both go by title, so "Mammoth" by Mammoth Mammoth
+        # handed its date, label and recordings to every track (#1426)
+        from core.metadata.musicbrainz_tags import release_by_artist
+        expected_artists = [pp.get("batch_artist_name"), artist_name, metadata.get("album_artist")]
+        if (release_detail and not pinned_release
+                and not release_by_artist(release_detail, expected_artists, pp.get("artist_mbid"))):
+            logger.info("MusicBrainz release %s is not by '%s'; not using it",
+                        pp["release_mbid"], pp.get("batch_artist_name") or artist_name)
+            release_detail = {}
+            pp["release_mbid"] = ""
+            pp["id_tags"].pop("MUSICBRAINZ_RELEASE_ID", None)
         if release_detail:
             rg = release_detail.get("release-group", {})
             original_date = rg.get("first-release-date", "")
@@ -434,8 +446,11 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
                         if medium.get("position", 1) == disc_num_int:
                             for mtrack in (medium.get("tracks") or medium.get("track-list", [])):
                                 if mtrack.get("position") == track_num_int:
-                                    from core.metadata.musicbrainz_tags import track_matches_title
-                                    if pinned_release and not track_matches_title(track_title, mtrack):
+                                    from core.metadata.musicbrainz_tags import track_matches_title, track_title_agrees
+                                    # the slot must hold this song, or another edition's
+                                    # recording and credits land on it (#1426)
+                                    agrees = track_matches_title if pinned_release else track_title_agrees
+                                    if not agrees(track_title, mtrack):
                                         break
                                     if mtrack.get("id"):
                                         pp["id_tags"]["MUSICBRAINZ_RELEASETRACKID"] = mtrack["id"]
