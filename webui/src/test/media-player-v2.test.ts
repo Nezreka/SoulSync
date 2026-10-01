@@ -1883,3 +1883,92 @@ describe('the onset flag', () => {
     expect(S.waveFull).toHaveLength(2048);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Mini player glow: same colors and analysis as the theater, at a whisper
+// ---------------------------------------------------------------------------
+
+describe('mini player glow', () => {
+  const base = {
+    present: true,
+    idle: false,
+    bgOn: true,
+    reduceMotion: false,
+    playing: true,
+    hidden: false,
+    theaterOpen: false,
+  };
+
+  it('runs only while music plays with Visuals on, visible, and the theater closed', () => {
+    const { npv2MiniWanted } = v2Harness(['npv2MiniWanted']);
+    expect(npv2MiniWanted(base)).toBe(true);
+    for (const off of [
+      { present: false },
+      { idle: true },
+      { bgOn: false }, // follows the theater's Visuals switch
+      { reduceMotion: true },
+      { playing: false },
+      { hidden: true },
+      { theaterOpen: true }, // the theater runs its own engine
+    ]) {
+      expect(npv2MiniWanted({ ...base, ...off }), JSON.stringify(off)).toBe(false);
+    }
+  });
+
+  it('paints two cover-colored glows and a spectrum whisper from the real bands', () => {
+    const { npv2PaintMini } = v2Harness(['npv2PaintMini', 'npv2BeatAmp', 'npv2PalA', 'npv2Bin']);
+    const stops: string[] = [];
+    const rects: number[][] = [];
+    const ctx = {
+      clearRect() {},
+      createRadialGradient: () => ({
+        addColorStop: (_o: number, c: string) => stops.push(c),
+      }),
+      fillRect: (...a: number[]) => rects.push(a),
+      set fillStyle(_v: unknown) {},
+    };
+    const S = { freq: new Uint8Array(64).fill(200), beat: 0.5, t: 1 };
+    npv2PaintMini(ctx, 340, 70, S, { r: 236, g: 72, b: 120 }, { r: 70, g: 150, b: 240 });
+    expect(stops.some((c) => c.startsWith('rgba(236,72,120,'))).toBe(true);
+    expect(stops.some((c) => c.startsWith('rgba(70,150,240,'))).toBe(true);
+    // 2 glow fills + 48 bars, the bars sitting on the bottom edge
+    expect(rects).toHaveLength(50);
+    const bar = rects[2];
+    expect(bar[1] + bar[3]).toBeCloseTo(70, 5);
+  });
+});
+
+describe('mini player wiring', () => {
+  const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
+  const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
+
+  it('the glow canvas lives inside the mini player, under its controls', () => {
+    const mp = html.indexOf('id="media-player"');
+    const canvas = html.indexOf('id="mp-viz"');
+    const body = html.indexOf('class="mini-player-body"');
+    expect(canvas).toBeGreaterThan(mp);
+    expect(canvas).toBeLessThan(body);
+    expect(css).toMatch(
+      /#media-player \.mini-player-body,\s*#media-player \.player-top-progress \{\s*position: relative;\s*z-index: 1;/,
+    );
+  });
+
+  it('the mini player is colored by the cover, with the default accent as fallback', () => {
+    expect(css).toContain(
+      '--mp-a: var(--np-ambient-r, 29), var(--np-ambient-g, 185), var(--np-ambient-b, 84);',
+    );
+    expect(css).toMatch(
+      /#media-player \.play-button:not\(:disabled\) \{\s*background: linear-gradient\(135deg, rgb\(var\(--mp-a\)\), rgb\(var\(--mp-a2\)\)\);/,
+    );
+    // and v1 puts the cover colors on #media-player, not only the theater
+    expect(v1).toMatch(
+      /document\.querySelector\('\.np-modal'\), document\.getElementById\('media-player'\)/,
+    );
+  });
+
+  it('reduce motion at the OS level hides the live layer', () => {
+    expect(css).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{\s*#media-player \.mp-viz \{\s*display: none;/,
+    );
+  });
+});

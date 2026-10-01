@@ -2327,6 +2327,139 @@ function npv2KeepTrail(canvas, w, h) {
     b.theme = NPV2.theme;
 }
 
+// ---------------------------------------------------------------------------
+// Mini player glow: the same cover colors and the same analysis, at a whisper.
+// Two soft glows breathe with the bass and drift; a faint spectrum runs along
+// the bottom edge. Runs only while it is wanted (music playing, Visuals on,
+// reduce motion off, tab visible, theater closed: the theater has its own).
+// ---------------------------------------------------------------------------
+
+const NPV2_MINI = { raf: 0, c: null, ctx: null, last: 0, t: 0, tick: 0, pal: null, pal2: null, palT: null, pal2T: null };
+
+// Paint one mini frame. Pure apart from ctx: S is the shared analysis frame.
+function npv2PaintMini(ctx, w, h, S, pal, pal2) {
+    const t = (S && S.t) || 0;
+    const beat = npv2BeatAmp(S);
+    const bass = (S && S.freq && S.freq.length) ? (S.freq[0] + S.freq[1] + S.freq[2] + S.freq[3]) / 4 / 255 : 0.3;
+    const lift = Math.min(1, bass * 0.8 + beat * 0.5);
+    ctx.clearRect(0, 0, w, h);
+    const glow = (x, y, r, p, a) => {
+        const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+        g.addColorStop(0, npv2PalA(p, a.toFixed(3)));
+        g.addColorStop(1, npv2PalA(p, 0));
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, h);
+    };
+    glow(w * (0.24 + 0.08 * Math.sin(t * 0.35)), h * 0.55, h * (1.3 + 0.4 * lift), pal, 0.22 + 0.26 * lift);
+    glow(w * (0.78 + 0.07 * Math.cos(t * 0.28)), h * 0.45, h * (1.1 + 0.3 * lift), pal2, 0.16 + 0.16 * lift);
+    // spectrum whisper: a thin row of bars along the bottom edge
+    const n = 48;
+    const bw = w / n;
+    for (let i = 0; i < n; i++) {
+        const v = npv2Bin(S, i, n);
+        const bh = 1.5 + v * h * 0.16;
+        ctx.fillStyle = 'rgba(255,255,255,' + (0.05 + v * 0.14).toFixed(3) + ')';
+        ctx.fillRect(i * bw + 1, h - bh, Math.max(1, bw - 2), bh);
+    }
+}
+
+// Should the mini glow be animating right now? Pure over its inputs.
+function npv2MiniWanted(o) {
+    return !!(o && o.present && !o.idle && o.bgOn && !o.reduceMotion && o.playing && !o.hidden && !o.theaterOpen);
+}
+
+function npv2MiniState() {
+    let el = null;
+    try { el = document.getElementById('media-player'); } catch (e) {}
+    let hidden = false;
+    try { hidden = !!document.hidden; } catch (e) {}
+    return {
+        el,
+        present: !!el,
+        idle: !el || el.classList.contains('idle'),
+        bgOn: NPV2.bgOn,
+        reduceMotion: NPV2.reduceMotion,
+        playing: npv2IsPlaying(),
+        hidden,
+        theaterOpen: npv2ModalOpen(),
+    };
+}
+
+// The cover colors media-player.js put on #media-player.
+function npv2MiniReadPalette(el) {
+    try {
+        const cs = getComputedStyle(el);
+        const read = (pfx) => {
+            const r = parseInt(cs.getPropertyValue(pfx + '-r'), 10);
+            const g = parseInt(cs.getPropertyValue(pfx + '-g'), 10);
+            const b = parseInt(cs.getPropertyValue(pfx + '-b'), 10);
+            return [r, g, b].every((n) => isFinite(n)) ? { r, g, b } : null;
+        };
+        NPV2_MINI.palT = read('--np-ambient') || NPV2.palette;
+        NPV2_MINI.pal2T = read('--np-ambient2') || npv2Analogous(NPV2_MINI.palT);
+    } catch (e) {}
+}
+
+function npv2MiniFrame(now) {
+    const st = npv2MiniState();
+    if (!npv2MiniWanted(st)) {
+        NPV2_MINI.raf = 0;
+        if (NPV2_MINI.c) NPV2_MINI.c.classList.remove('on');
+        return;
+    }
+    NPV2_MINI.raf = requestAnimationFrame(npv2MiniFrame);
+    const c = NPV2_MINI.c, ctx = NPV2_MINI.ctx;
+    if (!c || !ctx) return;
+    const dt = Math.min(0.1, (now - NPV2_MINI.last) / 1000 || 0.016);
+    NPV2_MINI.last = now;
+    NPV2_MINI.t += dt;
+    // soft content: 1x pixels are plenty
+    const w = Math.max(2, c.clientWidth), h = Math.max(2, c.clientHeight);
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    const S = NPV2_VIZ;
+    npv2ReadAudio(S, NPV2_MINI.t, dt);
+    S.t = NPV2_MINI.t;
+    S.dt = dt;
+    if (!NPV2_MINI.palT || (NPV2_MINI.tick++ % 45) === 0) npv2MiniReadPalette(st.el);
+    NPV2_MINI.pal = npv2EaseColor(NPV2_MINI.pal, NPV2_MINI.palT || NPV2.palette, S);
+    NPV2_MINI.pal2 = npv2EaseColor(NPV2_MINI.pal2, NPV2_MINI.pal2T || npv2Analogous(NPV2.palette), S);
+    try { npv2PaintMini(ctx, w, h, S, NPV2_MINI.pal, NPV2_MINI.pal2); } catch (e) { /* never break the player */ }
+}
+
+// Start the mini glow if it is wanted and not already running. Cheap; called
+// from play / pause / visibility / theater close / Visuals toggles, plus a
+// 1s safety net.
+function npv2MiniKick() {
+    try {
+        if (!NPV2_MINI.c) {
+            const c = document.getElementById('mp-viz');
+            if (!c) return;
+            NPV2_MINI.c = c;
+            NPV2_MINI.ctx = c.getContext('2d');
+        }
+        const st = npv2MiniState();
+        if (!npv2MiniWanted(st)) {
+            NPV2_MINI.c.classList.remove('on');
+            return;
+        }
+        NPV2_MINI.c.classList.add('on');
+        if (!NPV2_MINI.raf) {
+            NPV2_MINI.last = performance.now();
+            NPV2_MINI.raf = requestAnimationFrame(npv2MiniFrame);
+        }
+    } catch (e) {}
+}
+
+function npv2MiniInit() {
+    try {
+        const a = npv2AudioEl();
+        if (a) ['play', 'playing', 'pause', 'ended'].forEach((ev) => a.addEventListener(ev, () => setTimeout(npv2MiniKick, 0)));
+        document.addEventListener('visibilitychange', npv2MiniKick);
+        setInterval(npv2MiniKick, 1000);
+        npv2MiniKick();
+    } catch (e) {}
+}
+
 function npv2VizStart() {
     if (NPV2.vizRaf) return;
     try {
@@ -2390,6 +2523,7 @@ function npv2SetBgOn(on) {
         const t = document.getElementById('np-v2-bg-toggle');
         if (t) { t.checked = NPV2.bgOn; }
     } catch (e) {}
+    npv2MiniKick(); // the mini player follows the same Visuals switch
 }
 
 // --- Visual options: every one of these changes what the painters do --------
@@ -2449,6 +2583,7 @@ function npv2SetReduceMotion(on) {
         const t = document.getElementById('np-v2-reduce-motion');
         if (t) t.checked = NPV2.reduceMotion;
     } catch (e) {}
+    npv2MiniKick();
 }
 
 // Sync a range slider + its value label.
@@ -3439,6 +3574,7 @@ function npv2WatchModal() {
                 if (NPV2.tab === 'history') npv2RenderHistory();
             } else {
                 npv2VizStop();
+                npv2MiniKick();
                 npv2ToggleShortcuts(false);
                 npv2UpdateWakeLock();
                 // closing the theater backs out of immersive mode too
@@ -3724,6 +3860,7 @@ function npv2Init() {
 
         npv2WatchTrackTitle();
         npv2WatchModal();
+        npv2MiniInit();
         npv2WatchQueue();
 
         // Keyboard: capture phase so Esc can close the shortcuts overlay

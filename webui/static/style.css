@@ -790,6 +790,87 @@ body.max-performance .nav-button.active:hover {
     display: none;
 }
 
+/* the mini player wears the current cover's colors: media-player.js sets
+   --np-ambient / --np-ambient2 on #media-player when the art loads, the
+   fallbacks are the default accent. a live glow canvas (media-player-v2.js,
+   npv2Mini*) sits behind the controls while music plays */
+#media-player {
+    --mp-a: var(--np-ambient-r, 29), var(--np-ambient-g, 185), var(--np-ambient-b, 84);
+    --mp-a2: var(--np-ambient2-r, 29), var(--np-ambient2-g, 140), var(--np-ambient2-b, 185);
+    background:
+        radial-gradient(130% 160% at 0% 0%, rgba(var(--mp-a), 0.20), transparent 62%),
+        radial-gradient(130% 160% at 100% 100%, rgba(var(--mp-a2), 0.14), transparent 62%),
+        linear-gradient(180deg, rgba(20, 19, 24, 0.94), rgba(10, 10, 13, 0.97));
+    border-color: rgba(var(--mp-a), 0.20);
+    border-top-color: rgba(255, 255, 255, 0.14);
+    box-shadow:
+        0 18px 50px rgba(0, 0, 0, 0.55),
+        0 0 46px rgba(var(--mp-a), 0.16),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+#media-player:hover {
+    border-color: rgba(var(--mp-a), 0.32);
+    border-top-color: rgba(255, 255, 255, 0.18);
+    box-shadow:
+        0 20px 54px rgba(0, 0, 0, 0.6),
+        0 0 58px rgba(var(--mp-a), 0.24),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+#media-player .mp-viz {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    mix-blend-mode: screen;
+    opacity: 0;
+    transition: opacity 0.6s ease;
+}
+
+#media-player .mp-viz.on {
+    opacity: 0.95;
+}
+
+#media-player .mini-player-body,
+#media-player .player-top-progress {
+    position: relative;
+    z-index: 1;
+}
+
+#media-player .sidebar-album-art {
+    border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(var(--mp-a), 0.38), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+#media-player .track-title {
+    color: #fff;
+}
+
+#media-player .play-button:not(:disabled) {
+    background: linear-gradient(135deg, rgb(var(--mp-a)), rgb(var(--mp-a2)));
+    color: #fff;
+    box-shadow: 0 4px 16px rgba(var(--mp-a), 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+#media-player .play-button:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgb(var(--mp-a)), rgb(var(--mp-a2)));
+    filter: brightness(1.12);
+    box-shadow: 0 6px 20px rgba(var(--mp-a), 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+#media-player .progress-fill {
+    background: linear-gradient(90deg, rgb(var(--mp-a)), rgb(var(--mp-a2)));
+    box-shadow: 0 0 10px rgba(var(--mp-a), 0.7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #media-player .mp-viz {
+        display: none;
+    }
+}
+
 /* Mini player body — horizontal: art | info | controls */
 .mini-player-body {
     display: flex;
