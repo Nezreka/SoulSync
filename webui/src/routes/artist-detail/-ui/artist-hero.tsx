@@ -303,6 +303,7 @@ export function ArtistHero({
           libraryArtistId={artist.id}
           artistName={String(artist.name || '')}
           artistImage={appliedPhoto || image.primary || ''}
+          discography={discography}
           onClose={() => setDownloadingDiscog(false)}
         />
       ) : null}

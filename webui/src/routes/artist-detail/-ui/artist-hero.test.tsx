@@ -248,7 +248,8 @@ describe('stats and actions', () => {
   it('radio stays a vanilla global; discography is the local modal now', async () => {
     const radio = vi.fn();
     window.playArtistRadio = radio;
-    // The modal resolves the artist's metadata ids, then the discography.
+    // The modal resolves the artist's metadata ids, then lists what the page
+    // shows. A /discography answer here would be a different list.
     const fetchSpy = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/enhanced')) {
@@ -257,13 +258,13 @@ describe('stats and actions', () => {
         );
       }
       return new Response(
-        JSON.stringify({ albums: [{ id: 9, name: 'SAW' }], eps: [], singles: [] }),
+        JSON.stringify({ albums: [{ id: 9, name: 'Underground V2.0' }], eps: [], singles: [] }),
       );
     });
     vi.stubGlobal('fetch', fetchSpy);
     window.showToast = vi.fn() as never;
     try {
-      renderHero({ id: 42, name: 'A' }, { albums: [{ id: 1 }] });
+      renderHero({ id: 42, name: 'A' }, { albums: [{ id: 1, name: 'SAW' }], source: 'deezer' });
 
       fireEvent.click(document.getElementById('library-artist-radio-btn')!);
       expect(radio).toHaveBeenCalled();
@@ -271,9 +272,8 @@ describe('stats and actions', () => {
       fireEvent.click(document.getElementById('discog-download-btn')!);
       expect(await screen.findByText('Download Discography')).toBeTruthy();
       await screen.findByText('SAW');
-      expect(
-        fetchSpy.mock.calls.some(([u]) => String(u).includes('/api/artist/sp1/discography')),
-      ).toBe(true);
+      expect(screen.queryByText('Underground V2.0')).toBeNull();
+      expect(fetchSpy.mock.calls.some(([u]) => String(u).includes('/discography'))).toBe(false);
     } finally {
       vi.unstubAllGlobals();
       delete window.showToast;
