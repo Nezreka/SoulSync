@@ -16,6 +16,7 @@ read it.
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
+from uuid import UUID
 
 from core.metadata.canonical_version import (
     score_release_against_files,
@@ -33,7 +34,6 @@ _ARTIST_ID_COLUMNS = {
     'itunes': 'artist_itunes_id',
     'deezer': 'artist_deezer_id',
     'discogs': 'artist_discogs_id',
-    'hydrabase': 'artist_hydrabase_id',
     'musicbrainz': 'artist_musicbrainz_id',
 }
 
@@ -45,7 +45,14 @@ def provider_artist_id(album_data: Dict[str, Any], source: str) -> str:
     to a metadata client causes invalid-ID requests (and can select an unrelated
     artist if the provider happens to recognize the same string).
     """
-    return str(album_data.get(_ARTIST_ID_COLUMNS.get(source, '')) or '')
+    column = _ARTIST_ID_COLUMNS.get(source)
+    artist_id = str(album_data.get(column) or '').strip() if column else ''
+    if source == 'musicbrainz' and artist_id:
+        try:
+            return str(UUID(artist_id))
+        except ValueError:
+            return ''  # malformed stored MBID: use the existing name search
+    return artist_id
 
 
 def resolve_canonical_for_album(

@@ -817,7 +817,6 @@ def load_album_and_tracks(db, album_id):
                    ar.itunes_artist_id as artist_itunes_id,
                    ar.deezer_id as artist_deezer_id,
                    ar.discogs_id as artist_discogs_id,
-                   ar.soul_id as artist_hydrabase_id,
                    ar.musicbrainz_id as artist_musicbrainz_id
             FROM albums al
             JOIN artists ar ON al.artist_id = ar.id

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from core.metadata.canonical_resolver import (
     default_fetch_tracklist,
+    provider_artist_id,
     resolve_and_store_canonical_for_album,
 )
 from database.music_database import MusicDatabase
@@ -117,6 +118,20 @@ def test_resolve_returns_none_for_missing_album(tmp_path):
         db, "does-not-exist", fetch_tracklist=lambda s, a: STD, source_priority=["spotify"],
     )
     assert out is None
+
+
+def test_local_soul_id_is_not_a_hydrabase_artist_id():
+    assert provider_artist_id(
+        {'artist_id': 'local', 'artist_hydrabase_id': 'locally-derived-soul-id'},
+        'hydrabase',
+    ) == ''
+
+
+def test_malformed_stored_musicbrainz_artist_id_uses_name_search():
+    assert provider_artist_id(
+        {'artist_id': 'local', 'artist_musicbrainz_id': '4QLGuDRbRtIIDoMyH9Zgg8'},
+        'musicbrainz',
+    ) == ''
 
 
 def test_alternate_lookup_uses_provider_artist_id_not_local_key(tmp_path, monkeypatch):
