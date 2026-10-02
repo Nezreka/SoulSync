@@ -63,6 +63,14 @@ def test_slot_must_hold_the_same_song():
     assert track_title_agrees("", track)                               # nothing to judge
 
 
+def test_romanized_title_is_not_judged_against_native_script():
+    """amazarashi in boulder's library: romanized titles, japanese on musicbrainz.
+    found by the live check; the slot is right, it just can't be compared."""
+    assert track_title_agrees("Hikari Saiko", {"title": "光、再考"})
+    assert track_title_agrees("Love Song", {"title": "ラブソング"})
+    assert not track_title_agrees("Mr. Ed", {"title": "500 Horsepower", "recording": {"title": "光"}})
+
+
 # ── album consistency ──
 
 def _mb(releases, artist_mbid=None):

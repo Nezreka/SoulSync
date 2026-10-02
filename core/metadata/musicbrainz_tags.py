@@ -47,6 +47,11 @@ def release_by_artist(release, artist_names, artist_mbid=None):
     return not folded or bool(expected & folded)
 
 
+def _latin(folded):
+    """every letter is a-z (fold_title already took the accents off)."""
+    return all(ch.isascii() for ch in folded if ch.isalpha())
+
+
 def track_title_agrees(title, track, threshold=0.7):
     """a release track at the file's position is the same song, not just the
     same slot on another album (#1426). a word-prefix counts, so "Song -
@@ -57,6 +62,11 @@ def track_title_agrees(title, track, threshold=0.7):
         return True
     track = track or {}
     theirs = {fold_title(n or "") for n in (track.get("title"), (track.get("recording") or {}).get("title"))} - {""}
+    if not theirs:
+        return True
+    # "Hikari Saiko" vs "光、再考" is the same song in two scripts. a romanized
+    # library can't be checked against native titles, so that's no-judge too
+    theirs = {name for name in theirs if _latin(name) == _latin(mine)}
     if not theirs:
         return True
     for name in theirs:
