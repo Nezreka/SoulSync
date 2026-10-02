@@ -110,7 +110,7 @@ describe('MirroredDetailModal', () => {
     renderModal({ name: 'A', source: 'spotify', tracks: [] }, { onRefreshFromSource: vi.fn() });
     expect(screen.getByText('Refresh from Spotify')).toBeTruthy();
     expect(screen.getByText('Pull only — nothing pushed or downloaded')).toBeTruthy();
-    expect(screen.getByText('Push to server')).toBeTruthy();
+    expect(screen.getByText('Sync & download')).toBeTruthy();
     expect(screen.getByText("Push the playlist and download what's missing")).toBeTruthy();
   });
 
@@ -120,7 +120,7 @@ describe('MirroredDetailModal', () => {
     expect(h.onDiscover).toHaveBeenCalled();
     fireEvent.click(screen.getByText('Edit Source'));
     expect(h.onEditSource).toHaveBeenCalled();
-    fireEvent.click(screen.getByText('Push to server'));
+    fireEvent.click(screen.getByText('Sync & download'));
     expect(h.onRunPipeline).toHaveBeenCalled();
     fireEvent.click(screen.getByText('Close'));
     expect(h.onClose).toHaveBeenCalled();
