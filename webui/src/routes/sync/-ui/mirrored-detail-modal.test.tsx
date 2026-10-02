@@ -91,18 +91,27 @@ describe('MirroredDetailModal', () => {
     expect(screen.queryByText('0 min')).toBeNull();
   });
 
-  it('Refresh from source shows when wired and calls its handler (#1413)', () => {
+  it('Refresh from {source} shows when wired and calls its handler (#1413)', () => {
     const onRefreshFromSource = vi.fn();
     renderModal({ name: 'A', source: 'youtube', tracks: [] }, { onRefreshFromSource });
-    const btn = screen.getByText('Refresh from source');
+    // #1289: the button names the source now ("Refresh from YouTube").
+    const btn = screen.getByText('Refresh from YouTube');
     expect(btn.getAttribute('title')).toMatch(/nothing is pushed to your server or downloaded/);
     fireEvent.click(btn);
     expect(onRefreshFromSource).toHaveBeenCalled();
   });
 
-  it('no handler, no Refresh from source button', () => {
+  it('no handler, no refresh button', () => {
     renderModal({ name: 'A', source: 'youtube', tracks: [] });
-    expect(screen.queryByText('Refresh from source')).toBeNull();
+    expect(screen.queryByText('Refresh from YouTube')).toBeNull();
+  });
+
+  it('labels the buttons by direction with a one-line explainer (#1289)', () => {
+    renderModal({ name: 'A', source: 'spotify', tracks: [] }, { onRefreshFromSource: vi.fn() });
+    expect(screen.getByText('Refresh from Spotify')).toBeTruthy();
+    expect(screen.getByText('Pull only — nothing pushed or downloaded')).toBeTruthy();
+    expect(screen.getByText('Push to server')).toBeTruthy();
+    expect(screen.getByText("Push the playlist and download what's missing")).toBeTruthy();
   });
 
   it('wires the five actions, and Delete CLOSES first (1148)', () => {
@@ -111,7 +120,7 @@ describe('MirroredDetailModal', () => {
     expect(h.onDiscover).toHaveBeenCalled();
     fireEvent.click(screen.getByText('Edit Source'));
     expect(h.onEditSource).toHaveBeenCalled();
-    fireEvent.click(screen.getByText('Sync & download'));
+    fireEvent.click(screen.getByText('Push to server'));
     expect(h.onRunPipeline).toHaveBeenCalled();
     fireEvent.click(screen.getByText('Close'));
     expect(h.onClose).toHaveBeenCalled();

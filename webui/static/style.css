@@ -17193,6 +17193,19 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     gap: 10px;
 }
 
+/* #1289: direction-labeled buttons get a one-line explainer underneath. */
+.mm-btn-wrap {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+}
+.mm-btn-caption {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.45);
+    white-space: nowrap;
+}
+
 .mm-btn {
     padding: 9px 18px;
     border-radius: 9px;
@@ -17238,6 +17251,9 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     .mm-actions { flex-direction: column; align-items: stretch; }
     .mm-actions-right { justify-content: space-between; }
     .mm-btn { flex: 1; text-align: center; }
+    /* #1289: wrapped buttons grow like the bare ones; captions may wrap. */
+    .mm-btn-wrap { flex: 1; }
+    .mm-btn-caption { white-space: normal; text-align: center; }
 }
 
 .sync-tab-content {
