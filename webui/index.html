@@ -1719,15 +1719,6 @@
                         <section class="vdsc-stories hidden" data-vdsc-stories aria-label="Stories">
                             <div class="vdsc-stories-row" data-vdsc-stories-row></div>
                         </section>
-                        <section class="vdsc-trailers hidden" data-vdsc-trailers aria-label="Watch trailers">
-                            <div class="vdsc-shelf-head">
-                                <div class="vdsc-shelf-titles">
-                                    <h3 class="vdsc-shelf-title">Watch trailers</h3>
-                                    <p class="vdsc-shelf-sub">Tap any title to play its trailer</p>
-                                </div>
-                            </div>
-                            <div class="vdsc-trail-rail" data-vdsc-trail-rail></div>
-                        </section>
 
                         <!-- ONE control row. Everything preference-shaped lives inside the
                              Preferences popover; browsing lives in the tile strip below. -->
@@ -1790,6 +1781,19 @@
                         <div class="vdsc-browse-strip" data-vdsc-browse-strip></div>
 
                         <div class="vdsc-shelves" data-vdsc-shelves></div>
+
+                        <!-- Trailers — a cinematic breather between the rails and the
+                             endless feed. Each card opens the title; the play button
+                             plays its trailer. Hidden until the JS fills it. -->
+                        <section class="vdsc-trailers hidden" data-vdsc-trailers aria-label="Trailers">
+                            <div class="vdsc-shelf-head">
+                                <div class="vdsc-shelf-titles">
+                                    <h3 class="vdsc-shelf-title">Trailers</h3>
+                                    <p class="vdsc-shelf-sub">Fresh previews, picked for you — play the trailer or open the title</p>
+                                </div>
+                            </div>
+                            <div class="vdsc-trail-rail" data-vdsc-trail-rail></div>
+                        </section>
 
                         <!-- Endless catalog feed — fills forever below the last rail group. -->
                         <section class="vdsc-explore" data-vdsc-explore hidden>

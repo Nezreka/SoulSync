@@ -218,7 +218,9 @@
             'data-vsr-open="' + it.kind + '" data-vsr-source="' + source + '" data-vsr-id="' + id +
             '" style="--vgm-h:' + hueOf(it.title) + '">' + cb + notInt +
             '<div class="vsr-poster">' + img + ribbon + rating + fresh +
-            '<span class="vsr-peek" aria-hidden="true">i</span></div>' +
+            '<span class="vsr-peek" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18">' +
+            '<path d="M7 17L17 7M9 7h8v8" stroke="currentColor" stroke-width="2" fill="none" ' +
+            'stroke-linecap="round" stroke-linejoin="round"/></svg></span></div>' +
             '<div class="vsr-info"><span class="vsr-name" title="' + esc(it.title) + '">' + esc(it.title) +
             '</span><span class="vsr-sub">' + esc(sub) + '</span></div></a>';
     }
@@ -724,9 +726,12 @@
         var owned = o.library_id != null;
         var source = owned ? 'library' : 'tmdb';
         var id = owned ? o.library_id : o.tmdb_id;
+        // Seamless ticker: the eyebrow repeated, doubled so the loop has no seam.
+        var mq = esc((o.eyebrow + ' \u2022 ').repeat(4));
         return '<article class="vdsc-story" style="--vgm-h:' + (o.eyebrowHue || hueOf(o.title)) + ';' +
             (o.art ? "background-image:url('" + esc(o.art) + "')" : '') + '">' +
             '<div class="vdsc-story-scrim" aria-hidden="true"></div>' +
+            '<div class="vdsc-story-marquee" aria-hidden="true"><span>' + mq + '</span><span>' + mq + '</span></div>' +
             '<div class="vdsc-story-body">' +
             '<span class="vdsc-story-eyebrow"><span class="vdsc-story-eyebrow-dot" aria-hidden="true"></span>' +
             esc(o.eyebrow) + '</span>' +
@@ -747,6 +752,7 @@
             '</div></div></article>';
     }
     function maybeRenderStories() {
+        maybeRenderBanners();   // banners share the data trio; own done-flag
         if (state._storiesDone) return;
         var heroItems = state.hero.items || [];
         var foryou = state._foryouItems || [];
@@ -805,23 +811,121 @@
         var sec = $('[data-vdsc-stories]'); if (sec) sec.classList.remove('hidden');
         if (window.VideoWishState) VideoWishState.hydrate(row);
     }
-    // ── vertical trailer rail ("Watch trailers" — music's Watch section) ────
+    // ── full-width poster banners (music-Discover parity) ──────────────────
+    // Same data trio as the stories; each banner is a cinematic moment between
+    // rail groups. Rendered once per rail-stack build (own done-flag).
+    function maybeRenderBanners() {
+        if (state._bannersDone) return;
+        var heroItems = state.hero.items || [];
+        var foryou = state._foryouItems || [];
+        var gapRails = state._gapRails || [];
+        if (!heroItems.length || !foryou.length || !state._gapsArrived) return;
+        state._bannersDone = true;
+        renderSagaBanner(gapRails);
+        renderFreshBanner(heroItems.concat(foryou));
+        observeBanners();
+    }
+    function _bannerShell(label, art, marquee, eyebrow, title, sub, cta) {
+        var mq = esc((marquee + ' \u2022 ').repeat(3));
+        return '<section class="vdsc-banner" aria-label="' + esc(label) + '">' +
+            (art ? '<div class="vdsc-banner-art" style="background-image:url(\'' + esc(art) + '\')" aria-hidden="true"></div>' : '') +
+            '<div class="vdsc-banner-scrim" aria-hidden="true"></div>' +
+            '<div class="vdsc-banner-marquee" aria-hidden="true"><span>' + mq + '</span><span>' + mq + '</span></div>' +
+            '<div class="vdsc-banner-body">' +
+            '<span class="vdsc-banner-eyebrow">' + esc(eyebrow) + '</span>' +
+            '<h3 class="vdsc-banner-title">' + title + '</h3>' +
+            (sub ? '<p class="vdsc-banner-sub">' + sub + '</p>' : '') +
+            cta +
+            '</div></section>';
+    }
+    // "Complete the saga" — first franchise gap, after the collection group.
+    function renderSagaBanner(gapRails) {
+        var slot = document.querySelector('[data-vdsc-banner-slot="saga"]'); if (!slot) return;
+        var coll = null;
+        gapRails.forEach(function (rl) { if (!coll && rl && rl.kind === 'collection') coll = rl; });
+        if (!coll || !(coll.items || []).length) return;
+        var fname = String(coll.title || '').replace(/^Complete the\s+/i, '') || 'this collection';
+        var n = coll.items.length;
+        var art = null;
+        for (var i = 0; i < coll.items.length; i++) {
+            var a = coll.items[i].backdrop || coll.items[i].poster;
+            if (a) { art = a; break; }
+        }
+        slot.innerHTML = _bannerShell(
+            'Complete the saga', art, 'Complete the saga',
+            'Your collection is incomplete', esc(fname),
+            'You own part of it \u2014 <strong>' + n + (n === 1 ? ' title' : ' titles') +
+                '</strong> you don\u2019t own yet.',
+            '<button class="vdsc-btn" type="button" data-vdsc-goto-collection>See what\u2019s missing</button>'
+        );
+    }
+    // "Fresh this week" — newest titles across hero + for-you, after the new group.
+    function renderFreshBanner(items) {
+        var slot = document.querySelector('[data-vdsc-banner-slot="fresh"]'); if (!slot) return;
+        var fresh = items.filter(function (it) { return it && it.year; })
+            .sort(function (a, b) { return b.year - a.year; }).slice(0, 4);
+        if (fresh.length < 2) return;
+        var art = fresh[0].backdrop || fresh[0].poster;
+        var names = fresh.map(function (it) { return it.title; }).filter(Boolean);
+        var shown = names.slice(0, 3).map(esc).join(', ');
+        slot.innerHTML = _bannerShell(
+            'Fresh this week', art, names.join(' '),
+            'New & noteworthy', 'Fresh<br>this week',
+            '<strong>' + shown + '</strong>' + (names.length > 3 ? ' and more' : '') + ' just landed.',
+            '<button class="vdsc-btn" type="button" data-vdsc-goto-group="new">Browse new arrivals</button>'
+        );
+    }
+    // Reveal banners as they scroll into view (entrance + drift start together).
+    function observeBanners() {
+        var banners = document.querySelectorAll('.vdsc-banner:not([data-vdsc-obs])');
+        if (!banners.length) return;
+        var reveal = function (el) { el.classList.add('vdsc-banner--in'); };
+        var i;
+        if (!('IntersectionObserver' in window)) {
+            for (i = 0; i < banners.length; i++) reveal(banners[i]);
+            return;
+        }
+        var io = new IntersectionObserver(function (entries) {
+            entries.forEach(function (en) {
+                if (en.isIntersecting) { io.unobserve(en.target); reveal(en.target); }
+            });
+        }, { threshold: 0.15 });
+        for (i = 0; i < banners.length; i++) {
+            banners[i].setAttribute('data-vdsc-obs', '1');
+            io.observe(banners[i]);
+        }
+    }
+    // ── trailer section ("Trailers" — a cinematic breather before the feed) ───
+    // Each card is a link to the title's detail page; the glass play button
+    // nested inside opens the trailer lightbox instead. Backdrop art (falling
+    // back to the poster) gives the 16:9 cards a proper cinematic frame.
     function renderTrailerRail() {
         var items = (state._foryouItems || []).slice(0, 10);
         if (items.length < 4) return;
         var rail = $('[data-vdsc-trail-rail]'); if (!rail) return;
-        rail.innerHTML = items.map(function (it) {
-            return '<button class="vdsc-trail" type="button" data-vdsc-trailer ' +
+        rail.innerHTML = items.map(function (it, i) {
+            var owned = it.library_id != null;
+            var source = owned ? 'library' : 'tmdb';
+            var id = owned ? it.library_id : it.tmdb_id;
+            var href = '/video-detail/' + source + '/' + it.kind + '/' + id;
+            var art = it.backdrop || it.poster;
+            return '<a class="vdsc-trailer-card" href="' + href + '" ' +
+                'data-vsr-open="' + it.kind + '" data-vsr-source="' + source + '" data-vsr-id="' + id + '" ' +
+                'style="--i:' + (i < 10 ? i : 10) + '" aria-label="' + esc(it.title || '') + ' — open details">' +
+                '<span class="vdsc-trailer-art"' +
+                (art ? ' style="background-image:url(\'' + esc(art) + '\')"' : '') + ' aria-hidden="true">' +
+                '<button class="vdsc-trailer-play" type="button" data-vdsc-trailer ' +
                 'data-kind="' + it.kind + '" data-tmdb="' + it.tmdb_id + '" data-title="' + esc(it.title || '') + '" ' +
                 'aria-label="Play trailer for ' + esc(it.title || '') + '">' +
-                '<span class="vdsc-trail-art" aria-hidden="true"' +
-                (it.poster ? ' style="background-image:url(\'' + esc(it.poster) + '\')"' : '') + '>' +
-                '<span class="vdsc-trail-play" aria-hidden="true">▶</span></span>' +
-                '<span class="vdsc-trail-why">Picked for you</span>' +
-                '<span class="vdsc-trail-title">' + esc(it.title || '') + '</span>' +
-                '<span class="vdsc-trail-meta">' + (it.kind === 'movie' ? 'Movie' : 'TV') +
+                '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">' +
+                '<path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg></button>' +
+                '</span>' +
+                '<span class="vdsc-trailer-body">' +
+                '<span class="vdsc-trailer-eyebrow">Picked for you</span>' +
+                '<span class="vdsc-trailer-title">' + esc(it.title || '') + '</span>' +
+                '<span class="vdsc-trailer-meta">' + (it.kind === 'movie' ? 'Movie' : 'TV') +
                 (it.year ? ' · ' + it.year : '') + '</span>' +
-                '</button>';
+                '</span></a>';
         }).join('');
         var sec = $('[data-vdsc-trailers]'); if (sec) sec.classList.remove('hidden');
     }
@@ -831,8 +935,9 @@
     // it before prepending, so rapid re-toggles can't stack duplicate "Recommended for you" rows.
     function reloadRails() {
         state.railGen = (state.railGen || 0) + 1;
-        // Story blocks + trailer rail are editorial — clear and rebuild with the rails.
-        state._storiesDone = false; state._pool = []; state._foryouItems = [];
+        // Story blocks + trailer rail + banners are editorial — clear and rebuild with the rails.
+        state._storiesDone = false; state._bannersDone = false;
+        state._pool = []; state._foryouItems = [];
         state._gapRails = []; state._gapsArrived = false;
         var srow = $('[data-vdsc-stories-row]'); if (srow) srow.innerHTML = '';
         var ssec = $('[data-vdsc-stories]'); if (ssec) ssec.classList.add('hidden');
@@ -894,11 +999,16 @@
             var rails = sec.rails.map(lazyShelfHtml).join('');
             // Groups with no static rails (async-only, e.g. gaps) start hidden — revealed when filled.
             var emptyCls = sec.rails.length ? '' : ' vdsc-group--empty';
-            return '<section class="vdsc-group' + emptyCls + '" data-group="' + sec.id + '">' +
+            var html = '<section class="vdsc-group' + emptyCls + '" data-group="' + sec.id + '">' +
                 '<div class="vdsc-group-head"><h2>' + esc(sec.label) + '</h2>' +
                 (GROUP_SUBS[sec.id] ? '<p>' + esc(GROUP_SUBS[sec.id]) + '</p>' : '') + '</div>' +
                 '<div class="vdsc-group-body" data-group-body="' + sec.id + '">' + rails + '</div>' +
             '</section>';
+            // Full-width poster banners between groups (music-Discover parity) —
+            // filled by maybeRenderBanners once the data trio lands.
+            if (sec.id === 'new') html += '<div data-vdsc-banner-slot="fresh"></div>';
+            if (sec.id === 'collection') html += '<div data-vdsc-banner-slot="saga"></div>';
+            return html;
         }).join('');
         wireJumpNav(host);
         observeShelves();
@@ -988,13 +1098,32 @@
                     rail.innerHTML = ranked
                         ? items.map(function (it, i) { return rankedCard(it, i + 1); }).join('')
                         : items.map(card).join('');
-                    stagger(rail); hydrateGet(rail);
+                    stagger(rail); hydrateGet(rail); paintGenreTile(rail, q);
                 }
                 shelf.classList.add('vdsc-shelf--in');            // reveal (cards cascade via --i)
             })
             .catch(function () { shelf.remove(); pruneGroup(grp); });
     }
 
+    // Paint a browse-strip genre tile with a random poster harvested from its
+    // loaded rail — real art for real genres, zero extra requests. Called from
+    // fillShelf; a tile keeps its gradient until (and unless) its rail loads.
+    function paintGenreTile(rail, q) {
+        var m = /[?&]genre=(\d+)/.exec(q || ''); if (!m) return;
+        var tile = document.querySelector('[data-vdsc-tile-genre="' + m[1] + '"]');
+        if (!tile || tile.getAttribute('data-vdsc-painted')) return;
+        var srcs = [];
+        var imgs = rail.querySelectorAll('.vsr-poster img');
+        for (var i = 0; i < imgs.length; i++) {
+            var s = imgs[i].getAttribute('src');
+            if (s) srcs.push(s);
+        }
+        if (!srcs.length) return;
+        var pick = srcs[Math.floor(Math.random() * srcs.length)];
+        tile.setAttribute('data-vdsc-painted', '1');
+        tile.style.setProperty('--tile-art', 'url("' + pick.replace(/"/g, '%22') + '")');
+        tile.classList.add('vdsc-tile--art');
+    }
     // ── category / filter grid (paged) ────────────────────────────────────────
     // `browse` = opened from the tiles / Browse-all (shows the live filter bar);
     // a rail's See-all keeps its fixed query and hides the bar. Every grid
@@ -1287,6 +1416,14 @@
         var page = $('[data-video-subpage="' + PAGE_ID + '"]'); if (!page) return;
 
         page.addEventListener('click', function (e) {
+            // Trailer play buttons nest INSIDE the trailer cards' detail links —
+            // check them first or the link wins and the trailer never plays.
+            var trbtn = e.target.closest('[data-vdsc-trailer]');
+            if (trbtn) {
+                e.preventDefault();
+                openTrailer(trbtn.getAttribute('data-kind'), trbtn.getAttribute('data-tmdb'), trbtn.getAttribute('data-title'));
+                return;
+            }
             var open = e.target.closest('[data-vsr-open]');
             if (open) {
                 if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -1299,11 +1436,6 @@
                 }));
                 return;
             }
-            var trbtn = e.target.closest('[data-vdsc-trailer]');
-            if (trbtn) {
-                openTrailer(trbtn.getAttribute('data-kind'), trbtn.getAttribute('data-tmdb'), trbtn.getAttribute('data-title'));
-                return;
-            }
             var picks = e.target.closest('[data-vdsc-picks]');
             if (picks) {
                 var fy = document.querySelector('[data-group="foryou"]');
@@ -1314,6 +1446,12 @@
             if (gotoColl) {
                 var cg = document.querySelector('[data-group="collection"]');
                 if (cg) cg.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                return;
+            }
+            var gotoGroup = e.target.closest('[data-vdsc-goto-group]');
+            if (gotoGroup) {
+                var gg = document.querySelector('[data-group="' + gotoGroup.getAttribute('data-vdsc-goto-group') + '"]');
+                if (gg) gg.scrollIntoView({ block: 'start', behavior: 'smooth' });
                 return;
             }
             var heroAdd = e.target.closest('[data-vdsc-hero-add]');
