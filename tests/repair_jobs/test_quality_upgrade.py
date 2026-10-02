@@ -991,6 +991,57 @@ def test_fix_handler_adds_matched_track_to_wishlist():
     assert captured['source_info']['quality_profile_name'] == 'Strict FLAC'
 
 
+def test_fix_handler_ignores_untargeted_format_instead_of_redownloading():
+    """#1289: format_not_in_profile with no explicit action resolves as
+    ignored, not redownloaded. Redownloading would fetch the profile's target
+    (often a downgrade, e.g. FLAC -> MP3) — the fix is a profile change."""
+    from core.repair_worker import RepairWorker
+
+    class _DB:
+        def add_to_wishlist(self, **kw):
+            raise AssertionError("must not wishlist when the format is untargeted")
+
+    worker = object.__new__(RepairWorker)
+    worker.db = _DB()
+
+    details = {
+        'quality_issue': 'format_not_in_profile',
+        'current_format': 'FLAC', 'current_bitrate': 1411,
+        'quality_profile_id': 7, 'quality_profile_name': 'MP3 320',
+    }
+    res = worker._fix_quality_upgrade('track', '1', '/music/a.flac', details)
+
+    assert res['success'] is True
+    assert res['action'] == 'ignored'
+
+
+def test_fix_handler_still_redownloads_other_issues_by_default():
+    """The ignored default is scoped to format_not_in_profile; a plain
+    below_profile finding with no explicit action still redownloads."""
+    from core.repair_worker import RepairWorker
+
+    captured = {}
+
+    class _DB:
+        def add_to_wishlist(self, **kw):
+            captured.update(kw)
+            return True
+
+    worker = object.__new__(RepairWorker)
+    worker.db = _DB()
+
+    details = {
+        'quality_issue': 'below_profile',
+        'matched_track_data': {'id': 'sp1', 'name': 'Song One',
+                               'album': {'name': 'Album X'}},
+        'current_format': 'MP3 128', 'current_bitrate': 128,
+    }
+    res = worker._fix_quality_upgrade('track', '1', '/music/a.mp3', details)
+
+    assert res['success'] is True
+    assert captured['spotify_track_data']['id'] == 'sp1'
+
+
 def test_fix_handler_resolves_own_track_identity_when_no_prematched_data():
     """The flag-only Quality Check scanner never pre-searches a replacement
     (unlike the active Quality Upgrade Finder) — its findings carry no

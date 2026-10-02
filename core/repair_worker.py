@@ -2619,8 +2619,23 @@ class RepairWorker:
                pipeline finds the replacement.
            'delete': remove the low-quality file + its DB row outright.
            'ignore' is handled in the UI by dismissing the finding — never here.
+           Exception (#1289): when no explicit action is given and the issue is
+           'format_not_in_profile', the finding resolves as ignored without
+           touching the file — redownloading would fetch the profile's target,
+           often a downgrade.
         """
-        fix_action = details.get('_fix_action', 'redownload')
+        fix_action = details.get('_fix_action')
+        if not fix_action:
+            if details.get('quality_issue') == 'format_not_in_profile':
+                # #1289: the profile doesn't target this format at all, so
+                # redownloading would fetch the profile's target — often a
+                # downgrade (e.g. FLAC -> MP3). There is nothing to upgrade to;
+                # the fix is a profile change, not a file change. Resolve the
+                # finding without touching the file (the backend equivalent of
+                # the UI's Ignore).
+                return {'success': True, 'action': 'ignored',
+                        'message': 'Format not targeted by quality profile — file left as-is'}
+            fix_action = 'redownload'
 
         if fix_action == 'delete':
             deleted_file, delete_note = _delete_file_if_present(
