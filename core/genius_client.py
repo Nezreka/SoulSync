@@ -4,6 +4,7 @@ import time
 import threading
 from typing import Dict, Optional, Any, List
 from functools import wraps
+from core.http_error_status import http_error_status
 from utils.logging_config import get_logger
 
 logger = get_logger("genius_client")
@@ -64,7 +65,12 @@ def rate_limited(func):
                 _rate_limit_backoff = max(0, _rate_limit_backoff - 5)
             return result
         except Exception as e:
-            if "429" in str(e) or "rate limit" in str(e).lower():
+            # Read the structured HTTP status first: the message can contain a
+            # URL whose entity ID holds "429", which is not a rate limit.
+            status = http_error_status(e)
+            is_rate_limit = (status == 429 if status is not None
+                             else "429" in str(e) or "rate limit" in str(e).lower())
+            if is_rate_limit:
                 # Open the gate: 30s → 60s → 120s (cap). Callers fail fast
                 # against it instead of sleeping here.
                 _rate_limit_backoff = min(120, max(30, _rate_limit_backoff * 2) if _rate_limit_backoff else 30)
