@@ -9008,9 +9008,16 @@ class VideoDatabase:
                     d["has_file"] = bool(d.get("has_file"))
                 items.append(d)
             total_pages = max(1, (total + limit - 1) // limit)
-            return {"items": items, "total_size_bytes": total_size or 0, "pagination": {
+            result = {"items": items, "total_size_bytes": total_size or 0, "pagination": {
                 "page": page, "total_pages": total_pages, "total_count": total,
                 "has_prev": page > 1, "has_next": page < total_pages}}
+            if is_shows:
+                # Cheap global episode total for dashboard stats (extension, etc.).
+                try:
+                    result["total_episodes"] = conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
+                except Exception:
+                    result["total_episodes"] = 0
+            return result
         finally:
             conn.close()
 

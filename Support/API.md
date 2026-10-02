@@ -2118,7 +2118,7 @@ The movies and TV side. Every endpoint runs the same handler the web UI uses and
 
 #### `GET /api/v1/video/library`
 
-Titles in the video library. `kind=movies|shows` (default `movies`), plus `search`, `letter`, `sort`, `status`, `genre`, `resolution`, `page`, `limit`.
+Titles in the video library. `kind=movies|shows` (default `movies`), plus `search`, `letter`, `sort`, `status`, `genre`, `resolution`, `page`, `limit`. When `kind=shows`, the response also includes `total_episodes` — the global episode count across all shows.
 
 #### `GET /api/v1/video/library/genres`
 
