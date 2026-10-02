@@ -8505,6 +8505,52 @@ class MusicDatabase:
             logger.error(f"get_manual_library_match error: {e}")
             return None
 
+    def get_manual_library_match_by_id(self, match_id: int,
+                                           profile_id: int) -> Optional[Dict[str, Any]]:
+        """Return a manual match row by PK id, scoped to profile_id.
+
+        #1289: the delete path needs the row's source_track_id BEFORE
+        deleting so mirrored in-library flags can be reset. The capped
+        list_manual_library_matches() cannot serve this — a match older than
+        the 100 most-recently-updated would silently skip the flag reset.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM manual_library_track_matches
+                    WHERE id = ? AND profile_id = ?
+                """, (match_id, profile_id))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"get_manual_library_match_by_id error: {e}")
+            return None
+
+    def find_all_manual_library_matches_by_source_track_id(
+        self, profile_id: int, source_track_id: str
+    ) -> list:
+        """Return ALL manual matches for a source track ID, any server_source.
+
+        #1289: the delete path's surviving-match guard must be
+        server-agnostic AND consider every survivor. The server-filtered
+        finder's SQL (`AND (server_source = ? OR server_source = '')`)
+        cannot see a survivor under a different server_source, and a
+        LIMIT 1 would let one dead survivor mask a live one — either
+        wrongly clears the mirrored in-library flag.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM manual_library_track_matches
+                    WHERE profile_id = ? AND source_track_id = ?
+                """, (profile_id, source_track_id))
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"find_all_manual_library_matches_by_source_track_id error: {e}")
+            return []
+
     def find_manual_library_match_by_source_track_id(self, profile_id: int,
                                                      source_track_id: str,
                                                      server_source: str = '') -> Optional[Dict[str, Any]]:
