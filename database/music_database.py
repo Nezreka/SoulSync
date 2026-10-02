@@ -24178,6 +24178,48 @@ class MusicDatabase:
             logger.error(f"Error getting mirrored playlist tracks: {e}")
             return []
 
+    def api_get_track_by_external_id(self, external_id: str) -> Optional[Dict[str, Any]]:
+        """Find a library track by Spotify/Deezer/etc external ID."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """SELECT t.*, a.name as artist_name
+                       FROM tracks t
+                       LEFT JOIN artists a ON t.artist_id = a.id
+                       WHERE t.spotify_track_id = ? OR t.deezer_id = ?
+                       LIMIT 1""",
+                    (external_id, external_id),
+                )
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception:
+            return None
+
+    def api_find_track_by_title_artist(self, title: str, artist: str = "") -> Optional[Dict[str, Any]]:
+        """Find a library track by title and artist name (fuzzy)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                if artist:
+                    cursor.execute(
+                        """SELECT t.*, ar.name as artist_name
+                           FROM tracks t
+                           JOIN artists ar ON ar.id = t.artist_id
+                           WHERE LOWER(t.title) LIKE ? AND LOWER(ar.name) = LOWER(?)
+                           LIMIT 1""",
+                        (f"%{title.lower()}%", artist),
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT t.*, a.name as artist_name FROM tracks t LEFT JOIN artists a ON t.artist_id = a.id WHERE LOWER(t.title) LIKE ? LIMIT 1",
+                        (f"%{title.lower()}%",),
+                    )
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception:
+            return None
+
     def update_mirrored_playlist_source_ref(
         self,
         playlist_id: int,
