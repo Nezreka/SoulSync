@@ -76,7 +76,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 47   # v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 48   # v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -1022,6 +1022,11 @@ class VideoDatabase:
             return None
         conn = self._get_connection()
         try:
+            # The user's explicit "I have this" link wins over the row's own
+            # tmdb_id — that override is the whole point of the table.
+            manual = self._manual_match_map(conn, kind, [tmdb_id], server_source)
+            if tmdb_id in manual:
+                return manual[tmdb_id]
             if server_source:
                 row = conn.execute(
                     f"SELECT id FROM {table} WHERE tmdb_id=? AND server_source=? LIMIT 1",
@@ -1053,8 +1058,13 @@ class VideoDatabase:
             return out
         conn = self._get_connection()
         try:
+            # Manual "I have this" links first — the user's word beats the
+            # auto-matcher, and setdefault below keeps it that way.
+            out.update(self._manual_match_map(conn, kind, ids, server_source))
             for i in range(0, len(ids), 400):   # stay under SQLite's variable cap
-                chunk = ids[i:i + 400]
+                chunk = [x for x in ids[i:i + 400] if x not in out]
+                if not chunk:
+                    continue
                 ph = ",".join("?" * len(chunk))
                 sql = f"SELECT id, tmdb_id FROM {table} WHERE tmdb_id IN ({ph})"
                 args = list(chunk)
@@ -1066,6 +1076,148 @@ class VideoDatabase:
             return out
         except sqlite3.Error:
             return out
+        finally:
+            conn.close()
+
+    # ── manual library matches ("I have this") ─────────────────────────────
+    def set_manual_match(self, kind: str, tmdb_id, library_id) -> bool:
+        """Record that TMDB id ``tmdb_id`` IS library row ``library_id`` — the
+        user's explicit override for a title the auto-matcher whiffed on.
+        Returns False (and writes nothing) for a bad kind, non-integer ids, or
+        a library row that doesn't exist."""
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        try:
+            tmdb_id, library_id = int(tmdb_id), int(library_id)
+        except (TypeError, ValueError):
+            return False
+        if not table or tmdb_id <= 0 or library_id <= 0:
+            return False
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                f"SELECT id FROM {table} WHERE id=? LIMIT 1", (library_id,)).fetchone()
+            if not row:
+                return False
+            conn.execute(
+                "INSERT INTO video_manual_matches (kind, tmdb_id, library_id)"
+                " VALUES (?, ?, ?)"
+                " ON CONFLICT (kind, tmdb_id) DO UPDATE SET library_id=excluded.library_id,"
+                " created_at=CURRENT_TIMESTAMP",
+                (kind, tmdb_id, library_id))
+            conn.commit()
+            return True
+        except sqlite3.Error:
+            return False
+        finally:
+            conn.close()
+
+    def clear_manual_match(self, kind: str, tmdb_id) -> bool:
+        """Remove the user's manual link for a TMDB id. True when a row was
+        actually deleted."""
+        if kind not in ("movie", "show"):
+            return False
+        try:
+            tmdb_id = int(tmdb_id)
+        except (TypeError, ValueError):
+            return False
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM video_manual_matches WHERE kind=? AND tmdb_id=?",
+                (kind, tmdb_id))
+            conn.commit()
+            return cur.rowcount > 0
+        except sqlite3.Error:
+            return False
+        finally:
+            conn.close()
+
+    def manual_match_for_tmdb(self, kind: str, tmdb_id):
+        """The library row id the user manually linked to this TMDB id, or None."""
+        if kind not in ("movie", "show"):
+            return None
+        try:
+            tmdb_id = int(tmdb_id)
+        except (TypeError, ValueError):
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT library_id FROM video_manual_matches WHERE kind=? AND tmdb_id=?",
+                (kind, tmdb_id)).fetchone()
+            return int(row["library_id"]) if row else None
+        except sqlite3.Error:
+            return None
+        finally:
+            conn.close()
+
+    def manual_match_for_library(self, kind: str, library_id):
+        """The TMDB id the user manually linked to this library row, or None —
+        drives the 'manually linked' chip on the library detail page."""
+        if kind not in ("movie", "show"):
+            return None
+        try:
+            library_id = int(library_id)
+        except (TypeError, ValueError):
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT tmdb_id FROM video_manual_matches WHERE kind=? AND library_id=?",
+                (kind, library_id)).fetchone()
+            return int(row["tmdb_id"]) if row else None
+        except sqlite3.Error:
+            return None
+        finally:
+            conn.close()
+
+    def _manual_match_map(self, conn, kind: str, tmdb_ids, server_source=None) -> dict:
+        """{tmdb_id: library_id} manual links for these TMDB ids, restricted to
+        library rows that still exist (and to the active server when scoped)."""
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        ids = []
+        for x in (tmdb_ids or []):
+            try:
+                ids.append(int(x))
+            except (TypeError, ValueError):
+                pass
+        if not table or not ids:
+            return {}
+        ph = ",".join("?" * len(ids))
+        sql = ("SELECT m.tmdb_id, m.library_id FROM video_manual_matches m "
+               f"JOIN {table} t ON t.id = m.library_id "
+               f"WHERE m.kind=? AND m.tmdb_id IN ({ph})")
+        args = [kind] + ids
+        if server_source:
+            sql += " AND t.server_source=?"
+            args.append(server_source)
+        try:
+            return {r["tmdb_id"]: r["library_id"] for r in conn.execute(sql, args)}
+        except sqlite3.Error:
+            return {}
+
+    def search_library_titles(self, kind: str, query: str, limit: int = 12) -> list:
+        """Library rows whose title matches — the 'I have this' picker's search.
+
+        Unlike ``search_owned_titles`` this deliberately includes rows the
+        auto-matcher never linked (NULL tmdb_id): those are exactly the rows
+        the user is trying to point at. Returns
+        [{id, title, year, tmdb_id}]."""
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        if not table or not (query or "").strip():
+            return []
+        like = ("%" + query.strip().replace("\\", "\\\\").replace("%", "\\%")
+                .replace("_", "\\_") + "%")
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                f"SELECT id, title, year, tmdb_id FROM {table} "
+                f"WHERE {self._ON_SERVER} AND title LIKE ? ESCAPE '\\' "
+                f"ORDER BY title LIMIT ?",
+                (like, max(1, min(int(limit or 12), 50)))).fetchall()
+            return [dict(r) for r in rows]
+        except sqlite3.Error:
+            return []
         finally:
             conn.close()
 
