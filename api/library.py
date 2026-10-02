@@ -248,7 +248,7 @@ def register_routes(bp):
 
     @bp.route("/library/playlists", methods=["GET"])
     @require_api_key
-    def list_playlists():
+    def list_library_playlists():
         """List curated playlists with track counts."""
         fields = parse_fields(request)
         profile_id = parse_profile_id(request)
