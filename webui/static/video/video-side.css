@@ -8349,3 +8349,156 @@ body[data-side="video"] #gsearch-aura {
    the specificity regardless of how many classes the other rule has. */
 #settings-page .settings-group[data-svc-side] { display: none !important; }
 #settings-page .settings-group[data-svc-side].svc-side-active { display: block !important; }
+
+/* ── Story blocks (music-Discover parity, second pass) ───────────────────────
+   Editorial story cards + a vertical trailer rail, composed from data the page
+   already fetches. The music side's dsc-promo cards are the visual reference:
+   eyebrow, big title, subtitle, actions, drifting backdrop art, scrim. */
+.vdsc-stories { margin: 26px 0 8px; }
+.vdsc-stories-row {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px;
+}
+.vdsc-story {
+    position: relative; overflow: hidden; border-radius: 20px;
+    min-height: 360px; display: flex; align-items: flex-end;
+    background-size: cover; background-position: center;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background-color: hsl(var(--vgm-h, 230), 30%, 12%);
+    isolation: isolate;
+    transition: transform 260ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 260ms ease;
+}
+.vdsc-story:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px hsla(var(--vgm-h, 230), 80%, 65%, 0.25);
+}
+/* slow Ken Burns drift, like the music side's promo art */
+.vdsc-story::before {
+    content: ''; position: absolute; inset: -6%; z-index: -2;
+    background-image: inherit; background-size: cover; background-position: center;
+    animation: vdscStoryDrift 36s ease-in-out infinite alternate;
+}
+@keyframes vdscStoryDrift {
+    from { transform: scale(1) translate(0, 0); }
+    to { transform: scale(1.08) translate(-1.5%, 1.5%); }
+}
+.vdsc-story-scrim {
+    position: absolute; inset: 0; z-index: -1;
+    background:
+        linear-gradient(180deg, rgba(5, 6, 10, 0.05) 30%, rgba(5, 6, 10, 0.55) 62%, rgba(5, 6, 10, 0.92) 100%),
+        radial-gradient(120% 90% at 20% 0%, hsla(var(--vgm-h, 230), 70%, 55%, 0.22), transparent 60%);
+}
+.vdsc-story-body { padding: 24px; width: 100%; }
+.vdsc-story-eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 11px; font-weight: 800; letter-spacing: 0.14em;
+    color: hsl(var(--vgm-h, 230), 85%, 72%);
+    text-transform: uppercase; margin-bottom: 10px;
+}
+.vdsc-story-eyebrow-dot {
+    width: 7px; height: 7px; border-radius: 9999px;
+    background: hsl(var(--vgm-h, 230), 85%, 62%);
+    box-shadow: 0 0 10px hsla(var(--vgm-h, 230), 85%, 62%, 0.9);
+}
+.vdsc-story-title {
+    margin: 0 0 8px; font-size: 1.9rem; font-weight: 900; letter-spacing: -0.03em;
+    line-height: 1.05; color: #fff; text-wrap: balance;
+}
+.vdsc-story-sub {
+    margin: 0 0 18px; font-size: 0.92rem; line-height: 1.5;
+    color: rgba(255, 255, 255, 0.72); max-width: 34ch;
+}
+.vdsc-story-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+/* ── Watch trailers: vertical 9:16 rail (music's Watch section) ───────────── */
+.vdsc-trailers { margin: 30px 0 6px; }
+.vdsc-shelf-titles { display: flex; flex-direction: column; gap: 4px; }
+.vdsc-shelf-sub { margin: 0; font-size: 0.85rem; color: rgba(255, 255, 255, 0.5); }
+.vdsc-trail-rail {
+    display: flex; gap: 14px; overflow-x: auto; padding: 4px 2px 14px;
+    scroll-snap-type: x mandatory; scrollbar-width: thin;
+}
+.vdsc-trail {
+    position: relative; flex: 0 0 168px; width: 168px; text-align: left;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.09); border-radius: 16px;
+    padding: 8px; cursor: pointer; scroll-snap-align: start;
+    transition: transform 240ms cubic-bezier(0.16, 1, 0.3, 1), border-color 240ms ease, box-shadow 240ms ease;
+}
+.vdsc-trail:hover {
+    transform: translateY(-4px) scale(1.02);
+    border-color: rgba(255, 255, 255, 0.22);
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5);
+}
+.vdsc-trail-art {
+    position: relative; display: block; aspect-ratio: 9 / 13; border-radius: 10px;
+    background-size: cover; background-position: center;
+    background-color: hsl(var(--vgm-h, 230), 30%, 14%);
+    overflow: hidden; margin-bottom: 10px;
+}
+.vdsc-trail-art::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(180deg, transparent 55%, rgba(0, 0, 0, 0.45));
+}
+.vdsc-trail-play {
+    position: absolute; left: 50%; top: 50%; z-index: 1;
+    width: 46px; height: 46px; border-radius: 50%;
+    transform: translate(-50%, -50%);
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(10, 12, 18, 0.72); color: #fff; font-size: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    transition: transform 200ms ease, background 200ms ease;
+}
+.vdsc-trail:hover .vdsc-trail-play { transform: translate(-50%, -50%) scale(1.12); background: rgba(20, 220, 120, 0.85); border-color: transparent; }
+.vdsc-trail-why {
+    display: block; font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: rgba(255, 255, 255, 0.45); margin-bottom: 3px;
+}
+.vdsc-trail-title {
+    display: block; font-size: 0.88rem; font-weight: 800; color: #fff;
+    letter-spacing: -0.01em; line-height: 1.25;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vdsc-trail-meta { display: block; font-size: 0.75rem; color: rgba(255, 255, 255, 0.5); margin-top: 2px; }
+
+/* ── Hero pick dots: poster thumbs (music's avatar dots) ──────────────────── */
+.vdsc-dots:has(.vdsc-dot--thumb) { gap: 10px; align-items: center; }
+.vdsc-dot--thumb {
+    width: 38px; height: 38px; min-height: 38px; border-radius: 50%;
+    background-size: cover; background-position: center;
+    border: 2px solid rgba(255, 255, 255, 0.18);
+    opacity: 0.55;
+    transition: opacity 200ms ease, border-color 200ms ease, transform 200ms ease, box-shadow 200ms ease;
+}
+.vdsc-dot--thumb::before { display: none; }
+.vdsc-dot--thumb:hover { opacity: 0.9; transform: scale(1.08); }
+.vdsc-dot--thumb.vdsc-dot--on {
+    opacity: 1; border-color: hsl(var(--vgm-h, 230), 85%, 65%);
+    box-shadow: 0 0 14px hsla(var(--vgm-h, 230), 85%, 65%, 0.75);
+}
+/* rotation progress pill sits under the active thumb */
+.vdsc-dot--thumb.vdsc-dot--on::after { top: auto; bottom: -10px; }
+/* "See all picks" — music hero's bottom-right link */
+.vdsc-hero-picks {
+    position: absolute; right: 60px; bottom: 22px; z-index: 3;
+    background: rgba(10, 13, 20, 0.55); color: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 9999px;
+    padding: 9px 18px; font-size: 0.82rem; font-weight: 700; cursor: pointer;
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    transition: background 180ms ease, color 180ms ease, border-color 180ms ease;
+}
+.vdsc-hero-picks:hover { background: rgba(255, 255, 255, 0.16); color: #fff; border-color: rgba(255, 255, 255, 0.3); }
+
+/* ── Story blocks: phone + reduced motion ──────────────────────────────────── */
+@media (max-width: 900px) {
+    .vdsc-stories-row { grid-template-columns: 1fr; }
+    .vdsc-story { min-height: 300px; }
+    .vdsc-story-title { font-size: 1.6rem; }
+    .vdsc-hero-picks { right: 20px; bottom: 18px; padding: 8px 14px; }
+    .vdsc-dots { padding-left: 20px; padding-right: 20px; }
+    .vdsc-trail { flex-basis: 148px; width: 148px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .vdsc-story::before { animation: none; }
+    .vdsc-story, .vdsc-trail { transition: none; }
+}

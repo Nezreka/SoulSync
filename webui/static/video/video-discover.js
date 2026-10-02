@@ -475,7 +475,7 @@
     function loadHero() {
         fetch('/api/video/discover/hero', { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) { state.hero.items = (d && d.items) || []; renderHero(); })
+            .then(function (d) { state.hero.items = (d && d.items) || []; _poolAdd(state.hero.items); renderHero(); maybeRenderStories(); })
             .catch(function () { /* hero is optional chrome */ });
     }
     function renderHero() {
@@ -491,8 +491,12 @@
             }).join('') + '</div>' +
             '<div class="vdsc-hero-body" data-vdsc-hero-body></div>' +
             '<div class="vdsc-dots">' + items.map(function (it, i) {
-                return '<button class="vdsc-dot' + (i === 0 ? ' vdsc-dot--on' : '') + '" type="button" data-vdsc-go="' + i + '" aria-label="Slide ' + (i + 1) + '"></button>';
+                // Music-Discover parity: the dots are poster thumbs (like the
+                // music side's artist avatar dots), plain dots when no poster.
+                var thumb = it.poster ? ' vdsc-dot--thumb" style="background-image:url(\'' + esc(it.poster) + '\')' : '';
+                return '<button class="vdsc-dot' + (i === 0 ? ' vdsc-dot--on' : '') + thumb + '" type="button" data-vdsc-go="' + i + '" aria-label="Pick ' + esc(it.title || ('slide ' + (i + 1))) + '"></button>';
             }).join('') + '</div>' +
+            '<button class="vdsc-hero-picks" type="button" data-vdsc-picks>See all picks <span aria-hidden="true">→</span></button>' +
             '<button class="vdsc-hero-nav vdsc-hero-nav--prev" type="button" data-vdsc-prev aria-label="Previous title">‹</button>' +
             '<button class="vdsc-hero-nav vdsc-hero-nav--next" type="button" data-vdsc-next aria-label="Next title">›</button>';
         state.hero.idx = 0;
@@ -635,6 +639,7 @@
                 var rails = (d && d.rails) || [];
                 var body = $('[data-group-body="taste"]');
                 if (!rails.length || !body) return;
+                rails.forEach(function (rl) { _poolAdd(rl.items); });
                 var html = rails.map(function (rl) {
                     return filledShelfHtml(rl.title, (rl.items || []).map(card).join(''), 'vdsc-shelf--ml');
                 }).join('');
@@ -642,6 +647,7 @@
                 revealGroup('taste');
                 staggerWithin(body);
                 hydrateGet(body);
+                maybeRenderStories();   // throwback card may now have pool items
             })
             .catch(function () { /* personalization is best-effort */ });
     }
@@ -655,8 +661,11 @@
             .then(function (d) {
                 if (gen !== (state.railGen || 0)) return;   // a newer rebuild superseded this
                 var rails = (d && d.rails) || [];
+                state._gapRails = rails;
+                state._gapsArrived = true;
                 var body = $('[data-group-body="collection"]');
-                if (!rails.length || !body) return;
+                if (!rails.length || !body) { maybeRenderStories(); return; }
+                rails.forEach(function (rl) { _poolAdd(rl.items); });
                 var html = rails.map(function (rl) {
                     return filledShelfHtml(rl.title, (rl.items || []).map(card).join(''), 'vdsc-shelf--gap');
                 }).join('');
@@ -664,6 +673,7 @@
                 revealGroup('collection');
                 staggerWithin(body);
                 hydrateGet(body);
+                maybeRenderStories();
             })
             .catch(function () { /* gaps are best-effort */ });
     }
@@ -678,14 +688,142 @@
                 var items = (d && d.items) || [];
                 var body = $('[data-group-body="foryou"]');
                 if (items.length < 6 || !body) return;
+                state._foryouItems = items;
+                _poolAdd(items);
                 // afterbegin: sits above the (static) "On your streaming services" rail in the group.
                 body.insertAdjacentHTML('afterbegin',
                     filledShelfHtml('Recommended for you', items.map(card).join(''), 'vdsc-shelf--foryou'));
                 revealGroup('foryou');
                 staggerWithin(body);
                 hydrateGet(body);
+                renderTrailerRail();
+                maybeRenderStories();
             })
             .catch(function () { /* best-effort */ });
+    }
+
+    // ── story blocks (music-Discover parity) ────────────────────────────────
+    // Editorial cards + a vertical trailer rail, composed from data the page
+    // already fetches — no new endpoints. Each personalized loader stashes its
+    // items in state._pool; maybeRenderStories fires once hero + foryou + gaps
+    // have all landed (morelike/taste may join late — the throwback card is
+    // optional chrome and renders only if pool items exist by then).
+    function _poolAdd(items) {
+        if (!items || !items.length) return;
+        var pool = state._pool || (state._pool = []);
+        var seen = {};
+        pool.forEach(function (it) { if (it && it.tmdb_id != null) seen[it.kind + ':' + it.tmdb_id] = 1; });
+        items.forEach(function (it) {
+            if (!it || it.tmdb_id == null || seen[it.kind + ':' + it.tmdb_id]) return;
+            seen[it.kind + ':' + it.tmdb_id] = 1;
+            pool.push(it);
+        });
+    }
+    function _storyCard(o) {
+        // o: {eyebrow, eyebrowHue, title, sub, art, kind, tmdb_id, library_id, year, extraAction}
+        var owned = o.library_id != null;
+        var source = owned ? 'library' : 'tmdb';
+        var id = owned ? o.library_id : o.tmdb_id;
+        return '<article class="vdsc-story" style="--vgm-h:' + (o.eyebrowHue || hueOf(o.title)) + ';' +
+            (o.art ? "background-image:url('" + esc(o.art) + "')" : '') + '">' +
+            '<div class="vdsc-story-scrim" aria-hidden="true"></div>' +
+            '<div class="vdsc-story-body">' +
+            '<span class="vdsc-story-eyebrow"><span class="vdsc-story-eyebrow-dot" aria-hidden="true"></span>' +
+            esc(o.eyebrow) + '</span>' +
+            '<h3 class="vdsc-story-title">' + esc(o.title) + '</h3>' +
+            (o.sub ? '<p class="vdsc-story-sub">' + esc(o.sub) + '</p>' : '') +
+            '<div class="vdsc-story-actions">' +
+            (o.tmdb_id != null
+                ? '<button class="vdsc-hero-trailer" type="button" data-vdsc-trailer ' +
+                  'data-kind="' + o.kind + '" data-tmdb="' + o.tmdb_id + '" data-title="' + esc(o.title) + '">' +
+                  '<span class="vdsc-tr-ic" aria-hidden="true">▶</span> Trailer</button>'
+                : '') +
+            (id != null
+                ? '<button class="discog-submit-btn vdsc-hero-cta" type="button" ' +
+                  'data-vsr-open="' + o.kind + '" data-vsr-source="' + source + '" data-vsr-id="' + id + '">' +
+                  '<span class="discog-submit-text">More info</span></button>'
+                : '') +
+            (o.extraAction || '') +
+            '</div></div></article>';
+    }
+    function maybeRenderStories() {
+        if (state._storiesDone) return;
+        var heroItems = state.hero.items || [];
+        var foryou = state._foryouItems || [];
+        var gapRails = state._gapRails || [];
+        if (!heroItems.length || !foryou.length || !state._gapsArrived) return;   // wait for the trio
+        state._storiesDone = true;
+        var pool = (state._pool || []).slice();
+        var cards = [];
+        // 1 · New this week — the newest title across hero + for-you.
+        var newest = null;
+        heroItems.concat(foryou).forEach(function (it) {
+            if (it && it.year && (!newest || it.year > newest.year)) newest = it;
+        });
+        if (newest) cards.push(_storyCard({
+            eyebrow: 'NEW • ' + newest.year, eyebrowHue: hueOf(newest.title),
+            title: newest.title,
+            sub: (newest.kind === 'movie' ? 'New movie' : 'New series') +
+                 (newest.overview ? ' — ' + newest.overview.slice(0, 90) + '…' : ''),
+            art: newest.backdrop || newest.poster,
+            kind: newest.kind, tmdb_id: newest.tmdb_id, library_id: newest.library_id
+        }));
+        // 2 · Your collection is missing — first franchise gap rail.
+        var coll = null;
+        gapRails.forEach(function (rl) { if (!coll && rl && rl.kind === 'collection') coll = rl; });
+        if (coll) {
+            var fname = String(coll.title || '').replace(/^Complete the\s+/i, '') || 'this collection';
+            var n = (coll.items || []).length;
+            cards.push(_storyCard({
+                eyebrow: 'YOUR COLLECTION IS MISSING', eyebrowHue: 268,
+                title: fname,
+                sub: 'You own part of it — ' + n + (n === 1 ? ' title' : ' titles') + " you're missing.",
+                art: (coll.items[0] && (coll.items[0].backdrop || coll.items[0].poster)) || null,
+                kind: 'movie', tmdb_id: null, library_id: null,
+                extraAction: '<button class="vdsc-btn vdsc-btn--ghost" type="button" data-vdsc-goto-collection>' +
+                             'See what\u2019s missing</button>'
+            }));
+        }
+        // 3 · Throwback — the oldest title in the pool (prefers pre-2000).
+        var old = null, oldestAny = null;
+        pool.forEach(function (it) {
+            if (!it || !it.year) return;
+            if (!oldestAny || it.year < oldestAny.year) oldestAny = it;
+            if (it.year < 2000 && (!old || it.year < old.year)) old = it;
+        });
+        var tb = old || oldestAny;
+        if (tb && (!newest || tb.tmdb_id !== newest.tmdb_id || tb.kind !== newest.kind)) cards.push(_storyCard({
+            eyebrow: 'THROWBACK', eyebrowHue: 36,
+            title: tb.title,
+            sub: 'From ' + tb.year + ' — still holds up.',
+            art: tb.backdrop || tb.poster,
+            kind: tb.kind, tmdb_id: tb.tmdb_id, library_id: tb.library_id
+        }));
+        if (!cards.length) return;
+        var row = $('[data-vdsc-stories-row]'); if (!row) return;
+        row.innerHTML = cards.join('');
+        var sec = $('[data-vdsc-stories]'); if (sec) sec.classList.remove('hidden');
+        if (window.VideoWishState) VideoWishState.hydrate(row);
+    }
+    // ── vertical trailer rail ("Watch trailers" — music's Watch section) ────
+    function renderTrailerRail() {
+        var items = (state._foryouItems || []).slice(0, 10);
+        if (items.length < 4) return;
+        var rail = $('[data-vdsc-trail-rail]'); if (!rail) return;
+        rail.innerHTML = items.map(function (it) {
+            return '<button class="vdsc-trail" type="button" data-vdsc-trailer ' +
+                'data-kind="' + it.kind + '" data-tmdb="' + it.tmdb_id + '" data-title="' + esc(it.title || '') + '" ' +
+                'aria-label="Play trailer for ' + esc(it.title || '') + '">' +
+                '<span class="vdsc-trail-art" aria-hidden="true"' +
+                (it.poster ? ' style="background-image:url(\'' + esc(it.poster) + '\')"' : '') + '>' +
+                '<span class="vdsc-trail-play" aria-hidden="true">▶</span></span>' +
+                '<span class="vdsc-trail-why">Picked for you</span>' +
+                '<span class="vdsc-trail-title">' + esc(it.title || '') + '</span>' +
+                '<span class="vdsc-trail-meta">' + (it.kind === 'movie' ? 'Movie' : 'TV') +
+                (it.year ? ' · ' + it.year : '') + '</span>' +
+                '</button>';
+        }).join('');
+        var sec = $('[data-vdsc-trailers]'); if (sec) sec.classList.remove('hidden');
     }
 
     // Rebuild the whole rail stack (genre/curated shelves + the prepended personalized rows).
@@ -693,6 +831,13 @@
     // it before prepending, so rapid re-toggles can't stack duplicate "Recommended for you" rows.
     function reloadRails() {
         state.railGen = (state.railGen || 0) + 1;
+        // Story blocks + trailer rail are editorial — clear and rebuild with the rails.
+        state._storiesDone = false; state._pool = []; state._foryouItems = [];
+        state._gapRails = []; state._gapsArrived = false;
+        var srow = $('[data-vdsc-stories-row]'); if (srow) srow.innerHTML = '';
+        var ssec = $('[data-vdsc-stories]'); if (ssec) ssec.classList.add('hidden');
+        var trl = $('[data-vdsc-trail-rail]'); if (trl) trl.innerHTML = '';
+        var tsec = $('[data-vdsc-trailers]'); if (tsec) tsec.classList.add('hidden');
         renderShelves();
         loadMoreLike();
         loadGaps();
@@ -1157,6 +1302,18 @@
             var trbtn = e.target.closest('[data-vdsc-trailer]');
             if (trbtn) {
                 openTrailer(trbtn.getAttribute('data-kind'), trbtn.getAttribute('data-tmdb'), trbtn.getAttribute('data-title'));
+                return;
+            }
+            var picks = e.target.closest('[data-vdsc-picks]');
+            if (picks) {
+                var fy = document.querySelector('[data-group="foryou"]');
+                if (fy) fy.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                return;
+            }
+            var gotoColl = e.target.closest('[data-vdsc-goto-collection]');
+            if (gotoColl) {
+                var cg = document.querySelector('[data-group="collection"]');
+                if (cg) cg.scrollIntoView({ block: 'start', behavior: 'smooth' });
                 return;
             }
             var heroAdd = e.target.closest('[data-vdsc-hero-add]');
