@@ -8505,52 +8505,6 @@ class MusicDatabase:
             logger.error(f"get_manual_library_match error: {e}")
             return None
 
-    def get_manual_library_match_by_id(self, match_id: int,
-                                           profile_id: int) -> Optional[Dict[str, Any]]:
-        """Return a manual match row by PK id, scoped to profile_id.
-
-        #1289: the delete path needs the row's source_track_id BEFORE
-        deleting so mirrored in-library flags can be reset. The capped
-        list_manual_library_matches() cannot serve this — a match older than
-        the 100 most-recently-updated would silently skip the flag reset.
-        """
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT * FROM manual_library_track_matches
-                    WHERE id = ? AND profile_id = ?
-                """, (match_id, profile_id))
-                row = cursor.fetchone()
-                return dict(row) if row else None
-        except Exception as e:
-            logger.error(f"get_manual_library_match_by_id error: {e}")
-            return None
-
-    def find_all_manual_library_matches_by_source_track_id(
-        self, profile_id: int, source_track_id: str
-    ) -> list:
-        """Return ALL manual matches for a source track ID, any server_source.
-
-        #1289: the delete path's surviving-match guard must be
-        server-agnostic AND consider every survivor. The server-filtered
-        finder's SQL (`AND (server_source = ? OR server_source = '')`)
-        cannot see a survivor under a different server_source, and a
-        LIMIT 1 would let one dead survivor mask a live one — either
-        wrongly clears the mirrored in-library flag.
-        """
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT * FROM manual_library_track_matches
-                    WHERE profile_id = ? AND source_track_id = ?
-                """, (profile_id, source_track_id))
-                return [dict(row) for row in cursor.fetchall()]
-        except Exception as e:
-            logger.error(f"find_all_manual_library_matches_by_source_track_id error: {e}")
-            return []
-
     def find_manual_library_match_by_source_track_id(self, profile_id: int,
                                                      source_track_id: str,
                                                      server_source: str = '') -> Optional[Dict[str, Any]]:
@@ -23148,7 +23102,15 @@ class MusicDatabase:
             return []
 
     def api_get_curated_playlist_tracks(self, playlist_id: int, profile_id: int = 1) -> List[Dict[str, Any]]:
-        """Get track dicts for a curated playlist, in order."""
+        """Get track dicts for a curated playlist, in order.
+
+        Handles the different payload formats stored in track_ids_json:
+        - List of track IDs: [1, 2, 3]
+        - Dict with "tracks": {"tracks": [{"id": 1}, ...]} or {"tracks": [1, 2, 3]}
+        - Dict with "mixes" (Daily Mixes): {"mixes": [{"tracks": [...]}, ...]}
+
+        For entries without database IDs, falls back to title/artist matching.
+        """
         try:
             import json
             with self._get_connection() as conn:
@@ -23162,22 +23124,95 @@ class MusicDatabase:
                 if not row:
                     return []
                 try:
-                    track_ids = json.loads(row["track_ids_json"] or "[]")
+                    payload = json.loads(row["track_ids_json"] or "[]")
                 except Exception:
                     return []
-                if not track_ids:
+                entries = self._extract_curated_track_ids(payload)
+                if not entries:
                     return []
-                # Fetch tracks in playlist order.
-                placeholders = ",".join("?" for _ in track_ids)
-                cursor.execute(
-                    f"SELECT * FROM tracks WHERE id IN ({placeholders})",
-                    tuple(track_ids),
-                )
-                by_id = {r["id"]: dict(r) for r in cursor.fetchall()}
-                return [by_id[tid] for tid in track_ids if tid in by_id]
+                # Separate ID-based lookups from title/artist fallbacks.
+                id_entries = [(tid, t, a) for (tid, t, a) in entries if tid is not None]
+                name_entries = [(t, a) for (tid, t, a) in entries if tid is None and t]
+                by_id = {}
+                if id_entries:
+                    tids = [tid for (tid, _, _) in id_entries]
+                    placeholders = ",".join("?" for _ in tids)
+                    # Only bind int/str, never dicts.
+                    safe_tids = [tid for tid in tids if isinstance(tid, (int, str))]
+                    if safe_tids:
+                        placeholders = ",".join("?" for _ in safe_tids)
+                        cursor.execute(
+                            f"SELECT * FROM tracks WHERE id IN ({placeholders})",
+                            tuple(safe_tids),
+                        )
+                        by_id = {str(r["id"]): dict(r) for r in cursor.fetchall()}
+                # Title/artist fallback for entries without IDs.
+                name_matches = {}
+                for (title, artist) in name_entries:
+                    if not title:
+                        continue
+                    try:
+                        if artist:
+                            cursor.execute(
+                                """SELECT * FROM tracks
+                                   WHERE LOWER(title) = LOWER(?)
+                                   AND LOWER(artist) = LOWER(?)
+                                   LIMIT 1""",
+                                (title, artist),
+                            )
+                        else:
+                            cursor.execute(
+                                "SELECT * FROM tracks WHERE LOWER(title) = LOWER(?) LIMIT 1",
+                                (title,),
+                            )
+                        r = cursor.fetchone()
+                        if r:
+                            name_matches[(title.lower(), (artist or "").lower())] = dict(r)
+                    except Exception:
+                        continue
+                # Build result in playlist order.
+                out = []
+                for (tid, title, artist) in entries:
+                    if tid is not None and str(tid) in by_id:
+                        out.append(by_id[str(tid)])
+                    elif title:
+                        key = (title.lower(), (artist or "").lower())
+                        if key in name_matches:
+                            out.append(name_matches[key])
+                return out
         except Exception as e:
             logger.error(f"API: Error getting playlist tracks: {e}")
             return []
+
+    def _extract_curated_track_ids(self, payload) -> List:
+        """Extract ordered track IDs from a curated playlist payload.
+
+        Returns a list of (id_or_none, title, artist) tuples. The ID may be
+        None if the payload only has display data (title/artist).
+        """
+        if isinstance(payload, list):
+            out = []
+            for item in payload:
+                if isinstance(item, dict):
+                    tid = item.get("id") or item.get("track_id")
+                    # Only accept int/str IDs, not nested dicts.
+                    if isinstance(tid, (int, str)):
+                        out.append((tid, item.get("title"), item.get("artist")))
+                    elif item.get("title"):
+                        out.append((None, item.get("title"), item.get("artist")))
+                elif isinstance(item, (int, str)):
+                    out.append((item, None, None))
+            return out
+        if isinstance(payload, dict):
+            if "tracks" in payload:
+                return self._extract_curated_track_ids(payload["tracks"])
+            if "mixes" in payload and isinstance(payload["mixes"], list):
+                out = []
+                for mix in payload["mixes"]:
+                    if isinstance(mix, dict) and "tracks" in mix:
+                        out.extend(self._extract_curated_track_ids(mix["tracks"]))
+                return out
+        return []
 
     def api_list_albums(self, search: str = "", artist_id: int = None,
                         year: int = None, page: int = 1, limit: int = 50) -> Dict[str, Any]:
