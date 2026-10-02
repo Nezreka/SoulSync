@@ -126,7 +126,8 @@ describe('import route', () => {
       albumItem(),
       albumItem({
         key: 'hash-2',
-        name: 'Loose Song',
+        name: 'loose.flac',
+        guessed_name: 'Loose Song',
         artist: 'Artist B',
         kind: 'single',
         folder_name: 'loose.flac',
@@ -325,6 +326,18 @@ describe('import route', () => {
     expect(screen.getByText(/next scan in \d+s/)).toBeInTheDocument();
     expect(history.location.pathname).toBe('/import');
     expect(window.SoulSyncWebShellBridge?.showReactHost).toHaveBeenCalledWith('import');
+  });
+
+  it('singles lead with the title tag, not the filename (#1289)', async () => {
+    renderImportRoute(['/import?filter=all']);
+    // The single has title tag 'Loose Song' on files[0]; the backend falls back
+    // to the title for guessed_name when there's no album guess — the title
+    // leads, the filename is the subtitle.
+    const rows = await screen.findAllByTestId('import-inbox-row');
+    const singleRow = rows.find((r) => within(r).queryByText('Loose Song'));
+    expect(singleRow).toBeTruthy();
+    // No "tags say" subtitle: guessed_name equals the displayed title.
+    expect(within(singleRow!).queryByText(/tags say/)).toBeNull();
   });
 
   it('the old tabs redirect into the inbox', async () => {

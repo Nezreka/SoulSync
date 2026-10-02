@@ -657,6 +657,12 @@ function InboxRow({
       ? (item.live.track_index / item.live.track_total) * 100
       : null;
   const openMatcher = () => void navigate({ to: '/import/match/$key', params: { key: item.key } });
+  // #1289: singles lead with the title tag (the prettiest signal); the
+  // filename stays as the subtitle below. Albums keep the folder-name
+  // primary from fix 1. guessed_name is the *album* guess, not the title —
+  // the title tag lives on files[0].
+  const singleTitle = item.kind === 'single' ? item.files[0]?.title : null;
+  const displayTitle = singleTitle || item.name || item.folder_name;
 
   return (
     <article
@@ -673,7 +679,7 @@ function InboxRow({
         <Checkbox
           checked={selected}
           disabled={!selectable}
-          aria-label={`Select ${item.name}`}
+          aria-label={`Select ${displayTitle}`}
           onCheckedChange={(next) => onSelectedChange(Boolean(next))}
         />
       </div>
@@ -694,11 +700,11 @@ function InboxRow({
 
       <div className={styles.rowBody}>
         <div className={styles.rowTitleLine}>
-          <span className={styles.rowTitle} title={item.name}>
-            {item.name || item.folder_name}
+          <span className={styles.rowTitle} title={displayTitle}>
+            {displayTitle}
           </span>
         </div>
-        {item.guessed_name && item.guessed_name !== item.name ? (
+        {item.guessed_name && item.guessed_name !== displayTitle ? (
           <span className={styles.rowGuessed} title={item.guessed_name}>
             tags say “{item.guessed_name}”
           </span>
