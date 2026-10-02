@@ -1423,6 +1423,54 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vsr-sub { display: block; font-size: 12px; color: rgba(255, 255, 255, 0.5); margin-top: 3px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/* ── Discover card elevation (round 2): quiet, premier refinement ─────────
+   Scoped to Discover — the shared .vsr-card keeps its base look elsewhere. */
+.vdsc-page .vsr-card { border-radius: 16px; }
+.vdsc-page .vsr-poster {
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.45s ease, border-color 0.45s ease;
+}
+.vdsc-page .vsr-card:hover .vsr-poster {
+    transform: translateY(-6px);
+    border-color: rgba(255, 255, 255, 0.2);
+    box-shadow: 0 24px 54px rgba(0, 0, 0, 0.62), 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+.vdsc-page .vsr-card:hover .vsr-poster img { transform: scale(1.06); }
+/* hover affordance: the old serif-italic "i" becomes a quiet glass arrow */
+.vdsc-page .vsr-peek {
+    width: 48px; height: 48px;
+    background: rgba(12, 14, 20, 0.55); color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.32);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+    font-family: inherit; font-style: normal;
+}
+.vdsc-page .vsr-peek svg { display: block; }
+/* ribbons: pills go quiet — glass with a whisper of state color */
+.vdsc-page .vsr-ribbon {
+    top: 8px; left: 8px;
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.09em;
+    padding: 5px 11px; border-radius: 999px;
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+}
+.vdsc-page .vsr-ribbon--owned {
+    background: rgba(10, 14, 12, 0.62); color: #a7f3d0;
+    border: 1px solid rgba(52, 211, 153, 0.45);
+}
+.vdsc-page .vsr-ribbon--preview {
+    background: rgba(10, 12, 18, 0.55); color: rgba(255, 255, 255, 0.78);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+}
+.vdsc-page .vsr-ribbon--wish {
+    background: rgba(12, 14, 26, 0.62); color: #c7d2fe;
+    border: 1px solid rgba(129, 140, 248, 0.5);
+}
+/* type: tighter, lighter, more confident */
+.vdsc-page .vsr-name { font-weight: 600; letter-spacing: -0.01em; }
+.vdsc-page .vsr-info { padding: 12px 4px 0; }
+
 /* people = circular portrait card */
 .vsr-card--person .vsr-poster {
     aspect-ratio: 1 / 1; border-radius: 50%;
@@ -3822,6 +3870,7 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vdsc-shelf--in .vdsc-rail .vsr-card:nth-child(7) { animation-delay: 0.24s; }
 .vdsc-shelf--in .vdsc-rail .vsr-card:nth-child(n+8) { animation-delay: 0.28s; }
 @keyframes vdscCardIn { from { opacity: 0; transform: translateY(18px) scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes vdscKenBurns { from { transform: scale(1) translate(0, 0); } to { transform: scale(1.12) translate(-1.5%, 1%); } }
 .vdsc-rail {
     display: flex; gap: 18px; overflow-x: auto; overscroll-behavior-x: contain;
     padding: 6px 2px 20px;
@@ -3953,7 +4002,7 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 }
 .vdsc-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
 .vdsc-tile {
-    position: relative; height: 86px; border-radius: 16px; overflow: hidden;
+    position: relative; height: 132px; border-radius: 16px; overflow: hidden;
     border: 1px solid rgba(255, 255, 255, 0.08);
     background: rgba(28, 34, 48, 0.7);
     cursor: pointer; text-align: left; padding: 0;
@@ -3964,13 +4013,26 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     content: ''; position: absolute; inset: 0;
     background: radial-gradient(120% 140% at 20% 110%, rgba(var(--c, 88, 101, 242), 0.38), transparent 60%);
 }
+/* painted tiles: a real poster from the genre's rail beneath a refined
+   legibility gradient — the art does the talking, the type stays readable */
+.vdsc-tile--art::after {
+    content: ''; position: absolute; inset: 0;
+    background-image: var(--tile-art);
+    background-size: cover; background-position: center 22%;
+    transition: transform 600ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.vdsc-tile--art::before {
+    background: linear-gradient(178deg, rgba(8, 10, 16, 0.04) 34%, rgba(8, 10, 16, 0.88) 100%);
+    z-index: 1;
+}
+.vdsc-tile--art:hover::after { transform: scale(1.05); }
 .vdsc-tile:hover {
     transform: translateY(-3px);
     border-color: rgba(var(--c, 88, 101, 242), 0.55);
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45), 0 0 22px rgba(var(--c, 88, 101, 242), 0.22);
 }
 .vdsc-tile-name {
-    position: absolute; left: 14px; bottom: 12px; z-index: 1;
+    position: absolute; left: 14px; bottom: 12px; z-index: 2;
     font-size: 15px; font-weight: 700; letter-spacing: -0.01em; color: #fff;
     text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
 }
@@ -8413,57 +8475,143 @@ body[data-side="video"] #gsearch-aura {
 }
 .vdsc-story-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 
-/* ── Watch trailers: vertical 9:16 rail (music's Watch section) ───────────── */
-.vdsc-trailers { margin: 30px 0 6px; }
-.vdsc-shelf-titles { display: flex; flex-direction: column; gap: 4px; }
-.vdsc-shelf-sub { margin: 0; font-size: 0.85rem; color: rgba(255, 255, 255, 0.5); }
+/* ── marquee tickers (music-Discover parity): doubled spans, seamless loop ── */
+.vdsc-story-marquee, .vdsc-banner-marquee {
+    display: flex; white-space: nowrap; overflow: hidden;
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 30px; align-items: center;
+    background: rgba(6, 8, 13, 0.66);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+    font-size: 10px; font-weight: 800; letter-spacing: 0.24em; text-transform: uppercase;
+}
+.vdsc-story-marquee { z-index: 1; color: hsl(var(--vgm-h, 230), 85%, 74%); }
+.vdsc-banner-marquee { z-index: 1; color: rgba(255, 255, 255, 0.85); height: 34px; font-size: 11px; }
+.vdsc-story-marquee > span, .vdsc-banner-marquee > span {
+    flex: 0 0 auto; padding-right: 0.6em;
+    animation: vdscMarquee 26s linear infinite;
+}
+.vdsc-banner-marquee > span { animation-duration: 32s; }
+@keyframes vdscMarquee { to { transform: translateX(-100%); } }
+
+/* ── Full-width poster banners (music-Discover parity) ─────────────────── */
+.vdsc-banner {
+    position: relative; overflow: hidden; border-radius: 26px;
+    min-height: 430px; display: flex; align-items: flex-end;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    isolation: isolate; margin: 46px 0;
+    opacity: 0; transform: translateY(30px);
+    transition: opacity 0.9s ease, transform 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+}
+.vdsc-banner--in { opacity: 1; transform: none; }
+.vdsc-banner-art {
+    position: absolute; inset: 0; z-index: -2;
+    background-size: cover; background-position: center 22%;
+    background-color: hsl(230, 30%, 10%);
+}
+.vdsc-banner--in .vdsc-banner-art { animation: vdscBannerDrift 26s ease-in-out infinite alternate; }
+@keyframes vdscBannerDrift { from { transform: scale(1); } to { transform: scale(1.09); } }
+.vdsc-banner-scrim {
+    position: absolute; inset: 0; z-index: -1;
+    background:
+        linear-gradient(180deg, rgba(5, 6, 10, 0.3) 0%, rgba(5, 6, 10, 0.04) 38%, rgba(5, 6, 10, 0.92) 100%),
+        linear-gradient(100deg, rgba(5, 6, 10, 0.74) 0%, rgba(5, 6, 10, 0.2) 55%, transparent 80%);
+}
+.vdsc-banner-body { position: relative; z-index: 1; padding: 60px 56px 52px; max-width: 780px; }
+.vdsc-banner-eyebrow {
+    display: block; font-size: 11px; font-weight: 800; letter-spacing: 0.22em;
+    text-transform: uppercase; color: rgba(255, 255, 255, 0.66); margin-bottom: 14px;
+}
+.vdsc-banner-title {
+    margin: 0 0 16px; font-size: clamp(3rem, 7vw, 5.25rem); font-weight: 800;
+    letter-spacing: -0.035em; line-height: 0.95; text-transform: uppercase;
+    color: #fff; text-wrap: balance;
+    text-shadow: 0 4px 40px rgba(0, 0, 0, 0.55);
+}
+.vdsc-banner-sub {
+    margin: 0; font-size: 1.02rem; line-height: 1.55; color: rgba(255, 255, 255, 0.78);
+    max-width: 46ch;
+}
+.vdsc-banner-sub strong { color: #fff; font-weight: 700; }
+.vdsc-banner .vdsc-btn { margin-top: 22px; }
+
+/* ── Trailers: a cinematic breather between the rails and the endless feed ── */
+.vdsc-trailers {
+    margin: 44px 0 8px; padding-top: 34px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    position: relative;
+}
+.vdsc-trailers::before {
+    content: ''; position: absolute; top: -1px; left: 8%; right: 8%; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.28), transparent);
+    pointer-events: none;
+}
 .vdsc-trail-rail {
-    display: flex; gap: 14px; overflow-x: auto; padding: 4px 2px 14px;
-    scroll-snap-type: x mandatory; scrollbar-width: thin;
+    display: flex; gap: 22px; overflow-x: auto; padding: 6px 2px 22px;
+    scroll-snap-type: x proximity; scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
 }
-.vdsc-trail {
-    position: relative; flex: 0 0 168px; width: 168px; text-align: left;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.09); border-radius: 16px;
-    padding: 8px; cursor: pointer; scroll-snap-align: start;
-    transition: transform 240ms cubic-bezier(0.16, 1, 0.3, 1), border-color 240ms ease, box-shadow 240ms ease;
+.vdsc-trailer-card {
+    position: relative; flex: 0 0 300px; width: 300px; scroll-snap-align: start;
+    text-decoration: none; color: inherit; display: block;
+    animation: vdscCardIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+    animation-delay: calc(var(--i, 0) * 0.06s);
 }
-.vdsc-trail:hover {
-    transform: translateY(-4px) scale(1.02);
-    border-color: rgba(255, 255, 255, 0.22);
-    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5);
-}
-.vdsc-trail-art {
-    position: relative; display: block; aspect-ratio: 9 / 13; border-radius: 10px;
+.vdsc-trailer-art {
+    position: relative; display: block; aspect-ratio: 16 / 9; border-radius: 18px;
     background-size: cover; background-position: center;
-    background-color: hsl(var(--vgm-h, 230), 30%, 14%);
-    overflow: hidden; margin-bottom: 10px;
+    background-color: hsl(var(--vgm-h, 230), 28%, 13%);
+    overflow: hidden; isolation: isolate;
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+    transition: transform 420ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 420ms ease;
 }
-.vdsc-trail-art::after {
-    content: ''; position: absolute; inset: 0;
-    background: linear-gradient(180deg, transparent 55%, rgba(0, 0, 0, 0.45));
+/* slow Ken Burns drift on hover — the frame feels alive without shouting */
+.vdsc-trailer-art::before {
+    content: ''; position: absolute; inset: -6%;
+    background-image: inherit; background-size: cover; background-position: center;
+    opacity: 0; transition: opacity 600ms ease;
 }
-.vdsc-trail-play {
-    position: absolute; left: 50%; top: 50%; z-index: 1;
-    width: 46px; height: 46px; border-radius: 50%;
+.vdsc-trailer-card:hover .vdsc-trailer-art::before { opacity: 1; animation: vdscKenBurns 9s ease-in-out infinite alternate; }
+.vdsc-trailer-art::after {
+    content: ''; position: absolute; inset: 0; z-index: 1;
+    background: linear-gradient(180deg, rgba(0,0,0,0.12) 0%, transparent 40%, rgba(0,0,0,0.28) 100%);
+    pointer-events: none;
+}
+.vdsc-trailer-card:hover .vdsc-trailer-art {
+    transform: translateY(-6px) scale(1.015);
+    box-shadow: 0 28px 60px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+.vdsc-trailer-play {
+    position: absolute; left: 50%; top: 50%; z-index: 2;
+    width: 68px; height: 68px; border-radius: 50%;
     transform: translate(-50%, -50%);
     display: flex; align-items: center; justify-content: center;
-    background: rgba(10, 12, 18, 0.72); color: #fff; font-size: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.25);
-    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
-    transition: transform 200ms ease, background 200ms ease;
+    background: rgba(12, 14, 20, 0.55); color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.35); cursor: pointer;
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+    transition: transform 260ms cubic-bezier(0.16, 1, 0.3, 1), background 260ms ease, box-shadow 260ms ease;
 }
-.vdsc-trail:hover .vdsc-trail-play { transform: translate(-50%, -50%) scale(1.12); background: rgba(20, 220, 120, 0.85); border-color: transparent; }
-.vdsc-trail-why {
-    display: block; font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
-    text-transform: uppercase; color: rgba(255, 255, 255, 0.45); margin-bottom: 3px;
+.vdsc-trailer-play svg { margin-left: 3px; }
+.vdsc-trailer-card:hover .vdsc-trailer-play,
+.vdsc-trailer-play:hover {
+    transform: translate(-50%, -50%) scale(1.14);
+    background: rgba(255, 255, 255, 0.92); color: #0b0d13;
+    box-shadow: 0 10px 36px rgba(255, 255, 255, 0.25);
 }
-.vdsc-trail-title {
-    display: block; font-size: 0.88rem; font-weight: 800; color: #fff;
-    letter-spacing: -0.01em; line-height: 1.25;
+.vdsc-trailer-play:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.vdsc-trailer-body { display: block; padding: 14px 6px 0; }
+.vdsc-trailer-eyebrow {
+    display: block; font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
+    text-transform: uppercase; color: rgba(255, 255, 255, 0.42); margin-bottom: 5px;
+}
+.vdsc-trailer-title {
+    display: block; font-size: 1.02rem; font-weight: 700; color: #fff;
+    letter-spacing: -0.015em; line-height: 1.3;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.vdsc-trail-meta { display: block; font-size: 0.75rem; color: rgba(255, 255, 255, 0.5); margin-top: 2px; }
+.vdsc-trailer-meta { display: block; font-size: 0.8rem; color: rgba(255, 255, 255, 0.52); margin-top: 3px; }
 
 /* ── Hero pick dots: poster thumbs (music's avatar dots) ──────────────────── */
 .vdsc-dots:has(.vdsc-dot--thumb) { gap: 10px; align-items: center; }
@@ -8500,9 +8648,16 @@ body[data-side="video"] #gsearch-aura {
     .vdsc-story-title { font-size: 1.6rem; }
     .vdsc-hero-picks { right: 20px; bottom: 18px; padding: 8px 14px; }
     .vdsc-dots { padding-left: 20px; padding-right: 20px; }
-    .vdsc-trail { flex-basis: 148px; width: 148px; }
+    .vdsc-trailer-card { flex-basis: 248px; width: 248px; }
+    .vdsc-banner { min-height: 340px; margin: 34px 0; border-radius: 20px; }
+    .vdsc-banner-body { padding: 40px 26px 34px; }
+    .vdsc-banner-title { font-size: clamp(2.4rem, 11vw, 3.4rem); }
 }
 @media (prefers-reduced-motion: reduce) {
     .vdsc-story::before { animation: none; }
-    .vdsc-story, .vdsc-trail { transition: none; }
+    .vdsc-story, .vdsc-trailer-card, .vdsc-trailer-art, .vdsc-trailer-play { transition: none; animation: none; }
+    .vdsc-trailer-card:hover .vdsc-trailer-art::before { opacity: 0; }
+    .vdsc-story-marquee > span, .vdsc-banner-marquee > span { animation: none; }
+    .vdsc-banner { transition: none; opacity: 1; transform: none; }
+    .vdsc-banner--in .vdsc-banner-art { animation: none; }
 }
