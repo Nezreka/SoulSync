@@ -23157,12 +23157,18 @@ class MusicDatabase:
                         )
                         by_id = {str(r["id"]): dict(r) for r in cursor.fetchall()}
                 # Title/artist fallback for entries without IDs.
+                # Tries exact match, then fuzzy (LIKE), then title-only.
                 name_matches = {}
                 for (title, artist) in name_entries:
                     if not title:
                         continue
+                    key = (title.lower(), (artist or "").lower())
+                    if key in name_matches:
+                        continue
                     try:
+                        r = None
                         if artist:
+                            # 1. Exact title + artist.
                             cursor.execute(
                                 """SELECT t.* FROM tracks t
                                    JOIN artists ar ON ar.id = t.artist_id
@@ -23171,14 +23177,34 @@ class MusicDatabase:
                                    LIMIT 1""",
                                 (title, artist),
                             )
-                        else:
+                            r = cursor.fetchone()
+                            # 2. Fuzzy title + exact artist.
+                            if not r:
+                                cursor.execute(
+                                    """SELECT t.* FROM tracks t
+                                       JOIN artists ar ON ar.id = t.artist_id
+                                       WHERE LOWER(t.title) LIKE ?
+                                       AND LOWER(ar.name) = LOWER(?)
+                                       LIMIT 1""",
+                                    (f"%{title.lower()}%", artist),
+                                )
+                                r = cursor.fetchone()
+                        # 3. Title-only exact.
+                        if not r:
                             cursor.execute(
                                 "SELECT * FROM tracks WHERE LOWER(title) = LOWER(?) LIMIT 1",
                                 (title,),
                             )
-                        r = cursor.fetchone()
+                            r = cursor.fetchone()
+                        # 4. Title-only fuzzy.
+                        if not r:
+                            cursor.execute(
+                                "SELECT * FROM tracks WHERE LOWER(title) LIKE ? LIMIT 1",
+                                (f"%{title.lower()}%",),
+                            )
+                            r = cursor.fetchone()
                         if r:
-                            name_matches[(title.lower(), (artist or "").lower())] = dict(r)
+                            name_matches[key] = dict(r)
                     except Exception as e:
                         logger.warning(f"Playlist track fallback match failed for '{title}': {e}")
                         continue
@@ -23191,6 +23217,11 @@ class MusicDatabase:
                         key = (title.lower(), (artist or "").lower())
                         if key in name_matches:
                             out.append(name_matches[key])
+                logger.info(f"Playlist {playlist_id}: matched {len(out)}/{len(entries)} entries ({len(by_id)} by ID, {len(name_matches)} by name)")
+                if entries and not out:
+                    # Log a sample to diagnose matching failures.
+                    sample = entries[0]
+                    logger.info(f"Playlist {playlist_id}: sample entry title='{sample[1]}' artist='{sample[2]}'")
                 return out
         except Exception as e:
             logger.error(f"API: Error getting playlist tracks: {e}")
