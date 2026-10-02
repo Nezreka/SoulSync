@@ -3850,7 +3850,9 @@ for the whole filtered set.
 
 \`data\` is \`{"items": [...], "total_size_bytes": <int>, "pagination":
 {"page", "total_pages", "total_count", "has_prev", "has_next"}}\`. \`items\`
-are movie/show/channel rows for the requested kind.
+are movie/show/channel rows for the requested kind. When \`kind=shows\`,
+\`data\` also carries \`total_episodes\` — the global episode count
+across all shows (one cheap COUNT query, not summed from the page).
 
 \`\`\`json
 {
@@ -3858,7 +3860,8 @@ are movie/show/channel rows for the requested kind.
   "data": {
     "items": [],
     "total_size_bytes": 0,
-    "pagination": {"page": 1, "total_pages": 1, "total_count": 0, "has_prev": false, "has_next": false}
+    "pagination": {"page": 1, "total_pages": 1, "total_count": 0, "has_prev": false, "has_next": false},
+    "total_episodes": 0
   },
   "error": null,
   "pagination": null
