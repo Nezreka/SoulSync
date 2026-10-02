@@ -67,8 +67,22 @@ def test_itunes_single_albumartist_falls_back_to_track_artist(monkeypatch, tmp_p
     """#989: an iTunes single's collection carries a placeholder 'Unknown Artist'
     album artist while the track artist is real. The album_path must use the real
     artist for $albumartist, not bury the file under 'Unknown Artist'. FAILS pre-fix
-    (the placeholder album-context artist overrode the real track artist)."""
-    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _album_path_config(tmp_path))
+    (the placeholder album-context artist overrode the real track artist).
+
+    The fixture keeps the DEFAULT single_path on purpose: a customized
+    single_path now routes explicit singles through the single branch (Hirvi),
+    which would bypass the album-branch fallback this test is pinning."""
+    _cfg = _Config({
+        "soulseek.transfer_path": str(tmp_path / "Transfer"),
+        "file_organization.enabled": True,
+        "file_organization.templates": {
+            "album_path": "$albumartist/$albumartist - $album/$track - $title",
+            "single_path": "$albumartist/$albumartist - $title/$title",
+        },
+        "file_organization.collab_artist_mode": "first",
+        "file_organization.disc_label": "Disc",
+    })
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _cfg)
     monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
     ctx = {
         "source": "itunes",
@@ -85,6 +99,76 @@ def test_itunes_single_albumartist_falls_back_to_track_artist(monkeypatch, tmp_p
         ctx, {"name": "Forevert", "id": "123456"}, info, ".flac", create_dirs=False)
     assert final_path == str(tmp_path / "Transfer" / "Forevert" / "Forevert - CHAOSRIFT" / "01 - CHAOSRIFT.flac")
     assert "Unknown Artist" not in final_path
+
+
+def test_customized_single_path_wins_for_explicit_singles(monkeypatch, tmp_path):
+    """Hirvi: a customized Single Path Template must be honored for singles the
+    source explicitly typed as 'single'. build_import_album_info routes those
+    through album_path (so $albumtype in the ALBUM template keeps working), but
+    that silently ignored a customized single_path — every single landed in its
+    own title-named folder instead of the template's Singles folder."""
+    _cfg = _Config({
+        "soulseek.transfer_path": str(tmp_path / "Transfer"),
+        "file_organization.enabled": True,
+        "file_organization.templates": {
+            "album_path": "$albumartist/${album}/$track - $title",
+            "single_path": "${albumartist}/Singles/${title}",
+        },
+        "file_organization.collab_artist_mode": "first",
+        "file_organization.disc_label": "Disc",
+    })
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _cfg)
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+    ctx = {
+        "source": "deezer",
+        "artist": {"name": "Artistname", "id": "d1"},
+        "album": {"name": "Some Song", "id": "al1", "album_type": "single",
+                  "release_date": "2024-01-01", "artists": [{"name": "Artistname"}]},
+        "track_info": {"name": "Some Song", "track_number": 1, "disc_number": 1,
+                       "artists": [{"name": "Artistname"}]},
+        "original_search_result": {"title": "Some Song", "clean_title": "Some Song",
+                                   "artists": [{"name": "Artistname"}]},
+    }
+    # Deezer explicitly typed this "single", so is_album is True and the album
+    # name falls back to the track title (#980) — the single template must win.
+    info = {"is_album": True, "album_name": "Some Song", "album_type": "single",
+            "track_number": 1, "disc_number": 1}
+    final_path, _ = import_paths.build_final_path_for_track(
+        ctx, {"name": "Artistname", "id": "d1"}, info, ".opus", create_dirs=False)
+    assert final_path == str(tmp_path / "Transfer" / "Artistname" / "Singles" / "Some Song.opus")
+
+
+def test_default_single_path_keeps_album_routing_for_explicit_singles(monkeypatch, tmp_path):
+    """The $albumtype-in-album-template contract: with a default (uncustomized)
+    single_path, explicitly-typed singles keep routing through album_path, so a
+    '${albumtype}s/...' album template still files them under Singles."""
+    _cfg = _Config({
+        "soulseek.transfer_path": str(tmp_path / "Transfer"),
+        "file_organization.enabled": True,
+        "file_organization.templates": {
+            "album_path": "$albumartist/${albumtype}s/${album}/$track - $title",
+        },
+        "file_organization.collab_artist_mode": "first",
+        "file_organization.disc_label": "Disc",
+    })
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _cfg)
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+    ctx = {
+        "source": "deezer",
+        "artist": {"name": "Artistname", "id": "d1"},
+        "album": {"name": "Some Song", "id": "al1", "album_type": "single",
+                  "release_date": "2024-01-01", "artists": [{"name": "Artistname"}]},
+        "track_info": {"name": "Some Song", "track_number": 1, "disc_number": 1,
+                       "artists": [{"name": "Artistname"}]},
+        "original_search_result": {"title": "Some Song", "clean_title": "Some Song",
+                                   "artists": [{"name": "Artistname"}]},
+    }
+    info = {"is_album": True, "album_name": "Some Song", "album_type": "single",
+            "track_number": 1, "disc_number": 1}
+    final_path, _ = import_paths.build_final_path_for_track(
+        ctx, {"name": "Artistname", "id": "d1"}, info, ".opus", create_dirs=False)
+    assert final_path == str(tmp_path / "Transfer" / "Artistname" / "Singles"
+                             / "Some Song" / "01 - Some Song.opus")
 
 
 def test_compilation_uses_compilation_path_template(monkeypatch, tmp_path):
