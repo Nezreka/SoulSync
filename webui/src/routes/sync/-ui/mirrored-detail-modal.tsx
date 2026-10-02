@@ -200,9 +200,7 @@ export function MirroredDetailModal({
                 >
                   Refresh from {srcLabel === 'unknown' ? 'source' : srcLabel}
                 </button>
-                <span className="mm-btn-caption">
-                  Pull only — nothing pushed or downloaded
-                </span>
+                <span className="mm-btn-caption">Pull only — nothing pushed or downloaded</span>
               </div>
             ) : null}
             {/* Runs the pipeline now; the header's "Auto-Sync" schedules it. */}
@@ -215,9 +213,7 @@ export function MirroredDetailModal({
               >
                 Push to server
               </button>
-              <span className="mm-btn-caption">
-                Push the playlist and download what's missing
-              </span>
+              <span className="mm-btn-caption">Push the playlist and download what's missing</span>
             </div>
             <button type="button" className="mm-btn mm-btn-ghost" onClick={onClose}>
               Close

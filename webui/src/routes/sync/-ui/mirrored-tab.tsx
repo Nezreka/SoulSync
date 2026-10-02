@@ -1035,9 +1035,7 @@ export function MirroredTab({
                     Date.now(),
                     pipelineCovers,
                   )}
-                  scheduled={
-                    Boolean(cardSchedules.schedules[String(row.id)]) || pipelineCovers
-                  }
+                  scheduled={Boolean(cardSchedules.schedules[String(row.id)]) || pipelineCovers}
                   health={autoSyncPlaylistHealth(cardSchedules.history, row.id)}
                   status={
                     exportStatus ? (
