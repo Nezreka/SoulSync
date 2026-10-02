@@ -6,6 +6,7 @@ import time
 import threading
 from typing import Dict, List, Optional, Any
 from urllib.parse import urlsplit, urlunsplit
+from core.http_error_status import http_error_status
 from utils.logging_config import get_logger
 
 logger = get_logger("musicbrainz_client")
@@ -111,10 +112,11 @@ def _is_transient_musicbrainz_error(exc: Exception) -> bool:
         return True
     if isinstance(exc, (requests.exceptions.ReadTimeout, requests.exceptions.Timeout, requests.exceptions.ConnectionError)):
         return True
-    response = getattr(exc, 'response', None)
-    status_code = getattr(response, 'status_code', None)
-    if status_code in TRANSIENT_STATUS_CODES:
-        return True
+    status_code = http_error_status(exc)
+    # An HTTP response is authoritative. Searching the exception text below
+    # can mistake 429/503 inside a release ID in the URL for the HTTP status.
+    if status_code is not None:
+        return status_code in TRANSIENT_STATUS_CODES
     message = str(exc).lower()
     return 'rate limit' in message or 'read timed out' in message or '503' in message or '429' in message
 

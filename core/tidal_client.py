@@ -6,6 +6,7 @@ import threading
 from typing import Dict, List, Optional, Any
 from functools import wraps
 from dataclasses import dataclass
+from core.http_error_status import http_error_status
 from utils.logging_config import get_logger
 from core.settings import config_manager
 import json
@@ -36,6 +37,20 @@ _last_api_call_time = 0
 _api_call_lock = threading.Lock()
 MIN_API_INTERVAL = 0.5  # 500ms between API calls
 
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    status = http_error_status(exc)
+    if status is not None:
+        return status == 429
+    return 'rate limit' in str(exc).lower() or '429' in str(exc)
+
+
+def _is_server_error(exc: Exception) -> bool:
+    status = http_error_status(exc)
+    if status is not None:
+        return status in (502, 503)
+    return '502' in str(exc) or '503' in str(exc)
+
 def rate_limited(func):
     """Decorator to enforce rate limiting on Tidal API calls with retry logic"""
     @wraps(func)
@@ -64,16 +79,14 @@ def rate_limited(func):
                 return result
             except Exception as e:
                 last_exception = e
-                error_str = str(e)
-
                 # Only retry on specific errors
-                if "rate limit" in error_str.lower() or "429" in error_str:
+                if _is_rate_limit_error(e):
                     backoff = 3.0 * (2 ** attempt)  # Exponential: 3s, 6s, 12s, 24s
                     logger.warning(f"Rate limit hit on attempt {attempt + 1}/{max_retries}, backing off {backoff}s: {e}")
                     if attempt < max_retries - 1:
                         time.sleep(backoff)
                         continue
-                elif "503" in error_str or "502" in error_str:
+                elif _is_server_error(e):
                     logger.warning(f"Tidal service error on attempt {attempt + 1}/{max_retries}, backing off: {e}")
                     if attempt < max_retries - 1:
                         time.sleep(2.0)
@@ -1068,7 +1081,7 @@ class TidalClient:
             return []
 
         except Exception as e:
-            if "429" in str(e):
+            if _is_rate_limit_error(e):
                 raise  # Let rate_limited decorator handle retry
             logger.error(f"Error searching Tidal tracks: {e}")
             return []
@@ -1113,7 +1126,7 @@ class TidalClient:
             return None
 
         except Exception as e:
-            if "429" in str(e):
+            if _is_rate_limit_error(e):
                 raise  # Let rate_limited decorator handle retry
             logger.error(f"Error searching Tidal artist: {e}")
             return None
@@ -1163,7 +1176,7 @@ class TidalClient:
             return None
 
         except Exception as e:
-            if "429" in str(e):
+            if _is_rate_limit_error(e):
                 raise  # Let rate_limited decorator handle retry
             logger.error(f"Error searching Tidal album: {e}")
             return None
@@ -1213,7 +1226,7 @@ class TidalClient:
             return None
 
         except Exception as e:
-            if "429" in str(e):
+            if _is_rate_limit_error(e):
                 raise  # Let rate_limited decorator handle retry
             logger.error(f"Error searching Tidal track: {e}")
             return None
@@ -1247,7 +1260,7 @@ class TidalClient:
             return None
 
         except Exception as e:
-            if "429" in str(e):
+            if _is_rate_limit_error(e):
                 raise  # Let rate_limited decorator handle retry
             logger.error(f"Error getting Tidal artist {artist_id}: {e}")
             return None
@@ -1280,7 +1293,7 @@ class TidalClient:
             return None
 
         except Exception as e:
-            if "429" in str(e):
+            if _is_rate_limit_error(e):
                 raise  # Let rate_limited decorator handle retry
             logger.error(f"Error getting Tidal album {album_id}: {e}")
             return None
@@ -1428,7 +1441,7 @@ class TidalClient:
             return None
 
         except Exception as e:
-            if "429" in str(e):
+            if _is_rate_limit_error(e):
                 raise  # Let rate_limited decorator handle retry
             logger.error(f"Error getting Tidal track {track_id}: {e}")
             return None
@@ -1502,8 +1515,7 @@ class TidalClient:
                 try:
                     tracks_page = self._get_playlist_tracks_page(playlist_id, cursor)
                 except Exception as e:
-                    error_str = str(e)
-                    if "429" in error_str or "rate limit" in error_str.lower():
+                    if _is_rate_limit_error(e):
                         consecutive_failures += 1
                         if consecutive_failures <= MAX_PAGE_RETRIES:
                             backoff = 10.0 * consecutive_failures  # 10s, 20s, 30s
