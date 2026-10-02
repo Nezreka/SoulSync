@@ -19,6 +19,7 @@ function item(over: Partial<ImportInboxItem> & { status: ImportInboxStatus }): I
     key: over.status,
     kind: 'album',
     name: 'Album',
+    guessed_name: null,
     artist: 'Artist',
     folder_name: 'Artist - Album',
     folder_path: '/Staging/Artist - Album',

@@ -59,6 +59,7 @@ function albumItem(over: Partial<ImportInboxItem> = {}): ImportInboxItem {
     key: 'hash-1',
     kind: 'album',
     name: 'Album A',
+    guessed_name: null,
     artist: 'Artist A',
     folder_name: 'Album',
     folder_path: '/music/Staging/Album',
