@@ -182,8 +182,12 @@ def build_inbox(
         rows.append({
             'key': cand.folder_hash,
             'kind': 'single' if getattr(cand, 'is_single', False) else 'album',
-            'name': (hist or {}).get('album_name') or _most_common(f['album'] for f in files)
-                    or (files[0]['title'] if getattr(cand, 'is_single', False) and files else cand.name),
+            # #1289: the row is named by the folder, not the guessed tag — the
+            # tags said "Sgt. Pepper" for a folder the user named "Beatles".
+            # the guess survives as a subtitle so the signal isn't lost.
+            'name': cand.name or '',
+            'guessed_name': (hist or {}).get('album_name') or _most_common(f['album'] for f in files)
+                    or (files[0]['title'] if getattr(cand, 'is_single', False) and files else None),
             'artist': (hist or {}).get('artist_name') or _most_common(f['artist'] for f in files),
             'folder_name': cand.name,
             'folder_path': cand.path,
@@ -220,7 +224,9 @@ def build_inbox(
         rows.append({
             'key': row.get('folder_hash') or f"history-{row.get('id')}",
             'kind': 'album' if (row.get('total_files') or 0) > 1 else 'single',
-            'name': row.get('album_name') or row.get('folder_name') or '',
+            # #1289: folder name first, same as staging rows above.
+            'name': row.get('folder_name') or row.get('album_name') or '',
+            'guessed_name': row.get('album_name') or None,
             'artist': row.get('artist_name') or '',
             'folder_name': row.get('folder_name') or '',
             'folder_path': row.get('folder_path') or '',

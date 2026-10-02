@@ -88,6 +88,8 @@ import {
   autoSyncWeeklyTrigger,
   detectBrowserTimezone,
   getMirroredSourceRef,
+  autoSyncPipelineCoversPlaylist,
+  autoSyncEnabledFlag,
 } from './-sync.autosync';
 
 const AUTO_SYNC_SRC = readFileSync(resolve(process.cwd(), 'static/auto-sync.js'), 'utf8');
@@ -1611,5 +1613,36 @@ describe('isValidTimezone', () => {
     for (const tz of ['', 'America/Los_Angles', 'Europe/Lundon', 'nonsense', 'GMT+25']) {
       expect(isValidTimezone(tz)).toBe(false);
     }
+  });
+});
+
+describe('autoSyncPipelineCoversPlaylist (#1289)', () => {
+  // Mirrors the backend filter (pipeline.py:325, refresh_mirrored.py:78):
+  // file/beatport sources are skipped by an all-playlists pipeline run.
+  // lastfm is NOT excluded — the backend processes it.
+  it('covers everything except file and beatport sources', () => {
+    expect(autoSyncPipelineCoversPlaylist(null)).toBe(false);
+    expect(autoSyncPipelineCoversPlaylist(undefined)).toBe(false);
+    expect(autoSyncPipelineCoversPlaylist({ source: 'file' })).toBe(false);
+    expect(autoSyncPipelineCoversPlaylist({ source: 'beatport' })).toBe(false);
+    expect(autoSyncPipelineCoversPlaylist({ source: 'youtube' })).toBe(true);
+    expect(autoSyncPipelineCoversPlaylist({ source: 'spotify' })).toBe(true);
+    expect(autoSyncPipelineCoversPlaylist({ source: 'lastfm' })).toBe(true);
+    expect(autoSyncPipelineCoversPlaylist({ source: null })).toBe(true);
+    expect(autoSyncPipelineCoversPlaylist({})).toBe(true);
+  });
+});
+
+describe('autoSyncEnabledFlag (#1289)', () => {
+  // Tri-state, NOT truthiness: the row is enabled unless explicitly
+  // false or 0, so an absent flag counts as enabled.
+  it('treats only explicit false/0 as disabled', () => {
+    expect(autoSyncEnabledFlag(null)).toBe(true);
+    expect(autoSyncEnabledFlag(undefined)).toBe(true);
+    expect(autoSyncEnabledFlag({} as never)).toBe(true);
+    expect(autoSyncEnabledFlag({ enabled: true } as never)).toBe(true);
+    expect(autoSyncEnabledFlag({ enabled: 1 } as never)).toBe(true);
+    expect(autoSyncEnabledFlag({ enabled: false } as never)).toBe(false);
+    expect(autoSyncEnabledFlag({ enabled: 0 } as never)).toBe(false);
   });
 });

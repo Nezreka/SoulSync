@@ -33,7 +33,10 @@ import {
 import {
   AUTO_SYNC_BUCKETS,
   autoSyncCanSchedulePlaylist,
+  autoSyncEnabledFlag,
   autoSyncIntervalLabel,
+  autoSyncIsPipelineAutomation,
+  autoSyncIsScheduleOwned,
   autoSyncNextRunLabel,
   autoSyncSchedulePayload,
   autoSyncTriggerForHours,
@@ -64,6 +67,36 @@ export const CARD_SCHEDULE_OPTIONS: readonly { value: string; label: string }[] 
   { value: '', label: 'Not scheduled' },
   ...AUTO_SYNC_BUCKETS.map((h) => ({ value: String(h), label: autoSyncIntervalLabel(h) })),
 ];
+
+/**
+ * Whether an enabled, owned Playlist Pipeline automation covers every mirrored
+ * playlist ("Process all mirrored playlists"). #1289: such a playlist is
+ * scheduled even though it has no per-playlist automation row.
+ *
+ * Only timer triggers count: 'schedule', 'daily_time', 'weekly_time',
+ * 'monthly_time' — the four the backend scheduler treats as self-running
+ * (core/automation/schedule.py::next_run_at). A manual- or event-trigger
+ * "process all" pipeline runs nothing on its own.
+ *
+ * Deliberately does not validate trigger_config: a misconfigured automation
+ * is broken as an automation, which the Automations page surfaces; this
+ * predicate answers whether an enabled, owned all-pipeline exists on a timer.
+ */
+export function hasAllPlaylistPipeline(automations: unknown[]): boolean {
+  const TIMER_TRIGGERS = ['schedule', 'daily_time', 'weekly_time', 'monthly_time'];
+  return (automations || []).some((auto) => {
+    const a = auto as {
+      action_config?: { all?: unknown };
+      trigger_type?: string;
+    } | null;
+    if (!autoSyncIsPipelineAutomation(a)) return false;
+    if (!autoSyncIsScheduleOwned(a)) return false;
+    if (!autoSyncEnabledFlag(a)) return false;
+    if (!TIMER_TRIGGERS.includes(a?.trigger_type ?? '')) return false;
+    const all = a?.action_config?.all;
+    return all === true || all === 'true';
+  });
+}
 
 /**
  * Read every owned schedule out of an automations payload.
@@ -111,8 +144,14 @@ export function cardSchedulesFrom(automations: unknown[]): CardScheduleMap {
  * 3h") and the cadence on its own answers a different, weaker question — how
  * often, but not whether anything is about to happen.
  */
-export function cardScheduleLabel(schedule: CardSchedule | undefined, now?: number): string {
-  if (!schedule) return 'Not scheduled';
+export function cardScheduleLabel(
+  schedule: CardSchedule | undefined,
+  now?: number,
+  coveredByAllPipeline = false,
+): string {
+  // #1289: a playlist covered by an "all mirrored playlists" pipeline is
+  // scheduled even without its own automation row.
+  if (!schedule) return coveredByAllPipeline ? 'All-playlists pipeline' : 'Not scheduled';
   const base = schedule.weekly
     ? 'Weekly'
     : schedule.hours
@@ -125,6 +164,8 @@ export function cardScheduleLabel(schedule: CardSchedule | undefined, now?: numb
 
 export interface CardScheduleController {
   schedules: CardScheduleMap;
+  /** True when an enabled, owned Playlist Pipeline covers all mirrored playlists (#1289). */
+  hasAllPipeline: boolean;
   /**
    * Recent pipeline runs, for the repeated-failure signal the board's `!` / `⚠`
    * glyph carried. The card's ring reports the CURRENT run; this reports the
@@ -158,6 +199,7 @@ export interface UseCardSchedulesOptions {
 
 export function useCardSchedules(options: UseCardSchedulesOptions = {}): CardScheduleController {
   const [schedules, setSchedules] = useState<CardScheduleMap>({});
+  const [hasAllPipeline, setHasAllPipeline] = useState(false);
   const [history, setHistory] = useState<AutoSyncHistoryEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set());
@@ -175,6 +217,7 @@ export function useCardSchedules(options: UseCardSchedulesOptions = {}): CardSch
       const data = (await res.json()) as { automations?: unknown[] } | unknown[];
       const rows = Array.isArray(data) ? data : (data.automations ?? []);
       setSchedules(cardSchedulesFrom(rows));
+      setHasAllPipeline(hasAllPlaylistPipeline(rows));
 
       if (historyRes) {
         const payload = (await historyRes.json()) as { history?: AutoSyncHistoryEntry[] };
@@ -293,5 +336,5 @@ export function useCardSchedules(options: UseCardSchedulesOptions = {}): CardSch
     [schedules, load, options.toast],
   );
 
-  return { schedules, history, loaded, set, setWeekly, busy, reload: load };
+  return { schedules, hasAllPipeline, history, loaded, set, setWeekly, busy, reload: load };
 }

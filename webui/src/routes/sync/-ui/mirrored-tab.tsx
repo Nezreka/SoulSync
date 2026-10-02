@@ -64,6 +64,7 @@ import { patchMirroredSourceRef } from '../-sync.api';
 import { patchMirroredPreferences } from '../-sync.api';
 import { getMirroredSourceRef } from '../-sync.autosync';
 import { autoSyncCanSchedulePlaylist } from '../-sync.autosync';
+import { autoSyncPipelineCoversPlaylist } from '../-sync.autosync';
 import { autoSyncPlaylistHealth, detectBrowserTimezone } from '../-sync.autosync';
 import { cardScheduleLabel, useCardSchedules } from '../-sync.card-schedule';
 import { exportNotConnectedStatus } from '../-sync.export';
@@ -755,12 +756,18 @@ export function MirroredTab({
   /**
    * The ids that have a cadence, for the Scheduled / Unscheduled tabs. Derived
    * from the same map the cards read for their pills, so a tab can never
-   * disagree with the pill on the card it is filtering to.
+   * disagree with the pill on the card it is filtering to. #1289: an
+   * all-playlists pipeline schedules every row.
    */
   const scheduledIds = new Set(
-    Object.keys(cardSchedules.schedules)
-      .map(Number)
-      .filter((id) => !Number.isNaN(id)),
+    cardSchedules.hasAllPipeline
+      ? allRows
+          .filter((r) => autoSyncPipelineCoversPlaylist(r))
+          .map((r) => r.id)
+          .filter((id): id is number => id !== undefined && !Number.isNaN(Number(id)))
+      : Object.keys(cardSchedules.schedules)
+          .map(Number)
+          .filter((id) => !Number.isNaN(id)),
   );
 
   /**
@@ -983,6 +990,10 @@ export function MirroredTab({
               );
               const exportStatus = exportJobs.statuses[row.id];
               const state = libraryCardState(row);
+              // #1289: an all-playlists pipeline schedules this card only if
+              // the backend actually processes its source (file/beatport are skipped).
+              const pipelineCovers =
+                cardSchedules.hasAllPipeline && autoSyncPipelineCoversPlaylist(row);
               return renaming === row.id ? (
                 // Rename stays INLINE on the card: a modal for one text field is
                 // heavier than the edit itself.
@@ -1019,8 +1030,12 @@ export function MirroredTab({
                   // the timestamp actually is (the last mirror refresh), where a
                   // bare "30m ago" leaves you guessing.
                   when={`Mirrored ${timeAgo(row.updated_at || row.mirrored_at, Date.now())}`}
-                  schedule={cardScheduleLabel(cardSchedules.schedules[String(row.id)], Date.now())}
-                  scheduled={Boolean(cardSchedules.schedules[String(row.id)])}
+                  schedule={cardScheduleLabel(
+                    cardSchedules.schedules[String(row.id)],
+                    Date.now(),
+                    pipelineCovers,
+                  )}
+                  scheduled={Boolean(cardSchedules.schedules[String(row.id)]) || pipelineCovers}
                   health={autoSyncPlaylistHealth(cardSchedules.history, row.id)}
                   status={
                     exportStatus ? (

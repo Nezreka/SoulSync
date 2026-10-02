@@ -191,24 +191,30 @@ export function MirroredDetailModal({
               Edit Source
             </button>
             {onRefreshFromSource ? (
-              <button
-                type="button"
-                className="mm-btn mm-btn-ghost"
-                title="Pull the latest tracks from the source and discover the new ones. Your matches are kept, nothing is pushed to your server or downloaded"
-                onClick={onRefreshFromSource}
-              >
-                Refresh from source
-              </button>
+              <div className="mm-btn-wrap">
+                <button
+                  type="button"
+                  className="mm-btn mm-btn-ghost"
+                  title="Pull the latest tracks from the source and discover the new ones. Your matches are kept, nothing is pushed to your server or downloaded"
+                  onClick={onRefreshFromSource}
+                >
+                  Refresh from {srcLabel === 'unknown' ? 'source' : srcLabel}
+                </button>
+                <span className="mm-btn-caption">Pull only — nothing pushed or downloaded</span>
+              </div>
             ) : null}
             {/* Runs the pipeline now; the header's "Auto-Sync" schedules it. */}
-            <button
-              type="button"
-              className="mm-btn mm-btn-secondary"
-              title="Refresh from the source, match, push to your server and download what's missing"
-              onClick={onRunPipeline}
-            >
-              Sync &amp; download
-            </button>
+            <div className="mm-btn-wrap">
+              <button
+                type="button"
+                className="mm-btn mm-btn-secondary"
+                title="Refresh from the source, match, push to your server and download what's missing"
+                onClick={onRunPipeline}
+              >
+                Push to server
+              </button>
+              <span className="mm-btn-caption">Push the playlist and download what's missing</span>
+            </div>
             <button type="button" className="mm-btn mm-btn-ghost" onClick={onClose}>
               Close
             </button>

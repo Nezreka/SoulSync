@@ -703,6 +703,89 @@ def test_flag_only_scanner_finding_carries_profile_for_redownload(monkeypatch, t
     assert findings[0]['details']['quality_profile_name'] == 'Strict FLAC'
 
 
+def _scan_one_file(monkeypatch, tmp_path, profile_targets, probed_aq):
+    """Run the flag-only scanner over a single stubbed file; return findings."""
+    from core.quality.model import QualityTarget
+    audio_path = tmp_path / "song.flac"
+    audio_path.write_bytes(b"fake")
+    profile = {'id': 13, 'name': 'MP3 Only', 'upgrade_policy': 'until_cutoff',
+               'upgrade_cutoff_index': 0,
+               'ranked_targets': [t.to_dict() for t in profile_targets]}
+
+    class _EmptyConn:
+        def execute(self, *a, **k):
+            return self
+
+        def fetchall(self):
+            return []
+
+        def close(self):
+            pass
+
+    class _DB:
+        def get_quality_profile(self):
+            return profile
+
+        def _get_connection(self):
+            return _EmptyConn()
+
+    targets = profile_targets
+    monkeypatch.setattr(qs, 'targets_from_profile', lambda p: (targets, False))
+    monkeypatch.setattr(
+        qs.QualityUpgradeScannerJob, '_collect_music_dirs',
+        lambda self, context: [str(tmp_path)],
+    )
+    monkeypatch.setattr(
+        qs.QualityUpgradeScannerJob, '_build_db_suffix_index',
+        lambda self, context: {
+            'song.flac': {'track_id': 6, 'title': 'Song', 'artist': 'Artist A',
+                          'album': 'Album X', 'track_number': 1,
+                          'quality_profile_id': 13}
+        },
+    )
+    monkeypatch.setattr('core.imports.file_ops.probe_audio_quality', lambda path: probed_aq)
+    monkeypatch.setattr('core.imports.silence.detect_broken_audio', lambda path: None)
+
+    findings = []
+    ctx = JobContext(
+        db=_DB(),
+        transfer_folder=str(tmp_path),
+        config_manager=None,
+        create_finding=lambda **kw: findings.append(kw) or True,
+        should_stop=lambda: False,
+        is_paused=lambda: False,
+    )
+    result = qs.QualityUpgradeScannerJob().scan(ctx)
+    assert result.findings_created == 1
+    return findings[0]
+
+
+def test_scanner_flags_untargeted_format_honestly(monkeypatch, tmp_path):
+    """#1289: a FLAC under an MP3-only profile is 'format not in profile',
+    not 'below profile'."""
+    from core.quality.model import AudioQuality, QualityTarget
+    finding = _scan_one_file(
+        monkeypatch, tmp_path,
+        [QualityTarget(label='MP3 320', format='mp3', min_bitrate=320)],
+        AudioQuality(format='flac', bitrate=1411),
+    )
+    assert finding['details']['quality_issue'] == 'format_not_in_profile'
+    assert finding['title'].startswith('Format not in profile:')
+    assert 'does not target' in finding['description']
+
+
+def test_scanner_flags_weak_targeted_format_as_below_profile(monkeypatch, tmp_path):
+    """#1289: a 128kbps MP3 under an MP3-320 target is genuinely below profile."""
+    from core.quality.model import AudioQuality, QualityTarget
+    finding = _scan_one_file(
+        monkeypatch, tmp_path,
+        [QualityTarget(label='MP3 320', format='mp3', min_bitrate=320)],
+        AudioQuality(format='mp3', bitrate=128),
+    )
+    assert finding['details']['quality_issue'] == 'below_profile'
+    assert finding['title'].startswith('Upgradeable:')
+
+
 class _ScannerFakeConn:
     """Fake repair_findings connection for the flag-only scanner's dismissed-
     findings lookup — mirrors _FakeConn above but keyed by (entity_id,
