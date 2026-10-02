@@ -23144,18 +23144,40 @@ class MusicDatabase:
                 id_entries = [(tid, t, a) for (tid, t, a) in entries if tid is not None]
                 name_entries = [(t, a) for (tid, t, a) in entries if tid is None and t]
                 by_id = {}
+                by_external = {}
                 if id_entries:
                     tids = [tid for (tid, _, _) in id_entries]
-                    placeholders = ",".join("?" for _ in tids)
                     # Only bind int/str, never dicts.
                     safe_tids = [tid for tid in tids if isinstance(tid, (int, str))]
                     if safe_tids:
                         placeholders = ",".join("?" for _ in safe_tids)
+                        # 1. Try database IDs.
                         cursor.execute(
                             f"SELECT * FROM tracks WHERE id IN ({placeholders})",
                             tuple(safe_tids),
                         )
                         by_id = {str(r["id"]): dict(r) for r in cursor.fetchall()}
+                        # 2. Try Deezer IDs (numeric external IDs).
+                        # 3. Try Spotify IDs (string external IDs).
+                        remaining = [tid for tid in safe_tids if str(tid) not in by_id]
+                        if remaining:
+                            placeholders = ",".join("?" for _ in remaining)
+                            cursor.execute(
+                                f"SELECT * FROM tracks WHERE deezer_id IN ({placeholders})",
+                                tuple(remaining),
+                            )
+                            for r in cursor.fetchall():
+                                d = dict(r)
+                                if d.get("deezer_id"):
+                                    by_external[str(d["deezer_id"])] = d
+                            cursor.execute(
+                                f"SELECT * FROM tracks WHERE spotify_track_id IN ({placeholders})",
+                                tuple(remaining),
+                            )
+                            for r in cursor.fetchall():
+                                d = dict(r)
+                                if d.get("spotify_track_id"):
+                                    by_external[str(d["spotify_track_id"])] = d
                 # Title/artist fallback for entries without IDs.
                 # Tries exact match, then fuzzy (LIKE), then title-only.
                 name_matches = {}
@@ -23213,11 +23235,13 @@ class MusicDatabase:
                 for (tid, title, artist) in entries:
                     if tid is not None and str(tid) in by_id:
                         out.append(by_id[str(tid)])
+                    elif tid is not None and str(tid) in by_external:
+                        out.append(by_external[str(tid)])
                     elif title:
                         key = (title.lower(), (artist or "").lower())
                         if key in name_matches:
                             out.append(name_matches[key])
-                logger.info(f"Playlist {playlist_id}: matched {len(out)}/{len(entries)} entries ({len(by_id)} by ID, {len(name_matches)} by name)")
+                logger.info(f"Playlist {playlist_id}: matched {len(out)}/{len(entries)} entries ({len(by_id)} by ID, {len(by_external)} by external ID, {len(name_matches)} by name)")
                 if entries and not out:
                     # Log a sample to diagnose matching failures.
                     sample = entries[0]
