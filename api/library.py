@@ -343,6 +343,56 @@ def register_routes(bp):
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
+    @bp.route("/library/mirrored-playlists", methods=["GET"])
+    @require_api_key
+    def list_mirrored_playlists():
+        """List mirrored playlists for the profile."""
+        profile_id = parse_profile_id(request)
+        try:
+            db = get_database()
+            playlists = db.get_mirrored_playlists(profile_id=profile_id)
+            out = []
+            for pl in playlists:
+                out.append({
+                    "id": pl.get("id"),
+                    "name": pl.get("name") or pl.get("custom_name") or "Untitled",
+                    "track_count": pl.get("track_count", 0),
+                    "cover_url": pl.get("cover_url"),
+                })
+            return api_success({"playlists": out})
+        except Exception as e:
+            return api_error("LIBRARY_ERROR", str(e), 500)
+
+    @bp.route("/library/mirrored-playlists/<playlist_id>/tracks", methods=["GET"])
+    @require_api_key
+    def get_mirrored_playlist_tracks(playlist_id):
+        """List tracks in a mirrored playlist, in order."""
+        fields = parse_fields(request)
+        profile_id = parse_profile_id(request)
+        try:
+            pid = int(playlist_id)
+        except (ValueError, TypeError):
+            return api_error("BAD_REQUEST", "playlist_id must be an integer.", 400)
+        try:
+            db = get_database()
+            mtracks = db.get_mirrored_playlist_tracks(pid, profile_id=profile_id)
+            out = []
+            for mt in mtracks:
+                t = None
+                # Try external ID first (source_track_id is Spotify/etc).
+                sid = mt.get("source_track_id")
+                if sid:
+                    t = db.api_get_track_by_external_id(str(sid))
+                # Fallback to title/artist.
+                if not t and mt.get("track_name"):
+                    t = db.api_find_track_by_title_artist(
+                        mt.get("track_name"), mt.get("artist_name") or "")
+                if t:
+                    out.append(serialize_track(t, fields))
+            return api_success({"tracks": out})
+        except Exception as e:
+            return api_error("LIBRARY_ERROR", str(e), 500)
+
     @bp.route("/library/lookup", methods=["GET"])
     @require_api_key
     def lookup_by_external_id():
