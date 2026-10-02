@@ -22,7 +22,7 @@ def collect_known_signals(database) -> list[str]:
     """
     signals: set[str] = set()
     try:
-        for auto in database.get_automations():
+        for auto in database.get_all_automations():
             if auto.get('trigger_type') == 'signal_received':
                 try:
                     tc = json.loads(auto.get('trigger_config') or '{}')
