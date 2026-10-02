@@ -276,7 +276,7 @@ function notIntHarness(saveResult: unknown, undoResult: unknown = { success: tru
     'esc',
     'toast',
     'document',
-    `var _undoTimer=null; ${src}; wireNotInterested();`,
+    `var _undoPrev=null; ${src}; wireNotInterested();`,
   )(state, postIgnore, esc, (m: string) => toasts.push(m), doc);
 
   return {
