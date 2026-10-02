@@ -714,29 +714,6 @@ def get_file_path_from_template_raw(template: str, context: dict) -> tuple[str, 
     return "", sanitize_filename(full_path)
 
 
-_SINGLE_PATH_DEFAULTS = frozenset({
-    "$albumartist/$albumartist - $title/$title",
-    "$artist/$artist - $title/$title",
-})
-
-
-def is_single_path_customized() -> bool:
-    """Has the user actually customized the Single Path template?
-
-    Explicitly-typed singles are routed through ``album_path`` (so $albumtype
-    in the ALBUM template keeps working), which silently ignores a customized
-    ``single_path``. A stored template that is empty or one of the known
-    defaults means "not customized" — anything else is the user's explicit
-    choice and must win for singles.
-    """
-    try:
-        templates = _get_config_manager().get("file_organization.templates", {}) or {}
-    except Exception:
-        return False
-    template = str(templates.get("single_path") or "").strip()
-    return bool(template) and template not in _SINGLE_PATH_DEFAULTS
-
-
 def get_file_path_from_template(context: dict, template_type: str = "album_path") -> tuple[str, str]:
     """Build complete file path using configured templates."""
     if not _get_config_manager().get("file_organization.enabled", True):
@@ -1060,20 +1037,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         logger.debug("[atypes] could not build release-type labels: %s", _at_err)
         atypes_value = ""
 
-    # An explicitly-typed single (the source said "single", so is_album is True
-    # via explicit_release_type) still belongs on the SINGLE template when the
-    # user customized it — otherwise the custom single_path is silently dead
-    # and every single lands in its own title-named folder via album_path.
-    # Default/empty single_path keeps the album_path routing so $albumtype in
-    # the ALBUM template keeps filing singles under "Singles".
-    _single_template_override = (
-        bool(album_info)
-        and bool(album_info.get("is_album"))
-        and raw_album_type == "single"
-        and is_single_path_customized()
-    )
-
-    if album_info and album_info.get("is_album") and not _single_template_override:
+    if album_info and album_info.get("is_album"):
         clean_track_name = get_import_clean_title(context, album_info=album_info, default=original_search.get("title", "Unknown Track"))
         raw_track_number = album_info.get("track_number", 1)
         track_number = (0 if raw_album_type in ("compilation", "compile") and raw_track_number == 0
@@ -1268,6 +1232,9 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
                     config_manager=_get_config_manager(),
                     musicbrainz_release_id=selected_release_id(album_context),
                     disambiguation=template_context.get("disambiguation", ""),
+                    # A single/EP sharing the album's title is a different
+                    # release — never let it reuse the album's folder.
+                    incoming_album_type=raw_album_type,
                 )
             except Exception as _reuse_err:
                 logger.debug("[Existing Album Folder] lookup failed: %s", _reuse_err)
