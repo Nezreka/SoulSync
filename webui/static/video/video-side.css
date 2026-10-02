@@ -8697,3 +8697,34 @@ body[data-side="video"] #gsearch-aura {
     .vdsc-banner--in .vdsc-banner-art { animation: none; }
     .vdsc-amb::before, .vdsc-amb::after { transition: none; }
 }
+
+/* picked-title hero: blurred poster wash, cinematic scrims, eyebrow + gradient title + frosted pills */
+.vimp-hero { position: relative; margin: 14px 22px 0; border-radius: 16px; overflow: hidden; min-height: 128px;
+    display: flex; align-items: flex-end; isolation: isolate;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    animation: vimpRise 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.vimp-hero[hidden] { display: none; }
+.vimp-hero-bg { position: absolute; inset: -20px; z-index: 0; background-size: cover; background-position: center 20%;
+    filter: blur(22px) saturate(1.5); transform: scale(1.1); }
+.vimp-hero-bg--none { background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.4), rgba(20, 20, 30, 0.9)); filter: none; }
+.vimp-hero-scrim { position: absolute; inset: 0; z-index: 1;
+    background: linear-gradient(90deg, rgba(8, 8, 12, 0.92) 8%, rgba(8, 8, 12, 0.55) 55%, rgba(8, 8, 12, 0.25)),
+        linear-gradient(0deg, rgba(8, 8, 12, 0.85) 0%, transparent 55%); }
+.vimp-hero-body { position: relative; z-index: 2; padding: 16px 18px 14px; width: 100%; }
+.vimp-hero-eyebrow { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.12em;
+    color: rgb(var(--accent-rgb)); margin-bottom: 5px; text-shadow: 0 0 16px rgba(var(--accent-rgb), 0.6); }
+.vimp-hero-title { font-size: 24px; font-weight: 900; letter-spacing: -0.025em; line-height: 1.05; margin: 0; color: #fff;
+    text-shadow: 0 3px 22px rgba(0, 0, 0, 0.75); }
+.vimp-hero-pills { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.vimp-hero-pill { font-size: 11.5px; font-weight: 700; padding: 4px 11px; border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.16); backdrop-filter: blur(6px); }
+.vimp-hero-pill--owned { color: #8fe3ae; border-color: rgba(108, 211, 145, 0.4); background: rgba(108, 211, 145, 0.12); }
+
+@keyframes vimpRise { from { opacity: 0; transform: translateY(22px) scale(0.985); } to { opacity: 1; transform: none; } }
+
+.vimp-res-check { flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+    font-size: 14px; font-weight: 800; color: #fff; background: rgb(var(--accent-rgb));
+    box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.7); opacity: 0; transform: scale(0.6); transition: all 0.18s ease; }
+
+.vimp-res--on .vimp-res-check { opacity: 1; transform: scale(1); }
