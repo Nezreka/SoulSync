@@ -23127,7 +23127,17 @@ class MusicDatabase:
                     payload = json.loads(row["track_ids_json"] or "[]")
                 except Exception:
                     return []
+                # Debug: log payload structure.
+                if isinstance(payload, dict):
+                    logger.info(f"Playlist {playlist_id}: dict payload with keys {list(payload.keys())}")
+                    if "tracks" in payload and isinstance(payload["tracks"], list):
+                        logger.info(f"Playlist {playlist_id}: tracks list len={len(payload['tracks'])}, first={str(payload['tracks'][0])[:200] if payload['tracks'] else 'empty'}")
+                    if "mixes" in payload and isinstance(payload["mixes"], list):
+                        logger.info(f"Playlist {playlist_id}: mixes len={len(payload['mixes'])}")
+                elif isinstance(payload, list):
+                    logger.info(f"Playlist {playlist_id}: list payload len={len(payload)}, first={str(payload[0])[:200] if payload else 'empty'}")
                 entries = self._extract_curated_track_ids(payload)
+                logger.info(f"Playlist {playlist_id}: extracted {len(entries)} entries")
                 if not entries:
                     return []
                 # Separate ID-based lookups from title/artist fallbacks.
@@ -23154,9 +23164,10 @@ class MusicDatabase:
                     try:
                         if artist:
                             cursor.execute(
-                                """SELECT * FROM tracks
-                                   WHERE LOWER(title) = LOWER(?)
-                                   AND LOWER(artist) = LOWER(?)
+                                """SELECT t.* FROM tracks t
+                                   JOIN artists ar ON ar.id = t.artist_id
+                                   WHERE LOWER(t.title) = LOWER(?)
+                                   AND LOWER(ar.name) = LOWER(?)
                                    LIMIT 1""",
                                 (title, artist),
                             )
@@ -23168,7 +23179,8 @@ class MusicDatabase:
                         r = cursor.fetchone()
                         if r:
                             name_matches[(title.lower(), (artist or "").lower())] = dict(r)
-                    except Exception:
+                    except Exception as e:
+                        logger.warning(f"Playlist track fallback match failed for '{title}': {e}")
                         continue
                 # Build result in playlist order.
                 out = []
