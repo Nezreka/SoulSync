@@ -15,7 +15,7 @@
  * `spotifyPlaylists` are top-level `let`s and have no window property at all.
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { SyncActionsState } from './-sync.sidebar';
 import type { SyncModals } from './-sync.use-modals';
@@ -89,6 +89,22 @@ export function useSyncPage(): SyncPage {
   );
   const reloadMirrored = useCallback(() => mirroredReload.current?.(), []);
   const pipeline = useMirroredPipeline({ onState: onPipelineState, reload: reloadMirrored });
+
+  /**
+   * #1289: let the vanilla manual-match tool trigger a mirrored refetch.
+   * The tool lives outside React (shell/manual-library-match.ts) and only
+   * re-renders its own list on save/delete — the mirrored card counts it
+   * just changed would stay stale until the next manual refresh. Exposing
+   * the tab's reload on window reuses the exact path the pipeline controller
+   * already uses. No-op when the tab isn't mounted (e.g. tool opened from
+   * the Tools page).
+   */
+  useEffect(() => {
+    window.reloadMirroredTab = reloadMirrored;
+    return () => {
+      delete window.reloadMirroredTab;
+    };
+  }, [reloadMirrored]);
 
   /**
    * Names come from the ENGINE's array, which is what `updateUI` resolves
