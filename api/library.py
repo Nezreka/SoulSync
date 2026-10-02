@@ -246,6 +246,67 @@ def register_routes(bp):
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
+    @bp.route("/library/recently-played", methods=["GET"])
+    @require_api_key
+    def recently_played():
+        """Get recently played tracks from listening history.
+
+        Query params:
+            limit: max items to return (default: 20, max: 100)
+        """
+        try:
+            limit = min(100, max(1, int(request.args.get("limit", 20))))
+        except (ValueError, TypeError):
+            limit = 20
+        fields = parse_fields(request)
+        profile_id = parse_profile_id(request)
+
+        try:
+            db = get_database()
+            # Get recently played with library track IDs for playback.
+            # Uses listening_history joined to tracks for file_path.
+            from core.stats.queries import listening_owner, owner_clause
+            scope = owner_clause(listening_owner(db, profile_id), 'lh')
+            conn = db._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"""
+                    SELECT lh.title, lh.artist, lh.album, lh.played_at,
+                           t.id as track_id, t.file_path, t.artist_id,
+                           t.album_id, al.thumb_url
+                    FROM listening_history lh
+                    LEFT JOIN tracks t ON t.id = CAST(lh.db_track_id AS TEXT)
+                    LEFT JOIN albums al ON al.id = t.album_id
+                    WHERE {scope}
+                    ORDER BY lh.played_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                )
+                rows = cursor.fetchall()
+            finally:
+                conn.close()
+
+            tracks = []
+            for row in rows:
+                track = {
+                    "title": row[0],
+                    "artist_name": row[1],
+                    "album_title": row[2],
+                    "played_at": row[3],
+                    "id": row[4],
+                    "file_path": row[5],
+                    "artist_id": row[6],
+                    "album_id": row[7],
+                    "thumb_url": row[8],
+                }
+                tracks.append(serialize_track(track, fields))
+
+            return api_success({"tracks": tracks})
+        except Exception as e:
+            return api_error("LIBRARY_ERROR", str(e), 500)
+
     @bp.route("/library/playlists", methods=["GET"])
     @require_api_key
     def list_library_playlists():
