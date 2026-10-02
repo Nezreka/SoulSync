@@ -23232,17 +23232,22 @@ class MusicDatabase:
 
         Returns a list of (id_or_none, title, artist) tuples. The ID may be
         None if the payload only has display data (title/artist).
+        Handles both owned-track keys (title/artist) and discovery-pool
+        keys (track_name/artist_name).
         """
+        def _title(d):
+            return d.get("title") or d.get("track_name") or d.get("name")
+        def _artist(d):
+            return d.get("artist") or d.get("artist_name")
         if isinstance(payload, list):
             out = []
             for item in payload:
                 if isinstance(item, dict):
                     tid = item.get("id") or item.get("track_id")
-                    # Only accept int/str IDs, not nested dicts.
                     if isinstance(tid, (int, str)):
-                        out.append((tid, item.get("title"), item.get("artist")))
-                    elif item.get("title"):
-                        out.append((None, item.get("title"), item.get("artist")))
+                        out.append((tid, _title(item), _artist(item)))
+                    elif _title(item):
+                        out.append((None, _title(item), _artist(item)))
                 elif isinstance(item, (int, str)):
                     out.append((item, None, None))
             return out
