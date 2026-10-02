@@ -698,6 +698,11 @@ function InboxRow({
             {item.name || item.folder_name}
           </span>
         </div>
+        {item.guessed_name && item.guessed_name !== item.name ? (
+          <span className={styles.rowGuessed} title={item.guessed_name}>
+            tags say “{item.guessed_name}”
+          </span>
+        ) : null}
         {item.artist ? (
           <span className={styles.rowArtist} title={item.artist}>
             {item.artist}
