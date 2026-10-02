@@ -66,6 +66,8 @@ export interface ImportInboxItem {
   key: string;
   kind: 'album' | 'single';
   name: string;
+  /** what the tags/history guessed — shown as a subtitle when it differs from name (#1289) */
+  guessed_name: string | null;
   artist: string;
   folder_name: string;
   folder_path: string;
