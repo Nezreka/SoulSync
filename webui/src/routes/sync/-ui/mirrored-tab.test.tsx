@@ -591,7 +591,7 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     expect(screen.getByText('Discover')).toBeInTheDocument();
   });
 
-  it('Refresh from source runs the pipeline with refresh_only, nothing pushed (#1413)', async () => {
+  it('Refresh from source runs the pipeline with refresh_only, nothing pushed (#1413, #1289)', async () => {
     // radoslav-orlov #1413: added a song on youtube, wanted to pull it in
     // without a server push or downloads, and keep the discovery
     stubFetch();
@@ -609,7 +609,8 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Road Trip'));
     await waitFor(() => expect(document.querySelector('#mirrored-track-modal')).not.toBeNull());
-    fireEvent.click(screen.getByText('Refresh from source'));
+    // #1289: the label now names the source ("Refresh from YouTube")
+    fireEvent.click(screen.getByText('Refresh from YouTube'));
     await waitFor(() =>
       expect(calls.find((c) => c.url.endsWith('/pipeline/run'))).toMatchObject({
         method: 'POST',
