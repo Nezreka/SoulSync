@@ -505,6 +505,21 @@
         paintHeroBody();
         startHeroTimer();
     }
+    // Ambient wash crossfade: two hue layers (::before/::after) alternate so the
+    // background melts from one hero title's color into the next. The incoming
+    // layer fades in over 1.6s; the outgoing one is hidden only after it is
+    // fully covered, so there is never a snap.
+    var _ambFlip = false;
+    function paintAmbient(hue) {
+        var pageEl = $('[data-vdsc-page]'); if (!pageEl) return;
+        _ambFlip = !_ambFlip;
+        pageEl.style.setProperty(_ambFlip ? '--vdsc-amb-a' : '--vdsc-amb-b', hue);
+        var amb = $('[data-vdsc-amb]'); if (!amb) return;
+        amb.classList.add('vdsc-amb--on');
+        amb.classList.remove('vdsc-amb--a', 'vdsc-amb--b');
+        void amb.offsetWidth;   // reflow so the opacity transition always runs
+        amb.classList.add(_ambFlip ? 'vdsc-amb--a' : 'vdsc-amb--b');
+    }
     function paintHeroBody() {
         var body = $('[data-vdsc-hero-body]'); if (!body) return;
         var it = state.hero.items[state.hero.idx]; if (!it) return;
@@ -519,8 +534,7 @@
         // eyebrow — all children of the host — inherit the per-title hue.
         var heroEl = $('[data-vdsc-hero]'); if (heroEl) heroEl.style.setProperty('--vgm-h', hue);
         body.style.setProperty('--vgm-h', hue);
-        var pageEl = $('[data-vdsc-page]'); if (pageEl) pageEl.style.setProperty('--vdsc-amb', hue);   // ambient bleed
-        var amb = $('[data-vdsc-amb]'); if (amb) amb.classList.add('vdsc-amb--on');
+        paintAmbient(hue);   // crossfading background wash
         // Netflix-style billboard: the TMDB wordmark logo when the title has
         // one (backend enriches hero items), text falls back. Alt carries the
         // title so a broken logo image still reads.
@@ -1096,31 +1110,34 @@
                     rail.innerHTML = ranked
                         ? items.map(function (it, i) { return rankedCard(it, i + 1); }).join('')
                         : items.map(card).join('');
-                    stagger(rail); hydrateGet(rail); paintGenreTile(rail, q);
+                    stagger(rail); hydrateGet(rail);
                 }
                 shelf.classList.add('vdsc-shelf--in');            // reveal (cards cascade via --i)
             })
             .catch(function () { shelf.remove(); pruneGroup(grp); });
     }
 
-    // Paint a browse-strip genre tile with a random poster harvested from its
-    // loaded rail — real art for real genres, zero extra requests. Called from
-    // fillShelf; a tile keeps its gradient until (and unless) its rail loads.
-    function paintGenreTile(rail, q) {
-        var m = /[?&]genre=(\d+)/.exec(q || ''); if (!m) return;
-        var tile = document.querySelector('[data-vdsc-tile-genre="' + m[1] + '"]');
-        if (!tile || tile.getAttribute('data-vdsc-painted')) return;
-        var srcs = [];
-        var imgs = rail.querySelectorAll('.vsr-poster img');
-        for (var i = 0; i < imgs.length; i++) {
-            var s = imgs[i].getAttribute('src');
-            if (s) srcs.push(s);
-        }
-        if (!srcs.length) return;
-        var pick = srcs[Math.floor(Math.random() * srcs.length)];
-        tile.setAttribute('data-vdsc-painted', '1');
-        tile.style.setProperty('--tile-art', 'url("' + pick.replace(/"/g, '%22') + '")');
-        tile.classList.add('vdsc-tile--art');
+    // Eager tile art: the browse strip sits ABOVE the genre rails, so painting
+    // on rail-load left every tile imageless. Fetch one poster per genre when
+    // the strip is first seen — cachedFetch means the rail load later is free.
+    function paintStripTiles() {
+        var tiles = document.querySelectorAll('[data-vdsc-tile-genre]:not([data-vdsc-painted])');
+        for (var i = 0; i < tiles.length; i++) (function (tile) {
+            var id = tile.getAttribute('data-vdsc-tile-genre');
+            cachedFetch(LIST_URL + '?kind=movie&genre=' + id + '&sort=popularity.desc')
+                .then(function (d) {
+                    var items = (d && d.items) || [];
+                    for (var j = 0; j < items.length; j++) {
+                        if (items[j] && items[j].poster) {
+                            tile.setAttribute('data-vdsc-painted', '1');
+                            tile.style.setProperty('--tile-art',
+                                'url("' + String(items[j].poster).replace(/"/g, '%22') + '")');
+                            tile.classList.add('vdsc-tile--art');
+                            break;
+                        }
+                    }
+                }).catch(function () { /* gradient stays */ });
+        })(tiles[i]);
     }
     // ── category / filter grid (paged) ────────────────────────────────────────
     // `browse` = opened from the tiles / Browse-all (shows the live filter bar);
@@ -1300,6 +1317,14 @@
             '<div class="vdsc-tiles">' + tiles +
             '<button class="vdsc-tile vdsc-tile--all" type="button" data-vdsc-apply>' +
             '<span class="vdsc-tile-name">Browse all →</span></button></div>';
+        // Tile art loads when the strip is first approached — not at boot, so
+        // the hero and first rails win the network race.
+        if ('IntersectionObserver' in window) {
+            var _tio = new IntersectionObserver(function (en) {
+                if (en[0].isIntersecting) { _tio.disconnect(); paintStripTiles(); }
+            }, { rootMargin: '600px 0px' });
+            _tio.observe(strip);
+        } else paintStripTiles();
     }
     // Reflect state.sel onto the grid filter bar (used when a tile pre-selects a
     // genre, so the bar shows what the grid is actually filtered to).

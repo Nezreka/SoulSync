@@ -3581,7 +3581,7 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     overflow-x: clip;
 }
 /* Ambient wash: the music side's top glow, plus the hero-derived hue bleed
-   (paintHeroBody sets --vdsc-amb on the page and lights .vdsc-amb--on). */
+   (paintAmbient crossfades --vdsc-amb-a/--vdsc-amb-b on the page). */
 .vdsc-page::before {
     content: '';
     position: absolute;
@@ -3600,14 +3600,26 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     opacity: 0; transition: opacity 1.2s ease;
 }
 .vdsc-amb--on { opacity: 1; }
-.vdsc-amb::before {
+/* Two hue layers that crossfade on hero change — the wash melts from one
+   title's color into the next instead of snapping. paintAmbient() alternates
+   which layer carries the new hue (see --vdsc-amb-a / --vdsc-amb-b). */
+.vdsc-amb::before, .vdsc-amb::after {
     content: '';
     position: absolute; top: -15%; left: 50%; transform: translateX(-50%);
     width: 110%; height: 75%;
-    background: radial-gradient(ellipse at 50% 0%,
-        hsla(var(--vdsc-amb, 230), 85%, 55%, 0.20) 0%, transparent 65%);
     filter: blur(70px);
+    opacity: 0; transition: opacity 1.6s ease;
 }
+.vdsc-amb::before {
+    background: radial-gradient(ellipse at 50% 0%,
+        hsla(var(--vdsc-amb-a, 230), 85%, 55%, 0.20) 0%, transparent 65%);
+}
+.vdsc-amb::after {
+    background: radial-gradient(ellipse at 50% 0%,
+        hsla(var(--vdsc-amb-b, 230), 85%, 55%, 0.20) 0%, transparent 65%);
+}
+.vdsc-amb--a::before { opacity: 1; }
+.vdsc-amb--b::after { opacity: 1; }
 .vdsc-page > :not(.vdsc-amb) { position: relative; z-index: 1; }
 
 /* ── Hero billboard ─────────────────────────────────────────────────────── */
@@ -8683,4 +8695,5 @@ body[data-side="video"] #gsearch-aura {
     .vdsc-banner-marquee > span { animation: none; }
     .vdsc-banner { transition: none; opacity: 1; transform: none; }
     .vdsc-banner--in .vdsc-banner-art { animation: none; }
+    .vdsc-amb::before, .vdsc-amb::after { transition: none; }
 }
