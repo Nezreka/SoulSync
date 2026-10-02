@@ -1731,6 +1731,9 @@ class VideoDatabase:
           or to 'not_found' on a clear;
         - textual metadata the old match gap-filled is cleared (unlocked fields
           only — user edits stay theirs), because gap-fill never overwrites;
+        - art (poster/backdrop/logo) the old match downloaded is cleared
+          (unlocked fields only), so the workers re-fetch for the new id —
+          otherwise the wrong title's backdrop sits on the detail page forever;
         - details/episodes/ratings sync flags and every backfill service's
           status reset, so the whole derived pipeline re-runs;
         - enrichment-sourced credits are dropped (they were the wrong title's).
@@ -1787,9 +1790,17 @@ class VideoDatabase:
                 sets.append("tmdb_match_status=" +
                             ("NULL" if external_id is not None else "'not_found'"))
                 sets.append("tmdb_last_attempted=NULL")
-                # Clear what the old match derived (never a locked field, never art).
+                # Clear what the old match derived (never a locked field).
                 for col in sorted(self._REMATCH_CLEAR_COLS & cols - locked):
                     sets.append(f"{col}=NULL")
+                # Art was derived from the old match too — a wrong TMDB id
+                # means the poster/backdrop/logo are the wrong title's. Clear
+                # them (unless the user locked the field) so the workers
+                # re-download for the new id; otherwise the stale wrong art
+                # sits on the detail page forever.
+                for col in ("poster_url", "backdrop_url", "logo_url"):
+                    if col in cols and col not in locked:
+                        sets.append(f"{col}=NULL")
                 # Re-run everything: detail backfill, episode cascade, OMDb
                 # ratings, and every id-keyed backfill service.
                 for flag in ("details_synced", "episodes_synced", "ratings_synced"):
