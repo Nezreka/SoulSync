@@ -1,4 +1,4 @@
-# soulsync 3.4.10: `dev` → `main`
+# soulsync 3.5.0: `dev` → `main`
 
 video discover gets the music-side treatment, video import and matching get smarter, sync goes per-profile, and a stack of provider, filing and repair fixes. scope: the commits since the 3.4.9 release commit (`2063841b`).
 

@@ -1,4 +1,4 @@
-**SoulSync 3.4.10 is out** :musical_note:
+**SoulSync 3.5.0 is out** :musical_note:
 
 Video Discover got the full music-side treatment: story blocks, trailers, genre art, a hero badge, story tickers, and tiles that fade in with your posters. Video detail pages now have an "I have this" button for when auto-matching misses, and rematching a video actually refreshes its artwork.
 
