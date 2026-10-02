@@ -24388,6 +24388,27 @@ class MusicDatabase:
             logger.error(f"Error getting automations: {e}")
             return []
 
+    def get_all_automations(self):
+        """Get every automation in the table, regardless of owning profile.
+
+        Engine/internal view — the automation engine (start(), event cache,
+        signal-cycle detection) must see all enabled automations, not just
+        profile 1's, or non-admin automations silently stop after a restart
+        (timers are in-memory; issue #1428). The profile-filtered
+        ``get_automations()`` keeps serving the UI, which must stay scoped.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM automations ORDER BY is_system DESC, created_at DESC
+                """)
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting all automations: {e}")
+            return []
+
     def get_system_automation_by_action(self, action_type: str):
         """Get a system automation by its action_type. Returns dict or None."""
         try:

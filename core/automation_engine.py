@@ -919,7 +919,7 @@ class AutomationEngine:
         self._running = True
         self._event_cache_dirty = True
         self.ensure_system_automations()
-        automations = self.db.get_automations()
+        automations = self.db.get_all_automations()
         scheduled = 0
         event_count = 0
         for auto in automations:
@@ -1069,7 +1069,7 @@ class AutomationEngine:
         """Cache which automations listen to which event types."""
         new_cache = {}
         try:
-            all_autos = self.db.get_automations()
+            all_autos = self.db.get_all_automations()
             for auto in all_autos:
                 if not auto.get('enabled'):
                     continue

@@ -24,6 +24,9 @@ class _FakeDB:
             return list(self.automations.values())
         return [a for a in self.automations.values() if a.get('profile_id') == profile_id]
 
+    def get_all_automations(self):
+        return list(self.automations.values())
+
     def get_automation(self, automation_id):
         return dict(self.automations[automation_id]) if automation_id in self.automations else None
 

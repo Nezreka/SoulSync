@@ -20,6 +20,9 @@ class _FakeDB:
     def get_automations(self):
         return list(self._autos.values())
 
+    def get_all_automations(self):
+        return list(self._autos.values())
+
     def get_automation(self, aid):
         return self._autos.get(aid)
 
