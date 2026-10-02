@@ -1120,24 +1120,37 @@
     // Eager tile art: the browse strip sits ABOVE the genre rails, so painting
     // on rail-load left every tile imageless. Fetch one poster per genre when
     // the strip is first seen — cachedFetch means the rail load later is free.
+    // Posters are deduped across tiles: the top-popularity title often spans
+    // genres (Spider-Man is Action AND Adventure AND Sci-Fi), so each tile
+    // takes the first poster no earlier tile claimed.
     function paintStripTiles() {
-        var tiles = document.querySelectorAll('[data-vdsc-tile-genre]:not([data-vdsc-painted])');
-        for (var i = 0; i < tiles.length; i++) (function (tile) {
+        var tiles = Array.prototype.slice.call(
+            document.querySelectorAll('[data-vdsc-tile-genre]:not([data-vdsc-painted])'));
+        if (!tiles.length) return;
+        var used = {};
+        var jobs = tiles.map(function (tile) {
             var id = tile.getAttribute('data-vdsc-tile-genre');
-            cachedFetch(LIST_URL + '?kind=movie&genre=' + id + '&sort=popularity.desc')
-                .then(function (d) {
-                    var items = (d && d.items) || [];
-                    for (var j = 0; j < items.length; j++) {
-                        if (items[j] && items[j].poster) {
-                            tile.setAttribute('data-vdsc-painted', '1');
-                            tile.style.setProperty('--tile-art',
-                                'url("' + String(items[j].poster).replace(/"/g, '%22') + '")');
-                            tile.classList.add('vdsc-tile--art');
-                            break;
-                        }
+            return cachedFetch(LIST_URL + '?kind=movie&genre=' + id + '&sort=popularity.desc')
+                .then(function (d) { return { tile: tile, items: (d && d.items) || [] }; })
+                .catch(function () { return { tile: tile, items: [] }; });
+        });
+        Promise.all(jobs).then(function (results) {
+            results.forEach(function (r) {
+                for (var j = 0; j < r.items.length; j++) {
+                    var it = r.items[j];
+                    var key = it && (it.tmdb_id || it.poster);
+                    if (it && it.poster && key && !used[key]) {
+                        used[key] = 1;
+                        r.tile.setAttribute('data-vdsc-painted', '1');
+                        r.tile.style.setProperty('--tile-art',
+                            'url("' + String(it.poster).replace(/"/g, '%22') + '")');
+                        r.tile.classList.add('vdsc-tile--art');
+                        break;
                     }
-                }).catch(function () { /* gradient stays */ });
-        })(tiles[i]);
+                }
+                // A tile whose whole list was claimed keeps its gradient.
+            });
+        });
     }
     // ── category / filter grid (paged) ────────────────────────────────────────
     // `browse` = opened from the tiles / Browse-all (shows the live filter bar);
