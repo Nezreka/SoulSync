@@ -23060,11 +23060,77 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             scope_sql, scope_params = self._current_scope_sql('owner_profile_id')
-            cursor.execute(f"SELECT * FROM {table} WHERE {scope_sql} ORDER BY created_at DESC LIMIT ?",
+            # COALESCE handles rows where created_at was never backfilled —
+            # updated_at is always set on write.
+            cursor.execute(f"SELECT * FROM {table} WHERE {scope_sql} ORDER BY COALESCE(created_at, updated_at) DESC LIMIT ?",
                            (*scope_params, limit))
             return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"API: Error getting recently added {entity_type}: {e}")
+            return []
+
+    def api_list_curated_playlists(self, profile_id: int = 1) -> List[Dict[str, Any]]:
+        """List discovery curated playlists for a profile with track counts."""
+        try:
+            import json
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """SELECT id, playlist_type, track_ids_json, curated_date
+                       FROM discovery_curated_playlists
+                       WHERE profile_id = ?
+                       ORDER BY curated_date DESC""",
+                    (profile_id,),
+                )
+                out = []
+                for row in cursor.fetchall():
+                    d = dict(row)
+                    try:
+                        track_ids = json.loads(d.get("track_ids_json") or "[]")
+                    except Exception:
+                        track_ids = []
+                    out.append({
+                        "id": d.get("id"),
+                        "name": str(d.get("playlist_type") or "").replace("_", " ").title(),
+                        "playlist_type": d.get("playlist_type"),
+                        "track_count": len(track_ids),
+                        "curated_date": d.get("curated_date"),
+                    })
+                return out
+        except Exception as e:
+            logger.error(f"API: Error listing curated playlists: {e}")
+            return []
+
+    def api_get_curated_playlist_tracks(self, playlist_id: int, profile_id: int = 1) -> List[Dict[str, Any]]:
+        """Get track dicts for a curated playlist, in order."""
+        try:
+            import json
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """SELECT track_ids_json FROM discovery_curated_playlists
+                       WHERE id = ? AND profile_id = ?""",
+                    (playlist_id, profile_id),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return []
+                try:
+                    track_ids = json.loads(row["track_ids_json"] or "[]")
+                except Exception:
+                    return []
+                if not track_ids:
+                    return []
+                # Fetch tracks in playlist order.
+                placeholders = ",".join("?" for _ in track_ids)
+                cursor.execute(
+                    f"SELECT * FROM tracks WHERE id IN ({placeholders})",
+                    tuple(track_ids),
+                )
+                by_id = {r["id"]: dict(r) for r in cursor.fetchall()}
+                return [by_id[tid] for tid in track_ids if tid in by_id]
+        except Exception as e:
+            logger.error(f"API: Error getting playlist tracks: {e}")
             return []
 
     def api_list_albums(self, search: str = "", artist_id: int = None,
@@ -24386,27 +24452,6 @@ class MusicDatabase:
                 return [dict(row) for row in rows]
         except Exception as e:
             logger.error(f"Error getting automations: {e}")
-            return []
-
-    def get_all_automations(self):
-        """Get every automation in the table, regardless of owning profile.
-
-        Engine/internal view — the automation engine (start(), event cache,
-        signal-cycle detection) must see all enabled automations, not just
-        profile 1's, or non-admin automations silently stop after a restart
-        (timers are in-memory; issue #1428). The profile-filtered
-        ``get_automations()`` keeps serving the UI, which must stay scoped.
-        """
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT * FROM automations ORDER BY is_system DESC, created_at DESC
-                """)
-                rows = cursor.fetchall()
-                return [dict(row) for row in rows]
-        except Exception as e:
-            logger.error(f"Error getting all automations: {e}")
             return []
 
     def get_system_automation_by_action(self, action_type: str):

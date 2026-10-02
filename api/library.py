@@ -246,6 +246,42 @@ def register_routes(bp):
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
+    @bp.route("/library/playlists", methods=["GET"])
+    @require_api_key
+    def list_playlists():
+        """List curated playlists with track counts."""
+        fields = parse_fields(request)
+        profile_id = parse_profile_id(request)
+        try:
+            db = get_database()
+            playlists = db.api_list_curated_playlists(profile_id=profile_id)
+            # fields filtering: only include requested fields if specified
+            if fields is not None:
+                playlists = [
+                    {k: v for k, v in p.items() if k in fields}
+                    for p in playlists
+                ]
+            return api_success({"playlists": playlists})
+        except Exception as e:
+            return api_error("LIBRARY_ERROR", str(e), 500)
+
+    @bp.route("/library/playlists/<playlist_id>/tracks", methods=["GET"])
+    @require_api_key
+    def get_playlist_tracks(playlist_id):
+        """List tracks in a curated playlist, in order."""
+        fields = parse_fields(request)
+        profile_id = parse_profile_id(request)
+        try:
+            pid = int(playlist_id)
+        except (ValueError, TypeError):
+            return api_error("BAD_REQUEST", "playlist_id must be an integer.", 400)
+        try:
+            db = get_database()
+            tracks = db.api_get_curated_playlist_tracks(pid, profile_id=profile_id)
+            return api_success({"tracks": [serialize_track(t, fields) for t in tracks]})
+        except Exception as e:
+            return api_error("LIBRARY_ERROR", str(e), 500)
+
     @bp.route("/library/lookup", methods=["GET"])
     @require_api_key
     def lookup_by_external_id():
