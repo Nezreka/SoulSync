@@ -3460,6 +3460,22 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
+    '3.5.0': [
+        { date: 'October 2026 · 3.5.0' },
+        { title: 'Video discover overhaul', desc: 'The music-side visual treatment lands on video discover: story blocks, trailers, genre art, card elevation, banners, a hero badge, story tickers, and genre tiles that load eagerly with an ambient crossfade and deduped posters (#1427, #1433, #1434, #1435, #1436).' },
+        { title: '"I have this" matching', desc: 'Video detail pages get a manual library match button for when automatic matching says you do not own something you do. Rematching a video clears its artwork so the corrected match re-downloads art (#1438, #1440).' },
+        { title: 'Video import polish', desc: 'The place-file modal got restyled, commercial-free episode cuts pass the duration gate, and the picked-title hero has its styles (#1423, #1439).' },
+        { title: 'Per-profile discover', desc: 'Listening recs, the listening mix and the warmer are per profile now. A deezer editorial playlist opens to a preview first, and built playlists can be named with missing tracks landing on the wishlist (#1418, #1421).', page: 'discover' },
+        { title: 'Per-profile server playlists', desc: 'The sync page shows whose server playlist is whose, same-named mirrors stop overwriting each other, deleted tracks are noticed on the next sync, and deleting a mirror lets go of its server playlist (#1414, #1417, #1420).', page: 'sync' },
+        { title: 'No more false rate limits', desc: 'Providers stop crying rate limit when an id contains 429 or 503. The http status is trusted over digits in the url, across musicbrainz, spotify, tidal, deezer, jiosaavn, audiodb, discogs, genius and last.fm (#1391, #1443).' },
+        { title: 'Smarter canonical lookups', desc: 'Alternate editions use each provider\'s own artist id instead of soulsync\'s local key, so musicbrainz stops returning 400 invalid mbid. Musicbrainz album consistency also checks the artist and stops judging romanized titles against native script (#1415, #1426).' },
+        { title: 'Filing fixes', desc: 'Singles stop merging into same-named album folders, and a customized single path template is honored for explicitly-typed singles (#1441, #1431).', page: 'library' },
+        { title: 'Lossy copies keep their tags', desc: 'FLAC to MP3 copies get native tags and cover art, with ARTISTS following the primary source (#1422, #1425).' },
+        { title: 'Non-admin automations re-arm', desc: 'Scheduled automations owned by other profiles re-arm after a restart instead of running once and never again (#1428, #1430).', page: 'automations' },
+        { title: 'Repair job honesty', desc: 'Acoustid retag keeps the album artist, sfv and srr count as leftover junk, and a run that quit early says so (#1289).', page: 'tools' },
+        { title: 'Extension chat tab', desc: 'The server chat lives in the companion extension popup, with rooms, dms and replies. Video pages get library-status pills and watchlist actions.' },
+        { title: 'Earlier versions', desc: '3.4.9 brought the discover glow-up, player theater, sample studio and a calmer sync page.' },
+    ],
     '3.4.9': [
         { date: 'September 2026 · 3.4.9' },
         { title: 'Discover home', desc: 'Opens with a grid of what you go back to, then flow, on repeat, your daily mixes, a mood for the hour, repeat rewind and a blend. One section nav replaces the fourteen pills that only scrolled.', page: 'discover' },
@@ -3512,6 +3528,25 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
+        title: '3.5.0: video discover, per-profile sync and smarter providers',
+        description: 'Video discover gets the music-side treatment, sync and discover go per-profile, providers stop false rate-limiting, and the extension gets a chat tab.',
+        features: [
+            'Video discover overhaul: story blocks, trailers, genre art, hero badge, story tickers, eager genre tiles with ambient crossfade (#1427, #1433, #1434, #1435, #1436).',
+            '"I have this" manual matching on video detail pages, and rematches that actually refresh artwork (#1438, #1440).',
+            'Per-profile server playlists and discover: whose is whose, no more overwrites, deleted tracks noticed on next sync (#1414, #1417, #1420).',
+            'Providers trust the http status over digits in urls: no more false 429s across nine providers (#1391, #1443).',
+            'Canonical lookups use each provider\'s artist id; musicbrainz album consistency checks the artist (#1415, #1426).',
+            'Singles stop merging into same-named album folders; custom single path templates honored (#1441, #1431).',
+            'Non-admin automations re-arm after restart (#1428, #1430).',
+            'Companion extension: chat tab in the popup, video badges with watchlist actions.',
+        ],
+    },
+    {
+        title: 'Earlier in 3.4.9',
+        description: 'Discover glow-up, player theater, sample studio from your own library, calmer sync page, and filing and download fixes.',
+        features: [],
+    },
+    {
         title: '3.4.9: discover, player theater and sample studio',
         description: 'A big discover glow-up, a full player theater, Sample Studio from your own library, a calmer sync page, and a stack of filing and download fixes.',
         features: [
@@ -3526,16 +3561,11 @@ const VERSION_MODAL_SECTIONS = [
             'Fixes: torrents are no longer deleted after 90s at 0%, Keep Best keeps the copy your playlists use, Navidrome can take a separate playlist account, and failed downloads say why.',
         ],
     },
-    {
-        title: 'Earlier in 3.4.8',
-        description: 'Wishlist, dashboard and automations redesigned, library album views with sorting, chat P2P sharing and badges, and filing, scan and matching fixes.',
-        features: [],
-    },
 ];
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '3.4.9';
+    return btn ? btn.textContent.trim().replace('v', '') : '3.5.0';
 }
 
 // Compare two semver-ish strings ("2.4.0" vs "2.4.1" vs "2.39"). Returns
