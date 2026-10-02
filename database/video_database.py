@@ -1310,6 +1310,23 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def episode_in_library(self, show_tmdb_id: int, season_number: int, episode_number: int) -> bool:
+        """Is a specific episode in the library (has_file=1)?"""
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                """SELECT e.id FROM episodes e
+                   JOIN shows s ON s.id = e.show_id
+                   WHERE s.tmdb_id = ? AND e.season_number = ? AND e.episode_number = ?
+                   AND e.has_file = 1 LIMIT 1""",
+                (int(show_tmdb_id), int(season_number), int(episode_number)),
+            ).fetchone()
+            return row is not None
+        except (sqlite3.Error, ValueError, TypeError):
+            return False
+        finally:
+            conn.close()
+
     def owned_episode_keys(self, show_id) -> set:
         """(season_number, episode_number) pairs already in the library for a show —
         so a season-pack grab can skip episodes you already own."""

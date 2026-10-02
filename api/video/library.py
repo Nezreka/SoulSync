@@ -96,6 +96,24 @@ def register_routes(bp):
             logger.exception("Failed to list library resolutions")
             return jsonify({"resolutions": []})
 
+    @bp.route("/library/episode", methods=["GET"])
+    def video_library_episode():
+        """Is a specific episode in the library?
+        ?tmdb_id=<show_tmdb_id>&season=<n>&episode=<n>
+        Returns {in_library: bool}."""
+        from . import get_video_db
+        try:
+            tmdb_id = request.args.get("tmdb_id", type=int)
+            season = request.args.get("season", type=int)
+            episode = request.args.get("episode", type=int)
+            if not tmdb_id or season is None or episode is None:
+                return jsonify({"error": "tmdb_id, season, and episode are required."}), 400
+            in_lib = get_video_db().episode_in_library(tmdb_id, season, episode)
+            return jsonify({"success": True, "in_library": in_lib})
+        except Exception:
+            logger.exception("Failed to check episode library status")
+            return jsonify({"success": False, "error": "Failed to check episode."}), 500
+
     @bp.route("/library/genres", methods=["GET"])
     def video_library_genres():
         """Genre names in use for the given kind — the library filter dropdown.
