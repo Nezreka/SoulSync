@@ -23191,6 +23191,11 @@ class MusicDatabase:
                         key = (title.lower(), (artist or "").lower())
                         if key in name_matches:
                             out.append(name_matches[key])
+                logger.info(f"Playlist {playlist_id}: matched {len(out)}/{len(entries)} entries ({len(by_id)} by ID, {len(name_matches)} by name)")
+                if entries and not out:
+                    # Log a sample to diagnose matching failures.
+                    sample = entries[0]
+                    logger.info(f"Playlist {playlist_id}: sample entry title='{sample[1]}' artist='{sample[2]}'")
                 return out
         except Exception as e:
             logger.error(f"API: Error getting playlist tracks: {e}")
