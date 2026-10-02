@@ -129,6 +129,22 @@
         { title: 'Hindi Cinema', q: 'kind=movie&sort=popularity.desc&lang=hi' },
     ];
 
+    // One-line descriptions under each group heading (music Discover
+    // language: a strong title, one quiet line, then the rows).
+    // IIFE scope: renderShelves() reads this when stamping group headers.
+    var GROUP_SUBS = {
+        foryou: 'Picked for your shelves',
+        topten: "What everyone's watching right now",
+        'new': 'Fresh releases and recent standouts',
+        collection: 'Complete the sets you started',
+        taste: 'Based on what you already own',
+        popular: 'Trending across the catalog',
+        mood: 'Find the right vibe for tonight',
+        studios: 'From the studios you follow',
+        genre: 'Every genre, one rail at a time',
+        different: 'Go off the beaten path',
+    };
+
     // The page is organised into a FIXED, authored sequence of groups (each with a header).
     // Static rails are placed into their group here; the async personalized rows fill their
     // group's body when they arrive — so the on-screen order is stable no matter which fetch
@@ -239,31 +255,73 @@
 
     // The Undo bar. A toast can't carry a button and this needs one: hiding a
     // title is a taste decision, and "not tonight" must be reversible.
-    var _undoTimer = null;
+    var _undoPrev = null;   // _undoPrev: expire() of the live Undo bar
     function showUndoBar(title, onUndo) {
+        // A second hide inside the first Undo window used to orphan the
+        // earlier tiles: the old bar was removed without expire() ever
+        // running, so its cards stayed hidden-but-present for the session.
+        // Expire the previous undo first — its cards are dropped for real —
+        // then the new bar takes over.
+        if (_undoPrev) { var prev = _undoPrev; _undoPrev = null; try { prev(); } catch (e) {} }
         var ex = document.getElementById('vdsc-undo'); if (ex) ex.remove();
-        clearTimeout(_undoTimer);
         var bar = document.createElement('div');
         bar.id = 'vdsc-undo';
         bar.className = 'vdsc-undo';
         bar.setAttribute('role', 'status');
         bar.innerHTML = '<span class="vdsc-undo-txt">Hidden ' + esc(title || 'that title') + '</span>' +
-            '<button class="vdsc-undo-btn" type="button">Undo</button>';
+            '<button class="vdsc-undo-btn" type="button">Undo</button>' +
+            '<button class="vdsc-undo-x" type="button" aria-label="Dismiss">✕</button>';
         document.body.appendChild(bar);
-        var done = function () { clearTimeout(_undoTimer); if (bar.parentNode) bar.remove(); };
+        var settled = false;        // this bar's fate is decided — late events are no-ops
+        var undoing = false;        // an Undo request is in flight
+        var pendingExpire = false;  // expire() arrived mid-undo; honoured when the undo lands
+        var timer = null;           // this bar's own 9s clock (never the shared one)
+        var done = function () { if (timer) { clearTimeout(timer); timer = null; } if (bar.parentNode) bar.remove(); };
+        var expire = function () {   // keep the server state, drop the bar
+            if (settled) return;
+            // An Undo is in flight: dropping the cards now would strand them
+            // if the server restores the title a moment later. Wait for it.
+            if (undoing) { pendingExpire = true; return; }
+            settled = true;
+            if (_undoPrev === expire) _undoPrev = null;
+            done(); onUndo.expire();
+        };
         bar.querySelector('.vdsc-undo-btn').addEventListener('click', function () {
             var button = this;
             if (button.disabled) return;
-            clearTimeout(_undoTimer);
+            if (timer) { clearTimeout(timer); timer = null; }
             button.disabled = true; button.textContent = 'Restoring…';
+            undoing = true;
             Promise.resolve(onUndo()).then(function (saved) {
-                if (saved) { done(); return; }
+                undoing = false;
+                // Note: expire() defers while undoing, so settled is always
+                // false here — the only question is whether an expire was
+                // deferred mid-flight (pendingExpire).
+                if (saved) {
+                    // Server restored the title; undo() already put the cards
+                    // back. A deferred expire must NOT drop them now.
+                    settled = true; pendingExpire = false;
+                    if (_undoPrev === expire) _undoPrev = null;
+                    done();
+                    return;
+                }
+                if (pendingExpire) {
+                    // The bar was superseded (or dismissed) mid-flight and the
+                    // Undo failed: honour the deferred expire — the hide
+                    // stands, so the cards are dropped for real.
+                    pendingExpire = false; expire();
+                    return;
+                }
                 button.disabled = false; button.textContent = 'Retry Undo';
                 // Keep failed Undo available instead of expiring its recovery path.
                 button.focus();
             });
         });
-        _undoTimer = setTimeout(function () { done(); onUndo.expire(); }, 9000);
+        // A failed undo used to leave a permanent "Retry Undo" bar with no
+        // way off screen — the ✕ expires it like the timer would.
+        bar.querySelector('.vdsc-undo-x').addEventListener('click', expire);
+        timer = setTimeout(expire, 9000);
+        _undoPrev = expire;
         return done;
     }
 
@@ -417,7 +475,7 @@
     function loadHero() {
         fetch('/api/video/discover/hero', { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) { state.hero.items = (d && d.items) || []; renderHero(); })
+            .then(function (d) { state.hero.items = (d && d.items) || []; _poolAdd(state.hero.items); renderHero(); maybeRenderStories(); })
             .catch(function () { /* hero is optional chrome */ });
     }
     function renderHero() {
@@ -433,8 +491,14 @@
             }).join('') + '</div>' +
             '<div class="vdsc-hero-body" data-vdsc-hero-body></div>' +
             '<div class="vdsc-dots">' + items.map(function (it, i) {
-                return '<button class="vdsc-dot' + (i === 0 ? ' vdsc-dot--on' : '') + '" type="button" data-vdsc-go="' + i + '" aria-label="Slide ' + (i + 1) + '"></button>';
-            }).join('') + '</div>';
+                // Music-Discover parity: the dots are poster thumbs (like the
+                // music side's artist avatar dots), plain dots when no poster.
+                var thumb = it.poster ? ' vdsc-dot--thumb" style="background-image:url(\'' + esc(it.poster) + '\')' : '';
+                return '<button class="vdsc-dot' + (i === 0 ? ' vdsc-dot--on' : '') + thumb + '" type="button" data-vdsc-go="' + i + '" aria-label="Pick ' + esc(it.title || ('slide ' + (i + 1))) + '"></button>';
+            }).join('') + '</div>' +
+            '<button class="vdsc-hero-picks" type="button" data-vdsc-picks>See all picks <span aria-hidden="true">→</span></button>' +
+            '<button class="vdsc-hero-nav vdsc-hero-nav--prev" type="button" data-vdsc-prev aria-label="Previous title">‹</button>' +
+            '<button class="vdsc-hero-nav vdsc-hero-nav--next" type="button" data-vdsc-next aria-label="Next title">›</button>';
         state.hero.idx = 0;
         paintHeroBody();
         startHeroTimer();
@@ -445,12 +509,16 @@
         var owned = it.library_id != null;
         var source = owned ? 'library' : 'tmdb';
         var id = owned ? it.library_id : it.tmdb_id;
-        var pills = [it.kind === 'movie' ? 'Movie' : 'TV Series', it.year,
+        var meta = [it.kind === 'movie' ? 'Movie' : 'TV Series', it.year,
             it.rating ? '★ ' + (Math.round(it.rating * 10) / 10) : null,
-            owned ? 'In Library' : null].filter(Boolean);
+            owned ? 'In your library' : null].filter(Boolean);
         var hue = hueOf(it.title);
+        // Set on the hero host (not just the body) so the dots, scrims and
+        // eyebrow — all children of the host — inherit the per-title hue.
+        var heroEl = $('[data-vdsc-hero]'); if (heroEl) heroEl.style.setProperty('--vgm-h', hue);
         body.style.setProperty('--vgm-h', hue);
         var pageEl = $('[data-vdsc-page]'); if (pageEl) pageEl.style.setProperty('--vdsc-amb', hue);   // ambient bleed
+        var amb = $('[data-vdsc-amb]'); if (amb) amb.classList.add('vdsc-amb--on');
         // Netflix-style billboard: the TMDB wordmark logo when the title has
         // one (backend enriches hero items), text falls back. Alt carries the
         // title so a broken logo image still reads.
@@ -459,10 +527,11 @@
               'onerror="this.outerHTML=\'<h2 class=&quot;vdsc-hero-title&quot;>' + esc(it.title) + '</h2>\'">'
             : '<h2 class="vdsc-hero-title">' + esc(it.title) + '</h2>';
         body.innerHTML =
-            '<div class="vdsc-hero-eyebrow">' + (owned ? 'In your library' : '#' + (state.hero.idx + 1) + ' Trending now') + '</div>' +
+            '<div class="vdsc-hero-eyebrow"><span class="vdsc-hero-eyebrow-dot" aria-hidden="true"></span>' +
+            (owned ? 'In your library' : '#' + (state.hero.idx + 1) + ' Trending now') + '</div>' +
             titleHtml +
-            '<div class="vdsc-hero-pills">' + pills.map(function (p) {
-                return '<span class="vdsc-hero-pill">' + esc(p) + '</span>'; }).join('') + '</div>' +
+            '<div class="vdsc-hero-meta">' + meta.map(function (m) {
+                return '<span class="vdsc-hero-meta-item">' + esc(m) + '</span>'; }).join('') + '</div>' +
             (it.overview ? '<p class="vdsc-hero-ov">' + esc(it.overview) + '</p>' : '') +
             '<div class="vdsc-hero-actions">' +
             '<button class="discog-submit-btn vdsc-hero-cta" type="button" ' +
@@ -570,6 +639,7 @@
                 var rails = (d && d.rails) || [];
                 var body = $('[data-group-body="taste"]');
                 if (!rails.length || !body) return;
+                rails.forEach(function (rl) { _poolAdd(rl.items); });
                 var html = rails.map(function (rl) {
                     return filledShelfHtml(rl.title, (rl.items || []).map(card).join(''), 'vdsc-shelf--ml');
                 }).join('');
@@ -577,6 +647,7 @@
                 revealGroup('taste');
                 staggerWithin(body);
                 hydrateGet(body);
+                maybeRenderStories();   // throwback card may now have pool items
             })
             .catch(function () { /* personalization is best-effort */ });
     }
@@ -590,8 +661,11 @@
             .then(function (d) {
                 if (gen !== (state.railGen || 0)) return;   // a newer rebuild superseded this
                 var rails = (d && d.rails) || [];
+                state._gapRails = rails;
+                state._gapsArrived = true;
                 var body = $('[data-group-body="collection"]');
-                if (!rails.length || !body) return;
+                if (!rails.length || !body) { maybeRenderStories(); return; }
+                rails.forEach(function (rl) { _poolAdd(rl.items); });
                 var html = rails.map(function (rl) {
                     return filledShelfHtml(rl.title, (rl.items || []).map(card).join(''), 'vdsc-shelf--gap');
                 }).join('');
@@ -599,6 +673,7 @@
                 revealGroup('collection');
                 staggerWithin(body);
                 hydrateGet(body);
+                maybeRenderStories();
             })
             .catch(function () { /* gaps are best-effort */ });
     }
@@ -613,14 +688,142 @@
                 var items = (d && d.items) || [];
                 var body = $('[data-group-body="foryou"]');
                 if (items.length < 6 || !body) return;
+                state._foryouItems = items;
+                _poolAdd(items);
                 // afterbegin: sits above the (static) "On your streaming services" rail in the group.
                 body.insertAdjacentHTML('afterbegin',
                     filledShelfHtml('Recommended for you', items.map(card).join(''), 'vdsc-shelf--foryou'));
                 revealGroup('foryou');
                 staggerWithin(body);
                 hydrateGet(body);
+                renderTrailerRail();
+                maybeRenderStories();
             })
             .catch(function () { /* best-effort */ });
+    }
+
+    // ── story blocks (music-Discover parity) ────────────────────────────────
+    // Editorial cards + a vertical trailer rail, composed from data the page
+    // already fetches — no new endpoints. Each personalized loader stashes its
+    // items in state._pool; maybeRenderStories fires once hero + foryou + gaps
+    // have all landed (morelike/taste may join late — the throwback card is
+    // optional chrome and renders only if pool items exist by then).
+    function _poolAdd(items) {
+        if (!items || !items.length) return;
+        var pool = state._pool || (state._pool = []);
+        var seen = {};
+        pool.forEach(function (it) { if (it && it.tmdb_id != null) seen[it.kind + ':' + it.tmdb_id] = 1; });
+        items.forEach(function (it) {
+            if (!it || it.tmdb_id == null || seen[it.kind + ':' + it.tmdb_id]) return;
+            seen[it.kind + ':' + it.tmdb_id] = 1;
+            pool.push(it);
+        });
+    }
+    function _storyCard(o) {
+        // o: {eyebrow, eyebrowHue, title, sub, art, kind, tmdb_id, library_id, year, extraAction}
+        var owned = o.library_id != null;
+        var source = owned ? 'library' : 'tmdb';
+        var id = owned ? o.library_id : o.tmdb_id;
+        return '<article class="vdsc-story" style="--vgm-h:' + (o.eyebrowHue || hueOf(o.title)) + ';' +
+            (o.art ? "background-image:url('" + esc(o.art) + "')" : '') + '">' +
+            '<div class="vdsc-story-scrim" aria-hidden="true"></div>' +
+            '<div class="vdsc-story-body">' +
+            '<span class="vdsc-story-eyebrow"><span class="vdsc-story-eyebrow-dot" aria-hidden="true"></span>' +
+            esc(o.eyebrow) + '</span>' +
+            '<h3 class="vdsc-story-title">' + esc(o.title) + '</h3>' +
+            (o.sub ? '<p class="vdsc-story-sub">' + esc(o.sub) + '</p>' : '') +
+            '<div class="vdsc-story-actions">' +
+            (o.tmdb_id != null
+                ? '<button class="vdsc-hero-trailer" type="button" data-vdsc-trailer ' +
+                  'data-kind="' + o.kind + '" data-tmdb="' + o.tmdb_id + '" data-title="' + esc(o.title) + '">' +
+                  '<span class="vdsc-tr-ic" aria-hidden="true">▶</span> Trailer</button>'
+                : '') +
+            (id != null
+                ? '<button class="discog-submit-btn vdsc-hero-cta" type="button" ' +
+                  'data-vsr-open="' + o.kind + '" data-vsr-source="' + source + '" data-vsr-id="' + id + '">' +
+                  '<span class="discog-submit-text">More info</span></button>'
+                : '') +
+            (o.extraAction || '') +
+            '</div></div></article>';
+    }
+    function maybeRenderStories() {
+        if (state._storiesDone) return;
+        var heroItems = state.hero.items || [];
+        var foryou = state._foryouItems || [];
+        var gapRails = state._gapRails || [];
+        if (!heroItems.length || !foryou.length || !state._gapsArrived) return;   // wait for the trio
+        state._storiesDone = true;
+        var pool = (state._pool || []).slice();
+        var cards = [];
+        // 1 · New this week — the newest title across hero + for-you.
+        var newest = null;
+        heroItems.concat(foryou).forEach(function (it) {
+            if (it && it.year && (!newest || it.year > newest.year)) newest = it;
+        });
+        if (newest) cards.push(_storyCard({
+            eyebrow: 'NEW • ' + newest.year, eyebrowHue: hueOf(newest.title),
+            title: newest.title,
+            sub: (newest.kind === 'movie' ? 'New movie' : 'New series') +
+                 (newest.overview ? ' — ' + newest.overview.slice(0, 90) + '…' : ''),
+            art: newest.backdrop || newest.poster,
+            kind: newest.kind, tmdb_id: newest.tmdb_id, library_id: newest.library_id
+        }));
+        // 2 · Your collection is missing — first franchise gap rail.
+        var coll = null;
+        gapRails.forEach(function (rl) { if (!coll && rl && rl.kind === 'collection') coll = rl; });
+        if (coll) {
+            var fname = String(coll.title || '').replace(/^Complete the\s+/i, '') || 'this collection';
+            var n = (coll.items || []).length;
+            cards.push(_storyCard({
+                eyebrow: 'YOUR COLLECTION IS MISSING', eyebrowHue: 268,
+                title: fname,
+                sub: 'You own part of it — ' + n + (n === 1 ? ' title' : ' titles') + " you're missing.",
+                art: (coll.items[0] && (coll.items[0].backdrop || coll.items[0].poster)) || null,
+                kind: 'movie', tmdb_id: null, library_id: null,
+                extraAction: '<button class="vdsc-btn vdsc-btn--ghost" type="button" data-vdsc-goto-collection>' +
+                             'See what\u2019s missing</button>'
+            }));
+        }
+        // 3 · Throwback — the oldest title in the pool (prefers pre-2000).
+        var old = null, oldestAny = null;
+        pool.forEach(function (it) {
+            if (!it || !it.year) return;
+            if (!oldestAny || it.year < oldestAny.year) oldestAny = it;
+            if (it.year < 2000 && (!old || it.year < old.year)) old = it;
+        });
+        var tb = old || oldestAny;
+        if (tb && (!newest || tb.tmdb_id !== newest.tmdb_id || tb.kind !== newest.kind)) cards.push(_storyCard({
+            eyebrow: 'THROWBACK', eyebrowHue: 36,
+            title: tb.title,
+            sub: 'From ' + tb.year + ' — still holds up.',
+            art: tb.backdrop || tb.poster,
+            kind: tb.kind, tmdb_id: tb.tmdb_id, library_id: tb.library_id
+        }));
+        if (!cards.length) return;
+        var row = $('[data-vdsc-stories-row]'); if (!row) return;
+        row.innerHTML = cards.join('');
+        var sec = $('[data-vdsc-stories]'); if (sec) sec.classList.remove('hidden');
+        if (window.VideoWishState) VideoWishState.hydrate(row);
+    }
+    // ── vertical trailer rail ("Watch trailers" — music's Watch section) ────
+    function renderTrailerRail() {
+        var items = (state._foryouItems || []).slice(0, 10);
+        if (items.length < 4) return;
+        var rail = $('[data-vdsc-trail-rail]'); if (!rail) return;
+        rail.innerHTML = items.map(function (it) {
+            return '<button class="vdsc-trail" type="button" data-vdsc-trailer ' +
+                'data-kind="' + it.kind + '" data-tmdb="' + it.tmdb_id + '" data-title="' + esc(it.title || '') + '" ' +
+                'aria-label="Play trailer for ' + esc(it.title || '') + '">' +
+                '<span class="vdsc-trail-art" aria-hidden="true"' +
+                (it.poster ? ' style="background-image:url(\'' + esc(it.poster) + '\')"' : '') + '>' +
+                '<span class="vdsc-trail-play" aria-hidden="true">▶</span></span>' +
+                '<span class="vdsc-trail-why">Picked for you</span>' +
+                '<span class="vdsc-trail-title">' + esc(it.title || '') + '</span>' +
+                '<span class="vdsc-trail-meta">' + (it.kind === 'movie' ? 'Movie' : 'TV') +
+                (it.year ? ' · ' + it.year : '') + '</span>' +
+                '</button>';
+        }).join('');
+        var sec = $('[data-vdsc-trailers]'); if (sec) sec.classList.remove('hidden');
     }
 
     // Rebuild the whole rail stack (genre/curated shelves + the prepended personalized rows).
@@ -628,6 +831,13 @@
     // it before prepending, so rapid re-toggles can't stack duplicate "Recommended for you" rows.
     function reloadRails() {
         state.railGen = (state.railGen || 0) + 1;
+        // Story blocks + trailer rail are editorial — clear and rebuild with the rails.
+        state._storiesDone = false; state._pool = []; state._foryouItems = [];
+        state._gapRails = []; state._gapsArrived = false;
+        var srow = $('[data-vdsc-stories-row]'); if (srow) srow.innerHTML = '';
+        var ssec = $('[data-vdsc-stories]'); if (ssec) ssec.classList.add('hidden');
+        var trl = $('[data-vdsc-trail-rail]'); if (trl) trl.innerHTML = '';
+        var tsec = $('[data-vdsc-trailers]'); if (tsec) tsec.classList.add('hidden');
         renderShelves();
         loadMoreLike();
         loadGaps();
@@ -685,7 +895,8 @@
             // Groups with no static rails (async-only, e.g. gaps) start hidden — revealed when filled.
             var emptyCls = sec.rails.length ? '' : ' vdsc-group--empty';
             return '<section class="vdsc-group' + emptyCls + '" data-group="' + sec.id + '">' +
-                '<h2 class="vdsc-group-head">' + esc(sec.label) + '</h2>' +
+                '<div class="vdsc-group-head"><h2>' + esc(sec.label) + '</h2>' +
+                (GROUP_SUBS[sec.id] ? '<p>' + esc(GROUP_SUBS[sec.id]) + '</p>' : '') + '</div>' +
                 '<div class="vdsc-group-body" data-group-body="' + sec.id + '">' + rails + '</div>' +
             '</section>';
         }).join('');
@@ -957,7 +1168,8 @@
                 '<span class="vdsc-tile-name">' + esc(name) + '</span></button>';
         }).join('');
         strip.innerHTML =
-            '<div class="vdsc-strip-head"><h2 class="vdsc-group-head">Browse</h2></div>' +
+            '<div class="vdsc-strip-head"><div class="vdsc-group-head"><h2>Browse</h2>' +
+            '<p>Jump into a genre, or open the full filter grid</p></div></div>' +
             '<div class="vdsc-tiles">' + tiles +
             '<button class="vdsc-tile vdsc-tile--all" type="button" data-vdsc-apply>' +
             '<span class="vdsc-tile-name">Browse all →</span></button></div>';
@@ -991,6 +1203,12 @@
         explore = { mNext: 1, sNext: 1, mMore: true, sMore: true, busy: false,
                     seen: {}, gen: explore.gen + 1 };
         var grid = $('[data-vdsc-explore-grid]'); if (grid) grid.innerHTML = '';
+        var ld = $('[data-vdsc-explore-loading]'); if (ld) ld.classList.add('hidden');
+        // A prefs rebuild empties the feed while it may already be on screen —
+        // the sentinel won't refire (no intersection *change* happens), so
+        // resume explicitly instead of leaving "Keep exploring" empty.
+        var sec = $('[data-vdsc-explore]');
+        if (sec && sec.getAttribute('data-started')) loadExplore();
     }
     function startExplore() {
         var sec = $('[data-vdsc-explore]'); if (!sec) return;
@@ -1053,9 +1271,7 @@
         var box = $('[data-vdsc-chipset="genre"]'); if (!box) return;
         box.innerHTML = '<button class="vdsc-chip vdsc-chip--reset vdsc-chip--on" type="button" data-val="">All genres</button>' +
             (state.genres[state.sel.kind] || []).map(function (g) {
-                var c = GENRE_COLORS[(g.name || '').toLowerCase()];
-                return '<button class="vdsc-chip" type="button" data-val="' + g.id + '"' +
-                    (c ? ' style="--c: ' + c + '"' : '') + '>' + esc(g.name) + '</button>';
+                return '<button class="vdsc-chip" type="button" data-val="' + g.id + '">' + esc(g.name) + '</button>';
             }).join('');
         state.sel.genre = '';
     }
@@ -1086,6 +1302,18 @@
             var trbtn = e.target.closest('[data-vdsc-trailer]');
             if (trbtn) {
                 openTrailer(trbtn.getAttribute('data-kind'), trbtn.getAttribute('data-tmdb'), trbtn.getAttribute('data-title'));
+                return;
+            }
+            var picks = e.target.closest('[data-vdsc-picks]');
+            if (picks) {
+                var fy = document.querySelector('[data-group="foryou"]');
+                if (fy) fy.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                return;
+            }
+            var gotoColl = e.target.closest('[data-vdsc-goto-collection]');
+            if (gotoColl) {
+                var cg = document.querySelector('[data-group="collection"]');
+                if (cg) cg.scrollIntoView({ block: 'start', behavior: 'smooth' });
                 return;
             }
             var heroAdd = e.target.closest('[data-vdsc-hero-add]');
@@ -1147,7 +1375,9 @@
                 return;
             }
             var dot = e.target.closest('[data-vdsc-go]');
-            if (dot) { goHero(parseInt(dot.getAttribute('data-vdsc-go'), 10)); startHeroTimer(); }
+            if (dot) { goHero(parseInt(dot.getAttribute('data-vdsc-go'), 10)); startHeroTimer(); return; }
+            if (e.target.closest('[data-vdsc-prev]')) { goHero(state.hero.idx - 1); startHeroTimer(); return; }
+            if (e.target.closest('[data-vdsc-next]')) { goHero(state.hero.idx + 1); startHeroTimer(); return; }
         });
 
         var hero = $('[data-vdsc-hero]');
