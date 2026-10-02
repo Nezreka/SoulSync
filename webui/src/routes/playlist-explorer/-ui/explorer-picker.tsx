@@ -55,9 +55,29 @@ function PickerCard({
     .join(' ');
 
   return (
-    // A card below the readiness gate had NO click handler in the vanilla, not
-    // a disabled one: clicking it does nothing at all (explorerRenderPickerCards :156).
-    <div className={classes} data-id={playlist.id} onClick={view.isReady ? onSelect : undefined}>
+    // #1289: the 50% readiness gate is gone as a click block — every card opens.
+    // isReady survives as the "thin discovery" warning signal (badge, meta
+    // styling, Discover button), not a lock.
+    <div
+      className={classes}
+      data-id={playlist.id}
+      onClick={onSelect}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        // ignore keys bubbling up from nested controls (e.g. the Discover button)
+        if (event.target !== event.currentTarget) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
+      title={
+        view.isReady
+          ? undefined
+          : `Only ${view.pct}% discovered — results may be thin. Explore anyway.`
+      }
+    >
       <div className="explorer-picker-card-art">
         {image ? (
           <img src={image} alt="" loading="lazy" />
@@ -193,7 +213,7 @@ export function ExplorerPicker({
             <strong>{playlists.length.toLocaleString()}</strong> playlists
           </span>
           <span>
-            <strong>{stats.ready.toLocaleString()}</strong> ready
+            <strong>{stats.ready.toLocaleString()}</strong> well discovered
           </span>
           <span>
             <strong>{stats.explored.toLocaleString()}</strong> explored
