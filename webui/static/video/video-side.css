@@ -4002,39 +4002,63 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 }
 .vdsc-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
 .vdsc-tile {
-    position: relative; height: 132px; border-radius: 16px; overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    position: relative; height: 148px; border-radius: 18px; overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.1);
     background: rgba(28, 34, 48, 0.7);
     cursor: pointer; text-align: left; padding: 0;
-    transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1), border-color 200ms ease, box-shadow 200ms ease;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    transition: transform 240ms cubic-bezier(0.16, 1, 0.3, 1), border-color 240ms ease, box-shadow 240ms ease;
 }
-/* soft genre-hue glow instead of the old full-gradient tiles */
+/* unpainted: soft genre-hue glow */
 .vdsc-tile::before {
     content: ''; position: absolute; inset: 0;
     background: radial-gradient(120% 140% at 20% 110%, rgba(var(--c, 88, 101, 242), 0.38), transparent 60%);
 }
-/* painted tiles: a real poster from the genre's rail beneath a refined
-   legibility gradient — the art does the talking, the type stays readable */
+/* painted: hero-grade cinematic scrim — the art feels curated, the type always reads.
+   What the hero slider taught: directional scrims (bottom + left) beat a flat dim. */
 .vdsc-tile--art::after {
     content: ''; position: absolute; inset: 0;
     background-image: var(--tile-art);
     background-size: cover; background-position: center 22%;
-    transition: transform 600ms cubic-bezier(0.16, 1, 0.3, 1);
+    transition: transform 700ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .vdsc-tile--art::before {
-    background: linear-gradient(178deg, rgba(8, 10, 16, 0.04) 34%, rgba(8, 10, 16, 0.88) 100%);
+    background:
+        linear-gradient(180deg, rgba(8, 10, 16, 0.3) 0%, rgba(8, 10, 16, 0.03) 34%,
+            rgba(8, 10, 16, 0.66) 68%, rgba(8, 10, 16, 0.95) 100%),
+        linear-gradient(100deg, rgba(8, 10, 16, 0.52) 0%, transparent 58%);
     z-index: 1;
 }
-.vdsc-tile--art:hover::after { transform: scale(1.05); }
+.vdsc-tile--art:hover::after { transform: scale(1.07); }
+.vdsc-tile:hover {
+    transform: translateY(-4px);
+    border-color: rgba(255, 255, 255, 0.22);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        0 18px 40px rgba(0, 0, 0, 0.52), 0 0 26px rgba(var(--c, 88, 101, 242), 0.16);
+}
+.vdsc-tile-name {
+    position: absolute; left: 16px; bottom: 14px; z-index: 2;
+    font-size: 18px; font-weight: 800; letter-spacing: -0.02em; color: #fff;
+    text-shadow: 0 2px 14px rgba(0, 0, 0, 0.75);
+}
+/* genre-hue accent bar — the music-poster touch that makes it designed, not decorated */
+.vdsc-tile-name::before {
+    content: ''; display: block; width: 26px; height: 3px; border-radius: 2px;
+    background: rgb(var(--c, 88, 101, 242));
+    box-shadow: 0 0 12px rgba(var(--c, 88, 101, 242), 0.85);
+    margin-bottom: 9px;
+    transition: width 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.vdsc-tile:hover .vdsc-tile-name::before { width: 42px; }
 .vdsc-tile:hover {
     transform: translateY(-3px);
     border-color: rgba(var(--c, 88, 101, 242), 0.55);
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45), 0 0 22px rgba(var(--c, 88, 101, 242), 0.22);
 }
 .vdsc-tile-name {
-    position: absolute; left: 14px; bottom: 12px; z-index: 2;
-    font-size: 15px; font-weight: 700; letter-spacing: -0.01em; color: #fff;
-    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+    position: absolute; left: 16px; bottom: 14px; z-index: 2;
+    font-size: 18px; font-weight: 800; letter-spacing: -0.02em; color: #fff;
+    text-shadow: 0 2px 14px rgba(0, 0, 0, 0.75);
 }
 .vdsc-tile--all { border-style: dashed; }
 
@@ -8476,22 +8500,21 @@ body[data-side="video"] #gsearch-aura {
 .vdsc-story-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 
 /* ── marquee tickers (music-Discover parity): doubled spans, seamless loop ── */
-.vdsc-story-marquee, .vdsc-banner-marquee {
+/* (full-width banners only — the story cards stay quiet) */
+.vdsc-banner-marquee {
     display: flex; white-space: nowrap; overflow: hidden;
-    position: absolute; top: 0; left: 0; right: 0;
-    height: 30px; align-items: center;
+    position: absolute; top: 0; left: 0; right: 0; z-index: 1;
+    height: 34px; align-items: center;
     background: rgba(6, 8, 13, 0.66);
     -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
     border-bottom: 1px solid rgba(255, 255, 255, 0.09);
-    font-size: 10px; font-weight: 800; letter-spacing: 0.24em; text-transform: uppercase;
+    font-size: 11px; font-weight: 800; letter-spacing: 0.24em; text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.85);
 }
-.vdsc-story-marquee { z-index: 1; color: hsl(var(--vgm-h, 230), 85%, 74%); }
-.vdsc-banner-marquee { z-index: 1; color: rgba(255, 255, 255, 0.85); height: 34px; font-size: 11px; }
-.vdsc-story-marquee > span, .vdsc-banner-marquee > span {
+.vdsc-banner-marquee > span {
     flex: 0 0 auto; padding-right: 0.6em;
-    animation: vdscMarquee 26s linear infinite;
+    animation: vdscMarquee 32s linear infinite;
 }
-.vdsc-banner-marquee > span { animation-duration: 32s; }
 @keyframes vdscMarquee { to { transform: translateX(-100%); } }
 
 /* ── Full-width poster banners (music-Discover parity) ─────────────────── */
@@ -8657,7 +8680,7 @@ body[data-side="video"] #gsearch-aura {
     .vdsc-story::before { animation: none; }
     .vdsc-story, .vdsc-trailer-card, .vdsc-trailer-art, .vdsc-trailer-play { transition: none; animation: none; }
     .vdsc-trailer-card:hover .vdsc-trailer-art::before { opacity: 0; }
-    .vdsc-story-marquee > span, .vdsc-banner-marquee > span { animation: none; }
+    .vdsc-banner-marquee > span { animation: none; }
     .vdsc-banner { transition: none; opacity: 1; transform: none; }
     .vdsc-banner--in .vdsc-banner-art { animation: none; }
 }

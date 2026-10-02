@@ -529,8 +529,9 @@
               'onerror="this.outerHTML=\'<h2 class=&quot;vdsc-hero-title&quot;>' + esc(it.title) + '</h2>\'">'
             : '<h2 class="vdsc-hero-title">' + esc(it.title) + '</h2>';
         body.innerHTML =
+            (owned ? '' :
             '<div class="vdsc-hero-eyebrow"><span class="vdsc-hero-eyebrow-dot" aria-hidden="true"></span>' +
-            (owned ? 'In your library' : '#' + (state.hero.idx + 1) + ' Trending now') + '</div>' +
+            '#' + (state.hero.idx + 1) + ' Trending now</div>') +
             titleHtml +
             '<div class="vdsc-hero-meta">' + meta.map(function (m) {
                 return '<span class="vdsc-hero-meta-item">' + esc(m) + '</span>'; }).join('') + '</div>' +
@@ -726,12 +727,9 @@
         var owned = o.library_id != null;
         var source = owned ? 'library' : 'tmdb';
         var id = owned ? o.library_id : o.tmdb_id;
-        // Seamless ticker: the eyebrow repeated, doubled so the loop has no seam.
-        var mq = esc((o.eyebrow + ' \u2022 ').repeat(4));
         return '<article class="vdsc-story" style="--vgm-h:' + (o.eyebrowHue || hueOf(o.title)) + ';' +
             (o.art ? "background-image:url('" + esc(o.art) + "')" : '') + '">' +
             '<div class="vdsc-story-scrim" aria-hidden="true"></div>' +
-            '<div class="vdsc-story-marquee" aria-hidden="true"><span>' + mq + '</span><span>' + mq + '</span></div>' +
             '<div class="vdsc-story-body">' +
             '<span class="vdsc-story-eyebrow"><span class="vdsc-story-eyebrow-dot" aria-hidden="true"></span>' +
             esc(o.eyebrow) + '</span>' +
