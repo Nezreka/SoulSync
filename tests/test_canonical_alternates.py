@@ -3,6 +3,8 @@ matcher, and the production default_fetch_alternates wired over fake source APIs
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import core.metadata.canonical_resolver as cr
 from core.metadata.canonical_resolver import (
     _release_name_key,
@@ -87,6 +89,37 @@ def test_default_fetch_alternates_discovers_artist_from_album_meta(monkeypatch):
 
     out = default_fetch_alternates("spotify", "sp_deluxe")
     assert [e["album_id"] for e in out] == ["sp_single"]
+
+
+def test_musicbrainz_alternates_search_name_when_local_artist_has_no_mbid(monkeypatch):
+    import core.metadata.album_tracks as at
+
+    calls = []
+
+    def search_artists(name, **kwargs):
+        calls.append(("search", name))
+        return [{"id": "8e3bb70b-cb74-4296-9bbd-ae00050fd4ca", "name": name}]
+
+    def artist_albums(artist_id, **kwargs):
+        calls.append(("albums", artist_id))
+        return [{"id": "alternate", "name": "Scatterbrain (Single)"}]
+
+    client = SimpleNamespace(search_artists=search_artists, get_artist_albums=artist_albums)
+    monkeypatch.setattr(at.metadata_registry, "get_client_for_source", lambda source: client)
+    monkeypatch.setattr(
+        "core.metadata_service.get_album_tracks_for_source",
+        lambda source, album_id: SINGLE if album_id == "alternate" else None,
+    )
+
+    out = default_fetch_alternates(
+        "musicbrainz", "linked", artist_id="", artist_name="The Band",
+        album_title="Scatterbrain",
+    )
+    assert [item["album_id"] for item in out] == ["alternate"]
+    assert calls == [
+        ("search", "The Band"),
+        ("albums", "8e3bb70b-cb74-4296-9bbd-ae00050fd4ca"),
+    ]
 
 
 def test_default_fetch_alternates_empty_when_no_artist(monkeypatch):

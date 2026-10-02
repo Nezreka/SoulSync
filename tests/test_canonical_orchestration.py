@@ -6,8 +6,11 @@ the DB gathering + persistence are exercised for real without live APIs.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from core.metadata.canonical_resolver import (
     default_fetch_tracklist,
+    provider_artist_id,
     resolve_and_store_canonical_for_album,
 )
 from database.music_database import MusicDatabase
@@ -117,6 +120,123 @@ def test_resolve_returns_none_for_missing_album(tmp_path):
         db, "does-not-exist", fetch_tracklist=lambda s, a: STD, source_priority=["spotify"],
     )
     assert out is None
+
+
+def test_local_soul_id_is_not_a_hydrabase_artist_id():
+    assert provider_artist_id(
+        {'artist_id': 'local', 'artist_hydrabase_id': 'locally-derived-soul-id'},
+        'hydrabase',
+    ) == ''
+
+
+def test_malformed_stored_musicbrainz_artist_id_uses_name_search():
+    assert provider_artist_id(
+        {'artist_id': 'local', 'artist_musicbrainz_id': '4QLGuDRbRtIIDoMyH9Zgg8'},
+        'musicbrainz',
+    ) == ''
+
+
+def test_alternate_lookup_uses_provider_artist_id_not_local_key(tmp_path, monkeypatch):
+    import core.metadata.canonical_resolver as resolver
+
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    album_id = _seed(db, spotify="spotify_album")
+    with db._get_connection() as conn:
+        conn.execute(
+            "UPDATE artists SET musicbrainz_id = ?, spotify_artist_id = ? WHERE id = 'art1'",
+            ("8e3bb70b-cb74-4296-9bbd-ae00050fd4ca", "spotify_artist"),
+        )
+        conn.execute(
+            "UPDATE albums SET musicbrainz_release_id = ? WHERE id = ?",
+            ("musicbrainz_release", album_id),
+        )
+
+    calls = []
+
+    def alternates(source, album, **kwargs):
+        calls.append((source, kwargs["artist_id"], kwargs["artist_name"]))
+        return []
+
+    monkeypatch.setattr(resolver, "default_fetch_alternates", alternates)
+    resolve_and_store_canonical_for_album(
+        db, album_id, fetch_tracklist=lambda source, album: DLX,
+        source_priority=["spotify", "musicbrainz"], mode="best_fit", store=False,
+        min_score=0.99,
+    )
+    assert calls == [
+        ("spotify", "spotify_artist", "Imagine Dragons"),
+        ("musicbrainz", "8e3bb70b-cb74-4296-9bbd-ae00050fd4ca", "Imagine Dragons"),
+    ]
+
+
+def test_alternate_lookup_without_provider_id_searches_by_name(tmp_path, monkeypatch):
+    import core.metadata.canonical_resolver as resolver
+
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    album_id = _seed(db, spotify="spotify_album")
+    with db._get_connection() as conn:
+        conn.execute(
+            "UPDATE albums SET musicbrainz_release_id = ? WHERE id = ?",
+            ("musicbrainz_release", album_id),
+        )
+
+    calls = []
+
+    def alternates(source, album, **kwargs):
+        calls.append((source, kwargs["artist_id"], kwargs["artist_name"]))
+        return []
+
+    monkeypatch.setattr(resolver, "default_fetch_alternates", alternates)
+    resolve_and_store_canonical_for_album(
+        db, album_id, fetch_tracklist=lambda source, album: DLX,
+        source_priority=["spotify", "musicbrainz"], mode="best_fit", store=False,
+        min_score=0.99,
+    )
+    assert calls == [
+        ("spotify", "", "Imagine Dragons"),
+        ("musicbrainz", "", "Imagine Dragons"),
+    ]
+
+
+def test_canonical_misfit_never_sends_invalid_artist_id_to_musicbrainz(tmp_path, monkeypatch):
+    import core.metadata.album_tracks as album_tracks
+
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    album_id = _seed(db)
+    with db._get_connection() as conn:
+        conn.execute(
+            "UPDATE albums SET musicbrainz_release_id = ? WHERE id = ?",
+            ("linked-release", album_id),
+        )
+        conn.execute(
+            "UPDATE artists SET musicbrainz_id = ? WHERE id = 'art1'",
+            ("4QLGuDRbRtIIDoMyH9Zgg8",),
+        )
+
+    calls = []
+    artist_mbid = "8e3bb70b-cb74-4296-9bbd-ae00050fd4ca"
+
+    def search_artists(name, **kwargs):
+        calls.append(("search", name))
+        return [{"id": artist_mbid, "name": name}]
+
+    def get_artist_albums(artist_id, **kwargs):
+        calls.append(("albums", artist_id))
+        return [{"id": "standard-release", "name": "Evolve (Standard)"}]
+
+    client = SimpleNamespace(search_artists=search_artists,
+                             get_artist_albums=get_artist_albums)
+    monkeypatch.setattr(album_tracks.metadata_registry, "get_client_for_source",
+                        lambda source: client)
+    monkeypatch.setattr("core.metadata_service.get_album_tracks_for_source",
+                        lambda source, album: STD if album == "standard-release" else None)
+
+    result = resolve_and_store_canonical_for_album(
+        db, album_id, fetch_tracklist=lambda source, album: DLX,
+        source_priority=["musicbrainz"], min_score=0.99, store=False,
+    )
+    assert result and result["album_id"] == "standard-release"
+    assert calls == [("search", "Imagine Dragons"), ("albums", artist_mbid)]
 
 
 # ── default_fetch_tracklist normalization (no DB / no live API) ────────────
