@@ -3,6 +3,7 @@ import time
 import threading
 from typing import Dict, Optional, Any, List
 from functools import wraps
+from core.http_error_status import http_error_status
 from utils.logging_config import get_logger
 
 logger = get_logger("lastfm_client")
@@ -36,7 +37,12 @@ def rate_limited(func):
             result = func(*args, **kwargs)
             return result
         except Exception as e:
-            if "rate limit" in str(e).lower() or "429" in str(e):
+            # Read the structured HTTP status first: the message can contain a
+            # URL whose entity ID holds "429", which is not a rate limit.
+            status = http_error_status(e)
+            is_rate_limit = (status == 429 if status is not None
+                             else "rate limit" in str(e).lower() or "429" in str(e))
+            if is_rate_limit:
                 logger.warning(f"Last.fm rate limit hit, implementing backoff: {e}")
                 time.sleep(5.0)
             raise e
