@@ -62,7 +62,7 @@ def save_match(
 
 
 def _mirrored_tracks_for_source_id(db, profile_id, source_track_id):
-    """Yield (playlist_id, track) for mirrored tracks matching a source ID.
+    """Yield mirrored tracks (for this profile) matching a source ID.
 
     Matching is by ``source_track_id`` only: source labels legitimately differ
     between UI surfaces (``get_match_for_track`` documents the same), and the
@@ -91,7 +91,7 @@ def _mirrored_tracks_for_source_id(db, profile_id, source_track_id):
                 continue
             if str(track.get("source_track_id") or "") != wanted:
                 continue
-            yield pid, track
+            yield track
 
 
 def refresh_mirrored_library_flags(
@@ -131,7 +131,7 @@ def refresh_mirrored_library_flags(
         return 0
     checked_at = int(time.time())
     updated = 0
-    for pid, track in _mirrored_tracks_for_source_id(db, profile_id, source_track_id):
+    for track in _mirrored_tracks_for_source_id(db, profile_id, source_track_id):
         try:
             if db.update_mirrored_track_extra_data(track["id"], {
                 "in_library": True,
@@ -209,7 +209,7 @@ def clear_mirrored_library_flags(
         logger.debug("mirrored flag clear: surviving-match check failed: %s", exc)
     checked_at = int(time.time())
     updated = 0
-    for pid, track in _mirrored_tracks_for_source_id(db, profile_id, source_track_id):
+    for track in _mirrored_tracks_for_source_id(db, profile_id, source_track_id):
         try:
             if db.update_mirrored_track_extra_data(track["id"], {
                 "in_library": False,
