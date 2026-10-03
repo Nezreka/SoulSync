@@ -21194,6 +21194,40 @@ class MusicDatabase:
             logger.error(f"Error deleting discovery cache entry: {e}")
             return False
 
+    def clear_discovery_cache(self, playlist_id: int = None, profile_id: int = None) -> int:
+        """Delete cached discovery matches, optionally scoped to one playlist.
+
+        With playlist_id, only cache rows whose (normalized_title,
+        normalized_artist) key matches one of the playlist's tracks are
+        removed; without it the whole cache is emptied. Mirrored-playlist
+        track flags are untouched — the failed tab is per-track workflow
+        state, not cache. Returns the number of rows deleted. (#1452)
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            if playlist_id:
+                keys = self._get_playlist_discovery_keys(playlist_id, profile_id)
+                if not keys:
+                    return 0
+                # Note: the cache is global (no playlist column), so a row
+                # shared with other playlists is removed for them too. The
+                # only consequence is re-identification on next discovery.
+                placeholders = ",".join(["(?, ?)"] * len(keys))
+                flat = [v for pair in keys for v in pair]
+                cursor.execute(
+                    f"DELETE FROM discovery_match_cache WHERE (normalized_title, normalized_artist) IN ({placeholders})",
+                    flat,
+                )
+            else:
+                cursor.execute("DELETE FROM discovery_match_cache")
+            deleted = cursor.rowcount
+            conn.commit()
+            return deleted
+        except Exception as e:
+            logger.error(f"Error clearing discovery cache: {e}")
+            return 0
+
     def get_discovery_pool_stats(self, profile_id: int = None, playlist_id: int = None) -> dict:
         """Get counts for matched and failed discovery tracks."""
         try:

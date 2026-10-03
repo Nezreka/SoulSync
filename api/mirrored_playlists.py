@@ -945,6 +945,27 @@ def fix_discovery_pool_track():
         logger.error(f"Error fixing discovery pool track: {e}")
         return jsonify({"error": str(e)}), 500
 
+@bp.route('/api/discovery-pool/cache', methods=['DELETE'])
+def clear_discovery_pool_cache():
+    """Clear cached discovery matches, optionally scoped to one playlist (?playlist_id=)."""
+    try:
+        database = get_database()
+        profile_id = get_current_profile_id()
+        # Validate explicitly: a malformed ?playlist_id= must 400, never
+        # silently escalate to a global wipe (request.args.get(type=int)
+        # swallows parse failures into None).
+        raw_playlist_id = request.args.get('playlist_id')
+        playlist_id = None
+        if raw_playlist_id is not None and raw_playlist_id != '':
+            playlist_id = parse_strict_int(raw_playlist_id)
+            if playlist_id is None or playlist_id <= 0:
+                return jsonify({"error": "Invalid playlist_id"}), 400
+        cleared = database.clear_discovery_cache(playlist_id=playlist_id, profile_id=profile_id)
+        return jsonify({"success": True, "cleared": cleared})
+    except Exception as e:
+        logger.error(f"Error clearing discovery cache: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @bp.route('/api/discovery-pool/cache/<int:entry_id>', methods=['DELETE'])
 def delete_discovery_pool_cache_entry(entry_id):
     """Remove a single entry from the discovery match cache."""

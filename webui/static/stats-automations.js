@@ -1202,6 +1202,7 @@ let _discoveryPoolOverlay = null;
 let _discoveryPoolData = null;
 let _discoveryPoolView = 'categories'; // 'categories' | 'failed' | 'matched'
 let _discoveryPoolPlaylistFilter = null;
+let _discoveryPoolSort = 'recent'; // 'recent' | 'confidence_desc' | 'confidence_asc' (#1452)
 
 async function loadDiscoveryPoolStats() {
     try {
@@ -1291,6 +1292,12 @@ async function openDiscoveryPoolModal(playlistId = null) {
                         <button class="pool-back-btn" onclick="showPoolCategories()">&larr; Back</button>
                         <span class="pool-list-title" id="pool-list-title"></span>
                         <input type="text" class="pool-list-search" id="pool-list-search" placeholder="Filter tracks..." oninput="renderPoolList()">
+                        <select id="pool-sort-select" class="pool-sort-select" style="display: none;" onchange="_discoveryPoolSort = this.value; renderPoolList();" title="Sort matched tracks">
+                            <option value="recent">Most recent</option>
+                            <option value="confidence_desc">Highest match %</option>
+                            <option value="confidence_asc">Lowest match %</option>
+                        </select>
+                        <button id="pool-clear-btn" class="playlist-modal-btn playlist-modal-btn-secondary" style="display: none;" onclick="clearPoolCache()" title="Clear cached matches">Clear</button>
                     </div>
                     <div class="pool-list-content" id="pool-list-content"></div>
                 </div>
@@ -1608,9 +1615,15 @@ function showPoolList(category) {
     const titleEl = document.getElementById('pool-list-title');
     if (titleEl) titleEl.textContent = category === 'failed' ? 'Failed Tracks' : 'Matched Tracks';
 
-    // Clear search filter when switching views
+    // Clear search filter when switching views (sort choice persists)
     const searchEl = document.getElementById('pool-list-search');
     if (searchEl) searchEl.value = '';
+
+    // Sort + Clear controls only make sense on the matched view (#1452)
+    const sortEl = document.getElementById('pool-sort-select');
+    if (sortEl) sortEl.style.display = category === 'matched' ? '' : 'none';
+    const clearEl = document.getElementById('pool-clear-btn');
+    if (clearEl) clearEl.style.display = category === 'matched' ? '' : 'none';
 
     renderPoolList();
 }
@@ -1696,6 +1709,13 @@ function renderPoolList() {
                     (e.original_artist || '').toLowerCase().includes(query) ||
                     matchedName.toLowerCase().includes(query);
             });
+        }
+        // Match-% sort, applied after the search filter (#1452). slice() keeps
+        // the backend's recency order intact when switching back to 'recent'.
+        if (_discoveryPoolSort === 'confidence_desc') {
+            entries = entries.slice().sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+        } else if (_discoveryPoolSort === 'confidence_asc') {
+            entries = entries.slice().sort((a, b) => (a.confidence || 0) - (b.confidence || 0));
         }
         if (entries.length === 0) {
             container.innerHTML = query
@@ -1821,6 +1841,30 @@ async function removePoolCacheEntry(entryId) {
             filterDiscoveryPool(_discoveryPoolPlaylistFilter || '');
         } else {
             showToast(data.error || 'Failed to remove', 'error');
+        }
+    } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+    }
+}
+
+async function clearPoolCache() {
+    // Bulk-clear cached matches, scoped to the playlist filter when one is set (#1452).
+    const count = (_discoveryPoolData && _discoveryPoolData.stats && _discoveryPoolData.stats.matched) || 0;
+    const playlistId = _discoveryPoolPlaylistFilter;
+    const scopeMsg = playlistId
+        ? `Clear ${count} cached matches for this playlist?`
+        : `Clear all ${count} cached matches?`;
+    if (!await showConfirmDialog({ title: 'Clear Cached Matches', message: `${scopeMsg} Tracks will be re-identified on the next discovery or sync.`, confirmText: 'Clear', destructive: true })) return;
+    try {
+        let url = '/api/discovery-pool/cache';
+        if (playlistId) url += `?playlist_id=${playlistId}`;
+        const res = await fetch(url, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Cleared ${data.cleared} cached matches`, 'success');
+            filterDiscoveryPool(_discoveryPoolPlaylistFilter || '');
+        } else {
+            showToast(data.error || 'Failed to clear', 'error');
         }
     } catch (err) {
         showToast(`Error: ${err.message}`, 'error');
