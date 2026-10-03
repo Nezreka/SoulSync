@@ -300,10 +300,10 @@ const HELPER_CONTENT = {
         docsId: 'dashboard'
     },
     '#discovery-pool-card': {
-        title: 'Discovery Pool',
-        description: 'Collection of tracks from similar artists discovered during watchlist scans. Matched tracks feed the Discover page\'s personalized playlists and genre browser. Failed matches can be fixed manually.',
+        title: 'Match Review',
+        description: 'Review matched and failed track identifications across all mirrored playlists. Matched tracks feed the Discover page\'s personalized playlists and genre browser. Failed matches can be fixed manually.',
         tips: [
-            'Click "Open Discovery Pool" to review matched and failed tracks',
+            'Click "Open Match Review" to review matched and failed tracks',
             '"Rematch" button on matched tracks lets you pick a different match',
             'Search filter helps find specific tracks in large pools'
         ],
@@ -660,13 +660,13 @@ const HELPER_CONTENT = {
     },
     '.sync-tab-button[data-tab="deezer"]': {
         title: 'Deezer Playlists',
-        description: 'Import Deezer playlists by URL. Paste a playlist URL, load it, then discover and sync tracks.',
+        description: 'Import Deezer playlists by URL. Paste a playlist URL, load it, then identify and sync tracks.',
         docsId: 'sync-deezer'
     },
     '.sync-tab-button[data-tab="youtube"]': {
         title: 'YouTube Playlists',
-        description: 'Import YouTube Music playlists by URL. Tracks go through the discovery pipeline to match official metadata before downloading.',
-        tips: ['Paste any YouTube Music playlist URL', 'Discovery matches video titles to official tracks', 'Unmatched tracks can be fixed manually'],
+        description: 'Import YouTube Music playlists by URL. Tracks go through the identification pipeline to match official metadata before downloading.',
+        tips: ['Paste any YouTube Music playlist URL', 'Identification matches video titles to official tracks', 'Unmatched tracks can be fixed manually'],
         docsId: 'sync-youtube'
     },
     '.sync-tab-button[data-tab="beatport"]': {
@@ -683,7 +683,7 @@ const HELPER_CONTENT = {
     },
     '.sync-tab-button[data-tab="mirrored"]': {
         title: 'Mirrored Playlists',
-        description: 'All imported playlists from every source, saved persistently. Shows discovery status, download progress, and allows re-syncing.',
+        description: 'All imported playlists from every source, saved persistently. Shows identification status, download progress, and allows re-syncing.',
         tips: ['Every parsed playlist is automatically mirrored here', 'Cards show live state: Discovering, Discovered, Syncing, Complete', 'Re-parsing the same URL updates the existing mirror'],
         docsId: 'sync-mirrored'
     },
@@ -745,12 +745,12 @@ const HELPER_CONTENT = {
     // Playlist card action buttons
     '.playlist-card-action-btn': {
         title: 'Playlist Action',
-        description: 'The action depends on the playlist state: "Discover" matches tracks to metadata, "Sync" downloads missing tracks, "Download" processes the playlist.',
+        description: 'The action depends on the playlist state: "Identify" matches tracks to metadata, "Sync" downloads missing tracks, "Download" processes the playlist.',
     },
     '.youtube-playlist-card': {
         title: 'Imported Playlist',
-        description: 'An imported playlist card. Shows track count, discovery status, and sync progress. Click the action button to advance to the next step.',
-        tips: ['Progress shows: total tracks / matched / failed / percentage', 'Phase colors: gray=fresh, blue=discovering, green=discovered, orange=syncing'],
+        description: 'An imported playlist card. Shows track count, identification status, and sync progress. Click the action button to advance to the next step.',
+        tips: ['Progress shows: total tracks / matched / failed / percentage', 'Phase colors: gray=fresh, blue=identifying, green=identified, orange=syncing'],
     },
 
     // Sidebar
@@ -777,7 +777,7 @@ const HELPER_CONTENT = {
     },
     '#import-file-import-btn': {
         title: 'Import as Playlist',
-        description: 'Creates a mirrored playlist from the parsed file. Give it a name and click Import — the playlist will appear in the Mirrored tab for discovery and sync.',
+        description: 'Creates a mirrored playlist from the parsed file. Give it a name and click Import — the playlist will appear in the Mirrored tab for identification and sync.',
     },
 
     // Beatport elements
@@ -798,8 +798,8 @@ const HELPER_CONTENT = {
 
     // Mirrored tab
     '.pool-trigger-btn': {
-        title: 'Discovery Pool',
-        description: 'Open the Discovery Pool to view matched and failed track discoveries across all mirrored playlists. Fix failed matches manually.',
+        title: 'Match Review',
+        description: 'Open the Match Review to view matched and failed track identifications across all mirrored playlists. Fix failed matches manually.',
         docsId: 'sync-discovery'
     },
     '#mirrored-refresh-btn': {
@@ -810,12 +810,12 @@ const HELPER_CONTENT = {
     // ─── DISCOVERY MODAL (used by YouTube, Tidal, Deezer, Beatport, ListenBrainz, Mirrored) ───
 
     '.youtube-discovery-modal .modal-header': {
-        title: 'Discovery Modal Header',
-        description: 'Shows the playlist name, track count, and current phase description. The discovery pipeline matches raw track titles from the source to official metadata on your configured metadata service.',
+        title: 'Identification Modal Header',
+        description: 'Shows the playlist name, track count, and current phase description. The identification pipeline matches raw track titles from the source to official metadata on your configured metadata service.',
         docsId: 'sync-discovery'
     },
     '.progress-section': {
-        title: 'Discovery Progress',
+        title: 'Identification Progress',
         description: 'Real-time progress of the track matching process. Each track from the source playlist is compared against your metadata service (Spotify, iTunes, or Deezer) using fuzzy matching with a 0.7 confidence threshold.',
         tips: [
             'Green progress = tracks successfully matched',
@@ -825,7 +825,7 @@ const HELPER_CONTENT = {
         docsId: 'sync-discovery'
     },
     '.discovery-table-container': {
-        title: 'Discovery Results Table',
+        title: 'Identification Results Table',
         description: 'Shows each source track alongside its matched metadata result. Green rows = matched, red = failed, gray = pending. Failed matches can be fixed manually.',
         tips: [
             'Source columns show the original track/artist from the playlist',
@@ -840,14 +840,14 @@ const HELPER_CONTENT = {
         tips: [
             'Edit the search terms to improve results',
             'Results come from your active metadata source',
-            'Selecting a match updates the discovery cache for future use'
+            'Selecting a match updates the identification cache for future use'
         ]
     },
     '[id^="youtube-discovery-modal"] .modal-footer': {
-        title: 'Discovery Actions',
-        description: 'Action buttons change based on the current phase. "Start Discovery" begins matching, "Sync to Wishlist" queues matched tracks for download, "Download Missing" starts downloading immediately.',
+        title: 'Identification Actions',
+        description: 'Action buttons change based on the current phase. "Start Identifying" begins matching, "Sync to Wishlist" queues matched tracks for download, "Download Missing" starts downloading immediately.',
         tips: [
-            'Discovery: matches source tracks to official metadata',
+            'Identification: matches source tracks to official metadata',
             'Sync: adds matched tracks to your wishlist',
             'Download: searches your download sources and downloads missing tracks',
             'You can close the modal — operations continue in the background'
@@ -2351,7 +2351,7 @@ const HELPER_TOURS = {
             { page: 'sync', selector: '.sync-tab-button[data-tab="youtube"]', title: 'YouTube Music', description: 'Paste a YouTube Music playlist URL. The parser extracts track titles and artists, then matches them against your metadata source.' },
             { page: 'sync', selector: '.sync-tab-button[data-tab="beatport"]', title: 'Beatport', description: 'For electronic music — paste a Beatport playlist URL to import DJ sets and charts.' },
             { page: 'sync', selector: '.sync-tab-button[data-tab="import-file"]', title: 'File Import', description: 'Import a playlist from a local file — M3U, CSV, or plain text. Map columns to track/artist/album fields.' },
-            { page: 'sync', selector: '.sync-tab-button[data-tab="mirrored"]', title: 'Mirrored Playlists', description: 'Every imported playlist is saved here permanently. Re-sync anytime to catch new additions, check match status, or view the Discovery Pool for unmatched tracks.' },
+            { page: 'sync', selector: '.sync-tab-button[data-tab="mirrored"]', title: 'Mirrored Playlists', description: 'Every imported playlist is saved here permanently. Re-sync anytime to catch new additions, check match status, or view the Match Review for unmatched tracks.' },
 
             // Sidebar
             { page: 'sync', selector: '.sync-sidebar', title: 'Sync Controls', description: 'The command center. Select playlists with checkboxes on the left, then click "Start Sync" here. Progress bars, match counts, and logs update in real-time. That\'s the sync flow! 🎉' },

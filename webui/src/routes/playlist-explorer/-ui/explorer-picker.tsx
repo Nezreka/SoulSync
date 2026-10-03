@@ -17,7 +17,7 @@ import { explorerCardView, groupPlaylistsBySource, type ExplorerCardView } from 
 export type DiscoverButtonState = 'idle' | 'starting' | 'open';
 
 const DISCOVER_LABEL: Record<DiscoverButtonState, string> = {
-  idle: 'Discover',
+  idle: 'Identify',
   starting: 'Starting...',
   open: 'Open',
 };
@@ -75,7 +75,7 @@ function PickerCard({
       title={
         view.isReady
           ? undefined
-          : `Only ${view.pct}% discovered — results may be thin. Explore anyway.`
+          : `Only ${view.pct}% identified — results may be thin. Explore anyway.`
       }
     >
       <div className="explorer-picker-card-art">
@@ -130,13 +130,15 @@ function PickerCard({
           <span style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
         </div>
         <div className="explorer-picker-card-footer">
-          <span>{view.discovered.toLocaleString()} discovered</span>
+          <span>{view.discovered.toLocaleString()} identified</span>
           {view.showDiscoverButton ? (
             <button
               type="button"
               className="explorer-picker-discover-btn"
               disabled={discoverState === 'starting'}
-              title={discoverState === 'open' ? 'Reopen discovery modal' : 'Start discovery'}
+              title={
+                discoverState === 'open' ? 'Reopen identification modal' : 'Start identification'
+              }
               onClick={(event) => {
                 event.stopPropagation();
                 onDiscover();
@@ -205,7 +207,7 @@ export function ExplorerPicker({
     <div className="explorer-playlist-picker" id="explorer-playlist-picker">
       <div className="explorer-picker-command">
         <div className="explorer-picker-command-copy">
-          <span className="explorer-kicker">Discovery map</span>
+          <span className="explorer-kicker">Identification map</span>
           <h3>Turn a synced playlist into a release graph.</h3>
         </div>
         <div className="explorer-picker-stats" aria-label="Explorer playlist summary">
@@ -213,7 +215,7 @@ export function ExplorerPicker({
             <strong>{playlists.length.toLocaleString()}</strong> playlists
           </span>
           <span>
-            <strong>{stats.ready.toLocaleString()}</strong> well discovered
+            <strong>{stats.ready.toLocaleString()}</strong> well identified
           </span>
           <span>
             <strong>{stats.explored.toLocaleString()}</strong> explored

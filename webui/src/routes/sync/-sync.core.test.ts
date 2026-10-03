@@ -99,12 +99,12 @@ describe('phase maps (differential vs sync-spotify.js)', () => {
   });
 
   it('pins the user-facing words as literals', () => {
-    expect(actionButtonText('fresh')).toBe('Discover');
+    expect(actionButtonText('fresh')).toBe('Identify');
     expect(actionButtonText('sync_complete')).toBe('Download');
     expect(actionButtonText('download_complete')).toBe('Complete');
     expect(actionButtonText('anything else')).toBe('Open');
-    expect(phaseText('fresh')).toBe('Ready to discover');
-    expect(phaseText('discovered')).toBe('Discovery Complete');
+    expect(phaseText('fresh')).toBe('Ready to identify');
+    expect(phaseText('discovered')).toBe('Identification Complete');
     // Unknown phases echo straight through — getPhaseText's default arm.
     expect(phaseText('some_future_phase')).toBe('some_future_phase');
     expect(phaseColor('fresh')).toBe('#999');
@@ -504,7 +504,7 @@ describe('discoveryCompleteToast (differential vs sync-services.js 9218-9231)', 
       const state: Record<string, unknown> = { spotify_matches: c.matches };
       if (c.retry) state._retryDiscovery = { ...c.retry };
       const theirs = vanillaToast(state);
-      const ours = discoveryCompleteToast('Discovery complete!', c.matches, c.retry);
+      const ours = discoveryCompleteToast('Identification complete!', c.matches, c.retry);
       expect(ours, JSON.stringify(c)).toEqual(theirs);
     }
   });

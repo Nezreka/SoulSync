@@ -196,9 +196,9 @@ def test_normalize_request_overrides_config():
 
 
 def test_normalize_falls_back_for_unknown():
-    assert normalize_sync_mode('bogus', 'replace') == 'replace'
-    assert normalize_sync_mode(None, None) == 'replace'
-    assert normalize_sync_mode(None, 'also-bogus') == 'replace'
+    assert normalize_sync_mode('bogus', 'replace') == 'reconcile'  # invalid -> default
+    assert normalize_sync_mode(None, None) == 'reconcile'  # #1289: safer default
+    assert normalize_sync_mode(None, 'also-bogus') == 'reconcile'
 
 
 def test_normalize_all_real_modes_pass_through():

@@ -117,7 +117,7 @@ describe('TidalTab', () => {
       description: 'desc-meta',
     });
     // States applied after the list (61-62).
-    await waitFor(() => expect(screen.getByText('Discovery Complete')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Identification Complete')).toBeInTheDocument());
     expect(screen.getByText('1 / 1')).toBeInTheDocument();
     expect(screen.getByText('100%')).toBeInTheDocument();
   });
@@ -166,7 +166,7 @@ describe('TidalTab', () => {
     };
     render(<TidalHarness />);
     fireEvent.click(screen.getByText('🔄 Refresh'));
-    await waitFor(() => expect(screen.getByText('Discovery Complete')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Identification Complete')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Settled'));
     await waitFor(() => expect(screen.getByTestId('open-id')).toHaveTextContent('t1'));
     expect(calls.some((c) => c.url === '/api/tidal/state/t1')).toBe(true);
@@ -344,7 +344,7 @@ describe('TidalTab', () => {
     };
     render(<TidalHarness />);
     fireEvent.click(screen.getByText('🔄 Refresh'));
-    await waitFor(() => expect(screen.getByText('Discovery Complete')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Identification Complete')).toBeInTheDocument());
     const bar = document.querySelector('#tidal-card-t1 .playlist-card-progress')!;
     // Still VISIBLE (not hidden) and still zeroed — the distinction from the
     // check-note sources, which render empty at total 0.

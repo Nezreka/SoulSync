@@ -57,7 +57,7 @@ afterEach(() => {
 });
 
 describe('phase footers', () => {
-  it('fresh: Start Discovery + Wing It; the start button fires the action', () => {
+  it('fresh: Start Identifying + Wing It; the start button fires the action', () => {
     const onStartDiscovery = vi.fn();
     render(
       <DiscoveryModal
@@ -68,10 +68,10 @@ describe('phase footers', () => {
         onStartDiscovery={onStartDiscovery}
       />,
     );
-    fireEvent.click(screen.getByText('🔍 Start Discovery'));
+    fireEvent.click(screen.getByText('🔍 Start Identifying'));
     expect(onStartDiscovery).toHaveBeenCalledOnce();
     expect(screen.getByText('⚡ Wing It')).toBeInTheDocument();
-    expect(screen.getByText('Click Start Discovery to begin...')).toBeInTheDocument();
+    expect(screen.getByText('Click Start Identifying to begin...')).toBeInTheDocument();
   });
 
   it('discovering: the vanilla info line, no action buttons', () => {
@@ -83,7 +83,7 @@ describe('phase footers', () => {
         {...noopHandlers}
       />,
     );
-    expect(screen.getByText('🔍 Discovering Spotify matches...')).toBeInTheDocument();
+    expect(screen.getByText('🔍 Identifying Spotify matches...')).toBeInTheDocument();
     expect(screen.queryByText('🔍 Download Missing Tracks')).not.toBeInTheDocument();
   });
 
@@ -199,7 +199,7 @@ describe('phase footers', () => {
         onRetryFailed={() => {}}
       />,
     );
-    expect(screen.queryByText('🔄 Rediscover')).not.toBeInTheDocument(); // tidal has no reset
+    expect(screen.queryByText('🔄 Re-identify')).not.toBeInTheDocument(); // tidal has no reset
     unmount();
     render(
       <DiscoveryModal
@@ -220,7 +220,7 @@ describe('phase footers', () => {
         onRetryFailed={() => {}}
       />,
     );
-    expect(screen.getByText('🔄 Rediscover')).toBeInTheDocument();
+    expect(screen.getByText('🔄 Re-identify')).toBeInTheDocument();
     expect(screen.getByText('🔄 Retry Failed (2)')).toBeInTheDocument();
   });
 });

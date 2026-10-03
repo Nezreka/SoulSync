@@ -253,7 +253,7 @@ def test_activity_feed_logged():
 
     args, _ = deps._activity_log[0]
     title = args[1]
-    assert 'Tidal Discovery Complete' in title
+    assert 'Tidal Identification Complete' in title
 
 
 def test_sync_to_mirrored_invoked():

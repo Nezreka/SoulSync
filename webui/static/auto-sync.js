@@ -1533,7 +1533,7 @@ function createAutoSyncHistoryEntryElement(entry, index = 0) {
     autoSyncAppendFlowArrow(flow);
     autoSyncAppendFlowChip(flow, 'Refresh', 'flow-action');
     autoSyncAppendFlowArrow(flow);
-    autoSyncAppendFlowChip(flow, 'Discover', 'flow-action');
+    autoSyncAppendFlowChip(flow, 'Identify', 'flow-action');
     autoSyncAppendFlowArrow(flow);
     autoSyncAppendFlowChip(flow, 'Sync + wishlist', 'flow-notify');
 

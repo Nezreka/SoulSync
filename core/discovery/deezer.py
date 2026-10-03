@@ -311,7 +311,7 @@ def run_deezer_discovery_worker(playlist_id, deps: DeezerDiscoveryDeps):
 
         # Add activity for discovery completion
         source_label = discovery_source.upper()
-        deps.add_activity_item("", f"Deezer Discovery Complete ({source_label})", f"'{playlist['name']}' - {successful_discoveries}/{len(tracks)} tracks found", "Now")
+        deps.add_activity_item("", f"Deezer Identification Complete ({source_label})", f"'{playlist['name']}' - {successful_discoveries}/{len(tracks)} tracks found", "Now")
 
         logger.info(f"Deezer discovery complete ({source_label}): {successful_discoveries}/{len(tracks)} tracks found")
 

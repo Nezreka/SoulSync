@@ -469,7 +469,7 @@ def run_youtube_discovery_worker(url_hash, deps: YoutubeDiscoveryDeps):
         activity_msg = f"'{playlist_name}' - {state['spotify_matches']}/{len(tracks)} tracks found"
         if wing_it_count:
             activity_msg += f", {wing_it_count} wing it"
-        deps.add_activity_item("", f"YouTube Discovery Complete ({source_label})", activity_msg, "Now")
+        deps.add_activity_item("", f"YouTube Identification Complete ({source_label})", activity_msg, "Now")
 
         logger.info(f"YouTube discovery complete ({discovery_source}): {state['spotify_matches']}/{len(tracks)} tracks matched, {wing_it_count} wing it")
 

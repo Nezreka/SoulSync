@@ -119,7 +119,7 @@ def register_routes(bp):
         """Trigger playlist sync/download.
 
         Runs the app's own sync start in-process.
-        Body: {"playlist_name": "...", "tracks": [...], "sync_mode"?: "replace"|"append"}
+        Body: {"playlist_name": "...", "tracks": [...], "sync_mode"?: "replace"|"append"|"reconcile"}
         """
         body = request.get_json(silent=True) or {}
         playlist_name = body.get("playlist_name")

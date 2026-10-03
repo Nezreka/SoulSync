@@ -245,8 +245,8 @@ describe('card presentation', () => {
     expect(itunesLinkTypeBadge({ type: 'track' })).toEqual({ text: 'Track', color: '#fa586a' });
   });
 
-  it("youtube button map drift (8982-9037): 'Start Discovery' / 'View Details' ×2 / 'View Results'", () => {
-    expect(ytActionButtonText('fresh')).toBe('Start Discovery');
+  it("youtube button map drift (8982-9037): 'Start Identifying' / 'View Details' ×2 / 'View Results'", () => {
+    expect(ytActionButtonText('fresh')).toBe('Start Identifying');
     expect(ytActionButtonText('discovering')).toBe('View Progress');
     expect(ytActionButtonText('discovered')).toBe('View Details');
     expect(ytActionButtonText('syncing')).toBe('View Progress');

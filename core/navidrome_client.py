@@ -3,7 +3,7 @@ import requests
 import hashlib
 import secrets
 import time
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Union
 from datetime import datetime
 from urllib.parse import urlencode
 import json
@@ -1347,8 +1347,15 @@ class NavidromeClient(MediaServerClient):
         return False
 
     @validated_playlist_write
-    def create_playlist(self, name: str, tracks, playlist_id: str = None) -> bool:
-        """Create a new playlist or update existing one if playlist_id provided"""
+    def create_playlist(self, name: str, tracks, playlist_id: str = None) -> Union[str, bool]:
+        """Create a new playlist or update existing one if playlist_id provided.
+
+        Returns the server playlist ID on success (#1289 item 6: a newly
+        created playlist is linked to its mirrored playlist immediately from
+        this ID), False on failure. Backward compatible: every existing
+        caller only tests truthiness, and ``validated_playlist_write`` still
+        normalizes the externally visible return to bool.
+        """
         if not self.ensure_connection():
             return False
 
@@ -1372,7 +1379,7 @@ class NavidromeClient(MediaServerClient):
                 'name': name,
                 'songId': track_ids  # Subsonic API accepts multiple songId parameters
             }
-            
+
             # If playlist_id is provided, it acts as an overwrite/update
             if playlist_id:
                 params['playlistId'] = playlist_id
@@ -1381,6 +1388,16 @@ class NavidromeClient(MediaServerClient):
 
             if response and response.get('status') == 'ok':
                 logger.info(f"{'Updated' if playlist_id else 'Created'} Navidrome playlist '{name}' with {len(track_ids)} tracks")
+                if playlist_id:
+                    return str(playlist_id)
+                # A fresh createPlaylist response carries no ID, so resolve
+                # the just-created playlist by name.
+                created = self.get_playlists_by_name(name)
+                if created:
+                    return str(created[0].id)
+                logger.warning(
+                    f"Created Navidrome playlist '{name}' but could not resolve its server ID"
+                )
                 return True
             else:
                 logger.error(f"Failed to {'update' if playlist_id else 'create'} Navidrome playlist '{name}'")
@@ -1498,28 +1515,98 @@ class NavidromeClient(MediaServerClient):
                 matches.append(playlist)
         return matches
 
+    def get_playlist_by_id(self, playlist_id: str) -> Optional[PlaylistInfo]:
+        """Fetch a single playlist by server ID.
+
+        The cheap existence check behind the mirrored-playlist server link
+        (#1289): a stored ``server_playlist_id`` is only followed when the
+        server still has that playlist. Returns None when the ID is unknown
+        (deleted on the server) or unreachable — never raises.
+        """
+        if not playlist_id:
+            return None
+        if not self.ensure_connection():
+            return None
+        try:
+            response = self._make_request('getPlaylist', {'id': str(playlist_id)})
+            playlist_data = (response or {}).get('playlist')
+            if not isinstance(playlist_data, dict) or not playlist_data.get('id'):
+                return None
+            return PlaylistInfo(
+                id=str(playlist_data.get('id')),
+                title=str(playlist_data.get('name') or 'Unknown Playlist'),
+                description=playlist_data.get('comment'),
+                duration=(playlist_data.get('duration') or 0) * 1000,
+                leaf_count=playlist_data.get('songCount', 0),
+                tracks=[],
+                owner=playlist_data.get('owner'),
+            )
+        except Exception as e:
+            logger.error(f"Error fetching Navidrome playlist {playlist_id}: {e}")
+            return None
+
+    def _follow_playlist_id(
+        self, playlist_name: str, playlist_id: Optional[str]
+    ) -> Optional[PlaylistInfo]:
+        """Validate an explicitly resolved server playlist ID (#1289 item 6).
+
+        Returns the PlaylistInfo when the server still has that ID (the sync
+        then writes to it directly, following a server-side rename silently),
+        or None when no ID was given / the server no longer has it — in which
+        case the caller falls back to the legacy name-match. Never raises.
+        """
+        if not playlist_id:
+            return None
+        try:
+            existing = self.get_playlist_by_id(playlist_id)
+        except Exception as e:  # noqa: BLE001 - validation failure == unusable ID
+            logger.debug("playlist-id validation failed for %r: %s", playlist_name, e)
+            return None
+        if existing is None:
+            logger.info(
+                f"Stored server playlist id {playlist_id} for '{playlist_name}' "
+                f"no longer exists — falling back to name match"
+            )
+            return None
+        logger.info(
+            f"Following stored server playlist id {playlist_id} for '{playlist_name}'"
+        )
+        return existing
+
     @validated_playlist_write
-    def append_to_playlist(self, playlist_name: str, tracks) -> bool:
+    def append_to_playlist(self, playlist_name: str, tracks, *,
+                           playlist_id: Optional[str] = None) -> bool:
         """Append tracks to an existing playlist (creates it if missing).
 
         Differs from `update_playlist`: never deletes existing tracks,
         never recreates the playlist, no backup. Used by sync mode
         'append' so user-added tracks on the server playlist survive
         re-syncing the source. Dedupe-by-id ensures we don't re-add
-        tracks the playlist already contains."""
+        tracks the playlist already contains.
+
+        `playlist_id`, when given and still on the server, is written to
+        directly (#1289 item 6: follow the mirrored playlist's stored server
+        ID silently across server-side renames). Falls back to the legacy
+        name-match when absent or stale."""
         if not self.ensure_connection():
             return False
 
         try:
-            existing_playlists = self.get_playlists_by_name(playlist_name)
-            if not existing_playlists:
-                logger.info(
-                    f"Navidrome append: playlist '{playlist_name}' doesn't exist yet — "
-                    f"creating with {len(tracks)} tracks"
-                )
-                return self.create_playlist(playlist_name, tracks)
+            # #1289 item 6: an explicit server playlist ID (resolved from the
+            # mirrored playlist's stored link by the sync service) skips the
+            # name-match entirely — a server-side rename is followed silently.
+            # An ID the server no longer has falls through to the legacy path.
+            primary = self._follow_playlist_id(playlist_name, playlist_id)
+            if primary is None:
+                existing_playlists = self.get_playlists_by_name(playlist_name)
+                if not existing_playlists:
+                    logger.info(
+                        f"Navidrome append: playlist '{playlist_name}' doesn't exist yet — "
+                        f"creating with {len(tracks)} tracks"
+                    )
+                    return self.create_playlist(playlist_name, tracks)
 
-            primary = existing_playlists[0]
+                primary = existing_playlists[0]
             # #823 round 2: the old dedupe read `t.id` — but NavidromeTrack only
             # defines `ratingKey`, so the existing-ids set was ALWAYS empty and
             # every sync re-appended the whole matched list (every track N
@@ -1574,22 +1661,30 @@ class NavidromeClient(MediaServerClient):
             return False
 
     @validated_playlist_write
-    def reconcile_playlist(self, playlist_name: str, tracks) -> bool:
+    def reconcile_playlist(self, playlist_name: str, tracks, *,
+                           playlist_id: Optional[str] = None) -> bool:
         """In-place reconcile (#792): add missing + remove gone via Subsonic
         updatePlaylist (songIdToAdd / songIndexToRemove), keeping the existing
         playlist object so its comment/identity survive — no delete/recreate.
         Creates the playlist if missing. Returns False so the caller can fall
-        back to replace on any failure."""
+        back to replace on any failure.
+
+        `playlist_id`, when given and still on the server, is reconciled
+        directly (#1289 item 6: follow the mirrored playlist's stored server
+        ID silently across server-side renames). Falls back to the legacy
+        name-match when absent or stale."""
         if not self.ensure_connection():
             return False
         try:
             from core.sync.playlist_edit import plan_playlist_reconcile
-            existing_playlists = self.get_playlists_by_name(playlist_name)
-            if not existing_playlists:
-                logger.info(f"Navidrome reconcile: '{playlist_name}' doesn't exist — creating")
-                return self.create_playlist(playlist_name, tracks)
+            primary = self._follow_playlist_id(playlist_name, playlist_id)
+            if primary is None:
+                existing_playlists = self.get_playlists_by_name(playlist_name)
+                if not existing_playlists:
+                    logger.info(f"Navidrome reconcile: '{playlist_name}' doesn't exist — creating")
+                    return self.create_playlist(playlist_name, tracks)
 
-            primary = existing_playlists[0]
+                primary = existing_playlists[0]
             existing_tracks = self.get_playlist_tracks(primary.id)
             # #905: NavidromeTrack exposes the Subsonic song id as `ratingKey` (NOT `.id`,
             # which doesn't exist) — same as append_to_playlist reads it. Reading `t.id` here
@@ -1633,19 +1728,43 @@ class NavidromeClient(MediaServerClient):
             return False
 
     @validated_playlist_write
-    def update_playlist(self, playlist_name: str, tracks) -> bool:
-        """Update an existing playlist or create it if it doesn't exist. Handles duplicates."""
+    def update_playlist(self, playlist_name: str, tracks, *,
+                        playlist_id: Optional[str] = None) -> bool:
+        """Update an existing playlist or create it if it doesn't exist. Handles duplicates.
+
+        `playlist_id`, when given and still on the server, is overwritten
+        directly (#1289 item 6: follow the mirrored playlist's stored server
+        ID silently across server-side renames — no duplicate cleanup, no
+        rename adoption). Falls back to the legacy name-match when absent or
+        stale."""
         if not self.ensure_connection():
             return False
 
         try:
-            # Find ALL existing playlists with this name to handle duplicates
-            existing_playlists = self.get_playlists_by_name(playlist_name)
-            
             # Check if backup is enabled in config
             from core.settings import config_manager
             from core.sync.playlist_edit import playlist_backup_enabled
             create_backup = playlist_backup_enabled(config_manager)
+
+            # #1289 item 6: an explicit server playlist ID (resolved from the
+            # mirrored playlist's stored link by the sync service) skips the
+            # name-match entirely. Silent follow: just write to the ID. The
+            # opt-in pre-sync backup still runs — against the playlist's
+            # CURRENT server-side title, so it works across renames too.
+            followed = self._follow_playlist_id(playlist_name, playlist_id)
+            if followed is not None:
+                if create_backup:
+                    backup_name = f"{playlist_name} Backup"
+                    logger.info(f"Creating backup playlist '{backup_name}' before sync")
+                    if self.copy_playlist(followed.title, backup_name):
+                        logger.info("Backup created successfully")
+                    else:
+                        logger.warning("Failed to create backup, continuing with sync")
+                logger.info(f"Updating existing playlist '{playlist_name}' (ID: {followed.id})")
+                return self.create_playlist(playlist_name, tracks, playlist_id=followed.id)
+
+            # Find ALL existing playlists with this name to handle duplicates
+            existing_playlists = self.get_playlists_by_name(playlist_name)
 
             # If we have existing playlists and want to backup, use the first one found
             if existing_playlists and create_backup:

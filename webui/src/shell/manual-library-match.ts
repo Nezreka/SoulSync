@@ -25,9 +25,12 @@ interface MlmLibraryTrack {
   album_title?: string;
   file_path?: string;
   bitrate?: number;
+  server_source?: string;
 }
 
-type MlmResultsEl = HTMLElement & { _mlmTracks?: MlmSourceTrack[] & MlmLibraryTrack[] };
+type MlmResultsEl = HTMLElement & {
+  _mlmTracks?: MlmSourceTrack[] & MlmLibraryTrack[];
+};
 
 let _mlmOverlay: HTMLDivElement | null = null;
 let _mlmSelectedSource: MlmSourceTrack | null = null;
@@ -53,6 +56,8 @@ export function openManualLibraryMatchTool(prefill?: string): void {
                     <div class="playlist-quick-info">
                         <span class="playlist-owner">Link source tracks to library tracks to stop re-downloads</span>
                     </div>
+                    <div class="mlm-direction-note" style="font-size:12px;opacity:0.7;margin-top:6px;">Links a source track to a library track &mdash; nothing is added to any playlist.</div>
+                    <div class="mlm-persist-note" style="font-size:12px;opacity:0.7;margin-top:2px;">Saved as: link only. Affects next sync: yes.</div>
                 </div>
                 <span class="playlist-modal-close" onclick="_mlmClose()">&times;</span>
             </div>
@@ -93,6 +98,10 @@ export function openManualLibraryMatchTool(prefill?: string): void {
             <div class="playlist-modal-footer">
                 <div class="playlist-modal-footer-left">
                     <span id="mlm-status" class="mlm-status-msg"></span>
+                    <label id="mlm-add-to-playlist-wrap" class="checkbox-label" style="display:none;margin-top:6px;">
+                        <input type="checkbox" id="mlm-add-to-playlist">
+                        <span id="mlm-add-to-playlist-label">Also add to server playlist?</span>
+                    </label>
                 </div>
                 <div class="playlist-modal-footer-right">
                     <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="_mlmClose()">Cancel</button>
@@ -228,6 +237,33 @@ export function _mlmSelectSource(idx: number): void {
     r.classList.toggle('mlm-row-selected', i === idx),
   );
   _mlmUpdateSaveBtn();
+  _mlmUpdatePlaylistCheckbox();
+}
+
+// #1289: show "also add to playlist" when the source came from a mirrored
+// playlist (context is a playlist name, not "Wishlist"). The backend resolves
+// the name through the stored server link (item 6) when available, so renames
+// don't break it.
+//
+// The checkbox is only shown when the SELECTED LIBRARY TRACK exists on a
+// media server (has a server_source). A local download's DB id is an
+// auto-increment integer, not a server ratingKey — sending it to the
+// server's add-track endpoint would resolve to an unrelated item.
+function _mlmUpdatePlaylistCheckbox(): void {
+  const wrap = document.getElementById('mlm-add-to-playlist-wrap');
+  const label = document.getElementById('mlm-add-to-playlist-label');
+  const box = document.getElementById('mlm-add-to-playlist') as HTMLInputElement | null;
+  if (!wrap || !label || !box) return;
+  const ctx = (_mlmSelectedSource?.context || '').trim();
+  const isPlaylist = ctx !== '' && ctx.toLowerCase() !== 'wishlist';
+  const isServerTrack = !!_mlmSelectedLibrary?.server_source;
+  if (isPlaylist && isServerTrack) {
+    label.textContent = `Also add to server playlist "${ctx}"?`;
+    wrap.style.display = '';
+  } else {
+    wrap.style.display = 'none';
+    box.checked = false;
+  }
 }
 
 export function _mlmSelectLibrary(idx: number): void {
@@ -267,7 +303,46 @@ export async function _mlmSaveMatch(): Promise<void> {
     });
     const data = (await res.json()) as { success?: boolean; error?: string };
     if (data.success) {
-      if (status) status.textContent = 'Saved!';
+      // #1289: "also add to playlist" — push the library track into the
+      // server playlist the source came from (by name; the match above is
+      // the durable link, this is the visible playlist edit).
+      const _addBox = document.getElementById('mlm-add-to-playlist') as HTMLInputElement | null;
+      const _plName = (_mlmSelectedSource.context || '').trim();
+      if (_addBox?.checked && _plName && _plName.toLowerCase() !== 'wishlist') {
+        try {
+          const _addRes = await fetch('/api/server/playlist/0/add-track', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              track_id: String(_mlmSelectedLibrary.id),
+              playlist_name: _plName,
+              source_track_id: String(_mlmSelectedSource.source_track_id || ''),
+              source_title: _mlmSelectedSource.title || '',
+              source_artist: _mlmSelectedSource.artist || '',
+              source: _mlmSelectedSource.source || 'spotify',
+            }),
+          });
+          const _addData = (await _addRes.json()) as {
+            success?: boolean;
+            error?: string;
+          };
+          if (!_addData.success) {
+            if (status)
+              status.textContent =
+                'Match saved, but playlist add failed: ' + (_addData.error || 'unknown');
+          } else if (status) {
+            status.textContent = `Saved + added to "${_plName}"!`;
+          }
+        } catch {
+          if (status) status.textContent = 'Match saved, but playlist add failed (network)';
+        }
+      }
+      if (
+        status &&
+        !status.textContent.startsWith('Match saved') &&
+        !status.textContent.includes('added to')
+      )
+        status.textContent = 'Saved!';
       _mlmSelectedSource = null;
       _mlmSelectedLibrary = null;
       _mlmUpdateSaveBtn();
@@ -334,7 +409,9 @@ export async function _mlmDeleteMatch(id: number): Promise<void> {
   // reloading either way is what made a failed delete look like a UI that
   // simply refused to work.
   try {
-    const res = await fetch(`/api/manual-library-matches/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/manual-library-matches/${id}`, {
+      method: 'DELETE',
+    });
     let data: { success?: boolean; error?: string } = {};
     try {
       data = (await res.json()) as typeof data;

@@ -680,6 +680,11 @@ class RepairWorker:
                 # Per-setting choice lists so the UI can render a dropdown
                 # instead of a free-text box (e.g. canonical source_selection).
                 'setting_options': dict(getattr(job, 'setting_options', {}) or {}),
+                # Whether this job MOVES or REWRITES real library files when it
+                # runs live (dry_run off). The UI shows its strongest dry-run
+                # warning on exactly these jobs — finding-only jobs get a
+                # lighter note.
+                'writes_library_files': bool(getattr(job, 'writes_library_files', False)),
                 'last_run': last_run,
                 'next_run': next_run,
                 'is_running': self._current_job_id == job_id,

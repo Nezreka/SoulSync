@@ -40,19 +40,19 @@ export function isLastfmRadioHash(fakeHash: string): boolean {
 
 /** Modal titles (9358-9368), keyed by source + the lastfm hash special. */
 export function modalTitle(source: SyncSourceId, fakeHash: string): string {
-  if (source === 'mirrored') return '🎵 Mirrored Playlist Discovery';
-  if (isLastfmRadioHash(fakeHash)) return '📻 Last.fm Radio Discovery';
+  if (source === 'mirrored') return '🎵 Mirrored Playlist Identification';
+  if (isLastfmRadioHash(fakeHash)) return '📻 Last.fm Radio Identification';
   const titles: Record<SyncSourceId, string> = {
-    spotify_public: '🎵 Spotify Playlist Discovery',
-    itunes_link: '🎵 iTunes Link Discovery',
-    deezer: '🎵 Deezer Playlist Discovery',
-    tidal: '🎵 Tidal Playlist Discovery',
-    qobuz: '🎵 Qobuz Playlist Discovery',
-    beatport: '🎵 Beatport Chart Discovery',
-    listenbrainz: '🎵 ListenBrainz Playlist Discovery',
-    youtube: '🎵 YouTube Playlist Discovery',
-    ytmusic: '🎵 YouTube Music Playlist Discovery',
-    mirrored: '🎵 Mirrored Playlist Discovery',
+    spotify_public: '🎵 Spotify Playlist Identification',
+    itunes_link: '🎵 iTunes Link Identification',
+    deezer: '🎵 Deezer Playlist Identification',
+    tidal: '🎵 Tidal Playlist Identification',
+    qobuz: '🎵 Qobuz Playlist Identification',
+    beatport: '🎵 Beatport Chart Identification',
+    listenbrainz: '🎵 ListenBrainz Playlist Identification',
+    youtube: '🎵 YouTube Playlist Identification',
+    ytmusic: '🎵 YouTube Music Playlist Identification',
+    mirrored: '🎵 Mirrored Playlist Identification',
   };
   return titles[source];
 }
@@ -110,13 +110,13 @@ export function descriptionSourceWord(source: SyncSourceId, fakeHash: string): s
 export function modalDescription(phase: string, sourceWord: string, metadataLabel: string): string {
   switch (phase) {
     case 'fresh':
-      return `Ready to discover clean ${metadataLabel} metadata for ${sourceWord} tracks...`;
+      return `Ready to identify ${sourceWord} tracks with clean ${metadataLabel} metadata...`;
     case 'discovered':
     case 'downloading':
     case 'download_complete':
-      return 'Discovery complete! View the results below.';
+      return 'Identification complete! View the results below.';
     default:
-      return `Discovering clean ${metadataLabel} metadata for ${sourceWord} tracks...`;
+      return `Identifying clean ${metadataLabel} metadata for ${sourceWord} tracks...`;
   }
 }
 
@@ -124,13 +124,13 @@ export function modalDescription(phase: string, sourceWord: string, metadataLabe
 export function initialProgressText(phase: string): string {
   switch (phase) {
     case 'fresh':
-      return 'Click Start Discovery to begin...';
+      return 'Click Start Identifying to begin...';
     case 'discovered':
     case 'downloading':
     case 'download_complete':
-      return 'Discovery completed!';
+      return 'Identification complete!';
     default:
-      return 'Starting discovery...';
+      return 'Starting identification...';
   }
 }
 

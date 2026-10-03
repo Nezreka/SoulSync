@@ -116,7 +116,7 @@ describe('MirroredDetailModal', () => {
 
   it('wires the five actions, and Delete CLOSES first (1148)', () => {
     const h = renderModal({ name: 'A', source: 'spotify', tracks: [] });
-    fireEvent.click(screen.getByText('Discover'));
+    fireEvent.click(screen.getByText('Identify'));
     expect(h.onDiscover).toHaveBeenCalled();
     fireEvent.click(screen.getByText('Edit Source'));
     expect(h.onEditSource).toHaveBeenCalled();

@@ -113,7 +113,7 @@ describe('ExplorerPicker', () => {
     fireEvent.click(card);
     expect(onSelectPlaylist).toHaveBeenCalledWith(7);
 
-    const discover = screen.getByRole('button', { name: 'Discover' });
+    const discover = screen.getByRole('button', { name: 'Identify' });
     fireEvent.click(discover);
     expect(onStartDiscovery).toHaveBeenCalledWith(7);
     // The click must not also select the card behind it.
@@ -140,7 +140,7 @@ describe('ExplorerPicker', () => {
     expect(onSelectPlaylist).toHaveBeenCalledWith(7);
 
     // Enter on the nested Discover button must not bubble up into a card select.
-    const discover = screen.getByRole('button', { name: 'Discover' });
+    const discover = screen.getByRole('button', { name: 'Identify' });
     fireEvent.keyDown(discover, { key: 'Enter' });
     expect(onSelectPlaylist).toHaveBeenCalledTimes(1);
   });
@@ -159,7 +159,7 @@ describe('ExplorerPicker', () => {
     );
     fireEvent.click(container.querySelector('.explorer-picker-card') as HTMLElement);
     expect(onSelectPlaylist).toHaveBeenCalledWith(3);
-    expect(screen.queryByRole('button', { name: 'Discover' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Identify' })).toBeNull();
   });
 
   it('shows the badge and the meta line the card view derives', () => {
@@ -222,7 +222,7 @@ describe('ExplorerPicker', () => {
     );
     const open = screen.getByRole('button', { name: 'Open' }) as HTMLButtonElement;
     expect(open.disabled).toBe(false);
-    expect(open.getAttribute('title')).toBe('Reopen discovery modal');
+    expect(open.getAttribute('title')).toBe('Reopen identification modal');
   });
 
   it('names the selected playlist in the build hint', () => {

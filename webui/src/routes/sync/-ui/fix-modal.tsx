@@ -184,6 +184,11 @@ export function FixModal({ config, sourceId, row, onClose, onFixed }: FixModalPr
       <div className="discovery-fix-modal">
         <div className="discovery-fix-modal-header">
           <h2>Fix Track Match</h2>
+          <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4, fontWeight: 400 }}>
+            Links this source track to catalogue metadata — nothing is downloaded here.
+            <br />
+            Saved as: match data on the playlist track. Affects next sync: yes.
+          </div>
           <button type="button" className="modal-close-btn" onClick={onClose}>
             ✕
           </button>

@@ -96,7 +96,7 @@ export function MirroredDetailModal({
   onRunPipeline,
   onRefreshFromSource,
   onDiscover,
-  discoverLabel = 'Discover',
+  discoverLabel = 'Identify',
 }: MirroredDetailModalProps) {
   const tracks = (data.tracks ?? []) as MirroredTrack[];
   const source = data.source || 'unknown';

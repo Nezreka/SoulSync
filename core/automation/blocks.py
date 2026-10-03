@@ -75,7 +75,7 @@ TRIGGERS: list[dict] = [
      "has_conditions": True,
      "condition_fields": ["playlist_name"],
      "variables": ["playlist_name", "old_count", "new_count", "added", "removed"]},
-    {"type": "discovery_completed", "label": "Discovery Complete", "icon": "search", "description": "When playlist track discovery finishes", "available": True,
+    {"type": "discovery_completed", "label": "Identification Complete", "icon": "search", "description": "When playlist track identification finishes", "available": True,
      "has_conditions": True,
      "condition_fields": ["playlist_name"],
      "variables": ["playlist_name", "total_tracks", "discovered_count", "failed_count", "skipped_count"]},
@@ -304,13 +304,13 @@ ACTIONS: list[dict] = [
      "config_fields": [
          {"key": "playlist_id", "type": "mirrored_playlist_select", "label": "Playlist"}
      ]},
-    {"type": "discover_playlist", "label": "Discover Playlist", "icon": "search", "description": "Find official Spotify/iTunes metadata for mirrored playlist tracks", "available": True,
+    {"type": "discover_playlist", "label": "Identify Playlist Tracks", "icon": "search", "description": "Find official Spotify/iTunes metadata for mirrored playlist tracks", "available": True,
      "config_fields": [
          {"key": "playlist_id", "type": "mirrored_playlist_select", "label": "Playlist"},
-         {"key": "all", "type": "checkbox", "label": "Discover all mirrored playlists", "default": False}
+         {"key": "all", "type": "checkbox", "label": "Identify all mirrored playlists", "default": False}
      ]},
     {"type": "playlist_pipeline", "label": "Playlist Pipeline", "icon": "rocket",
-     "description": "Full lifecycle: refresh → discover → sync → download missing. One automation for the entire flow.",
+     "description": "Full lifecycle: refresh → identify → sync → download missing. One automation for the entire flow.",
      "available": True,
      "config_fields": [
          {"key": "playlist_id", "type": "mirrored_playlist_select", "label": "Playlist"},

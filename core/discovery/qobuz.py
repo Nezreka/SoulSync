@@ -284,7 +284,7 @@ def run_qobuz_discovery_worker(playlist_id, deps: QobuzDiscoveryDeps):
         state['discovery_progress'] = 100
 
         source_label = discovery_source.upper()
-        deps.add_activity_item("", f"Qobuz Discovery Complete ({source_label})", f"'{playlist['name']}' - {successful_discoveries}/{len(tracks)} tracks found", "Now")
+        deps.add_activity_item("", f"Qobuz Identification Complete ({source_label})", f"'{playlist['name']}' - {successful_discoveries}/{len(tracks)} tracks found", "Now")
 
         logger.info(f"Qobuz discovery complete ({source_label}): {successful_discoveries}/{len(tracks)} tracks found")
 

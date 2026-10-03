@@ -249,7 +249,7 @@ function MirroredCardMenu({
       {item('Edit source link', onEditSource)}
       {item('Export', onExport)}
       {/* Only offered when there IS a discovery to clear (575-582). */}
-      {(row.discovered_count || 0) > 0 && item('Clear discovery', onClear)}
+      {(row.discovered_count || 0) > 0 && item('Clear identification', onClear)}
       {item('Delete', onDelete, true)}
     </div>
   );
@@ -443,18 +443,18 @@ export function MirroredTab({
     async (row: MirroredPlaylistRow) => {
       const name = row.name ?? '';
       const ok = await window.showConfirmDialog?.({
-        title: 'Clear Discovery Data',
-        message: `Clear discovery data for "${name}"? You can re-discover afterwards to get updated cover art.`,
+        title: 'Clear Identification Data',
+        message: `Clear identification data for "${name}"? You can re-identify afterwards to get updated cover art.`,
       });
       if (!ok) return;
       try {
         const data = await clearMirroredDiscovery(row.id);
         if (!data.success) {
-          window.showToast?.(data.error || 'Failed to clear discovery', 'error');
+          window.showToast?.(data.error || 'Failed to clear identification', 'error');
           return;
         }
         window.showToast?.(
-          `Cleared discovery for ${name} (${data.cleared ?? 0} tracks)`,
+          `Cleared identification for ${name} (${data.cleared ?? 0} tracks)`,
           'success',
         );
         // 1184-1187: the 'cancelled' write is the running worker's cancel
@@ -1227,8 +1227,8 @@ export function MirroredTab({
           onDiscover={() => void runDiscovery(detail.playlistId)}
           discoverLabel={
             mirroredDiscoveryReopenable(vertical.states[mirroredHash(detail.playlistId)])
-              ? 'View discovery'
-              : 'Discover'
+              ? 'View identification'
+              : 'Identify'
           }
         />
       )}
