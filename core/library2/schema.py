@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS lib2_albums (
     title TEXT NOT NULL,
     album_type TEXT NOT NULL DEFAULT 'album',         -- 'album'|'single'|'ep'|'compilation'|'live'|...
     secondary_types TEXT NOT NULL DEFAULT '[]',       -- JSON array of extra tags
+    filed_release TEXT NOT NULL DEFAULT '{}',         -- how the last download filed it ($albumtype inputs); reorganize reuses it
     release_date TEXT,
     year INTEGER,
     spotify_id TEXT,
@@ -537,6 +538,13 @@ _ADDED_COLUMNS = (
     # never remembered, so the next check tries again exactly as before.
     ("lib2_albums", "canonical_track_count",
      "ALTER TABLE lib2_albums ADD COLUMN canonical_track_count INTEGER"),
+    # The release type a download filed the album under, with the inputs that
+    # decided it (type, track count, source, artist-page lock). A Library v2
+    # reorganize builds its path from the catalogue, which does not know the
+    # source's own single/EP label or the section lock -- without this it
+    # moved a fresh Deezer single from Single/ to EP/ (upstream 558d96864).
+    ("lib2_albums", "filed_release",
+     "ALTER TABLE lib2_albums ADD COLUMN filed_release TEXT NOT NULL DEFAULT '{}'"),
     # Deep-dive A7/C4: pipeline-result detail (AcoustID message, quality-gate
     # fallback) that the autolink import-callback now persists per file.
     ("lib2_track_files", "pipeline_result_json",

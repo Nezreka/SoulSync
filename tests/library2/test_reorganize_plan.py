@@ -26,6 +26,7 @@ applies the template to what the catalogue says. Two steps, each visible.
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Dict, List
 
 import pytest
@@ -316,3 +317,121 @@ def test_a_track_landing_on_an_unchanged_file_is_a_collision(imported_conn):
     assert by_title["Keep"]["unchanged"] is True
     assert by_title["Keep"]["collision"] is False
     assert by_title["Move"]["collision"] is True
+
+
+# ── the release type a download filed the album under (upstream 558d96864) ──
+
+class _Cfg:
+    def __init__(self, vals):
+        self.vals = vals
+
+    def get(self, key, default=None):
+        return self.vals.get(key, default)
+
+
+def _real_builder(monkeypatch, tmp_path):
+    """The real path builder with an $albumtype template, so the assertion is
+    about the folder a file actually lands in."""
+    from core.imports import paths
+
+    monkeypatch.setattr(paths, "_get_config_manager", lambda: _Cfg({
+        "file_organization.templates": {
+            "album_path": "$albumartist/$albumtype/$album/$track - $title"},
+        "file_organization.enabled": True,
+        "soulseek.transfer_path": str(tmp_path),
+    }))
+    return paths.build_final_path_for_track
+
+
+def _download_filing(monkeypatch, tmp_path, *, source, record_type, tracks, locked=False):
+    """What a download's path builder decides and leaves on its context."""
+    from core.library_reorganize import _build_album_info, _build_post_process_context
+
+    build = _real_builder(monkeypatch, tmp_path)
+    ctx = _build_post_process_context(
+        {"id": "AL9", "name": "Views", "release_date": "2016-01-01",
+         "total_tracks": tracks, "images": [{"url": ""}]},
+        {"name": "One Dance", "track_number": 1, "disc_number": 1,
+         "artists": [{"name": "Drake"}]},
+        "Drake", "Views", 1, record_type=record_type)
+    ctx["source"] = source
+    ctx["spotify_album"]["album_type_locked"] = locked
+    path, _ = build(ctx, ctx["spotify_artist"], _build_album_info(ctx), ".flac",
+                    create_dirs=False)
+    return ctx, os.path.basename(os.path.dirname(os.path.dirname(path)))
+
+
+def _reorganized_type_folder(conn, album_id, monkeypatch, tmp_path):
+    plan = reorganize_plan.plan_album_reorganize(
+        conn, album_id, build_final_path_fn=_real_builder(monkeypatch, tmp_path),
+        transfer_dir=str(tmp_path), resolve_file_path_fn=lambda p: p)
+    return os.path.basename(os.path.dirname(os.path.dirname(plan["tracks"][0]["new_path_abs"])))
+
+
+@pytest.mark.parametrize(("source", "record_type", "tracks", "locked", "folder"), [
+    ("deezer", "single", 5, False, "Single"),   # deezer labels its singles itself
+    ("deezer", "ep", 9, False, "EP"),
+    ("spotify", "single", 5, False, "EP"),      # spotify's EP-as-single splits
+    ("deezer", "album", 3, True, "Album"),      # locked to its artist-page section
+])
+def test_reorganize_files_a_release_where_its_download_did(
+        imported_conn, monkeypatch, tmp_path, source, record_type, tracks, locked, folder):
+    conn = imported_conn
+    _, album_id, _ = _seed(conn, tracks=tuple((f"T{n}", n, 1) for n in range(1, tracks + 1)))
+    conn.execute("UPDATE lib2_albums SET album_type=? WHERE id=?", (record_type, album_id))
+    ctx, download_folder = _download_filing(
+        monkeypatch, tmp_path, source=source, record_type=record_type, tracks=tracks,
+        locked=locked)
+    assert download_folder == folder
+
+    reorganize_plan.record_filed_release(conn, album_id, ctx)
+    conn.commit()
+
+    assert _reorganized_type_folder(conn, album_id, monkeypatch, tmp_path) == folder
+
+
+def test_without_a_recorded_filing_the_catalogue_type_is_split_by_count(
+        imported_conn, monkeypatch, tmp_path):
+    """Albums downloaded before the filing was kept: the catalogue type and the
+    release's track count, as before."""
+    conn = imported_conn
+    _, album_id, _ = _seed(conn, tracks=tuple((f"T{n}", n, 1) for n in range(1, 6)))
+    conn.execute("UPDATE lib2_albums SET album_type='single' WHERE id=?", (album_id,))
+    conn.commit()
+
+    assert _reorganized_type_folder(conn, album_id, monkeypatch, tmp_path) == "EP"
+
+
+def test_a_type_set_by_hand_beats_the_recorded_filing(imported_conn, monkeypatch, tmp_path):
+    from core.library2.metadata_overrides import set_field_override
+
+    conn = imported_conn
+    _, album_id, _ = _seed(conn, tracks=tuple((f"T{n}", n, 1) for n in range(1, 6)))
+    conn.execute("UPDATE lib2_albums SET album_type='single' WHERE id=?", (album_id,))
+    ctx, _ = _download_filing(monkeypatch, tmp_path, source="deezer", record_type="single",
+                              tracks=5)
+    reorganize_plan.record_filed_release(conn, album_id, ctx)
+    set_field_override(conn, entity_type="release_group", entity_id=album_id,
+                       field_name="album_type", value="album")
+    conn.commit()
+
+    assert _reorganized_type_folder(conn, album_id, monkeypatch, tmp_path) == "Album"
+
+
+def test_recorded_secondary_types_fill_only_an_empty_list(imported_conn):
+    conn = imported_conn
+    _, album_id, _ = _seed(conn)
+    ctx = {"_filed_release": {"type": "ep", "total_tracks": 5, "source": "musicbrainz",
+                              "locked": False, "secondary_types": ["live"]}}
+    reorganize_plan.record_filed_release(conn, album_id, ctx)
+    row = conn.execute("SELECT filed_release, secondary_types FROM lib2_albums WHERE id=?",
+                       (album_id,)).fetchone()
+    assert json.loads(row["secondary_types"]) == ["live"]
+    assert json.loads(row["filed_release"]) == {
+        "type": "ep", "total_tracks": 5, "source": "musicbrainz", "locked": False}
+
+    conn.execute("UPDATE lib2_albums SET secondary_types='[\"soundtrack\"]' WHERE id=?",
+                 (album_id,))
+    reorganize_plan.record_filed_release(conn, album_id, ctx)
+    row = conn.execute("SELECT secondary_types FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
+    assert json.loads(row["secondary_types"]) == ["soundtrack"]

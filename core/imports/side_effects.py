@@ -784,6 +784,8 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                     # second release of the same name straight back in.
                     title_fallback=not mb_release_id)
             _fill_external_id(cursor, "lib2_albums", catalogue_album, source, album_source_id)
+            from core.library2.reorganize_plan import record_filed_release
+            record_filed_release(cursor, catalogue_album, context)
             if mb_release_id:
                 _fill_external_id(cursor, "lib2_albums", catalogue_album, "musicbrainz", mb_release_id)
 

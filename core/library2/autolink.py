@@ -820,6 +820,11 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                     disc_number=disc_number, source=track_identity_source,
                     monitored=derived_monitored)
 
+            if not fallback:
+                # how this download filed the release, for a later reorganize
+                from core.library2.reorganize_plan import record_filed_release
+                record_filed_release(conn, album_id, context)
+
             fmt = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else None
             bitrate = sample_rate = bit_depth = None
             tier = None

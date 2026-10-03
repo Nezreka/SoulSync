@@ -41,10 +41,71 @@ from utils.logging_config import get_logger
 logger = get_logger("library2.reorganize_plan")
 
 
+FILED_RELEASE_KEY = "_filed_release"
+
+
+def record_filed_release(conn, album_id: Any, context: Any) -> None:
+    """Remember on the album how this download filed the release.
+
+    The path builder stashes the inputs of its release-type decision on the
+    import context (``_filed_release``): the source's type, the track count,
+    which source said it and whether the artist-page section locked it. The
+    catalogue alone cannot reproduce that -- it keeps one ``album_type`` and
+    neither the source nor the lock -- so a reorganize would re-judge the
+    release and move it. Secondary types (Live, Soundtrack, ...) fill an empty
+    ``secondary_types`` so ``$atypes`` keeps its labels. Never raises.
+    """
+    filed = context.get(FILED_RELEASE_KEY) if isinstance(context, dict) else None
+    if not album_id or not isinstance(filed, dict) or not filed.get("type"):
+        return
+    try:
+        payload = {
+            "type": str(filed.get("type") or "album").strip().lower(),
+            "total_tracks": int(filed.get("total_tracks") or 0),
+            "source": str(filed.get("source") or ""),
+            "locked": bool(filed.get("locked")),
+        }
+        conn.execute("UPDATE lib2_albums SET filed_release=? WHERE id=?",
+                     (json.dumps(payload), int(album_id)))
+        secondary = [str(v) for v in (filed.get("secondary_types") or []) if v]
+        if secondary:
+            conn.execute(
+                "UPDATE lib2_albums SET secondary_types=? WHERE id=?"
+                " AND COALESCE(secondary_types, '[]') IN ('', '[]')",
+                (json.dumps(secondary), int(album_id)))
+    except Exception as exc:  # noqa: BLE001 - bookkeeping must not fail an import
+        logger.debug("filed release not recorded for album %s: %s", album_id, exc)
+
+
+def _filing(album_row: Any, album: Dict[str, Any]) -> Dict[str, Any]:
+    """How a reorganize judges the release type, in this order:
+
+    1. a type the user set by hand (an override): the section, used as-is;
+    2. how the last download filed it: the same inputs, so the same folder;
+    3. otherwise the catalogue type split by the release's track count.
+    """
+    base_type = str(album_row["album_type"] or "album").strip().lower() or "album"
+    effective_type = str(album.get("album_type") or base_type).strip().lower() or base_type
+    if effective_type != base_type:
+        return {"type": effective_type, "source": "", "locked": True, "total_tracks": 0}
+    try:
+        filed = json.loads(album_row["filed_release"] or "{}")
+    except (TypeError, ValueError, IndexError, KeyError):
+        filed = {}
+    if isinstance(filed, dict) and filed.get("type"):
+        return {
+            "type": str(filed["type"]).strip().lower(),
+            "source": str(filed.get("source") or ""),
+            "locked": bool(filed.get("locked")),
+            "total_tracks": int(filed.get("total_tracks") or 0),
+        }
+    return {"type": base_type, "source": "tags", "locked": None, "total_tracks": 0}
+
+
 def _album_row(conn, album_id: int):
     return conn.execute(
         """SELECT al.id, al.title, al.year, al.release_date, al.album_type,
-                  al.secondary_types,
+                  al.secondary_types, al.filed_release,
                   al.image_url, al.spotify_id, al.primary_artist_id,
                   al.expected_track_count, al.track_count,
                   ar.name AS artist_name
@@ -221,6 +282,7 @@ def plan_album_reorganize(
     # of `Disc 1/`, and moved it straight back the moment disc 2's first file
     # landed — the #1080 oscillation from the other direction.
     total_discs = max((int(t["disc_number"] or 1) for t in all_tracks), default=1)
+    filing = _filing(album_row, album)
 
     planned: List[Dict[str, Any]] = []
     for track in tracks:
@@ -257,7 +319,8 @@ def plan_album_reorganize(
 
         artists = _credited_artists(conn, track["id"]) or [artist_name]
         context = _build_post_process_context(
-            _as_provider_album(album, release_tracks, total_discs),
+            _as_provider_album({**album, "album_type": filing["type"]},
+                               filing["total_tracks"] or release_tracks, total_discs),
             {
                 "id": "",
                 "name": title,
@@ -271,9 +334,14 @@ def plan_album_reorganize(
             total_discs,
             local_title=title,
             local_year=(str(album["year"]) if album.get("year") else None),
-            record_type=album.get("album_type") or "album",
-            type_source="tags",
+            record_type=filing["type"],
+            type_source=filing["source"],
         )
+        if filing["locked"] is not None:
+            # reproduce the download's decision exactly: its source and its
+            # lock, not the context builder's own guess from the source name
+            context["_album_type_source"] = filing["source"]
+            context["spotify_album"]["album_type_locked"] = filing["locked"]
         try:
             new_full, _ok = build_final_path_fn(
                 context, context["spotify_artist"], _build_album_info(context),

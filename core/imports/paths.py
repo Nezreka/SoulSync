@@ -1083,6 +1083,20 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         or (isinstance(album_info, dict) and album_info.get("album_type_locked"))
     )
     album_type_display = get_album_type_display(raw_album_type, total_tracks, _type_source, _type_locked)
+    if isinstance(context, dict):
+        # the inputs that decided the release type, kept on the Library v2
+        # album at registration so a reorganize files the release where this
+        # download did (core/library2/reorganize_plan.py)
+        context["_filed_release"] = {
+            "type": raw_album_type or "album",
+            "total_tracks": _coerce_int(total_tracks, 0),
+            "source": str(_type_source or ""),
+            "locked": _type_locked,
+            "secondary_types": [
+                str(value) for value in ((album_context or {}).get("secondary_types") or [])
+                if value
+            ],
+        }
 
     # $atypes: every qualifier the release actually carries, bracketed, and
     # nothing at all for a plain album — the beets convention, so a library
