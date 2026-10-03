@@ -21065,8 +21065,49 @@ class MusicDatabase:
 
     # ==================== Discovery Pool Methods ====================
 
-    def get_discovery_pool_matched(self, limit: int = 500) -> list:
-        """Get all cached discovery matches, ordered by most recently used."""
+    def _get_playlist_discovery_keys(self, playlist_id: int, profile_id: int = None) -> set:
+        """Return the set of (normalized_title, normalized_artist) discovery keys for a playlist.
+
+        discovery_match_cache is a global cache keyed by Python-normalized
+        (clean_title, clean_artist) pairs (see _get_discovery_cache_key), so per-playlist
+        filtering re-keys the playlist's tracks with the same normalization and filters
+        the cached rows in memory. The cache has no playlist column by design.
+        """
+        keys = set()
+        try:
+            engine = _matching_engine
+            if engine is None:
+                return keys
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            query = """
+                SELECT mpt.track_name, mpt.artist_name
+                FROM mirrored_playlist_tracks mpt
+                JOIN mirrored_playlists mp ON mpt.playlist_id = mp.id
+                WHERE mpt.playlist_id = ?
+            """
+            params = [playlist_id]
+            if profile_id:
+                query += " AND mp.profile_id = ?"
+                params.append(profile_id)
+            cursor.execute(query, params)
+            for row in cursor.fetchall():
+                keys.add((engine.clean_title(row['track_name'] or ''),
+                          engine.clean_artist(row['artist_name'] or '')))
+            conn.close()
+        except Exception as e:
+            logger.error(f"Error getting playlist discovery keys: {e}")
+        return keys
+
+    def get_discovery_pool_matched(self, limit: int = 500, profile_id: int = None,
+                                   playlist_id: int = None) -> list:
+        """Get cached discovery matches, ordered by most recently used.
+
+        When ``playlist_id`` is given, only matches for tracks in that playlist are
+        returned. The cache is global and carries no playlist id, so the playlist's
+        tracks are re-keyed with the same normalization and the rows are filtered
+        in memory. Without ``playlist_id`` the result is identical to before.
+        """
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -21077,8 +21118,16 @@ class MusicDatabase:
                 ORDER BY last_used_at DESC
                 LIMIT ?
             """, (limit,))
+            rows = cursor.fetchall()
+            conn.close()
+
+            if playlist_id:
+                keys = self._get_playlist_discovery_keys(playlist_id, profile_id)
+                rows = [row for row in rows
+                        if (row['normalized_title'], row['normalized_artist']) in keys]
+
             results = []
-            for row in cursor.fetchall():
+            for row in rows:
                 try:
                     matched_data = json.loads(row['matched_data_json'])
                 except (json.JSONDecodeError, TypeError):
@@ -21138,13 +21187,21 @@ class MusicDatabase:
             logger.error(f"Error deleting discovery cache entry: {e}")
             return False
 
-    def get_discovery_pool_stats(self, profile_id: int = None) -> dict:
+    def get_discovery_pool_stats(self, profile_id: int = None, playlist_id: int = None) -> dict:
         """Get counts for matched and failed discovery tracks."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) as cnt FROM discovery_match_cache")
-            matched = cursor.fetchone()['cnt']
+            if playlist_id:
+                # Scope the matched count the same way as the matched query: the cache
+                # is global, so re-key the playlist's tracks and count matching rows.
+                keys = self._get_playlist_discovery_keys(playlist_id, profile_id)
+                cursor.execute("SELECT normalized_title, normalized_artist FROM discovery_match_cache")
+                matched = sum(1 for row in cursor.fetchall()
+                              if (row['normalized_title'], row['normalized_artist']) in keys)
+            else:
+                cursor.execute("SELECT COUNT(*) as cnt FROM discovery_match_cache")
+                matched = cursor.fetchone()['cnt']
 
             query = """
                 SELECT COUNT(*) as cnt FROM mirrored_playlist_tracks mpt
@@ -21153,11 +21210,15 @@ class MusicDatabase:
                   AND mpt.extra_data NOT LIKE '%"discovered": true%'
             """
             params = []
-            if profile_id:
+            if playlist_id:
+                query += " AND mpt.playlist_id = ?"
+                params.append(playlist_id)
+            elif profile_id:
                 query += " AND mp.profile_id = ?"
                 params.append(profile_id)
             cursor.execute(query, params)
             failed = cursor.fetchone()['cnt']
+            conn.close()
             return {'matched': matched, 'failed': failed}
         except Exception as e:
             logger.error(f"Error getting discovery pool stats: {e}")
@@ -21236,7 +21297,7 @@ class MusicDatabase:
             logger.error(f"Error getting wing it pool: {e}")
             return []
 
-    def get_wing_it_pool_stats(self, profile_id: int = None) -> dict:
+    def get_wing_it_pool_stats(self, profile_id: int = None, playlist_id: int = None) -> dict:
         """Counts for both Wing It states: unverified (``wing_it``) + resolved (``matched``)."""
         try:
             conn = self._get_connection()
@@ -21246,7 +21307,10 @@ class MusicDatabase:
                 q = (f"SELECT COUNT(*) as cnt FROM mirrored_playlist_tracks mpt "
                      f"JOIN mirrored_playlists mp ON mpt.playlist_id = mp.id WHERE {where}")
                 params = []
-                if profile_id:
+                if playlist_id:
+                    q += " AND mpt.playlist_id = ?"
+                    params.append(playlist_id)
+                elif profile_id:
                     q += " AND mp.profile_id = ?"
                     params.append(profile_id)
                 cursor.execute(q, params)

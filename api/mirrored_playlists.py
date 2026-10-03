@@ -821,9 +821,9 @@ def get_discovery_pool():
         profile_id = get_current_profile_id()
         playlist_id = request.args.get('playlist_id', type=int)
 
-        matched = database.get_discovery_pool_matched()
+        matched = database.get_discovery_pool_matched(profile_id=profile_id, playlist_id=playlist_id)
         failed = database.get_discovery_pool_failed(profile_id=profile_id, playlist_id=playlist_id)
-        stats = database.get_discovery_pool_stats(profile_id=profile_id)
+        stats = database.get_discovery_pool_stats(profile_id=profile_id, playlist_id=playlist_id)
 
         # Playlist list for the filter dropdown
         playlists = database.get_mirrored_playlists(profile_id=profile_id)
@@ -855,7 +855,7 @@ def get_wing_it_pool():
 
         tracks = database.get_wing_it_pool(profile_id=profile_id, playlist_id=playlist_id)
         matched = database.get_wing_it_pool(profile_id=profile_id, playlist_id=playlist_id, resolved=True)
-        stats = database.get_wing_it_pool_stats(profile_id=profile_id)
+        stats = database.get_wing_it_pool_stats(profile_id=profile_id, playlist_id=playlist_id)
 
         playlists = database.get_mirrored_playlists(profile_id=profile_id)
         playlist_options = [{'id': p['id'], 'name': p['name']} for p in playlists]
