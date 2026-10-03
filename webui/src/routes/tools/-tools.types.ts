@@ -211,6 +211,8 @@ export interface ToolRunState {
 export interface DbUpdateState extends ToolRunState {
   processed?: number;
   total?: number;
+  /** What processed/total count: "artists" during scan phases, "tracks" during the post-scan tag reconcile. */
+  unit?: string;
 }
 
 export interface DuplicateCleanState extends ToolRunState {

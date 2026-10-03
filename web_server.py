@@ -1330,6 +1330,7 @@ db_update_state = {
     "processed": 0,
     "total": 0,
     "error_message": "",
+    "unit": "artists",  # what processed/total count; "tracks" during post-scan tag reconcile
     "removed_artists": 0,
     "removed_albums": 0,
     "removed_tracks": 0,
@@ -8268,6 +8269,7 @@ def request_incremental_database_update():
             db_update_state.update({
                 "status": "running", "phase": "Initializing...",
                 "progress": 0, "current_item": "", "processed": 0, "total": 0, "error_message": "",
+                "unit": "artists",
                 # H16: new run epoch — a stale worker from a watchdog-superseded
                 # run must not overwrite this run's terminal state.
                 "run_epoch": db_update_state.get("run_epoch", 0) + 1,
@@ -9986,7 +9988,8 @@ def _reconcile_after_scan(worker):
         def _on_progress(totals, title):
             try:
                 pct = (totals.processed / totals.total * 100) if totals.total else 100
-                _db_update_progress_callback(title, totals.processed, totals.total, pct)
+                _db_update_progress_callback(title, totals.processed, totals.total, pct,
+                                             unit="tracks")
             except Exception:  # noqa: S110 — best-effort UI progress tick
                 pass
 
