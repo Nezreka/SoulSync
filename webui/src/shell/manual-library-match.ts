@@ -240,8 +240,9 @@ export function _mlmSelectSource(idx: number): void {
 }
 
 // #1289: show "also add to playlist" when the source came from a mirrored
-// playlist (context is a playlist name, not "Wishlist"). Uses by-name
-// resolution — deliberately not the server_playlist_id column.
+// playlist (context is a playlist name, not "Wishlist"). The backend resolves
+// the name through the stored server link (item 6) when available, so renames
+// don't break it.
 function _mlmUpdatePlaylistCheckbox(): void {
   const wrap = document.getElementById('mlm-add-to-playlist-wrap');
   const label = document.getElementById('mlm-add-to-playlist-label');

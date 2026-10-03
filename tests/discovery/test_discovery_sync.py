@@ -450,6 +450,22 @@ def test_playlist_image_new_playlist_still_pushes(patched_db):
     assert nd.image_calls == [('PNew', 'https://img/n.png')]
 
 
+def test_playlist_image_skipped_under_reconcile_default(patched_db):
+    """#1289 item 1: Reconcile is the default sync mode, and reconcile edits the
+    playlist in place — it must NOT push the source cover over a user's custom
+    server-side image. The default (no sync_mode arg) must skip the upload."""
+    nd = _FakeNavidrome()
+    cfg = _FakeConfig(server='navidrome')
+    result = _FakeSyncResult(synced_tracks=4)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, navidrome=nd, config=cfg)
+
+    ds.run_sync_task('pND', 'PND', [_track()],
+                     playlist_image_url='https://img/z.png', deps=deps)
+
+    assert nd.image_calls == []
+
+
 def test_playlist_image_skip_on_existing_applies_to_plex_too(patched_db):
     """The new-playlist-only rule is uniform across servers, not Navidrome-only."""
     plex = _FakePlex(existing=('PImg',))

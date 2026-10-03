@@ -18393,6 +18393,36 @@ def server_playlist_add_track(playlist_id):
             return jsonify({"success": False, "error": "playlist_name required"}), 400
 
         active_server = config_manager.get_active_media_server()
+        # #1289 item 7 + item 6: the frontend sends playlist_id=0 and a name.
+        # If this name matches a mirrored playlist with a stored server link,
+        # follow the stored server ID (survives server-side renames) instead
+        # of the potentially stale name.
+        if str(playlist_id) == '0' and playlist_name:
+            try:
+                from core.sync.mirrored_server_link import resolve_sync_server_playlist_id
+                db = get_database()
+                profile_id = get_current_profile_id()
+                mirrors = db.get_mirrored_playlists(profile_id)
+                mirror = next(
+                    (m for m in mirrors
+                     if str(m.get('name', '')).lower() == playlist_name.lower()),
+                    None)
+                if mirror:
+                    # Build a minimal client for the link resolution.
+                    _link_client = None
+                    if active_server == 'navidrome':
+                        from core.navidrome_client import NavidromeClient
+                        _link_client = NavidromeClient()
+                    stored_id = resolve_sync_server_playlist_id(
+                        playlist_id=mirror.get('id', ''),
+                        playlist_name=playlist_name,
+                        server_type=active_server,
+                        media_client=_link_client,
+                        profile_id=profile_id)
+                    if stored_id:
+                        playlist_id = stored_id
+            except Exception as e:
+                logger.debug(f"add-track server-link resolution failed: {e}")
         # #1414: a profile reaches only its own playlists, through its own
         # server user when it has one, and acts on the playlist it was checked for
         _sp_client, playlist_id, playlist_name, _sp_refusal = _server_playlist_guard(

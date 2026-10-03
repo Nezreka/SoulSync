@@ -301,12 +301,13 @@ const HELPER_CONTENT = {
     },
     '#discovery-pool-card': {
         title: 'Match Review',
-        description: 'Review matched and failed track identifications across all mirrored playlists. Failed matches can be fixed manually.',
+        description: 'Review matched and failed track identifications across all mirrored playlists. Matched tracks feed the Discover page\'s personalized playlists and genre browser. Failed matches can be fixed manually.',
         tips: [
             'Click "Open Match Review" to review matched and failed tracks',
             '"Rematch" button on matched tracks lets you pick a different match',
             'Search filter helps find specific tracks in large pools'
-        ]
+        ],
+        docsId: 'discover'
     },
     // (#retag-tool-card removed — no element with that id exists anywhere, so
     // the entry could only ever produce a helper search result that goes

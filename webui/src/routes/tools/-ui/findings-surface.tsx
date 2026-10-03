@@ -809,7 +809,7 @@ export function FindingsSurface({
         fixAction = await prompts.promptDeadFile();
         if (!fixAction) return;
       } else if (group.finding_type === TYPE_ACOUSTID) {
-        fixAction = await prompts.promptAcoustid();
+        fixAction = await prompts.promptAcoustid(undefined, count);
         if (!fixAction) return;
       } else if (group.finding_type === TYPE_QUALITY) {
         fixAction = await prompts.promptQuality();

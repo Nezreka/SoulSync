@@ -231,7 +231,9 @@ function AcoustidPrompt({
       title={confirmRelocate ? 'Confirm Relocate' : 'AcoustID Mismatch'}
       body={
         confirmRelocate
-          ? 'This will move the file out of your library into Staging for re-import, and remove its library entry. Continue?'
+          ? count && count > 1
+            ? `This will move ${count} files out of your library into Staging for re-import, and remove their library entries. Continue?`
+            : 'This will move the file out of your library into Staging for re-import, and remove its library entry. Continue?'
           : ambiguous
             ? 'The fingerprint matches several recordings. Pick the one this file really is, then choose how to fix it.'
             : "The audio fingerprint doesn't match the expected track. Choose how to fix it."
