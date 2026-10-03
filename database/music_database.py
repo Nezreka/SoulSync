@@ -22559,6 +22559,22 @@ class MusicDatabase:
                     by_key[key] = card
                     cards.append(card)
 
+                # #1453: a rebuild wipes tracks but keeps library_history
+                # (the Expired Download Cleaner grandfathers pre-rebuild
+                # downloads off surviving history rows + library_rebuilt_at),
+                # so the fold above can build cards whose play target no
+                # longer exists. Drop those here — never delete the history
+                # rows themselves.
+                from core.library.expired_cleanup import path_suffix_key  # matches the existing lazy import at :21740
+                cursor.execute("SELECT file_path FROM tracks WHERE file_path IS NOT NULL")
+                live_keys = {path_suffix_key(r[0]) for r in cursor.fetchall()}
+                cards = [
+                    c for c in cards
+                    if not c.get('play_file_path')
+                    or os.path.exists(c['play_file_path'])
+                    or path_suffix_key(c['play_file_path']) in live_keys
+                ]
+
                 # the normalized columns are indexed; the LOWER(TRIM()) form
                 # this replaced scanned every album per card (1.3 s of cpu per
                 # dashboard load on 70k albums). the norm also folds accents,
