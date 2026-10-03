@@ -20,8 +20,19 @@ from .sql_util import (
 from .status import compute_metadata_gaps, file_status, metadata_scan_status, quality_tier
 from .track_files import primary_order
 
+def _alpha_key(column: str) -> str:
+    """Upstream's A-Z key (33da6be49): leading punctuation is skipped, so
+    '"Weird Al" Yankovic' files under W and '*NSYNC' under N. One definition,
+    shared with the compatibility API in ``database/music_database.py``."""
+    from database.music_database import _library_sort_key_sql
+
+    return _library_sort_key_sql(column)
+
+
 _SORTS = {
-    "name": "a.sort_name COLLATE NOCASE, a.name COLLATE NOCASE",
+    # An empty or NULL sort_name sorts by the name rather than ahead of A.
+    "name": (_alpha_key("COALESCE(NULLIF(a.sort_name, ''), a.name)")
+             + ", a.name COLLATE NOCASE"),
     "added": "a.added_at DESC",
     "albums": "album_count DESC, a.name COLLATE NOCASE",
     "tracks": "track_count DESC, a.name COLLATE NOCASE",
@@ -1055,7 +1066,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         LEFT JOIN lib2_wanted_tracks w ON w.track_id=t.id AND w.profile_id={intent_profile_id()}
         LEFT JOIN album_size asz ON asz.album_id=al.id
         GROUP BY al.id
-        ORDER BY al.year DESC, al.title COLLATE NOCASE
+        ORDER BY al.year DESC, {_alpha_key("al.title")}
         """,
         (*tuple(group), *tuple(group)),
     ).fetchall()
