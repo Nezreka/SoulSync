@@ -258,7 +258,10 @@ describe('MirroredTab — the three actions', () => {
         'Clear identification data for "Road Trip"? You can re-identify afterwards to get updated cover art.',
     });
     expect(calls.some((c) => c.url === '/api/mirrored-playlists/3/clear-discovery')).toBe(true);
-    expect(toast).toHaveBeenCalledWith('Cleared identification for Road Trip (12 tracks)', 'success');
+    expect(toast).toHaveBeenCalledWith(
+      'Cleared identification for Road Trip (12 tracks)',
+      'success',
+    );
     // 1187: the entry is DELETED, not left at 'cancelled' — otherwise the
     // next card click reads it as non-fresh and opens an empty modal.
     expect(screen.getByTestId('phase')).toHaveTextContent('unseeded');
