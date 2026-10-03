@@ -250,11 +250,11 @@ describe('discovery-completion toasts (the per-source drift, 9204/11076)', () =>
     expect(byId).toEqual({
       // _discoveryCompleteToast, shared by youtube and the mirrored rows that
       // ride its poller (9204).
-      youtube: 'Discovery complete!',
-      ytmusic: 'Discovery complete!',
-      mirrored: 'Discovery complete!',
+      youtube: 'Identification complete!',
+      ytmusic: 'Identification complete!',
+      mirrored: 'Identification complete!',
       // ListenBrainz words its own (11076, 11171).
-      listenbrainz: 'ListenBrainz discovery complete!',
+      listenbrainz: 'ListenBrainz identification complete!',
       // The other six complete with a console.log and NO toast.
       tidal: null,
       qobuz: null,

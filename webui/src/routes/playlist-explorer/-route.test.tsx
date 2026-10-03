@@ -120,9 +120,9 @@ describe('playlist-explorer route', () => {
     expect(screen.getByText('Playlist Explorer')).toBeInTheDocument();
     expect(document.querySelector('#explorer-empty')).toBeTruthy();
     // The under-discovered playlist warns (not-ready styling) but still opens;
-    // it also offers Discover to thicken discovery (#1289).
+    // it also offers Identify to thicken identification (#1289).
     expect(document.querySelectorAll('.explorer-picker-card.not-ready')).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'Discover' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Identify' })).toBeInTheDocument();
     // No action bar until a tree exists.
     expect(document.querySelector('#explorer-action-bar')).toBeNull();
   });
