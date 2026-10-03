@@ -158,7 +158,11 @@ describe('the card status badges', () => {
       },
     };
     // eslint-disable-next-line @typescript-eslint/no-implied-eval
-    const fn = new Function(...Object.keys(deps), 'args', `${extractFunction(name, JS)}\nreturn ${name}(...args);`);
+    const fn = new Function(
+      ...Object.keys(deps),
+      'args',
+      `${extractFunction(name, JS)}\nreturn ${name}(...args);`,
+    );
     return fn(...Object.values(deps), args) as string;
   }
 
@@ -175,7 +179,9 @@ describe('the card status badges', () => {
     expect(wanted).toContain('vcal-acq--want');
     expect(wanted).toContain('Wanted');
     // Other in-flight states ride along too.
-    expect(renderCard('epCell', { ...EP, has_file: 0, acq: 'downloading' })).toContain('Downloading');
+    expect(renderCard('epCell', { ...EP, has_file: 0, acq: 'downloading' })).toContain(
+      'Downloading',
+    );
     // The ordinary unaired case stays clean.
     const unaired = renderCard('epCell', { ...EP, has_file: 0, acq: 'unaired' });
     expect(unaired).not.toContain('vcal-flag');
@@ -185,11 +191,22 @@ describe('the card status badges', () => {
   it('grid movie cards say wishlist until owned', () => {
     // The movie lane is built from the wishlist, so a non-owned card is
     // wishlisted by construction.
-    const wished = renderCard('movieCell', { title: 'Film', tmdb_id: 9, type: 'available', owned: 0 });
+    const wished = renderCard('movieCell', {
+      title: 'Film',
+      tmdb_id: 9,
+      type: 'available',
+      owned: 0,
+    });
     expect(wished).not.toContain('vcal-flag');
     expect(wished).toContain('vcal-acq--want');
     expect(wished).toContain('Wishlist');
-    const owned = renderCard('movieCell', { title: 'Film', tmdb_id: 9, type: 'available', owned: 1, library_id: 4 });
+    const owned = renderCard('movieCell', {
+      title: 'Film',
+      tmdb_id: 9,
+      type: 'available',
+      owned: 1,
+      library_id: 4,
+    });
     expect(owned).toContain('vcal-flag');
     expect(owned).not.toContain('vcal-acq');
   });
