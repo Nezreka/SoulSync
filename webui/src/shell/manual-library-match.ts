@@ -256,14 +256,12 @@ function _mlmUpdatePlaylistCheckbox(): void {
   if (!wrap || !label || !box) return;
   const ctx = (_mlmSelectedSource?.context || '').trim();
   const isPlaylist = ctx !== '' && ctx.toLowerCase() !== 'wishlist';
-  const isServerTrack = !!(_mlmSelectedLibrary?.server_source);
+  const isServerTrack = !!_mlmSelectedLibrary?.server_source;
   if (isPlaylist && isServerTrack) {
     label.textContent = `Also add to server playlist "${ctx}"?`;
     wrap.style.display = '';
   } else {
     wrap.style.display = 'none';
-    box.checked = false;
-  }
     box.checked = false;
   }
 }
@@ -339,7 +337,11 @@ export async function _mlmSaveMatch(): Promise<void> {
           if (status) status.textContent = 'Match saved, but playlist add failed (network)';
         }
       }
-      if (status && !status.textContent.startsWith('Match saved') && !status.textContent.includes('added to'))
+      if (
+        status &&
+        !status.textContent.startsWith('Match saved') &&
+        !status.textContent.includes('added to')
+      )
         status.textContent = 'Saved!';
       _mlmSelectedSource = null;
       _mlmSelectedLibrary = null;

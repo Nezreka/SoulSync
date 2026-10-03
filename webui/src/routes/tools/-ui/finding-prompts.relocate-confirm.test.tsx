@@ -7,10 +7,10 @@
  */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { useFindingPrompts } from './finding-prompts';
-import { useState } from 'react';
 
 // Minimal harness to drive the prompt hook.
 function Harness({ candidates, count }: { candidates?: string[]; count?: number }) {
