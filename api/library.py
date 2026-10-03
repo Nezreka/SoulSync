@@ -31,6 +31,7 @@ def register_routes(bp):
                 limit=limit,
                 watchlist_filter=watchlist,
                 profile_id=profile_id,
+                skip_server_filter=True,
             )
             artists = result.get("artists", [])
             pag = result.get("pagination", {})
