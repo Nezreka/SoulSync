@@ -831,3 +831,10 @@ class TestBackfillStaleHistory:
         out = _backfill_stale_history(w, [cand], [])
         assert len(out) == 1
         assert out[0]['status'] == 'failed'
+
+
+def test_partial_rows_kept_without_files():
+    """#1289 Bug 3: partial history rows must survive even with no staged files
+    (regression guard for _KEEP_WITHOUT_FILES)."""
+    from core.imports.inbox import _KEEP_WITHOUT_FILES
+    assert 'partial' in _KEEP_WITHOUT_FILES

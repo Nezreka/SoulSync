@@ -34,13 +34,18 @@ export const INBOX_STATUS_META: Record<ImportInboxStatus, InboxStatusMeta> = {
   queued: { label: 'Queued', tone: 'info', hint: 'Approved, importing on the next pass' },
   importing: { label: 'Importing', tone: 'info', hint: 'Tagging and moving files' },
   imported: { label: 'Imported', tone: 'success', hint: 'In the library' },
+  partial: {
+    label: 'Partially imported',
+    tone: 'warning',
+    hint: 'Some tracks imported — the rest did not make it',
+  },
   failed: { label: 'Failed', tone: 'danger', hint: 'The import did not finish' },
   dismissed: { label: 'Dismissed', tone: 'neutral', hint: 'Left in the import folder' },
 };
 
-/** statuses a person has to do something about, in the order they should see them */
+/** statuses a person has to do something about, in the order they should see them. */
 const ATTENTION_ORDER: ImportInboxStatus[] = ['needs_review', 'needs_identify', 'failed'];
-const HISTORY: ImportInboxStatus[] = ['imported', 'failed', 'dismissed'];
+const HISTORY: ImportInboxStatus[] = ['imported', 'partial', 'failed', 'dismissed'];
 
 /**
  * Waiting counts as attention only while auto-import is OFF. With it on, a
@@ -77,6 +82,7 @@ const STATUS_RANK: ImportInboxStatus[] = [
   'identifying',
   'needs_review',
   'needs_identify',
+  'partial',
   'failed',
   'waiting',
   'imported',

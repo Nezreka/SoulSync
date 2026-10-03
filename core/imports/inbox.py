@@ -26,7 +26,7 @@ _HISTORY_STATUS = {
     'approved': 'queued',
     'processing': 'importing',
     'completed': 'imported',
-    'partial': 'imported',
+    'partial': 'partial',
     'failed': 'failed',
     'rejected': 'dismissed',
 }
@@ -34,7 +34,7 @@ _HISTORY_STATUS = {
 # history rows whose files are gone from staging are worth keeping only when
 # they are a record of something. a stale "needs identify" for a folder the
 # user already moved away is noise.
-_KEEP_WITHOUT_FILES = {'imported', 'failed', 'dismissed'}
+_KEEP_WITHOUT_FILES = {'imported', 'partial', 'failed', 'dismissed'}
 
 # active-import phases -> inbox status
 _LIVE_STATUS = {

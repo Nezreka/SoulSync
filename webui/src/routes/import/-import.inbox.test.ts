@@ -150,3 +150,21 @@ describe('time', () => {
     expect(secondsToNextScan(null, 60, now)).toBeNull();
   });
 });
+
+describe('partial status (Bug 3)', () => {
+  it('has a warning-presented inbox meta entry', async () => {
+    const { INBOX_STATUS_META } = await import('./-import.inbox');
+    const meta = INBOX_STATUS_META['partial'];
+    expect(meta).toBeDefined();
+    expect(meta.label).toMatch(/partial/i);
+    expect(meta.tone).toBe('warning');
+  });
+
+  it('is not an attention status', async () => {
+    const { isAttention } = await import('./-import.inbox');
+    // partial+staging is mapped to failed by the backend; a bare partial
+    // row is history, never attention.
+    expect(isAttention('partial', true)).toBe(false);
+    expect(isAttention('partial', false)).toBe(false);
+  });
+});

@@ -71,9 +71,11 @@ def test_history_joins_by_hash_and_falls_back_to_path():
 
 def test_a_partial_import_with_files_left_in_staging_did_not_finish():
     # #1289: partial mapped to "imported" while most of the album sat in staging,
-    # and the auto-import dedup never looks at it again, so it hid forever
+    # and the auto-import dedup never looks at it again, so it hid forever.
+    # Now partial is a first-class status: failed when files remain in staging
+    # (retryable), partial when they don't (honest record of what happened).
     assert derive_status('partial', None, True) == 'failed'
-    assert derive_status('partial', None, False) == 'imported'
+    assert derive_status('partial', None, False) == 'partial'
     c = _cand('/Staging/AHDN', ['/Staging/AHDN/02.flac', '/Staging/AHDN/03.flac'], 'h-left')
     hist = [{'id': 9, 'folder_hash': 'h-orig', 'folder_path': '/Staging/AHDN', 'status': 'partial',
              'error_message': '11 of 12 tracks failed'}]
