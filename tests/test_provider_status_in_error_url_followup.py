@@ -49,8 +49,8 @@ def _capture_sleep(monkeypatch, module):
 
 
 @pytest.mark.parametrize("url", [
-    "https://www.theaudiodb.com/api/v1/json/2/album.php?m=429871",
-    "https://www.theaudiodb.com/api/v1/json/2/search.php?s=item503",
+    "https://www.theaudiodb.com/api/v1/json/123/album.php?m=429871",
+    "https://www.theaudiodb.com/api/v1/json/123/search.php?s=item503",
 ])
 def test_audiodb_404_with_status_digits_does_not_back_off(monkeypatch, url):
     error = _http_error(404, url)
@@ -67,7 +67,7 @@ def test_audiodb_404_with_status_digits_does_not_back_off(monkeypatch, url):
 
 
 def test_audiodb_real_429_still_backs_off(monkeypatch):
-    error = _http_error(429, "https://www.theaudiodb.com/api/v1/json/2/album.php?m=123")
+    error = _http_error(429, "https://www.theaudiodb.com/api/v1/json/123/album.php?m=123")
     sleeps = _capture_sleep(monkeypatch, audiodb)
     monkeypatch.setattr(audiodb, "_last_api_call_time", 0)
 

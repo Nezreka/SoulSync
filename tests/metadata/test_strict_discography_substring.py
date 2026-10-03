@@ -3,9 +3,13 @@
 Download Discography asks "is this release owned?" for each discography card.
 For requested "Respiro" (2019, 13 tracks) vs library "Sessão Respiro" (2020,
 7 tracks) the strict match gate returned True, so every track of the card
-was skipped as "already in library". Edition markers are cleaned before the
-substring check, so leftover words are meaningful: one title containing the
-other means different releases.
+was skipped as "already in library".
+
+The substring check runs on normalized titles; the equality checks run on
+both normalized and edition-cleaned titles. So one title containing the other
+means different releases — except the known residual below where an edition
+marker on the *requested* side breaks the substring (documented, not fixed:
+closing it would newly reject plausible same-release edition labelings).
 """
 
 import pytest
@@ -65,3 +69,23 @@ def test_soundtrack_token_overlap_path_unchanged(gate):
     assert gate("Dune Part Two (Original Motion Picture Soundtrack)",
                "Dune Part Two Soundtrack",
                sims=(0.95, 0.90, 0.92), tracks=(22, 22)) is True
+
+
+def test_edition_marker_on_requested_side_is_known_residual(gate):
+    # Review note (#1448): the substring check runs on normalized (uncleaned)
+    # titles, so "Respiro (Remastered)" is not a substring of "Sessão Respiro"
+    # and the pair is still accepted — the exact false-ownership shape of the
+    # issue. Documented here so any future change to this trade-off is
+    # deliberate: checking cleaned titles too would newly reject plausible
+    # same-release edition labelings ("Respiro (Deluxe Edition)" vs
+    # "Respiro Deluxe").
+    assert gate("Respiro (Remastered)", "Sessão Respiro") is True
+
+
+def test_article_drift_rejects_in_safe_direction(gate):
+    # Review note (#1448): normalization strips neither articles nor
+    # punctuation, so "The Dark Side of the Moon" vs "Dark Side of the Moon"
+    # is a substring pair and gets rejected — a false negative (the card shows
+    # missing / Download Discography queues a re-download), never a false
+    # skip. That is the failure direction the issue prefers.
+    assert gate("The Dark Side of the Moon", "Dark Side of the Moon") is False
