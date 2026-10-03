@@ -6376,7 +6376,7 @@ async function saveSettings(quiet = false) {
             allow_duplicate_tracks: document.getElementById('allow-duplicate-tracks').checked,
             ignore_ttl_days: Math.max(1, Math.min(365,
                 _cfgInt('wishlist-ignore-ttl', 30))),
-            wing_it_guesses: document.getElementById('wishlist-wing-it-guesses')?.checked === true,
+            wing_it_guesses: document.getElementById('wishlist-wing-it-guesses').checked,
         },
         playlist_sync: {
             create_backup: document.getElementById('create-backup').checked,

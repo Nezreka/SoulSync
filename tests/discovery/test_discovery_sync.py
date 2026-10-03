@@ -370,7 +370,7 @@ def test_playlist_image_uploaded_to_plex(patched_db):
     deps = _build_deps(sync_service=svc, plex=plex, config=cfg)
 
     ds.run_sync_task('pImg', 'PImg', [_track()],
-                     playlist_image_url='https://img/x.png', deps=deps)
+                     playlist_image_url='https://img/x.png', deps=deps, sync_mode='replace')
 
     assert plex.image_calls == [('PImg', 'https://img/x.png')]
 
@@ -384,7 +384,7 @@ def test_playlist_image_uploaded_to_jellyfin(patched_db):
     deps = _build_deps(sync_service=svc, jellyfin=jf, config=cfg)
 
     ds.run_sync_task('pJF', 'PJF', [_track()],
-                     playlist_image_url='https://img/y.png', deps=deps)
+                     playlist_image_url='https://img/y.png', deps=deps, sync_mode='replace')
 
     assert jf.image_calls == [('PJF', 'https://img/y.png')]
 
@@ -399,7 +399,7 @@ def test_playlist_image_uploaded_to_navidrome(patched_db):
     deps = _build_deps(sync_service=svc, navidrome=nd, config=cfg)
 
     ds.run_sync_task('pND', 'PND', [_track()],
-                     playlist_image_url='https://img/z.png', deps=deps)
+                     playlist_image_url='https://img/z.png', deps=deps, sync_mode='replace')
 
     assert nd.image_calls == [('PND', 'https://img/z.png')]
 
@@ -430,7 +430,7 @@ def test_playlist_image_skipped_when_playlist_already_exists(patched_db):
     deps = _build_deps(sync_service=svc, navidrome=nd, config=cfg)
 
     ds.run_sync_task('pND', 'PND', [_track()],
-                     playlist_image_url='https://img/z.png', deps=deps)
+                     playlist_image_url='https://img/z.png', deps=deps, sync_mode='replace')
 
     assert nd.image_calls == []   # already existed → cover left untouched
 
@@ -445,7 +445,7 @@ def test_playlist_image_new_playlist_still_pushes(patched_db):
     deps = _build_deps(sync_service=svc, navidrome=nd, config=cfg)
 
     ds.run_sync_task('pNew', 'PNew', [_track()],
-                     playlist_image_url='https://img/n.png', deps=deps)
+                     playlist_image_url='https://img/n.png', deps=deps, sync_mode='replace')
 
     assert nd.image_calls == [('PNew', 'https://img/n.png')]
 
@@ -459,7 +459,7 @@ def test_playlist_image_skip_on_existing_applies_to_plex_too(patched_db):
     deps = _build_deps(sync_service=svc, plex=plex, config=cfg)
 
     ds.run_sync_task('pImg', 'PImg', [_track()],
-                     playlist_image_url='https://img/x.png', deps=deps)
+                     playlist_image_url='https://img/x.png', deps=deps, sync_mode='replace')
 
     assert plex.image_calls == []   # already existed → not re-pushed
 
@@ -804,7 +804,7 @@ def test_navidrome_cover_goes_to_the_profiles_own_user(patched_db, monkeypatch):
     svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
     deps = _build_deps(sync_service=svc, navidrome=nd, config=cfg)
 
-    ds.run_sync_task('pND', 'PND', [_track()], profile_id=2,
+    ds.run_sync_task('pND', 'PND', [_track()], profile_id=2, sync_mode='replace',
                      playlist_image_url='https://img/z.png', deps=deps)
 
     assert nd.image_calls == [], "the app account uploaded the cover"
@@ -814,7 +814,7 @@ def test_navidrome_cover_goes_to_the_profiles_own_user(patched_db, monkeypatch):
     # no login: exactly the old path
     nd2 = _NavWithUsers()
     deps = _build_deps(sync_service=svc, navidrome=nd2, config=cfg)
-    ds.run_sync_task('pND', 'PND', [_track()], profile_id=3,
+    ds.run_sync_task('pND', 'PND', [_track()], profile_id=3, sync_mode='replace',
                      playlist_image_url='https://img/z.png', deps=deps)
     assert nd2.image_calls == [('PND', 'https://img/z.png')] and nd2.views == []
 
@@ -875,7 +875,7 @@ def test_jellyfin_cover_goes_to_the_profiles_own_user(patched_db, monkeypatch):
     deps = _build_deps(sync_service=svc, jellyfin=jf, config=cfg)
 
     ds.run_sync_task('pJF', 'PJF', [_track()], profile_id=2,
-                     playlist_image_url='https://img/j.png', deps=deps)
+                     playlist_image_url='https://img/j.png', deps=deps, sync_mode='replace')
 
     assert jf.image_calls == [], "the app account uploaded the cover"
     assert [v.acting_as for v in jf.views] == ['kid-uid', 'kid-uid']
