@@ -232,8 +232,37 @@ def backfill_legacy_mappings(cursor: Any, *, connection: Any = None,
     return changed
 
 
+def track_server_playlists(cursor: Any, track_ids: Iterable[int], server_source: Any,
+                           membership: Dict[str, List[str]]) -> Dict[int, List[str]]:
+    """The server playlists each catalogue track sits in (upstream e573bd5fc).
+
+    ``membership`` is ``core.library.playlist_membership``'s map of server
+    track id -> playlist titles. Upstream reads it by library row id because
+    its ``tracks.id`` is the server's id; a catalogue track reaches the server
+    through its recognized mappings instead, in any of the server's libraries.
+    """
+    ids = sorted({int(value) for value in track_ids if value is not None})
+    result: Dict[int, List[str]] = {track_id: [] for track_id in ids}
+    if not ids or not membership:
+        return result
+    marks = ",".join("?" for _ in ids)
+    rows = cursor.execute(
+        f"SELECT entity_id, server_id FROM lib2_media_server_mappings "
+        f"WHERE entity_type='track' AND server_source=? AND entity_id IN ({marks}) "
+        "AND match_status='recognized'",
+        [str(server_source or ""), *ids],
+    ).fetchall()
+    for row in rows:
+        names = result[int(row[0])]
+        for title in membership.get(str(row[1]), ()):
+            if title not in names:
+                names.append(title)
+    return result
+
+
 __all__ = [
     "MEDIA_SERVER_SOURCES", "backfill_legacy_mappings",
     "ensure_media_mapping_schema", "is_media_server_source",
-    "mapping_sources", "resolve_mapping", "upsert_mapping",
+    "mapping_sources", "resolve_mapping", "track_server_playlists",
+    "upsert_mapping",
 ]

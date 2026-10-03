@@ -3688,6 +3688,20 @@ export function ManageTracksDuplicatesTab({ artistId }: { artistId: number }) {
     return [fmt, rate.label].filter(Boolean).join(' / ') || 'file';
   }
 
+  function playlistHint(side: { playlists?: string[] }) {
+    const names = side.playlists ?? [];
+    if (names.length === 0) return null;
+    return (
+      <span
+        className={styles.muted}
+        title="Removing this version's file drops it from these media-server playlists"
+      >
+        {' '}
+        · In playlist: {names.join(', ')}
+      </span>
+    );
+  }
+
   return (
     <>
       <p className={styles.qpSubtitle}>
@@ -3729,6 +3743,7 @@ export function ManageTracksDuplicatesTab({ artistId }: { artistId: number }) {
                   <td className={styles.qualityText}>
                     {p.single.album_title ?? '—'}
                     <span className={styles.muted}> · {fileText(p.single)}</span>
+                    {playlistHint(p.single)}
                   </td>
                   <td>
                     <MonitorToggle
@@ -3740,6 +3755,7 @@ export function ManageTracksDuplicatesTab({ artistId }: { artistId: number }) {
                   <td className={styles.qualityText}>
                     {p.album.album_title ?? '—'}
                     <span className={styles.muted}> · {fileText(p.album)}</span>
+                    {playlistHint(p.album)}
                   </td>
                   <td>
                     <MonitorToggle

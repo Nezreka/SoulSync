@@ -4794,6 +4794,28 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 row = _primary_files.get(int(track_id))
                 return {field: row.get(field) for field in _summary_fields} if row else None
 
+            # Upstream e573bd5fc: removing the copy a server playlist points
+            # at drops it from that playlist, so each side says where it is
+            # listed. Best effort and cached; no media server means no hint.
+            playlists: Dict[int, List[str]] = {}
+            if rows:
+                try:
+                    from core.library.playlist_membership import (
+                        _active_server_and_client, server_playlist_membership,
+                    )
+                    from core.library2.media_mappings import track_server_playlists
+
+                    server, client = _active_server_and_client()
+                    if server and client is not None:
+                        playlists = track_server_playlists(
+                            conn,
+                            [r["single_id"] for r in rows] + [r["canonical_id"] for r in rows],
+                            server,
+                            server_playlist_membership(resolve=lambda: (server, client)),
+                        )
+                except Exception as exc:  # noqa: BLE001 - a hint, never a failed list
+                    logger.debug("duplicate playlist hint skipped: %s", exc)
+
             pairs = [{
                 "title": r["title"],
                 "single": {
@@ -4801,12 +4823,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     "album_title": r["single_album"],
                     "monitored": bool(r["single_monitored"]),
                     "file": _file_summary(r["single_id"]),
+                    "playlists": playlists.get(int(r["single_id"]), []),
                 },
                 "album": {
                     "track_id": r["canonical_id"],
                     "album_title": r["canonical_album"],
                     "monitored": bool(r["canonical_monitored"]),
                     "file": _file_summary(r["canonical_id"]),
+                    "playlists": playlists.get(int(r["canonical_id"]), []),
                 },
             } for r in rows]
         finally:

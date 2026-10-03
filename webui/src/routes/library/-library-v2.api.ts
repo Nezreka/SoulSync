@@ -1357,6 +1357,9 @@ export interface LibraryV2DuplicateSide {
     sample_rate: number | null;
     bit_depth: number | null;
   } | null;
+  /** Media-server playlists that point at this version; removing its file
+   *  drops it from them. Empty without a connected server. */
+  playlists?: string[];
 }
 
 export interface LibraryV2DuplicatePair {
