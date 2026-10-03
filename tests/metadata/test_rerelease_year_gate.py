@@ -78,11 +78,18 @@ class TestYearsConflict:
 
 
 class TestMatcherYearGate:
-    def test_rerelease_card_does_not_match_owned_original(self, db):
-        # THE reported bug: own the 2005 original; the 2024 re-release card
-        # must not read as owned.
+    def test_single_exact_title_candidate_ignores_year_mismatch(self, db):
+        # #1289 (Deezer reissue dates): Deezer's release_date is the digital
+        # reissue date, so a year mismatch no longer proves "different
+        # release". With exactly ONE exact-title candidate the year cannot be
+        # disambiguating anything — the card matches the owned album.
+        # (This reverses the pre-#1289 expectation formerly pinned here: the
+        # old "2024 card must not match owned 2005" rule assumed card years
+        # were original release dates, which is false for Deezer. Genuine
+        # same-title ambiguity is still gated — see
+        # test_gate_picks_the_right_edition_from_mixed_candidates.)
         owned = [_album("Album X", 2005)]
-        assert _match(db, "Album X", owned, year="2024") is None
+        assert _match(db, "Album X", owned, year="2024") is not None
 
     def test_original_card_still_matches_owned_original(self, db):
         owned = [_album("Album X", 2005)]
@@ -101,15 +108,16 @@ class TestMatcherYearGate:
         owned = [_album("Album X", None)]
         assert _match(db, "Album X", owned, year="2024") is not None
 
-    def test_non_strict_caller_with_year_now_gates(self, db):
-        # ROUND 3 FLIP (5BILLION): this used to pin the gate as strict-only,
-        # which left the download analysis year-blind — a 2023 remaster
-        # edition-matched the 1998 original and every track showed FOUND.
-        # The gate now fires for ANY caller that supplies expected_year;
-        # callers that pass no year (all other non-strict callers) are
-        # byte-identical to before (see test_no_year_still_edition_matches...).
+    def test_single_exact_title_candidate_no_gate_without_strict(self, db):
+        # #1289: the single-exact-title exemption is about the candidate-set
+        # shape, not strict mode — a lone "Album X" (2005) is the same album
+        # as the 2024-dated card (Deezer reissue dating), strict or not.
+        # (Reverses the 5BILLION round-3 expectation formerly pinned here for
+        # the same-title case. The round-3 protection that matters — a
+        # DIFFERENTLY-titled remaster matching the original — is untouched:
+        # see test_year_conflict_rejects_without_strict_mode.)
         owned = [_album("Album X", 2005)]
-        assert _match(db, "Album X", owned, year="2024", strict=False) is None
+        assert _match(db, "Album X", owned, year="2024", strict=False) is not None
 
     def test_same_year_deluxe_still_matches_standard_card(self, db):
         # the intentional standard-vs-deluxe behavior is preserved: same year,

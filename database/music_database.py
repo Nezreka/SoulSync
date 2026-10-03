@@ -12393,8 +12393,27 @@ class MusicDatabase:
                 # expected-track-count edition matching, so we don't need the
                 # per-variation SQL widening that the legacy path does.
                 logger.debug(f"Edition matching for '{title}' by '{artist}': batched against {len(candidate_albums)} candidates")
+                # #1289 (Deezer reissue dates): Deezer's release_date is the
+                # digital reissue date, so a year mismatch no longer proves
+                # "different release". When exactly ONE candidate has an exact
+                # normalized-title match, the year cannot be disambiguating
+                # anything — skip the re-release year gate for that candidate
+                # only. With 0 or >=2 same-title candidates the gate stays
+                # exactly as before (>=2 is the true re-release ambiguity it
+                # was built for). Normalization here is diacritics/case only,
+                # NOT edition-stripping, so "X (Deluxe)" never counts as "X".
+                gate_exempt = None
+                if expected_year is not None:
+                    wanted_norm = self._normalize_for_comparison(title or "")
+                    if wanted_norm:
+                        exact = [a for a in candidate_albums
+                                 if self._normalize_for_comparison(getattr(a, "title", "") or "") == wanted_norm]
+                        if len(exact) == 1:
+                            gate_exempt = exact[0]
+                            logger.debug(f"  Year gate skipped for single exact-title candidate '{title}' (#1289)")
                 for album in candidate_albums:
-                    confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year)
+                    ey = None if album is gate_exempt else expected_year
+                    confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=ey)
                     if confidence > best_confidence:
                         best_confidence = confidence
                         best_match = album

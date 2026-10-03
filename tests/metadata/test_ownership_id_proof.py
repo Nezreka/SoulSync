@@ -75,25 +75,32 @@ def test_id_proof_beats_title_drift(library):
     assert r['status'] == 'completed'
 
 
-def test_rerelease_card_with_different_id_still_missing(library):
-    """5BILLION's guard holds: a sibling edition has a DIFFERENT id — the
-    year gate keeps rejecting it, id proof can never fire."""
+def test_rerelease_card_with_different_id_now_matches_single_candidate(library):
+    """#1289 changed this: with a SINGLE exact-title candidate the year no
+    longer vetoes, so the fuzzy title match resolves first and the id-proof
+    question is moot. (Deezer's release_date is the reissue date — a year
+    mismatch can't prove "different release".) The sibling-edition guard now
+    lives in the >=2 same-title candidates case, where the year veto still
+    fires; and id proof still matters when fuzzy FAILS (title drift) — see
+    test_id_proof_beats_title_drift."""
     db, candidates = library
     r = check_album_completion(db, _card(id='DZ-2019-DELUXE', year=1989),
                                'The Cure', source_override='deezer',
                                candidate_albums=candidates)
-    assert r['status'] == 'missing'
-    assert r['confidence'] == 0.0
+    assert r['status'] == 'completed'
 
 
-def test_year_gate_unchanged_without_enrichment_id(library):
-    """The documented residual: no stored id for the viewing source AND a
-    year conflict → still missing (canonical-pin territory)."""
+def test_year_gate_softened_without_enrichment_id(library):
+    """#1289: this was the Yellowcard shape — no stored id for the viewing
+    source and a year conflict. With a single exact-title candidate the year
+    no longer vetoes, so the album now reads as owned. (Previously pinned as
+    'still missing'; that residual assumed card years were original release
+    dates, which is false for Deezer.)"""
     db, candidates = library
     r = check_album_completion(db, _card(id='SP-123'), 'The Cure',
                                source_override='spotify',
                                candidate_albums=candidates)
-    assert r['status'] == 'missing'
+    assert r['status'] == 'completed'
 
 
 def test_matching_year_never_needed_the_proof(library):
@@ -105,14 +112,16 @@ def test_matching_year_never_needed_the_proof(library):
     assert r['status'] == 'completed'
 
 
-def test_wrong_source_id_space_never_matches(library):
-    """A spotify card whose id happens to equal a DEEZER stored id is not
-    proof — columns are consulted per the card's own source only."""
+def test_cross_source_id_now_resolves_by_title(library):
+    """#1289: a spotify card whose id happens to equal a DEEZER stored id is
+    still not id proof (columns are consulted per the card's own source
+    only) — but with a single exact-title candidate the fuzzy title match
+    now resolves first, so the card reads as owned regardless."""
     db, candidates = library
     r = check_album_completion(db, _card(id='DZ-9', year=1989), 'The Cure',
                                source_override='spotify',
                                candidate_albums=candidates)
-    assert r['status'] == 'missing'
+    assert r['status'] == 'completed'
 
 
 def test_ep_branch_gets_the_same_rescue(tmp_path):
