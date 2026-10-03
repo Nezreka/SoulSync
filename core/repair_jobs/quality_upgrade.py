@@ -659,8 +659,14 @@ class QualityUpgradeJob(RepairJob):
 
         for i, row in enumerate(tracks):
             if context.check_stop():
+                # #1289: a stop here (shutdown/disable, not just user cancel)
+                # must not record 'completed' for a partial scan.
+                result.stopped_early = (
+                    f"Scan interrupted. Stopped at track {i + 1} of {total}.")
                 return result
             if i % 10 == 0 and context.wait_if_paused():
+                result.stopped_early = (
+                    f"Scan interrupted. Stopped at track {i + 1} of {total}.")
                 return result
 
             track_id = row['id']
@@ -832,6 +838,11 @@ class QualityUpgradeJob(RepairJob):
             if not best:
                 if matched_via == 'search' and not attempted:
                     logger.warning("[Quality Upgrade] No metadata provider responded — stopping")
+                    # #1289: sibling paths set stopped_early; this bare return
+                    # recorded 'completed' for a partial scan.
+                    result.stopped_early = (
+                        f"No metadata provider responded, so upgrades could not be looked up. "
+                        f"Stopped at track {i + 1} of {total}.")
                     return result
                 result.skipped += 1
                 continue

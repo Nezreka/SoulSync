@@ -490,3 +490,42 @@ def test_tagless_file_with_weak_title_unmatched_in_multidisc():
     # threshold → no match.
     assert not result['matches']
     assert result['unmatched_files'] == ['/a/track06.flac']
+
+
+def test_descending_score_beats_track_order():
+    """#1289 Bug 4: the Give Up Deluxe cover mislabeling.
+
+    Phase 3 was greedy per-track in tracklist order: an early track with a
+    mediocre score (0.402) permanently claimed a file that a later track
+    would have matched at 1.0. Now scores are claimed in descending order,
+    so the best match wins regardless of track order.
+    """
+    from core.imports.album_matching import match_files_to_tracks
+    # Track 0 (early in list) vaguely resembles the file; track 1 is exact.
+    # With track-order greedy, track 0 would steal it.
+    files = ['/a/cover.flac']
+    file_tags = {
+        '/a/cover.flac': _tags(title='Such Great Heights', artist='The Shins',
+                               track=3, disc=2,
+                               ),
+    }
+    # Give the file a duration so the duration gate passes
+    file_tags['/a/cover.flac']['duration_ms'] = 250000
+    tracks = [
+        {'name': 'Such Great Heights', 'track_number': 3, 'disc_number': 1,
+         'artists': [{'name': 'The Postal Service'}],
+         'duration_ms': 250000},
+        {'name': 'Such Great Heights', 'track_number': 7, 'disc_number': 2,
+         'artists': [{'name': 'The Shins'}],
+         'duration_ms': 250000},
+    ]
+    result = match_files_to_tracks(
+        files, file_tags, tracks,
+        target_album='Give Up Deluxe', similarity=_sim, quality_rank=_qrank,
+    )
+    assert len(result['matches']) == 1
+    m = result['matches'][0]
+    # The Shins cover (disc 2, track 7) must win over the Postal Service
+    # original (disc 1, track 3) — exact artist + position beats title-only.
+    assert m['track']['disc_number'] == 2
+    assert m['file'] == '/a/cover.flac'

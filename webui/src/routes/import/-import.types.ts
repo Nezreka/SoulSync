@@ -27,6 +27,7 @@ export type ImportInboxStatus =
   | 'queued'
   | 'importing'
   | 'imported'
+  | 'partial'
   | 'failed'
   | 'dismissed';
 
