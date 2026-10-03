@@ -3460,7 +3460,16 @@
             host.innerHTML = ''; host.hidden = true; state.userFilter = ''; return;
         }
         host.hidden = false;
-        state.users = users.map(function (u) { return String(u.username || u || ''); }).filter(Boolean);
+        // Dedupe (case-insensitive): slskd can return the same user twice,
+        // which doubles the list and the count.
+        var _seen = {};
+        state.users = users.map(function (u) { return String(u.username || u || ''); }).filter(function (n) {
+            if (!n) return false;
+            var k = n.toLowerCase();
+            if (_seen[k]) return false;
+            _seen[k] = true;
+            return true;
+        });
         // static skeleton once — the search input must survive the 4s poll
         if (!host.querySelector('[data-chat-user-search]')) {
             host.innerHTML =
