@@ -23,16 +23,24 @@ def register_routes(bp):
         profile_id = parse_profile_id(request)
 
         try:
-            db = get_database()
-            result = db.get_library_artists(
-                search_query=search,
-                letter=letter,
-                page=page,
-                limit=limit,
-                watchlist_filter=watchlist,
-                profile_id=profile_id,
-                skip_server_filter=True,
-            )
+            # The artists query scopes by current_library_scope(), which doesn't
+            # resolve for API-key requests. Set it explicitly from the profile.
+            from core.library_scope import set_library_scope, library_scope_for_profile
+            token = set_library_scope(library_scope_for_profile(profile_id))
+            try:
+                db = get_database()
+                result = db.get_library_artists(
+                    search_query=search,
+                    letter=letter,
+                    page=page,
+                    limit=limit,
+                    watchlist_filter=watchlist,
+                    profile_id=profile_id,
+                    skip_server_filter=True,
+                )
+            finally:
+                from core.library_scope import _explicit_scope
+                _explicit_scope.reset(token)
             artists = result.get("artists", [])
             pag = result.get("pagination", {})
             pagination = build_pagination(
