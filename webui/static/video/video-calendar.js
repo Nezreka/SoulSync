@@ -89,7 +89,10 @@
         var time = tl
             ? '<span class="vcal-time"><span class="vcal-time-dot"></span>' + tl + '</span>'
             : '<span class="vcal-time vcal-time--none">Anytime</span>';
-        var flag = ep.has_file ? '<span class="vcal-flag" title="In your library">✓</span>' : '';
+        // Owned episodes wear the ✓ flag; everything else wears its acquisition
+        // badge (Wanted = on the wishlist, Downloading, Missing, …) — the same
+        // badge the agenda view already shows, so the grid stops hiding it.
+        var flag = ep.has_file ? '<span class="vcal-flag" title="In your library">✓</span>' : acqBadge(ep);
         var meta = '<span class="vcal-se">' + se + '</span>' + (epTitle ? '<span class="vcal-ep">' + esc(epTitle) + '</span>' : '');
         return '<a class="vcal-cell' + (ep.has_file ? ' vcal-cell--owned' : '') + '" style="--vcal-h:' + hue + ';--i:' + (idx % 24) + '" ' +
             'href="/video-detail/library/show/' + ep.show_id + '" ' +
@@ -122,7 +125,10 @@
         var hue = showHue(m.title || '');
         var img = m.poster_url ? '<img class="vcal-cell-img" src="' + esc(m.poster_url) + '" alt="" loading="lazy" decoding="async" ' +
             'onload="this.classList.add(\'vcal-loaded\')" onerror="this.style.display=\'none\'">' : '';
-        var flag = m.owned ? '<span class="vcal-flag" title="In your library">✓</span>' : '';
+        var flag = m.owned ? '<span class="vcal-flag" title="In your library">✓</span>'
+            // Every movie in this lane IS wishlisted (the lane is built from the
+            // wishlist) — say so until it's owned.
+            : '<span class="vcal-acq vcal-acq--want" title="On your wishlist">Wishlist</span>';
         var href = m.owned && m.library_id
             ? '/video-detail/library/movie/' + m.library_id
             : '/video-detail/tmdb/movie/' + m.tmdb_id;
@@ -293,7 +299,8 @@
                     '<span class="vcal-ag-time vcal-mv-chip">' + t.chip + '</span>' +
                     '<span class="vcal-ag-main"><span class="vcal-ag-title">' + esc(m.title) + '</span>' +
                     (m.year ? '<span class="vcal-ag-sub">' + m.year + '</span>' : '') + '</span>' +
-                    (m.owned ? '<span class="vcal-flag" title="In your library">✓</span>' : '') +
+                    (m.owned ? '<span class="vcal-flag" title="In your library">✓</span>'
+                              : '<span class="vcal-acq vcal-acq--want vcal-acq--sm" title="On your wishlist">Wishlist</span>') +
                     '</a>';
             });
             eps.forEach(function (ep) {
@@ -352,7 +359,7 @@
         var bg = ep.show_has_backdrop ? ('/api/video/backdrop/show/' + ep.show_id + '?w=1280') : '';
         var se = 'S' + ep.season_number + ' · E' + ep.episode_number;
         var epTitle = ep.title || '';
-        var owned = ep.has_file ? '<span class="vcal-bb-badge">✓ In your library</span>' : '';
+        var statusBadge = ep.has_file ? '<span class="vcal-bb-badge">✓ In your library</span>' : acqBadge(ep);
         var cls = multi ? ('vcal-bb-panel' + (lead ? ' vcal-bb-panel--lead' : '')) : 'vcal-bb';
         return '<div class="' + cls + '" style="--vcal-h:' + hue + '" data-cal-ep="' + ep.id + '" role="button" tabindex="0">' +
                 (bg ? '<div class="vcal-bb-bg" style="background-image:url(\'' + bg + '\')"></div>' : '') +
@@ -362,7 +369,7 @@
                         (state.offset === 0 ? 'NEXT UP' : 'FEATURED') + ' · ' + esc(whenLabel(ep, d.today)) + '</div>' +
                     '<h2 class="vcal-bb-title">' + esc(ep.show_title) + '</h2>' +
                     '<div class="vcal-bb-sub"><span class="vcal-bb-se">' + se + '</span>' + (epTitle ? ' · ' + esc(epTitle) : '') + '</div>' +
-                    '<div class="vcal-bb-actions"><span class="vcal-bb-btn">View details</span>' + owned + '</div>' +
+                    '<div class="vcal-bb-actions"><span class="vcal-bb-btn">View details</span>' + statusBadge + '</div>' +
                 '</div>' +
             '</div>';
     }
@@ -468,8 +475,11 @@
             if (el && el.scrollIntoView) el.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'center' });
         });
     }
-    function load() {
-        state.loaded = true; state.fresh = true;
+    function load(opts) {
+        state.loaded = true;
+        // A quiet reload (after a wishlist change) skips the entrance stagger —
+        // the grid is already on screen, it just needs truer badges.
+        state.fresh = !(opts && opts.quiet);
         // Crossfade the grid out while the next week loads (only when we already
         // have something on screen — first load uses the entrance instead).
         var grid = $('[data-video-cal-grid]'); if (grid && state.data) grid.classList.add('vcal-fading');
@@ -681,6 +691,12 @@
                 render();
             });
         })(mbs[q]);
+
+        // The modal's "Wishlist episode" button fires this — refetch so the
+        // card badges pick up the new acquisition state without a week change.
+        document.addEventListener('soulsync:video-wishlist-changed', function () {
+            if (state.data) load({ quiet: true });
+        });
 
         // Keyboard nav for a page users live in: ← / → step weeks, T jumps to
         // today. Only when the calendar is the visible page, no modal is open,
