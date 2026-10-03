@@ -3268,6 +3268,10 @@ async function loadSettingsData() {
         const abSource = ab.download_source || {};
         const abVal = (el, value) => { if (el) el.value = value; };
         const abChecked = (el, value) => { if (el) el.checked = value !== false; };
+        // Which Audible storefront the catalogue pages query. No deep merge
+        // of new defaults into an existing config row, so older installs come
+        // back undefined and read as the US store, same as before.
+        abVal(document.getElementById('audiobook-marketplace'), ab.marketplace || 'us');
         abVal(document.getElementById('audiobook-download-mode'), abSource.mode || 'hybrid');
         _audiobookHybrid = (abSource.hybrid_order || [])
             .filter(src => AUDIOBOOK_SOURCES.includes(src));
@@ -6411,6 +6415,7 @@ async function saveSettings(quiet = false) {
             media_format: _cfgStr('podcast-media-format', { fallback: 'audio' }),
         },
         audiobooks: {
+            marketplace: _cfgStr('audiobook-marketplace', { fallback: 'us' }),
             download_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),
             download_source: {
                 mode: _cfgStr('audiobook-download-mode', { fallback: 'hybrid' }),

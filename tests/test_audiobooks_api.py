@@ -135,6 +135,57 @@ def test_search_forwards_the_marketplace(client, catalog):
 
 
 # ---------------------------------------------------------------------------
+# Marketplace resolution: request param -> audiobooks.marketplace -> "us"
+# ---------------------------------------------------------------------------
+
+_NO_CONFIG = object()
+
+
+def _app_with_config(code=_NO_CONFIG):
+    """A test app whose config manager answers with one storefront code, or
+    none at all (no ``app.soulsync`` — like a miswired install)."""
+    app = Flask(__name__)
+    if code is not _NO_CONFIG:
+        manager = MagicMock()
+        manager.get.side_effect = lambda key, default=None: code
+        app.soulsync = {"config_manager": manager}
+    app.register_blueprint(create_audiobooks_blueprint())
+    return app
+
+
+def _marketplace_asked_for(app, query="/api/audiobooks/search?q=x"):
+    catalog = MagicMock()
+    catalog.search_with_fallback.return_value = ([], "audible")
+    with patch("api.audiobooks.get_audiobook_client", return_value=catalog):
+        app.test_client().get(query)
+    return catalog.search_with_fallback.call_args.kwargs["marketplace"]
+
+
+def test_marketplace_comes_from_config_when_there_is_no_param():
+    assert _marketplace_asked_for(_app_with_config("de")) == "de"
+
+
+def test_marketplace_request_param_beats_the_config():
+    app = _app_with_config("de")
+    assert _marketplace_asked_for(app, "/api/audiobooks/search?q=x&marketplace=UK") == "uk"
+
+
+def test_marketplace_is_us_when_config_is_unreadable():
+    # No app.soulsync at all — a miswired app serves US rather than 500ing.
+    assert _marketplace_asked_for(_app_with_config()) == "us"
+
+
+def test_marketplace_blank_config_falls_back_to_us():
+    assert _marketplace_asked_for(_app_with_config("")) == "us"
+
+
+def test_marketplace_unknown_config_code_passes_through_verbatim():
+    # Unknown-code fallback to US lives inside the audiobook client
+    # (marketplace_chain); _marketplace() only resolves the precedence.
+    assert _marketplace_asked_for(_app_with_config("xx")) == "xx"
+
+
+# ---------------------------------------------------------------------------
 # Detail and similar
 # ---------------------------------------------------------------------------
 
