@@ -509,6 +509,16 @@ class ListenBrainzManager:
                     f"DELETE FROM mirrored_playlists WHERE id IN ({ph})",
                     mirror_ids,
                 )
+                # #1455: cascade the Auto-Sync board's schedule automations too,
+                # so the dashboard Sync band doesn't render ghost rows for the
+                # removed mirrors. The legacy-mirror SELECT is not
+                # profile-scoped, so match the mirror delete's scope (all).
+                from database.music_database import MusicDatabase
+
+                for _mid in mirror_ids:
+                    MusicDatabase._delete_auto_sync_automations_for_playlist(
+                        cursor, int(_mid), profile_id=None
+                    )
                 total += len(mirror_ids)
             if total:
                 logger.info(
@@ -656,6 +666,15 @@ class ListenBrainzManager:
                 f"DELETE FROM mirrored_playlists WHERE id IN ({mid_ph})",
                 mirror_ids,
             )
+            # #1455: cascade the Auto-Sync board's schedule automations too, so
+            # the dashboard Sync band doesn't render ghost rows for the pruned
+            # mirrors. Scoped to this profile like the mirror delete above.
+            from database.music_database import MusicDatabase
+
+            for _mid in mirror_ids:
+                MusicDatabase._delete_auto_sync_automations_for_playlist(
+                    cursor, int(_mid), profile_id=self.profile_id
+                )
             logger.info(
                 f"Cascade-removed {len(mirror_ids)} stale {source} mirrored playlists"
             )

@@ -21077,6 +21077,13 @@ class MusicDatabase:
         try:
             engine = _matching_engine
             if engine is None:
+                # #1452: failing closed here would silently empty the Matched
+                # tab whenever a playlist filter is applied, so log loudly —
+                # a missing matching engine breaks the app broadly anyway.
+                logger.warning(
+                    "Discovery pool playlist filter: matching engine unavailable, "
+                    "returning no matched keys"
+                )
                 return keys
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -24757,8 +24764,9 @@ class MusicDatabase:
             logger.error(f"Error deleting mirrored playlist: {e}")
             return False
 
+    @staticmethod
     def _delete_auto_sync_automations_for_playlist(
-        self, cursor, playlist_id: int, profile_id: Optional[int] = None
+        cursor, playlist_id: int, profile_id: Optional[int] = None
     ):
         """Delete board-owned Auto-Sync automations scoped to one mirrored playlist.
 
@@ -24766,6 +24774,9 @@ class MusicDatabase:
         action_config targets exactly this playlist_id are removed. The board
         stores playlist_id as a JSON string; 'all' schedules (true/'true') apply
         to every playlist and are left alone (#1455).
+
+        Static: needs only a cursor, so non-MusicDatabase owners of mirror
+        deletes (e.g. ListenBrainzManager) can reuse it.
         """
         try:
             if profile_id is None:
