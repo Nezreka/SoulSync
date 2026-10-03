@@ -24,6 +24,13 @@ IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif'}
 # Lyric / metadata / playlist / release checksum (sfv, srr) sidecars that are worthless
 # without their audio.
 SIDECAR_EXTS = {'.lrc', '.nfo', '.cue', '.m3u', '.m3u8', '.sfv', '.srr'}
+# Release junk: checksums and release info that are worthless without audio.
+# #1289: a folder holding only nfo/sfv/srr/m3u was never cleaned because
+# these were lumped into the opt-in disposable tier with cover.jpg (#891
+# deliberately kept images opt-in). Scoped to the reported extensions —
+# .cue (image rips, split workflows) and .lrc (deliberately kept lyrics)
+# stay opt-in via the disposable tier.
+RELEASE_JUNK_EXTS = {'.nfo', '.sfv', '.srr', '.m3u', '.m3u8'}
 
 
 def _ext(name: str) -> str:
@@ -32,6 +39,16 @@ def _ext(name: str) -> str:
 
 def is_junk(name: str) -> bool:
     return (name or '').lower() in JUNK_FILES
+
+
+def is_release_junk(name: str) -> bool:
+    """True if this file is release junk (nfo/sfv/srr/m3u).
+
+    #1289: worthless without its audio files, so the empty-folder cleaner
+    treats it like OS junk by default (unlike cover images, which #891
+    deliberately kept opt-in). .cue/.lrc stay in the opt-in disposable tier.
+    """
+    return _ext(name) in RELEASE_JUNK_EXTS
 
 
 def is_image(name: str) -> bool:
@@ -56,7 +73,9 @@ __all__ = [
     "JUNK_FILES",
     "IMAGE_EXTS",
     "SIDECAR_EXTS",
+    "RELEASE_JUNK_EXTS",
     "is_junk",
+    "is_release_junk",
     "is_image",
     "is_sidecar",
     "is_appledouble",
