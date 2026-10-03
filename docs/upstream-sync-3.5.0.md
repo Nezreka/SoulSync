@@ -49,7 +49,7 @@ Die gezielten Portierungsprüfungen B1–B15 aus Claudes Notizen sind berücksic
 | B4 | Staging übernimmt die Bibliothekszuordnung des ursprünglichen Download-Batches. |
 | B5 | Album-Folder-Reuse zählt vorhandene Dateien statt nur angelegter Trackpositionen. |
 | B6 | Library-Match berücksichtigt den Media-Server. |
-| B7 | Änderungen am alten Duplicate Detector entfallen, weil dieser Job stillgelegt ist. |
+| B7 | Die Titel-Fixes des alten Duplicate Detectors sind nachträglich in die Library-v2-Duplikatschlüssel portiert (siehe Nachportierung). |
 | B8 | Inbox-Präsenzprüfungen verwenden Library v2 und die ausgewählte Bibliothek. |
 | B9 | Dauerhafte manuelle Matches übersetzen Katalog-IDs vor dem Sync in Server-IDs. |
 | B10 | AcoustID-Retag schreibt Track-Künstler statt Album-Künstler. |
@@ -74,8 +74,8 @@ Lossy-Tags und die Library-v2-Abfragen der neuen Mixes, Labels und Künstlerbild
 - Die Sync-Präsenzprüfung unterscheidet gleiche Track-IDs verschiedener Server.
 - Reorganize übergibt gespeicherte Release-Typen und sekundäre Typen an die
   Pfadvorlagen, einschließlich `$albumtype` und `$atypes`.
-- Die neue Album-Inspection-Tray bietet für Fake-Lossless-Findings keine
-  Reparatur oder Redownload-Aktion an.
+- Die neue Album-Inspection-Tray bot für Fake-Lossless-Findings zunächst keine
+  Reparatur an; die Nachportierung ersetzt das durch die Library-v2-Aktion.
 - Tools-Playbooks verwenden die tatsächlich registrierten Job-IDs, damit
   etwa Lyrics, Cover und Tracknummern wirklich bearbeitet werden.
 - Fehlgeschlagene Streaming-Abfragen im Download-Monitor ergeben einen
@@ -83,18 +83,36 @@ Lossy-Tags und die Library-v2-Abfragen der neuen Mixes, Labels und Künstlerbild
 - Unveränderte Sample-Schnitte werden ohne ungültigen Rubber-Band-CLI-Aufruf
   gerendert. Engine-Tests hängen nicht mehr von der Installation auf dem Host ab.
 
+## Nachportierung (2026-10-03)
+
+Der erste Abschluss hatte mehrere Upstream-Fixes mit „Job stillgelegt“
+abgelehnt. Das ist kein Grund (siehe [Merge-Playbook](upstream-merge-playbook.md));
+geprüft wurde, welche Library-v2-Stelle denselben Zweck erfüllt.
+
+| Upstream | Library-v2-Port |
+| --- | --- |
+| #1315 / ce83731b8: `Rabbit Run - From "8 Mile" Soundtrack` = `Rabbit Run` | `strip_provenance_tail` in `core/library2/duplicate_relationship.py`; wirkt in `_normalized_title` (manuelles Verknüpfen) und `importer.dedup_title_key` (Single↔Album-Verknüpfung beim Import). Klammerform `(from the vault)` und `Far-from Home` bleiben eigene Titel. |
+| 558d96864 / 4f09b31b8: Reorganize legt ein Release dort ab, wo der Download es ablegte | Der Pfadbauer legt seine Typentscheidung (`type`, `total_tracks`, `source`, `locked`) im Kontext ab; beide Import-Schreiber speichern sie als `lib2_albums.filed_release`. Der Reorganize-Planer verwendet sie; ein von Hand gesetzter Typ gewinnt, ohne gespeicherte Entscheidung teilt er nach Trackzahl. |
+| Fake-Lossless-Fix („Re-download FLAC“) | `_fix_fake_lossless`: Die Datei (`lib2:<Datei-ID>`) wandert über das Löschjournal in die Quarantäne (`.deleted`, wiederherstellbar), der Track wird wieder gewünscht. Upstream behält die Datei und legt eine Wishlist-Zeile an; hier hielte die behauptete FLAC-Qualität die Wanted-Projektion zufrieden. `delete` quarantäniert ohne Ersatz. Dateien außerhalb des Katalogs werden nur auf ausdrücklichen Wunsch entfernt. Tools-Tray, Finding-Liste und Redownload-Dialog suchen über den Track der Datei, nie über die Datei-ID. |
+| 33da6be49: A–Z ignoriert führende Satzzeichen | Native Library-v2-Künstlerliste (Sortierung `name`, leerer `sort_name` fällt auf den Namen zurück) und Album-Reihenfolge auf der Künstlerseite verwenden denselben Schlüssel wie die Kompatibilitäts-API. |
+| e573bd5fc: Keep Best behält die Kopie, auf die eine Playlist zeigt | Library v2 hat kein automatisches Keep Best. Die Duplikatliste in Manage Tracks nennt pro Version die Server-Playlists (über `lib2_media_server_mappings`), damit die gelistete Kopie behalten wird. |
+| Quality-Review und Apply Quality Upgrades | Bereits in `f461c4442` nativ portiert, siehe [Library-v2-Qualitätsupgrades](library-v2-quality-upgrades.md). |
+
 ## Bewusst nicht portiert und warum
 
 | Upstream-Funktion | Grund und Verhalten dieses Forks |
 | --- | --- |
-| Alte Library-Grid- und Album-Browse-Oberfläche, `/api/library/albums` | Die Library-Seite wird vollständig von Library v2 bereitgestellt. Die Legacy-Oberfläche würde einen zweiten, unpassenden Katalogpfad einführen. |
-| Duplicate Detector und dessen Titel-Normalisierungsänderungen | Der Job ist hier stillgelegt. Library-v2-Duplikate beruhen auf Recording-Identität und den bestehenden Katalogfunktionen. |
-| Quality Upgrade / Quality Upgrade Scanner und Single Album Dedup / Unknown Artist Fixer | Diese Legacy-Jobs bleiben stillgelegt. Sie setzen das alte Datenmodell und dessen Findings voraus. Ihre Tests und UI-Einstiege werden nicht wiederhergestellt. |
-| „Upgrades show up in the library“ und Apply Quality Upgrades | Die Upstream-Funktion verarbeitet Findings der stillgelegten Quality-Jobs. Library v2 behandelt gewünschte Qualität über seine vorhandenen Wanted-Funktionen. Der Kompatibilitätshandler bleibt registriert, die neue Aktion wird nicht angeboten. |
-| Fake-Lossless-Fix und zugehöriger Redownload-/Bulk-Fix-Einstieg | Der Detector bleibt zur Prüfung sichtbar. Automatischer Ersatz wurde nicht als Library-v2-Dateitransaktion portiert; die bestehende Entscheidung dieses Branches bleibt deshalb „review-only“. |
+| 1af23bea2, dfb031a2d, 6f52569c5: Nummern-, römische Teil- und Editionsjahr-Regeln des Duplicate Detectors | Sie schützen dessen unscharfe Ähnlichkeitsgruppierung. Library v2 verknüpft nur gleiche normalisierte Titelschlüssel; Teilnummern und Jahre bleiben im Schlüssel. „Part 1“ und „Part 2“ können nicht zusammenfallen, „Part II“ gegen „Part 2“ ist höchstens eine fehlende, nie eine falsche Verknüpfung. |
+| ba545eb3a: fehlender `track_artist` auf Compilations aus Datei-Tags | Library v2 führt Track-Credits in `lib2_track_artists` (Importer, Server-Sync, Provider-Credits). Restrisiko: ein aus Legacy übernommener Compilation-Track ohne Credit kann nicht manuell mit der Kopie des Interpreten verknüpft werden („Tracks do not share an artist“). |
+| Quality Upgrade / Quality Upgrade Scanner, Single Album Dedup, Unknown Artist Fixer als Jobs | Ersetzt durch Wanted-Projektion, Quality Profile Audit und die Single↔Album-Verknüpfung des Importers. |
 | Bereits entfernte Legacy-Sync-, Delete-, Incremental-Update- und Test-Endpunkte | Der Fork hat diese Wege schon vor diesem Merge durch native Library-v2-Wege ersetzt oder stillgelegt. Ihre Wiederherstellung wäre ein Rückschritt beim Katalogwechsel. |
 | Upstream-Änderungen zu #1418/#1420, die Upstream selbst zurückgenommen hat | Der endgültige Upstream-Stand enthält die Reverts. Zurückgenommene Zwischenstände werden nicht separat wieder eingebaut. |
-| Vollständige Übernahme der Interpunktions-Sortierung in der nativen Library-v2-A–Z-Liste | Die Kompatibilitäts-Künstler-API übernimmt die Upstream-Korrektur. Die native Seite verwendet ihre vorhandenen `sort_name`-Werte; Namen wie `*NSYNC` können dort weiterhin vor Buchstaben stehen. Eine Änderung der nativen Sortierschlüssel und vorhandenen Katalogwerte bleibt eine separate Folgeaufgabe. |
+
+## Offene Entscheidung
+
+| Upstream | Stand |
+| --- | --- |
+| 7fdd98ac2, 78b9318cf, 4431ac2ab: Library nach Alben durchsuchen (Album-Grid mit Sortierung A–Z, Jahr, zuletzt hinzugefügt) | Library v2 listet nur Künstler. Ein Port wäre eine neue Albenansicht in Library v2 mit eigener Katalogabfrage, keine Wiederherstellung der Legacy-Seite. Nicht als „erledigt“ markiert in `scripts/deleted_path_reviewed.json`, damit es sichtbar bleibt. |
 
 Die ID-Typen bleiben bewusst getrennt: Katalog-ID für Library-v2-Objekte,
 Server-ID für Server-Playlists. `get_track_by_server_id()` materialisiert einen
