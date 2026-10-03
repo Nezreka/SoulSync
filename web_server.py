@@ -18845,6 +18845,20 @@ def mlm_list():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/manual-library-matches/unmatched', methods=['GET'])
+def mlm_unmatched():
+    """Pre-populated worklist of wanted-but-unmatched tracks (#1289)."""
+    try:
+        from core.library import manual_library_match as mlm
+        limit = min(int(request.args.get('limit', 200)), 500)
+        db = get_database()
+        profile_id = get_current_profile_id()
+        return jsonify({"success": True, "tracks": mlm.list_unmatched_wanted_tracks(db, profile_id, limit)})
+    except Exception as e:
+        logger.error(f"mlm_unmatched error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/manual-library-matches/source-search', methods=['GET'])
 def mlm_source_search():
     """Search wishlist + sync history for source track candidates."""
