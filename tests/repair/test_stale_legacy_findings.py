@@ -46,6 +46,7 @@ STALE_SUBJECT_CASES = {
     'dead_file': {'_fix_action': 'remove'},
     'short_preview_track': {'expected_duration_s': 200.0},
     'corrupt_audio': {'_fix_action': 'delete'},
+    'fake_lossless': {'_fix_action': 'delete'},
     'library_retag': {},
     'unwanted_content': {},
     'metadata_gap': {'found_fields': {'isrc': 'DEZZZ0000001'}},
@@ -64,6 +65,7 @@ STALE_SUBJECT_CASES = {
 
 STALE_SUBJECT_ENTITY_TYPES = {
     'genre_enrichment': 'artist',
+    'fake_lossless': 'file',
 }
 
 

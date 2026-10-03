@@ -86,7 +86,7 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     'replaygain_filler': frozenset({'observe', 'tags'}),
     'empty_folder_cleaner': frozenset({'none'}),
     'metadata_gap_filler': frozenset({'observe', 'metadata', 'tags'}),
-    'fake_lossless_detector': frozenset({'observe'}),
+    'fake_lossless_detector': frozenset({'observe', 'delete', 'wanted'}),
     'lossy_converter': frozenset({'observe', 'new_file', 'tags'}),
     'album_tag_consistency': frozenset({'observe', 'metadata', 'tags'}),
     'live_commentary_cleaner': frozenset({'observe', 'delete', 'wanted'}),

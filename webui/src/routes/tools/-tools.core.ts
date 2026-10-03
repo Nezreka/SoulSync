@@ -263,6 +263,7 @@ export const FINDING_FIXABLE_TYPES: Record<string, string> = {
   missing_discography_track: 'Add to Wishlist',
   library_retag: 'Apply Tags',
   short_preview_track: 'Re-download',
+  fake_lossless: 'Re-download',
   genre_cleanup: 'Clean Genres',
   genre_enrichment: 'Apply Genres',
   comma_artist_split: 'Split Artists',
@@ -279,7 +280,11 @@ export function findingFixLabel(findingType: string): string | null {
  *  points at. Nothing can be re-requested for those, so the fix is a plain
  *  delete; saying "Re-download" was a promise the backend answered with
  *  "No track ID associated with this finding". */
-const SUBJECTLESS_DELETE_ONLY_TYPES = new Set(['corrupt_audio', 'short_preview_track']);
+const SUBJECTLESS_DELETE_ONLY_TYPES = new Set([
+  'corrupt_audio',
+  'short_preview_track',
+  'fake_lossless',
+]);
 
 /** The button label for ONE finding row — `findingFixLabel` by type, unless the
  *  row has no track behind it and the type's verb only makes sense with one. */
@@ -292,6 +297,24 @@ export function findingRowFixLabel(finding: {
     return 'Delete File';
   }
   return findingFixLabel(finding.finding_type);
+}
+
+/** The `lib2:<track id>` the redownload modal searches for, or null when the
+ *  finding names no catalogue track. A file-subject finding (fake lossless)
+ *  carries the FILE's id as `entity_id`; handing that to the modal would
+ *  search for, and replace, whichever track happens to share the number. */
+export function findingRedownloadTrackId(finding: {
+  entity_type?: string | null;
+  entity_id?: string | number | null;
+  details?: Record<string, unknown> | null;
+}): string | null {
+  if (!finding.entity_id) return null;
+  if (finding.entity_type !== 'file') return String(finding.entity_id);
+  const linked = finding.details?.library_v2 as { track_id?: unknown } | undefined;
+  const trackId = linked?.track_id;
+  return typeof trackId === 'number' || (typeof trackId === 'string' && trackId !== '')
+    ? `lib2:${trackId}`
+    : null;
 }
 
 export const FINDING_ACTION_LABELS: Record<string, string> = {

@@ -415,12 +415,12 @@ describe('the findings inbox', () => {
 
   it('shows the blurb and the served verb, and no fix button for an unfixable type', async () => {
     routes({
-      [GROUPS]: { groups: [group({ finding_type: 'fake_lossless', pending: 4 })] },
+      [GROUPS]: { groups: [group({ finding_type: 'album_needs_enrichment', pending: 4 })] },
       [TYPES]: {
         types: [
           typeInfo({
-            type: 'fake_lossless',
-            label: 'Fake Lossless',
+            type: 'album_needs_enrichment',
+            label: 'Needs Enrichment',
             verb: null,
             fixable: false,
             destructive: false,
@@ -431,7 +431,7 @@ describe('the findings inbox', () => {
     renderSurface();
     await flush();
 
-    expect(document.querySelector('.repair-inbox-blurb')?.textContent).toContain('upscaled');
+    expect(document.querySelector('.repair-inbox-blurb')?.textContent).toContain('enrichment');
     expect(document.querySelector('.repair-inbox-btn')?.textContent).toBe('Dismiss all');
   });
 

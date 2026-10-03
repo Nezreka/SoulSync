@@ -250,7 +250,10 @@ describe('safeFixablePending', () => {
   const catalog = new Map([
     ['missing_cover_art', info({ type: 'missing_cover_art', destructive: false })],
     ['orphan_file', info({ type: 'orphan_file', destructive: true })],
-    ['fake_lossless', info({ type: 'fake_lossless', fixable: false, destructive: false })],
+    [
+      'album_needs_enrichment',
+      info({ type: 'album_needs_enrichment', fixable: false, destructive: false }),
+    ],
   ]);
   const lookup = (type: string) => catalog.get(type);
 
@@ -261,7 +264,7 @@ describe('safeFixablePending', () => {
         group({ finding_type: 'orphan_file', pending: 20 }),
         // Unfixable: counting it is how a button comes to report
         // "Fixed 0 of 1,204".
-        group({ finding_type: 'fake_lossless', pending: 5 }),
+        group({ finding_type: 'album_needs_enrichment', pending: 5 }),
         // Unknown to the catalog — no evidence it is safe.
         group({ finding_type: 'brand_new_type', pending: 99 }),
       ],

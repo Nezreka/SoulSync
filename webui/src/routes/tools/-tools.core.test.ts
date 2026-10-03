@@ -24,6 +24,7 @@ import {
   cacheSourceLabel,
   findingFilePath,
   findingFixLabel,
+  findingRedownloadTrackId,
   findingRowFixLabel,
   findingSeverityClass,
   findingSeverityIcon,
@@ -204,7 +205,8 @@ describe('finding labels', () => {
     expect(findingFixLabel('duplicate_tracks')).toBe('Keep Best');
     expect(findingFixLabel('genre_enrichment')).toBe('Apply Genres');
     expect(findingFixLabel('comma_artist_split')).toBe('Split Artists');
-    expect(findingFixLabel('fake_lossless')).toBeNull();
+    expect(findingFixLabel('fake_lossless')).toBe('Re-download');
+    expect(findingFixLabel('album_needs_enrichment')).toBeNull();
     expect(findingFixLabel('path_mismatch')).toBeNull();
   });
 
@@ -218,6 +220,19 @@ describe('finding labels', () => {
     expect(findingRowFixLabel({ ...stray, finding_type: 'short_preview_track' })).toBe(
       'Delete File',
     );
+    expect(findingRowFixLabel({ ...stray, finding_type: 'fake_lossless' })).toBe('Delete File');
+  });
+
+  it('searches a file finding by the track behind the file, never by the file id', () => {
+    const fake = {
+      entity_type: 'file',
+      entity_id: 'lib2:31',
+      details: { library_v2: { file_id: 31, track_id: 7 } },
+    };
+    expect(findingRedownloadTrackId(fake)).toBe('lib2:7');
+    expect(findingRedownloadTrackId({ ...fake, details: {} })).toBeNull();
+    expect(findingRedownloadTrackId({ ...fake, entity_id: null })).toBeNull();
+    expect(findingRedownloadTrackId({ entity_type: 'track', entity_id: 'lib2:9' })).toBe('lib2:9');
   });
 
   it('leaves a finding that DOES name a track on the re-download wording', () => {

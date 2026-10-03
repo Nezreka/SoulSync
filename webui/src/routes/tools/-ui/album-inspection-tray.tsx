@@ -4,7 +4,13 @@ import type { FindingAlbumGroup } from '../-tools.api';
 import type { RepairFinding } from '../-tools.types';
 
 import { fetchRepairFindings, fixFinding, dismissFinding, reopenFinding } from '../-tools.api';
-import { findingFixLabel, findingSeverityIcon, findingTypeLabel } from '../-tools.core';
+import {
+  findingFixLabel,
+  findingRedownloadTrackId,
+  findingRowFixLabel,
+  findingSeverityIcon,
+  findingTypeLabel,
+} from '../-tools.core';
 import { VinylCoverFallback } from './album-cover-fallback';
 
 export interface AlbumInspectionTrayProps {
@@ -134,7 +140,10 @@ export function AlbumInspectionTray({
     if (fixable.length === 0) return;
 
     const hasDestructive = fixable.some(
-      (f) => f.finding_type === 'corrupt_audio' || f.finding_type === 'orphan_file',
+      (f) =>
+        f.finding_type === 'corrupt_audio' ||
+        f.finding_type === 'fake_lossless' ||
+        f.finding_type === 'orphan_file',
     );
     if (hasDestructive) {
       const confirmed = await window.showConfirmDialog?.({
@@ -191,7 +200,13 @@ export function AlbumInspectionTray({
   };
 
   const isRedownloadFinding = (type: string) => {
-    return ['quality_upgrade', 'dead_file', 'short_preview_track', 'corrupt_audio'].includes(type);
+    return [
+      'quality_upgrade',
+      'dead_file',
+      'short_preview_track',
+      'corrupt_audio',
+      'fake_lossless',
+    ].includes(type);
   };
 
   return (
@@ -338,9 +353,12 @@ export function AlbumInspectionTray({
           <div className="album-tray-tracks-list">
             {findings.map((f, idx) => {
               const details = (f.details as Record<string, any>) || {};
-              const fixLabel = findingFixLabel(f.finding_type);
+              const fixLabel = findingRowFixLabel(f);
               const busy = busyIds.has(f.id);
-              const isRedl = isRedownloadFinding(f.finding_type);
+              // Only a finding with a catalogue track behind it can open the
+              // redownload search; the rest fall back to their row fix.
+              const isRedl =
+                isRedownloadFinding(f.finding_type) && Boolean(findingRedownloadTrackId(f));
 
               // Never display database row ID (f.entity_id) as track number!
               const rawNum = details.track_number;

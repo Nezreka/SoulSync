@@ -38,7 +38,7 @@ import {
   stopBulkFix,
   stopRepairJob,
 } from '../-tools.api';
-import { repairJobBadge } from '../-tools.core';
+import { findingRedownloadTrackId, repairJobBadge } from '../-tools.core';
 import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
 import { AlbumInspectionTray } from './album-inspection-tray';
 import { FindingsAlbumGrid } from './findings-album-grid';
@@ -849,8 +849,8 @@ export function OperationsStudio({
       {redownloadFinding ? (
         <RedownloadModal
           track={{
-            id: redownloadFinding.entity_id || String(redownloadFinding.id),
-            track_id: redownloadFinding.entity_id || String(redownloadFinding.id),
+            id: findingRedownloadTrackId(redownloadFinding) || String(redownloadFinding.id),
+            track_id: findingRedownloadTrackId(redownloadFinding) || String(redownloadFinding.id),
             title: String(
               (redownloadFinding.details as Record<string, any>)?.track_title ||
                 redownloadFinding.title ||
@@ -875,8 +875,9 @@ export function OperationsStudio({
               '',
             tracks: [
               {
-                id: redownloadFinding.entity_id || String(redownloadFinding.id),
-                track_id: redownloadFinding.entity_id || String(redownloadFinding.id),
+                id: findingRedownloadTrackId(redownloadFinding) || String(redownloadFinding.id),
+                track_id:
+                  findingRedownloadTrackId(redownloadFinding) || String(redownloadFinding.id),
                 title: String(
                   (redownloadFinding.details as Record<string, any>)?.track_title ||
                     redownloadFinding.title ||

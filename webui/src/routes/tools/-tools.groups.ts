@@ -95,7 +95,7 @@ export const FINDING_TYPE_BLURBS: Record<string, string> = {
   genre_cleanup: 'Genre tags that are junk, duplicated or wrongly cased.',
   comma_artist_split: 'One artist row holding several comma-separated names.',
   suspect_album_tag: 'Tracks probably filed under the wrong album due to bad tags.',
-  fake_lossless: 'FLAC upscaled from a lossy source. Review only.',
+  fake_lossless: 'FLAC upscaled from a lossy source; applying re-downloads it.',
   album_needs_enrichment: 'Albums still waiting on a metadata enrichment pass.',
 };
 

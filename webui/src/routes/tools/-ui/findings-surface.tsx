@@ -64,6 +64,7 @@ import {
   cacheHealthLabel,
   cacheHealthScore,
   findingFilePath,
+  findingRedownloadTrackId,
   findingRowFixLabel,
   findingSeverityIcon,
   findingStatusBadge,
@@ -573,13 +574,19 @@ export function FindingsSurface({
       // its own to stop at. Confirm it here rather than let one click remove a
       // file from disk.
       if (findingRowFixLabel(finding) === 'Delete File') {
+        const quarantined = type === 'corrupt_audio' || type === 'fake_lossless';
         const confirmed = await window.showConfirmDialog?.({
           title: 'Delete File',
-          message: `Permanently delete ${findingFilePath(finding) || 'this file'} from disk? It is not in your library, so nothing will be queued to replace it.`,
+          message: quarantined
+            ? `Move ${findingFilePath(finding) || 'this file'} to the deleted-files folder? It is not in your library, so nothing will be queued to replace it.`
+            : `Permanently delete ${findingFilePath(finding) || 'this file'} from disk? It is not in your library, so nothing will be queued to replace it.`,
           confirmText: 'Delete',
           destructive: true,
         });
         if (!confirmed) return;
+        // Fake lossless refuses to remove an uncatalogued file without being
+        // told to: its default action is a re-download.
+        fixAction = 'delete';
       }
 
       setBusyFix((current) => new Set(current).add(finding.id));
@@ -1515,8 +1522,8 @@ export function FindingsSurface({
       {redownloadFinding ? (
         <RedownloadModal
           track={{
-            id: redownloadFinding.entity_id || String(redownloadFinding.id),
-            track_id: redownloadFinding.entity_id || String(redownloadFinding.id),
+            id: findingRedownloadTrackId(redownloadFinding) || String(redownloadFinding.id),
+            track_id: findingRedownloadTrackId(redownloadFinding) || String(redownloadFinding.id),
             title: String(
               (redownloadFinding.details as Record<string, any>)?.track_title ||
                 redownloadFinding.title ||
@@ -1541,8 +1548,9 @@ export function FindingsSurface({
               '',
             tracks: [
               {
-                id: redownloadFinding.entity_id || String(redownloadFinding.id),
-                track_id: redownloadFinding.entity_id || String(redownloadFinding.id),
+                id: findingRedownloadTrackId(redownloadFinding) || String(redownloadFinding.id),
+                track_id:
+                  findingRedownloadTrackId(redownloadFinding) || String(redownloadFinding.id),
                 title: String(
                   (redownloadFinding.details as Record<string, any>)?.track_title ||
                     redownloadFinding.title ||
@@ -1560,7 +1568,10 @@ export function FindingsSurface({
               (redownloadFinding.details as Record<string, any>)?.artist ||
               '',
           )}
-          upgrade={redownloadFinding.finding_type === 'quality_upgrade'}
+          upgrade={
+            redownloadFinding.finding_type === 'quality_upgrade' ||
+            redownloadFinding.finding_type === 'fake_lossless'
+          }
           onReload={() => {
             refreshAll();
           }}
@@ -1671,9 +1682,10 @@ function FindingCard({
                       fixLabel.toLowerCase().includes('download') ||
                       finding.finding_type === 'quality_upgrade' ||
                       finding.finding_type === 'missing_discography_track' ||
+                      finding.finding_type === 'fake_lossless' ||
                       finding.finding_type === 'short_preview_track' ||
                       finding.finding_type === 'dead_file';
-                    if (isRedownload && onInspectRedownload && finding.entity_id) {
+                    if (isRedownload && onInspectRedownload && findingRedownloadTrackId(finding)) {
                       onInspectRedownload(finding);
                     } else {
                       void onFix(finding);

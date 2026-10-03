@@ -66,6 +66,7 @@ DESTRUCTIVE_FINDING_TYPES = frozenset({
     'orphan_file',            # default 'staging' MOVES the file; 'delete' removes it
     'dead_file',              # 'remove' drops the library row + file
     'corrupt_audio',          # moves to the deleted-files folder, re-wishlists
+    'fake_lossless',          # moves the transcode to the deleted-files folder
     'unwanted_content',       # deletes/quarantines live + spoken content
     'short_preview_track',    # deletes the clip, re-wishlists the real track
     'expired_download',       # deletes the aged download
@@ -117,12 +118,15 @@ FINDING_TYPE_META = {
                                  'confirm': ('The damaged files move to the deleted-files folder, where they '
                                              'can be restored until retention clears them, and the tracks '
                                              'are re-downloaded.')},
+    'fake_lossless':            {'label': 'Fake Lossless', 'verb': 'Re-download',
+                                 'confirm': ('The transcoded files move to the deleted-files folder, where '
+                                             'they can be restored until retention clears them, and the '
+                                             'tracks are downloaded again under their quality profile.')},
     'canonical_version':        {'label': 'Canonical Version', 'verb': 'Pin Version'},
     'genre_cleanup':            {'label': 'Genre Cleanup', 'verb': 'Clean Genres'},
     'comma_artist_split':       {'label': 'Combined Artists', 'verb': 'Split Artists'},
     # Emitted, but no handler exists — the UI must show review-only, never a
     # button that can only fail.
-    'fake_lossless':            {'label': 'Fake Lossless', 'verb': None},
     'album_needs_enrichment':   {'label': 'Needs Enrichment', 'verb': None},
 }
 
@@ -338,6 +342,7 @@ NATIVE_SUBJECT_FINDING_TYPES = frozenset({
     'comma_artist_split',
     'corrupt_audio',
     'dead_file',
+    'fake_lossless',
     'metadata_gap',
     'missing_cover_art',
     'genre_enrichment',
@@ -2553,6 +2558,7 @@ class RepairWorker:
             'missing_discography_release': self._fix_discography_release,
             'short_preview_track': self._fix_short_preview_track,
             'corrupt_audio': self._fix_corrupt_audio,
+            'fake_lossless': self._fix_fake_lossless,
             'library_retag': self._fix_library_retag,
             'canonical_version': self._fix_canonical_version,
             'genre_cleanup': self._fix_genre_cleanup,
@@ -3715,6 +3721,92 @@ class RepairWorker:
             'library_v2_file_deleted': True,
             'repair_intent': 'redownload',
         }
+
+    def _fix_fake_lossless(self, entity_type, entity_id, file_path, details):
+        """Approve a fake-lossless finding. ``details['_fix_action']``:
+           'redownload' (default) — move the transcode to the deleted-files
+               quarantine and want the track again, so a real lossless copy
+               downloads under its quality profile
+           'delete' — quarantine it without a replacement; the track is
+               unmonitored once no other usable file is left
+
+        Upstream keeps the fake file and adds a wishlist row. Here the wanted
+        projection reads the file's claimed format — exactly what a transcode
+        lies about — so a track with the fake FLAC stays satisfied until the
+        file leaves the catalogue. Quarantined, not deleted: until a real copy
+        arrives the transcode is the only playable one, and it can be restored
+        from the deleted-files manager.
+
+        The subject is the FILE, ``lib2:<file id>`` (dd28-27); its track comes
+        from that row.
+        """
+        fix_action = str(details.get('_fix_action') or 'redownload')
+        if fix_action not in ('redownload', 'delete'):
+            return {'success': False,
+                    'error': f'Unknown action for a fake lossless file: {fix_action}'}
+        if not entity_id:
+            if fix_action != 'delete':
+                # A file the catalogue does not know names no track to want
+                # again. Quarantining it under "Re-download" would remove
+                # playable audio and replace it with nothing.
+                return {'success': False,
+                        'error': ('This file is not in your library, so there is '
+                                  'nothing to re-download. Delete it, or import it first.')}
+            return self._fix_uncatalogued_bad_file(
+                file_path, details, reason='fake_lossless',
+                noun='fake lossless file', quarantine=True)
+        stale = _stale_legacy_subject(entity_id)
+        if stale:
+            return stale
+        file_id = _lib2_id(entity_id)
+        recorded = ((details.get('library_v2') or {}).get('file_id'))
+        if recorded not in (None, '') and str(recorded) != str(file_id):
+            return {'success': False, 'stale_subject': True,
+                    'error': ('This finding names a different file than it was '
+                              'raised for — re-run the scan')}
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            file_row = conn.execute(
+                "SELECT track_id, path FROM lib2_track_files WHERE id=? "
+                "AND COALESCE(file_state,'active') NOT IN ('missing_confirmed','deleted')",
+                (file_id,),
+            ).fetchone()
+        finally:
+            if conn:
+                conn.close()
+        if not file_row or file_row['track_id'] is None:
+            return {'success': False, 'stale': True,
+                    'error': 'The file is no longer in the library'}
+        track_id = int(file_row['track_id'])
+        row = self._load_lib2_redownload_row(track_id)
+        if not row:
+            return {'success': False, 'error': 'Track not found in Library v2'}
+        # The catalogue path, not the scan's resolved one: the journal files
+        # the move under the album that owns this path.
+        removed = self._remove_native_repair_file(
+            file_row['path'] or file_path, details, reason='fake_lossless',
+            quarantine=True)
+        if not removed.get('success'):
+            return removed
+        title = row.get('title') or details.get('title') or 'Unknown'
+        moved = ('Moved the fake lossless file to the deleted folder'
+                 if removed.get('deleted_file') else 'The fake lossless file was already gone')
+        others = self._other_usable_lib2_files(track_id, file_row['path'])
+        payload = {'success': True, 'library_v2_file_deleted': True}
+        if fix_action == 'redownload':
+            payload.update(
+                action='redownload',
+                message=(f'{moved}; "{title}" keeps its other file, so its quality '
+                         f'profile decides whether a lossless copy is still wanted'
+                         if others else f'{moved} and queued "{title}" for download'),
+                repair_intent='redownload',
+            )
+        else:
+            payload.update(action='deleted_file', message=f'{moved}; nothing was queued')
+            if not others:
+                payload['repair_intent'] = 'remove'
+        return payload
 
     def _fix_orphan_file(self, entity_type, entity_id, file_path, details):
         """Handle an orphan file — move to staging or delete based on user choice.
