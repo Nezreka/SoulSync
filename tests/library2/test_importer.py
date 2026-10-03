@@ -1212,6 +1212,22 @@ def test_dedup_title_key_strips_only_featured_annotations():
     assert dedup_title_key("Feature Presentation") == "feature presentation"
 
 
+def test_dedup_title_key_drops_a_dash_form_provenance_tail():
+    """#1315: the tail names the release the recording came from, not the
+    song, so a soundtrack copy links to its album cut. Only the dash form:
+    a parenthesized "(from the vault)" is a version, "Far-from" is a word."""
+    from core.library2.duplicate_relationship import _normalized_title
+    from core.library2.importer import dedup_title_key
+
+    for key in (dedup_title_key, _normalized_title):
+        assert key('Rabbit Run - From "8 Mile" Soundtrack') == key("Rabbit Run")
+        assert key("Lose Yourself - from the Motion Picture") == key("Lose Yourself")
+        assert key("Song (from the vault)") != key("Song")
+        assert key("Far-from Home") != key("Far")
+        assert key("Song - Live From Wembley") != key("Song")
+        assert key("From the Start") == key("From the Start")
+
+
 def test_idempotent_rerun(legacy_db):
     first = import_legacy_library(legacy_db)
     second = import_legacy_library(legacy_db)

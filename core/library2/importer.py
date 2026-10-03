@@ -253,9 +253,14 @@ def dedup_title_key(title: str) -> str:
     one side spells out the guests — the common real-world reason a single and
     its album cut carry different raw titles (#39). Version qualifiers (Remix,
     Live, Remastered, Acoustic, …) are deliberately preserved: those are distinct
-    recordings and must not be collapsed into one canonical row.
+    recordings and must not be collapsed into one canonical row. A dash-form
+    provenance tail (`` - From "8 Mile" Soundtrack``) names the source release,
+    not the recording, and is dropped too (#1315).
     """
-    text = _FEAT_IN_TITLE_RE.sub("", title or "")   # drop "(feat. …)"/"(with …)" groups
+    from core.library2.duplicate_relationship import strip_provenance_tail
+
+    text = strip_provenance_tail(title or "")
+    text = _FEAT_IN_TITLE_RE.sub("", text)          # drop "(feat. …)"/"(with …)" groups
     text = _FEAT_TITLE_TAIL_RE.sub("", text)         # drop a bare trailing "feat. …"
     return normalize_name(text)
 

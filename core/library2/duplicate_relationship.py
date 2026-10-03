@@ -20,8 +20,21 @@ class DuplicateRelationshipError(ValueError):
         self.status = status
 
 
+# A dash-form provenance tail names the release a recording was taken from,
+# not the song: ``Rabbit Run - From "8 Mile" Soundtrack`` is ``Rabbit Run``
+# (upstream #1315, the rule core/matching/audio_verification.py has long
+# applied). Dash form after a space only: ``(from the vault)`` stays a version
+# qualifier and ``Far-from Home`` stays a title.
+_PROVENANCE_TAIL_RE = re.compile(r"\s+-\s*from\s+.+$", re.IGNORECASE)
+
+
+def strip_provenance_tail(title: Any) -> str:
+    """``title`` without a trailing `` - From …`` naming its source release."""
+    return _PROVENANCE_TAIL_RE.sub("", str(title or ""))
+
+
 def _normalized_title(value: Any) -> str:
-    text = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    text = unicodedata.normalize("NFKC", strip_provenance_tail(value)).casefold()
     return " ".join(part for part in re.split(r"\W+", text) if part)
 
 
