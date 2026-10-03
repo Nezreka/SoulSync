@@ -268,6 +268,8 @@ class QualityUpgradeScannerJob(RepairJob):
         for base in base_dirs:
             for root, _dirs, files in walk_library(base):
                 if context.check_stop():
+                    # #1289: must not record 'completed' for a partial scan.
+                    result.stopped_early = "Scan interrupted during directory walk."
                     return result
                 for fname in files:
                     if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
@@ -308,10 +310,16 @@ class QualityUpgradeScannerJob(RepairJob):
             context.config_manager, context.db, logger=logger,
         )
         hand_tagged = hand_tagged_path_keys(context.db)
+        total = len(audio_files)
         for i, fpath in enumerate(audio_files):
             if context.check_stop():
+                # #1289: must not record 'completed' for a partial scan.
+                result.stopped_early = (
+                    f"Scan interrupted. Stopped at file {i + 1} of {total}.")
                 return result
             if i % 20 == 0 and context.wait_if_paused():
+                result.stopped_early = (
+                    f"Scan interrupted. Stopped at file {i + 1} of {total}.")
                 return result
 
             fname = os.path.basename(fpath)
