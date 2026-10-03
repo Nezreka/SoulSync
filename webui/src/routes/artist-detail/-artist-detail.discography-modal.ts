@@ -1,5 +1,7 @@
+import type { Discography } from './-artist-detail.types';
+
 import { classifyReleaseContent } from './-artist-detail.filters';
-import { gapFillEnabled, gapSameRelease } from './-artist-detail.gap-fill';
+import { type ReleaseSectionType } from './-artist-detail.open-release';
 
 /**
  * Download Discography (library.js: openDiscographyModal 580, filters 798,
@@ -34,81 +36,61 @@ export interface DiscogModalData {
 }
 
 /**
- * The library-path load (592-677): resolve the artist's metadata id from the
- * enhanced record (the modal's download API needs it), fetch the discography,
- * then merge gap-fill releases when '+ Other sources' is on — deduped against
- * the base list by title + year.
+ * The releases the artist page is showing, flattened for the modal.
+ *
+ * the modal used to refetch the discography on its own, with no source and its
+ * own gap-fill call, so it could list a different source's releases than the
+ * page (discord, SeadogsBooty: deezer page showed 2 EPs, the download pulled
+ * musicbrainz's Underground fan club EPs). now it lists exactly what the page
+ * rendered, gap cards included with their own source.
+ */
+export function releasesFromPageDiscography(discography: Discography): DiscogRelease[] {
+  const releases: DiscogRelease[] = [];
+  for (const [bucket, type] of [
+    ['albums', 'album'],
+    ['eps', 'ep'],
+    ['singles', 'single'],
+  ] as const) {
+    for (const release of discography[bucket] ?? []) {
+      releases.push({
+        ...release,
+        name: release.name || release.title || 'Unknown Release',
+        image_url: release.image_url || undefined,
+        total_tracks: Number(release.track_count) || Number(release._gap_track_count) || undefined,
+        _type: type,
+        _gap_source: (release._gap_source as string | undefined) || undefined,
+      });
+    }
+  }
+  return releases;
+}
+
+/**
+ * Resolve the artist's metadata id from the enhanced record (the download
+ * URL carries it), then take the releases straight from the page.
  */
 export async function loadDiscographyForModal(
   libraryArtistId: unknown,
   artistName: string,
+  pageDiscography: Discography,
 ): Promise<DiscogModalData | null> {
+  const releases = releasesFromPageDiscography(pageDiscography);
+  if (releases.length === 0) return null;
+
   let metadataArtistId: string | null = null;
-  let lookupId = libraryArtistId;
   try {
     const idResponse = await fetch(`/api/library/artist/${libraryArtistId}/enhanced`);
     const idData = await idResponse.json();
     if (idData.success && idData.artist) {
       const a = idData.artist;
       metadataArtistId = a.spotify_artist_id || a.itunes_artist_id || a.deezer_id || null;
-      lookupId = metadataArtistId || libraryArtistId;
     }
   } catch {
     console.debug('[Discography] Could not fetch artist IDs, using DB id');
   }
 
-  let releases: DiscogRelease[] = [];
-  let source: string | null = null;
-  try {
-    const response = await fetch(
-      `/api/artist/${encodeURIComponent(String(lookupId))}/discography?artist_name=${encodeURIComponent(artistName)}`,
-    );
-    const data = await response.json();
-    if (!data.error) {
-      releases = [
-        ...(data.albums || []).map((a: object) => ({ ...a, _type: 'album' })),
-        ...(data.eps || []).map((a: object) => ({ ...a, _type: 'ep' })),
-        ...(data.singles || []).map((a: object) => ({ ...a, _type: 'single' })),
-      ];
-      source = data.source || null;
-    }
-  } catch (error) {
-    console.error('Failed to load discography:', error);
-  }
-  if (releases.length === 0) return null;
-
+  const source = pageDiscography.source || null;
   const artist = { id: metadataArtistId || libraryArtistId, name: artistName, source };
-
-  if (gapFillEnabled()) {
-    try {
-      const params = new URLSearchParams();
-      if (artistName) params.set('artist_name', artistName);
-      if (source) params.set('base_source', source);
-      const response = await fetch(
-        `/api/artist/${encodeURIComponent(String(artist.id))}/discography/gap-fill?${params}`,
-      );
-      const data = await response.json().catch(() => ({}));
-      if (response.ok && data.success) {
-        const gaps = data.gaps || {};
-        const gapReleases: DiscogRelease[] = [
-          ...(gaps.albums || []).map((g: object) => ({ ...g, _type: 'album' })),
-          ...(gaps.eps || []).map((g: object) => ({ ...g, _type: 'ep' })),
-          ...(gaps.singles || []).map((g: object) => ({ ...g, _type: 'single' })),
-        ];
-        for (const g of gapReleases) {
-          if (releases.some((r) => gapSameRelease(g, r))) continue;
-          releases.push({
-            ...g,
-            name: g.title || g.name || 'Unknown Release',
-            _gap_source: (g as { gap_source?: string }).gap_source,
-          });
-        }
-      }
-    } catch (error) {
-      console.debug('discog modal gap-fill skipped:', error);
-    }
-  }
-
   return { artist, releases };
 }
 
@@ -217,6 +199,8 @@ export interface DiscogEntry {
   name: string;
   tracks: number;
   gapSource: string | null;
+  /** the section the release sat in on the artist page */
+  albumType?: ReleaseSectionType;
 }
 
 /**
@@ -227,7 +211,14 @@ export interface DiscogEntry {
  * name (pages-extra.js:820-828).
  */
 export interface DiscographyDownloadPayload {
-  albums: { id: unknown; name: string; artist_name: string; source: string | null }[];
+  albums: {
+    id: unknown;
+    name: string;
+    artist_name: string;
+    source: string | null;
+    /** the artist page section: the server files the release under it */
+    album_type?: ReleaseSectionType;
+  }[];
   artist_name: string;
   source?: string | null;
 }
@@ -249,6 +240,7 @@ export function buildDiscographyPayload(
       name: e.name,
       artist_name: artist.name,
       source: e.gapSource || sourceForBatch,
+      ...(e.albumType ? { album_type: e.albumType } : {}),
     })),
     artist_name: artist.name,
     source: sourceForBatch,

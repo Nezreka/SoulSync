@@ -224,10 +224,28 @@ def _search_in_directory(
             # Tier 4: fuzzy basename match. Cheaper than path-walking
             # the whole tree a second time, so always compute and
             # keep the best one as a fallback.
+            #
+            # Encoded dispatch keys (``id||title``) are extensionless by
+            # construction, but the file on disk carries an audio
+            # extension — comparing the extensionless target against the
+            # full on-disk name drags the score under the 0.85 floor
+            # (issue #1366: 'PRYVT - ANGEL' vs 'PRYVT - ANGEL.flac'
+            # scored 0.839, so a completed download was reported "not
+            # found" while sitting in the folder). Compare against the
+            # stem as well and take the better score; the full-name
+            # comparison is unchanged, so every previously-accepted
+            # match still passes.
             normalized_file = _normalize_for_finding(filename)
-            similarity = SequenceMatcher(
-                None, normalized_target, normalized_file,
-            ).ratio()
+            stem, _ext = os.path.splitext(filename)
+            normalized_stem = _normalize_for_finding(stem)
+            similarity = max(
+                SequenceMatcher(
+                    None, normalized_target, normalized_file,
+                ).ratio(),
+                SequenceMatcher(
+                    None, normalized_target, normalized_stem,
+                ).ratio(),
+            )
             if similarity > highest_fuzzy_similarity:
                 highest_fuzzy_similarity = similarity
                 best_fuzzy_path = file_path

@@ -80,6 +80,9 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
                 # after discovery it is whichever provider matched (often Deezer).
                 # SpotifyTrack reads named fields, so this rides along unused.
                 'db_track_id': t.get('id'),
+                # the playlist's own id, which `id` above is not: Find & Add
+                # files a manual match under it, so the sync needs both (#1289)
+                'source_track_id': t.get('source_track_id') or '',
             }
             if md.get('track_number'):
                 _track_entry['track_number'] = md['track_number']
@@ -119,6 +122,7 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
                     'duration_ms': t.get('duration_ms', 0),
                     'id': hint['id'],
                     'db_track_id': t.get('id'),
+                    'source_track_id': t.get('source_track_id') or '',
                 })
             elif t.get('source_track_id') and (t.get('track_name') or '').strip():
                 # Has a valid source ID and track name — usable for wishlist.
@@ -129,6 +133,7 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
                     'duration_ms': t.get('duration_ms', 0),
                     'id': t['source_track_id'],
                     'db_track_id': t.get('id'),
+                    'source_track_id': t['source_track_id'],
                 })
             else:
                 skipped_count += 1  # No usable ID or name — truly can't process.
@@ -195,13 +200,22 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
         # forces exactly one extra sync per mirror and is then self-consistent.
         last_quality_profile_id = last_status.get('quality_profile_id')
         quality_profile_changed = last_quality_profile_id != quality_profile_id
-        if (
+        # unchanged tracks are not enough: a matched file deleted since the last
+        # sync changes nothing above, and skipping then never re-matched or
+        # wishlisted it (#1417). checked last, it is the only part that reads
+        # the library.
+        unchanged = (
             not force_sync
             and not mirror_changed
             and not quality_profile_changed
             and last_hash == tracks_hash
             and last_matched >= len(tracks_json)
-        ):
+        )
+        library_lost = False
+        if unchanged:
+            from core.sync.library_presence import matched_tracks_still_present
+            library_lost = not matched_tracks_still_present(db, tracks)
+        if unchanged and not library_lost:
             # Exact same tracks, all matched last time — nothing to DOWNLOAD.
             # The run still happened, so it still gets recorded: skipping the
             # bookkeeping too is what left the dashboard card with no run to
@@ -237,6 +251,12 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
                 ),
                 log_type='info',
             )
+        elif library_lost:
+            deps.update_progress(
+                auto_id,
+                log_line='A track from the last sync is no longer in the library, running sync',
+                log_type='info',
+            )
         elif mirror_changed:
             deps.update_progress(
                 auto_id,
@@ -257,8 +277,14 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
 
     # Sync under the user's custom alias when set, else the upstream name (#865
     # follow-up). The server-side playlist is named with this.
-    from core.playlists.naming import effective_mirrored_name
-    sync_name = effective_mirrored_name(pl) or pl.get('name') or 'Playlist'
+    # the server playlist is found by name, so a mirror that would land on
+    # another mirror's playlist gets a distinct name (core/playlists/sync_names)
+    from core.playlists.sync_names import sync_name_for
+    try:
+        _active_server = deps.config_manager.get_active_media_server()
+    except Exception:
+        _active_server = None
+    sync_name = sync_name_for(db, _active_server, pl) or pl.get('name') or 'Playlist'
 
     deps.update_progress(
         auto_id,

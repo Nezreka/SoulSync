@@ -63,6 +63,19 @@ _HERO_CACHE = {}  # (profile_id, source) -> (expiry_ts, payload)
 _HERO_TTL_S = 1800
 
 
+def billboard_order(hero_artists):
+    """a billboard needs a photo. deezer answers "no photo" with a real url
+    to a grey silhouette (the md5 of an empty string), and coldplay sat on
+    the hero like that. placeholder urls become none so the ui shows its own
+    fallback, and artists with a real photo go first. stable, so the
+    least-recently-featured rotation still holds inside each group."""
+    from core.metadata.artwork import usable_image_url
+    for a in hero_artists:
+        if a.get('image_url') and not usable_image_url(a.get('image_url')):
+            a['image_url'] = None
+    return sorted(hero_artists, key=lambda a: 0 if a.get('image_url') else 1)
+
+
 def get_discover_hero():
     """Get featured similar artists for hero slideshow"""
     try:
@@ -74,9 +87,21 @@ def get_discover_hero():
         logger.info(f"Discover hero using source: {active_source}")
 
         _cache_key = (get_current_profile_id(), active_source)
+        from core.discovery.feedback import Taste
+        _hero_taste = Taste.load(database, get_current_profile_id())
         _cached = _HERO_CACHE.get(_cache_key)
         if _cached and _time.time() < _cached[0]:
-            return jsonify(_cached[1])
+            if _hero_taste.is_empty:
+                return jsonify(_cached[1])
+            # less like this ranks lower everywhere: sink disliked artists
+            # below the visible cut even on a cached hero. the cached payload
+            # is shared, so sort a copy.
+            _payload = dict(_cached[1])
+            _payload['artists'] = sorted(
+                _payload.get('artists') or [],
+                key=lambda a: _hero_taste.artist_factor(a.get('artist_name')),
+                reverse=True)
+            return jsonify(_payload)
 
         # Import fallback client for non-Spotify lookups
         itunes_client = _get_metadata_fallback_client()
@@ -136,6 +161,7 @@ def get_discover_hero():
 
                 hero_artists.append(artist_data)
 
+            hero_artists = billboard_order(hero_artists)
             logger.warning(f"[Discover Hero] Returning {len(hero_artists)} watchlist artists as fallback")
             _payload = {"success": True, "artists": hero_artists, "source": active_source, "fallback": "watchlist"}
             if hero_artists:
@@ -185,13 +211,40 @@ def get_discover_hero():
 
         logger.info(f"[Discover Hero] Found {len(valid_artists)} valid artists for source: {active_source}")
 
-        # Filter out blacklisted artists
-        blacklisted = database.get_discovery_blacklist_names()
-        if blacklisted:
-            valid_artists = [a for a in valid_artists if a.similar_artist_name.lower() not in blacklisted]
+        # this profile's blocked artists never make the hero (before the cut to
+        # 10, so a block doesn't leave the rotation short)
+        from core.discovery.blocked import BlockedArtists
+        blocked = BlockedArtists.load(database, get_current_profile_id())
+        if not blocked.is_empty:
+            valid_artists = [a for a in valid_artists if not blocked.blocks_artist({
+                'artist_name': a.similar_artist_name,
+                'spotify_artist_id': a.similar_artist_spotify_id,
+                'itunes_artist_id': a.similar_artist_itunes_id,
+                'deezer_artist_id': getattr(a, 'similar_artist_deezer_id', None),
+                'musicbrainz_id': getattr(a, 'similar_artist_musicbrainz_id', None),
+            })]
+
+        if not _hero_taste.is_empty:
+            # less like this ranks lower everywhere: sink disliked artists
+            # below the top-10 cut. the sort is stable, so the
+            # least-recently-featured rotation holds among equally-liked
+            # artists.
+            valid_artists = sorted(valid_artists,
+                                   key=lambda a: _hero_taste.artist_factor(a.similar_artist_name),
+                                   reverse=True)
 
         # Take top 10 (already ordered by least-recently-featured, then quality)
         similar_artists = valid_artists[:10]
+
+        # the artists of yours that point at each one, for the explanation
+        from core.discovery.explain import consensus_confidence, explanation
+        try:
+            sources_by_name = database.get_recommendation_sources(
+                [a.similar_artist_name for a in similar_artists],
+                profile_id=get_current_profile_id()) or {}
+        except Exception as e:
+            logger.debug("hero recommendation-sources lookup failed: %s", e)
+            sources_by_name = {}
 
         # Convert to JSON format — use cached metadata, only fetch from API if missing
         hero_artists = []
@@ -216,9 +269,15 @@ def get_discover_hero():
                 "similarity_rank": artist.similarity_rank,
                 "source": active_source
             }
+            because = sources_by_name.get(artist.similar_artist_name) or []
+            artist_data["explanation"] = explanation(
+                'similar_to', because,
+                consensus_confidence(len(because) or artist.occurrence_count))
 
-            # Use cached metadata if available
-            if artist.image_url:
+            # Use cached metadata if available (a placeholder is not an image,
+            # it goes down the fetch path like a missing one)
+            from core.metadata.artwork import usable_image_url
+            if usable_image_url(artist.image_url):
                 artist_data['image_url'] = artist.image_url
                 artist_data['genres'] = artist.genres or []
                 artist_data['popularity'] = artist.popularity or 0
@@ -271,6 +330,8 @@ def get_discover_hero():
                 logger.debug(f"owned-album count failed for {artist.similar_artist_name}: {count_err}")
 
             hero_artists.append(artist_data)
+
+        hero_artists = billboard_order(hero_artists)
 
         # Mark these artists as featured so they cycle to the back of the queue
         featured_names = [a["artist_name"] for a in hero_artists]

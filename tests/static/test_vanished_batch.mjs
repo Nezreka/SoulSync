@@ -1,0 +1,222 @@
+// Tests for how the download modal ends a batch the server dropped
+// (`webui/static/downloads.js`).
+//
+//     node --test tests/static/test_vanished_batch.mjs
+//
+// #1384 (cremonies): after a playlist download was cancelled, reopening the
+// playlist's download modal showed the process still running with nothing
+// downloading, and the log repeated "Returning status for 0 batches" every
+// poll. The batch had been deleted server-side; the modal only learns a batch
+// ended through a status update, and a deleted batch never sends one. the
+// status update itself never handled a server-side cancel either: no phase
+// branch took 'cancelled', so the modal read "running" until the batch was
+// reaped.
+
+import { test, describe, beforeEach } from 'node:test';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const SOURCE = readFileSync(
+    resolve(__dirname, '..', '..', 'webui', 'static', 'downloads.js'), 'utf8');
+
+function lift(name) {
+    const start = SOURCE.indexOf(`function ${name}(`);
+    assert.ok(start !== -1, `${name} not found in downloads.js`);
+    let i = SOURCE.indexOf('{', start);
+    let depth = 0;
+    for (; i < SOURCE.length; i++) {
+        if (SOURCE[i] === '{') depth++;
+        else if (SOURCE[i] === '}') { depth--; if (depth === 0) { i++; break; } }
+    }
+    return SOURCE.slice(start, i);
+}
+
+let sb;
+beforeEach(() => {
+    sb = {
+        activeDownloadProcesses: {},
+        cleaned: [],
+        toasts: [],
+        cleared: [],
+    };
+    sb.closeDownloadMissingModal = (id) => { sb.cleaned.push(id); delete sb.activeDownloadProcesses[id]; };
+    sb.showToast = (msg) => sb.toasts.push(msg);
+    sb.clearInterval = (h) => sb.cleared.push(h);
+    vm.createContext(sb);
+    vm.runInContext(`${lift('_vanishedBatchIds')}\n${lift('_endVanishedProcess')}`, sb);
+});
+
+// arrays built inside the vm are from another realm; copy them out so strict
+// deepEqual compares values, not prototypes
+const vanished = (...args) => Array.from(sb._vanishedBatchIds(...args));
+
+describe('_vanishedBatchIds', () => {
+    test('a batch missing twice in a row is gone; once is a blip', () => {
+        const misses = {};
+        assert.deepEqual(vanished(['a', 'b'], { a: {} }, misses), []);
+        assert.deepEqual(vanished(['a', 'b'], { a: {} }, misses), ['b']);
+        // counted once, then forgotten: it doesn't fire again
+        assert.deepEqual(misses, {});
+    });
+
+    test('showing up again resets the count', () => {
+        const misses = {};
+        vanished(['b'], {}, misses);
+        vanished(['b'], { b: {} }, misses);
+        assert.deepEqual(vanished(['b'], {}, misses), []);
+    });
+
+    test('no batches in the answer at all', () => {
+        const misses = {};
+        vanished(['a'], undefined, misses);
+        assert.deepEqual(vanished(['a'], undefined, misses), ['a']);
+    });
+});
+
+describe('_endVanishedProcess', () => {
+    test('a stuck running process with its modal closed is closed properly, so reopening starts fresh', () => {
+        sb.activeDownloadProcesses.p1 = {
+            status: 'running', poller: 7, modalElement: { style: { display: 'none' } },
+            playlist: { name: 'Road Trip' },
+        };
+        sb._endVanishedProcess('p1');
+        assert.deepEqual([...sb.cleaned], ['p1']);
+        assert.equal(sb.activeDownloadProcesses.p1, undefined);
+        assert.deepEqual([...sb.cleared], [7]);
+    });
+
+    test('with the modal open, it stops running and says so', () => {
+        const process = {
+            status: 'running', modalElement: { style: { display: 'flex' } },
+            playlist: { name: 'Road Trip' },
+        };
+        sb.activeDownloadProcesses.p1 = process;
+        sb._endVanishedProcess('p1');
+        assert.equal(process.status, 'cancelled');
+        assert.equal(process.batchGone, true);
+        assert.equal(sb.cleaned.length, 0);
+        assert.match(sb.toasts[0], /Road Trip is no longer running/);
+    });
+
+    test('a finished download the server reaped stays viewable, it just stops being polled', () => {
+        const process = {
+            status: 'complete', modalElement: { style: { display: 'none' } },
+            playlist: { name: 'Road Trip' },
+        };
+        sb.activeDownloadProcesses.p1 = process;
+        sb._endVanishedProcess('p1');
+        assert.equal(process.status, 'complete');
+        assert.equal(process.batchGone, true);
+        assert.equal(sb.cleaned.length, 0);
+        assert.equal(sb.toasts.length, 0);
+        assert.equal(sb.activeDownloadProcesses.p1, process);
+    });
+
+    test('an unknown playlist is a no-op', () => {
+        sb._endVanishedProcess(undefined);
+        sb._endVanishedProcess('nope');
+        assert.equal(sb.cleaned.length, 0);
+    });
+});
+
+test('both global pollers run the check and skip a batch that is gone', () => {
+    const calls = SOURCE.split('_vanishedBatchIds(activeBatchIds, data.batches, _batchMissCounts)').length - 1;
+    assert.equal(calls, 2);
+    const skips = SOURCE.split('process.batchId && !process.batchGone &&').length - 1;
+    assert.equal(skips, 2);
+});
+
+describe('processModalStatusUpdate with a batch cancelled on the server', () => {
+    function setup(playlistId = 'p1') {
+        const elements = {};
+        const ctx = {
+            activeDownloadProcesses: {},
+            toasts: [],
+            cards: [],
+            youtube: [],
+            console: { debug() {}, log() {}, warn() {}, error() {} },
+            _patchOverlayActive() {},
+            updatePlaylistCardUI(id) { ctx.cards.push(id); },
+            updateYouTubeCardPhase(hash, phase) { ctx.youtube.push([hash, phase]); },
+            updateMirroredCardPhase() {},
+            showToast(msg) { ctx.toasts.push(msg); },
+            document: {
+                getElementById(id) {
+                    elements[id] = elements[id] || { style: { display: 'inline-block' } };
+                    return elements[id];
+                },
+            },
+        };
+        ctx.activeDownloadProcesses[playlistId] = {
+            status: 'running', batchId: 'b1', playlist: { name: 'Road Trip' },
+        };
+        vm.createContext(ctx);
+        vm.runInContext(lift('processModalStatusUpdate'), ctx);
+        return { ctx, elements, process: ctx.activeDownloadProcesses[playlistId] };
+    }
+
+    test('ends the process once, hides cancel, resets the card (#1384)', () => {
+        const { ctx, elements, process } = setup();
+        ctx.processModalStatusUpdate('p1', { phase: 'cancelled', tasks: [] });
+        assert.equal(process.status, 'cancelled');
+        assert.equal(elements['cancel-all-btn-p1'].style.display, 'none');
+        assert.deepEqual([...ctx.cards], ['p1']);
+        assert.equal(ctx.toasts.length, 1);
+        assert.match(ctx.toasts[0], /Process cancelled for Road Trip/);
+        // a later poll that still says cancelled doesn't toast again
+        ctx.processModalStatusUpdate('p1', { phase: 'cancelled', tasks: [] });
+        assert.equal(ctx.toasts.length, 1);
+    });
+
+    test('a cancelled youtube playlist goes back to discovered', () => {
+        const { ctx } = setup('youtube_abc');
+        ctx.processModalStatusUpdate('youtube_abc', { phase: 'cancelled', tasks: [] });
+        assert.deepEqual(ctx.youtube.map((x) => [...x]), [['abc', 'discovered']]);
+    });
+
+    test('never reads as "Download complete!" even when every task is cancelled', () => {
+        const { ctx } = setup();
+        ctx.processModalStatusUpdate('p1', {
+            phase: 'cancelled',
+            tasks: [{ track_index: 0, status: 'cancelled' }, { track_index: 1, status: 'cancelled' }],
+        });
+        assert.ok(ctx.toasts.every((t) => !/complete/i.test(t)), ctx.toasts.join(' | '));
+    });
+});
+
+describe('_announceDownloadsFinished', () => {
+    // #1386: search kept an album you'd just downloaded unbadged until a
+    // browser refresh. the modal now tells the page a download landed.
+    function ctx() {
+        const c = { fired: [] };
+        c.CustomEvent = class { constructor(type, init) { this.type = type; this.detail = init && init.detail; } };
+        c.window = { dispatchEvent: (e) => c.fired.push(e) };
+        vm.createContext(c);
+        vm.runInContext(lift('_announceDownloadsFinished'), c);
+        return c;
+    }
+
+    test('fires once something actually downloaded', () => {
+        const c = ctx();
+        c._announceDownloadsFinished('enhanced_search_x', 3);
+        assert.equal(c.fired.length, 1);
+        assert.equal(c.fired[0].type, 'ss:downloads-finished');
+        assert.equal(c.fired[0].detail.completed, 3);
+    });
+
+    test('stays quiet when nothing downloaded', () => {
+        const c = ctx();
+        c._announceDownloadsFinished('p1', 0);
+        c._announceDownloadsFinished('p1', undefined);
+        assert.equal(c.fired.length, 0);
+    });
+
+    test('both ways a modal completes announce it', () => {
+        const calls = SOURCE.split('_announceDownloadsFinished(playlistId, completedCount);').length - 1;
+        assert.equal(calls, 2);
+    });
+});

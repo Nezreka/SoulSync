@@ -40,6 +40,42 @@ _OWNED_PROVIDER_IDS_CTE = """
                 )"""
 
 
+def _blocklist_profile() -> int:
+    """Whose blocks apply: the request's profile, or the background override.
+    Blocks are per profile, so one profile's block never thins another's mix."""
+    try:
+        from core.profile_context import get_current_profile_id
+        return get_current_profile_id() or 1
+    except Exception:  # noqa: BLE001 - no flask, no profile context
+        return 1
+
+
+def rank_library_genres(rows) -> List[Tuple[str, int]]:
+    """(genres_value, weight) rows -> [(genre, total_weight)], biggest first.
+
+    genres_value is a json array or a comma list. names count case-blind so
+    "House" and "house" are one genre, the first spelling seen is the label.
+    """
+    totals: Counter = Counter()
+    labels: Dict[str, str] = {}
+    for raw, weight in rows:
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(raw)
+            names = parsed if isinstance(parsed, list) else [parsed]
+        except (ValueError, TypeError):
+            names = str(raw).split(',')
+        for name in names:
+            label = str(name or '').strip()
+            if not label:
+                continue
+            key = label.lower()
+            labels.setdefault(key, label)
+            totals[key] += int(weight or 1)
+    return [(labels[key], count) for key, count in totals.most_common()]
+
+
 class PersonalizedPlaylistsService:
     """Service for generating personalized playlists from library and discovery pool"""
 
@@ -194,7 +230,7 @@ class PersonalizedPlaylistsService:
             source = ?
             AND (spotify_track_id IS NOT NULL OR itunes_track_id IS NOT NULL OR deezer_track_id IS NOT NULL)
             AND LOWER(artist_name) NOT IN
-                (SELECT LOWER(artist_name) FROM discovery_artist_blacklist)
+                (this profile's blocked artists, by name)
 
         When `exclude_owned=True` (default) the WHERE additionally excludes
         any discovery_pool row whose IDs already match a row in the local
@@ -240,13 +276,20 @@ class PersonalizedPlaylistsService:
             owned_cte = ""
             if exclude_owned:
                 owned_cte = _OWNED_PROVIDER_IDS_CTE
+                # Three uncorrelated NOT IN lists (one per ID space) instead
+                # of one OR'd correlated NOT EXISTS: SQLite cannot index the
+                # OR'd subquery and scans every owned row for every
+                # discovery_pool row, which pins the CPU for minutes on large
+                # pools (issue #1350). Each list is built once over the
+                # materialized CTE. NULLs are kept out of the lists (NOT IN
+                # with a NULL is never true) and a NULL pool ID cannot match.
                 owned_clause = """
-                  AND NOT EXISTS (
-                      SELECT 1 FROM owned o
-                      WHERE (o.spotify_id IS NOT NULL AND o.spotify_id = discovery_pool.spotify_track_id)
-                         OR (o.itunes_id IS NOT NULL AND o.itunes_id = discovery_pool.itunes_track_id)
-                         OR (o.deezer_id IS NOT NULL AND o.deezer_id = discovery_pool.deezer_track_id)
-                  )"""
+                  AND (discovery_pool.spotify_track_id IS NULL OR discovery_pool.spotify_track_id NOT IN (
+                      SELECT o.spotify_id FROM owned o WHERE o.spotify_id IS NOT NULL))
+                  AND (discovery_pool.itunes_track_id IS NULL OR discovery_pool.itunes_track_id NOT IN (
+                      SELECT o.itunes_id FROM owned o WHERE o.itunes_id IS NOT NULL))
+                  AND (discovery_pool.deezer_track_id IS NULL OR discovery_pool.deezer_track_id NOT IN (
+                      SELECT o.deezer_id FROM owned o WHERE o.deezer_id IS NOT NULL))"""
 
             query = f"""
                 {owned_cte}
@@ -255,14 +298,14 @@ class PersonalizedPlaylistsService:
                 FROM discovery_pool
                 WHERE source = ?
                   AND (spotify_track_id IS NOT NULL OR itunes_track_id IS NOT NULL OR deezer_track_id IS NOT NULL)
-                  AND LOWER(artist_name) NOT IN (SELECT LOWER(artist_name) FROM discovery_artist_blacklist UNION SELECT LOWER(name) FROM blocklist WHERE entity_type='artist')
+                  AND LOWER(artist_name) NOT IN (SELECT LOWER(name) FROM blocklist WHERE entity_type='artist' AND profile_id = ?)
                   {owned_clause}
                   {extra_where}
                 ORDER BY {order_by}
                 LIMIT ?
             """
 
-            params = (source,) + tuple(extra_params) + (fetch_limit,)
+            params = (source, _blocklist_profile()) + tuple(extra_params) + (fetch_limit,)
 
             with self.database._get_connection() as conn:
                 cursor = conn.cursor()
@@ -733,35 +776,44 @@ class PersonalizedPlaylistsService:
                 # lib2 keeps genres on the release, not the recording: a track
                 # inherits its album's list, which is where the importer and
                 # every provider worker write it (docs §50.4.4.17).
+                # Weighted by how many of your tracks each album holds.
                 cursor.execute("""
-                    SELECT al.genres AS genres
+                    SELECT al.genres AS genres, COUNT(t.id) AS weight
                     FROM lib2_albums al
+                    JOIN lib2_tracks t ON t.album_id = al.id
                     WHERE al.genres IS NOT NULL AND al.genres NOT IN ('', '[]')
-                      AND EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
-                                  ON f.track_id=t.id WHERE t.album_id=al.id
+                      AND EXISTS (SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id
                                   AND f.file_state='active' AND TRIM(f.path)<>'')
+                    GROUP BY al.id
                 """)
 
-                # Parse genres (JSON array, or a comma-separated legacy value)
-                all_genres = []
-                for row in cursor.fetchall():
-                    genres_str = row['genres']
-                    if not genres_str:
-                        continue
-                    try:
-                        parsed = json.loads(genres_str)
-                    except (ValueError, TypeError):
-                        parsed = [g.strip() for g in str(genres_str).split(',')]
-                    all_genres.extend(g for g in parsed if g)
+                ranked = rank_library_genres(
+                    (row['genres'], row['weight']) for row in cursor.fetchall())
+                if ranked:
+                    return ranked[:limit]
 
-                if all_genres:
-                    return Counter(all_genres).most_common(limit)
+                # no album carries genres yet: the artists' genres, weighted by
+                # how many of your tracks they have. Jumping straight to artist
+                # names made get_genre_playlist search the discovery pool for a
+                # *genre* called "Louis Armstrong": every Daily Mix came back
+                # empty.
+                cursor.execute("""
+                    SELECT ar.genres AS genres, COUNT(t.id) AS weight
+                    FROM lib2_tracks t
+                    JOIN lib2_albums al ON al.id = t.album_id
+                    JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                    WHERE ar.genres IS NOT NULL AND ar.genres NOT IN ('', '[]')
+                      AND EXISTS (SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id
+                                  AND f.file_state='active' AND TRIM(f.path)<>'')
+                    GROUP BY ar.id
+                """)
+                ranked = rank_library_genres(
+                    (row['genres'], row['weight']) for row in cursor.fetchall())
+                if ranked:
+                    return ranked[:limit]
 
-                # Fallback: use artist names as "genres". The trigger used to be
-                # "the schema has no genres column", which lib2 always has — but
-                # the situation it covered is real and now says so directly: a
-                # library nothing has enriched yet still needs categories.
-                logger.warning("No genres in the library - using top artists as categories")
+                # last resort, no genre data anywhere: artist names as categories
+                logger.warning("No genre data in library - using top artists as categories")
                 cursor.execute("""
                     SELECT ar.name AS name, COUNT(*) AS count
                     FROM lib2_tracks t
@@ -872,10 +924,10 @@ class PersonalizedPlaylistsService:
                         source
                     FROM discovery_pool
                     WHERE (artist_name LIKE ? OR track_name LIKE ?) AND source = ?
-                      AND LOWER(artist_name) NOT IN (SELECT LOWER(artist_name) FROM discovery_artist_blacklist UNION SELECT LOWER(name) FROM blocklist WHERE entity_type='artist')
+                      AND LOWER(artist_name) NOT IN (SELECT LOWER(name) FROM blocklist WHERE entity_type='artist' AND profile_id = ?)
                     ORDER BY RANDOM()
                     LIMIT ?
-                """, (f'%{category}%', f'%{category}%', active_source, limit))
+                """, (f'%{category}%', f'%{category}%', active_source, _blocklist_profile(), limit))
 
                 rows = cursor.fetchall()
                 return [self._build_track_dict(row, active_source) for row in rows]
@@ -1089,6 +1141,14 @@ class PersonalizedPlaylistsService:
             else:
                 from core.metadata_service import get_primary_client
                 itunes = get_primary_client()
+                # S8: these track ids come from the active (non-Spotify)
+                # source — label them with the provider-correct key instead
+                # of mislabeling them as spotify_track_id. The generic 'id'
+                # is preserved for consumers that don't care about the source.
+                track_id_key = {
+                    'itunes': 'itunes_track_id',
+                    'deezer': 'deezer_track_id',
+                }.get(active_source, 'spotify_track_id')
                 for album in selected_albums:
                     try:
                         album_data = itunes.get_album(album.id, include_tracks=True)
@@ -1104,7 +1164,7 @@ class PersonalizedPlaylistsService:
                                     track_artists = track.get('artists', [])
                                     artist_names = [a['name'] for a in track_artists] if isinstance(track_artists, list) and track_artists and isinstance(track_artists[0], dict) else (track_artists if isinstance(track_artists, list) else [])
                                     all_tracks.append({
-                                        'spotify_track_id': track_id,
+                                        track_id_key: track_id,
                                         'track_name': track.get('name', ''),
                                         'artist_name': ', '.join(artist_names) if artist_names else 'Unknown',
                                         'album_name': album_name,

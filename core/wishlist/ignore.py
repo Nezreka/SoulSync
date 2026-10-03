@@ -41,9 +41,12 @@ def configured_ttl_days() -> int:
     except Exception:
         return IGNORE_TTL_DAYS
 
-# Recognised reasons (free-text tolerated; these are the canonical two).
+# Recognised reasons (free-text tolerated; these are the canonical ones).
 REASON_REMOVED = "removed"
 REASON_CANCELLED = "cancelled"
+# A bulk-skip from the wishlist queue: "not now, stop auto-grabbing this"
+# rather than a user block. Same TTL semantics as a manual remove.
+REASON_SKIPPED = "skipped"
 
 
 def normalize_ignore_id(track_id: Any) -> str:

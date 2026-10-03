@@ -11,6 +11,9 @@
  * (still classic) - reached through window at call time.
  */
 
+import type { CandidateDecision } from '../features/downloads/decisions';
+
+import { decisionLabel, decisionPill, rejectionSummary } from '../features/downloads/decisions';
 import { escapeHtml } from './html';
 
 declare global {
@@ -57,6 +60,40 @@ interface TrackDetailPayload {
   quarantine_entry_id?: string | number;
   expected?: { title?: string; artist?: string };
   downloaded?: { title?: string; artist?: string };
+  decision?: DecisionBlock | null;
+}
+
+/** A stored candidate, as core/downloads/candidate_pool.py summarizes it. */
+export interface DecisionCandidate {
+  username?: string;
+  display_name?: string;
+  source_service?: string;
+  quality?: string;
+  quality_label?: string;
+  confidence?: number;
+  duration?: number;
+  decision?: CandidateDecision;
+}
+
+export interface DecisionBlock {
+  outcome: string;
+  chosen?: DecisionCandidate | null;
+  alternatives?: DecisionCandidate[];
+  accepted_total?: number;
+  rejected_total?: number;
+  rejected_counts?: Record<string, number>;
+  /** Search provenance (core/downloads/provenance.py): which search ran. */
+  search_mode?: 'automatic' | 'interactive';
+  searched_at?: string;
+  policy_run_id?: string;
+  /** Candidate policy facet: the ladder rung the winner reached. */
+  policy?: {
+    target_index?: number;
+    target_label?: string;
+    target_count?: number;
+    tier_score?: number | null;
+    fallback_enabled?: boolean;
+  };
 }
 
 function _tdEsc(s: unknown): string {
@@ -198,6 +235,8 @@ function _tdRender(d: TrackDetailPayload, taskId: string): void {
     }
   }
 
+  renderDecisionBlock(d.decision ?? null);
+
   // Reason banner (quarantined / failed)
   const reason = document.getElementById('td-reason');
   if (reason) {
@@ -230,6 +269,150 @@ function _tdRender(d: TrackDetailPayload, taskId: string): void {
   _tdRenderActions(d, taskId, kind);
 }
 
+const SOURCE_NAMES: Record<string, string> = {
+  soulseek: 'Soulseek',
+  youtube: 'YouTube',
+  tidal: 'Tidal',
+  qobuz: 'Qobuz',
+  hifi: 'HiFi',
+  deezer_dl: 'Deezer',
+  lidarr: 'Lidarr',
+  amazon: 'Amazon Music',
+  soundcloud: 'SoundCloud',
+  torrent: 'Torrent',
+  usenet: 'Usenet',
+};
+
+function _el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  cls: string,
+  text?: string,
+): HTMLElementTagNameMap[K] {
+  const node = document.createElement(tag);
+  node.className = cls;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+function _candidateLine(c: DecisionCandidate): string {
+  const bits = [SOURCE_NAMES[c.source_service || ''] || c.source_service || ''];
+  if (c.source_service === 'soulseek' && c.username) bits.push(c.username);
+  if (c.quality_label || c.quality) bits.push(String(c.quality_label || c.quality));
+  const score = c.decision?.score ?? c.confidence;
+  if (score != null) bits.push(`match ${Math.round(Number(score) * 100)}%`);
+  return bits.filter(Boolean).join(' · ');
+}
+
+/**
+ * "Why this file": what won and why, what came next, what got turned away.
+ * Built from DOM nodes, never innerHTML: file names come from other people.
+ */
+export function renderDecisionBlock(decision: DecisionBlock | null): void {
+  const box = document.getElementById('td-decision');
+  if (!box) return;
+  box.replaceChildren();
+  if (!decision || !decision.outcome) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  const counts = decision.rejected_counts || {};
+  const rejected = decision.rejected_total || 0;
+  const accepted = decision.accepted_total || 0;
+
+  // Search provenance: which search produced this decision (automatic worker
+  // vs interactive inspection) and the policy rung the winner reached.
+  const modeLabel =
+    decision.search_mode === 'interactive' ? 'Interactive Search' : 'Automatic Search';
+  const searchedDate = String(decision.searched_at || '').split(' ')[0];
+  box.append(
+    _el(
+      'p',
+      'td-decision-provenance',
+      searchedDate ? `${modeLabel} · searched ${searchedDate}` : modeLabel,
+    ),
+  );
+  const policy = decision.policy;
+  if (policy && policy.target_label) {
+    const rung = (policy.target_index ?? 0) + 1;
+    const total = policy.target_count ?? 0;
+    const tier = policy.tier_score == null ? '' : ` · tier ${policy.tier_score}`;
+    box.append(
+      _el(
+        'p',
+        'td-decision-policy',
+        `Ladder rung ${rung} of ${total}: ${policy.target_label}${tier}`,
+      ),
+    );
+  }
+
+  if (decision.outcome === 'chosen') {
+    box.append(_el('h3', 'td-decision-title', 'Why this file'));
+    const chosen = decision.chosen;
+    if (chosen) {
+      const win = _el('div', 'td-decision-win');
+      win.append(
+        _el('span', 'td-decision-name', chosen.display_name || ''),
+        _el('span', 'td-decision-meta', _candidateLine(chosen)),
+      );
+      box.append(win);
+    }
+    const runnersUp = Math.max(0, accepted - 1);
+    const parts = [];
+    if (runnersUp) parts.push(`${runnersUp} other${runnersUp === 1 ? '' : 's'} also passed`);
+    if (rejected) parts.push(`${rejected} passed over: ${rejectionSummary(counts)}`);
+    box.append(
+      _el(
+        'p',
+        'td-decision-summary',
+        parts.length ? `${parts.join('. ')}.` : 'It was the only match.',
+      ),
+    );
+  } else {
+    box.append(
+      _el(
+        'h3',
+        'td-decision-title',
+        decision.outcome === 'nothing_passed' ? 'Why nothing was downloaded' : 'Why it stopped',
+      ),
+    );
+    const text =
+      decision.outcome === 'nothing_passed'
+        ? rejected
+          ? `Nothing passed: ${rejectionSummary(counts)}.`
+          : 'The search came back empty.'
+        : `${accepted} passed the checks, but none of them would start downloading.` +
+          (rejected ? ` Passed over: ${rejectionSummary(counts)}.` : '');
+    box.append(_el('p', 'td-decision-summary', text));
+  }
+
+  const alternatives = (decision.alternatives || []).slice(0, 5);
+  if (alternatives.length) {
+    box.append(
+      _el('div', 'td-decision-subtitle', decision.chosen ? 'Next in line' : 'Closest results'),
+    );
+    const list = _el('ul', 'td-decision-list');
+    for (const alt of alternatives) {
+      const item = _el('li', 'td-decision-item');
+      const text = _el('div', 'td-decision-text');
+      text.append(
+        _el('span', 'td-decision-name', alt.display_name || ''),
+        _el('span', 'td-decision-meta', _candidateLine(alt)),
+      );
+      const d = alt.decision;
+      const pill = _el(
+        'span',
+        `td-decision-pill stage-${d && !d.accepted ? d.stage || 'decision' : 'ok'}`,
+        d && !d.accepted ? decisionPill(alt) || decisionLabel(d.code) : 'passed',
+      );
+      if (d?.detail) pill.title = d.detail;
+      item.append(text, pill);
+      list.append(item);
+    }
+    box.append(list);
+  }
+}
+
 function _tdRenderActions(d: TrackDetailPayload, taskId: string, kind: string): void {
   const el = document.getElementById('td-actions');
   if (!el) return;
@@ -254,6 +437,18 @@ function _tdRenderActions(d: TrackDetailPayload, taskId: string, kind: string): 
       if (taskId) showCandidatesModal(taskId);
     });
   } else if (kind === 'failed' || kind === 'not_found') {
+    // The candidate inspector: every source searched for this track, with why
+    // each hit would or wouldn't be taken. Lives in the React app.
+    if (window.openDownloadTaskInspector) {
+      add('🧭 Interactive Search', 'td-action-secondary', () => {
+        closeTrackDetail();
+        window.openDownloadTaskInspector?.(taskId, {
+          name: d.title,
+          artist: d.artist,
+          album: d.album,
+        });
+      });
+    }
     add('🔍 Search for a different result', 'td-action-secondary', () => {
       closeTrackDetail();
       if (taskId) showCandidatesModal(taskId);

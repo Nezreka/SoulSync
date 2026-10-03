@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import threading
 import time
 from dataclasses import dataclass
@@ -86,6 +87,7 @@ from core.imports.paths import (
     build_simple_download_destination,
     docker_resolve_path,
     import_profile_id,
+    transfer_root_for_context,
 )
 from core.imports.album_naming import resolve_album_group
 from core.metadata.lyrics import generate_lrc_file
@@ -723,6 +725,23 @@ def _requeue_quarantined_task_for_retry(task_id, batch_id, trigger) -> bool:
         return False
 
 
+def _record_failed_download_blocklist(task_id, reason):
+    """Terminal import give-up: the file burned every quarantine retry, so its
+    fingerprint joins the failed-download blocklist (90 days) and future
+    searches skip it. Fail-open — the blocklist never sinks the import."""
+    if not task_id:
+        return
+    try:
+        with tasks_lock:
+            task = dict(download_tasks.get(task_id) or {})
+        from core.downloads.failed_blocklist import record_task_giveup
+        if record_task_giveup(get_database(), task, reason=reason):
+            logger.info(f"[FailedBlocklist] Task {task_id} blocked after terminal "
+                        f"import give-up: {reason}")
+    except Exception as exc:  # noqa: BLE001 - defensive
+        logger.debug(f"[FailedBlocklist] give-up record failed: {exc}")
+
+
 def import_rejection_reason(context: dict) -> str | None:
     """Human-readable reason if post-processing terminally rejected the file
     (quarantine or race-guard), else ``None`` for a clean import.
@@ -1154,6 +1173,88 @@ def _apply_profile_output_transforms(final_path: str, context: dict,
     return lossy_path
 
 
+def _update_moved_track_file_path(old_path: str, new_path: str) -> None:
+    """Point the Library v2 file row at a track file's new location after
+    an M5 album-folder merge. Best-effort: a stale path is worse than
+    a missed update, but a failed update must never fail the import.
+
+    Every media server, not only SoulSync's own: the file rows are the
+    library whichever server reported it."""
+    try:
+        from core.library2.track_files import repoint_file_path
+
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            repoint_file_path(conn, old_path, new_path)
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("[M5] Could not update moved track path %s -> %s: %s", old_path, new_path, e)
+
+
+def _merge_upgraded_album_folder(context, artist_context, album_info, old_album_name,
+                                 file_ext, new_final_path) -> None:
+    """M5: the album group just upgraded standard -> deluxe. Tracks filed
+    earlier under the standard folder are moved into the deluxe folder so
+    the album is not split across two folders by processing order.
+
+    The old folder is located with a dry-run of the real path builder, so
+    custom templates stay consistent. Never raises — a failed merge leaves
+    the split in place (the pre-existing behavior), it must not fail the
+    deluxe track's own import.
+    """
+    try:
+        old_album_info = dict(album_info) if isinstance(album_info, dict) else {}
+        old_album_info["album_name"] = old_album_name
+        old_final_path, old_is_replace = build_final_path_for_track(
+            context, artist_context, old_album_info, file_ext, create_dirs=False
+        )
+        if old_is_replace:
+            return
+        old_folder = os.path.dirname(old_final_path or "")
+        new_folder = os.path.dirname(new_final_path or "")
+        if not old_folder or not new_folder or old_folder == new_folder:
+            return
+        # Safety: only touch folders under the transfer/library root.
+        transfer_dir = os.path.normpath(transfer_root_for_context(context))
+        if os.path.commonpath([os.path.normpath(old_folder), transfer_dir]) != transfer_dir:
+            logger.warning("[M5] Upgrade merge refused: %s is outside the library root", old_folder)
+            return
+        if not os.path.isdir(old_folder):
+            return
+        os.makedirs(new_folder, exist_ok=True)
+        try:
+            entries = os.listdir(old_folder)
+        except OSError:
+            return
+        for entry in entries:
+            src = os.path.join(old_folder, entry)
+            if not os.path.isfile(src):
+                continue
+            dst = os.path.join(new_folder, entry)
+            if os.path.exists(dst):
+                logger.warning(
+                    "[M5] Upgrade merge: %s already exists in %s — leaving %s in place",
+                    entry, new_folder, src,
+                )
+                continue
+            try:
+                shutil.move(src, dst)
+            except OSError as e:
+                logger.error("[M5] Upgrade merge: could not move %s -> %s: %s", src, dst, e)
+                continue
+            _update_moved_track_file_path(src, dst)
+        try:
+            os.rmdir(old_folder)
+        except OSError:
+            pass  # not empty (name conflicts) — leave the remainder in place
+        logger.info("[M5] Merged upgraded album folder %s -> %s", old_folder, new_folder)
+    except Exception as e:
+        logger.error("[M5] Album folder merge failed (non-fatal): %s", e)
+
+
 def post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=None):
     """Import one finished download, under the library it was decided for (#1199).
 
@@ -1292,6 +1393,8 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                     file_path,
                     _expected_duration_ms,
                     length_tolerance_s=_duration_tolerance_override,
+                    verify_flac_decode=bool(
+                        config_manager.get('post_processing.verify_flac_decode', False)),
                 )
             except Exception as integrity_error:
                 logger.error(f"[Integrity] Check raised unexpectedly (continuing): {integrity_error}")
@@ -1416,6 +1519,7 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                     if task_id in download_tasks:
                         download_tasks[task_id]['status'] = 'failed'
                         download_tasks[task_id]['error_message'] = f"Audio guard: {audio_reason}"
+                _record_failed_download_blocklist(task_id, f"audio guard: {audio_reason}")
             if task_id and batch_id:
                 _notify_download_completed(batch_id, task_id, success=False)
             return
@@ -2052,7 +2156,30 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
         # overwrite of the batch (ordinary wishlist items stay protected).
         is_quality_upgrade = _enhance_source_info.get('job') == 'quality_upgrade'
 
-        final_path, _ = build_final_path_for_track(context, artist_context, album_info, file_ext)
+        # M5: re-resolve the album group just before filing — a concurrent
+        # track may have upgraded standard -> deluxe after this track
+        # resolved it above. The group only ever upgrades, never
+        # downgrades, so this can only move the track into the newer folder.
+        _group_upgraded_from = None
+        if album_info and album_info.get('is_album') and not is_album_download:
+            _regrouped = resolve_album_group(artist_context, album_info, original_album)
+            if _regrouped and _regrouped != album_info.get('album_name'):
+                logger.info(
+                    "Album grouping re-resolved before filing: %r -> %r",
+                    album_info.get('album_name'), _regrouped,
+                )
+                album_info['album_name'] = _regrouped
+            _group_upgraded_from = album_info.pop('_album_group_upgraded_from', None)
+
+        final_path, _final_is_replace = build_final_path_for_track(context, artist_context, album_info, file_ext)
+        if _group_upgraded_from and not _final_is_replace:
+            # M5: this track upgraded the group — relocate tracks already
+            # filed under the standard folder so the album isn't split
+            # across two folders by processing order.
+            _merge_upgraded_album_folder(
+                context, artist_context, album_info,
+                _group_upgraded_from, file_ext, final_path,
+            )
         # #999 atomic album publish (opt-in): redirect to a private staging mirror
         # for fresh whole-album batches; returns final_path unchanged otherwise.
         # Upgrades publish at the live destination before retiring an old copy;
@@ -2588,14 +2715,30 @@ def post_process_matched_download_with_verification(context_key, context, file_p
 
     logger = pp_logger
     try:
+        # #1351: a batched download only knows its profile through the batch.
+        # The pops below strip batch_id before the inner pipeline builds the
+        # final import path, so import_profile_id() resolved to None and the
+        # file fell back to the shared transfer folder — even for own-library
+        # profiles. The staging route (try_staging_match) never puts batch_id
+        # in its context at all, so resolve through the wrapper's batch_id
+        # argument as well. The pop semantics below stay untouched: this only
+        # preserves the profile the inner pipeline was always meant to see.
+        if not context.get('profile_id'):
+            _resolved_pid = import_profile_id(context) or import_profile_id({'batch_id': batch_id})
+            if _resolved_pid:
+                context['profile_id'] = _resolved_pid
         original_task_id = context.pop('task_id', None)
         original_batch_id = context.pop('batch_id', None)
         # #1199: the batch's library must survive the pop -- import_owner_id
-        # reads it from the context once batch_id is gone
-        if original_batch_id:
+        # reads it from the context once batch_id is gone. The staging route
+        # carries no batch_id in its context (see #1351 above), so the
+        # wrapper's own batch_id decides there: otherwise a batch decided
+        # for the shared library on purpose would file into the profile's own.
+        _owner_batch_id = original_batch_id or batch_id
+        if _owner_batch_id:
             from core.library_scope import BATCH_OWNER_KEY
             from core.runtime_state import download_batches
-            _batch = download_batches.get(original_batch_id) or {}
+            _batch = download_batches.get(_owner_batch_id) or {}
             if BATCH_OWNER_KEY in _batch and BATCH_OWNER_KEY not in context:
                 context[BATCH_OWNER_KEY] = _batch[BATCH_OWNER_KEY]
         # #999: the atomic-publish stage redirect runs inside the inner pipeline
@@ -2664,6 +2807,7 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                 f"Task {task_id} quarantined by the {trigger} guard with no "
                 f"retry candidate — marking failed: {reason}"
             )
+            _record_failed_download_blocklist(task_id, reason)
             if task_id:
                 with tasks_lock:
                     if task_id in download_tasks:
@@ -2730,6 +2874,7 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             if _attempt_version_mismatch_fallback(context, task_id, batch_id, runtime, metadata_runtime):
                 return
             logger.info(f"File was quarantined by AcoustID verification (task={task_id}): {failure_msg}")
+            _record_failed_download_blocklist(task_id, f"AcoustID verification failed: {failure_msg}")
             with tasks_lock:
                 if task_id in download_tasks:
                     download_tasks[task_id]['status'] = 'failed'

@@ -556,6 +556,10 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                 if aid:
                     album_ids.add(str(aid))
             album_release_dates = {}
+            # The album's own track count, for the embedded album dict below.
+            # (It used to get the PLAYLIST's track count — a 12-track album
+            # imported from a 1582-track playlist claimed 1582 tracks.)
+            album_track_counts = {}
             # Deezer PLAYLIST tracks do NOT carry `track_position` (only `/track/<id>`
             # and `/album/<id>/tracks` do), so numbering them by their playlist index
             # poisons the real album track number — which then rides into the wishlist
@@ -593,6 +597,8 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                         cached = cache.get_entity('deezer', 'album', aid)
                         if cached and cached.get('release_date'):
                             album_release_dates[aid] = cached['release_date']
+                            if cached.get('nb_tracks'):
+                                album_track_counts[aid] = cached['nb_tracks']
                     except Exception as e:
                         logger.debug("cache get_entity album release_date: %s", e)
                 # Cache miss — fetch from API
@@ -605,6 +611,8 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                         if a_resp is not None and a_resp.ok:
                             a_data = a_resp.json()
                             album_release_dates[aid] = a_data.get('release_date', '')
+                            if a_data.get('nb_tracks'):
+                                album_track_counts[aid] = a_data['nb_tracks']
                             # Store in metadata cache for future use
                             if cache:
                                 try:
@@ -639,7 +647,10 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                         'images': [{'url': album_cover}] if album_cover else [],
                         'release_date': album_release_dates.get(album_id, ''),
                         'album_type': 'album',
-                        'total_tracks': total_tracks,
+                        # The ALBUM's track count (from /album/{id} nb_tracks),
+                        # not the playlist's — unknown only when the album
+                        # lookup failed entirely.
+                        'total_tracks': album_track_counts.get(album_id) or total_tracks,
                         'id': album_id,
                     },
                     'duration_ms': t.get('duration', 0) * 1000,
@@ -948,7 +959,8 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         # Get track data from private API
         track_data = self._get_track_data(track_id)
         if not track_data:
-            self._set_error(download_id, 'Failed to get track data')
+            self._set_error(download_id, 'Deezer would not return this track (expired ARL, '
+                                         'or not available in your region)')
             return None
 
         track_token = track_data.get('TRACK_TOKEN', '')
@@ -983,7 +995,11 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                 break
 
         if not media_url:
-            self._set_error(download_id, 'No media URL available (may require higher subscription tier)')
+            # no license token = the login itself is broken, not the plan
+            self._set_error(download_id, (
+                'Deezer login has no license token, refresh your ARL in Settings'
+                if not getattr(self, '_license_token', None) else
+                'No media URL available (may require higher subscription tier)'))
             return None
 
         if actual_quality != requested_quality:
@@ -1087,6 +1103,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             transferred=record.get('transferred', 0),
             speed=record.get('speed', 0),
             file_path=record.get('file_path'),
+            error=record.get('error'),
         )
 
     async def get_all_downloads(self) -> List[DownloadStatus]:

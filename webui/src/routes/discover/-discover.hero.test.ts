@@ -11,11 +11,13 @@ import {
   HERO_SLIDE_MS,
   HERO_WATCHLIST_ICON,
   heroArtistId,
+  heroIds,
   heroAutoAdvances,
   heroGenres,
   heroJumpIndex,
   heroNextIndex,
   heroPopularityClass,
+  heroPopularityWords,
   heroShowsPopularity,
   heroWatchlistLabel,
   WATCH_ALL_BUSY,
@@ -74,6 +76,13 @@ describe('popularity', () => {
     expect(heroPopularityClass(50)).toBe('medium'); //  boundary is inclusive
     expect(heroPopularityClass(49)).toBe('low');
     expect(heroPopularityClass(0)).toBe('low');
+  });
+
+  it('words each band, on the same thresholds', () => {
+    expect(heroPopularityWords(80)).toBe('Well known');
+    expect(heroPopularityWords(79)).toBe('Rising');
+    expect(heroPopularityWords(50)).toBe('Rising');
+    expect(heroPopularityWords(49)).toBe('Under the radar');
   });
 });
 
@@ -294,5 +303,19 @@ describe('the hero watchlist state check', () => {
 
   it('posts just the artist id', () => {
     expect(heroWatchlistCheckBody('a1')).toEqual({ artist_id: 'a1' });
+  });
+});
+
+describe('heroIds', () => {
+  it('carries every provider id the artist has, for feedback and blocks', () => {
+    expect(
+      heroIds({
+        artist_id: 'x',
+        artist_name: 'Soen',
+        spotify_artist_id: 'sp',
+        itunes_artist_id: null,
+        musicbrainz_artist_id: 'mb',
+      }),
+    ).toEqual({ spotify: 'sp', musicbrainz: 'mb' });
   });
 });

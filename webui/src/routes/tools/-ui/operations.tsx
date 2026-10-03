@@ -56,6 +56,7 @@ import {
   jobSchedule,
   jobTrend,
 } from '../-tools.ops';
+import { OperationsStudio } from './operations-studio';
 
 function toast(message: string, type = 'info') {
   window.showToast?.(message, type);
@@ -532,7 +533,10 @@ export interface OperationsProps {
   runs: RepairJobRun[];
   onChanged: () => void;
   onHelp: (job: RepairJob) => void;
-  onShowFindings: (jobId: string) => void;
+  onShowFindings: (jobId: string, options?: { severity?: string; findingType?: string }) => void;
+  mode?: 'simple' | 'advanced';
+  onModeChange?: (mode: 'simple' | 'advanced') => void;
+  defaultMode?: 'simple' | 'advanced';
 }
 
 export function Operations({
@@ -543,7 +547,36 @@ export function Operations({
   onChanged,
   onHelp,
   onShowFindings,
+  mode: controlledMode,
+  onModeChange,
+  defaultMode,
 }: OperationsProps) {
+  const [internalMode, setInternalMode] = useState<'simple' | 'advanced'>(() => {
+    if (defaultMode) return defaultMode;
+    try {
+      const saved = localStorage.getItem('soulsync_operations_mode');
+      if (saved === 'advanced' || saved === 'simple') return saved;
+    } catch {
+      // Fallback if localStorage unavailable
+    }
+    return 'simple';
+  });
+
+  const mode = controlledMode ?? internalMode;
+
+  const handleModeSwitch = useCallback(
+    (next: 'simple' | 'advanced') => {
+      setInternalMode(next);
+      try {
+        localStorage.setItem('soulsync_operations_mode', next);
+      } catch {
+        // Ignore storage errors
+      }
+      onModeChange?.(next);
+    },
+    [onModeChange],
+  );
+
   const families = useMemo(() => jobFamilies(jobs || []), [jobs]);
   /** Collapsed families, by name. Everything starts open — a page that hides
    *  its own contents on arrival is the tab problem again, one level down. */
@@ -564,59 +597,140 @@ export function Operations({
   }
 
   return (
-    <div className="repair-families">
-      {families.map((family) => {
-        const isOpen = !collapsed.has(family.category);
-        return (
-          <section
-            className={`repair-family${isOpen ? '' : ' collapsed'}`}
-            style={{ ['--tile-glow' as string]: family.glow }}
-            data-category={family.category}
-            key={family.category}
+    <div className="operations-wrapper">
+      {/* ── Mode Switcher Bar ────────────────────────────────────────────── */}
+      <div className="operations-mode-bar">
+        <div className="operations-mode-meta">
+          <div className="operations-mode-heading">
+            <span className="operations-mode-pill">
+              {mode === 'simple' ? '✦ Simple View' : '⚙ Advanced View'}
+            </span>
+            <span className="operations-mode-label">
+              {mode === 'simple'
+                ? 'Curated Playbooks & 4 Operational Pillars'
+                : '30 Low-Level Scripts & Cadence Control'}
+            </span>
+          </div>
+          <p className="operations-mode-description">
+            {mode === 'simple'
+              ? 'Outcome-based curation designed for everyday library management. Trigger composite tune-ups or manage high-level domains with 1-click.'
+              : 'Detailed crontab engine room. Configure custom intervals per job, worker thread pools, spectral cutoff thresholds, and historical metrics.'}
+          </p>
+        </div>
+
+        <div
+          className="operations-mode-toggle-group"
+          role="tablist"
+          aria-label="Workstation View Mode"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'simple'}
+            className={`operations-mode-toggle-btn ${mode === 'simple' ? 'active' : ''}`}
+            onClick={() => handleModeSwitch('simple')}
+            title="Switch to Simple Studio Mode (Recommended)"
           >
-            <button
-              type="button"
-              className="repair-family-head"
-              aria-expanded={isOpen}
-              onClick={() =>
-                setCollapsed((current) => {
-                  const next = new Set(current);
-                  if (next.has(family.category)) next.delete(family.category);
-                  else next.add(family.category);
-                  return next;
-                })
-              }
+            <span className="operations-mode-toggle-icon">✦</span>
+            <span>Simple Mode</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'advanced'}
+            className={`operations-mode-toggle-btn ${mode === 'advanced' ? 'active' : ''}`}
+            onClick={() => handleModeSwitch('advanced')}
+            title="Switch to Advanced Mode (30 Micro-Jobs)"
+          >
+            <span className="operations-mode-toggle-icon">⚙</span>
+            <span>Advanced Mode</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ── Simple Mode (Studio) View ────────────────────────────────────── */}
+      {mode === 'simple' ? (
+        <OperationsStudio
+          jobs={jobs}
+          progress={progress}
+          runs={runs}
+          onChanged={onChanged}
+          onShowFindings={onShowFindings}
+          onSwitchToAdvanced={(category) => {
+            handleModeSwitch('advanced');
+            if (category) {
+              setTimeout(() => {
+                const target = document.querySelector(`[data-category="${category}"]`);
+                target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }, 50);
+            }
+          }}
+        />
+      ) : null}
+
+      {/* ── Advanced Mode (Job Families & Tiles) View ─────────────────────── */}
+      {/* Kept in the DOM with hidden when in Simple mode to maintain socket dispatch hooks & test stability */}
+      <div
+        className="repair-families"
+        hidden={mode !== 'advanced'}
+        style={mode !== 'advanced' ? { display: 'none' } : undefined}
+      >
+        {families.map((family) => {
+          const isOpen = !collapsed.has(family.category);
+          return (
+            <section
+              className={`repair-family${isOpen ? '' : ' collapsed'}`}
+              style={{ ['--tile-glow' as string]: family.glow }}
+              data-category={family.category}
+              key={family.category}
             >
-              <span className="repair-family-title">{family.category}</span>
-              <span className="repair-family-summary">{familySummary(family)}</span>
-              {family.pending > 0 ? (
-                <span className="repair-family-pending">
-                  {family.pending.toLocaleString()} open
+              <button
+                type="button"
+                className="repair-family-head"
+                aria-expanded={isOpen}
+                onClick={() =>
+                  setCollapsed((current) => {
+                    const next = new Set(current);
+                    if (next.has(family.category)) next.delete(family.category);
+                    else next.add(family.category);
+                    return next;
+                  })
+                }
+              >
+                <span className="repair-family-title">{family.category}</span>
+                <span className="repair-family-summary">{familySummary(family)}</span>
+                {family.pending > 0 ? (
+                  <span className="repair-family-pending">
+                    {family.pending.toLocaleString()} open
+                  </span>
+                ) : null}
+                <span
+                  className={`repair-family-chevron${isOpen ? ' open' : ''}`}
+                  aria-hidden="true"
+                >
+                  &#9660;
                 </span>
+              </button>
+              <div className="repair-family-blurb">{family.blurb}</div>
+              {isOpen ? (
+                <div className="repair-family-grid">
+                  {family.jobs.map((job) => (
+                    <OperationTile
+                      job={job}
+                      progress={progress[job.job_id]}
+                      runs={runs}
+                      onChanged={onChanged}
+                      onHelp={onHelp}
+                      onShowFindings={onShowFindings}
+                      key={job.job_id}
+                    />
+                  ))}
+                </div>
               ) : null}
-              <span className={`repair-family-chevron${isOpen ? ' open' : ''}`} aria-hidden="true">
-                &#9660;
-              </span>
-            </button>
-            <div className="repair-family-blurb">{family.blurb}</div>
-            {isOpen ? (
-              <div className="repair-family-grid">
-                {family.jobs.map((job) => (
-                  <OperationTile
-                    job={job}
-                    progress={progress[job.job_id]}
-                    runs={runs}
-                    onChanged={onChanged}
-                    onHelp={onHelp}
-                    onShowFindings={onShowFindings}
-                    key={job.job_id}
-                  />
-                ))}
-              </div>
-            ) : null}
-          </section>
-        );
-      })}
+            </section>
+          );
+        })}
+      </div>
     </div>
   );
 }

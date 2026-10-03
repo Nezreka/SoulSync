@@ -52,6 +52,7 @@ import {
   repairJobDot,
   scoreBar,
   timeAgo,
+  linkedJobId,
 } from './-tools.core';
 
 describe('prettifyRepairSettingKey', () => {
@@ -178,8 +179,8 @@ describe('finding labels', () => {
     // know only `critical`, which nothing has ever emitted. Both map to the
     // same icon and the same CSS class while old rows exist.
     expect(Object.keys(FINDING_SEVERITY_ICONS)).toHaveLength(4);
-    expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(23);
-    expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(21);
+    expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(24);
+    expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(22);
     expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(13);
   });
 
@@ -188,6 +189,7 @@ describe('finding labels', () => {
     expect(findingTypeLabel('short_preview_track')).toBe('Preview Clip');
     expect(findingTypeLabel('genre_enrichment')).toBe('Genre Enrichment');
     expect(findingTypeLabel('comma_artist_split')).toBe('Comma Artist');
+    expect(findingTypeLabel('suspect_album_tag')).toBe('Suspect Album');
   });
 
   it('humanises an unknown type instead of showing a raw id', () => {
@@ -783,5 +785,14 @@ describe('bulkFixLoopMessage', () => {
     // ever sets lastError alongside a failure — a stale error must not surface
     // on a clean run.
     expect(bulkFixLoopMessage(5, 0, 'stale').message).toBe('Fixed 5');
+  });
+});
+
+describe('linkedJobId', () => {
+  it('reads a real job id off /tools?job=', () => {
+    const ids = ['expired_download_cleaner', 'duplicate_detector'];
+    expect(linkedJobId('?job=expired_download_cleaner', ids)).toBe('expired_download_cleaner');
+    expect(linkedJobId('?job=nope', ids)).toBeNull();
+    expect(linkedJobId('', ids)).toBeNull();
   });
 });

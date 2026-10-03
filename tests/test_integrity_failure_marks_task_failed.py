@@ -208,7 +208,9 @@ def test_no_success_contract_never_assumes_success(_isolate_state):
         'task_id': 't3',
         'batch_id': 'b3',
         'context_key': 'test::ctx3',
-        # No failure markers, no _final_processed_path
+        # No failure markers, no _final_processed_path — but the inner
+        # pipeline explicitly reported success.
+        '_pipeline_import_succeeded': True,
     }
 
     with patch.object(import_pipeline, 'post_process_matched_download',

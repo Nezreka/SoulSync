@@ -45,6 +45,12 @@ _VALID_ALBUM_TYPES = frozenset({'album', 'single', 'ep', 'compilation'})
 _YEAR_RE = re.compile(r'(\d{4})')
 
 
+# Every separator a release-type value arrives packed with: "," from
+# read_embedded_tags joining a list, NUL from ID3 multi-value frames, and
+# ";"/"/" from taggers that pack several values into one string.
+_SEPARATORS = re.compile(r"[,;/\x00]")
+
+
 # Separators we split a single artist field on to recover a list.
 # Mirrors the same separator set ``core/metadata/artist_resolution.py``
 # uses when normalizing soulseek matched-download artist strings.
@@ -121,14 +127,71 @@ def _normalize_year(value: Any) -> str:
     return m.group(1) if m else ''
 
 
+def _release_type_tokens(value: Any) -> List[str]:
+    """Every release-type token in a ``releasetype`` tag, lowercased, in order.
+
+    The tag is legitimately MULTI-VALUED — MusicBrainz describes a release as
+    one primary type plus any number of secondary ones, and beets and Picard
+    both write the whole set. Mutagen hands that back as a list, and the old
+    code ran ``str()`` over it, producing ``"['album', 'compilation', 'live']"``
+    — a string that matches no canonical token, so every multi-valued tag read
+    as "no type at all". Which is to say: on any library tagged by beets or
+    Picard, the release type was silently invisible to reorganize.
+    """
+    if value is None:
+        return []
+    values = value if isinstance(value, (list, tuple, set)) else [value]
+    out: List[str] = []
+    for entry in values:
+        # The same release reaches this function spelled three different ways
+        # and every one of them has to tokenise identically:
+        #
+        #   mutagen on a FLAC   -> ["album", "compilation", "live"]
+        #   mutagen on an mp3   -> "album\x00compilation\x00live"   (ID3 NUL-packs)
+        #   read_embedded_tags  -> "album, compilation, live"      (it joins lists)
+        #
+        # That last one is the reorganize path: the tag reader flattens every
+        # multi-value tag with ", " before this ever sees it. Missing any one
+        # separator leaves the whole value as a single unrecognised token and
+        # silently drops every label the file carries.
+        for part in _SEPARATORS.split(str(entry or "")):
+            token = part.strip().lower()
+            if token and token not in out:
+                out.append(token)
+    return out
+
+
 def _normalize_album_type(value: Any) -> str:
-    """Lowercase + validate the ``releasetype`` tag against the canonical
-    token set. Returns '' for unknown values so the downstream path
-    builder falls back to its default."""
-    s = _stringify(value).lower()
-    if s in _VALID_ALBUM_TYPES:
-        return s
+    """The PRIMARY canonical token for the ``releasetype`` tag, or ''.
+
+    Order matters and is not arbitrary: MusicBrainz writes the primary type
+    first and its qualifiers after it, so the first canonical token IS the
+    primary. Taking the most SPECIFIC token instead looks tidier and silently
+    re-routes libraries — ``[album, compilation]`` is a single artist's own
+    anthology with a Compilation qualifier, and answering 'compilation' sends
+    it to compilation_path, moving every greatest-hits record a user owns into
+    Compilations/ on the next reorganize.
+
+    The qualifiers are not discarded, they are just not the answer to THIS
+    question; :func:`_secondary_album_types` keeps them for ``$atypes``.
+    """
+    for token in _release_type_tokens(value):
+        if token in _VALID_ALBUM_TYPES:
+            return token
     return ''
+
+
+def _secondary_album_types(value: Any, primary: str) -> List[str]:
+    """The release-type tokens that are not the resolved primary.
+
+    For ``[album, compilation, live]`` that is ``[compilation, live]`` — the
+    qualifiers, which is exactly what ``$atypes`` labels a folder with.
+
+    These are what ``$atypes`` needs: Live, Soundtrack, Remix and the like
+    exist only as secondary types, so a reorganize that kept just the primary
+    could never reproduce a folder called ``[2007][Live][Anthology] Salival``.
+    """
+    return [t for t in _release_type_tokens(value) if t != primary]
 
 
 def _split_artists(value: Any) -> List[str]:
@@ -224,7 +287,9 @@ def extract_album_meta_from_tags(tags: Dict[str, Any]) -> Dict[str, Any]:
         or _parse_int_total(tags.get('tracknumber'))  # may be "5/12"
         or 0
     )
-    album_type = _normalize_album_type(tags.get('releasetype'))
+    _releasetype_raw = tags.get('releasetype')
+    album_type = _normalize_album_type(_releasetype_raw)
+    secondary_types = _secondary_album_types(_releasetype_raw, album_type)
 
     # `total_discs` only comes from explicit total signals: a
     # `totaldiscs` tag, or the trailing `/N` of an ID3-style
@@ -251,6 +316,9 @@ def extract_album_meta_from_tags(tags: Dict[str, Any]) -> Dict[str, Any]:
         'images': [],
         'album_artist': album_artist,
         'album_type': album_type,
+        # Kept alongside the collapsed primary so $atypes can label a release
+        # with every qualifier it carries, the same as it does at import time.
+        'secondary_types': secondary_types,
     }
 
 

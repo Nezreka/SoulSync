@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any, Iterable
 
-from core.repair_jobs.base import skip_deleted_quarantine
+from core.repair_jobs.base import walk_library
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.filesystem_subjects")
@@ -83,8 +83,7 @@ def filesystem_audio_files(
     found: list[str] = []
     seen: set[str] = set()
     for root_dir in repair_scan_roots(context):
-        for root, dirs, files in os.walk(root_dir):
-            skip_deleted_quarantine(root, dirs, root_dir)
+        for root, _dirs, files in walk_library(root_dir):
             if context.check_stop():
                 return found
             for name in files:

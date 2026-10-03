@@ -91,7 +91,12 @@ let discoverPageInitialized = false;
  */
 window.startDiscoverVirtualSync = function (virtualPlaylistId, name, spotifyTracks) {
     playlistTrackCache[virtualPlaylistId] = spotifyTracks;
-    if (!spotifyPlaylists.find(p => p.id === virtualPlaylistId)) {
+    const existing = spotifyPlaylists.find(p => p.id === virtualPlaylistId);
+    if (existing) {
+        // same id, new run: the sync reads the name off this row
+        existing.name = name;
+        existing.track_count = spotifyTracks.length;
+    } else {
         spotifyPlaylists.push({ id: virtualPlaylistId, name, track_count: spotifyTracks.length });
     }
     return startPlaylistSync(virtualPlaylistId);
@@ -371,9 +376,17 @@ window.openLbPlaylistDiscovery = async function (identifier, title, tracks) {
     }
 };
 
-window.reopenActiveDownloadModal = function (virtualPlaylistId) {
+window.reopenActiveDownloadModal = function (virtualPlaylistId, options = {}) {
     const process = activeDownloadProcesses[virtualPlaylistId];
     if (!process || !process.modalElement) return false;
+    // "open this album" (artist page, search) wants a download still in
+    // progress, not a finished one: an old finished window carries the old
+    // album (no section lock) and the old analysis. returning false lets the
+    // caller open fresh, which closes the finished run properly first (#1386).
+    // a download bubble passes nothing: reviewing a finished run is its job
+    if (options.runningOnly && (process.status === 'complete' || process.status === 'cancelled')) {
+        return false;
+    }
     if (process.status === 'complete') {
         showToast('Showing previous results. Close this modal to start a new analysis.', 'info');
     }

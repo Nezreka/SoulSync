@@ -65,13 +65,11 @@ class _FakeDatabase:
                 artist_genres TEXT,
                 track_data_json TEXT
             );
-            CREATE TABLE discovery_artist_blacklist (
-                artist_name TEXT PRIMARY KEY
-            );
-            -- Unified blocklist — discovery filtering now unions artist bans
-            -- from here too (Phase 1 blocklist). Minimal shape for the subquery.
+            -- The profile blocklist; discovery filters on this profile's
+            -- artist bans. Minimal shape for the subquery.
             CREATE TABLE blocklist (
                 id INTEGER PRIMARY KEY,
+                profile_id INTEGER NOT NULL DEFAULT 1,
                 entity_type TEXT,
                 name TEXT
             );
@@ -102,10 +100,10 @@ class _FakeDatabase:
         )
         self._conn.commit()
 
-    def blacklist(self, artist_name):
+    def blacklist(self, artist_name, profile_id=1):
         self._conn.execute(
-            "INSERT INTO discovery_artist_blacklist (artist_name) VALUES (?)",
-            (artist_name,),
+            "INSERT INTO blocklist (profile_id, entity_type, name) VALUES (?, 'artist', ?)",
+            (profile_id, artist_name),
         )
         self._conn.commit()
 
@@ -221,6 +219,29 @@ def test_discovery_helper_filters_blacklisted_artists(service):
     assert [t['track_name'] for t in tracks] == ['Keep']
 
 
+def test_discovery_helper_filters_only_this_profiles_blocks(service):
+    """Blocks are per profile: another profile's block doesn't thin this mix."""
+    from core.profile_context import reset_background_profile, set_background_profile
+
+    svc, db = service
+    db.insert_discovery_track(
+        source='spotify', spotify_track_id='sp1', track_name='Theirs',
+        artist_name='Their Block', album_name='X',
+    )
+    db.blacklist('their block', profile_id=2)
+
+    def names():
+        return [t['track_name'] for t in svc._select_discovery_tracks(
+            source='spotify', order_by='track_name', fetch_limit=100)]
+
+    assert names() == ['Theirs']
+    token = set_background_profile(2)
+    try:
+        assert names() == []
+    finally:
+        reset_background_profile(token)
+
+
 def test_discovery_helper_honors_source_filter(service):
     svc, db = service
     db.insert_discovery_track(
@@ -258,6 +279,55 @@ def test_discovery_helper_honors_extra_where(service):
         fetch_limit=100,
     )
     assert [t['track_name'] for t in tracks] == ['Pop60']
+
+
+def test_discovery_helper_excludes_owned_across_all_id_spaces(service):
+    """`exclude_owned=True` must filter pool rows whose IDs match a library
+    row in ANY of the three ID spaces (spotify / itunes / deezer)."""
+    svc, db = service
+    db.insert_discovery_track(source='spotify', spotify_track_id='sp-owned',
+                              track_name='OwnedSpotify', artist_name='A', album_name='X')
+    db.insert_discovery_track(source='spotify', itunes_track_id='it-owned',
+                              track_name='OwnedItunes', artist_name='B', album_name='X')
+    db.insert_discovery_track(source='deezer', deezer_track_id='dz-owned',
+                              track_name='OwnedDeezer', artist_name='C', album_name='X')
+    db.insert_discovery_track(source='spotify', spotify_track_id='sp-free',
+                              track_name='Free', artist_name='D', album_name='X')
+    db.insert_library_track(spotify_track_id='sp-owned')
+    db.insert_library_track(itunes_track_id='it-owned')
+    db.insert_library_track(deezer_id='dz-owned')
+
+    tracks = svc._select_discovery_tracks(
+        source='spotify', order_by='track_name', fetch_limit=100,
+    )
+    assert [t['track_name'] for t in tracks] == ['Free']
+
+
+def test_discovery_helper_exclude_owned_null_guard_keeps_unmatched(service):
+    """Regression for the #1350 rewrite: the NULL guard must not change
+    semantics. A deezer-only pool row (NULL spotify/itunes IDs) must NOT
+    be excluded just because the library has unrelated spotify/itunes rows,
+    and a library row with a NULL ID must never exclude anything."""
+    svc, db = service
+    db.insert_discovery_track(source='deezer', deezer_track_id='dz-keep',
+                              spotify_track_id=None, itunes_track_id=None,
+                              track_name='DeezerKeep', artist_name='A', album_name='X')
+    db.insert_discovery_track(source='deezer', deezer_track_id='dz-drop',
+                              spotify_track_id=None, itunes_track_id=None,
+                              track_name='DeezerDrop', artist_name='B', album_name='X')
+    # Unrelated library rows in other ID spaces + a row with all-NULL IDs
+    db.insert_library_track(spotify_track_id='sp-unrelated')
+    db.insert_library_track(itunes_track_id='it-unrelated')
+    db.insert_library_track(spotify_track_id=None, itunes_track_id=None, deezer_id=None)
+    db.insert_library_track(deezer_id='dz-drop')
+
+    with patch.object(
+            svc, '_get_active_source', return_value='deezer'):
+        tracks = svc._select_discovery_tracks(
+            source='deezer', order_by='track_name', fetch_limit=100,
+        )
+    assert [t['track_name'] for t in tracks] == ['DeezerKeep']
+
 
 
 # ---------------------------------------------------------------------------

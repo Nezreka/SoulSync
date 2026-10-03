@@ -216,12 +216,15 @@ export function AdlQuarantineRow({
   onToggle,
   handlers,
   altSlot,
+  attempts,
 }: {
   entry: AdlQuarantineEntry;
   open: boolean;
   onToggle: () => void;
   handlers: ReviewActionHandlers;
   altSlot?: React.ReactNode;
+  /** set on the lead row of a group: how many files tried to be this track. */
+  attempts?: { count: number; open: boolean; groupKey: string; onToggle: () => void };
 }) {
   const [triggerLabel, triggerClass] = quarantineTrigger(entry.trigger);
   const title = entry.expected_track || entry.original_filename || entry.filename || 'Unknown file';
@@ -247,7 +250,29 @@ export function AdlQuarantineRow({
     >
       <RowArt artwork={entry.thumb_url} />
       <div className="adl-row-info">
-        <div className="adl-row-title">{title}</div>
+        <div className="verif-quar-title-row">
+          <div className="adl-row-title">{title}</div>
+          {/* right by the name, where you're already reading. the old "▾ 3
+              more" sat grey on the far right and nobody saw it. */}
+          {attempts ? (
+            <button
+              type="button"
+              className={`verif-quar-alt-btn verif-quar-attempts${attempts.open ? ' open' : ''}`}
+              data-group-key={attempts.groupKey}
+              data-alt-count={attempts.count - 1}
+              aria-expanded={attempts.open}
+              title={`${attempts.count} downloads tried to be this track. ${
+                attempts.open ? 'Hide' : 'Show'
+              } the other ${attempts.count === 2 ? 'one' : attempts.count - 1}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                attempts.onToggle();
+              }}
+            >
+              {attempts.count} attempts <span aria-hidden="true">{attempts.open ? '▴' : '▾'}</span>
+            </button>
+          ) : null}
+        </div>
         {meta ? <div className="adl-row-meta">{meta}</div> : null}
         {sourceLabel ? <div className="adl-row-batch">{sourceLabel}</div> : null}
         <div className="verif-quar-details" style={{ display: open ? '' : 'none' }}>
@@ -347,35 +372,32 @@ export function AdlQuarantineList({
               open={openDetails.has(first.id)}
               onToggle={() => onToggleDetails(first.id)}
               handlers={handlersFor(first)}
+              attempts={{
+                count: group.members.length,
+                open: isOpen,
+                groupKey,
+                onToggle: () => onToggleGroup(groupKey),
+              }}
               altSlot={
-                <>
+                // The row's own Delete only takes the one candidate it sits
+                // on. This takes the group (#1208).
+                onDeleteGroup ? (
                   <button
                     type="button"
-                    className={`verif-quar-alt-btn${isOpen ? ' open' : ''}`}
+                    className="verif-quar-alt-btn verif-quar-alt-del"
                     data-group-key={groupKey}
-                    data-alt-count={rest.length}
-                    title={`Show ${rest.length} more alternative candidate${rest.length === 1 ? '' : 's'} for this track`}
-                    onClick={() => onToggleGroup(groupKey)}
+                    title={`Permanently delete all ${group.members.length} quarantined candidates for this track`}
+                    onClick={() => onDeleteGroup(first, group.members.length)}
                   >
-                    {isOpen ? '▴' : '▾'} {rest.length} more
+                    Delete all {group.members.length}
                   </button>
-                  {/* The row's own Delete only takes the one candidate it sits
-                      on. This takes the group (#1208). */}
-                  {onDeleteGroup ? (
-                    <button
-                      type="button"
-                      className="verif-quar-alt-btn verif-quar-alt-del"
-                      data-group-key={groupKey}
-                      title={`Permanently delete all ${group.members.length} quarantined candidates for this track`}
-                      onClick={() => onDeleteGroup(first, group.members.length)}
-                    >
-                      🗑 Delete all {group.members.length}
-                    </button>
-                  ) : null}
-                </>
+                ) : null
               }
             />
             <div className={`verif-quar-alt-members${isOpen ? ' vqg-open' : ''}`}>
+              <div className="verif-quar-alt-heading">
+                Other {rest.length === 1 ? 'attempt' : `${rest.length} attempts`} at this track
+              </div>
               {rest.map((entry) => (
                 <AdlQuarantineRow
                   key={entry.id}
@@ -393,6 +415,41 @@ export function AdlQuarantineList({
   );
 }
 
+/** "2 tracks · 7 files", or just "3 files" when every file is its own track. */
+export function quarantineSummary(tracks: number, files: number): string {
+  const f = `${files} file${files === 1 ? '' : 's'}`;
+  if (tracks === files) return f;
+  return `${tracks} track${tracks === 1 ? '' : 's'} · ${f}`;
+}
+
+function ReviewSegment({
+  active,
+  label,
+  count,
+  title,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  count: number | null;
+  title: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      className={`adl-pill adl-review-seg-btn${active ? ' active' : ''}`}
+      title={title}
+      onClick={onClick}
+    >
+      <span className="adl-review-seg-label">{label}</span>
+      {count == null ? null : <span className="adl-review-seg-count">{count}</span>}
+    </button>
+  );
+}
+
 /**
  * The sub-view switcher above the review list.
  *
@@ -406,6 +463,7 @@ export function AdlReviewBanner({
   unverifiedCount,
   quarantineCount,
   quarantineLoaded,
+  quarantineTrackCount = null,
   deletedCount,
   selectedCount,
   onSubView,
@@ -424,6 +482,8 @@ export function AdlReviewBanner({
   unverifiedCount: number;
   quarantineCount: number;
   quarantineLoaded: boolean;
+  /** distinct tracks behind the quarantined files, null until the list loads. */
+  quarantineTrackCount?: number | null;
   deletedCount: number | null;
   /** Checked unverified rows; the bulk buttons narrow to these when > 0. */
   selectedCount: number;
@@ -439,36 +499,44 @@ export function AdlReviewBanner({
   onEmptyDeleted: () => void;
 }) {
   return (
-    <div className="adl-batch-filter-banner" id="verif-subview-banner">
-      {/* Hidden entirely when no unverified queue can exist. */}
-      {acoustidEnabled ? (
-        <button
-          type="button"
-          className={`adl-pill${subView === 'unverified' ? ' active' : ''}`}
-          title="Imported files that AcoustID could not hard-confirm"
-          onClick={() => onSubView('unverified')}
-        >
-          ⚠ Unverified ({unverifiedCount})
-        </button>
-      ) : null}
-      <button
-        type="button"
-        className={`adl-pill${subView === 'quarantine' ? ' active' : ''}`}
-        title="Files that failed verification and were NOT imported"
-        onClick={() => onSubView('quarantine')}
-      >
-        {/* The count only appears once it is known, rather than showing (0). */}🛡 Quarantine
-        {quarantineLoaded ? ` (${quarantineCount})` : ''}
-      </button>
-      <button
-        type="button"
-        className={`adl-pill${subView === 'deleted' ? ' active' : ''}`}
-        title="Files removed by repair tools and the duplicate cleaner — restorable until purged"
-        onClick={() => onSubView('deleted')}
-      >
-        🗑 Deleted{deletedCount == null ? '' : ` (${deletedCount})`}
-      </button>
+    <div className="adl-batch-filter-banner adl-review-bar" id="verif-subview-banner">
+      {/* a real segmented control. the old pills were 12px grey text on a
+          tinted strip, and hard to read. */}
+      <div className="adl-review-seg" role="tablist" aria-label="Review queue">
+        {/* Hidden entirely when no unverified queue can exist. */}
+        {acoustidEnabled ? (
+          <ReviewSegment
+            active={subView === 'unverified'}
+            label="Unverified"
+            count={unverifiedCount}
+            title="Imported files that AcoustID could not hard-confirm"
+            onClick={() => onSubView('unverified')}
+          />
+        ) : null}
+        <ReviewSegment
+          active={subView === 'quarantine'}
+          label="Quarantine"
+          // only once it's known, rather than showing 0
+          count={quarantineLoaded ? quarantineCount : null}
+          title="Files that failed verification and were NOT imported"
+          onClick={() => onSubView('quarantine')}
+        />
+        <ReviewSegment
+          active={subView === 'deleted'}
+          label="Deleted"
+          count={deletedCount}
+          title="Files removed by repair tools and the duplicate cleaner, restorable until purged"
+          onClick={() => onSubView('deleted')}
+        />
+      </div>
       <span className="verif-banner-spacer" />
+      {/* the pill counts files, the list shows one row per track. say both so
+          "7" next to two rows isn't a puzzle. */}
+      {subView === 'quarantine' && quarantineTrackCount != null && quarantineCount > 0 ? (
+        <span className="adl-review-summary">
+          {quarantineSummary(quarantineTrackCount, quarantineCount)}
+        </span>
+      ) : null}
       {/* Bulk buttons only when the view has something to act on — a bulk
           button over an empty list is a promise the click can't keep. */}
       {subView === 'deleted' ? (
@@ -656,7 +724,10 @@ export function AdlDeletedRow({
           // them here now, so they need to say what they are.
           entry.source === 'album_bundle_orphan'
           ? 'Stalled album download'
-          : null;
+          : // Corrupt File Detector: kept until the re-download replaces it.
+            entry.source === 'corrupt_audio'
+            ? 'Corrupt file (re-downloading)'
+            : null;
   const ago = entry.deleted_at ? timeAgo(entry.deleted_at) || entry.deleted_at : 'age unknown';
   return (
     <div className="adl-row adl-row-completed verif-quar-row" data-deleted-id={entry.id}>

@@ -53,6 +53,19 @@ describe('AutoSyncMonitorPanel (1131-1160)', () => {
     expect(container.querySelector('.auto-sync-monitor-list')).toBeNull();
   });
 
+  it('collapses to one line when idle and opens back up when something runs (#1401)', () => {
+    // cremonies #1401: the idle monitor ate ~140px above the board, which is
+    // where the actual work happens. style.css keys the one-line layout off this.
+    const idle = renderPanel([row(1, 'A')]);
+    expect(idle.container.querySelector('.auto-sync-monitor--idle')).not.toBeNull();
+    const busy = renderPanel([row(2, 'B', { status: 'running' })]);
+    expect(
+      busy.container
+        .querySelectorAll('.auto-sync-monitor')[0]
+        ?.classList.contains('auto-sync-monitor--idle'),
+    ).toBe(false);
+  });
+
   it('hides IDLE playlists from the monitor entirely (1107)', () => {
     const { container } = renderPanel([row(1, 'A', { status: 'idle' }), row(2, 'B', {})]);
     expect(container.querySelector('.auto-sync-monitor-empty')).not.toBeNull();
@@ -161,6 +174,14 @@ describe('AutoSyncMonitorCard (1162-1182)', () => {
       ...render(<AutoSyncMonitorCard playlist={playlist} state={state} onDetails={onDetails} />),
     };
   };
+
+  it('a personalized row has no Details, there is no mirrored playlist to open', () => {
+    const daily = { ...row(-1, 'Daily Mix 1'), _personalized: true };
+    const { container } = renderCard({ status: 'running', phase: 'Syncing' }, daily);
+    expect(container.textContent).toContain('Daily Mix 1');
+    expect(container.textContent).toContain('Syncing');
+    expect(container.querySelector('button')).toBeNull();
+  });
 
   it('maps each status to its label and its class', () => {
     const cases: [string, string, string][] = [

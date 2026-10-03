@@ -432,6 +432,12 @@ describe('Auto-Sync pipeline endpoints (auto-sync.js 2467-2497)', () => {
     });
   });
 
+  it('run with refreshOnly asks for refresh_only (#1413)', async () => {
+    stubFetch({ state: { status: 'running', progress: 0 } });
+    await runMirroredPipeline(7, { refreshOnly: true });
+    expect(calls[0]).toMatchObject({ method: 'POST', body: { refresh_only: true } });
+  });
+
   it('status GETs, and the whole body IS the state', async () => {
     stubFetch({ status: 'finished', progress: 100 });
     await expect(fetchMirroredPipelineStatus(7)).resolves.toEqual({

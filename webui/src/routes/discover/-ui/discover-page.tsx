@@ -1,9 +1,11 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
+import { getShellProfileContext } from '@/platform/shell/bridge';
 
 import type { WebLens } from '../-discover.artist-web';
 import type { CacheItem } from '../-discover.cache-sections';
-import type { DiscoverSectionId } from '../-discover.layout';
+import type { DiscoverSectionId, DiscoverZoneId } from '../-discover.layout';
 import type { DiscoverMix, MixAction } from '../-discover.mixes';
 import type { RecentAlbum } from '../-discover.recent-releases';
 import type { RecommendedArtist } from '../-discover.recommended';
@@ -12,8 +14,16 @@ import type { DiscoverHeroArtist } from '../-discover.types';
 import type { YourAlbum } from '../-discover.your-albums-actions';
 import type { GenreDiveData } from './genre-dive-modal';
 
-import { fetchBecauseYouListenTo, fetchGenreDeepDive, fetchLbPlaylist } from '../-discover.api';
-import { bpMetaStats } from '../-discover.build-playlist';
+import {
+  fetchBecauseYouListenTo,
+  fetchGenreDeepDive,
+  fetchFlow,
+  fetchInbox,
+  fetchLbPlaylist,
+  fetchWeekStats,
+} from '../-discover.api';
+import { useDominantColor } from '../-discover.backdrop';
+import { bpMetaStats, BP_NO_PLAYLIST_TRACKS } from '../-discover.build-playlist';
 import {
   byltSections,
   byltRow,
@@ -30,7 +40,10 @@ import {
 } from '../-discover.bylt';
 import { CACHE_SECTIONS } from '../-discover.cache-sections';
 import { decadeClassicsName, decadeTrackToSpotify } from '../-discover.decade-shelf';
+import { explanationLine } from '../-discover.explanation';
+import { quickTiles } from '../-discover.greeting';
 import { normalizeTrack } from '../-discover.helpers';
+import { inboxArtistRef } from '../-discover.inbox';
 import { discoverLimiter } from '../-discover.limiter';
 import {
   lbStatusBase,
@@ -41,7 +54,10 @@ import {
 } from '../-discover.listenbrainz';
 import { beginPlayIntent, playMixNow, playTrackNow, type PlayIntent } from '../-discover.playable';
 import { syncBubbleImage, toSyncTracks } from '../-discover.playlist-sync';
+import { pickConcert, pickPosterAlbum, posterDay } from '../-discover.posters';
 import { profileKey, useProfileScope } from '../-discover.profile-scope';
+import { pickSpotlight, releaseKind, shortDate, tasteGap, weekSummary } from '../-discover.pulse';
+import { keepRecipe, recipeVerb, refreshRecipe, type RecipeMixCard } from '../-discover.recipes';
 import { recSource, recommendedVisible } from '../-discover.recommended';
 import {
   fetchStations,
@@ -59,15 +75,18 @@ import { useBuildPlaylist } from '../-discover.use-build-playlist';
 import { useDownloadBar } from '../-discover.use-download-bar';
 import { useHero } from '../-discover.use-hero';
 import { useLastfmRadio } from '../-discover.use-lastfm-radio';
+import { useDiscoverLayout } from '../-discover.use-layout';
 import { useListenBrainz } from '../-discover.use-listenbrainz';
 import { defaultLazySource, useMixModal } from '../-discover.use-mix-modal';
 import { useDiscoverMixes } from '../-discover.use-mixes';
 import { useDiscoverPage } from '../-discover.use-page';
 import { usePlaylistSync } from '../-discover.use-playlist-sync';
+import { usePromoVideo } from '../-discover.use-promo';
 import { useAdventurousness, useRecommended } from '../-discover.use-recommended';
 import { useStationPreview } from '../-discover.use-station';
 import { useYourAlbums } from '../-discover.use-your-albums';
 import { useYourArtists } from '../-discover.use-your-artists';
+import { useVideoBackdropsEnabled } from '../-discover.video-stage';
 import {
   ARTISTS_DEFAULT_SOURCES,
   savedArtistSourcesSubtitle,
@@ -85,16 +104,26 @@ import { ByltSections } from './bylt-sections';
 import { CacheShelf, GenreExplorerSection } from './cache-shelves';
 import { DeezerEditorialShelf } from './deezer-editorial-shelf';
 import { DiscoverHero } from './discover-hero';
+import { DiscoverLayoutModal } from './discover-layout-modal';
+import { DiscoverNav, type DiscoverNavItem } from './discover-nav';
+import { DiscoveryInbox } from './discovery-inbox';
 import { DownloadBar } from './download-bar';
 import { GenreDiveModal } from './genre-dive-modal';
+import { GreetingGrid } from './greeting-grid';
 import { MixModal } from './mix-modal';
 import { MixShelf } from './mix-shelf';
+import { NowPlayingBanner, useNowPlaying } from './now-playing-banner';
+import { AlbumPoster, ArtistPoster, ConcertPoster, PosterRow } from './poster-row';
+import { PromoBanner } from './promo-banner';
+import { TasteGapBanner, useReveal, WeekBanner } from './pulse-banners';
 import { LastfmRadioSection, ListenBrainzSection } from './radio-sections';
+import { RecipeEditor } from './recipe-editor';
 import { RecommendedModal } from './recommended-modal';
 import { RecommendedShelf } from './recommended-shelf';
 import { YourAlbumsSourcesModal, YourArtistsSourcesModal } from './sources-modals';
 import { StationModal } from './station-modal';
 import { StationsRow } from './stations-row';
+import { VideoRail, type RailArtist } from './video-rail';
 import { YourAlbumsBatchModal } from './your-albums-batch-modal';
 import { YourAlbumsShelf } from './your-albums-shelf';
 import { YourArtistsModal } from './your-artists-modal';
@@ -187,115 +216,27 @@ function okData<T>(outcome: unknown): T | undefined {
   return o?.kind === 'ok' ? o.data : undefined;
 }
 
-interface DiscoveryActionCard {
-  id: string;
-  eyebrow: string;
-  title: string;
-  detail: string;
-  value: string;
-  target: string;
-}
-
-interface DiscoveryInsight {
-  eyebrow: string;
-  title: string;
-  detail: string;
-  value: string;
-  actionLabel: string;
-  target: string;
-}
-
-function scrollToDiscoveryTarget(target: string) {
-  document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
-function DiscoveryActionCard({ card }: { card: DiscoveryActionCard }) {
-  return (
-    <button
-      type="button"
-      className={`discover-action-card discover-action-card--${card.id}`}
-      onClick={() => scrollToDiscoveryTarget(card.target)}
-    >
-      <span className="discover-action-card__eyebrow">{card.eyebrow}</span>
-      <span className="discover-action-card__title">{card.title}</span>
-      <span className="discover-action-card__detail">{card.detail}</span>
-      <span className="discover-action-card__value">{card.value}</span>
-    </button>
-  );
-}
-
-function DiscoveryCommandPanel({
-  cards,
-  insight,
-  onBuildPlaylist,
-  onOpenMap,
-  onOpenRecommended,
-}: {
-  cards: DiscoveryActionCard[];
-  insight: DiscoveryInsight;
-  onBuildPlaylist: () => void;
-  onOpenMap: () => void;
-  onOpenRecommended: () => void;
-}) {
-  return (
-    <aside className="discover-command-panel" aria-label="Discovery shortcuts">
-      <div className="discover-command-panel__head">
-        <span className="discover-command-kicker">Discovery Queue</span>
-        <h2>Start Here</h2>
-        <p>The strongest moves from your library, listening history, release gaps, and builders.</p>
-      </div>
-      <button
-        type="button"
-        className="discover-next-move"
-        onClick={() => scrollToDiscoveryTarget(insight.target)}
-      >
-        <span className="discover-next-move__eyebrow">{insight.eyebrow}</span>
-        <strong>{insight.title}</strong>
-        <span>{insight.detail}</span>
-        <span className="discover-next-move__foot">
-          <em>{insight.value}</em>
-          <b>{insight.actionLabel}</b>
-        </span>
-      </button>
-      <div className="discover-action-grid">
-        {cards.map((card) => (
-          <DiscoveryActionCard key={card.id} card={card} />
-        ))}
-      </div>
-      <div className="discover-command-tools">
-        <button type="button" onClick={onBuildPlaylist}>
-          Build playlist
-        </button>
-        <button type="button" onClick={onOpenMap}>
-          Artist map
-        </button>
-        <button type="button" onClick={onOpenRecommended}>
-          Recommended
-        </button>
-      </div>
-    </aside>
-  );
-}
-
 interface DiscoveryZoneProps {
   id: string;
   title: string;
   subtitle: string;
   tone: string;
-  metric: string;
   children: React.ReactNode;
 }
 
-function DiscoveryZone({ id, title, subtitle, tone, metric, children }: DiscoveryZoneProps) {
+/**
+ * one zone of the feed. a title and one line, then its rows. the zone used to
+ * wear a kicker that repeated its own title ("FOR YOU / For You") and a count
+ * of "signals", "leads" and "tools" that meant nothing to anyone reading it.
+ */
+function DiscoveryZone({ id, title, subtitle, tone, children }: DiscoveryZoneProps) {
   return (
     <section className={`discovery-zone discovery-zone--${tone}`} id={id}>
       <header className="discovery-zone-head">
         <div>
-          <span className="discovery-zone-kicker">{tone.replace('-', ' ')}</span>
           <h2>{title}</h2>
           <p>{subtitle}</p>
         </div>
-        <span className="discovery-zone-metric">{metric}</span>
       </header>
       <div className="discovery-zone-body">{children}</div>
     </section>
@@ -305,6 +246,7 @@ function DiscoveryZone({ id, title, subtitle, tone, metric, children }: Discover
 export function DiscoverPage() {
   const page = useDiscoverPage();
   const mixes = useDiscoverMixes(page.aboveFoldSettled);
+  const queryClient = useQueryClient();
   const sync = usePlaylistSync((t) => toast(t.message, t.level));
   const bar = useDownloadBar();
   const albumOpen = useAlbumOpen((t) => toast(t.message, t.level));
@@ -332,8 +274,9 @@ export function DiscoverPage() {
     phase: 'loading' | 'error' | 'ready';
   } | null>(null);
   const [recModalOpen, setRecModalOpen] = useState(false);
+  // the recipe editor: a new mix, or the one being edited
+  const [recipeEditor, setRecipeEditor] = useState<{ editing: RecipeMixCard | null } | null>(null);
   const [addingAll, setAddingAll] = useState(false);
-  const [expandedCaches, setExpandedCaches] = useState<Record<string, boolean>>({});
   const [explorerPromptOpen, setExplorerPromptOpen] = useState(false);
   const [lbCovers, setLbCovers] = useState<Record<string, unknown[]>>({});
 
@@ -347,6 +290,12 @@ export function DiscoverPage() {
   // infinite one: these shelves are regenerated by the scanner, and "never
   // refetch for the life of the tab" is not a freshness policy.
   const profileId = useProfileScope();
+  // The profile's page layout: saved sections merged over the defaults by
+  // the server. Falls back to the defaults while pending or failed, so the
+  // page never renders without sections.
+  const pageLayout = useDiscoverLayout(profileId);
+  const [layoutOpen, setLayoutOpen] = useState(false);
+  const [layoutSaving, setLayoutSaving] = useState(false);
   const bylt = useQuery({
     queryKey: ['discover', 'bylt', profileKey(profileId)] as const,
     queryFn: () => discoverLimiter.run(fetchBecauseYouListenTo),
@@ -370,6 +319,23 @@ export function DiscoverPage() {
     retry: false,
     enabled: page.aboveFoldSettled,
   });
+  // your week: the stats worker's cached summary. instant (a metadata read),
+  // so it rides with the first paint instead of waiting for tier 2.
+  const weekQuery = useQuery({
+    queryKey: ['discover', 'week-stats', profileKey(profileId)] as const,
+    queryFn: () => discoverLimiter.run(fetchWeekStats),
+    staleTime: BYLT_STALE_MS,
+    gcTime: BYLT_STALE_MS * 2,
+    retry: false,
+  });
+  const week = weekSummary(weekQuery.data);
+  const gap = tasteGap(weekQuery.data);
+  const [playingTop, setPlayingTop] = useState(false);
+  const [flowBusy, setFlowBusy] = useState(false);
+
+  // ── the living banners: one music video at a time, only the one on screen ──
+  const [videosOn, setVideosOn] = useVideoBackdropsEnabled();
+  const heroGlow = useDominantColor(hero.artist?.image_url ?? null);
   const stationPreview = useStationPreview();
   // A profile switch discards an open preview: it belongs to the old profile,
   // and a response already in flight for it must never fill this one in.
@@ -587,6 +553,31 @@ export function DiscoverPage() {
     (action: MixAction) => {
       const mix = modal.mix;
       if (!mix) return;
+      const recipe = recipeVerb(action.onclick);
+      if (recipe) {
+        const [rverb, recipeId] = recipe;
+        if (rverb === 'recipe-edit') {
+          modal.close();
+          setRecipeEditor({
+            editing: mixes.recipes.find((r) => r.recipe_id === recipeId) ?? null,
+          });
+        } else if (rverb === 'recipe-refresh') {
+          void refreshRecipe(recipeId)
+            .then(() => {
+              void queryClient.invalidateQueries({ queryKey: ['discover', 'recipes'] });
+              toast(`New tracks in ${mix.title}`, 'success');
+            })
+            .catch(() => toast("Couldn't renew the mix. Try again.", 'error'));
+        } else {
+          void keepRecipe(recipeId)
+            .then((res) => {
+              if (res.success === false) throw new Error(res.error);
+              toast(`Kept as a playlist: find it on the Sync page`, 'success');
+            })
+            .catch(() => toast("Couldn't keep this one. Try again.", 'error'));
+        }
+        return;
+      }
       const [verb, ...rest] = action.onclick.split(':');
       if (verb === 'play') {
         // resolve against the library and play what's owned RIGHT NOW; the
@@ -681,7 +672,7 @@ export function DiscoverPage() {
         // starts (1806) — a bubble at modal-open outlived a cancelled modal.
       }
     },
-    [modal, sync, bar, openTracksModal, playMixFromCard],
+    [modal, sync, bar, openTracksModal, playMixFromCard, mixes.recipes, queryClient],
   );
 
   const downloadSelection = useCallback(() => {
@@ -940,8 +931,11 @@ export function DiscoverPage() {
       if (id === 'listenbrainz') return true; // renders its own load/error states
       if (id === 'deezer-editorial') return true; // fetches and empties itself
       if (id === 'build-a-playlist') return true; // a control, like adv-wave
-      if (id === 'your-mixes-section') return mixes.mixes.length > 0;
+      // always: 'Build a mix' lives in its header, so it must be reachable
+      // before there is a single mix
+      if (id === 'your-mixes-section') return true;
       if (id === 'year-mixes-section') return mixes.decadeMixes.length > 0;
+      if (id === 'mood-mixes-section') return mixes.moodMixes.length > 0;
       if (id === 'discover-bylt-sections') return byltRows.length > 0;
       return page.hasContent(id);
     },
@@ -956,8 +950,6 @@ export function DiscoverPage() {
       <CacheShelf
         def={def}
         items={items}
-        expanded={Boolean(expandedCaches[id])}
-        onToggleExpand={() => setExpandedCaches((e) => ({ ...e, [id]: !e[id] }))}
         onOpenItem={(key, index) => void albumOpen.openCacheItem(key, items[index])}
       />
     );
@@ -982,6 +974,29 @@ export function DiscoverPage() {
             mixes={mixes.mixes}
             loaded={true}
             gridId="your-mixes-grid"
+            actions={
+              <button
+                type="button"
+                className="discover-build-mix-btn"
+                onClick={() => setRecipeEditor({ editing: null })}
+              >
+                + Build a mix
+              </button>
+            }
+            onOpenMix={modal.open}
+            onPlayMix={playMixFromCard}
+            playingKey={playingMixKey}
+          />
+        );
+      case 'mood-mixes-section':
+        return (
+          <MixShelf
+            id={id}
+            title="Moods"
+            subtitle="A mix for how you feel, from your own albums. Plays straight away."
+            mixes={mixes.moodMixes}
+            loaded={true}
+            gridId="mood-mixes-grid"
             onOpenMix={modal.open}
             onPlayMix={playMixFromCard}
             playingKey={playingMixKey}
@@ -1169,6 +1184,9 @@ export function DiscoverPage() {
             generating={bp.generating}
             resultSubtitle={bp.resultSubtitle}
             hasResults={bp.tracks !== null}
+            name={bp.name}
+            namePlaceholder={bp.playlistName}
+            onNameChange={bp.setName}
             syncing={sync.syncingKeys.includes('build-playlist')}
             syncProgress={toRawProgress(sync.progressFor('build-playlist'))}
             metadata={
@@ -1193,10 +1211,13 @@ export function DiscoverPage() {
               else toast(d.toast, d.level);
             }}
             onSync={() => {
-              const out = sync.startMixSync(
-                { key: 'build_playlist_custom', title: 'Custom Playlist' },
-                bp.tracks ?? undefined,
-              );
+              // its own id, name and status base: through startMixSync the
+              // progress keyed 'build_playlist_custom' while this section read
+              // 'build-playlist', and the toast named the raw key (#1421)
+              const req = bp.syncRequest();
+              const out = req
+                ? sync.startSync(req)
+                : { message: BP_NO_PLAYLIST_TRACKS, level: 'warning' as const };
               if (out) toast(out.message, out.level);
             }}
             infoOpen={bp.infoOpen}
@@ -1209,89 +1230,183 @@ export function DiscoverPage() {
     }
   };
 
-  const recentAlbums = page.sectionState('recent-releases').items as RecentAlbum[];
-  const genreReleaseAlbums = page.sectionState('cache-genre-releases').items as CacheItem[];
-  const undiscoveredAlbums = page.sectionState('cache-undiscovered').items as CacheItem[];
-  const labelAlbums = page.sectionState('cache-label-explorer').items as CacheItem[];
-  const deepCuts = page.sectionState('cache-deep-cuts').items as CacheItem[];
-  const genrePills = page.sectionState('cache-genre-explorer').items as { genre?: string }[];
-  const personalSignalCount = mixes.mixes.length + listeningArtists.length + recArtists.length;
-  const actionableAlbumCount =
-    recentAlbums.length +
-    genreReleaseAlbums.length +
-    undiscoveredAlbums.length +
-    labelAlbums.length;
-  const librarySignalCount = deepCuts.length + decadeMixesHydrated.length;
-  const toolSignalCount = genrePills.length + lbMixesHydrated.length + lastfm.mixes.length;
-  const discoveryInsight: DiscoveryInsight =
-    actionableAlbumCount > 0
-      ? {
-          eyebrow: 'Next best move',
-          title: 'Fill the newest gaps first',
-          detail: 'New releases, label finds, and missing albums are ready to open or download.',
-          value: `${actionableAlbumCount} albums`,
-          actionLabel: 'Review gaps',
-          target: 'discover-zone-new-missing',
-        }
-      : personalSignalCount > 0
-        ? {
-            eyebrow: 'Next best move',
-            title: 'Follow the taste engine',
-            detail: 'Your mixes and artist recommendations are the strongest live signal today.',
-            value: `${personalSignalCount} signals`,
-            actionLabel: 'Open For You',
-            target: 'discover-zone-for-you',
-          }
-        : {
-            eyebrow: 'Next best move',
-            title: 'Build from a seed artist',
-            detail: 'Start with one artist and let SoulSync expand the discovery graph.',
-            value: `${toolSignalCount} tools`,
-            actionLabel: 'Build',
-            target: 'build-a-playlist',
-          };
-
-  const actionCards: DiscoveryActionCard[] = [
-    {
-      id: 'for-you',
-      eyebrow: 'Personal',
-      title: 'For You',
-      detail: 'Mixes, artist recs, and because-you-listen-to picks.',
-      value: `${personalSignalCount} signals`,
-      target: 'discover-zone-for-you',
-    },
-    {
-      id: 'new-missing',
-      eyebrow: 'Actionable',
-      title: 'New & Missing',
-      detail: 'Fresh releases and library gaps ready to open or download.',
-      value: `${actionableAlbumCount} albums`,
-      target: 'discover-zone-new-missing',
-    },
-    {
-      id: 'library',
-      eyebrow: 'Library',
-      title: 'Your Taste Map',
-      detail: 'Saved artists, albums, eras, and deep cuts from your collection.',
-      value: `${librarySignalCount} leads`,
-      target: 'discover-zone-library',
-    },
-    {
-      id: 'tools',
-      eyebrow: 'Explore',
-      title: 'Browse & Build',
-      detail: 'Genre explorer, stations, ListenBrainz, and custom builder.',
-      value: `${toolSignalCount} tools`,
-      target: 'discover-zone-tools',
-    },
-  ];
-
   const renderZoneSections = (ids: DiscoverSectionId[]) =>
     ids.filter(hasContent).map((id) => (
       <div className={`discovery-zone-section discovery-zone-section--${id}`} key={id}>
         {renderSection(id)}
       </div>
     ));
+
+  /** Enabled sections for a zone from the profile's layout. */
+  const zoneSections = (zone: DiscoverZoneId): DiscoverSectionId[] =>
+    pageLayout.sectionsByZone[zone].filter((id) => hasContent(id));
+
+  /** The For You zone keeps StationsRow pinned right after Your Mixes. */
+  const renderForYouSections = () => {
+    const ids = zoneSections('for-you');
+    const anchor = ids.indexOf('your-mixes-section');
+    const before = anchor < 0 ? [] : ids.slice(0, anchor + 1);
+    const after = anchor < 0 ? ids : ids.slice(anchor + 1);
+    return (
+      <>
+        {renderZoneSections(before)}
+        <StationsRow
+          stations={stationsQuery.data ?? null}
+          loading={stationsQuery.isPending}
+          error={stationsQuery.isError ? 'Could not load your stations.' : null}
+          onRetry={() => void stationsQuery.refetch()}
+          onView={stationPreview.open}
+          onPlayRadio={playStationRadio}
+          pendingId={stationPreview.pendingId}
+          cardErrors={stationPreview.cardErrors}
+          onPlayLibraryRadio={() => {
+            if (window.startLibraryRadio) void window.startLibraryRadio();
+            else toast('The player is not ready yet. Try again in a moment.', 'error');
+          }}
+        />
+        {renderZoneSections(after)}
+      </>
+    );
+  };
+
+  const recentForSpotlight = page.sectionState('recent-releases').items as RecentAlbum[];
+  const spotlight = pickSpotlight(recentForSpotlight, weekQuery.data?.top_artists ?? []);
+  const releasePromo = usePromoVideo(
+    'promo-release',
+    spotlight?.album.artist_name,
+    spotlight?.album.album_name,
+    spotlight?.album.album_cover_url,
+    videosOn,
+  );
+  // an artist you should know: the first recommendation with a photo that
+  // isn't already rotating through the hero
+  const heroNames = new Set(hero.artists.map((a) => a.artist_name.toLowerCase()));
+  const artistPick =
+    recArtists.find(
+      (a) => a.image_url && a.artist_name && !heroNames.has(a.artist_name.toLowerCase()),
+    ) ?? null;
+  const artistPromo = usePromoVideo(
+    'promo-artist',
+    artistPick?.artist_name,
+    null,
+    artistPick?.image_url,
+    videosOn,
+  );
+  // a throwback: the top of repeat rewind, a song you had on repeat
+  const rewindMix = mixes.mixes.find((m) => m.key === 'repeat_rewind') ?? null;
+  const throwbackRow = (rewindMix?.tracks?.[0] ?? null) as Record<string, unknown> | null;
+  const throwback = throwbackRow ? normalizeTrack(throwbackRow as never) : null;
+  const throwbackPromo = usePromoVideo(
+    'promo-throwback',
+    throwback?.artist,
+    throwback?.name,
+    throwback?.cover,
+    videosOn,
+  );
+  // the poster row: a show coming up (the inbox's concerts, shared with the
+  // inbox list's own query), a second release, and your week's number one
+  const inboxQuery = useQuery({
+    queryKey: ['discover', 'inbox', 'new'] as const,
+    queryFn: () => fetchInbox('new'),
+    retry: false,
+  });
+  const concert = pickConcert(inboxQuery.data?.items);
+  const concertDay = concert ? posterDay(concert.item.item_date) : null;
+  const photoByName = new Map<string, string>();
+  for (const a of [
+    ...(weekQuery.data?.top_artists ?? []).map((t) => ({ n: t.name, i: t.image_url })),
+    ...hero.artists.map((h) => ({ n: h.artist_name, i: h.image_url })),
+    ...recArtists.map((r) => ({ n: r.artist_name, i: r.image_url })),
+  ]) {
+    if (a.n && a.i && !photoByName.has(a.n.toLowerCase())) photoByName.set(a.n.toLowerCase(), a.i);
+  }
+  const posterAlbum = pickPosterAlbum(recentForSpotlight, spotlight?.index ?? null);
+  const topArtist = week?.topArtist ?? null;
+  const [bentoRef, bentoIn] = useReveal<HTMLElement>();
+  const videoToggle = { on: videosOn, onToggle: () => setVideosOn(!videosOn) };
+  // the watch rail: hero picks and recommendations with a photo, one each,
+  // never the artist already in the bento
+  const railArtists: RailArtist[] = [];
+  {
+    const seenNames = new Set<string>(
+      artistPick?.artist_name ? [artistPick.artist_name.toLowerCase()] : [],
+    );
+    for (const a of [...hero.artists, ...recArtists] as {
+      artist_id?: string | number | null;
+      artist_name?: string;
+      image_url?: string | null;
+      source?: string | null;
+      explanation?: unknown;
+    }[]) {
+      const name = a.artist_name ?? '';
+      if (!name || !a.image_url || seenNames.has(name.toLowerCase())) continue;
+      seenNames.add(name.toLowerCase());
+      railArtists.push({
+        key: `${a.artist_id ?? name}`,
+        name,
+        image: a.image_url,
+        reason: explanationLine(a.explanation as never),
+        href:
+          a.artist_id != null
+            ? detailPath(a.artist_id, a.source ?? recSource(recPayload) ?? null, name)
+            : '#',
+      });
+      if (railArtists.length >= 10) break;
+    }
+  }
+  const playTopTracks = () => {
+    if (!week || playingTop) return;
+    const intent = beginPlayIntent();
+    setPlayingTop(true);
+    const rows = week.topTracks.map((t) => ({ title: t.name, artist: t.artist, album: t.album }));
+    void playMixNow(rows, 'Your top tracks this week', intent).finally(() => setPlayingTop(false));
+  };
+
+  /** flow: a fresh queue from the server every press, played straight away. */
+  const playFlow = () => {
+    if (flowBusy) return;
+    const intent = beginPlayIntent();
+    setFlowBusy(true);
+    void fetchFlow()
+      .then((res) => {
+        const tracks = res.tracks ?? [];
+        if (!intent.isCurrent()) return;
+        if (!tracks.length) {
+          toast('Flow needs some listening history first', 'info');
+          return;
+        }
+        return playMixNow(tracks, 'Flow', intent);
+      })
+      .catch(() => toast("Couldn't start Flow. Try again.", 'error'))
+      .finally(() => setFlowBusy(false));
+  };
+  const tiles = quickTiles(mixes.mixes, mixes.moodMixes, new Date().getHours());
+  const nowPlaying = useNowPlaying();
+  const shellProfile = getShellProfileContext();
+
+  const newMissingIds = zoneSections('new-missing');
+  const libraryIds = zoneSections('library');
+  const navItems: DiscoverNavItem[] = [
+    { id: 'discover-zone-for-you', label: 'For You' },
+    { id: 'discover-zone-new-missing', label: 'New & Missing' },
+    ...(libraryIds.length ? [{ id: 'discover-zone-library', label: 'From Your Library' }] : []),
+    { id: 'discover-zone-tools', label: 'Explore & Build' },
+  ];
+
+  const handleSaveLayout = (sections: Parameters<typeof pageLayout.save>[0]) => {
+    setLayoutSaving(true);
+    void pageLayout.save(sections).then(
+      () => {
+        setLayoutSaving(false);
+        setLayoutOpen(false);
+        toast('Layout saved', 'success');
+      },
+      (err: unknown) => {
+        setLayoutSaving(false);
+        toast(err instanceof Error ? err.message : 'Could not save layout', 'error');
+      },
+    );
+  };
 
   const vizOpen = map.kind !== null || webRequest !== null;
 
@@ -1318,7 +1433,12 @@ export function DiscoverPage() {
       />
 
       {!vizOpen && (
-        <div className="discover-container">
+        <div
+          className="discover-container"
+          style={
+            heroGlow ? ({ '--discover-glow-rgb': heroGlow } as React.CSSProperties) : undefined
+          }
+        >
           {(playingMixKey !== null || playingTrackIndex !== null) && (
             <div className="discover-playback-pending" role="status">
               <span>
@@ -1338,198 +1458,303 @@ export function DiscoverPage() {
               </button>
             </div>
           )}
-          {/* Quick Filter Navigation Rail (Spotify / Deezer style) */}
-          <nav className="dsc-quick-filter-bar" aria-label="Discover Categories">
-            <button
-              type="button"
-              className="dsc-filter-pill active"
-              onClick={() => scrollToDiscoveryTarget('discover-zone-for-you')}
-            >
-              <span>✨ For You</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-filter-pill"
-              onClick={() => scrollToDiscoveryTarget('discover-zone-for-you')}
-            >
-              <span>🎵 Daily Mixes</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-filter-pill"
-              onClick={() => scrollToDiscoveryTarget('recommended-stations-section')}
-            >
-              <span>📻 Artist Radio</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-filter-pill"
-              onClick={() => scrollToDiscoveryTarget('discover-zone-new-missing')}
-            >
-              <span>🔥 New Releases</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-filter-pill"
-              onClick={() => scrollToDiscoveryTarget('deezer-editorial')}
-            >
-              <span>🎧 Deezer Curated</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-filter-pill"
-              onClick={() => scrollToDiscoveryTarget('discover-zone-tools')}
-            >
-              <span>🪐 Explore & Lab</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-filter-pill"
-              onClick={() => scrollToDiscoveryTarget('discover-zone-library')}
-            >
-              <span>📦 Library Gaps</span>
-            </button>
-          </nav>
-
-          {/* Deezer Flow & Moods Bar */}
-          <div className="dsc-flow-bar" role="toolbar" aria-label="Music Moods">
-            <span className="dsc-flow-title">Flow Moods</span>
-            <button
-              type="button"
-              className="dsc-flow-pill"
-              onClick={() => scrollToDiscoveryTarget('discover-zone-for-you')}
-              title="Energizing high-tempo mixes"
-            >
-              <span className="dsc-flow-icon">⚡</span>
-              <span>Energizing</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-flow-pill"
-              onClick={() => scrollToDiscoveryTarget('discover-zone-for-you')}
-              title="Chill & ambient listening"
-            >
-              <span className="dsc-flow-icon">☕</span>
-              <span>Chill & Lo-Fi</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-flow-pill"
-              onClick={() => scrollToDiscoveryTarget('library-radio-section')}
-              title="Focus radio from your collection"
-            >
-              <span className="dsc-flow-icon">🎯</span>
-              <span>Focus</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-flow-pill"
-              onClick={() => scrollToDiscoveryTarget('discover-zone-library')}
-              title="Deep cuts and nocturnal sounds"
-            >
-              <span className="dsc-flow-icon">🌙</span>
-              <span>Deep Cuts</span>
-            </button>
-            <button
-              type="button"
-              className="dsc-flow-pill"
-              onClick={() => scrollToDiscoveryTarget('discover-zone-tools')}
-              title="Surprise discovery shuffle"
-            >
-              <span className="dsc-flow-icon">🎲</span>
-              <span>Discovery Roulette</span>
-            </button>
-          </div>
-
-          <div className="discover-command-grid">
-            <div className="discover-command-hero">
-              <DiscoverHero
-                artist={hero.artist}
-                loading={page.hero.isPending}
-                count={hero.artists.length}
-                index={hero.index}
-                watchlist={hero.watchlist}
-                watchAllPhase={hero.watchAllPhase}
-                discographyHref={
-                  hero.artist?.artist_id != null
-                    ? detailPath(hero.artist.artist_id, hero.artist.source ?? null)
-                    : '#'
-                }
-                onNavigate={hero.navigate}
-                onJump={hero.jump}
-                onToggleWatchlist={() => void hero.toggleWatchlist()}
-                onWatchAll={() => void hero.watchAll()}
-                onViewRecommended={() => setRecModalOpen(true)}
-                onOpenBlacklist={blacklist.openModal}
-              />
-            </div>
-            <DiscoveryCommandPanel
-              cards={actionCards}
-              insight={discoveryInsight}
-              onBuildPlaylist={() => scrollToDiscoveryTarget('build-a-playlist')}
-              onOpenMap={() => void map.openWatchlist()}
-              onOpenRecommended={() => setRecModalOpen(true)}
+          <GreetingGrid
+            name={shellProfile?.name}
+            hour={new Date().getHours()}
+            tiles={tiles}
+            onOpenMix={modal.open}
+            onPlayMix={playMixFromCard}
+            onPlayFlow={playFlow}
+            flowBusy={flowBusy}
+            playingKey={playingMixKey}
+          />
+          <NowPlayingBanner
+            state={nowPlaying}
+            artistHref={
+              nowPlaying.track?.artist_id != null
+                ? detailPath(nowPlaying.track.artist_id, nowPlaying.track.artist_source ?? null)
+                : null
+            }
+            onMoreLikeThis={(track) => {
+              if (!window.startArtistRadioById || track.artist_id == null) return;
+              void Promise.resolve(
+                window.startArtistRadioById(String(track.artist_id), track.artist ?? ''),
+              ).then((started) => {
+                if (started === false)
+                  toast(`Could not start ${track.artist ?? 'that'} radio`, 'error');
+              });
+            }}
+          />
+          <div className="discover-command-hero">
+            <DiscoverHero
+              artist={hero.artist}
+              loading={page.hero.isPending}
+              count={hero.artists.length}
+              index={hero.index}
+              watchlist={hero.watchlist}
+              watchAllPhase={hero.watchAllPhase}
+              discographyHref={
+                hero.artist?.artist_id != null
+                  ? detailPath(hero.artist.artist_id, hero.artist.source ?? null)
+                  : '#'
+              }
+              onNavigate={hero.navigate}
+              onJump={hero.jump}
+              onToggleWatchlist={() => void hero.toggleWatchlist()}
+              onWatchAll={() => void hero.watchAll()}
+              onViewRecommended={() => setRecModalOpen(true)}
+              onOpenBlacklist={blacklist.openModal}
+              artists={hero.artists}
+              onPauseChange={hero.setPaused}
+              glowRgb={heroGlow}
             />
           </div>
+          {week || gap ? (
+            <div className={`dsc-pulse-row${week && gap ? '' : ' dsc-pulse-row--single'}`}>
+              {week ? (
+                <WeekBanner week={week} onPlayTop={playTopTracks} playing={playingTop} />
+              ) : null}
+              {gap ? (
+                <TasteGapBanner gap={gap} onExplore={(g) => openDive(g.toLowerCase())} />
+              ) : null}
+            </div>
+          ) : null}
+          <DiscoverNav items={navItems} onOpenLayout={() => setLayoutOpen(true)} />
           <DiscoveryZone
             id="discover-zone-for-you"
             title="For You"
-            subtitle="High-confidence mixes, artist paths, and records connected to what you already play."
+            subtitle="Mixes, stations and artists picked from what you play."
             tone="for-you"
-            metric={`${personalSignalCount} signals`}
           >
-            {renderZoneSections(['your-mixes-section'])}
-            <StationsRow
-              stations={stationsQuery.data ?? null}
-              loading={stationsQuery.isPending}
-              error={stationsQuery.isError ? 'Could not load your stations.' : null}
-              onRetry={() => void stationsQuery.refetch()}
-              onView={stationPreview.open}
-              onPlayRadio={playStationRadio}
-              pendingId={stationPreview.pendingId}
-              cardErrors={stationPreview.cardErrors}
-            />
-            {renderZoneSections([
-              'adv-wave',
-              'listening-recs-section',
-              'recommended-artists-section',
-              'discover-bylt-sections',
-            ])}
+            {renderForYouSections()}
           </DiscoveryZone>
+
+          {spotlight || artistPick || (throwback && throwbackRow) ? (
+            <section
+              ref={bentoRef}
+              className={`dsc-bento dsc-reveal${bentoIn ? ' is-in' : ''}`}
+              aria-label="Spotlight"
+            >
+              {spotlight ? (
+                <PromoBanner
+                  kind="release"
+                  size="feature"
+                  onHoverChange={releasePromo.setHover}
+                  soundOn={releasePromo.soundOn}
+                  onSoundChange={releasePromo.setSound}
+                  eyebrow={`${releaseKind(spotlight.album.album_type)}${shortDate(spotlight.album.release_date) ? ` · ${shortDate(spotlight.album.release_date)}` : ''}`}
+                  title={spotlight.album.album_name ?? ''}
+                  subtitle={
+                    <>
+                      <strong>{spotlight.album.artist_name}</strong> · {spotlight.reason}
+                    </>
+                  }
+                  art={spotlight.album.album_cover_url ?? null}
+                  actions={
+                    <button
+                      type="button"
+                      className="dsc-pulse-btn primary"
+                      onClick={() =>
+                        void albumOpen.openRecentAlbum(recentForSpotlight[spotlight.index])
+                      }
+                    >
+                      Open {releaseKind(spotlight.album.album_type).replace('New ', '')}
+                    </button>
+                  }
+                  glowRgb={releasePromo.glowRgb}
+                  rootRef={releasePromo.ref}
+                  videoId={releasePromo.videoId}
+                  playing={releasePromo.playing}
+                  onUnplayable={releasePromo.onUnplayable}
+                  videoToggle={videoToggle}
+                />
+              ) : null}
+              {artistPick ? (
+                <PromoBanner
+                  kind="artist"
+                  size="tile"
+                  onHoverChange={artistPromo.setHover}
+                  soundOn={artistPromo.soundOn}
+                  onSoundChange={artistPromo.setSound}
+                  eyebrow="An artist you should know"
+                  title={artistPick.artist_name ?? ''}
+                  subtitle={
+                    explanationLine(artistPick.explanation as never) || 'Picked from your library'
+                  }
+                  art={artistPick.image_url ?? null}
+                  round
+                  actions={
+                    <>
+                      <a
+                        className="dsc-pulse-btn primary"
+                        href={detailPath(
+                          artistPick.artist_id ?? '',
+                          recSource(recPayload) || null,
+                          artistPick.artist_name,
+                        )}
+                      >
+                        View artist
+                      </a>
+                      {artistPick.artist_id ? (
+                        <button
+                          type="button"
+                          className="dsc-pulse-btn"
+                          disabled={rec.watchingIds.has(String(artistPick.artist_id))}
+                          onClick={() =>
+                            void rec.toggleWatchlist(
+                              String(artistPick.artist_id),
+                              artistPick.artist_name ?? '',
+                            )
+                          }
+                        >
+                          {rec.watchingIds.has(String(artistPick.artist_id))
+                            ? 'On your watchlist'
+                            : 'Add to watchlist'}
+                        </button>
+                      ) : null}
+                    </>
+                  }
+                  glowRgb={artistPromo.glowRgb}
+                  rootRef={artistPromo.ref}
+                  videoId={artistPromo.videoId}
+                  playing={artistPromo.playing}
+                  onUnplayable={artistPromo.onUnplayable}
+                  videoToggle={videoToggle}
+                />
+              ) : null}
+              {throwback && throwbackRow ? (
+                <PromoBanner
+                  kind="throwback"
+                  size="tile"
+                  onHoverChange={throwbackPromo.setHover}
+                  soundOn={throwbackPromo.soundOn}
+                  onSoundChange={throwbackPromo.setSound}
+                  eyebrow="Throwback"
+                  title={throwback.name}
+                  subtitle={
+                    <>
+                      <strong>{throwback.artist}</strong> · you had this on repeat, then it went
+                      quiet
+                    </>
+                  }
+                  art={throwback.cover || null}
+                  actions={
+                    <>
+                      <button
+                        type="button"
+                        className="dsc-pulse-btn primary"
+                        onClick={() => {
+                          const intent = beginPlayIntent();
+                          void playTrackNow(throwbackRow, throwback.name, intent);
+                        }}
+                      >
+                        Play it
+                      </button>
+                      <button
+                        type="button"
+                        className="dsc-pulse-btn"
+                        onClick={() => modal.open('repeat_rewind')}
+                      >
+                        Repeat Rewind
+                      </button>
+                    </>
+                  }
+                  glowRgb={throwbackPromo.glowRgb}
+                  rootRef={throwbackPromo.ref}
+                  videoId={throwbackPromo.videoId}
+                  playing={throwbackPromo.playing}
+                  onUnplayable={throwbackPromo.onUnplayable}
+                  videoToggle={videoToggle}
+                />
+              ) : null}
+            </section>
+          ) : null}
 
           <DiscoveryZone
             id="discover-zone-new-missing"
             title="New & Missing"
-            subtitle="Fresh releases and collection gaps worth opening, downloading, or syncing next."
+            subtitle="Fresh releases, and the albums your collection is missing."
             tone="new-missing"
-            metric={`${actionableAlbumCount} albums`}
           >
-            {renderZoneSections([
-              'recent-releases',
-              'cache-genre-releases',
-              'seasonal-albums-section',
-              'cache-undiscovered',
-              'cache-label-explorer',
-              'your-albums-section',
-            ])}
+            {/* the inbox lives here now: releases and dates worth coming back
+                to, which is what this zone is. it used to sit between the hero
+                and everything else, pushing the feed a screen down. */}
+            <div className="discovery-zone-section discovery-zone-section--inbox">
+              <DiscoveryInbox
+                onOpenRelease={(album) => void albumOpen.openRecentAlbum(album)}
+                buildArtistPath={(item) => {
+                  const ref = inboxArtistRef(item);
+                  return ref ? detailPath(ref.id, ref.source, item.artist_name) : '';
+                }}
+              />
+            </div>
+            {renderZoneSections(newMissingIds)}
           </DiscoveryZone>
 
-          <DiscoveryZone
-            id="discover-zone-library"
-            title="Library Signals"
-            subtitle="Saved artists, eras, and deep cuts turned into useful entry points."
-            tone="library"
-            metric={`${librarySignalCount} leads`}
-          >
-            {renderZoneSections(['your-artists-section', 'year-mixes-section', 'cache-deep-cuts'])}
-          </DiscoveryZone>
+          <VideoRail
+            title="Watch"
+            subtitle="Artists picked for you, every one playing its video."
+            artists={railArtists}
+            videosOn={videosOn}
+          />
+
+          {libraryIds.length > 0 && (
+            <DiscoveryZone
+              id="discover-zone-library"
+              title="From Your Library"
+              subtitle="Your artists, your eras, your deep cuts."
+              tone="library"
+            >
+              {renderZoneSections(libraryIds)}
+            </DiscoveryZone>
+          )}
+
+          <PosterRow>
+            {[
+              concert && concertDay ? (
+                <ConcertPoster
+                  key="concert"
+                  artist={concert.item.artist_name ?? ''}
+                  day={concertDay}
+                  venue={(concert.item.payload as { venue?: string } | undefined)?.venue}
+                  city={(concert.item.payload as { city?: string } | undefined)?.city}
+                  url={concert.item.payload?.url}
+                  more={concert.more}
+                  photo={photoByName.get((concert.item.artist_name ?? '').toLowerCase()) ?? null}
+                />
+              ) : null,
+              posterAlbum ? (
+                <AlbumPoster
+                  key="album"
+                  title={posterAlbum.album.album_name ?? ''}
+                  artist={posterAlbum.album.artist_name ?? ''}
+                  tag={releaseKind(posterAlbum.album.album_type as string | undefined)}
+                  art={posterAlbum.album.album_cover_url ?? ''}
+                  openLabel={`Open ${releaseKind(posterAlbum.album.album_type as string | undefined).replace('New ', '')}`}
+                  onOpen={() => void albumOpen.openRecentAlbum(posterAlbum.album)}
+                />
+              ) : null,
+              topArtist && (topArtist.play_count ?? 0) > 0 ? (
+                <ArtistPoster
+                  key="artist"
+                  name={topArtist.name}
+                  plays={topArtist.play_count ?? 0}
+                  photo={topArtist.image_url ?? null}
+                  href={
+                    topArtist.id != null
+                      ? detailPath(topArtist.id, 'library', topArtist.name)
+                      : null
+                  }
+                />
+              ) : null,
+            ]}
+          </PosterRow>
 
           <DiscoveryZone
             id="discover-zone-tools"
             title="Explore & Build"
-            subtitle="The lab: maps, genres, radio, ListenBrainz, and custom playlists."
+            subtitle="Maps, genres, radio and playlist tools."
             tone="tools"
-            metric={`${toolSignalCount} tools`}
           >
             <div className="discovery-zone-section discovery-zone-section--map-tools">
               <div className="discover-hub-row discover-hub-row--tools">
@@ -1543,39 +1768,33 @@ export function DiscoverPage() {
                 <ArtistWebHub onOpenLens={(lens) => setWebRequest({ lens })} />
               </div>
             </div>
-            <div className="discovery-zone-section" id="library-radio-section">
-              <div className="discover-library-radio-card">
-                <div className="discover-library-radio-copy">
-                  <div className="discover-library-radio-title">📻 Library Radio</div>
-                  <div className="discover-library-radio-sub">
-                    Endless smart shuffle of your whole collection — play-count weighted, refills
-                    itself by similarity.
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="modal-btn modal-btn-primary"
-                  onClick={() => void window.startLibraryRadio?.()}
-                >
-                  ▶ Start radio
-                </button>
-              </div>
-            </div>
-            {renderZoneSections([
-              'cache-genre-explorer',
-              'lastfm-radio',
-              'listenbrainz',
-              // the page renders sections through these ZONE lists, not from
-              // DISCOVER_LAYOUT - registering a section in the layout alone
-              // gets it an order and a policy but never puts it on screen.
-              'deezer-editorial',
-              'build-a-playlist',
-            ])}
+            {renderZoneSections(zoneSections('tools'))}
           </DiscoveryZone>
         </div>
       )}
 
       <DownloadBar state={bar.state} onOpen={(id) => void bar.openBubble(id)} />
+
+      {layoutOpen && (
+        <DiscoverLayoutModal
+          entries={pageLayout.entries}
+          saving={layoutSaving}
+          onSave={handleSaveLayout}
+          onClose={() => setLayoutOpen(false)}
+        />
+      )}
+
+      {recipeEditor && (
+        <RecipeEditor
+          editing={recipeEditor.editing}
+          onClose={() => setRecipeEditor(null)}
+          onSaved={(message) => {
+            setRecipeEditor(null);
+            toast(message, 'success');
+            void queryClient.invalidateQueries({ queryKey: ['discover', 'recipes'] });
+          }}
+        />
+      )}
 
       {stationPreview.station && (
         <StationModal

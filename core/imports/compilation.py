@@ -88,6 +88,25 @@ def _album_types(album_ctx: Dict[str, Any]) -> set:
     return types
 
 
+def is_various_artists_credit(album_ctx: Optional[Dict[str, Any]]) -> bool:
+    """True when the album is CREDITED to various artists.
+
+    Deliberately narrower than :func:`is_compilation_album_context`, which also
+    answers yes for anything the source merely TYPED a compilation. MusicBrainz
+    gives a single artist's own anthology ``primary=Album`` with
+    ``secondary=[Compilation]``, and ``map_release_group_type`` turns that into
+    ``album_type="compilation"`` — so the broader check calls Tool's *Salival* a
+    various-artists release, which it is not.
+
+    Callers asking "is this VA?" rather than "is this a compilation?" — beets'
+    ``ignore_va`` rule among them — need this one.
+    """
+    if not isinstance(album_ctx, dict) or not album_ctx:
+        return False
+    credits = _album_credit_names(album_ctx)
+    return bool(credits) and all(is_various_artists_name(name) for name in credits)
+
+
 def is_compilation_album_context(album_ctx: Optional[Dict[str, Any]]) -> bool:
     """Whether the source says this release is a various-artists compilation.
 

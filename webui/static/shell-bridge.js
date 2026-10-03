@@ -378,15 +378,21 @@ function _handleArtistDetailLinkClick(event, pathname, anchor) {
     // has nothing to resolve against. The card already stashes it as a data
     // attribute (renderCompactSection); the href's own ?name= query (set by
     // buildArtistDetailPath) is the fallback for anchors that don't.
+    const linkParams = new URLSearchParams(anchor?.search || '');
     const artistName = anchor?.dataset?.artistName
-        || new URLSearchParams(anchor?.search || '').get('name')
+        || linkParams.get('name')
         || '';
+    // ?album= (the library's album grid) names the album to open on arrival.
+    // It must survive this handoff — without it the deep link silently
+    // degrades to the plain artist page.
+    const focusAlbumId = linkParams.get('album') || '';
 
     event.preventDefault();
     void navigateToPage('artist-detail', {
         artistId,
         artistSource: source,
         artistName,
+        focusAlbumId,
         forceReload: true,
     });
 }

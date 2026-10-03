@@ -6,7 +6,23 @@ import time
 from typing import Dict, Any, Optional
 from cryptography.fernet import Fernet, InvalidToken
 from pathlib import Path
+from core.imports.album_types import (
+    DEFAULT_BRACKET as _ATYPE_DEFAULT_BRACKET,
+    DEFAULT_IGNORE_VA as _ATYPE_DEFAULT_IGNORE_VA,
+    DEFAULT_TYPES as _ATYPE_DEFAULT_TYPES,
+)
 from utils.logging_config import get_logger
+
+
+def default_sample_paths() -> list:
+    """Fresh-install default for ``library.sample_paths`` (Docker-aware).
+
+    Kept module-level so core/sample/folders.py can reuse the same default
+    for installs whose stored config predates the key (no deep-merge of
+    defaults happens on load — see ConfigManager._load_config).
+    """
+    is_docker = os.path.exists("/.dockerenv") or os.environ.get("SOULSYNC_IN_DOCKER", "").lower() in ("1", "true", "yes")
+    return ["/app/samples"] if is_docker else ["./samples"]
 
 
 logger = get_logger("config")
@@ -588,6 +604,10 @@ class ConfigManager:
                 "usenet_path_mappings": [],
             },
             "post_processing": {
+                # Tier-2 integrity: fully decode each downloaded FLAC with
+                # `flac -t` (frames + MD5). Off by default: a full decode per
+                # file. See core/imports/file_integrity.py.
+                "verify_flac_decode": False,
                 # When a download is quarantined (AcoustID mismatch, integrity /
                 # duration failure), retry the next-best candidate instead of
                 # failing outright. Default ON (PR #801's documented default —
@@ -730,7 +750,10 @@ class ConfigManager:
             # only issues keys to partner organizations.)
             "concerts": {
                 "ticketmaster_api_key": "",
-                "setlistfm_api_key": ""
+                "setlistfm_api_key": "",
+                # two-letter country for the discover inbox's concerts. empty
+                # means anywhere; artist pages always show every date.
+                "country": ""
             },
             "logging": {
                 "path": "logs/app.log",
@@ -788,7 +811,9 @@ class ConfigManager:
                 },
             },
             "playlist_sync": {
-                "create_backup": True,
+                # off by default (#1406): replace-sync server backups pile up
+                # as "<name> Backup" playlists most people never asked for
+                "create_backup": False,
                 # How a re-sync writes to the server playlist:
                 #   replace   — delete + recreate (default; today's behavior)
                 #   reconcile — edit in place (add/remove delta), preserving the
@@ -832,6 +857,12 @@ class ConfigManager:
                 "music_videos_path": "",
                 "podcasts_path": default_podcast_path,
                 "audiobooks_path": default_audiobook_path,
+                # Sample Studio output folders (Phase 6): where saved chops
+                # are rendered. A list like music_paths — the first entry is
+                # the default destination; the save dialog lets the user pick
+                # per chop. Separate from the music library on purpose so
+                # media servers never index chops as albums.
+                "sample_paths": default_sample_paths(),
                 # Library Organize: when the tool re-resolves a track from the
                 # metadata source, the source's title/album CASING often differs
                 # from a file the user already curated (Spotify capitalizing
@@ -854,6 +885,31 @@ class ConfigManager:
                     # Plex both read. Series segments collapse when a book has no
                     # series, exactly as the podcast season folder does.
                     "audiobook_path": "$author/$series/$seriespos - $title",
+                    # Sample Studio chops, rendered inside the chosen sample
+                    # folder (see library.sample_paths). Variables:
+                    # $artist / $track / $album = the SOURCE track's metadata,
+                    # $chop = the chop's save name, $stem = stem name or empty.
+                    # Empty segments collapse, same as the audiobook template.
+                    "sample_path": "$artist/$track - $chop",
+                },
+                # $atypes — beets-compatible release-type labels for folder
+                # names. Empty for a plain album, bracketed and concatenated
+                # for anything that carries qualifiers ("[EP][Live]"). Only
+                # used by templates that mention $atypes, so this is inert
+                # unless a user opts in. Shapes match the beets albumtypes
+                # plugin so a config can be pasted across: "types" also accepts
+                # beets' list-of-single-key-maps form.
+                # Sourced from core.imports.album_types rather than repeated
+                # here: these defaults also apply in code for installs whose
+                # stored config predates the setting, and two copies would let
+                # a fresh install and an existing one disagree about what
+                # $atypes emits.
+                "album_types": {
+                    "types": dict(_ATYPE_DEFAULT_TYPES),
+                    "bracket": _ATYPE_DEFAULT_BRACKET,
+                    # A various-artists compilation already lives under
+                    # Compilations/; repeating the qualifier is noise.
+                    "ignore_va": list(_ATYPE_DEFAULT_IGNORE_VA),
                 },
                 "detect_multi_artist_compilations": True,
             },
@@ -975,6 +1031,9 @@ class ConfigManager:
                 # Chapter files arrive named however the uploader left them.
                 # On by default: a book whose files sort wrong plays wrong.
                 "renumber_chapters": True,
+                # Off keeps an owned book on the wishlist as "In library";
+                # on drops it, like the music wishlist does.
+                "remove_owned_from_wishlist": False,
             },
             "podcasts": {
                 "download_path": default_podcast_path,

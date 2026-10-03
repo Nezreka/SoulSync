@@ -1,0 +1,163 @@
+"""Expired Download Cleaner job: scan protection + findings vs auto-delete,
+and the shared delete helper.
+
+The pure expiry logic is tested in tests/library/test_expired_cleanup.py; this
+covers the job's fact-gathering (play_count, active-mirror/watch protection)
+and the two modes.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
+from core.repair_jobs.expired_download_cleaner import (
+    ExpiredDownloadCleanerJob,
+    delete_origin_download,
+)
+
+OLD = (datetime.now(timezone.utc) - timedelta(days=120)).strftime("%Y-%m-%d %H:%M:%S")
+NEW = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+class _DB:
+    def __init__(self, candidates, mirrored=None, watched=None):
+        self._candidates = candidates
+        self._mirrored = mirrored or []
+        self._watched = watched or []
+        self.deleted_paths = []
+        self.deleted_history = []
+
+    def get_origin_cleanup_candidates(self):
+        return [dict(c) for c in self._candidates]
+
+    def get_mirrored_playlists(self, profile_id=1):
+        return [{'name': n} for n in self._mirrored]
+
+    def get_watchlist_artists(self, profile_id=1):
+        return [SimpleNamespace(artist_name=n) for n in self._watched]
+
+    def delete_track_by_file_path(self, p):
+        self.deleted_paths.append(p)
+        return 1
+
+    def delete_library_history_rows(self, ids):
+        self.deleted_history.extend(ids)
+        return len(ids)
+
+
+def _ctx(db, settings, findings):
+    return SimpleNamespace(
+        db=db,
+        config_manager=SimpleNamespace(get=lambda k, d=None: settings if k.endswith('.settings') else d),
+        check_stop=lambda: False, wait_if_paused=lambda: False,
+        update_progress=lambda *a, **k: None, report_progress=lambda *a, **k: None,
+        create_finding=lambda **kw: (findings.append(kw) or True),
+        transfer_folder=None,
+    )
+
+
+def _cand(eid, origin="playlist", created=OLD, play_count=0, ctx="Some Playlist", path=None):
+    return {"id": eid, "origin": origin, "origin_context": ctx, "created_at": created,
+            "file_path": path or f"/music/{eid}.flac", "title": f"T{eid}",
+            "artist_name": "Artist", "play_count": play_count}
+
+
+# ── scan: findings mode + protections ────────────────────────────────────────
+
+def test_scan_noop_when_both_retentions_off():
+    db = _DB([_cand(1)])
+    findings = []
+    res = ExpiredDownloadCleanerJob().scan(_ctx(db, {}, findings))   # defaults: both off
+    assert res.findings_created == 0 and findings == []
+
+
+def test_scan_creates_findings_for_expired():
+    db = _DB([
+        _cand(1, created=OLD, play_count=0),            # expired
+        _cand(2, created=NEW, play_count=0),            # too new
+        _cand(3, created=OLD, play_count=5),            # listened → keep
+    ])
+    findings = []
+    res = ExpiredDownloadCleanerJob().scan(_ctx(
+        db, {'playlist_retention': '2mo', 'keep_if_played_at_least': 2}, findings))
+    assert res.findings_created == 1
+    assert findings[0]['details']['history_id'] == 1
+    assert findings[0]['finding_type'] == 'expired_download'
+
+
+def test_scan_protects_actively_mirrored_playlist():
+    db = _DB([_cand(1, origin="playlist", ctx="My Mix", created=OLD)],
+             mirrored=["My Mix"])
+    findings = []
+    ExpiredDownloadCleanerJob().scan(_ctx(db, {'playlist_retention': '1w'}, findings))
+    assert findings == []   # still mirrored → protected
+
+
+def test_scan_protects_watched_artist():
+    db = _DB([_cand(1, origin="watchlist", ctx="Drake", created=OLD)],
+             watched=["Drake"])
+    findings = []
+    ExpiredDownloadCleanerJob().scan(_ctx(db, {'watchlist_retention': '1w'}, findings))
+    assert findings == []   # still watched → protected
+
+
+def test_scan_dry_run_default_is_findings_only():
+    # No dry_run in settings → defaults to True → findings, never deletes.
+    db = _DB([_cand(1, created=OLD, path="/music/x.flac")])
+    findings = []
+    res = ExpiredDownloadCleanerJob().scan(_ctx(db, {'playlist_retention': '2mo'}, findings))
+    assert res.findings_created == 1 and db.deleted_history == []   # nothing deleted
+
+
+# The auto-delete and delete_origin_download tests are not here: on this
+# branch the delete goes through Library v2's journaled file delete
+# (core/library2/file_delete.py); tests/library/test_expired_cleanup.py covers
+# delete_origin_download against a real catalogue.
+
+
+# ── #1416: every profile's mirrors and watchlists protect, under every name ──
+
+@pytest.fixture()
+def real_db(tmp_path):
+    from database.music_database import MusicDatabase
+
+    class _Real(MusicDatabase):
+        candidates = []
+
+        def get_origin_cleanup_candidates(self):
+            return [dict(c) for c in self.candidates]
+
+    return _Real(str(tmp_path / 'm.db'))
+
+
+def _expired_ids(db):
+    findings = []
+    ctx = _ctx(db, {'playlist_retention': '2mo', 'watchlist_retention': '2mo',
+                    'keep_if_played_at_least': 2, 'use_curation_signals': False}, findings)
+    ctx.config_manager.get_active_media_server = lambda: 'navidrome'
+    ExpiredDownloadCleanerJob().scan(ctx)
+    return {f['details']['history_id'] for f in findings}
+
+
+def test_another_profiles_mirror_and_watchlist_protect_their_downloads(real_db):
+    thomas = real_db.create_profile('ThomasClan')
+    real_db.mirror_playlist('spotify', 'p-t', 'Thomas Mix', [], profile_id=thomas)
+    real_db.add_artist_to_watchlist('art-1', 'Kavinsky', profile_id=thomas)
+    real_db.candidates = [_cand(1, ctx='Thomas Mix'), _cand(2, origin='watchlist', ctx='Kavinsky'),
+                          _cand(3, ctx='Deleted Playlist')]
+    assert _expired_ids(real_db) == {3}
+
+
+def test_a_renamed_or_suffixed_mirror_still_protects(real_db):
+    thomas = real_db.create_profile('ThomasClan')
+    mid = real_db.mirror_playlist('spotify', 'p-r', 'Upstream Name', [], profile_id=thomas)
+    real_db.set_mirrored_playlist_custom_name(mid, 'My Rename', profile_id=thomas)
+    real_db.mirror_playlist('spotify', 'rr-a', 'Release Radar', [], profile_id=1)
+    real_db.mirror_playlist('spotify', 'rr-t', 'Release Radar', [], profile_id=thomas)
+    real_db.candidates = [_cand(1, ctx='My Rename'), _cand(2, ctx='Release Radar - ThomasClan'),
+                          _cand(3, ctx='Upstream Name')]
+    assert _expired_ids(real_db) == set()

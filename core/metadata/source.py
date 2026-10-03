@@ -7,7 +7,7 @@ import socket
 import threading
 import time
 from collections import OrderedDict
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import requests
 
@@ -45,11 +45,19 @@ __all__ = [
 
 _MB_RELEASE_CACHE_MAX_ENTRIES = 4096
 _MB_RELEASE_DETAIL_CACHE_MAX_ENTRIES = 4096
+_MB_ARTIST_CACHE_MAX_ENTRIES = 1024
+_MB_ARTIST_DETAIL_CACHE_MAX_ENTRIES = 1024
 
 mb_release_cache: "OrderedDict[tuple, str]" = OrderedDict()
 mb_release_cache_lock = threading.RLock()
 mb_release_detail_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 mb_release_detail_cache_lock = threading.RLock()
+# L4: per-track MusicBrainz artist lookups for one album's tracks all ask
+# about the same artist. Bounded + locked, keyed by normalized identity.
+mb_artist_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+mb_artist_cache_lock = threading.RLock()
+mb_artist_detail_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+mb_artist_detail_cache_lock = threading.RLock()
 logger = _create_logger("metadata.source")
 
 _SOURCE_NETWORK_EXCEPTIONS = (requests.RequestException, socket.timeout, TimeoutError)
@@ -66,8 +74,6 @@ _EDITION_BARE_RE = re.compile(
     r'(?:\s+(?:edition|version))?\s*$',
     re.IGNORECASE,
 )
-
-
 def normalize_album_cache_key(album_name: str) -> str:
     result = _EDITION_PAREN_RE.sub("", album_name or "")
     result = _EDITION_BARE_RE.sub("", result)
@@ -264,6 +270,49 @@ def _collect_source_ids(metadata: dict, cfg) -> dict:
     return source_ids
 
 
+def _cached_mb_artist(mb_service, artist_name: str) -> Optional[Dict[str, Any]]:
+    """L4: ``match_artist`` result cached by normalized artist name. One
+    album's tracks all resolve the same artist — the network is hit once,
+    not once per track. Only successful results are cached."""
+    key = str(artist_name or "").strip().lower()
+    if not key:
+        return None
+    with mb_artist_cache_lock:
+        cached = _bounded_cache_get(mb_artist_cache, key)
+        if cached is not None:
+            return cached
+    result = _call_source_lookup("MusicBrainz artist", mb_service.match_artist, artist_name)
+    if result:
+        with mb_artist_cache_lock:
+            _bounded_cache_set(mb_artist_cache, key, result, _MB_ARTIST_CACHE_MAX_ENTRIES)
+    return result
+
+
+def _cached_mb_artist_details(mb_service, artist_mbid: str) -> Optional[Dict[str, Any]]:
+    """L4: ``get_artist`` (genre fallback) result cached by artist MBID —
+    the normalized identity for this lookup. Same once-per-album
+    semantics as :func:`_cached_mb_artist`."""
+    key = str(artist_mbid or "").strip()
+    if not key:
+        return None
+    with mb_artist_detail_cache_lock:
+        cached = _bounded_cache_get(mb_artist_detail_cache, key)
+        if cached is not None:
+            return cached
+    detail = _call_source_lookup(
+        "MusicBrainz artist details",
+        mb_service.mb_client.get_artist,
+        key,
+        includes=["genres"],
+    )
+    if detail:
+        with mb_artist_detail_cache_lock:
+            _bounded_cache_set(
+                mb_artist_detail_cache, key, detail, _MB_ARTIST_DETAIL_CACHE_MAX_ENTRIES
+            )
+    return detail
+
+
 def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
     if cfg.get("musicbrainz.embed_tags", True) is False:
         return
@@ -298,7 +347,7 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
     track_artist_name = metadata.get("artist", "") or artist_name
     if ", " in track_artist_name:
         track_artist_name = track_artist_name.split(", ")[0]
-    artist_result = None if pinned_release else _call_source_lookup("MusicBrainz artist", mb_service.match_artist, track_artist_name)
+    artist_result = None if pinned_release else _cached_mb_artist(mb_service, track_artist_name)
     if artist_result and artist_result.get("mbid"):
         pp["artist_mbid"] = artist_result["mbid"]
         pp["id_tags"]["MUSICBRAINZ_ARTIST_ID"] = pp["artist_mbid"]
@@ -369,6 +418,18 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
                     _bounded_cache_set(mb_release_detail_cache, pp["release_mbid"], release_detail, _MB_RELEASE_DETAIL_CACHE_MAX_ENTRIES)
         if pinned_release and release_detail.get("id") != pinned_release:
             release_detail = {}
+        # a release found by name has to be by this artist. the album preflight
+        # and match_release both go by title, so "Mammoth" by Mammoth Mammoth
+        # handed its date, label and recordings to every track (#1426)
+        from core.metadata.musicbrainz_tags import release_by_artist
+        expected_artists = [pp.get("batch_artist_name"), artist_name, metadata.get("album_artist")]
+        if (release_detail and not pinned_release
+                and not release_by_artist(release_detail, expected_artists, pp.get("artist_mbid"))):
+            logger.info("MusicBrainz release %s is not by '%s'; not using it",
+                        pp["release_mbid"], pp.get("batch_artist_name") or artist_name)
+            release_detail = {}
+            pp["release_mbid"] = ""
+            pp["id_tags"].pop("MUSICBRAINZ_RELEASE_ID", None)
         if release_detail:
             rg = release_detail.get("release-group", {})
             original_date = rg.get("first-release-date", "")
@@ -385,8 +446,11 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
                         if medium.get("position", 1) == disc_num_int:
                             for mtrack in (medium.get("tracks") or medium.get("track-list", [])):
                                 if mtrack.get("position") == track_num_int:
-                                    from core.metadata.musicbrainz_tags import track_matches_title
-                                    if pinned_release and not track_matches_title(track_title, mtrack):
+                                    from core.metadata.musicbrainz_tags import track_matches_title, track_title_agrees
+                                    # the slot must hold this song, or another edition's
+                                    # recording and credits land on it (#1426)
+                                    agrees = track_matches_title if pinned_release else track_title_agrees
+                                    if not agrees(track_title, mtrack):
                                         break
                                     if mtrack.get("id"):
                                         pp["id_tags"]["MUSICBRAINZ_RELEASETRACKID"] = mtrack["id"]
@@ -426,12 +490,7 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
             )
         ]
     if not pp["mb_genres"] and pp.get("artist_mbid"):
-        artist_detail = _call_source_lookup(
-            "MusicBrainz artist details",
-            mb_service.mb_client.get_artist,
-            pp["artist_mbid"],
-            includes=["genres"],
-        )
+        artist_detail = _cached_mb_artist_details(mb_service, pp["artist_mbid"])
         if artist_detail:
             pp["mb_genres"] = [
                 g["name"] for g in sorted(
@@ -840,6 +899,11 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
         if config_path and not _tag_enabled(cfg, config_path):
             continue
         filtered_tags[tag_name] = value
+    # ARTISTS names the same artists as ARTIST/ALBUMARTIST, which come from the
+    # primary source. musicbrainz's credit keeps the name printed on the release
+    # ("Mammoth WVH"), so servers reading ARTISTS split the band in two (#1425)
+    if filtered_tags.get("ARTISTS") and metadata.get("_artists_list"):
+        filtered_tags["ARTISTS"] = list(metadata["_artists_list"])
 
     written = []
     release_year = pp["release_year"]
@@ -1192,13 +1256,11 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     explicit_artist = track_info_ctx.get("_explicit_artist_context") if isinstance(track_info_ctx, dict) else None
     album_artists_for_collab = None
 
-    if isinstance(explicit_artist, dict) and explicit_artist.get("name"):
-        raw_album_artist = explicit_artist["name"]
-        album_artists_for_collab = [explicit_artist]
-    elif isinstance(explicit_artist, str) and explicit_artist:
-        raw_album_artist = explicit_artist
-        album_artists_for_collab = [{"name": explicit_artist}]
-    elif album_ctx and isinstance(album_ctx, dict):
+    # The track's own album context is ground truth — resolve it first so a
+    # batch-level hint below is sanity-checked instead of blindly trusted.
+    own_album_artist = ""
+    own_album_artists = None
+    if album_ctx and isinstance(album_ctx, dict):
         album_artists = album_ctx.get("artists", [])
         if album_artists:
             first_album_artist = album_artists[0]
@@ -1213,8 +1275,38 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
             # (bug #735: album-artist tag overwritten to "Unknown Artist" on
             # import). Only override when the album context names a real artist.
             if candidate and candidate != "Unknown Artist":
-                raw_album_artist = candidate
-                album_artists_for_collab = album_artists
+                own_album_artist = candidate
+                own_album_artists = album_artists
+
+    explicit_name = ""
+    if isinstance(explicit_artist, dict) and explicit_artist.get("name"):
+        explicit_name = str(explicit_artist["name"])
+    elif isinstance(explicit_artist, str) and explicit_artist:
+        explicit_name = explicit_artist
+
+    if explicit_name:
+        # #1316: a batch-level artist hint must never silently override the
+        # track's own album artist when they name different real artists (a
+        # poisoned wishlist batch stamped an unrelated artist on 899 tracks'
+        # album_artist tags). On disagreement trust the track data, loudly.
+        if (own_album_artist
+                and own_album_artist.strip().casefold() != explicit_name.strip().casefold()):
+            logger.warning(
+                "Metadata: explicit artist context '%s' disagrees with the track's "
+                "own album artist '%s' — trusting the track data (#1316)",
+                explicit_name, own_album_artist,
+            )
+            raw_album_artist = own_album_artist
+            album_artists_for_collab = own_album_artists
+        else:
+            raw_album_artist = explicit_name
+            album_artists_for_collab = (
+                [explicit_artist] if isinstance(explicit_artist, dict)
+                else [{"name": explicit_artist}]
+            )
+    elif own_album_artist:
+        raw_album_artist = own_album_artist
+        album_artists_for_collab = own_album_artists
 
     collab_mode = cfg.get("file_organization.collab_artist_mode", "first")
     if collab_mode == "first" and raw_album_artist:

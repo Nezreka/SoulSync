@@ -604,6 +604,38 @@ def test_listenbrainz_adapter_refresh_resolves_synthetic_series_id():
     assert manager.refresh_playlist_calls == ["weekly-mbid"]
 
 
+def test_listenbrainz_series_resolves_to_the_newest_week_not_the_newest_write():
+    """cremonies #1407: the weekly exploration mirror kept pulling an old
+    week. newest was picked by last_updated, which ties when the first cache
+    fill writes every week in one second, and jumps to an old week whenever
+    that week's track count changes. the week lives in the title."""
+    import sqlite3
+    manager = _FakeLBManager()
+    conn = sqlite3.connect(":memory:")
+    cur = conn.cursor()
+    cur.execute(
+        "CREATE TABLE listenbrainz_playlists "
+        "(playlist_mbid TEXT, title TEXT, profile_id INTEGER, last_updated TEXT)"
+    )
+    cur.executemany(
+        "INSERT INTO listenbrainz_playlists VALUES (?, ?, 1, ?)",
+        [
+            # an old week re-written most recently (its count changed)
+            ('old-mbid', 'Weekly Exploration for nezreka, week of 2026-06-01 Mon', '2026-09-30 10:00:05'),
+            ('new-mbid', 'Weekly Exploration for nezreka, week of 2026-09-28 Mon', '2026-09-30 10:00:00'),
+            ('mid-mbid', 'Weekly Exploration for nezreka, week of 2026-09-21 Mon', '2026-09-30 10:00:00'),
+            # another user's newer week never leaks in
+            ('other-mbid', 'Weekly Exploration for someone, week of 2026-10-05 Mon', '2026-09-30 10:00:09'),
+        ],
+    )
+    conn.commit()
+    manager.profile_id = 1
+    manager._get_db_connection = lambda: conn
+
+    src = ListenBrainzPlaylistSource(lambda: manager)
+    assert src._resolve_series_to_latest_mbid(manager, "lb_weekly_exploration_nezreka") == "new-mbid"
+
+
 # ─── Last.fm ────────────────────────────────────────────────────────────
 
 

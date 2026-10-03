@@ -59,9 +59,9 @@ class FakeDb:
                     owner_profile_id INTEGER);
                 CREATE TABLE discovery_pool (
                     id INTEGER PRIMARY KEY, source TEXT, spotify_track_id TEXT,
-                    itunes_track_id TEXT, track_name TEXT, artist_name TEXT,
-                    album_name TEXT, album_cover_url TEXT, duration_ms INTEGER,
-                    popularity INTEGER, track_data_json TEXT);
+                    itunes_track_id TEXT, deezer_track_id TEXT, track_name TEXT,
+                    artist_name TEXT, album_name TEXT, album_cover_url TEXT,
+                    duration_ms INTEGER, popularity INTEGER, track_data_json TEXT);
             """)
             conn.commit()
 
@@ -387,3 +387,46 @@ class TestServiceWiring:
         svc.curate_seasonal_playlist('summer')
         ids = svc.get_curated_seasonal_playlist('summer', source='spotify')
         assert len(ids) == 50
+
+
+class TestVibePoolTracksSourceIds:
+    def _seed_pool_deezer(self, db, track_id='dz1', itunes_id=None):
+        with db._get_connection() as conn:
+            conn.execute(
+                "INSERT INTO discovery_pool (source, deezer_track_id, itunes_track_id,"
+                " track_name, artist_name, album_name, album_cover_url, duration_ms,"
+                " popularity, track_data_json) VALUES ('deezer', ?, ?, 'Wave', 'Surfy',"
+                " 'Alb', 'https://art.jpg', 1000, 90, '{}')",
+                (track_id, itunes_id))
+            conn.commit()
+
+    def test_deezer_source_uses_deezer_id_column(self, db):
+        """H13: a Deezer-only pool row (deezer_track_id set, itunes_track_id NULL)
+        must be found for source='deezer', with the provider-correct key."""
+        _seed_artist(db, 1, 'Surfy', lastfm_tags='["surf"]')
+        self._seed_pool_deezer(db)
+        rows = sv.vibe_pool_tracks(db, 'summer', 'deezer', limit=40)
+        assert len(rows) == 1
+        assert rows[0]['deezer_track_id'] == 'dz1'
+        # legacy alias kept for the storage column + frontend shape
+        assert rows[0]['spotify_track_id'] == 'dz1'
+
+    def test_spotify_source_still_uses_spotify_id_column(self, db):
+        _seed_artist(db, 1, 'Surfy', lastfm_tags='["surf"]')
+        with db._get_connection() as conn:
+            conn.execute(
+                "INSERT INTO discovery_pool (source, spotify_track_id, track_name,"
+                " artist_name, album_name, album_cover_url, duration_ms, popularity,"
+                " track_data_json) VALUES ('spotify', 's1', 'Wave', 'Surfy', 'Alb',"
+                " 'https://art.jpg', 1000, 90, '{}')")
+            conn.commit()
+        rows = sv.vibe_pool_tracks(db, 'summer', 'spotify', limit=40)
+        assert len(rows) == 1
+        assert rows[0]['spotify_track_id'] == 's1'
+
+    def test_source_id_column_map(self):
+        assert sv.seasonal_track_id_column('spotify') == 'spotify_track_id'
+        assert sv.seasonal_track_id_column('itunes') == 'itunes_track_id'
+        assert sv.seasonal_track_id_column('deezer') == 'deezer_track_id'
+        # unknown sources keep the legacy fallback
+        assert sv.seasonal_track_id_column('bogus') == 'itunes_track_id'

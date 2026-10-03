@@ -241,9 +241,14 @@ def search_itunes_tracks():
         else:
             if _hydrabase_worker() and _dev_mode_enabled():
                 _hydrabase_worker().enqueue(query, 'tracks')
-            fallback_client = _get_metadata_fallback_client()
-            tracks = fallback_client.search_tracks(query, limit=limit)
-            source = _get_metadata_fallback_source()
+            # this is the iTunes search, so ask iTunes. it used to ask the
+            # primary source, so the "iTunes" results could be deezer's.
+            # and try other stores when the home store doesn't have it (#1398)
+            client = _get_itunes_client()
+            tracks = (client.search_tracks_any_store(query, limit=limit, expected_title=track_q,
+                                                     expected_artist=artist_q) if track_q
+                      else client.search_tracks(query, limit=limit))
+            source = 'itunes'
 
         # Local rerank — same helper Deezer uses, applied wherever we
         # have an expected title/artist signal. Catches karaoke / cover
@@ -312,7 +317,13 @@ def search_deezer_tracks():
             return jsonify({"error": "Query parameter is required"}), 400
 
         client = _get_deezer_client()
-        tracks = client.search_tracks(query, limit=limit)
+        if track_q:
+            # field-scoped + free-text: deezer's free-text index skips songs
+            # (studio "Numb" never shows for "Numb Linkin Park")
+            from core.metadata.song_search import search_song
+            tracks = search_song(client, track_q, artist_q, limit=limit)
+        else:
+            tracks = client.search_tracks(query, limit=limit)
 
         # Local rerank — only when we have an expected title/artist
         # signal. Free-text-only searches have nothing to rank against.
@@ -5305,7 +5316,9 @@ def start_playlist_sync_from_payload(data):
         return jsonify({"success": False, "error": "Missing playlist_id, name, or tracks."}), 400
 
     # Add activity for sync start
-    add_activity_item("", "Spotify Sync Started", f"'{playlist_name}' - {len(tracks_json)} tracks ({sync_mode})", "Now")
+    # every source comes through here (history re-sync, dashboard, account
+    # tabs), not just spotify, so don't name one (#1404)
+    add_activity_item("", "Sync Started", f"'{playlist_name}' - {len(tracks_json)} tracks ({sync_mode})", "Now")
 
     logger.info(f"Starting playlist sync for '{playlist_name}' with {len(tracks_json)} tracks (mode: {sync_mode})")
     logger.debug(f"Request parsed at {time.strftime('%H:%M:%S')} (took {(time.time()-request_start_time)*1000:.1f}ms)")

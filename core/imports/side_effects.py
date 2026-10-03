@@ -50,6 +50,42 @@ def _stable_soulsync_id(text: str) -> str:
     return str(abs(int(hashlib.md5(text.encode("utf-8", errors="replace")).hexdigest(), 16)) % (10 ** 9))
 
 
+def _free_soulsync_track_id(cursor, track_id: str, final_path: str) -> str:
+    """A SoulSync server id for ``final_path`` no OTHER track already holds.
+
+    C4: ``_stable_soulsync_id`` is MD5 mod 1e9, so two paths can share an id.
+    ``upsert_track`` finds a track by (soulsync, server id) first, and would
+    fold this file into whatever track already holds the id -- one song lost,
+    two files on one track. An id whose track has this very file (a re-import)
+    or no live file at all is ours; one whose track lives at another path is
+    reminted with upstream's deterministic discriminator.
+    """
+    from core.library2.media_server_sync import resolve_mapping
+
+    candidate = track_id
+    for attempt in range(1, 11):
+        holder = resolve_mapping(cursor, "track", "soulsync", candidate)
+        if holder is None:
+            row = cursor.execute(
+                "SELECT id FROM lib2_tracks WHERE server_source='soulsync' AND server_id=?",
+                (str(candidate),)).fetchone()
+            holder = row[0] if row else None
+        if holder is None:
+            return candidate
+        ours = cursor.execute(
+            "SELECT 1 FROM lib2_track_files WHERE track_id=? AND path=?",
+            (holder, final_path)).fetchone()
+        elsewhere = cursor.execute(
+            "SELECT 1 FROM lib2_track_files WHERE track_id=? AND path<>?"
+            " AND COALESCE(file_state,'active')='active' AND TRIM(path)<>''",
+            (holder, final_path)).fetchone()
+        if ours or not elsewhere:
+            return candidate
+        logger.warning("[SoulSync Library] track id collision for %s — reminting", final_path)
+        candidate = _stable_soulsync_id(f"{final_path}::soulsync::{attempt}")
+    return candidate
+
+
 def _retention_provenance_json(context: Dict[str, Any]) -> tuple[str | None, str | None]:
     """Serialize acquisition/retention truth for either persistence path."""
     from core.quality.model import AudioQuality
@@ -422,7 +458,7 @@ def record_download_provenance(context: Dict[str, Any],
         acquired_quality_json, retention_json = _retention_provenance_json(context)
 
         db = get_database()
-        db.record_track_download(
+        download_row_id = db.record_track_download(
             file_path=file_path,
             source_service=source_service,
             source_username=username,
@@ -447,6 +483,9 @@ def record_download_provenance(context: Dict[str, Any],
             acquired_quality_json=acquired_quality_json,
             retention_json=retention_json,
         )
+        # the "why this file" record for the task that fetched it
+        if download_row_id and context.get("task_id"):
+            db.link_download_decision(context["task_id"], download_row_id)
     except Exception as e:
         logger.debug("record_download_provenance failed: %s", e)
 
@@ -748,6 +787,10 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             if mb_release_id:
                 _fill_external_id(cursor, "lib2_albums", catalogue_album, "musicbrainz", mb_release_id)
 
+            track_id = _free_soulsync_track_id(cursor, track_id, final_path)
+            existing_file = cursor.execute(
+                "SELECT 1 FROM lib2_track_files WHERE path=?"
+                " AND COALESCE(file_state,'active')='active'", (final_path,)).fetchone()
             catalogue_track = upsert_track(
                 cursor, server_source="soulsync", server_id=track_id,
                 album_id=catalogue_album, artist_id=catalogue_artist,
@@ -775,5 +818,14 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
 
             conn.commit()
             logger.info("[SoulSync Library] Added: %s / %s / %s", artist_name, album_name, track_name)
+            if not existing_file:
+                # Fresh import — queue Sample Studio background analysis.
+                # Lazy import + never raises: analysis must not break imports.
+                try:
+                    from core.sample.worker import enqueue_analysis as _enqueue_sample_analysis
+                    _enqueue_sample_analysis(catalogue_track)
+                except Exception as hook_exc:  # noqa: BLE001
+                    logger.debug("Sample analysis enqueue failed for track %s: %s",
+                                 catalogue_track, hook_exc)
     except Exception as exc:
         logger.error("[SoulSync Library] Could not record library entry: %s", exc)

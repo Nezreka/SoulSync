@@ -1,82 +1,303 @@
+/* =========================================================================
+   SoulSync Stats Page — Premier Apple / Meta Design System
+   Rich obsidian dark mode, radiant glassmorphic cards, luminous accents,
+   and executive 3-tier Bento architecture.
+   ========================================================================= */
+
 .statsContainer {
-  margin: 20px;
-  padding: 28px 24px 30px;
+  margin: 18px;
+  padding: 24px 28px 36px;
   overflow: hidden;
-  background: linear-gradient(135deg, rgba(20, 20, 20, 0.55) 0%, rgba(12, 12, 12, 0.62) 100%);
-  border-radius: 24px;
+  background:
+    radial-gradient(1100px 600px at 50% -10%, rgba(var(--accent-rgb), 0.09) 0%, transparent 70%),
+    radial-gradient(900px 500px at 85% 85%, rgba(139, 92, 246, 0.06) 0%, transparent 60%),
+    linear-gradient(180deg, rgba(16, 18, 24, 0.85) 0%, rgba(10, 12, 16, 0.95) 100%);
+  border-radius: 26px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.3),
-    0 4px 16px rgba(0, 0, 0, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    0 24px 60px -12px rgba(0, 0, 0, 0.65),
+    0 8px 24px -4px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(28px);
 }
 
+/* =========================================================================
+   Header Primary Actions
+   ========================================================================= */
+
+.headerPrimaryActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* VIP "Your Year" Button */
+.statsYearButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 18px;
+  border: 1px solid rgba(30, 215, 96, 0.45);
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(30, 215, 96, 0.18) 0%, rgba(16, 185, 129, 0.1) 100%);
+  color: #34d399;
+  font-family: inherit;
+  font-size: 0.84rem;
+  font-weight: 750;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow:
+    0 0 20px rgba(30, 215, 96, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.statsYearButton:hover {
+  background: linear-gradient(135deg, #1ed760 0%, #10b981 100%);
+  border-color: #1ed760;
+  color: #04160b;
+  transform: translateY(-1px) scale(1.03);
+  box-shadow:
+    0 6px 24px rgba(30, 215, 96, 0.45),
+    0 0 35px rgba(30, 215, 96, 0.3);
+}
+
+.statsYearButton:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.yearSparkle {
+  font-size: 0.95rem;
+  animation: sparkleRotate 6s ease-in-out infinite alternate;
+}
+
+@keyframes sparkleRotate {
+  0% {
+    transform: scale(1) rotate(0deg);
+  }
+  100% {
+    transform: scale(1.2) rotate(20deg);
+  }
+}
+
+/* Segmented Tabs (Listening | Library) */
+.statsTabs {
+  display: inline-flex;
+  gap: 3px;
+  padding: 4px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(12px);
+}
+
+.statsTab {
+  padding: 6px 16px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.statsTab:hover {
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.statsTabActive {
+  background: rgba(255, 255, 255, 0.15) !important;
+  color: #fff !important;
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* Time Range Selector */
 .statsTimeRange {
   display: flex;
-  gap: 4px;
-  padding: 3px;
-  border-radius: 10px;
+  gap: 3px;
+  padding: 4px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(12px);
 }
 
 .statsRangeButton {
-  padding: 7px 16px;
+  padding: 6px 15px;
   border: none;
-  border-radius: 8px;
+  border-radius: 9px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 0.82rem;
-  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.8rem;
+  font-weight: 650;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.18s ease;
   font-family: inherit;
 }
 
 .statsRangeButton:hover {
-  color: rgba(255, 255, 255, 0.8);
-  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .statsRangeButtonActive {
-  background: rgb(var(--accent-rgb));
+  background: rgb(var(--accent-rgb)) !important;
+  color: #fff !important;
+  box-shadow:
+    0 2px 10px rgba(var(--accent-rgb), 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* =========================================================================
+   Dedicated Executive Data Sources & Sync Bar
+   ========================================================================= */
+
+.statsSyncBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 14px 0 24px;
+  padding: 10px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(20px);
+}
+
+.statsServerSync {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.statsServerSyncGroup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.statsSyncStatusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.7);
+  flex-shrink: 0;
+}
+
+.statsLastSynced {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.45);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.statsStandaloneNotice {
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.statsSyncButton {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 15px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.statsSyncButton:hover {
+  background: rgba(var(--accent-rgb), 0.2);
   color: #fff;
-  box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.3);
+  border-color: rgba(var(--accent-rgb), 0.5);
+  transform: scale(1.05);
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.3);
+}
+
+.statsSyncButtonSyncing {
+  pointer-events: none;
+  color: transparent;
+  position: relative;
+}
+
+.statsSyncButtonSyncing::after {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(var(--accent-rgb), 0.2);
+  border-top-color: rgb(var(--accent-rgb));
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .statsSyncControls {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 0;
+  gap: 10px;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
 
+/* History Import Control Tile (Last.fm & ListenBrainz) */
 .historyImportControl {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px 16px;
-  width: 280px;
+  gap: 6px 14px;
+  width: 270px;
   max-width: 100%;
-  padding: 12px;
+  padding: 9px 13px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.025);
+  background: rgba(255, 255, 255, 0.035);
+  backdrop-filter: blur(14px);
+  transition: all 0.2s ease;
+}
+
+.historyImportControl:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .historyImportInfo {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 
 .historyImportService {
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(255, 255, 255, 0.95);
   font-size: 0.8rem;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .historyImportAccount,
@@ -84,12 +305,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.45);
 }
 
 .historyImportStatus {
-  color: rgba(255, 255, 255, 0.65);
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 550;
 }
 
 .historyImportButton {
@@ -97,34 +319,30 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 36px;
+  min-height: 32px;
   padding: 0 12px;
-  border-radius: 8px;
+  border-radius: 9px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.06);
   color: rgba(255, 255, 255, 0.9);
   font: inherit;
   font-size: 0.75rem;
-  font-weight: 600;
+  font-weight: 650;
   white-space: nowrap;
   cursor: pointer;
-  transition:
-    background 0.2s ease,
-    border-color 0.2s ease;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .historyImportButton:hover:not(:disabled) {
-  background: rgba(var(--accent-rgb), 0.12);
-  border-color: rgba(var(--accent-rgb), 0.45);
-}
-
-.historyImportButton:focus-visible {
-  outline: 2px solid rgb(var(--accent-rgb));
-  outline-offset: 3px;
+  background: rgba(var(--accent-rgb), 0.18);
+  border-color: rgba(var(--accent-rgb), 0.5);
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.25);
 }
 
 .historyImportButton:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: default;
 }
 
@@ -146,218 +364,348 @@
   background: rgb(var(--accent-rgb));
 }
 
-.statsLastSynced {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.statsStandaloneNotice {
-  max-width: 260px;
-  font-size: 0.72rem;
-  line-height: 1.35;
-  color: rgba(255, 255, 255, 0.38);
-  text-align: right;
-}
-
-.statsSyncButton {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 16px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.statsSyncButton:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.15);
-}
-
-.statsSyncButtonSyncing {
-  pointer-events: none;
-  color: transparent;
-  position: relative;
-}
-
-.statsSyncButtonSyncing::after {
-  content: '';
-  position: absolute;
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(var(--accent-rgb), 0.2);
-  border-top-color: rgba(var(--accent-rgb), 0.8);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
+/* =========================================================================
+   Executive Bento Overview Cards
+   ========================================================================= */
 
 .statsOverview {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 14px;
-  margin-bottom: 20px;
+  gap: 16px;
+  margin-bottom: 24px;
 }
 
 .statsCard {
-  background: linear-gradient(135deg, rgba(20, 20, 20, 0.95) 0%, rgba(12, 12, 12, 0.98) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  padding: 20px;
-  text-align: center;
+  background: linear-gradient(145deg, rgba(24, 28, 36, 0.75) 0%, rgba(14, 16, 22, 0.85) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 18px;
+  padding: 18px 20px 16px;
   position: relative;
   overflow: hidden;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
 }
 
 .statsCard::before {
   content: '';
   position: absolute;
   top: 0;
-  left: 20%;
-  right: 20%;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.5), transparent);
+  left: 10%;
+  right: 10%;
+  height: 1.5px;
+  background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.6), transparent);
 }
 
 .statsCard:hover {
   transform: translateY(-3px);
-  border-color: rgba(var(--accent-rgb), 0.2);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  border-color: rgba(var(--accent-rgb), 0.3);
+  box-shadow:
+    0 14px 36px rgba(0, 0, 0, 0.5),
+    0 0 20px rgba(var(--accent-rgb), 0.15);
 }
 
-.statsCardValue {
-  font-size: 2rem;
-  font-weight: 700;
-  color: #fff;
-  line-height: 1.2;
-  margin-bottom: 6px;
+.statsCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
 }
 
 .statsCardLabel {
+  font-size: 0.74rem;
+  color: rgba(255, 255, 255, 0.48);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.statsCardIconWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: rgb(var(--accent-rgb));
+}
+
+.statsCardValue {
+  font-size: 2.1rem;
+  font-weight: 800;
+  color: #fff;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 8px;
+}
+
+/* Comparison delta pill */
+.statsCardDelta {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.statsCardDelta_up {
+  background: rgba(74, 222, 128, 0.12);
+  color: #4ade80;
+  border: 1px solid rgba(74, 222, 128, 0.25);
+}
+
+.statsCardDelta_down {
+  background: rgba(248, 113, 113, 0.12);
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.25);
+}
+
+.statsCardDelta_flat {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.statsCardDeltaNew {
+  background: rgba(var(--accent-rgb), 0.14);
+  color: rgb(var(--accent-rgb));
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
+}
+
+/* =========================================================================
+   Bento Grid Layout: 3 Logical Tiers
+   ========================================================================= */
+
+.statsMainGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+/* Section Card Base */
+.statsSectionCard {
+  background: linear-gradient(155deg, rgba(22, 26, 34, 0.65) 0%, rgba(14, 16, 22, 0.75) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 20px;
+  padding: 22px;
+  backdrop-filter: blur(20px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  transition: all 0.25s ease;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.statsSectionCard:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.4);
+}
+
+.statsSectionTitle {
   font-size: 0.78rem;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 18px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Tier 1: Activity Row (Activity Timeline + When You Listen) */
+.statsActivityRow {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
+  gap: 20px;
+}
+
+.chartContainer {
+  position: relative;
+  height: 250px;
+  width: 100%;
+}
+
+/* When You Listen (Clock & Rhythm) */
+.statsClock {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.statsClockContext {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.78rem;
+}
+
+.statsClockContextLabel {
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 700;
+}
+
+.statsClockContextRange {
+  margin-left: 5px;
+}
+
+.statsClockContext strong {
+  color: rgb(var(--accent-rgb));
+  font-size: 0.85rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.statsClockGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.statsClockRow {
+  display: grid;
+  grid-template-columns: 32px repeat(24, 1fr);
+  gap: 3.5px;
+  align-items: center;
+}
+
+.statsClockDay {
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: rgba(255, 255, 255, 0.45);
+  text-align: right;
+  padding-right: 4px;
+  text-transform: uppercase;
+}
+
+.statsClockCell {
+  aspect-ratio: 1;
+  min-height: 10px;
+  border-radius: 3px;
+  background: rgb(var(--accent-rgb));
+  border: none;
+  padding: 0;
+  transition:
+    transform 0.15s ease,
+    filter 0.15s ease;
+}
+
+.statsClockCell:disabled {
+  cursor: default;
+}
+
+.statsClockCellActive {
+  cursor: pointer;
+}
+
+.statsClockCellActive:hover {
+  transform: scale(1.4);
+  z-index: 2;
+  filter: brightness(1.25);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.6);
+}
+
+.statsClockCellActive:focus-visible {
+  outline: 2px solid rgb(var(--accent-rgb));
+  outline-offset: 2px;
+}
+
+.statsClockAxis {
+  display: grid;
+  grid-template-columns: 32px repeat(4, 1fr);
+  gap: 3.5px;
+  margin-top: 4px;
+}
+
+.statsClockAxisLabel {
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.38);
+  font-weight: 550;
+}
+
+.statsClockEmpty {
+  padding: 32px 0;
+  text-align: center;
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* Rhythm habit pulse widget */
+.statsRhythm {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.statsRhythmItem {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.statsRhythmValue {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.statsRhythmLabel {
+  font-size: 0.7rem;
   color: rgba(255, 255, 255, 0.45);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-weight: 600;
 }
 
-.statsMainGrid {
+/* =========================================================================
+   Tier 2: Top Music Showcase (3 Columns: Artists, Albums, Tracks)
+   ========================================================================= */
+
+.statsTopShowcase {
   display: grid;
-  grid-template-columns: 1fr 360px;
+  grid-template-columns: repeat(3, 1fr);
   gap: 20px;
-  min-width: 0;
-  margin-bottom: 20px;
 }
 
-.statsLeftCol,
-.statsRightCol {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  min-width: 0;
-}
-
-.statsSectionCard {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 14px;
-  padding: 20px;
-  transition: border-color 0.2s ease;
-  min-width: 0;
-  overflow: hidden;
-  margin-bottom: 20px;
-}
-
-.statsSectionCard:hover {
-  border-color: rgba(255, 255, 255, 0.1);
-}
-
-.statsSectionTitle {
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: rgba(255, 255, 255, 0.4);
-  margin-bottom: 16px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.chartContainer {
-  position: relative;
-  height: 220px;
-}
-
-.statsGenreChartContainer {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-}
-
-.statsGenreChartWrap {
-  width: 180px;
-  height: 180px;
-  flex-shrink: 0;
-}
-
-.statsGenreLegend {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.statsGenreLegendItem {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.82rem;
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.statsGenreDot,
-.statsDbLegendDot {
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  flex-shrink: 0;
-}
-
-.statsGenrePct {
-  margin-left: auto;
-  color: rgba(255, 255, 255, 0.4);
-  font-variant-numeric: tabular-nums;
-}
-
+/* Top Artist Bubbles */
 .statsTopArtistsVisual {
   margin-bottom: 16px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.statsTopArtistsVisual::-webkit-scrollbar {
+  display: none;
 }
 
 .statsArtistBubbles {
   display: flex;
   justify-content: space-around;
   align-items: flex-end;
-  gap: 8px;
+  gap: 10px;
+  min-width: min-content;
 }
 
 .statsArtistBubble {
@@ -374,7 +722,7 @@
   color: inherit;
   text-decoration: none;
   font: inherit;
-  transition: transform 0.2s ease;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .statsArtistBubbleDisabled {
@@ -382,50 +730,56 @@
 }
 
 .statsArtistBubble:hover {
-  transform: translateY(-3px);
-}
-
-.statsArtistBubbleDisabled:hover {
-  transform: none;
+  transform: translateY(-4px);
 }
 
 .statsBubbleImage {
   border-radius: 50%;
   background-size: cover;
   background-position: center;
-  background-color: rgba(255, 255, 255, 0.06);
-  border: 2px solid rgba(var(--accent-rgb), 0.2);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  background-color: rgba(255, 255, 255, 0.08);
+  border: 2px solid rgba(var(--accent-rgb), 0.35);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.4),
+    0 0 16px rgba(var(--accent-rgb), 0.2);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  transition: all 0.22s ease;
+}
+
+.statsArtistBubble:hover .statsBubbleImage {
+  border-color: rgb(var(--accent-rgb));
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.5),
+    0 0 24px rgba(var(--accent-rgb), 0.45);
 }
 
 .statsBubbleInitial {
-  font-size: 1.2rem;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.4);
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.6);
 }
 
 .statsBubbleBarContainer {
   width: 100%;
-  height: 3px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 2px;
+  height: 3.5px;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 999px;
   overflow: hidden;
 }
 
 .statsBubbleBar {
   height: 100%;
-  background: linear-gradient(90deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.4));
-  border-radius: 2px;
+  background: linear-gradient(90deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.5));
+  border-radius: 999px;
 }
 
 .statsBubbleName {
-  font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.7);
-  font-weight: 500;
+  font-size: 0.76rem;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
@@ -434,54 +788,82 @@
 }
 
 .statsBubbleCount {
-  font-size: 0.65rem;
-  color: rgba(var(--accent-rgb), 0.7);
-  font-weight: 600;
+  font-size: 0.7rem;
+  color: rgba(var(--accent-rgb), 0.9);
+  font-weight: 700;
 }
 
+/* Ranked Items (Artists, Albums, Tracks) */
 .statsRankedList,
 .statsRecentList {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  max-height: 300px;
+  gap: 6px;
+  max-height: 360px;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+  padding-right: 4px;
 }
 
 .statsRankedItem,
 .statsRecentItem {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   padding: 8px 10px;
-  border-radius: 8px;
-  transition: background 0.15s ease;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
 }
 
 .statsRankedItem:hover,
 .statsRecentItem:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.08);
+  transform: translateX(2px);
 }
 
 .statsRankedNum {
-  font-size: 0.75rem;
-  color: rgba(255, 255, 255, 0.25);
-  font-weight: 700;
-  width: 18px;
-  text-align: right;
+  font-size: 0.78rem;
+  font-weight: 800;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* Gold, silver, bronze ranks */
+.statsRankedItem:nth-child(1) .statsRankedNum {
+  background: linear-gradient(135deg, #fbbf24 0%, #d97706 100%);
+  color: #000;
+  box-shadow: 0 0 10px rgba(251, 191, 36, 0.4);
+}
+
+.statsRankedItem:nth-child(2) .statsRankedNum {
+  background: linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%);
+  color: #000;
+}
+
+.statsRankedItem:nth-child(3) .statsRankedNum {
+  background: linear-gradient(135deg, #f97316 0%, #b45309 100%);
+  color: #000;
 }
 
 .statsRankedImage,
 .statsRankedImageFallback {
-  width: 36px;
-  height: 36px;
-  border-radius: 6px;
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
   flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.06);
   object-fit: cover;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .statsRankedInfo {
@@ -490,9 +872,9 @@
 }
 
 .statsRankedName {
-  font-size: 0.88rem;
-  color: rgba(255, 255, 255, 0.85);
-  font-weight: 500;
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.92);
+  font-weight: 650;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -502,16 +884,22 @@
 }
 
 .statsRankedMeta {
-  font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.74rem;
+  color: rgba(255, 255, 255, 0.45);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .statsRankedCount {
-  font-size: 0.78rem;
-  color: rgba(var(--accent-rgb), 0.8);
-  font-weight: 600;
+  font-size: 0.8rem;
+  color: rgba(var(--accent-rgb), 0.95);
+  font-weight: 700;
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(var(--accent-rgb), 0.08);
 }
 
 .statsArtistLink {
@@ -522,6 +910,7 @@
   padding: 0;
   cursor: pointer;
   font: inherit;
+  transition: color 0.15s ease;
 }
 
 .statsArtistLink:hover {
@@ -529,26 +918,28 @@
 }
 
 .statsSoulIdBadge {
-  width: 12px;
-  height: 12px;
-  opacity: 0.5;
+  width: 13px;
+  height: 13px;
+  opacity: 0.7;
 }
 
+/* Play button */
 .statsPlayButton {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   border: none;
-  background: rgba(var(--accent-rgb), 0.15);
+  background: rgba(var(--accent-rgb), 0.18);
   color: rgb(var(--accent-rgb));
-  font-size: 10px;
+  font-size: 11px;
   cursor: pointer;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   opacity: 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .statsRankedItem:hover .statsPlayButton,
@@ -559,19 +950,203 @@
 .statsPlayButton:hover {
   background: rgb(var(--accent-rgb));
   color: #fff;
-  transform: scale(1.1);
+  transform: scale(1.15);
+  box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.6);
 }
 
 .statsPlayButtonSmall {
-  width: 22px;
-  height: 22px;
-  font-size: 8px;
+  width: 26px;
+  height: 26px;
+  font-size: 9px;
 }
 
+/* =========================================================================
+   Tier 3: Insights & Recents (Own vs Play, Genre Breakdown, Recents)
+   ========================================================================= */
+
+.statsInsightsRow {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr 1.15fr;
+  gap: 20px;
+}
+
+/* Own vs Play */
+.statsOwnPlay {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.statsOwnPlayRow {
+  display: grid;
+  grid-template-columns: 90px 1fr 48px;
+  gap: 12px;
+  align-items: center;
+}
+
+.statsOwnPlayGenre {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statsOwnPlayBars {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.statsOwnPlayOwned,
+.statsOwnPlayPlayed {
+  height: 7px;
+  border-radius: 999px;
+  min-width: 3px;
+  transition: width 0.3s ease;
+}
+
+.statsOwnPlayOwned {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.statsOwnPlayPlayed {
+  background: rgb(var(--accent-rgb));
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.4);
+}
+
+.statsOwnPlayGap {
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.statsOwnPlayGapUp {
+  color: #4ade80;
+}
+
+.statsOwnPlayGapDown {
+  color: #f87171;
+}
+
+.statsOwnPlayLegend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 0.74rem;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.statsOwnPlayKeyOwned,
+.statsOwnPlayKeyPlayed {
+  width: 14px;
+  height: 6px;
+  border-radius: 3px;
+}
+
+.statsOwnPlayKeyOwned {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.statsOwnPlayKeyPlayed {
+  background: rgb(var(--accent-rgb));
+  margin-left: 10px;
+}
+
+.statsNeglected {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.statsNeglectedTitle {
+  font-size: 0.74rem;
+  font-weight: 750;
+  color: rgba(255, 255, 255, 0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+
+.statsNeglectedRow {
+  display: grid;
+  grid-template-columns: 1fr auto 30px;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 0.8rem;
+}
+
+.statsNeglectedName {
+  color: rgba(255, 255, 255, 0.85);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 550;
+}
+
+.statsNeglectedArtist {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.statsNeglectedCount {
+  color: rgba(255, 255, 255, 0.35);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Genre Breakdown */
+.statsGenreChartContainer {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.statsGenreChartWrap {
+  width: 180px;
+  height: 180px;
+  flex-shrink: 0;
+}
+
+.statsGenreLegend {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.statsGenreLegendItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.statsGenreDot,
+.statsDbLegendDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.statsGenrePct {
+  margin-left: auto;
+  color: rgba(255, 255, 255, 0.45);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* Recently Played Live Feed */
 .statsRecentTitle {
   flex: 1;
-  font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -579,27 +1154,46 @@
 
 .statsRecentArtist {
   font-size: 0.78rem;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.45);
   flex-shrink: 0;
 }
 
 .statsRecentTime {
-  font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.25);
+  font-size: 0.74rem;
+  color: rgba(255, 255, 255, 0.32);
   flex-shrink: 0;
   min-width: 65px;
   text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* =========================================================================
+   Library Tab (Operational Facts)
+   ========================================================================= */
+
+.statsLibraryGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.statsFullWidth {
+  width: 100%;
 }
 
 .statsHealthGrid {
   display: grid;
   grid-template-columns: 2fr 1fr 1fr 1fr;
-  gap: 16px;
+  gap: 18px;
   align-items: start;
 }
 
 .statsHealthItem {
   text-align: center;
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .statsHealthItemWide {
@@ -607,91 +1201,94 @@
 }
 
 .statsHealthValue {
-  font-size: 1.6rem;
-  font-weight: 700;
+  font-size: 1.8rem;
+  font-weight: 800;
   color: #fff;
-  line-height: 1.2;
+  line-height: 1.15;
   margin-bottom: 4px;
+  letter-spacing: -0.02em;
 }
 
 .statsHealthLabel {
-  font-size: 0.75rem;
-  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.74rem;
+  color: rgba(255, 255, 255, 0.45);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-weight: 600;
+  letter-spacing: 0.06em;
+  font-weight: 700;
 }
 
 .statsFormatBar {
   display: flex;
   height: 28px;
-  border-radius: 8px;
+  border-radius: 9px;
   overflow: hidden;
-  margin-top: 8px;
-  background: rgba(255, 255, 255, 0.04);
+  margin-top: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 .statsFormatSegment {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.68rem;
-  font-weight: 600;
+  font-size: 0.72rem;
+  font-weight: 700;
   color: #fff;
   white-space: nowrap;
-  min-width: 30px;
+  min-width: 32px;
 }
 
 .statsEnrichment {
   display: flex;
   gap: 16px;
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
   flex-wrap: wrap;
 }
 
 .statsEnrichItem {
   flex: 1;
-  min-width: 120px;
+  min-width: 140px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .statsEnrichName {
-  font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.45);
-  min-width: 70px;
-  font-weight: 500;
+  font-size: 0.76rem;
+  color: rgba(255, 255, 255, 0.55);
+  min-width: 75px;
+  font-weight: 600;
 }
 
 .statsEnrichBar {
   flex: 1;
-  height: 4px;
+  height: 5px;
   background: rgba(255, 255, 255, 0.06);
-  border-radius: 2px;
+  border-radius: 999px;
   overflow: hidden;
 }
 
 .statsEnrichFill {
   height: 100%;
-  border-radius: 2px;
+  border-radius: 999px;
 }
 
 .statsEnrichPct {
-  font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.76rem;
+  color: rgba(255, 255, 255, 0.45);
   font-variant-numeric: tabular-nums;
-  min-width: 30px;
+  min-width: 32px;
   text-align: right;
+  font-weight: 600;
 }
 
+/* Disk usage */
 .statsDiskUsageWrap {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  margin-top: 8px;
+  gap: 16px;
 }
 
 .statsDiskTotalRow {
@@ -702,65 +1299,68 @@
 }
 
 .statsDiskTotalValue {
-  font-size: 28px;
-  font-weight: 700;
+  font-size: 2.2rem;
+  font-weight: 800;
   color: rgb(var(--accent-rgb));
+  letter-spacing: -0.03em;
 }
 
 .statsDiskTotalMeta {
-  font-size: 12px;
+  font-size: 0.85rem;
   color: rgba(255, 255, 255, 0.55);
 }
 
 .statsDiskFormats {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .statsDiskFormatRow {
   display: grid;
-  grid-template-columns: 60px 1fr 80px;
+  grid-template-columns: 70px 1fr 90px;
   align-items: center;
-  gap: 10px;
-  font-size: 12px;
+  gap: 12px;
+  font-size: 0.82rem;
 }
 
 .statsDiskFormatName {
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.8);
+  font-weight: 650;
+  color: rgba(255, 255, 255, 0.85);
+  text-transform: uppercase;
 }
 
 .statsDiskFormatBar {
   height: 8px;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
   overflow: hidden;
 }
 
 .statsDiskFormatFill {
   height: 100%;
   background: linear-gradient(90deg, rgb(var(--accent-rgb)) 0%, rgba(var(--accent-rgb), 0.6) 100%);
-  border-radius: 4px;
+  border-radius: 999px;
 }
 
 .statsDiskFormatSize {
   text-align: right;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(255, 255, 255, 0.5);
   font-variant-numeric: tabular-nums;
+  font-weight: 600;
 }
 
+/* Database storage */
 .statsDbStorageWrap {
   display: flex;
   align-items: center;
-  gap: 24px;
-  margin-top: 8px;
+  gap: 28px;
 }
 
 .statsDbChartContainer {
   position: relative;
-  width: 180px;
-  height: 180px;
+  width: 190px;
+  height: 190px;
   flex-shrink: 0;
   isolation: isolate;
 }
@@ -777,33 +1377,33 @@
 }
 
 .statsDbTotalValue {
-  font-size: 20px;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.85);
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #fff;
   text-align: center;
 }
 
 .statsDbTotalLabel {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.45);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
 }
 
 .statsDbLegend {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 7px;
   min-width: 0;
 }
 
 .statsDbLegendItem {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+  gap: 10px;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .statsDbLegendName {
@@ -816,467 +1416,47 @@
 
 .statsDbLegendSize {
   font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.4);
-  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 0.78rem;
+  font-weight: 600;
 }
 
+/* Empty / Loading States */
 .statsEmpty,
 .statsLoading {
   text-align: center;
-  padding: 80px 20px;
+  padding: 90px 20px;
   color: rgba(255, 255, 255, 0.5);
 }
 
 .statsEmptyIcon {
-  font-size: 48px;
-  margin-bottom: 16px;
+  font-size: 52px;
+  margin-bottom: 18px;
 }
 
 .statsEmpty h3 {
-  font-size: 1.2rem;
-  color: rgba(255, 255, 255, 0.7);
-  margin-bottom: 8px;
+  font-size: 1.3rem;
+  color: rgba(255, 255, 255, 0.85);
+  margin-bottom: 10px;
+  font-weight: 750;
 }
 
 .statsEmpty p,
 .statsSubtleError,
 .emptyListState {
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   line-height: 1.5;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.45);
 }
 
 .emptyListState {
-  padding: 12px;
-}
-
-.statsSubtleError {
-  padding: 12px 0;
-}
-
-@media (max-width: 768px) {
-  .statsContainer {
-    margin: 8px;
-    padding: 12px;
-    border-radius: 16px;
-  }
-
-  .statsHeader {
-    flex-direction: column;
-    align-items: flex-start;
-    padding: 12px;
-    margin: -12px -12px 20px;
-    min-height: 0;
-    gap: 10px;
-    border-top-left-radius: 16px;
-    border-top-right-radius: 16px;
-  }
-
-  .statsHeaderControls {
-    width: 100%;
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .statsTimeRange {
-    width: 100%;
-  }
-
-  .statsRangeButton {
-    padding: 6px 12px;
-    font-size: 11px;
-    flex: 1;
-    text-align: center;
-  }
-
-  .statsSyncControls {
-    width: 100%;
-    justify-content: space-between;
-  }
-
-  .historyImportControl {
-    width: 100%;
-    max-width: none;
-  }
-
-  .statsStandaloneNotice {
-    max-width: none;
-    text-align: left;
-  }
-
-  .headerIcon {
-    width: 100px;
-    height: 100px;
-  }
-
-  .statsOverview {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 8px;
-  }
-
-  .statsCard {
-    padding: 12px 10px;
-    border-radius: 10px;
-  }
-
-  .statsCardValue {
-    font-size: 18px;
-  }
-
-  .statsCardLabel {
-    font-size: 9px;
-  }
-
-  .statsMainGrid {
-    grid-template-columns: 1fr;
-    gap: 14px;
-  }
-
-  .statsLeftCol,
-  .statsRightCol {
-    gap: 14px;
-  }
-
-  .statsSectionCard {
-    padding: 12px;
-  }
-
-  .chartContainer {
-    height: 160px;
-  }
-
-  .statsGenreChartContainer,
-  .statsDbStorageWrap {
-    flex-direction: column;
-    align-items: center;
-  }
-
-  .statsHealthGrid {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
-/* Tile delta — the comparison that turns a total into a signal (stats P1).
-   Absent entirely when there is nothing honest to compare against. */
-.statsCardDelta {
-  margin-top: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  opacity: 0.85;
-}
-
-.statsCardDelta_up {
-  color: #4ade80;
-}
-
-.statsCardDelta_down {
-  color: #f87171;
-}
-
-/* Flat is deliberately NOT red or green — no change is not bad news. */
-.statsCardDelta_flat {
-  color: rgba(255, 255, 255, 0.45);
-}
-
-.statsCardDeltaNew {
-  color: rgb(var(--accent-rgb));
-}
-
-/* Listening | Library — two kinds of fact that used to share one surface. */
-.statsTabs {
-  display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.statsTab {
-  padding: 6px 14px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    background 120ms ease,
-    color 120ms ease;
-}
-
-.statsTab:hover {
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.statsTabActive {
-  background: rgb(var(--accent-rgb));
-  color: #0c0c0c;
-}
-
-/* When You Listen — the weekday x hour heatmap and the habit numbers. */
-.statsClock {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.statsClockContext {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 2px 10px;
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 12px;
-}
-
-.statsClockContextLabel {
-  color: rgba(255, 255, 255, 0.82);
-  font-weight: 800;
-}
-
-.statsClockContextRange {
-  margin-left: 5px;
-}
-
-.statsClockContext strong {
-  color: rgb(var(--accent-rgb));
-  font-size: 13px;
-  font-weight: 800;
-  white-space: nowrap;
-}
-.statsClockGrid {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.statsClockRow {
-  display: grid;
-  grid-template-columns: 34px repeat(24, 1fr);
-  gap: 3px;
-  align-items: center;
-}
-
-.statsClockDay {
-  font-size: 10px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.4);
-  text-align: right;
-  padding-right: 4px;
-}
-
-.statsClockCell {
-  aspect-ratio: 1;
-  min-height: 10px;
-  border-radius: 2px;
-  background: rgb(var(--accent-rgb));
-  transition: transform 90ms ease;
-}
-
-.statsClockCell:hover {
-  transform: scale(1.35);
-}
-
-.statsClockAxis {
-  display: grid;
-  grid-template-columns: 34px repeat(4, 1fr);
-  gap: 3px;
-  margin-top: 2px;
-}
-
-.statsClockAxisLabel {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.35);
-}
-
-.statsClockEmpty {
-  padding: 24px 0;
+  padding: 16px;
   text-align: center;
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.4);
 }
 
-.statsRhythm {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 20px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.statsRhythmItem {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.statsRhythmValue {
-  font-size: 18px;
-  font-weight: 700;
-  color: #fff;
-}
-
-.statsRhythmLabel {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
-}
-
-/* Own vs Play — library share against listening share. */
-.statsOwnPlay {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.statsOwnPlayRow {
-  display: grid;
-  grid-template-columns: 92px 1fr 46px;
-  gap: 10px;
-  align-items: center;
-}
-
-.statsOwnPlayGenre {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.75);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.statsOwnPlayBars {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.statsOwnPlayOwned,
-.statsOwnPlayPlayed {
-  height: 6px;
-  border-radius: 3px;
-  min-width: 2px;
-}
-
-.statsOwnPlayOwned {
-  background: rgba(255, 255, 255, 0.28);
-}
-.statsOwnPlayPlayed {
-  background: rgb(var(--accent-rgb));
-}
-
-.statsOwnPlayGap {
-  font-size: 12px;
-  font-weight: 700;
-  text-align: right;
-}
-.statsOwnPlayGapUp {
-  color: #4ade80;
-}
-.statsOwnPlayGapDown {
-  color: #f87171;
-}
-
-.statsOwnPlayLegend {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
-}
-
-.statsOwnPlayKeyOwned,
-.statsOwnPlayKeyPlayed {
-  width: 12px;
-  height: 6px;
-  border-radius: 3px;
-  margin-left: 8px;
-}
-
-.statsOwnPlayKeyOwned {
-  background: rgba(255, 255, 255, 0.28);
-  margin-left: 0;
-}
-.statsOwnPlayKeyPlayed {
-  background: rgb(var(--accent-rgb));
-}
-
-.statsNeglected {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.statsNeglectedTitle {
-  font-size: 11px;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.5);
-  margin-bottom: 6px;
-}
-
-.statsNeglectedRow {
-  display: grid;
-  grid-template-columns: 1fr auto 28px;
-  gap: 8px;
-  padding: 3px 0;
-  font-size: 12px;
-}
-
-.statsNeglectedName {
-  color: rgba(255, 255, 255, 0.8);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.statsNeglectedArtist {
-  color: rgba(255, 255, 255, 0.4);
-}
-.statsNeglectedCount {
-  color: rgba(255, 255, 255, 0.35);
-  text-align: right;
-}
-
-/* Entry point to the Year in Listening takeover. Styled as the page's one
-   accented action — everything else in this header is a neutral control, and
-   this is the only thing here that opens something new. */
-.statsYearButton {
-  padding: 7px 18px;
-  border: 1px solid rgba(29, 185, 84, 0.35);
-  border-radius: 999px;
-  background: rgba(29, 185, 84, 0.12);
-  color: #1ed760;
-  font-family: inherit;
-  font-size: 0.82rem;
-  font-weight: 700;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.2s ease;
-}
-
-.statsYearButton:hover {
-  background: rgba(29, 185, 84, 0.22);
-  color: #fff;
-}
-
-.statsClockCell {
-  border: 0;
-  padding: 0;
-}
-
-.statsClockCell:disabled {
-  cursor: default;
-}
-
-.statsClockCellActive {
-  cursor: pointer;
-}
-
-.statsClockCellActive:focus-visible {
-  outline: 2px solid rgb(var(--accent-rgb));
-  outline-offset: 2px;
-}
+/* =========================================================================
+   Listening Detail Modal
+   ========================================================================= */
 
 .statsDetailBackdrop {
   position: fixed;
@@ -1286,20 +1466,21 @@
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.58);
-  backdrop-filter: blur(10px);
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(14px);
 }
 
 .statsDetailModal {
-  width: min(820px, 100%);
+  width: min(840px, 100%);
   max-height: min(720px, calc(100vh - 48px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-radius: 14px;
+  border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(16, 16, 18, 0.98);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+  background: rgba(18, 22, 28, 0.96);
+  backdrop-filter: blur(28px);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.7);
 }
 
 .statsDetailHeader {
@@ -1307,91 +1488,99 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
-  padding: 22px 24px 18px;
+  padding: 24px 26px 18px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .statsDetailEyebrow {
-  margin-bottom: 5px;
+  margin-bottom: 6px;
   color: rgb(var(--accent-rgb));
-  font-size: 11px;
+  font-size: 0.74rem;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
 .statsDetailHeader h3 {
   margin: 0;
-  color: rgba(255, 255, 255, 0.95);
-  font-size: 24px;
+  color: #fff;
+  font-size: 1.6rem;
   line-height: 1.15;
+  font-weight: 800;
 }
 
 .statsDetailHeader p {
-  margin: 7px 0 0;
-  color: rgba(255, 255, 255, 0.48);
-  font-size: 13px;
+  margin: 8px 0 0;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.88rem;
 }
 
 .statsDetailClose {
-  width: 32px;
-  height: 32px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.8);
   cursor: pointer;
-  font-size: 16px;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
 }
 
 .statsDetailClose:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.14);
   color: #fff;
+  transform: scale(1.08);
 }
 
 .statsDetailLoading {
-  padding: 28px;
+  padding: 36px;
   color: rgba(255, 255, 255, 0.55);
   text-align: center;
 }
 
 .statsDetailList {
   overflow-y: auto;
-  padding: 10px 12px 14px;
+  padding: 12px 16px 18px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
 }
 
 .statsDetailRow {
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr) auto 34px;
+  grid-template-columns: 48px minmax(0, 1fr) auto 36px;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   min-height: 64px;
-  padding: 9px 10px;
-  border-radius: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  transition: background 0.15s ease;
 }
 
 .statsDetailRow:hover {
-  background: rgba(255, 255, 255, 0.045);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .statsDetailArt,
 .statsDetailArtFallback {
-  width: 46px;
-  height: 46px;
-  border-radius: 7px;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
   object-fit: cover;
   flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 }
 
 .statsDetailArtFallback {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.45);
-  font-weight: 700;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.55);
+  font-weight: 750;
 }
 
 .statsDetailTrackMain {
@@ -1400,8 +1589,8 @@
 
 .statsDetailTrackTitle {
   overflow: hidden;
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 14px;
+  color: #fff;
+  font-size: 0.94rem;
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1410,8 +1599,8 @@
 .statsDetailTrackMeta {
   margin-top: 3px;
   overflow: hidden;
-  color: rgba(255, 255, 255, 0.48);
-  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.8rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1421,21 +1610,21 @@
   flex-direction: column;
   align-items: flex-end;
   gap: 5px;
-  color: rgba(255, 255, 255, 0.4);
-  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 0.76rem;
   white-space: nowrap;
 }
 
 .statsDetailSource {
   display: inline-flex;
   align-items: center;
-  min-height: 18px;
-  padding: 0 7px;
-  border: 1px solid rgba(var(--accent-rgb), 0.18);
+  min-height: 19px;
+  padding: 0 8px;
+  border: 1px solid rgba(var(--accent-rgb), 0.22);
   border-radius: 999px;
-  background: rgba(var(--accent-rgb), 0.08);
-  color: rgba(255, 255, 255, 0.62);
-  font-size: 10px;
+  background: rgba(var(--accent-rgb), 0.1);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.68rem;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -1445,38 +1634,230 @@
   height: 32px;
   border: 0;
   border-radius: 50%;
-  background: rgba(var(--accent-rgb), 0.15);
+  background: rgba(var(--accent-rgb), 0.18);
   color: rgb(var(--accent-rgb));
   cursor: pointer;
-  font-size: 10px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
 }
 
 .statsDetailPlay:hover {
   background: rgb(var(--accent-rgb));
-  color: #0c0c0c;
+  color: #fff;
+  transform: scale(1.1);
 }
 
-@media (max-width: 640px) {
+/* =========================================================================
+   Responsive Design
+   ========================================================================= */
+
+@media (max-width: 1200px) {
+  .statsActivityRow {
+    grid-template-columns: 1fr;
+  }
+
+  .statsTopShowcase {
+    grid-template-columns: 1fr;
+  }
+
+  .statsInsightsRow {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .statsContainer {
+    margin: 10px;
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .statsOverview {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .statsHealthGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .statsGenreChartContainer,
+  .statsDbStorageWrap {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .statsGenreLegend,
+  .statsDbLegend {
+    width: 100%;
+  }
+}
+
+@media (max-width: 580px) {
+  .statsContainer {
+    margin: 6px;
+    padding: 14px 10px;
+    border-radius: 16px;
+  }
+
+  .statsSectionCard {
+    padding: 16px 12px;
+    border-radius: 16px;
+  }
+
+  .headerPrimaryActions {
+    width: 100%;
+    gap: 8px;
+  }
+
+  .statsYearButton {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .statsTabs,
+  .statsTimeRange {
+    width: 100%;
+    display: flex;
+  }
+
+  .statsTab,
+  .statsRangeButton {
+    flex: 1;
+    text-align: center;
+    padding: 6px 4px;
+    font-size: 0.75rem;
+  }
+
+  .statsSyncBar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .statsServerSync {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .statsServerSyncGroup {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .statsSyncControls {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .historyImportControl {
+    width: 100%;
+  }
+
+  .statsOverview {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .statsCard {
+    padding: 14px 16px;
+  }
+
+  .statsCardValue {
+    font-size: 1.8rem;
+  }
+
+  .statsHealthGrid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .statsClockRow {
+    grid-template-columns: 24px repeat(24, 1fr);
+    gap: 1.5px;
+  }
+
+  .statsClockAxis {
+    grid-template-columns: 24px repeat(4, 1fr);
+    gap: 1.5px;
+  }
+
+  .statsClockAxisLabel {
+    font-size: 0.6rem;
+  }
+
+  .statsClockDay {
+    font-size: 0.6rem;
+    padding-right: 2px;
+  }
+
+  .statsSectionTitle {
+    font-size: 0.74rem;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+  }
+
+  .statsRankedItem,
+  .statsRecentItem {
+    padding: 8px 8px;
+    gap: 8px;
+  }
+
+  .statsRankedName,
+  .statsRecentTitle {
+    font-size: 0.84rem;
+  }
+
+  .statsRankedImage,
+  .statsRankedImageFallback {
+    width: 36px;
+    height: 36px;
+  }
+
+  .statsArtistBubbles {
+    gap: 6px;
+  }
+
+  .statsBubbleImage {
+    transform: scale(0.92);
+  }
+
+  .statsOwnPlayRow {
+    grid-template-columns: 75px 1fr 40px;
+    gap: 8px;
+  }
+
+  .statsDiskFormatRow {
+    grid-template-columns: 55px 1fr auto;
+    gap: 8px;
+  }
+
   .statsDetailBackdrop {
     align-items: flex-end;
-    padding: 10px;
+    padding: 8px;
   }
 
   .statsDetailModal {
-    max-height: 82vh;
-    border-radius: 14px;
+    max-height: 88vh;
+    border-radius: 18px 18px 12px 12px;
   }
 
   .statsDetailHeader {
-    padding: 18px 18px 14px;
+    padding: 16px 16px 12px;
   }
 
   .statsDetailHeader h3 {
-    font-size: 20px;
+    font-size: 1.25rem;
   }
 
   .statsDetailRow {
-    grid-template-columns: 38px minmax(0, 1fr) 30px;
+    grid-template-columns: 38px minmax(0, 1fr) auto 32px;
+    gap: 8px;
+    padding: 8px 8px;
+    min-height: 52px;
   }
 
   .statsDetailArt,
@@ -1485,13 +1866,42 @@
     height: 38px;
   }
 
-  .statsDetailWhen {
-    grid-column: 2 / 3;
-    align-items: flex-start;
+  .statsDetailTrackTitle {
+    font-size: 0.86rem;
+  }
+}
+
+@media (max-width: 380px) {
+  .statsContainer {
+    margin: 4px;
+    padding: 12px 8px;
   }
 
-  .statsDetailPlay {
-    grid-column: 3 / 4;
-    grid-row: 1 / 2;
+  .statsSectionCard {
+    padding: 14px 8px;
+  }
+
+  .statsCardValue {
+    font-size: 1.6rem;
+  }
+
+  .statsClockRow {
+    grid-template-columns: 20px repeat(24, 1fr);
+    gap: 1px;
+  }
+
+  .statsClockAxis {
+    grid-template-columns: 20px repeat(4, 1fr);
+    gap: 1px;
+  }
+
+  .statsClockDay {
+    font-size: 0.54rem;
+    padding-right: 1px;
+  }
+
+  .statsOwnPlayRow {
+    grid-template-columns: 62px 1fr 34px;
+    gap: 6px;
   }
 }

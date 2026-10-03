@@ -37,6 +37,12 @@ logger = get_logger("web_server")
 db_update_worker = None
 _db_update_automation_id = None
 _workers_paused_by_scan = {}
+# H16: epoch of the DB-update task currently on the executor. Bumped at every
+# run start (automation handler, manual endpoints); the finished/error
+# callbacks only commit for the current epoch, so a stale worker finishing
+# after the stall watchdog handed the run to a successor can't overwrite the
+# new run's state.
+_active_task_epoch = 0
 
 
 def set_db_update_automation_id(value):
@@ -131,8 +137,31 @@ def _db_update_artist_callback(artist_name, success, details, album_count, track
             log_line=f'{artist_name} — {details}',
             log_type='error')
 
+def _terminal_callback_for_current_run(kind: str) -> bool:
+    """H16 gate: True when the calling worker task belongs to the run epoch
+    that currently owns db_update_state.
+
+    The stall watchdog flips a hung 'running' job to 'error' without stopping
+    its worker thread; the next run then queues behind the hung worker on the
+    single-worker executor. When the stale worker finally fires its terminal
+    callback, the state already belongs to the successor run — committing the
+    write would fake a 'finished'/'error' the new run never produced. Drop it.
+    """
+    with db_update_lock:
+        current = (db_update_state or {}).get("run_epoch", 0)
+        if _active_task_epoch != current:
+            logger.warning(
+                "[DB Update] Ignoring %s callback from a superseded run "
+                "(task epoch %s, current epoch %s)",
+                kind, _active_task_epoch, current)
+            return False
+    return True
+
+
 def _db_update_finished_callback(total_artists, total_albums, total_tracks, successful, failed):
     global _db_update_automation_id
+    if not _terminal_callback_for_current_run("finished"):
+        return
     # Library extras: keep the whole-library M3U in sync with the DB. Every scan type (deep,
     # incremental, full refresh) converges on this callback, so writing here keeps it current.
     # Destination = the configured M3U output folder if set, else the Transfer folder. Fully
@@ -264,6 +293,8 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
 
 def _db_update_error_callback(error_message):
     global _db_update_automation_id
+    if not _terminal_callback_for_current_run("error"):
+        return
     with db_update_lock:
         db_update_state["status"] = "error"
         db_update_state["error_message"] = error_message
@@ -741,9 +772,33 @@ def _post_scan_hook_with_own_libraries(server_type, deep):
     return hook
 
 
-def _run_db_update_task(full_refresh, server_type):
-    """The actual function that runs in the background thread."""
-    global db_update_worker
+def _capture_task_epoch(run_epoch):
+    """H16: record the epoch of the task now starting on the executor.
+
+    run_epoch is the epoch assigned when the task was submitted. A task
+    queued behind a hung worker must carry ITS run's epoch, not the epoch
+    that happens to be current when it eventually starts — otherwise its
+    terminal callback would commit over the successor run's state.
+    """
+    global _active_task_epoch
+    with db_update_lock:
+        _active_task_epoch = (
+            run_epoch if run_epoch is not None
+            else (db_update_state or {}).get("run_epoch", 0)
+        )
+
+
+def _run_db_update_task(full_refresh, server_type, run_epoch=None):
+    """The actual function that runs in the background thread.
+
+    run_epoch is the epoch assigned at submit time (see start_database_update
+    / _run_with_progress): a task queued behind a hung worker must carry the
+    epoch of ITS run, not the epoch that happens to be current when it
+    eventually starts.
+    """
+    global db_update_worker, _active_task_epoch
+
+    _capture_task_epoch(run_epoch)
 
     # SoulSync standalone
     if server_type == "soulsync":
@@ -803,9 +858,15 @@ def _run_db_update_task(full_refresh, server_type):
     db_update_worker.run()
 
 
-def _run_deep_scan_task(server_type):
-    """Run a deep library scan in the background thread."""
-    global db_update_worker
+def _run_deep_scan_task(server_type, run_epoch=None):
+    """Run a deep library scan in the background thread.
+
+    run_epoch is the epoch assigned at submit time (see _run_db_update_task).
+    """
+    global db_update_worker, _active_task_epoch
+
+    _capture_task_epoch(run_epoch)
+
     media_client = None
 
     if server_type == "plex":
@@ -887,6 +948,9 @@ def start_database_update():
             "status": "running",
             "phase": f"{scan_type}: Initializing...",
             "progress": 0, "current_item": "", "processed": 0, "total": 0, "error_message": "",
+            # H16: new run epoch — a stale worker from a watchdog-superseded
+            # run must not overwrite this run's terminal state.
+            "run_epoch": db_update_state.get("run_epoch", 0) + 1,
             # Seed the heartbeat now so a worker that hangs during init (before the
             # first progress/phase callback) is still caught by the stall watchdog.
             "last_progress_at": time.time(),
@@ -898,9 +962,9 @@ def start_database_update():
 
         # Submit the appropriate worker
         if deep_scan:
-            db_update_executor.submit(_run_deep_scan_task, active_server)
+            db_update_executor.submit(_run_deep_scan_task, active_server, db_update_state["run_epoch"])
         else:
-            db_update_executor.submit(_run_db_update_task, full_refresh, active_server)
+            db_update_executor.submit(_run_db_update_task, full_refresh, active_server, db_update_state["run_epoch"])
 
     return jsonify({"success": True, "message": "Database update started."})
 

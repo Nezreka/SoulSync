@@ -2060,7 +2060,8 @@ class JellyfinClient(MediaServerClient):
             
             # Check if backup is enabled in config
             from core.settings import config_manager
-            create_backup = config_manager.get('playlist_sync.create_backup', True)
+            from core.sync.playlist_edit import playlist_backup_enabled
+            create_backup = playlist_backup_enabled(config_manager)
             
             if existing_playlist and create_backup:
                 backup_name = f"{playlist_name} Backup"
@@ -2093,35 +2094,53 @@ class JellyfinClient(MediaServerClient):
             return False
     
     def trigger_library_scan(self, library_name: str = "Music") -> bool:
-        """Trigger Jellyfin library scan for the specified library"""
+        """Trigger Jellyfin library scan for the specified library.
+
+        Called with the default ``"Music"`` (the post-download / automation
+        scan path), this refreshes EVERY music library, not just the first
+        match — own-library profiles each have their own Jellyfin music
+        library, and refreshing only one left the others' new files
+        undiscovered until a manual scan (#1351). An explicit non-default
+        name keeps the old single-library behavior.
+
+        Returns True when at least one library refresh was accepted;
+        per-library failures are logged, not raised.
+        """
         if not self.ensure_connection():
             return False
-            
+
         try:
             # Get library info to find the correct library ID
             libraries_response = self._make_request(f'/Users/{self.user_id}/Views')
             if not libraries_response:
                 logger.error("Failed to get library list for scan")
                 return False
-                
-            target_library_id = None
-            for library in libraries_response.get('Items', []):
-                if (library.get('CollectionType') == 'music' and 
-                    library_name.lower() in library.get('Name', '').lower()):
-                    target_library_id = library['Id']
-                    break
-            
+
+            music_libraries = [
+                library for library in libraries_response.get('Items', [])
+                if (library.get('CollectionType') or '').lower() == 'music'
+            ]
+
+            # Default call ("Music") = refresh everything in scope, mirroring
+            # Plex's all-libraries mode. An explicit name targets one library.
+            if library_name == "Music":
+                target_libraries = music_libraries
+            else:
+                target_libraries = [
+                    library for library in music_libraries
+                    if library_name.lower() in library.get('Name', '').lower()
+                ]
+
             # Default to music_library_id if no specific library found
-            if not target_library_id:
-                target_library_id = self.music_library_id
-                
-            if not target_library_id:
+            if not target_libraries and self.music_library_id:
+                target_libraries = [{'Id': self.music_library_id, 'Name': library_name}]
+
+            if not target_libraries:
                 logger.error(f"No library found matching '{library_name}'")
                 return False
-                
+
             # Trigger the scan using POST request
             import requests
-            url = f"{self.base_url}/Items/{target_library_id}/Refresh"
             headers = {
                 'X-Emby-Token': self.api_key, 'Authorization': self._auth_header(),
                 'Content-Type': 'application/json'
@@ -2131,13 +2150,21 @@ class JellyfinClient(MediaServerClient):
                 'ImageRefreshMode': 'ValidationOnly',  # Don't refresh images, just metadata
                 'MetadataRefreshMode': 'ValidationOnly'
             }
-            
-            response = requests.post(url, headers=headers, params=params, timeout=10)
-            response.raise_for_status()
-            
-            logger.info(f"Triggered Jellyfin library scan for '{library_name}'")
-            return True
-            
+
+            succeeded = 0
+            for target in target_libraries:
+                target_library_id = target['Id']
+                url = f"{self.base_url}/Items/{target_library_id}/Refresh"
+                try:
+                    response = requests.post(url, headers=headers, params=params, timeout=10)
+                    response.raise_for_status()
+                    succeeded += 1
+                    logger.info(f"Triggered Jellyfin library scan for '{target.get('Name', target_library_id)}'")
+                except Exception as e:
+                    logger.error(f"Failed to trigger Jellyfin library scan for '{target.get('Name', target_library_id)}': {e}")
+
+            return succeeded > 0
+
         except Exception as e:
             logger.error(f"Failed to trigger Jellyfin library scan for '{library_name}': {e}")
             return False

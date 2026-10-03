@@ -172,3 +172,8 @@ class AutomationDeps:
     # ``web_server.py`` always populates it via
     # ``core.playlists.sources.bootstrap.build_playlist_source_registry``.
     playlist_source_registry: Optional[Any] = None
+
+    # (finding_ids) -> {fixed, failed, ...}: applies Library Maintenance
+    # findings (the "Apply Quality Upgrades" action). None when the repair
+    # worker isn't running, and in fixtures that don't exercise it.
+    bulk_fix_repair_findings: Optional[Callable[..., Any]] = None

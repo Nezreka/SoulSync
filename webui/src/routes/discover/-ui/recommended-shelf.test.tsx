@@ -1,5 +1,8 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { HttpResponse, http } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { server } from '@/test/msw';
 
 import type { RecommendedArtist } from '../-discover.recommended';
 import type { RecommendedShelfProps } from './recommended-shelf';
@@ -164,11 +167,30 @@ describe('the card', () => {
         })}
       />,
     );
-    // At most two, and they REPLACE the plain reason line.
+    // At most two. with no artists to name, they stand in for the reason line.
     expect(container.querySelectorAll('.ya-why-chip')).toHaveLength(2);
     expect(container.querySelector('.ya-card-sub')).toBeNull();
     expect(screen.getByText(/shares 3 genres/)).toBeInTheDocument();
     expect(screen.queryByText(/third/)).toBeNull();
+  });
+
+  it('names your artists above the chips when it can', () => {
+    const { container } = render(
+      <RecommendedShelf
+        {...props({
+          artists: [
+            artist({
+              explanation: { kind: 'similar_to', seeds: [{ name: 'Tool' }, { name: 'Deftones' }] },
+              why: [{ type: 'consensus', label: '2 of your artists' }],
+            }),
+          ],
+        })}
+      />,
+    );
+    expect(container.querySelector('.ya-card-sub')!.textContent).toBe(
+      'Because you have Tool & Deftones',
+    );
+    expect(container.querySelectorAll('.ya-why-chip')).toHaveLength(1);
   });
 
   it('gives each chip its type class and icon', () => {
@@ -196,8 +218,11 @@ describe('the card', () => {
         {...props({
           artists: [
             artist({
-              because: ['Squarepusher', 'Autechre', 'Plaid'],
-            } as Partial<RecommendedArtist>),
+              explanation: {
+                kind: 'similar_to',
+                seeds: [{ name: 'Squarepusher' }, { name: 'Autechre' }, { name: 'Plaid' }],
+              },
+            }),
           ],
         })}
       />,
@@ -207,14 +232,14 @@ describe('the card', () => {
     expect(sub).toHaveAttribute('title', 'In your library: Squarepusher, Autechre, Plaid');
   });
 
-  it('reads the reason differently per shelf', () => {
-    // The two shelves inject different reason functions; sharing one would make
-    // the listening shelf explain itself as a similarity match.
-    const a = artist({ occurrence_count: 4 } as Partial<RecommendedArtist>);
-    const { container, rerender } = render(<RecommendedShelf {...props({ artists: [a] })} />);
-    const first = container.querySelector('.ya-card-sub')!.textContent;
-    rerender(<RecommendedShelf {...props({ kind: 'listening', artists: [a] })} />);
-    expect(container.querySelector('.ya-card-sub')!.textContent).not.toBe(first);
+  it('words each card from the explanation the server wrote', () => {
+    // The listening shelf's cards say "listen to" because the scan that made
+    // them wrote kind 'listened', not because the shelf guesses.
+    const a = artist({ explanation: { kind: 'listened', seeds: [{ name: 'Tool' }] } });
+    const { container } = render(
+      <RecommendedShelf {...props({ kind: 'listening', artists: [a] })} />,
+    );
+    expect(container.querySelector('.ya-card-sub')!.textContent).toBe('Because you listen to Tool');
   });
 
   it('adds to the watchlist with the id, the name and the id source', () => {
@@ -252,5 +277,47 @@ describe('the card', () => {
     const btn = container.querySelector('.recommended-card-watchlist-btn')!;
     expect(btn).toHaveAttribute('data-artist-id', 'sp1');
     expect(btn).toHaveAttribute('data-artist-name', 'Aphex Twin');
+  });
+});
+
+// ── the ⋯ feedback menu (plan 5c) ─────────────────────────────────────────
+
+function captureFeedback(): Record<string, unknown>[] {
+  const posted: Record<string, unknown>[] = [];
+  window.showToast = vi.fn() as never;
+  server.use(
+    http.post('*/api/discover/feedback', async ({ request }) => {
+      posted.push((await request.json()) as Record<string, unknown>);
+      return HttpResponse.json({ success: true, id: 1 });
+    }),
+  );
+  return posted;
+}
+
+describe('the ⋯ on a card', () => {
+  it('answers about the artist with its ids and explanation, and not now drops the card', async () => {
+    const posted = captureFeedback();
+    const explanation = { kind: 'similar_to', seeds: [{ name: 'Autechre' }] };
+    render(
+      <RecommendedShelf
+        {...props({
+          artists: [
+            artist({ artist_name: 'Plaid', deezer_artist_id: 'dz-plaid', explanation }),
+            artist({ artist_name: 'Boards of Canada', artist_id: 'boc' }),
+          ],
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText('Tell discovery about Plaid'));
+    fireEvent.click(screen.getByText('Not now'));
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toEqual({
+      action: 'not_now',
+      entity: { type: 'artist', name: 'Plaid', ids: { deezer: 'dz-plaid' } },
+      explanation,
+    });
+    await waitFor(() => expect(screen.queryByText('Plaid')).toBeNull());
+    expect(screen.getByText('Boards of Canada')).toBeTruthy();
+    server.resetHandlers();
   });
 });

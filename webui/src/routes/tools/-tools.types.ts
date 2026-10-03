@@ -114,6 +114,7 @@ export interface RepairFinding {
   entity_id?: string | number | null;
   created_at?: string | null;
   user_action?: string | null;
+  last_error?: string | null;
   /** Per-finding-type payload. Deliberately unknown — every one of the 20
    *  renderers reads a different set of keys. */
   details?: Record<string, unknown> | null;

@@ -8,6 +8,7 @@ import type {
   DiscogModalData,
   DiscogRelease,
 } from '../-artist-detail.discography-modal';
+import type { Discography } from '../-artist-detail.types';
 
 import {
   buildDiscographyPayload,
@@ -19,6 +20,7 @@ import {
   loadDiscographyForModal,
   streamDiscographyDownload,
 } from '../-artist-detail.discography-modal';
+import { releaseSectionType } from '../-artist-detail.open-release';
 import { BodyPortal } from './portal';
 
 /**
@@ -38,11 +40,14 @@ export function DiscographyModal({
   libraryArtistId,
   artistName,
   artistImage,
+  discography,
   onClose,
 }: {
   libraryArtistId: unknown;
   artistName: string;
   artistImage: string;
+  /** what the page is showing: the modal lists exactly these */
+  discography: Discography;
   onClose: () => void;
 }) {
   const [data, setData] = useState<DiscogModalData | null>(null);
@@ -55,7 +60,7 @@ export function DiscographyModal({
   useEffect(() => {
     let cancelled = false;
     window.showToast?.('Loading discography...', 'info');
-    void loadDiscographyForModal(libraryArtistId, artistName).then((result) => {
+    void loadDiscographyForModal(libraryArtistId, artistName, discography).then((result) => {
       if (cancelled) return;
       if (!result) {
         window.showToast?.(
@@ -121,6 +126,7 @@ export function DiscographyModal({
       name: c.view.albumName,
       tracks: c.view.tracks,
       gapSource: c.release._gap_source || null,
+      albumType: releaseSectionType(c.release),
     }));
     setPhase('progress');
     const initial: ProgressState = {};

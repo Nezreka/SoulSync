@@ -1389,6 +1389,15 @@ async function handleWishlistDownloadNow() {
  * Add all tracks from any download modal to the wishlist
  * Universal handler for all modal types (artist albums, playlists, YouTube, Tidal, etc.)
  */
+/** a track's album with the modal album's locked release type applied, when
+ * the modal album was opened from the artist page (album_type_locked) */
+function _withLockedAlbumType(trackAlbum, modalAlbum) {
+    if (!modalAlbum || !modalAlbum.album_type_locked || !trackAlbum || typeof trackAlbum !== 'object') {
+        return trackAlbum;
+    }
+    return { ...trackAlbum, album_type: modalAlbum.album_type, album_type_locked: true };
+}
+
 async function addModalTracksToWishlist(playlistId) {
     const process = activeDownloadProcesses[playlistId];
     if (!process) {
@@ -1512,6 +1521,12 @@ async function addModalTracksToWishlist(playlistId) {
                     };
                     trackAlbumType = 'album';
                 }
+
+                // an artist-page album is locked to the section it showed under;
+                // tracks queued from its modal keep that, or the wishlist files
+                // them by a track-count guess instead
+                trackAlbum = _withLockedAlbumType(trackAlbum, process.album);
+                trackAlbumType = trackAlbum.album_type || trackAlbumType;
 
                 // Resolve artist: for album downloads, use the album-level artist to keep
                 // all tracks grouped under one artist in the wishlist. Per-track artists

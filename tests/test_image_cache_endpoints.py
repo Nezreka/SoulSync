@@ -224,3 +224,63 @@ def test_dashboard_rail_is_resized_even_when_optional_thumbnails_are_off(client,
     again = client.get(url)
     assert again.headers['X-SoulSync-Image-Cache'] == 'hit'
     assert again.data == response.data
+
+
+# ── image-proxy normalization ───────────────────────────────────────────────
+# Raw media-server artwork URLs (Plex/Jellyfin/Navidrome localhost or relative
+# paths as stored in thumb_url) need server-side auth tokens before they can be
+# fetched. The proxy normalizes them first; fetching the raw URL can never
+# work (Plex answers 401 without X-Plex-Token).
+
+
+def test_image_proxy_normalizes_a_media_server_url_before_fetching(client, cache, monkeypatch):
+    from urllib.parse import quote
+    import api.discover_routes as routes
+
+    raw = "http://localhost:8008/library/metadata/589220/thumb/1790641057"
+    # Simulate normalize_image_url()'s Plex branch: token minted, registered.
+    tokenized = "http://plex.test:32400/library/metadata/589220/thumb/1790641057?X-Plex-Token=sekret"
+    key = cache.cache_url_for(tokenized).rsplit("/", 1)[-1]
+    monkeypatch.setattr(routes, "fix_artist_image_url", lambda u: f"/api/image-cache/{key}")
+
+    response = client.get(f"/api/image-proxy?url={quote(raw, safe='')}")
+    assert response.status_code == 200
+    assert response.data == BIG
+
+
+def test_image_proxy_normalizes_then_serves_the_rail_variant(client, cache, monkeypatch):
+    from urllib.parse import quote
+    from PIL import Image
+    import api.discover_routes as routes
+
+    raw = "http://localhost:8008/library/metadata/589220/thumb/1790641057"
+    tokenized = "http://plex.test:32400/library/metadata/589220/thumb/1790641057?X-Plex-Token=sekret"
+    key = cache.cache_url_for(tokenized).rsplit("/", 1)[-1]
+    monkeypatch.setattr(routes, "fix_artist_image_url", lambda u: f"/api/image-cache/{key}")
+
+    response = client.get(f"/api/image-proxy?url={quote(raw, safe='')}&v=rail")
+    assert response.status_code == 200
+    with Image.open(io.BytesIO(response.data)) as image:
+        assert image.width == VARIANT_MAX_WIDTH["rail"]
+
+
+def test_image_proxy_leaves_ordinary_urls_alone(client, cache, monkeypatch):
+    from urllib.parse import quote
+    import api.discover_routes as routes
+
+    monkeypatch.setattr(routes, "fix_artist_image_url", lambda u: u)
+    response = client.get(f"/api/image-proxy?url={quote(URL, safe='')}")
+    assert response.status_code == 200
+    assert response.data == BIG
+
+
+def test_image_proxy_unwraps_a_nested_proxy_url(client, cache, monkeypatch):
+    from urllib.parse import quote
+    import api.discover_routes as routes
+
+    inner = "http://localhost:9999/cover.jpg"
+    nested = f"/api/image-proxy?url={quote(inner, safe='')}"
+    monkeypatch.setattr(routes, "fix_artist_image_url", lambda u: nested)
+    response = client.get(f"/api/image-proxy?url={quote('http://localhost:1/x', safe='')}")
+    assert response.status_code == 200
+    assert response.data == BIG

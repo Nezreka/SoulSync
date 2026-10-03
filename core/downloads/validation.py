@@ -9,6 +9,8 @@ from utils.logging_config import get_logger
 import re
 
 from core.settings import config_manager
+from core.downloads import decisions as _decisions
+from core.downloads.decisions import format_duration as _fmt_dur
 from core.downloads.soulseek_identity import match_track
 from core.imports.file_integrity import resolve_duration_tolerance
 # One definition of "could this release satisfy the profile", shared with the
@@ -40,6 +42,28 @@ def init(matching_engine_obj, download_orchestrator_obj):
     download_orchestrator = download_orchestrator_obj
 
 
+# ``why`` threads through the filters below. None (get_valid_candidates, the
+# automatic path) records nothing and does no extra work. A dict
+# (evaluate_candidates) collects {id(row): (row, Decision)}; a later lane
+# overwrites an earlier one, so the YouTube fallthrough has the last word on
+# rows it re-judges.
+def _note(why, row, code, detail='', score=None, *, keep_existing=False):
+    if why is None or (keep_existing and id(row) in why):
+        return
+    why[id(row)] = (row, _decisions.reject(code, detail, score))
+
+
+def _quality_label(row) -> str:
+    try:
+        return row.audio_quality.label()
+    except Exception:  # noqa: BLE001 - a label is decoration
+        return str(getattr(row, 'quality', '') or 'unknown')
+
+
+def _conf_text(value) -> str:
+    return 'unscored' if value is None else f"{float(value):.2f}"
+
+
 def _youtube_probe_targets(profile_id=None):
     """Profile targets for YouTube itag probing. None if the DB is unavailable."""
     try:
@@ -54,7 +78,7 @@ def _youtube_probe_targets(profile_id=None):
         return None
 
 
-def _filter_youtube_by_quality(candidates, profile_id=None):
+def _filter_youtube_by_quality(candidates, profile_id=None, why=None):
     """Pre-download: keep YouTube hits the quality profile would accept.
 
     Called from ``get_valid_candidates`` after match scoring (and on the
@@ -86,6 +110,16 @@ def _filter_youtube_by_quality(candidates, profile_id=None):
             youtube = None
     from core.youtube_client import youtube_quality_rank_band
     band = youtube_quality_rank_band(yt)
+    if why is not None and len(band) != len(yt):
+        from core.youtube_client import _youtube_match_confidence
+        top = max(_youtube_match_confidence(c) for c in yt)
+        in_band = {id(c) for c in band}
+        for c in yt:
+            if id(c) not in in_band:
+                conf = _youtube_match_confidence(c)
+                _note(why, c, 'outranked',
+                      f"match {conf:.2f}, too far behind the best ({top:.2f}) to compete on quality",
+                      conf)
     if youtube is not None and hasattr(youtube, 'refresh_claimed_quality'):
         try:
             youtube.refresh_claimed_quality(band, targets=_youtube_probe_targets(profile_id))
@@ -100,6 +134,13 @@ def _filter_youtube_by_quality(candidates, profile_id=None):
     else:
         from core.quality.selection import rank_for_profile
         ranked, _ = rank_for_profile(band)
+    if why is not None:
+        kept = {id(c) for c in ranked}
+        for c in band:
+            if id(c) not in kept:
+                _note(why, c, 'below_profile',
+                      f"{_quality_label(c)} doesn't meet the quality profile",
+                      getattr(c, 'confidence', None))
     if not ranked:
         if other:
             return list(other)
@@ -248,13 +289,55 @@ def get_valid_candidates(results, spotify_track, query, profile_id=None):
     import guard (#1150). None means the app-wide default, which is what manual
     downloads and staging imports want.
     """
+    return _select(results, spotify_track, query, profile_id, None)
+
+
+def evaluate_candidates(results, spotify_track, query, profile_id=None):
+    """Every candidate, each with the :class:`Decision` that settled it.
+
+    Accepted rows come first, in exactly the order ``get_valid_candidates``
+    returns them (same code path, so the same survivors in the same order).
+    Rejected rows follow in input order. Returns ``[(row, Decision), ...]``.
+
+    Explaining costs a little extra (a quarantine read when Soulseek's
+    quality filter drops rows), which is why the automatic path doesn't go
+    through here.
+    """
+    rows = list(results or [])
+    why = {}
+    accepted = _select(rows, spotify_track, query, profile_id, why)
+    out = []
+    seen = set()
+    for row in accepted:
+        seen.add(id(row))
+        out.append((row, _decisions.accept(getattr(row, 'confidence', None))))
+    for row in rows:
+        if id(row) in seen:
+            continue
+        seen.add(id(row))
+        noted = why.get(id(row))
+        out.append((row, noted[1] if noted else _decisions.reject(
+            'unexplained', score=getattr(row, 'confidence', None))))
+    return out
+
+
+def _select(results, spotify_track, query, profile_id, why):
     if not results:
         return []
 
     # Pre-filter: drop SoundCloud preview snippets when expected
     # duration is non-trivially long. Same helper is also applied at
     # the modal-cache fallback path so previews never reach the UI.
-    results = filter_soundcloud_previews(results, spotify_track)
+    kept = filter_soundcloud_previews(results, spotify_track)
+    if why is not None and len(kept) != len(results):
+        kept_ids = {id(r) for r in kept}
+        expected_ms = getattr(spotify_track, 'duration_ms', 0) or 0
+        for r in results:
+            if id(r) not in kept_ids:
+                _note(why, r, 'preview',
+                      f"{_fmt_dur(getattr(r, 'duration', 0))} clip for a "
+                      f"{_fmt_dur(expected_ms)} track")
+    results = kept
     if not results:
         return []
 
@@ -263,11 +346,11 @@ def get_valid_candidates(results, spotify_track, query, profile_id=None):
 
     accepted = []
     if streaming:
-        scored = _score_streaming_candidates(streaming, spotify_track)
+        scored = _score_streaming_candidates(streaming, spotify_track, why=why)
         if scored:
             if any(getattr(r, 'username', None) == 'youtube' for r in scored):
-                scored = _filter_youtube_by_quality(scored, profile_id)
-            scored = _filter_prowlarr_by_quality(scored, profile_id)
+                scored = _filter_youtube_by_quality(scored, profile_id, why=why)
+            scored = _filter_prowlarr_by_quality(scored, profile_id, why=why)
             accepted.extend(scored)
         elif any(getattr(r, 'username', None) == 'youtube' for r in streaming):
             # YouTube artist data is unreliable; Tidal/Qobuz/etc. do not fall through.
@@ -275,7 +358,7 @@ def get_valid_candidates(results, spotify_track, query, profile_id=None):
             logger.warning(
                 "[Youtube] No streaming results passed validation — falling through to filename matching"
             )
-            accepted.extend(_match_filename_candidates(yt, spotify_track, profile_id))
+            accepted.extend(_match_filename_candidates(yt, spotify_track, profile_id, why=why))
         else:
             logger.warning(
                 "[Streaming] No streaming results passed validation "
@@ -283,11 +366,11 @@ def get_valid_candidates(results, spotify_track, query, profile_id=None):
             )
 
     if p2p:
-        accepted.extend(_match_filename_candidates(p2p, spotify_track, profile_id))
+        accepted.extend(_match_filename_candidates(p2p, spotify_track, profile_id, why=why))
     return accepted
 
 
-def _filter_prowlarr_by_quality(candidates, profile_id=None):
+def _filter_prowlarr_by_quality(candidates, profile_id=None, why=None):
     """Apply the item's quality ladder to torrent/Usenet search hits.
 
     Those sources enter the structured-metadata matching lane because their
@@ -335,6 +418,12 @@ def _filter_prowlarr_by_quality(candidates, profile_id=None):
         return rows
 
     kept_ids = {id(row) for row in ranked}
+    if why is not None:
+        for row in prowlarr:
+            if id(row) not in kept_ids:
+                _note(why, row, 'below_profile',
+                      f"{_quality_label(row)} doesn't meet the quality profile",
+                      getattr(row, 'confidence', None))
     filtered = [
         row for row in rows
         if getattr(row, 'username', None) not in ('torrent', 'usenet')
@@ -350,7 +439,7 @@ def _filter_prowlarr_by_quality(candidates, profile_id=None):
     return filtered
 
 
-def _score_streaming_candidates(results, spotify_track):
+def _score_streaming_candidates(results, spotify_track, why=None):
     """Match-filter structured-metadata hits (YouTube, Tidal, torrent, …)."""
     source_label = results[0].username.replace('_dl', '').title()
     expected_artists = spotify_track.artists if spotify_track else []
@@ -377,6 +466,9 @@ def _score_streaming_candidates(results, spotify_track):
                 expected_duration / 1000.0,
                 (r.duration or 0) / 1000.0,
             )
+            if why is not None:
+                _note(why, r, 'duration_mismatch',
+                      f"{_fmt_dur(r.duration)} vs expected {_fmt_dur(expected_duration)}")
             continue
 
         # Score using matching engine's generic scorer (same weights as Soulseek).
@@ -431,12 +523,15 @@ def _score_streaming_candidates(results, spotify_track):
         # Version detection penalty — reject live/remix/acoustic when expecting original
         r_title_lower = (r.title or '').lower()
         is_wrong_version = False
+        unpenalized = confidence
+        version_detail = ''
         if not expected_is_version:
             # Expecting original — penalize versions
             for kw in _version_keywords:
                 if _has_version_kw(r_title_lower, kw) and not _has_version_kw(expected_title_lower, kw):
                     confidence *= 0.4  # Heavy penalty
                     is_wrong_version = True
+                    version_detail = f"{kw} version, asked for the original"
                     break
         else:
             # Expecting specific version — penalize results that don't have it
@@ -444,6 +539,7 @@ def _score_streaming_candidates(results, spotify_track):
                 if _has_version_kw(expected_title_lower, kw) and not _has_version_kw(r_title_lower, kw):
                     confidence *= 0.5
                     is_wrong_version = True
+                    version_detail = f"asked for the {kw} version, this isn't marked {kw}"
                     break
 
         # Artist gate — streaming APIs (Tidal/Qobuz/HiFi/Deezer) have reliable metadata,
@@ -505,6 +601,12 @@ def _score_streaming_candidates(results, spotify_track):
                             source_label, list(expected_artists),
                             _cand_artist_raw, r.title or '', confidence,
                         )
+                        if why is not None:
+                            _note(why, r, 'artist_unverified',
+                                  f"no artist evidence and title match {confidence:.2f} < 0.75"
+                                  if confidence < 0.75 else
+                                  "no artist evidence and the title has words beyond the song",
+                                  confidence)
                         continue
             elif r.username in ('torrent', 'usenet') and _best_artist < 0.5:
                 logger.info(
@@ -515,14 +617,30 @@ def _score_streaming_candidates(results, spotify_track):
                     _cand_artist_raw,
                     r.title or '',
                 )
+                if why is not None:
+                    _note(why, r, 'artist_mismatch',
+                          f"{_cand_artist_raw or 'no artist'} vs {', '.join(expected_artists) or '?'}",
+                          confidence)
                 continue
             elif _best_artist < 0.5 and confidence < 0.85:
+                if why is not None:
+                    _note(why, r, 'artist_mismatch',
+                          f"{_cand_artist_raw or 'no artist'} vs {', '.join(expected_artists) or '?'}",
+                          confidence)
                 continue
 
         r.confidence = confidence
         r.version_type = 'wrong_version' if is_wrong_version else match_type
         if confidence >= 0.60:
             scored.append(r)
+        elif why is not None:
+            # The ×0.4 / ×0.5 penalty caps a wrong version at 0.5, so it can
+            # never reach 0.60: the version alone sank it.
+            if is_wrong_version:
+                _note(why, r, 'version_conflict',
+                      f"{version_detail} (match {unpenalized:.2f} before the penalty)", confidence)
+            else:
+                _note(why, r, 'match_weak', f"match {confidence:.2f} < 0.60", confidence)
 
     if scored:
         # Sort by confidence (best match first)
@@ -534,7 +652,82 @@ def _score_streaming_candidates(results, spotify_track):
     return []
 
 
-def _match_filename_candidates(results, spotify_track, profile_id=None):
+_ZERO_SCORE_VERSIONS = frozenset({'live', 'remix', 'acoustic', 'instrumental'})
+
+
+def _note_unmatched(results, matched, max_q, why):
+    """Say why find_best_slskd_matches_enhanced (+ recovery) left rows out.
+
+    The engine only returns survivors, so read its footprints: its queue gate
+    (applied only when something is within the limit), a 0.0 score from a
+    strict version reject, otherwise a score at or under its 0.58 bar.
+
+    For YouTube fallthrough rows the structured lane already said why; a
+    generic path-score miss on a video title adds nothing, so it doesn't
+    overwrite that.
+    """
+    matched_ids = {id(r) for r in matched}
+    queue_gated = max_q > 0 and any(
+        (getattr(r, 'queue_length', 0) or 0) <= max_q for r in results)
+    for r in results:
+        if id(r) in matched_ids:
+            continue
+        queued = getattr(r, 'queue_length', 0) or 0
+        if queue_gated and queued > max_q:
+            _note(why, r, 'peer_queue', f"{queued} in the peer's queue, limit {max_q}")
+            continue
+        conf = getattr(r, 'confidence', None)
+        if not conf:
+            version = ''
+            try:
+                version = matching_engine.detect_version_type(r.filename or '')[0]
+            except Exception:  # noqa: BLE001 - stub engines, odd filenames
+                version = ''
+            if version in _ZERO_SCORE_VERSIONS:
+                _note(why, r, 'version_conflict', f"{version} version, asked for the original",
+                      0.0, keep_existing=True)
+                continue
+        _note(why, r, 'match_weak', f"match {_conf_text(conf)}, needs over 0.58", conf,
+              keep_existing=True)
+
+
+def _note_soulseek_quality_drops(before, after, client, why):
+    """Split the Soulseek quality filter's drops into quarantine, size, profile.
+
+    filter_results_by_quality_preference does all three and returns only the
+    survivors; re-ask the first two questions of just the dropped rows.
+    """
+    kept = {id(r) for r in after}
+    dropped = [r for r in before if id(r) not in kept]
+    if not dropped:
+        return
+    not_quarantined = dropped
+    drop_quarantined = getattr(client, '_drop_quarantined_sources', None)
+    if callable(drop_quarantined):
+        try:
+            not_quarantined = drop_quarantined(list(dropped))
+        except Exception:  # noqa: BLE001 - explanation only
+            not_quarantined = dropped
+    clear = {id(r) for r in not_quarantined}
+    try:
+        from core.downloads.size_limit import configured_limit, filter_music_candidates
+        size_ok = {id(r) for r in filter_music_candidates(list(not_quarantined))}
+        cap = configured_limit()
+    except Exception:  # noqa: BLE001 - explanation only
+        size_ok, cap = clear, 0
+    for r in dropped:
+        conf = getattr(r, 'confidence', None)
+        if id(r) not in clear:
+            _note(why, r, 'quarantined', "this exact file failed an earlier import", conf)
+        elif id(r) not in size_ok:
+            size_mb = (getattr(r, 'size', 0) or 0) / 1_000_000
+            _note(why, r, 'too_large', f"{size_mb:.0f} MB, over the {cap:g} MB/min limit", conf)
+        else:
+            _note(why, r, 'below_profile',
+                  f"{_quality_label(r)} doesn't meet the quality profile", conf)
+
+
+def _match_filename_candidates(results, spotify_track, profile_id=None, why=None):
     """Soulseek path matcher, or YouTube structured-score fallthrough."""
     # Uses the existing, powerful matching engine for scoring (Soulseek P2P results)
     _max_q = config_manager.get('soulseek.max_peer_queue', 0) or 0
@@ -561,6 +754,8 @@ def _match_filename_candidates(results, spotify_track, profile_id=None):
             identity = match_track(spotify_track, row)
             if identity.matches and identity.artist_path_evidence:
                 initial_candidates.append(row)
+    if why is not None:
+        _note_unmatched(results, initial_candidates, _max_q, why)
     if not initial_candidates:
         return []
 
@@ -580,7 +775,7 @@ def _match_filename_candidates(results, spotify_track, profile_id=None):
         source_label = initial_candidates[0].username.title()
         if any(getattr(c, 'username', None) == 'youtube' for c in initial_candidates):
             quality_filtered_candidates = _filter_youtube_by_quality(
-                initial_candidates, profile_id,
+                initial_candidates, profile_id, why=why,
             )
             if not quality_filtered_candidates:
                 logger.error("[Quality Filter] No YouTube candidates match quality profile - download will fail per user preferences")
@@ -591,8 +786,12 @@ def _match_filename_candidates(results, spotify_track, profile_id=None):
     else:
         # Filter by user's quality profile before artist verification (Soulseek only)
         # Use existing download_orchestrator to avoid re-initializing (which accesses download_path filesystem)
-        quality_filtered_candidates = download_orchestrator.client('soulseek').filter_results_by_quality_preference(
+        soulseek = download_orchestrator.client('soulseek')
+        quality_filtered_candidates = soulseek.filter_results_by_quality_preference(
             initial_candidates, profile_id=profile_id)
+        if why is not None:
+            _note_soulseek_quality_drops(
+                initial_candidates, quality_filtered_candidates, soulseek, why)
 
         # IMPORTANT: Respect empty results from quality filter
         # If user has strict quality requirements (e.g., FLAC-only with fallback disabled),
@@ -627,10 +826,15 @@ def _match_filename_candidates(results, spotify_track, profile_id=None):
                 # even from the right artist's own channel.
                 _want_lower = (spotify_track.name or '').lower() if spotify_track else ''
                 _cand_lower = (candidate.title or '').lower()
-                if any(_has_version_kw(_cand_lower, kw) and not _has_version_kw(_want_lower, kw)
-                       for kw in _VERSION_KEYWORDS):
+                marker = next((kw for kw in _VERSION_KEYWORDS
+                               if _has_version_kw(_cand_lower, kw)
+                               and not _has_version_kw(_want_lower, kw)), None)
+                if marker is not None:
                     logger.info("[Youtube] Fallthrough rejecting %r — alternate "
                                 "recording marker", candidate.title or '')
+                    _note(why, candidate, 'version_conflict',
+                          f"{marker} version, asked for the original",
+                          getattr(candidate, 'confidence', None))
                     continue
                 if artist_word_sets:
                     cand_text_words = set(matching_engine.normalize_string(
@@ -641,6 +845,9 @@ def _match_filename_candidates(results, spotify_track, profile_id=None):
                             spotify_artists):
                         logger.info("[Youtube] Fallthrough rejecting %r — no artist "
                                     "evidence and foreign title words", candidate.title or '')
+                        _note(why, candidate, 'artist_unverified',
+                              "no artist evidence and the title has words beyond the song",
+                              getattr(candidate, 'confidence', None))
                         continue
             verified_candidates.append(candidate)
             continue
@@ -675,4 +882,8 @@ def _match_filename_candidates(results, spotify_track, profile_id=None):
 
         if artist_found:
             verified_candidates.append(candidate)
+        elif why is not None:
+            _note(why, candidate, 'artist_mismatch',
+                  f"no folder or filename names {', '.join(map(str, spotify_artists))}",
+                  getattr(candidate, 'confidence', None))
     return verified_candidates

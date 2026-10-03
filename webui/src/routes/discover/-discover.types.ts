@@ -18,6 +18,8 @@
  * that builds `result` — follow it rather than guessing.
  */
 
+import type { Explanation } from './-discover.explanation';
+
 /** Every discover endpoint answers inside this envelope. */
 export interface DiscoverEnvelope {
   success?: boolean;
@@ -51,6 +53,8 @@ export interface DiscoverHeroArtist {
   occurrence_count?: number;
   similarity_rank?: number;
   source?: string;
+  /** Why it is featured, written by the server (`-discover.explanation.ts`). */
+  explanation?: Explanation;
   /** Only on the watchlist-fallback branch. */
   is_watchlist?: boolean;
   /** The ownership meter: how many of their albums are in the library. */
@@ -108,9 +112,9 @@ export interface DiscoverArtist {
   id?: string;
   image_url?: string;
   genres?: string[];
-  /** Artists from YOUR library that caused this recommendation to surface. */
-  because?: string[];
-  /** How many of your artists point at this one — the zero-`because` fallback. */
+  /** Why it surfaced, written by the server (`-discover.explanation.ts`). */
+  explanation?: Explanation;
+  /** How many of your artists point at this one. */
   occurrence_count?: number;
   /** Why it surfaced: genre | obscure | consensus | explore. */
   why?: string;

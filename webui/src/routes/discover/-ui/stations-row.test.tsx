@@ -1,7 +1,10 @@
 /** Recommended Stations: two named actions, real states, honest subtitles. */
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { HttpResponse, http } from 'msw';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { server } from '@/test/msw';
 
 import type { Station } from '../-discover.stations';
 
@@ -154,4 +157,71 @@ it('guards radio startup and makes a rejected start retryable', async () => {
   reject(new Error('Temporary playback failure'));
   expect(await screen.findByRole('alert')).toHaveTextContent('Temporary playback failure');
   expect(button).not.toBeDisabled();
+});
+
+// ── the ⋯ feedback menu (plan 5c) ─────────────────────────────────────────
+
+function captureFeedback(): Record<string, unknown>[] {
+  const posted: Record<string, unknown>[] = [];
+  window.showToast = vi.fn() as never;
+  server.use(
+    http.post('*/api/discover/feedback', async ({ request }) => {
+      posted.push((await request.json()) as Record<string, unknown>);
+      return HttpResponse.json({ success: true, id: 1 });
+    }),
+  );
+  return posted;
+}
+
+describe('the ⋯ on a station', () => {
+  it("answers about the station's artist, with the station's explanation", async () => {
+    const posted = captureFeedback();
+    const explanation = { kind: 'listened', seeds: [{ name: 'bbno$' }], confidence: 1 };
+    render(
+      <StationsRow
+        stations={[{ ...STATIONS[0], explanation }, STATIONS[1]]}
+        onView={vi.fn()}
+        onPlayRadio={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText('Tell discovery about bbno$'));
+    fireEvent.click(screen.getByText('Less like this'));
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toEqual({
+      action: 'less',
+      entity: { type: 'artist', name: 'bbno$' },
+      explanation,
+    });
+    // less re-ranks; the station stays until the refetch says otherwise
+    expect(screen.getByText('bbno$')).toBeTruthy();
+    server.resetHandlers();
+  });
+});
+
+describe('library radio, the first station', () => {
+  it('leads the row when the page can start it, and plays from the photo or the name', () => {
+    const onPlayLibraryRadio = vi.fn();
+    const { container } = render(
+      <StationsRow
+        stations={STATIONS}
+        onView={vi.fn()}
+        onPlayRadio={vi.fn()}
+        onPlayLibraryRadio={onPlayLibraryRadio}
+      />,
+    );
+    const cards = container.querySelectorAll('.discover-station-card');
+    expect(cards[0]).toHaveClass('discover-station-card--library');
+    fireEvent.click(screen.getByLabelText('Play library radio'));
+    fireEvent.click(screen.getByText('Library Radio'));
+    expect(onPlayLibraryRadio).toHaveBeenCalledTimes(2);
+  });
+
+  it('is absent when the page cannot start it', () => {
+    const { container } = render(
+      <StationsRow stations={STATIONS} onView={vi.fn()} onPlayRadio={vi.fn()} />,
+    );
+    expect(container.querySelector('.discover-station-card--library')).toBeNull();
+    // and no card wears a RADIO badge in a row called Stations
+    expect(container.querySelector('.discover-station-badge')).toBeNull();
+  });
 });

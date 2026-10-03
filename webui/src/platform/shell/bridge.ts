@@ -135,8 +135,19 @@ export function bindWindowWebRouter(router: AnyRouter) {
         // Some sources (Bandcamp) have no numeric-ID lookup API — the name
         // has to travel with the URL or the route has nothing to resolve
         // against on mount.
+        const artistParams = new URLSearchParams();
         if (options.artistName) {
-          href = `${href}?name=${encodeURIComponent(options.artistName)}` as `/${string}`;
+          artistParams.set('name', String(options.artistName));
+        }
+        // ?album= names the album to open on arrival (the library's album
+        // grid). Without it the deep link silently degrades to the plain
+        // artist page.
+        if (options.focusAlbumId) {
+          artistParams.set('album', String(options.focusAlbumId));
+        }
+        const artistQuery = artistParams.toString();
+        if (artistQuery) {
+          href = `${href}?${artistQuery}` as `/${string}`;
         }
       }
       if (pageId === 'label-detail' && options?.labelId) {

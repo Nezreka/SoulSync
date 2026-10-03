@@ -37,7 +37,9 @@ def test_durable_match_used_when_volatile_cache_wiped():
     db.read_sync_match_cache.return_value = None                 # rescan wiped the cache
     db.check_track_exists.return_value = (None, 0.0)             # fuzzy would FAIL
     db.find_manual_library_match_by_source_track_id.return_value = {
-        "library_track_id": "t99", "library_file_path": "/m/x.flac"}
+        "library_track_id": 7, "library_file_path": "/m/x.flac"}
+    db.server_track_id.side_effect = (
+        lambda i, server: "t99" if i == 7 and server == "jellyfin" else None)
     db.get_track_by_server_id.side_effect = (
         lambda i, server: dt if str(i) == "t99" and server == "jellyfin" else None)
     match, conf = _run(svc=_service(), db=db)
@@ -50,10 +52,12 @@ def test_durable_match_self_heals_stale_library_id():
     db.read_sync_match_cache.return_value = None
     db.check_track_exists.return_value = (None, 0.0)
     db.find_manual_library_match_by_source_track_id.return_value = {
-        "library_track_id": "staleid", "library_file_path": "/m/x.flac"}
+        "library_track_id": 7, "library_file_path": "/m/x.flac"}
+    db.server_track_id.side_effect = (
+        lambda i, server: "newid" if i == 8 and server == "jellyfin" else None)
     db.get_track_by_server_id.side_effect = (
         lambda i, server: dt if str(i) == "newid" and server == "jellyfin" else None)
-    db.find_track_id_by_file_path.return_value = "newid"
+    db.find_track_id_by_file_path.return_value = 8
     match, conf = _run(svc=_service(), db=db)
     assert conf == 1.0 and match.id == "newid"
     db.find_track_id_by_file_path.assert_called_once_with("/m/x.flac")

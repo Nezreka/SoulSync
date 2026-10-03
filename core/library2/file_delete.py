@@ -768,6 +768,7 @@ def delete_files_journaled(
     config_manager: Any = None,
     unlink: Callable[[str], None] = os.unlink,
     require_library_root: bool = True,
+    mode: str = "permanent",
 ) -> Dict[str, Any]:
     """Delete files by path, through the ADR-05 journal.
 
@@ -791,6 +792,10 @@ def delete_files_journaled(
     ``library.music_paths`` still has deletable files. Journalling must not
     quietly change WHICH files a job may delete; that decision belongs to
     turning unattended deletion on, not to writing it down.
+
+    ``mode`` is what the journal records: ``permanent`` for an unlink,
+    ``quarantine`` when ``unlink`` moves the file into the deleted-files
+    folder instead (restorable until retention clears it).
     """
     # Before recovery, not after: a worker can reach this on a database whose
     # journal tables were never created, and "no such table" must not be how a
@@ -826,13 +831,14 @@ def delete_files_journaled(
             """INSERT INTO lib2_file_delete_operations(
                    id, entity_type, entity_id, preview_token, status,
                    file_count, total_size, mode, actor, actor_profile_id)
-               VALUES(?,?,?,'', 'planned', ?,?, 'permanent', ?,?)""",
+               VALUES(?,?,?,'', 'planned', ?,?, ?, ?,?)""",
             (
                 operation_id,
                 str(entity_type),
                 int(entity_id),
                 len(planned),
                 sum(int(item["size"] or 0) for item in ok),
+                str(mode or "permanent"),
                 str(actor or "user"),
                 actor_profile_id,
             ),

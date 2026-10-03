@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from core.wishlist import processing
@@ -436,7 +437,9 @@ def test_automatic_wishlist_cleanup_after_db_update_removes_library_matches():
     class _CleanupMusicDatabase:
         def check_track_exists(self, track_name, artist_name, confidence_threshold=0.7, server_source=None, album=None):
             if track_name == "Song A" and artist_name == "Artist A":
-                return {"id": "db-track"}, 0.9
+                return SimpleNamespace(id='db-track', title=track_name,
+                                       artist_name=artist_name, album_title=album,
+                                       file_path='/music/owned.flac'), 0.9
             return None, 0.0
 
     wishlist_service = _CleanupWishlistService(
@@ -527,7 +530,9 @@ class _CleanupMusicDatabase:
     def check_track_exists(self, track_name, artist_name, confidence_threshold=0.7, server_source=None, album=None):
         self.track_checks.append((track_name, artist_name, server_source, album))
         if track_name == "Owned Song" and artist_name == "Artist A":
-            return {"id": "db-track"}, 0.9
+            return SimpleNamespace(id='db-track', title=track_name,
+                                   artist_name=artist_name, album_title=album,
+                                   file_path='/music/owned.flac'), 0.9
         if track_name == "Broken Song":
             raise RuntimeError("boom")
         return None, 0.0

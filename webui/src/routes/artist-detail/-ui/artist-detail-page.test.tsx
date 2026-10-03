@@ -1052,6 +1052,8 @@ describe('opening a release (#1297)', () => {
     expect(name).toBe('[Aphex Twin] SAW');
     expect(tracks).toEqual([{ id: 1 }]);
     expect(album).toMatchObject({ id: 1, name: 'SAW' });
+    // locked to the section the card sat in, so it files where it was shown
+    expect(album).toMatchObject({ album_type: 'album', album_type_locked: true });
     expect(artist).toMatchObject({ id: 42, name: 'Aphex Twin' });
     expect(overlay).toBe(false);
     expect(register).toHaveBeenCalledWith(artist, album, 'artist_album_42_1', 'album');
@@ -1067,8 +1069,54 @@ describe('opening a release (#1297)', () => {
 
     fireEvent.click(document.querySelector('.release-card') as HTMLElement);
 
-    await waitFor(() => expect(window.reopenActiveDownloadModal).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(window.reopenActiveDownloadModal).toHaveBeenCalledWith('artist_album_42_1', {
+        runningOnly: true,
+      }),
+    );
     expect(download).not.toHaveBeenCalled();
     expect(requested.some((u) => u.includes('/api/album/'))).toBe(false);
+  });
+});
+
+/**
+ * ?album=<id>, the link the library's album view builds.
+ *
+ * The album it names is one you own, so it lives in the Your library view —
+ * which is not necessarily the view the stored preference would open.
+ */
+describe('arriving from the album view', () => {
+  it('opens Your library, whatever the saved preference says', async () => {
+    localStorage.setItem('soulsync-library-view-mode:2', 'standard');
+    renderPage('/artist-detail/library/42?album=1');
+    await screen.findByText('Aphex Twin');
+
+    await waitFor(() => expect(document.getElementById('enhanced-view-container')).not.toBeNull());
+  });
+
+  it('opens the album it names', async () => {
+    renderPage('/artist-detail/library/42?album=1');
+    await screen.findByText('Aphex Twin');
+
+    await waitFor(() =>
+      expect(document.getElementById('enhanced-album-row-1')?.getAttribute('aria-expanded')).toBe(
+        'true',
+      ),
+    );
+  });
+
+  it('leaves the saved preference alone — this is one visit, not a new default', async () => {
+    localStorage.setItem('soulsync-library-view-mode:2', 'standard');
+    renderPage('/artist-detail/library/42?album=1');
+    await waitFor(() => expect(document.getElementById('enhanced-view-container')).not.toBeNull());
+
+    expect(localStorage.getItem('soulsync-library-view-mode:2')).toBe('standard');
+  });
+
+  it('changes nothing without it', async () => {
+    renderPage('/artist-detail/library/42');
+    await screen.findByText('Aphex Twin');
+
+    expect(document.getElementById('enhanced-view-container')).toBeNull();
   });
 });

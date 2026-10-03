@@ -90,6 +90,7 @@ class Server:
         self.artists = {ar: {al: list(_tracks_of(al)) for al in _albums_of(ar)} for ar in ARTISTS}
         self.failing = set()          # (kind, id): requests that time out
         self.connection_up = True
+        self.scanning = False         # Navidrome's own rescan in progress
         self.calls = []
 
 
@@ -106,6 +107,8 @@ def _navidrome(server: Server):
     def fake_request(endpoint, params=None, **kw):
         params = params or {}
         server.calls.append((endpoint, dict(params)))
+        if endpoint == 'getScanStatus':
+            return {'scanStatus': {'scanning': server.scanning}}
         if endpoint == 'getArtists':
             c.last_api_error = None
             return {'artists': {'index': [{'artist': [
@@ -234,6 +237,41 @@ def test_navidrome_a_failure_elsewhere_does_not_shield_a_real_deletion(seeded):
     server.failing.add(('album', 'ar2-al0'))
     del server.artists['ar1']['ar1-al3']
     db, _ = _run_navidrome(seeded, server)
+    assert _remaining(db, 'navidrome') == _all_track_ids() - set(_tracks_of('ar1-al3'))
+
+
+# a server-side rescan is not a failure: every answer is 200 with transiently
+# incomplete listings, so the scan looks fully trusted and the 50% guard does
+# not fire. unseen is not gone — nothing is removed, and the real deletions
+# are picked up on a later scan once navidrome is idle.
+
+def test_navidrome_mid_rescan_removes_nothing(seeded):
+    server = Server()
+    server.scanning = True
+    db, w = _run_navidrome(seeded, server)
+    assert _remaining(db, 'navidrome') == _all_track_ids()
+
+
+def test_navidrome_mid_rescan_keeps_even_real_deletions(seeded):
+    server = Server()
+    server.scanning = True
+    del server.artists['ar1']['ar1-al3']
+    db, w = _run_navidrome(seeded, server)
+    assert _remaining(db, 'navidrome') == _all_track_ids(), \
+        "a deletion seen during the server's own rescan is not trustworthy — it waits for the next scan"
+
+
+def test_navidrome_idle_after_rescan_picks_up_the_deletion(seeded):
+    server = Server()
+    server.scanning = True
+    del server.artists['ar1']['ar1-al3']
+    db, _ = _run_navidrome(seeded, server)
+    assert _remaining(db, 'navidrome') == _all_track_ids()
+    server.scanning = False
+    client = _navidrome(server)
+    w = DatabaseUpdateWorker(media_client=client, database_path=seeded.path,
+                             server_type='navidrome', force_sequential=True)
+    w.run_deep_scan()
     assert _remaining(db, 'navidrome') == _all_track_ids() - set(_tracks_of('ar1-al3'))
 
 

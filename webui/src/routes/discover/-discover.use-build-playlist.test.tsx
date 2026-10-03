@@ -175,4 +175,85 @@ describe('useBuildPlaylist — generate + download', () => {
       tracks: [{ track_name: 't1' }],
     });
   });
+
+  describe('naming the playlist (#1421)', () => {
+    const deezerTrack = {
+      deezer_track_id: 'dz1',
+      id: 'dz1',
+      track_name: 'Xtal',
+      name: 'Xtal',
+      artist_name: 'Aphex Twin, Someone',
+      artists: ['Aphex Twin', 'Someone'],
+      album_name: 'SAW',
+      album: { name: 'SAW', images: [] },
+      duration_ms: 1000,
+    };
+
+    it('prefills the name from the seeds, and download + sync both use what is typed', async () => {
+      stub({ playlist: { tracks: [deezerTrack] } });
+      const { result } = mount();
+      expect(result.current.syncRequest()).toBeNull();
+      act(() => result.current.addSeed(artist('a1')));
+      await act(() => result.current.generate());
+      expect(result.current.name).toBe('Custom Playlist - Artist a1');
+
+      act(() => result.current.setName('  Late Night  '));
+      const dl = result.current.download();
+      expect(dl.kind === 'ok' && dl.name).toBe('Late Night');
+      const req = result.current.syncRequest()!;
+      expect(req.name).toBe('Late Night');
+      expect(req.statusBase).toBe('build-playlist');
+      expect(req.doneToast).toBe('Late Night sync complete!');
+    });
+
+    it('sends each track with its id even on a deezer primary, so the wishlist takes it', async () => {
+      // the wishlist refuses a track with no id ("missing track id"), and the
+      // generator only labels spotify_track_id on a spotify primary
+      stub({ playlist: { tracks: [deezerTrack] } });
+      const { result } = mount();
+      act(() => result.current.addSeed(artist('a1')));
+      await act(() => result.current.generate());
+      expect(result.current.syncRequest()!.tracks).toEqual([
+        {
+          id: 'dz1',
+          name: 'Xtal',
+          artists: ['Aphex Twin', 'Someone'],
+          album: { name: 'SAW', images: [] },
+          duration_ms: 1000,
+        },
+      ]);
+    });
+
+    it('gives two names two sync ids, so one build never overwrites another', async () => {
+      const { result } = mount();
+      act(() => result.current.addSeed(artist('a1')));
+      await act(() => result.current.generate());
+      act(() => result.current.setName('One'));
+      const one = result.current.syncRequest()!.virtualId;
+      act(() => result.current.setName('Two'));
+      const two = result.current.syncRequest()!.virtualId;
+      expect(one).not.toBe(two);
+      act(() => result.current.setName('One'));
+      expect(result.current.syncRequest()!.virtualId).toBe(one);
+    });
+
+    it('a blank name falls back to the default instead of sending nothing', async () => {
+      const { result } = mount();
+      act(() => result.current.addSeed(artist('a1')));
+      await act(() => result.current.generate());
+      act(() => result.current.setName('   '));
+      expect(result.current.playlistName).toBe('Custom Playlist - Artist a1');
+      expect(result.current.syncRequest()!.name).toBe('Custom Playlist - Artist a1');
+    });
+
+    it('a new build resets the name to its own seeds', async () => {
+      const { result } = mount();
+      act(() => result.current.addSeed(artist('a1')));
+      await act(() => result.current.generate());
+      act(() => result.current.setName('Mine'));
+      act(() => result.current.addSeed(artist('a2')));
+      await act(() => result.current.generate());
+      expect(result.current.name).toBe('Custom Playlist - Artist a1, Artist a2');
+    });
+  });
 });

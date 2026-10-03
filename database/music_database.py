@@ -54,6 +54,33 @@ _database_initialized_paths = set()
 _database_sidecar_warnings = set()
 _database_initialization_lock = threading.Lock()
 
+# Characters stripped from the START of a name/title for alphabetical library
+# sorting, so '"Weird Al" Yankovic' sorts under W and '*NSYNC' under N instead
+# of floating to the top ahead of 2PAC. Digits are deliberately kept — numbers
+# still sort in the '#' bucket. Leading articles ('A', 'The') are deliberately
+# NOT stripped.
+_LIBRARY_SORT_STRIP_CHARS = (
+    " \"'!#$%&()*+,-./:;<=>?@[\\]^_`{|}~"  # ASCII punctuation + space
+    "¡¿«»"                                  # inverted marks, guillemets
+    "\u201c\u201d\u201e\u2018\u2019"        # curly quotes
+    "\u2014\u2013\u2026"                    # em/en dash, ellipsis
+)
+
+
+def _library_stripped_sql(column: str) -> str:
+    """SQL expression for a name/title with leading punctuation and special
+    characters removed, for sort/filter purposes. Single quotes are doubled
+    for the SQL string literal."""
+    chars = _LIBRARY_SORT_STRIP_CHARS.replace("'", "''")
+    return f"LTRIM({column}, '{chars}')"
+
+
+def _library_sort_key_sql(column: str) -> str:
+    """SQL ORDER BY key for alphabetical library sorting that ignores leading
+    punctuation/special characters (case-insensitive)."""
+    return f"{_library_stripped_sql(column)} COLLATE NOCASE"
+
+
 def _row_value(row, column: str, default=None):
     """Read a column off a sqlite3.Row that may not have it.
 
@@ -654,6 +681,94 @@ class MusicDatabase:
             # runtime — `tests/library2/test_legacy_usage_ratchet.py` pins
             # that at reads: 0, writes: 0.
 
+            # Sample Studio analysis cache — one row per library track. Written by
+            # the sample analysis worker (core/sample/worker.py); rows are
+            # re-computed when core.sample.analyze.ANALYZER_VERSION increases.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sample_analysis (
+                    track_id INTEGER PRIMARY KEY,
+                    bpm REAL,
+                    onsets_json TEXT,  -- JSON array of onset times in seconds
+                    duration_s REAL,
+                    analyzed_at REAL,
+                    analyzer_version INTEGER DEFAULT 1
+                )
+            """)
+
+            # Sample Studio stash — saved chops. Each row is BOTH the file
+            # record (file_path -> data/sample-studio/chops/) and the
+            # lightweight bookmark (track_id + start/end + pitch/target_bpm),
+            # so a chop can be re-rendered or traced back to its source.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sample_stash (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    tags_json TEXT,  -- JSON array of tag strings
+                    track_id INTEGER NOT NULL,
+                    start_s REAL NOT NULL,
+                    end_s REAL NOT NULL,
+                    pitch_st REAL DEFAULT 0,
+                    target_bpm REAL,
+                    format TEXT DEFAULT 'wav16',
+                    file_path TEXT NOT NULL,
+                    created_at REAL
+                )
+            """)
+            # (ledger back-fill for sample_stash_v1 rides _KNOWN_MIGRATION_SIGNALS below)
+
+            # Phase 4: which stem a chop was cut from (NULL = the full mix).
+            # Tolerant ALTER — existing installs get the column on next boot.
+            try:
+                cursor.execute("ALTER TABLE sample_stash ADD COLUMN stem TEXT")
+            except sqlite3.OperationalError:
+                pass  # already there
+
+            # Phase 6: which configured sample folder the chop was saved to
+            # (the configured path string at save time). file_path stays the
+            # resolvable absolute path, so removing a folder from settings
+            # never breaks existing chops.
+            try:
+                cursor.execute("ALTER TABLE sample_stash ADD COLUMN folder TEXT")
+            except sqlite3.OperationalError:
+                pass  # already there
+
+            # Sample Studio stems — per-track separation cache. One row per
+            # (track_id, stem); the four WAVs live under
+            # data/sample-studio/stems/<track_id>/. "Separate once, cache
+            # forever" — re-running is keyed off separator_version.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sample_stems (
+                    track_id INTEGER NOT NULL,
+                    stem TEXT NOT NULL,  -- drums | vocals | bass | other
+                    file_path TEXT NOT NULL,
+                    status TEXT DEFAULT 'done',
+                    backend TEXT,  -- demucs-htdemucs | stub
+                    separator_version INTEGER DEFAULT 1,
+                    created_at REAL,
+                    PRIMARY KEY (track_id, stem)
+                )
+            """)
+            # (ledger back-fill for sample_stems_v1 rides _KNOWN_MIGRATION_SIGNALS below)
+
+            # sample studio: detected key + a signature of the source file (so
+            # a replaced file re-analyzes and re-separates), and the fx recipe
+            # each saved chop was rendered with. tolerant ALTERs like above.
+            for _table, _col, _type in (
+                ("sample_analysis", "key_name", "TEXT"),
+                ("sample_analysis", "key_confidence", "REAL"),
+                ("sample_analysis", "source_sig", "TEXT"),
+                ("sample_stems", "source_sig", "TEXT"),
+                ("sample_stash", "normalize", "TEXT"),
+                ("sample_stash", "fade_ms", "REAL"),
+                ("sample_stash", "reverse", "INTEGER"),
+                ("sample_stash", "space", "REAL"),
+                ("sample_stash", "delay_json", "TEXT"),
+            ):
+                try:
+                    cursor.execute(f"ALTER TABLE {_table} ADD COLUMN {_col} {_type}")
+                except sqlite3.OperationalError:
+                    pass  # already there
+
             # Metadata table for storing system information like last refresh dates
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS metadata (
@@ -957,7 +1072,7 @@ class MusicDatabase:
             # whole row (add_chat_messages requires a message) and a template
             # shared into the room simply vanished on reload.
             for _chat_col in ('chan TEXT', 'thread TEXT', 'thread_name TEXT', 'av INTEGER',
-                              'edit_target TEXT', 'overlay TEXT', 'np TEXT', 'want TEXT'):
+                              'edit_target TEXT', 'overlay TEXT', 'np TEXT', 'want TEXT', 'badge TEXT'):
                 try:
                     cursor.execute("ALTER TABLE chat_room_messages ADD COLUMN " + _chat_col)
                 except sqlite3.OperationalError:
@@ -1828,6 +1943,9 @@ class MusicDatabase:
         'tidal_search_fix':         ('table', '_tidal_search_fix_applied'),
         'quality_profiles_schema':  ('table', 'quality_profiles'),
         'library_v2_schema':        ('table', 'lib2_artists'),
+        'sample_analysis_v1':        ('table', 'sample_analysis'),
+        'sample_stash_v1':            ('table', 'sample_stash'),
+        'sample_stems_v1':            ('table', 'sample_stems'),
     }
 
     def _record_migration(self, cursor, name):
@@ -3082,6 +3200,43 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_soul_id ON track_downloads (soul_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_isrc ON track_downloads (isrc)")
 
+            # Why an automatic grab took the file it took, or why nothing
+            # passed: the winner, the closest alternatives and a count of
+            # rejections by reason code (core/downloads/decisions.py). One row
+            # per download task; cleared with the download history.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS download_decisions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    track_download_id INTEGER,
+                    task_key TEXT NOT NULL,
+                    track_title TEXT,
+                    track_artist TEXT,
+                    quality_profile_id INTEGER,
+                    outcome TEXT NOT NULL,
+                    chosen_json TEXT,
+                    alternatives_json TEXT,
+                    search_mode TEXT,
+                    searched_at TEXT,
+                    policy_run_id TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_dd_task_key ON download_decisions (task_key)")
+
+            # Provenance: which search produced the decision, when (UTC), and the
+            # 12-char policy run id. One provenance per automatic worker run and
+            # one per interactive inspection (core/downloads/provenance.py).
+            # MUST come before the index below: an old table has no
+            # search_mode/searched_at/policy_run_id columns, and indexing a
+            # missing column aborts DB init.
+            cursor.execute("PRAGMA table_info(download_decisions)")
+            dd_cols = {c[1] for c in cursor.fetchall()}
+            for _col in ['search_mode', 'searched_at', 'policy_run_id']:
+                if _col not in dd_cols:
+                    cursor.execute(f"ALTER TABLE download_decisions ADD COLUMN {_col} TEXT")
+                    logger.info(f"Added {_col} column to download_decisions")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_dd_track_download ON download_decisions (track_download_id)")
+
             # Durable record of completed TORRENT grabs so the seeding sweep
             # (core/downloads/seeding.py) can manage the tail: seed until the
             # ratio/time goals are met, then remove the torrent from the client.
@@ -3190,6 +3345,106 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_blocklist_spotify ON blocklist (spotify_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_blocklist_name ON blocklist (name COLLATE NOCASE)")
             self._migrate_discovery_blacklist_into_blocklist(cursor)
+
+            # What a profile told discovery about a recommendation: more /
+            # less like this, or not now (expires). Blocks are NOT here, they
+            # live in the blocklist, so resetting taste never clears them.
+            # One row per (profile, entity, kind); more and less replace each
+            # other. core/discovery/feedback.py reads it.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discovery_feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id INTEGER NOT NULL DEFAULT 1,
+                    entity_type TEXT NOT NULL,        -- artist | album | track
+                    entity_key TEXT NOT NULL,         -- normalised artist[, title]
+                    name TEXT NOT NULL,
+                    artist_name TEXT,
+                    ids_json TEXT,                    -- {source: id}
+                    kind TEXT NOT NULL,               -- more | less | not_now
+                    seed_context_json TEXT,           -- the explanation it was shown with
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP              -- not_now only
+                )
+            """)
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_discovery_feedback_entity "
+                           "ON discovery_feedback (profile_id, entity_type, entity_key, kind)")
+
+            # The discovery inbox: releases, upcoming releases, saved recs and
+            # concerts worth coming back to, per profile. A refresh adds items
+            # as unread and never resets a state someone chose.
+            # core/discovery/inbox.py owns it.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discovery_inbox (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id INTEGER NOT NULL DEFAULT 1,
+                    kind TEXT NOT NULL,               -- new_release | upcoming | saved_rec | concert | artist_news
+                    entity_key TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    artist_name TEXT,
+                    image_url TEXT,
+                    item_date TEXT,                   -- release or event date, YYYY-MM-DD
+                    payload_json TEXT,
+                    state TEXT NOT NULL DEFAULT 'unread',  -- unread | saved | dismissed | added
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (profile_id, kind, entity_key)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_inbox_state "
+                           "ON discovery_inbox (profile_id, state)")
+
+            # Per-profile discover page layout: which of the 19 sections
+            # (core/discovery/layout.py) shows in which of the 4 zones, in
+            # what order, enabled or not. Empty for a profile means the
+            # defaults — the API merges saved rows over them.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discovery_layout (
+                    profile_id INTEGER NOT NULL,
+                    section_id TEXT NOT NULL,
+                    zone TEXT NOT NULL,
+                    position INTEGER NOT NULL DEFAULT 0,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY (profile_id, section_id)
+                )
+            """)
+
+            # Persistent failed-download blocklist: files that burned every
+            # quarantine retry and hit a terminal import give-up. Fingerprint
+            # = SHA1(service | normalized artist | normalized title | size);
+            # Soulseek peers collapse to the service 'soulseek'. 90-day
+            # expiry, capped at 5000 rows. Separate from the user's download
+            # blocklist (username/filename they flagged) and the quarantine.
+            # core/downloads/failed_blocklist.py owns it.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS failed_download_blocklist (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fingerprint TEXT NOT NULL UNIQUE,
+                    service TEXT NOT NULL DEFAULT '',
+                    artist TEXT NOT NULL DEFAULT '',
+                    title TEXT NOT NULL DEFAULT '',
+                    size_bytes INTEGER NOT NULL DEFAULT 0,
+                    reason TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP NOT NULL
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_failed_blocklist_expires "
+                           "ON failed_download_blocklist (expires_at)")
+
+            # Renewable mixes: a recipe (seeds / genres, years, source mix,
+            # length, schedule) per row; each generation is stored as a
+            # curated payload keyed mix_recipe_<id>. core/personalized/recipes.py.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS mix_recipes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id INTEGER NOT NULL DEFAULT 1,
+                    recipe_json TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mix_recipes_profile "
+                           "ON mix_recipes (profile_id)")
 
             # Liked artists pool — aggregated followed/liked artists from connected services
             cursor.execute("""
@@ -9461,6 +9716,115 @@ class MusicDatabase:
             logger.error(f"API: Error searching tracks with title='{title}', artist='{artist}': {e}")
             return []
 
+    def search_tracks_interactive(self, query: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """As-you-type library search for interactive use (Sample Studio).
+
+        ONE sql statement: substring match across the title, the album's
+        artist and the per-track artist credit, ordered so an exact title
+        hit comes first, then title prefixes, then artist hits. When that
+        finds nothing and the query has several words, ONE term-OR fallback
+        catches word-order differences.
+
+        Deliberately simpler than api_search_tracks: the download matcher's
+        base-title/fuzzy cascade costs up to six full-table scans per call,
+        which is what made studio search feel stuck on a big library. Errors
+        propagate so the caller can tell a failed search apart from an empty
+        one.
+
+        Library v2: only tracks with a live file in the caller's library (a
+        chop needs the file), folded with ``unidecode_lower`` like the other
+        catalogue searches, projected like ``api_search_tracks`` so the id is
+        the catalogue track id.
+        """
+        query = (query or "").strip()
+        if not query:
+            return []
+        limit = max(1, min(int(limit or 50), 200))
+        qn = self._normalize_for_comparison(query)
+        if not qn:
+            return []
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            t_title = "unidecode_lower(tracks.title)"
+            a_name = "unidecode_lower(artists.name)"
+            t_artist = "unidecode_lower(COALESCE(tracks.track_artist, ''))"
+            like_all = f"%{qn}%"
+            like_prefix = f"{qn}%"
+            cursor.execute(
+                f"""{self._interactive_track_select()}
+                      AND ({t_title} LIKE ? OR {a_name} LIKE ? OR {t_artist} LIKE ?)
+                    ORDER BY
+                      CASE
+                        WHEN {t_title} = ? THEN 0
+                        WHEN {t_title} LIKE ? THEN 1
+                        WHEN {a_name} = ? THEN 2
+                        WHEN {a_name} LIKE ? THEN 3
+                        ELSE 4
+                      END,
+                      {t_title}, {a_name}
+                    LIMIT ?""",
+                [like_all, like_all, like_all, qn, like_prefix, qn, like_prefix, limit])
+            rows = cursor.fetchall()
+            if not rows:
+                rows = self._search_tracks_interactive_fuzzy(
+                    cursor, qn, t_title, a_name, t_artist, limit)
+            return self._api_project_lib2(conn, 'track', rows)
+        finally:
+            conn.close()
+
+    def recent_owned_tracks(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """The newest tracks with a live file, projected like
+        ``search_tracks_interactive`` (Sample Studio's empty search box)."""
+        limit = max(1, min(int(limit or 50), 200))
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                f"{self._interactive_track_select()}"
+                " ORDER BY tracks.added_at DESC, tracks.id DESC LIMIT ?", (limit,)).fetchall()
+            return self._api_project_lib2(conn, 'track', rows)
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _interactive_track_select() -> str:
+        """The catalogue projection the interactive search shares with
+        ``_search_tracks_basic_rows``, already WHERE-ing on a live file."""
+        from core.library2.sql_util import owned_sql, scoped_primary_file_join
+        return f"""SELECT tracks.*, NULL AS requested_server_id,
+                       albums.primary_artist_id AS artist_id,
+                       artists.name AS artist_name, albums.title AS album_title,
+                       albums.image_url AS album_thumb_url,
+                       files.path AS file_path, files.bitrate AS bitrate
+                FROM lib2_tracks tracks
+                JOIN lib2_albums albums ON albums.id = tracks.album_id
+                JOIN lib2_artists artists ON artists.id = albums.primary_artist_id
+                LEFT JOIN lib2_track_files files
+                       ON {scoped_primary_file_join("tracks", "files")}
+                WHERE {owned_sql("track", "tracks")}"""
+
+    def _search_tracks_interactive_fuzzy(self, cursor, qn: str, t_title: str, a_name: str,
+                                        t_artist: str, limit: int):
+        """Term-OR fallback for search_tracks_interactive: one full scan, no
+        python-side scoring. Only runs when the primary pass found nothing."""
+        terms = [t for t in qn.split() if len(t) > 2]
+        if len(terms) < 2:
+            return []
+        ors = " OR ".join(
+            f"({t_title} LIKE ? OR {a_name} LIKE ? OR {t_artist} LIKE ?)" for _ in terms)
+        params = []
+        for term in terms:
+            like = f"%{term}%"
+            params += [like, like, like]
+        params.append(limit)
+        cursor.execute(
+            f"""{self._interactive_track_select()}
+                  AND ({ors})
+                ORDER BY {t_title}, {a_name}
+                LIMIT ?""",
+            params)
+        return cursor.fetchall()
+
     def get_tracks_for_m3u_resolution(self, server_source: Optional[str] = None) -> List[Dict[str, str]]:
         """Bulk-load (artist, title, file_path) for in-memory M3U path resolution.
 
@@ -10545,6 +10909,7 @@ class MusicDatabase:
                 track.album_title = row['album_title']
                 track.album_thumb_url = row['album_thumb_url'] if 'album_thumb_url' in row.keys() else ''
                 track.server_source = row['server_source'] if 'server_source' in row.keys() else ''
+                track.track_artist = row['track_artist'] if 'track_artist' in row.keys() else None
                 tracks.append(track)
             return tracks
         except Exception as e:
@@ -13078,6 +13443,19 @@ class MusicDatabase:
                     (profile_id, track_id, track_name, artist_name, reason, created_at)
                     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """, (profile_id, key, track_name or "", artist_name or "", reason or "removed"))
+                # S12: opportunistic prune — expired rows otherwise accumulate
+                # forever for users who never open the ignore-list UI (the
+                # only other place that purges). Same TTL the read gate uses.
+                try:
+                    from datetime import datetime, timedelta
+                    from core.wishlist.ignore import configured_ttl_days
+                    cutoff = (datetime.now() - timedelta(days=configured_ttl_days())).strftime(
+                        "%Y-%m-%d %H:%M:%S")
+                    cursor.execute(
+                        "DELETE FROM wishlist_ignore WHERE profile_id = ? AND created_at < ?",
+                        (profile_id, cutoff))
+                except Exception as _prune_err:
+                    logger.debug("wishlist ignore prune failed (housekeeping): %s", _prune_err)
                 conn.commit()
                 logger.info("Added track to wishlist ignore-list (%s): '%s' [%s]",
                             reason or "removed", track_name or key, key)
@@ -13380,6 +13758,7 @@ class MusicDatabase:
             except (TypeError, ValueError):
                 _av = None
             _ed = m.get('ed')
+            _badge = m.get('badge')
             rows.append((str(room), user, msg, 1 if m.get('rich') else 0, ts, rep_json, fil_json,
                          str(_chan)[:24] if _chan else None,
                          str(_th)[:160] if _th else None,
@@ -13388,7 +13767,8 @@ class MusicDatabase:
                          str(_ed)[:160] if _ed else None,
                          ovl_json,
                          np_json,
-                         want_json))
+                         want_json,
+                         str(_badge)[:24] if _badge else None))
         if not rows:
             return 0
         try:
@@ -13396,8 +13776,8 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 before = conn.total_changes
                 cursor.executemany(
-                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay, np, want) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay, np, want, badge) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
                 inserted = conn.total_changes - before
                 if inserted:
                     cursor.execute(
@@ -13412,6 +13792,39 @@ class MusicDatabase:
             return 0
 
     _CHAT_REACTIONS_KEEP = 20000   # per room — rows are tiny, but still bounded
+
+    def prune_chat_messages(self, older_than_days) -> int:
+        """Time-based retention for the room archive: delete messages older
+        than ``older_than_days``. The per-room COUNT cap in add_chat_messages
+        stays as the disk bound; this is the age bound. ``0``/None/invalid =
+        disabled (count cap only). Returns rows deleted.
+
+        Timestamps are slskd ISO-ish strings ('2026-07-19 10:00:00'), which
+        sort lexicographically, so the cutoff is formatted to match. Rows
+        with malformed timestamps sort wherever they sort — they're pruned
+        only if they compare older than the cutoff."""
+        try:
+            days = float(older_than_days)
+        except (TypeError, ValueError):
+            return 0
+        if not days or days <= 0 or days != days:  # 0/negative/NaN = disabled
+            return 0
+        from datetime import timedelta
+
+        # slskd stamps are server-local naive strings, so the cutoff is one
+        # too — same clock, exact boundary, no timezone guessing.
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                before = conn.total_changes
+                cursor.execute("DELETE FROM chat_room_messages WHERE timestamp < ?", (cutoff,))
+                deleted = conn.total_changes - before
+                conn.commit()
+                return deleted
+        except Exception as e:
+            logger.error("Error pruning chat archive: %s", e)
+            return 0
 
     def add_chat_reactions(self, room: str, reactions) -> int:
         """Archive the aggregated reaction map ({target_key: {emoji: [users]}}).
@@ -13628,7 +14041,7 @@ class MusicDatabase:
         (ready to render). ``before`` pages backwards: only messages strictly
         older than that timestamp."""
         try:
-            q = ("SELECT username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay, np, want FROM chat_room_messages "
+            q = ("SELECT username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target, overlay, np, want, badge FROM chat_room_messages "
                  "WHERE room = ?")
             args: list = [str(room)]
             if before:
@@ -13669,6 +14082,8 @@ class MusicDatabase:
                     r['ed'] = r.pop('edit_target')
                 else:
                     r.pop('edit_target', None)
+                if not r.get('badge'):
+                    r.pop('badge', None)
                 # Rebuild the share card the live path hands the frontend:
                 # name, layer count and the asset refs it needs, so a reader
                 # can still adopt a template shared days ago.
@@ -14106,15 +14521,61 @@ class MusicDatabase:
             return 0
     
     def clear_wishlist(self, profile_id: int = 1) -> bool:
-        """Clear all tracks from the wishlist for the given profile"""
+        """Clear all tracks from the wishlist for the given profile.
+
+        S4: the cleared tracks get ignore-list entries (#874) in the SAME
+        transaction as the delete — without them the next automatic cycle
+        (watchlist scan, failed-track capture) re-adds exactly the tracks
+        the user just cleared, and the clear never sticks. One transaction
+        also closes the race where a producer re-adds a track after the
+        delete commits but before the ignore lands, and it means a failed
+        ignore write rolls the delete back instead of leaving a silent
+        half-clear (the clear reports failure and is retryable).
+        """
         try:
+            from datetime import datetime, timedelta
+            from core.wishlist.ignore import (
+                REASON_REMOVED, configured_ttl_days, extract_display,
+                normalize_ignore_id,
+            )
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT spotify_track_id, spotify_data FROM wishlist_tracks WHERE profile_id = ?",
+                    (profile_id,))
+                rows = cursor.fetchall()
+                ignored = 0
+                for row in rows:
+                    try:
+                        spotify_data = json.loads(row['spotify_data']) if row['spotify_data'] else {}
+                    except (json.JSONDecodeError, TypeError):
+                        spotify_data = {}
+                    name, artist = extract_display(spotify_data)
+                    key = normalize_ignore_id(row['spotify_track_id'])
+                    if not key:
+                        continue
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO wishlist_ignore
+                        (profile_id, track_id, track_name, artist_name, reason, created_at)
+                        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (profile_id, key, name or "", artist or "", REASON_REMOVED))
+                    ignored += 1
+                # S12: prune this profile's expired ignores once per clear
+                # (not once per row) so the table can't grow unbounded.
+                try:
+                    cutoff = (datetime.now() - timedelta(days=configured_ttl_days())).strftime(
+                        "%Y-%m-%d %H:%M:%S")
+                    cursor.execute(
+                        "DELETE FROM wishlist_ignore WHERE profile_id = ? AND created_at < ?",
+                        (profile_id, cutoff))
+                except Exception as _prune_err:
+                    logger.debug("wishlist ignore prune failed (housekeeping): %s", _prune_err)
                 cursor.execute("DELETE FROM wishlist_tracks WHERE profile_id = ?", (profile_id,))
                 cleared_count = cursor.rowcount
                 conn.commit()
-                logger.info(f"Cleared {cleared_count} tracks from wishlist (profile: {profile_id})")
-                return True
+                logger.info(f"Cleared {cleared_count} tracks from wishlist (profile: {profile_id}); "
+                            f"wrote {ignored} ignore-list entries")
+            return True
         except Exception as e:
             logger.error(f"Error clearing wishlist: {e}")
             return False
@@ -17181,13 +17642,19 @@ class MusicDatabase:
                 'server_source': server_source
             }
 
-    def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50, watchlist_filter: str = "all", profile_id: int = 1, source_filter: str = "") -> Dict[str, Any]:
+    def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50, watchlist_filter: str = "all", profile_id: int = 1, source_filter: str = "", quality_filter: str = "", sort: str = "name") -> Dict[str, Any]:
         """Artists for the public library API: search, filter, paginate.
 
         Reads the catalogue. Two things the legacy version had to do fall away
         with it: the same-name dedup (v2 has `canonical_artist_id`, so an alias
         member is folded, not guessed at with `MIN(id)`), and the active-server
         filter (a catalogue row is the library, whoever reported it).
+
+        ``sort`` is 'name' (A-Z, ignoring leading punctuation, so '"Weird Al"
+        Yankovic' files under W) or 'recent' (recently added first).
+        ``quality_filter`` is accepted for API compatibility and ignored: the
+        findings it filtered on come from the quality jobs Library v2 retired;
+        upgrades live in the wanted projection.
         """
         from core.library2.provider_ids import parse_external_ids
 
@@ -17203,10 +17670,14 @@ class MusicDatabase:
                     params.append(f"%{search_query}%")
 
                 if letter and letter != "all":
+                    stripped_name = _library_stripped_sql('a.name')
                     if letter == "#":
-                        where_conditions.append("SUBSTR(UPPER(a.name), 1, 1) NOT GLOB '[A-Z]'")
+                        # Numbers (and names that strip down to nothing)
+                        where_conditions.append(
+                            f"SUBSTR(UPPER({stripped_name}), 1, 1) NOT GLOB '[A-Z]'")
                     else:
-                        where_conditions.append("UPPER(SUBSTR(a.name, 1, 1)) = UPPER(?)")
+                        where_conditions.append(
+                            f"UPPER(SUBSTR({stripped_name}, 1, 1)) = UPPER(?)")
                         params.append(letter)
 
                 # Enrichment-source filter. Spotify and MusicBrainz have their
@@ -17262,6 +17733,10 @@ class MusicDatabase:
                 total_count = cursor.fetchone()['total_count']
 
                 offset = (page - 1) * limit
+                # Whitelisted — never interpolated from the raw request value.
+                order_by = {
+                    'recent': "a.added_at DESC, a.id DESC",
+                }.get(sort, f"{_library_sort_key_sql('a.name')}, a.name COLLATE NOCASE")
                 cursor.execute(f"""
                     SELECT a.id, a.name, a.image_url, a.genres, a.spotify_id,
                            a.musicbrainz_id, a.external_ids, a.soul_id,
@@ -17273,7 +17748,7 @@ class MusicDatabase:
                             WHERE al2.primary_artist_id = a.id) AS track_count
                       FROM lib2_artists a
                      WHERE {where_clause}
-                     ORDER BY a.name COLLATE NOCASE
+                     ORDER BY {order_by}
                      LIMIT ? OFFSET ?
                 """, params + [limit, offset])
                 artist_rows = self._api_project_lib2(conn, 'artist', cursor.fetchall())
@@ -17984,73 +18459,6 @@ class MusicDatabase:
             logger.error(f"Error removing from blacklist: {e}")
             return False
 
-    # ==================== Discovery Artist Blacklist Methods ====================
-
-    def add_to_discovery_blacklist(self, artist_name: str, spotify_id: str = None,
-                                   itunes_id: str = None, deezer_id: str = None) -> bool:
-        """Block an artist from appearing in discovery results."""
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO discovery_artist_blacklist
-                (artist_name, spotify_artist_id, itunes_artist_id, deezer_artist_id)
-                VALUES (?, ?, ?, ?)
-            """, (artist_name.strip(), spotify_id, itunes_id, deezer_id))
-            conn.commit()
-            return True
-        except Exception as e:
-            logger.error(f"Error adding to discovery blacklist: {e}")
-            return False
-
-    def remove_from_discovery_blacklist(self, blacklist_id: int) -> bool:
-        """Remove an artist from the discovery blacklist."""
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM discovery_artist_blacklist WHERE id = ?", (blacklist_id,))
-            conn.commit()
-            return cursor.rowcount > 0
-        except Exception as e:
-            logger.error(f"Error removing from discovery blacklist: {e}")
-            return False
-
-    def get_discovery_blacklist(self) -> list:
-        """Get all blacklisted discovery artists."""
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, artist_name, spotify_artist_id, itunes_artist_id, deezer_artist_id, created_at
-                FROM discovery_artist_blacklist ORDER BY created_at DESC
-            """)
-            return [dict(r) for r in cursor.fetchall()]
-        except Exception as e:
-            logger.error(f"Error getting discovery blacklist: {e}")
-            return []
-
-    def get_discovery_blacklist_names(self) -> set:
-        """Set of blacklisted artist names (lowercased) for discovery filtering.
-
-        Unions the legacy discovery_artist_blacklist with the new unified
-        blocklist's artist entries (across all profiles), so a ban added via
-        either path filters discovery. The legacy table is migrated into the
-        blocklist on upgrade but kept as a rollback safety net."""
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT LOWER(artist_name) FROM discovery_artist_blacklist")
-            names = {r[0] for r in cursor.fetchall()}
-            try:
-                cursor.execute("SELECT LOWER(name) FROM blocklist WHERE entity_type = 'artist'")
-                names.update(r[0] for r in cursor.fetchall())
-            except Exception as _bl_err:  # noqa: BLE001 — old schema may predate blocklist
-                logger.debug("blocklist union skipped in discovery names: %s", _bl_err)
-            return names
-        except Exception as e:
-            logger.error(f"Error getting discovery blacklist names: {e}")
-            return set()
-
     # ==================== Blocklist (artist/album/track) ====================
 
     def _migrate_discovery_blacklist_into_blocklist(self, cursor):
@@ -18060,13 +18468,23 @@ class MusicDatabase:
         Replicated to EVERY existing profile so no existing discovery ban
         silently stops working under the new per-profile model. Idempotent
         (skips a (profile, name) already present). The old table is left in
-        place as a rollback safety net."""
+        place as a rollback safety net.
+
+        Runs once. It used to run on every start, so an artist a profile
+        unblocked came back on the next restart; the discover page's blocked
+        artists modal now writes the blocklist, so nothing new lands in the
+        old table after this."""
         try:
+            cursor.execute("SELECT 1 FROM metadata WHERE key = "
+                           "'discovery_blacklist_migrated_v1' LIMIT 1")
+            if cursor.fetchone():
+                return
             cursor.execute(
                 "SELECT artist_name, spotify_artist_id, itunes_artist_id, deezer_artist_id "
                 "FROM discovery_artist_blacklist")
             legacy = cursor.fetchall()
             if not legacy:
+                self._mark_discovery_blacklist_migrated(cursor)
                 return
             try:
                 cursor.execute("SELECT id FROM profiles")
@@ -18090,11 +18508,20 @@ class MusicDatabase:
                         "itunes_id, deezer_id, match_status) VALUES (?, 'artist', ?, ?, ?, ?, 'matched')",
                         (pid, name, row[1], row[2], row[3]))
                     migrated += 1
+            self._mark_discovery_blacklist_migrated(cursor)
             if migrated:
                 logger.info("Migrated %d discovery-blacklist artist entr(ies) into the "
                             "unified blocklist across %d profile(s)", migrated, len(profile_ids))
         except Exception as e:
             logger.debug("discovery→blocklist migration skipped: %s", e)
+
+    @staticmethod
+    def _mark_discovery_blacklist_migrated(cursor):
+        try:
+            cursor.execute("INSERT OR REPLACE INTO metadata (key, value) "
+                           "VALUES ('discovery_blacklist_migrated_v1', '1')")
+        except Exception as e:  # noqa: BLE001 - worst case it runs again
+            logger.debug("discovery blacklist migration flag not written: %s", e)
 
     def add_blocklist_entry(self, profile_id: int, entity_type: str, name: str,
                             spotify_id: str = None, itunes_id: str = None,
@@ -18147,6 +18574,78 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error removing blocklist entry: {e}")
             return False
+
+    # ==================== Discovery feedback ====================
+
+    def set_discovery_feedback(self, profile_id: int, entity_type: str, entity_key: str,
+                               name: str, kind: str, artist_name: str = None,
+                               ids_json: str = None, seed_context_json: str = None,
+                               expires_at: str = None) -> Optional[int]:
+        """Record one piece of feedback, replacing the same kind for the same
+        entity. ``more`` and ``less`` are opposites: setting one drops the
+        other. Returns the row id."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            opposite = {'more': 'less', 'less': 'more'}.get(kind)
+            if opposite:
+                cursor.execute(
+                    "DELETE FROM discovery_feedback WHERE profile_id = ? AND entity_type = ? "
+                    "AND entity_key = ? AND kind = ?", (profile_id, entity_type, entity_key, opposite))
+            cursor.execute(
+                "DELETE FROM discovery_feedback WHERE profile_id = ? AND entity_type = ? "
+                "AND entity_key = ? AND kind = ?", (profile_id, entity_type, entity_key, kind))
+            cursor.execute(
+                "INSERT INTO discovery_feedback (profile_id, entity_type, entity_key, name, "
+                "artist_name, ids_json, kind, seed_context_json, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (profile_id, entity_type, entity_key, name, artist_name, ids_json, kind,
+                 seed_context_json, expires_at))
+            conn.commit()
+            return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error recording discovery feedback: {e}")
+            return None
+
+    def get_discovery_feedback(self, profile_id: int) -> list:
+        """This profile's feedback still in force (an expired not-now is not)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, entity_type, entity_key, name, artist_name, ids_json, kind, "
+                "seed_context_json, created_at, expires_at FROM discovery_feedback "
+                "WHERE profile_id = ? AND (expires_at IS NULL OR expires_at > datetime('now')) "
+                "ORDER BY created_at DESC, id DESC", (profile_id,))
+            return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.debug(f"discovery feedback read failed: {e}")
+            return []
+
+    def remove_discovery_feedback(self, profile_id: int, feedback_id: int) -> bool:
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM discovery_feedback WHERE id = ? AND profile_id = ?",
+                           (int(feedback_id), profile_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing discovery feedback: {e}")
+            return False
+
+    def clear_discovery_feedback(self, profile_id: int) -> int:
+        """Reset taste: every more / less / not-now for the profile. Blocks
+        are in the blocklist and stay."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM discovery_feedback WHERE profile_id = ?", (profile_id,))
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error clearing discovery feedback: {e}")
+            return 0
 
     def get_blocklist(self, profile_id: int, entity_type: str = None) -> list:
         """List blocklist entries for a profile, newest first."""
@@ -20042,6 +20541,312 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
+    # ==================== Download Decisions ====================
+
+    DOWNLOAD_DECISIONS_KEPT = 5000
+
+    def record_download_decision(self, task_key: str, *, outcome: str, summary: dict,
+                                 track_title: str = '', track_artist: str = '',
+                                 quality_profile_id=None, provenance: Optional[dict] = None) -> Optional[int]:
+        """Store (or replace) the decision behind one download task.
+
+        ``summary`` is ``core.downloads.candidate_pool.summarize_pool`` output.
+        A task that retries replaces its row, so each task has one answer. The
+        table keeps the newest DOWNLOAD_DECISIONS_KEPT rows.
+
+        ``provenance`` is ``core.downloads.provenance.new_provenance`` output
+        (``search_mode``/``searched_at``/``policy_run_id``). When a retry record
+        omits it, the task's previous provenance is preserved instead of being
+        blanked.
+        """
+        if not task_key:
+            return None
+        conn = None
+        try:
+            chosen = summary.get('chosen')
+            rest = {k: v for k, v in summary.items() if k != 'chosen'}
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            provenance = provenance or {}
+            old = cursor.execute(
+                "SELECT search_mode, searched_at, policy_run_id FROM download_decisions"
+                " WHERE task_key = ? ORDER BY id DESC LIMIT 1",
+                (str(task_key),),
+            ).fetchone()
+            old_mode, old_at, old_run = (old or (None, None, None))
+            search_mode = provenance.get('search_mode') or old_mode or 'automatic'
+            searched_at = provenance.get('searched_at') or old_at
+            policy_run_id = provenance.get('policy_run_id') or old_run
+            cursor.execute("DELETE FROM download_decisions WHERE task_key = ?", (str(task_key),))
+            cursor.execute(
+                """INSERT INTO download_decisions
+                   (task_key, track_title, track_artist, quality_profile_id, outcome,
+                    chosen_json, alternatives_json, search_mode, searched_at, policy_run_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (str(task_key), track_title or '', track_artist or '', quality_profile_id,
+                 outcome, json.dumps(chosen) if chosen else None, json.dumps(rest),
+                 search_mode, searched_at, policy_run_id),
+            )
+            new_id = cursor.lastrowid
+            cursor.execute(
+                "DELETE FROM download_decisions WHERE id <= ?",
+                (new_id - self.DOWNLOAD_DECISIONS_KEPT,),
+            )
+            conn.commit()
+            return new_id
+        except Exception as e:
+            logger.debug("Error recording download decision for %s: %s", task_key, e)
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    def get_download_decision(self, task_key: str) -> Optional[dict]:
+        if not task_key:
+            return None
+        conn = None
+        try:
+            conn = self._get_connection()
+            row = conn.execute(
+                """SELECT id, track_download_id, task_key, track_title, track_artist,
+                          quality_profile_id, outcome, chosen_json, alternatives_json,
+                          search_mode, searched_at, policy_run_id, created_at
+                   FROM download_decisions WHERE task_key = ? ORDER BY id DESC LIMIT 1""",
+                (str(task_key),),
+            ).fetchone()
+            return self._download_decision_row(row) if row else None
+        except Exception as e:
+            logger.debug("Error reading download decision for %s: %s", task_key, e)
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    def get_download_decision_for_track_download(self, track_download_id) -> Optional[dict]:
+        conn = None
+        try:
+            conn = self._get_connection()
+            row = conn.execute(
+                """SELECT id, track_download_id, task_key, track_title, track_artist,
+                          quality_profile_id, outcome, chosen_json, alternatives_json,
+                          search_mode, searched_at, policy_run_id, created_at
+                   FROM download_decisions WHERE track_download_id = ? ORDER BY id DESC LIMIT 1""",
+                (int(track_download_id),),
+            ).fetchone()
+            return self._download_decision_row(row) if row else None
+        except Exception as e:
+            logger.debug("Error reading download decision for download %s: %s", track_download_id, e)
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    def link_download_decision(self, task_key: str, track_download_id) -> bool:
+        """Tie a task's decision to the track_downloads row its file became."""
+        if not task_key or track_download_id is None:
+            return False
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.execute(
+                "UPDATE download_decisions SET track_download_id = ? WHERE task_key = ?",
+                (int(track_download_id), str(task_key)),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.debug("Error linking download decision for %s: %s", task_key, e)
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    # ---- failed-download blocklist -------------------------------------------
+    # core/downloads/failed_blocklist.py owns the fingerprinting and the
+    # fail-open policy; these methods are the SQL surface it calls.
+
+    def record_failed_download(self, fingerprint: str, service: str, artist: str,
+                               title: str, size_bytes: int, reason: str,
+                               expires_at: str, max_entries: int) -> bool:
+        """Block a fingerprint until expires_at. Re-recording refreshes the
+        expiry; oldest rows past max_entries are dropped."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO failed_download_blocklist "
+                "(fingerprint, service, artist, title, size_bytes, reason, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(fingerprint) DO UPDATE SET "
+                "expires_at = excluded.expires_at, reason = excluded.reason, "
+                "created_at = CURRENT_TIMESTAMP",
+                (fingerprint, service, artist, title, size_bytes, reason, expires_at))
+            cursor.execute(
+                "DELETE FROM failed_download_blocklist WHERE id NOT IN "
+                "(SELECT id FROM failed_download_blocklist "
+                "ORDER BY created_at DESC, id DESC LIMIT ?)",
+                (max_entries,))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.debug("Error recording failed download blocklist entry: %s", e)
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def is_download_blocked(self, fingerprint: str, now: str) -> bool:
+        """Is this fingerprint currently blocked (unexpired)?"""
+        conn = None
+        try:
+            conn = self._get_connection()
+            row = conn.execute(
+                "SELECT 1 FROM failed_download_blocklist "
+                "WHERE fingerprint = ? AND expires_at > ?",
+                (fingerprint, now)).fetchone()
+            return row is not None
+        except Exception as e:
+            logger.debug("Error checking failed download blocklist: %s", e)
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def list_failed_downloads(self, limit: int = 200) -> list:
+        """Newest blocklist entries first, for the API."""
+        try:
+            limit = max(1, min(int(limit or 200), 1000))
+        except (TypeError, ValueError):
+            limit = 200
+        conn = None
+        try:
+            conn = self._get_connection()
+            rows = conn.execute(
+                "SELECT fingerprint, service, artist, title, size_bytes, "
+                "reason, created_at, expires_at FROM failed_download_blocklist "
+                "ORDER BY created_at DESC, id DESC LIMIT ?",
+                (limit,)).fetchall()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.debug("Error listing failed download blocklist: %s", e)
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def remove_failed_download(self, fingerprint: str) -> bool:
+        """Unblock one fingerprint. True when a row was actually removed."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.execute(
+                "DELETE FROM failed_download_blocklist WHERE fingerprint = ?",
+                (str(fingerprint or ''),))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.debug("Error removing failed download blocklist entry: %s", e)
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def clear_expired_failed_downloads(self, now: str) -> int:
+        """Delete expired blocklist rows. Returns the number removed."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.execute(
+                "DELETE FROM failed_download_blocklist WHERE expires_at <= ?",
+                (now,))
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.debug("Error clearing expired failed download blocklist: %s", e)
+            return 0
+        finally:
+            if conn:
+                conn.close()
+
+    # ---- discover page layout ------------------------------------------------
+    # core/discovery/layout.py owns section ids, zones and validation; these
+    # methods are the per-profile persistence behind GET/PUT /api/discover/layout.
+
+    def get_discovery_layout(self, profile_id) -> list:
+        """Saved layout rows for a profile. Empty when never customized —
+        the API merges over the defaults then."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            rows = conn.execute(
+                "SELECT section_id, zone, position, enabled FROM discovery_layout "
+                "WHERE profile_id = ? ORDER BY position, section_id",
+                (int(profile_id),)).fetchall()
+            return [{'section_id': r[0], 'zone': r[1], 'position': r[2],
+                     'enabled': bool(r[3])} for r in rows]
+        except Exception as e:
+            logger.debug("Error reading discovery layout for %s: %s", profile_id, e)
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def save_discovery_layout(self, profile_id, entries) -> bool:
+        """Replace the profile's layout. ``entries`` are sanitized
+        ``{'id', 'zone', 'position', 'enabled'}`` dicts."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM discovery_layout WHERE profile_id = ?",
+                           (int(profile_id),))
+            for entry in entries or []:
+                cursor.execute(
+                    "INSERT INTO discovery_layout "
+                    "(profile_id, section_id, zone, position, enabled) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (int(profile_id), str(entry.get('id') or ''),
+                     str(entry.get('zone') or ''), int(entry.get('position') or 0),
+                     1 if entry.get('enabled') else 0))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.debug("Error saving discovery layout for %s: %s", profile_id, e)
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    @staticmethod
+    def _download_decision_row(row) -> dict:
+        def _load(text, fallback):
+            try:
+                return json.loads(text) if text else fallback
+            except (TypeError, ValueError):
+                return fallback
+
+        rest = _load(row['alternatives_json'], {})
+        return {
+            'id': row['id'],
+            'track_download_id': row['track_download_id'],
+            'task_key': row['task_key'],
+            'track_title': row['track_title'] or '',
+            'track_artist': row['track_artist'] or '',
+            'quality_profile_id': row['quality_profile_id'],
+            'outcome': row['outcome'],
+            'chosen': _load(row['chosen_json'], None),
+            'alternatives': rest.get('alternatives', []),
+            'accepted_total': rest.get('accepted_total', 0),
+            'rejected_total': rest.get('rejected_total', 0),
+            'rejected_counts': rest.get('rejected_counts', {}),
+            'policy': rest.get('policy'),
+            'search_mode': row['search_mode'] or 'automatic',
+            'searched_at': row['searched_at'] or '',
+            'policy_run_id': row['policy_run_id'] or '',
+            'created_at': row['created_at'],
+        }
+
     def clear_completed_download_history(self) -> int:
         """Delete the persisted completed-download history shown on the Downloads
         page (every event_type='download' row). This also clears the verification
@@ -20055,8 +20860,17 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("DELETE FROM library_history WHERE event_type IN ('download', 'podcast')")
+            removed = cursor.rowcount
             conn.commit()
-            return cursor.rowcount
+            # The "why this file" records belong to the same history. Best
+            # effort, after the commit: a missing table must never cost the
+            # clear the user asked for.
+            try:
+                cursor.execute("DELETE FROM download_decisions")
+                conn.commit()
+            except Exception as dec_err:
+                logger.debug("Could not clear download decisions: %s", dec_err)
+            return removed
         except Exception as e:
             logger.error("Error clearing completed download history: %s", e)
             return 0
@@ -21066,7 +21880,7 @@ class MusicDatabase:
                         name = excluded.name,
                         description = COALESCE(NULLIF(excluded.description, ''), mirrored_playlists.description),
                         owner = excluded.owner,
-                        image_url = excluded.image_url,
+                        image_url = COALESCE(NULLIF(excluded.image_url, ''), mirrored_playlists.image_url),
                         track_count = excluded.track_count,
                         quality_profile_id = CASE
                             WHEN ? THEN excluded.quality_profile_id
@@ -22180,6 +22994,27 @@ class MusicDatabase:
                 return [dict(row) for row in rows]
         except Exception as e:
             logger.error(f"Error getting automations: {e}")
+            return []
+
+    def get_all_automations(self):
+        """Get every automation in the table, regardless of owning profile.
+
+        Engine/internal view — the automation engine (start(), event cache,
+        signal-cycle detection) must see all enabled automations, not just
+        profile 1's, or non-admin automations silently stop after a restart
+        (timers are in-memory; issue #1428). The profile-filtered
+        ``get_automations()`` keeps serving the UI, which must stay scoped.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM automations ORDER BY is_system DESC, created_at DESC
+                """)
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting all automations: {e}")
             return []
 
     def get_system_automation_by_action(self, action_type: str):

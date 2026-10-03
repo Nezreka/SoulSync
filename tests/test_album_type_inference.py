@@ -6,13 +6,21 @@ and the converters turned that absence into a CONFIDENT 'album' default. Every
 discography single/EP then stored album_type='album' → the wishlist's Singles
 category showed 0 from the start, and files were named [Album].
 
+2026-09-24 recurrence (CAL, Yellowcard discography): the #1064 derivation was
+defeated by a NEW shape of the same lie — current SpotipyFree hardcodes
+``album["album_type"] = "album"`` in formatAlbum() (verified against the
+published spotipyFree package), so the filler now arrives AS an explicit type
+key and _has_explicit_type_signal trusted it. Fix: a bare 'album' is never an
+explicit signal — only distinguishing types ('single'/'ep'/'compilation') are
+trusted outright; 'album' is verified against the real track count.
+
 Fixes under test:
   * _build_album_tracks_payload derives the type from the REAL track count
-    when (and only when) the source raw carried no type signal at all
-  * Album.from_spotify_dict infers from total_tracks instead of fabricating
+    when the source raw carries no *distinguishing* type signal
+  * Album.from_spotify_dict does the same instead of trusting bare 'album'
   * get_album_type_display no longer collapses an unknown-count 'ep' to
     [Single] (the individual-EP mislabel from the same report)
-  * end-to-end: a signal-less 2-track release stored via the discography
+  * end-to-end: a filler-'album' 2-track release stored via the discography
     payload classifies as 'singles' in the wishlist
 """
 
@@ -30,17 +38,23 @@ from core.metadata.types import Album
 
 
 def _free_album_raw(n_tracks, **extra):
-    """A SpotipyFree-shaped album: spotipy-ish, NO album_type key anywhere."""
-    return {
+    """A SpotipyFree-shaped album: formatAlbum() hardcodes album_type='album'
+    on every release (verified against the published spotipyFree package) and
+    sets total_tracks from the returned items."""
+    raw = {
         'id': 'alb1', 'name': 'Cool Release',
+        'uri': 'spotify:album:alb1',
         'artists': [{'id': 'ar1', 'name': 'QT Artist'}],
         'release_date': '2024-05-01',
+        'album_type': 'album',  # the filler — NOT a real classification
+        'total_tracks': n_tracks,
         'tracks': {'items': [
             {'id': f't{i}', 'name': f'Track {i}', 'track_number': i,
              'artists': [{'name': 'QT Artist'}]}
             for i in range(1, n_tracks + 1)]},
-        **extra,
     }
+    raw.update(extra)
+    return raw
 
 
 # ── the derivation helpers ───────────────────────────────────────────────────
@@ -56,9 +70,14 @@ def test_derive_from_count_bands():
 
 
 def test_type_signal_detection():
+    # distinguishing types are trusted outright …
     assert _has_explicit_type_signal({'album_type': 'single'}) is True
+    assert _has_explicit_type_signal({'album_type': 'EP'}) is True
     assert _has_explicit_type_signal({'record_type': 'ep'}) is True
-    assert _has_explicit_type_signal({'collectionType': 'Album'}) is True
+    assert _has_explicit_type_signal({'record_type': 'compile'}) is True
+    # … but a bare 'album' is the universal filler, not a signal
+    assert _has_explicit_type_signal({'album_type': 'album'}) is False
+    assert _has_explicit_type_signal({'collectionType': 'Album'}) is False
     assert _has_explicit_type_signal({'name': 'X', 'album_type': ''}) is False
     assert _has_explicit_type_signal({'name': 'X'}) is False
     assert _has_explicit_type_signal(None) is False
@@ -83,13 +102,27 @@ def test_signalless_full_album_stays_album():
 
 
 def test_explicit_type_is_never_overridden():
-    # a REAL 5-track album (source said so) must not be reclassified as EP
-    raw = _free_album_raw(5, album_type='album')
-    payload = _build_album_tracks_payload(raw, None, 'spotify', 'alb1')
-    assert payload['album']['album_type'] == 'album'
-    raw = _free_album_raw(8, album_type='single')     # source's word wins too
+    # distinguishing types are never reclassified, whatever the count says
+    raw = _free_album_raw(8, album_type='single')     # source's word wins
     payload = _build_album_tracks_payload(raw, None, 'spotify', 'alb1')
     assert payload['album']['album_type'] == 'single'
+    raw = _free_album_raw(2, album_type='ep')
+    payload = _build_album_tracks_payload(raw, None, 'spotify', 'alb1')
+    assert payload['album']['album_type'] == 'ep'
+    raw = _free_album_raw(9, record_type='compile')
+    payload = _build_album_tracks_payload(raw, None, 'deezer', 'alb1')
+    assert payload['album']['album_type'] == 'compilation'
+
+
+def test_bare_album_filler_is_verified_by_count():
+    # SpotipyFree hardcodes album_type='album' on everything — a 2-track
+    # "album" is a single, a 5-track one an EP, an 11-track one an album.
+    payload = _build_album_tracks_payload(_free_album_raw(2), None, 'spotify', 'alb1')
+    assert payload['album']['album_type'] == 'single'
+    payload = _build_album_tracks_payload(_free_album_raw(5), None, 'spotify', 'alb1')
+    assert payload['album']['album_type'] == 'ep'
+    payload = _build_album_tracks_payload(_free_album_raw(11), None, 'spotify', 'alb1')
+    assert payload['album']['album_type'] == 'album'
 
 
 # ── converter backstop ───────────────────────────────────────────────────────
@@ -101,10 +134,18 @@ def test_spotify_converter_infers_when_absent():
     album = Album.from_spotify_dict({'id': 'a', 'name': 'N', 'artists': [],
                                      'total_tracks': 5})
     assert album.album_type == 'ep'
-    # explicit value untouched; unknown count stays album
+    # explicit distinguishing value untouched …
+    album = Album.from_spotify_dict({'id': 'a', 'name': 'N', 'artists': [],
+                                     'album_type': 'single', 'total_tracks': 8})
+    assert album.album_type == 'single'
+    # … but the SpotipyFree 'album' filler is verified against the count
     album = Album.from_spotify_dict({'id': 'a', 'name': 'N', 'artists': [],
                                      'album_type': 'album', 'total_tracks': 2})
+    assert album.album_type == 'single'
+    album = Album.from_spotify_dict({'id': 'a', 'name': 'N', 'artists': [],
+                                     'album_type': 'album', 'total_tracks': 11})
     assert album.album_type == 'album'
+    # unknown count stays album
     album = Album.from_spotify_dict({'id': 'a', 'name': 'N', 'artists': []})
     assert album.album_type == 'album'
 
@@ -122,15 +163,92 @@ def test_unknown_count_ep_stays_ep():
     assert get_album_type_display('album', 0) == 'Album'
 
 
+def test_a_source_with_its_own_ep_label_is_taken_at_its_word():
+    # discord (SeadogsBooty): Daft Punk's 'Harder, Better, Faster, Stronger'
+    # single filed under EP/ and Above & Beyond's Tranquility Base EPs under
+    # Album/, while the artist page showed them as Single and EP. deezer
+    # labels EPs itself, so its 'single' and 'ep' are the answer
+    for source in ('deezer', 'itunes', 'musicbrainz', 'tidal'):
+        assert get_album_type_display('single', 5, source) == 'Single', source
+        assert get_album_type_display('single', 9, source) == 'Single', source
+        assert get_album_type_display('ep', 9, source) == 'EP', source
+        assert get_album_type_display('ep', 2, source) == 'EP', source
+
+
+def test_spotify_and_unknown_sources_keep_the_track_count_split():
+    # spotify calls singles and EPs both 'single'; an unknown source may be it
+    for source in ('spotify', 'Spotify', '', None):
+        assert get_album_type_display('single', 5, source) == 'EP', source
+        assert get_album_type_display('single', 2, source) == 'Single', source
+    # a bare 'album' stays verified for everyone: deezer's track-level
+    # answers hardcode it
+    assert get_album_type_display('album', 2, 'deezer') == 'Single'
+
+
+def test_a_locked_type_is_used_as_is():
+    # the artist page section the user saw: no track-count guessing, from any
+    # source (discord: Deezer's 3-track album Flow State Sampler filed Single)
+    assert get_album_type_display('album', 3, 'deezer', locked=True) == 'Album'
+    assert get_album_type_display('single', 5, 'spotify', locked=True) == 'Single'
+    assert get_album_type_display('ep', 12, '', locked=True) == 'EP'
+    assert get_album_type_display('compilation', 2, '', locked=True) == 'Compilation'
+    # an unknown value can't be locked to anything: normal rules
+    assert get_album_type_display('mixtape', 2, '', locked=True) == 'Single'
+
+
+def test_bare_album_filler_verified_against_track_count():
+    # 2026-09-27 (CAL, Yellowcard discography via Deezer): Deezer's
+    # track-level responses hardcode album_type='album', and every upstream
+    # layer defaults to 'album' when the type is missing. The filing function
+    # trusted a bare 'album' unconditionally, so every single/EP filed under
+    # Album/. A bare 'album' is not a signal — verify against the track
+    # count when we have one.
+    assert get_album_type_display('album', 2) == 'Single'
+    assert get_album_type_display('album', 3) == 'Single'
+    assert get_album_type_display('album', 5) == 'EP'
+    assert get_album_type_display('album', 6) == 'EP'
+    assert get_album_type_display('album', 9) == 'Album'
+    assert get_album_type_display('album', 12) == 'Album'
+    # no count to verify against — keep the default, don't guess
+    assert get_album_type_display('album', 0) == 'Album'
+    assert get_album_type_display('album', None) == 'Album'
+    assert get_album_type_display('', 2) == 'Single'
+    assert get_album_type_display(None, 5) == 'EP'
+
+
 # ── end-to-end: discography add → wishlist classification ────────────────────
 
-def test_signalless_single_classifies_as_singles(tmp_path):
+def test_filler_album_single_path_end_to_end():
+    # DB-free version of the CAL regression: filler-'album' 2-track single →
+    # stored 'single' → wishlist 'singles' bucket → 'Single' display folder.
+    # (The DB round-trip variant below covers the full add_to_wishlist path
+    # where the cryptography dependency is installed.)
+    from core.imports.paths import get_album_type_display
+    from core.wishlist.classification import classify_wishlist_track
+
+    payload = _build_album_tracks_payload(_free_album_raw(2), None, 'spotify', 'alb1')
+    album = payload['album']
+    assert album['album_type'] == 'single'
+    row = {'spotify_data': {
+        'id': 't1', 'name': 'Track 1', 'artists': [{'name': 'QT Artist'}],
+        'album': {'id': album['id'], 'name': album['name'],
+                  'album_type': album['album_type'],
+                  'total_tracks': album['total_tracks']}}}
+    assert classify_wishlist_track(row) == 'singles'
+    assert get_album_type_display(album['album_type'], album['total_tracks']) == 'Single'
+
+
+def test_filler_album_single_classifies_as_singles(tmp_path):
+    # CAL 2026-09-24: a SpotipyFree-shaped 2-track single (hardcoded
+    # album_type='album' filler) stored via the discography flow must land in
+    # the wishlist's singles bucket, not albums.
     from database.music_database import MusicDatabase
     from core.wishlist.classification import classify_wishlist_track
 
     payload = _build_album_tracks_payload(_free_album_raw(2), None, 'spotify', 'alb1')
     album = payload['album']
-    # the same track payload shape the discography endpoint stores (#1064 flow)
+    assert album['album_type'] == 'single'
+    # the same track payload shape the discography endpoint stores
     track_data = {
         'id': 't1', 'name': 'Track 1', 'artists': [{'name': 'QT Artist'}],
         'album': {'id': album['id'], 'name': album['name'], 'artists': album['artists'],

@@ -5,10 +5,20 @@ import { server } from '@/test/msw';
 
 import {
   blacklistArtist,
+  dismissAllInbox,
+  fetchFlow,
+  fetchForYouMixes,
+  fetchInbox,
+  fetchMoodMixes,
+  fetchWeekStats,
+  setInboxState,
+  postDiscoverFeedback,
+  resetDiscoverTaste,
   enrichSimilarArtists,
   fetchAdventurousness,
   fetchArtistInfo,
   fetchDeepCuts,
+  fetchDiscoverLayout,
   fetchHero,
   isSuccess,
   fetchLabelExplorer,
@@ -18,6 +28,7 @@ import {
   fetchYourAlbums,
   refreshYourAlbums,
   resolveCacheAlbum,
+  saveDiscoverLayout,
   setAdventurousness,
   unblacklistArtist,
 } from './-discover.api';
@@ -246,5 +257,117 @@ describe('endpoint contracts that fail quietly', () => {
     const seen = capture('get', '/api/discover/listenbrainz/playlist/:mbid');
     await fetchLbPlaylist('a b/c');
     expect(seen[0].url.pathname).toBe('/api/discover/listenbrainz/playlist/a%20b%2Fc');
+  });
+});
+
+describe('discovery feedback', () => {
+  it('posts one answer and resets them all', async () => {
+    const seen: string[] = [];
+    server.use(
+      http.post('*/api/discover/feedback', async ({ request }) => {
+        seen.push(`POST ${JSON.stringify(await request.json())}`);
+        return HttpResponse.json({ success: true, id: 4 });
+      }),
+      http.delete('*/api/discover/feedback', () => {
+        seen.push('DELETE');
+        return HttpResponse.json({ success: true, cleared: 2 });
+      }),
+    );
+    const res = await postDiscoverFeedback({
+      action: 'more',
+      entity: { type: 'artist', name: 'Soen' },
+    });
+    expect(res.id).toBe(4);
+    expect((await resetDiscoverTaste()).cleared).toBe(2);
+    expect(seen).toEqual([
+      'POST {"action":"more","entity":{"type":"artist","name":"Soen"}}',
+      'DELETE',
+    ]);
+  });
+});
+
+describe('the inbox', () => {
+  it('reads a view, moves an item and dismisses the new', async () => {
+    const seen: string[] = [];
+    server.use(
+      http.get('*/api/discover/inbox', ({ request }) => {
+        seen.push(`GET ${new URL(request.url).searchParams.get('view')}`);
+        return HttpResponse.json({ success: true, items: [] });
+      }),
+      http.post('*/api/discover/inbox/:id/state', async ({ params, request }) => {
+        seen.push(`STATE ${String(params.id)} ${JSON.stringify(await request.json())}`);
+        return HttpResponse.json({ success: true });
+      }),
+      http.post('*/api/discover/inbox/dismiss-all', () => {
+        seen.push('DISMISS');
+        return HttpResponse.json({ success: true, dismissed: 4 });
+      }),
+    );
+    expect((await fetchInbox('saved')).items).toEqual([]);
+    await setInboxState(7, 'saved');
+    expect((await dismissAllInbox()).dismissed).toBe(4);
+    expect(seen).toEqual(['GET saved', 'STATE 7 {"state":"saved"}', 'DISMISS']);
+  });
+});
+
+describe('on repeat, blends and flow', () => {
+  it('reads the for-you mixes as an outcome and flow as a plain answer', async () => {
+    server.use(
+      http.get('*/api/discover/for-you', () =>
+        HttpResponse.json({ success: true, mixes: [{ key: 'on_repeat' }] }),
+      ),
+      http.get('*/api/discover/flow', () =>
+        HttpResponse.json({ success: true, tracks: [{ name: 'x' }] }),
+      ),
+    );
+    const out = await fetchForYouMixes();
+    expect(out.kind === 'ok' && (out.data.mixes as unknown[])).toHaveLength(1);
+    expect((await fetchFlow()).tracks).toHaveLength(1);
+  });
+});
+
+describe('moods', () => {
+  it('reads the mood mixes as a section outcome', async () => {
+    server.use(
+      http.get('*/api/discover/moods', () =>
+        HttpResponse.json({ success: true, mixes: [{ key: 'mood_chill' }] }),
+      ),
+    );
+    const out = await fetchMoodMixes();
+    expect(out.kind).toBe('ok');
+    expect(out.kind === 'ok' && (out.data.mixes as unknown[])).toHaveLength(1);
+  });
+});
+
+describe('your week', () => {
+  it('reads the cached 7-day stats, the same numbers the Stats page shows', async () => {
+    let range: string | null = null;
+    server.use(
+      http.get('*/api/stats/cached', ({ request }) => {
+        range = new URL(request.url).searchParams.get('range');
+        return HttpResponse.json({ success: true, overview: { total_plays: 12 } });
+      }),
+    );
+    expect((await fetchWeekStats()).overview?.total_plays).toBe(12);
+    expect(range).toBe('7d');
+  });
+});
+
+describe('the layout', () => {
+  it('reads and saves the layout', async () => {
+    const seen: string[] = [];
+    server.use(
+      http.get('*/api/discover/layout', () => {
+        seen.push('GET');
+        return HttpResponse.json({ success: true, sections: [] });
+      }),
+      http.put('*/api/discover/layout', async ({ request }) => {
+        seen.push(`PUT ${JSON.stringify(await request.json())}`);
+        return HttpResponse.json({ success: true, sections: [] });
+      }),
+    );
+    expect((await fetchDiscoverLayout()).sections).toEqual([]);
+    await saveDiscoverLayout([]);
+    expect(seen).toEqual(['GET', 'PUT {"sections":[]}']);
   });
 });

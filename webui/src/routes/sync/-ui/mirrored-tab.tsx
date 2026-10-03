@@ -40,7 +40,7 @@
  *   row.quality_profile_id is carried on the row type ready for it.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { MirroredPlaylistDetail } from '../-sync.api';
 import type { ExportMode } from '../-sync.export';
@@ -79,6 +79,7 @@ import {
   libraryVisibleRows,
 } from '../-sync.library';
 import {
+  mirroredDiscoveryReopenable,
   mirroredHash,
   mirroredPhaseLine,
   mirroredDiscoveryTracks,
@@ -176,6 +177,12 @@ function MirroredCardMenu({
     typeof window.playlistQualityProfileSelectHtml === 'function'
       ? window.playlistQualityProfileSelectHtml(row.source_playlist_id, row.source, true)
       : '';
+  // one object per html string. react 19 rewrites dangerouslySetInnerHTML
+  // whenever the prop OBJECT changes, not the string, so a fresh {__html} on
+  // every render put the select back to its empty "Loading…" state after the
+  // vanilla hydrate had filled it. opening ⋯ or starting a drag re-renders,
+  // and the hydrate effect doesn't re-run because its deps didn't change.
+  const profileMarkup = useMemo(() => ({ __html: profileHtml }), [profileHtml]);
   const { source_playlist_id: sourcePlaylistId, source, quality_profile_id: profileId } = row;
   useEffect(() => {
     if (!profileHtml) return;
@@ -233,7 +240,7 @@ function MirroredCardMenu({
           }}
         >
           <span className="pl-menu-heading">Quality profile</span>
-          <span dangerouslySetInnerHTML={{ __html: profileHtml }} />
+          <span dangerouslySetInnerHTML={profileMarkup} />
         </div>
       ) : null}
       <div className="pl-menu-sep" />
@@ -659,9 +666,7 @@ export function MirroredTab({
       // state, or a poll that died before the first payload), and reopening it
       // just re-showed "Playlist (0 tracks) / Starting discovery..." forever.
       // Falling through re-prepares and heals it.
-      const hasPlaylist =
-        Number((existing?.playlist as { track_count?: number } | undefined)?.track_count ?? 0) > 0;
-      if (existing && existing.phase !== 'fresh' && hasPlaylist) {
+      if (existing && mirroredDiscoveryReopenable(existing)) {
         onOpen(hash);
         if (existing.phase === 'discovering') vertical.resumeDiscovery(hash);
         return;
@@ -718,17 +723,27 @@ export function MirroredTab({
     [config, vertical, onOpen],
   );
 
-  /** handleMirroredCardClick (610-643). */
+  /**
+   * the card always opens the tracks detail. it used to jump straight to the
+   * discovery modal once a discovery existed, which hid Delete and Edit Source
+   * for good (#1403), and after a clear + sync the pipeline phase with no
+   * playlist behind it opened an empty discovery modal nobody could use
+   * (#1405). the detail's Discover button reopens the discovery instead.
+   */
   const onCardClick = useCallback(
     (row: MirroredPlaylistRow) => {
-      const hash = mirroredHash(row.id);
-      const state = vertical.states[hash];
-      if (state && state.phase && state.phase !== 'fresh') {
-        onOpen(hash);
-        return;
-      }
-      // Nothing running → the TRACKS detail modal (641).
       void openDetail(row.id);
+    },
+    [openDetail],
+  );
+
+  /** "View progress" on a working card goes straight to discovery, but only
+   *  when there is a playlist to show, otherwise it's the detail. */
+  const onViewProgress = useCallback(
+    (row: MirroredPlaylistRow) => {
+      const hash = mirroredHash(row.id);
+      if (mirroredDiscoveryReopenable(vertical.states[hash])) onOpen(hash);
+      else void openDetail(row.id);
     },
     [vertical, onOpen, openDetail],
   );
@@ -949,15 +964,16 @@ export function MirroredTab({
               // carry, so the existing (tested) writer still produces them.
               const hash = mirroredHash(row.id);
               const live = vertical.states[hash];
+              const hasLive = Boolean(live?.phase && live.phase !== 'fresh');
               const phaseLine = mirroredPhaseLine(
-                live?.phase ?? pipelinePhaseFor(row),
-                live
+                hasLive ? live!.phase : pipelinePhaseFor(row),
+                hasLive
                   ? {
-                      discoveryProgress: live.discoveryProgress,
-                      spotifyMatches: live.spotifyMatches,
-                      spotifyTotal: live.spotifyTotal,
-                      pipeline_progress: live.pipeline_progress,
-                      pipeline_phase: live.pipeline_phase,
+                      discoveryProgress: live!.discoveryProgress,
+                      spotifyMatches: live!.spotifyMatches,
+                      spotifyTotal: live!.spotifyTotal,
+                      pipeline_progress: live!.pipeline_progress,
+                      pipeline_phase: live!.pipeline_phase,
                     }
                   : {
                       pipeline_progress: row.pipeline_state?.progress,
@@ -991,6 +1007,9 @@ export function MirroredTab({
                   key={row.id}
                   row={row}
                   name={displayName}
+                  syncsAs={
+                    row.sync_name && row.sync_name !== displayName ? row.sync_name : undefined
+                  }
                   nameTitle={
                     row.custom_name
                       ? `${displayName} — originally "${row.name ?? ''}"`
@@ -1030,7 +1049,7 @@ export function MirroredTab({
                             // pipeline, which IS refresh + discover + sync + queue the
                             // missing tracks — so "Find N missing" is literal, not a
                             // friendlier name for something else.
-                            if (state === 'working') onCardClick(row);
+                            if (state === 'working') onViewProgress(row);
                             else void pipeline.run(row.id, row.name ?? '');
                           },
                         }
@@ -1186,7 +1205,16 @@ export function MirroredTab({
             setDetail(null);
             void pipeline.run(detail.playlistId, detail.data.name ?? '');
           }}
+          onRefreshFromSource={() => {
+            setDetail(null);
+            void pipeline.run(detail.playlistId, detail.data.name ?? '', { refreshOnly: true });
+          }}
           onDiscover={() => void runDiscovery(detail.playlistId)}
+          discoverLabel={
+            mirroredDiscoveryReopenable(vertical.states[mirroredHash(detail.playlistId)])
+              ? 'View discovery'
+              : 'Discover'
+          }
         />
       )}
       {editingRef && (

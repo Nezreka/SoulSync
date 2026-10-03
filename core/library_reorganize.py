@@ -69,6 +69,7 @@ from core.metadata_service import (
     get_primary_source,
     get_source_priority,
 )
+from core.source_ids import id_column
 from utils.logging_config import get_logger
 
 logger = get_logger("library_reorganize")
@@ -296,15 +297,16 @@ def _resolve_better_edition(album_data, source_ids, file_tracks, primary_source)
     from core.metadata.canonical_resolver import (
         default_fetch_alternates,
         default_fetch_tracklist,
+        provider_artist_id,
         resolve_canonical_for_album,
     )
-    art_id = str(album_data.get('artist_id') or '')
     art_name = album_data.get('artist_name') or ''
     title = album_data.get('title') or ''
 
     def _alts(source, aid):
         return default_fetch_alternates(
-            source, aid, artist_id=art_id, artist_name=art_name, album_title=title,
+            source, aid, artist_id=provider_artist_id(album_data, source),
+            artist_name=art_name, album_title=title,
         )
 
     try:
@@ -849,7 +851,12 @@ def load_album_and_tracks(db, album_id):
                    json_extract(al.external_ids, '$.itunes') AS itunes_album_id,
                    json_extract(al.external_ids, '$.deezer') AS deezer_id,
                    json_extract(al.external_ids, '$.discogs') AS discogs_id,
-                   ar.name AS artist_name
+                   ar.name AS artist_name,
+                   ar.spotify_id AS artist_spotify_id,
+                   json_extract(ar.external_ids, '$.itunes') AS artist_itunes_id,
+                   json_extract(ar.external_ids, '$.deezer') AS artist_deezer_id,
+                   json_extract(ar.external_ids, '$.discogs') AS artist_discogs_id,
+                   ar.musicbrainz_id AS artist_musicbrainz_id
             FROM lib2_albums al
             JOIN lib2_artists ar ON al.primary_artist_id = ar.id
             WHERE al.id = ?
@@ -859,7 +866,25 @@ def load_album_and_tracks(db, album_id):
         album_row = cursor.fetchone()
         if not album_row:
             return None, []
-        album_data = dict(album_row)
+        # Older and partial schemas may lack some enrichment columns. Read the
+        # artist side by position because album and artist rows share names
+        # like id and deezer_id; a combined sqlite3.Row resolves those names
+        # to the album value.
+        columns = [column[0] for column in cursor.description]
+        if '_artist_columns_start' in columns:
+            artist_start = columns.index('_artist_columns_start')
+            album_data = {
+                name: album_row[i] for i, name in enumerate(columns)
+                if i < artist_start
+            }
+            artist_columns = {
+                name: album_row[i] for i, name in enumerate(columns)
+                if i > artist_start
+            }
+            for source in ('spotify', 'itunes', 'deezer', 'discogs', 'musicbrainz'):
+                album_data[f'artist_{source}_id'] = artist_columns.get(id_column(source, 'artist'))
+        else:
+            album_data = dict(album_row)  # Legacy dict-backed database adapters.
 
         # the files of the library being reorganized (#1199): the same album
         # can have a copy in two of them, each in its own folder
@@ -1297,6 +1322,7 @@ def _build_post_process_context(
     local_title: Optional[str] = None,
     local_year: Optional[str] = None,
     record_type: Optional[str] = None,
+    type_source: Optional[str] = None,
     album_artist: Optional[str] = None,
 ) -> dict:
     """Build the same shape `import_album_process` builds so post-process
@@ -1390,7 +1416,25 @@ def _build_post_process_context(
 
     effective_artist_name = primary_track_artist if (is_comp and primary_track_artist) else album_artist_name
 
+    # which source the release type came from, for $albumtype only (a source
+    # with its own EP label is taken at its word). tag mode has none: its
+    # record_type is the library's, so it keeps the track-count split and a
+    # reorganize files a release where the download did
+    _type_source = type_source if type_source and type_source != 'tags' else ''
+    # the source's own album lookup is reliable for a source that labels EPs
+    # itself (deezer's catch-all 'album' only comes from its TRACK lookups).
+    # when the release type agrees with it, lock it, so a reorganize files a
+    # short album where the artist page shows it: Flow State Sampler, a
+    # three-track deezer album, would otherwise go back to Single/ by count.
+    # spotify and tag mode keep the count split, same as their downloads
+    from core.imports.paths import _source_labels_eps
+    _api_type = str(api_album.get('record_type') or api_album.get('album_type') or '').strip().lower()
+    _type_locked = bool(
+        _type_source and _source_labels_eps(_type_source)
+        and _api_type and _api_type == (eff_type or 'album')
+    )
     return {
+        '_album_type_source': _type_source,
         'spotify_artist': {
             'name': effective_artist_name,
             'id': '',
@@ -1412,6 +1456,13 @@ def _build_post_process_context(
             'disambiguation': str(api_album.get('disambiguation') or '').strip(),
             'album_type': eff_type or 'album',
             'record_type': eff_type or 'album',
+            'album_type_locked': _type_locked,
+            # $atypes labels a folder with every qualifier the release carries,
+            # and Live/Soundtrack/Remix exist only as secondary types. Without
+            # them here a reorganize renders $atypes empty and RENAMES
+            # "[2017][EP][Live] Audiotree Live" to "[2017] Audiotree Live",
+            # stripping the labels the variable exists to preserve.
+            'secondary_types': list(api_album.get('secondary_types') or []),
             'is_compilation': is_comp,
             'artists': [{'name': album_artist_name}],
         },
@@ -1632,6 +1683,7 @@ def preview_album_reorganize(
             local_year=(str(album_data.get('year')) if album_data.get('year') else None),
             record_type=plan.get('record_type') or album_data.get('record_type'),
             album_artist=artist_name,
+            type_source=plan.get('source'),
         )
         # `_build_final_path_for_track` switches between ALBUM and SINGLE
         # modes based on `album_info.get('is_album')` — must be passed,
@@ -1836,6 +1888,7 @@ class _RunContext:
     stop_check: Optional[Callable[[], bool]] = None
     transfer_dir: Optional[str] = None      # anchors the #746 /deleted-quarantine skip
     record_type: Optional[str] = None
+    source: Optional[str] = None            # the metadata source the plan resolved
 
     def emit(self, **updates) -> None:
         """Fire the progress callback. Caller is responsible for
@@ -1923,6 +1976,7 @@ def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, st
         local_title=title, local_year=ctx.local_year,
         record_type=ctx.record_type,
         album_artist=ctx.artist_name,
+        type_source=ctx.source,
     )
     context_key = f"reorganize_{ctx.album_id}_{track_id}_{uuid.uuid4().hex[:8]}"
     try:
@@ -2256,6 +2310,7 @@ def reorganize_album(
         stop_check=stop_check,
         transfer_dir=transfer_dir,
         record_type=plan.get('record_type') or album_data.get('record_type'),
+        source=plan.get('source'),
     )
 
     try:
@@ -2873,10 +2928,13 @@ def _has_remaining_audio(directory: str) -> bool:
     """Return True if `directory` contains any audio files. Used as the
     safety check before stripping album-level sidecars: if a track
     failed to move, leave its cover art and friends in place."""
+    from core.library.residual_files import is_appledouble
     if not os.path.isdir(directory):
         return False
     try:
         for name in os.listdir(directory):
+            if is_appledouble(name):
+                continue   # a macOS `._track.flac` splits to '.flac' but isn't audio
             full = os.path.join(directory, name)
             if not os.path.isfile(full):
                 continue

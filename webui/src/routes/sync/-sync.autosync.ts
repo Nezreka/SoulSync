@@ -879,6 +879,53 @@ export function getAutoSyncPipelinePlaylists(playlists: MirroredRow[]): AutoSync
     });
 }
 
+/** One automation's live progress, as /api/automations/progress returns it. */
+export interface AutomationProgressState {
+  status?: string;
+  phase?: string;
+  progress?: number;
+  started_at?: string | null;
+  finished_at?: string | null;
+  log?: { type?: string; text?: string }[];
+}
+
+function isoSeconds(value: string | null | undefined): number | undefined {
+  const ms = value ? Date.parse(value) : NaN;
+  return Number.isFinite(ms) ? ms / 1000 : undefined;
+}
+
+/**
+ * Live cards for personalized rows (Daily Mix etc).
+ *
+ * a mirrored playlist reports its run as `pipeline_state`. a personalized row
+ * that was never mirrored runs as its own scheduled automation instead, and
+ * that only reported to the notification area, so Run now on Daily Mix showed
+ * nothing on the board. this maps the automation's progress onto the row in
+ * the shape the monitor already reads.
+ */
+export function autoSyncApplyAutomationProgress(
+  playlists: MirroredRow[],
+  schedules: Record<string, { automation_id: number | string }>[],
+  progress: Record<string, AutomationProgressState> | null | undefined,
+): MirroredRow[] {
+  if (!progress) return playlists;
+  return playlists.map((p) => {
+    if (!p._personalized) return p;
+    const sched = schedules.map((s) => s[String(p.id)]).find(Boolean);
+    const live = sched ? progress[String(sched.automation_id)] : undefined;
+    if (!live?.status) return p;
+    const state: PipelineState = {
+      status: live.status,
+      phase: live.phase,
+      progress: live.progress,
+      started_at: isoSeconds(live.started_at),
+      finished_at: isoSeconds(live.finished_at),
+      log: (live.log || []).map((entry) => ({ message: entry?.text || '' })),
+    };
+    return { ...p, pipeline_state: state };
+  });
+}
+
 /** 1116-1122. */
 export function autoSyncPipelineStatusLabel(status: string | undefined): string {
   if (status === 'running') return 'Running';

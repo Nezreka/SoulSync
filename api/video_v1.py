@@ -59,6 +59,13 @@ def register_routes(bp):
     def video_library_genres():
         return _relay("video_library_genres")
 
+    @bp.route("/video/library/episode", methods=["GET"])
+    @require_api_key
+    def video_library_episode():
+        """Is a specific episode in the library?
+        ?tmdb_id=<show_tmdb_id>&season=<n>&episode=<n> → {in_library: bool}"""
+        return _relay("video_library_episode")
+
     # ---- search ----
 
     @bp.route("/video/search", methods=["GET"])

@@ -33,15 +33,20 @@ def format_rank_for_path(file_path: Optional[str]) -> int:
     return _FORMAT_RANK.get(ext, 1)
 
 
-def duplicate_keep_sort_key(track: Dict) -> Tuple[int, int, float, int]:
+def duplicate_keep_sort_key(track: Dict) -> Tuple[int, int, int, float, int]:
     """Sort key for picking the keeper — the higher tuple wins.
 
-    Order of precedence: format/lossless tier, then bitrate, then duration,
-    then track number (a real number over a placeholder ``01``). Putting format
-    first is the whole point — it makes FLAC beat MP3 even when the FLAC's
-    bitrate is 0/missing in the DB.
+    Order of precedence: in a server playlist, then format/lossless tier, then
+    bitrate, then duration, then track number (a real number over a
+    placeholder ``01``). format over bitrate makes FLAC beat MP3 even when the
+    FLAC's bitrate is 0/missing in the DB.
+
+    the playlist copy wins over quality: deleting it drops the song from that
+    playlist, so bulk "keep best" would quietly break playlists (discord,
+    jadux). ``playlists`` is set by the duplicate detector.
     """
     return (
+        1 if track.get("playlists") else 0,
         format_rank_for_path(track.get("file_path")),
         track.get("bitrate") or 0,
         track.get("duration") or 0,

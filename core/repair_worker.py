@@ -65,7 +65,7 @@ _ABSENCE_IS_THE_FINDING = frozenset({'dead_file', 'empty_folder'})
 DESTRUCTIVE_FINDING_TYPES = frozenset({
     'orphan_file',            # default 'staging' MOVES the file; 'delete' removes it
     'dead_file',              # 'remove' drops the library row + file
-    'corrupt_audio',          # deletes and re-wishlists
+    'corrupt_audio',          # moves to the deleted-files folder, re-wishlists
     'unwanted_content',       # deletes/quarantines live + spoken content
     'short_preview_track',    # deletes the clip, re-wishlists the real track
     'expired_download',       # deletes the aged download
@@ -104,12 +104,16 @@ FINDING_TYPE_META = {
     'missing_lossy_copy':       {'label': 'Missing Lossy Copy', 'verb': 'Convert'},
     'unwanted_content':         {'label': 'Unwanted Content', 'verb': 'Remove'},
     'unknown_artist':           {'label': 'Unknown Artist', 'verb': 'Identify'},
+    'suspect_album_tag':        {'label': 'Suspect Album Tags', 'verb': 'Re-identify'},
     'acoustid_mismatch':        {'label': 'AcoustID Mismatch', 'verb': 'Re-tag'},
     'quality_upgrade':          {'label': 'Quality Upgrades', 'verb': 'Upgrade'},
     'missing_discography_track':{'label': 'Missing Discography', 'verb': 'Add to Wishlist'},
     'library_retag':            {'label': 'Library Re-tag', 'verb': 'Apply Tags'},
     'short_preview_track':      {'label': 'Preview Clips', 'verb': 'Re-download'},
-    'corrupt_audio':            {'label': 'Corrupt Audio', 'verb': 'Re-download'},
+    'corrupt_audio':            {'label': 'Corrupt Audio', 'verb': 'Re-download',
+                                 'confirm': ('The damaged files move to the deleted-files folder, where they '
+                                             'can be restored until retention clears them, and the tracks '
+                                             'are re-downloaded.')},
     'canonical_version':        {'label': 'Canonical Version', 'verb': 'Pin Version'},
     'genre_cleanup':            {'label': 'Genre Cleanup', 'verb': 'Clean Genres'},
     'comma_artist_split':       {'label': 'Combined Artists', 'verb': 'Split Artists'},
@@ -167,6 +171,7 @@ JOB_CATEGORIES = {
     'genre_cleanup': 'Tags & metadata',
     'genre_enrichment': 'Tags & metadata',
     'comma_artist_splitter': 'Tags & metadata',
+    'suspect_album_tag_detector': 'Tags & metadata',
     'metadata_gap_filler': 'Tags & metadata',
     'native_enrichment_sweep': 'Tags & metadata',
     'missing_cover_art': 'Artwork & lyrics',
@@ -376,6 +381,39 @@ def _path_mapping_hint(config_manager) -> str:
             'for the SoulSync player, then run a full database refresh.'
         )
     return 'Check Settings -> Library -> Music Paths so SoulSync can map this path.'
+
+
+def _quarantine_mover(transfer_folder, source):
+    """An ``unlink`` for the delete journal that moves the file into the
+    deleted-files quarantine instead of deleting it.
+
+    The file keeps its path relative to the transfer folder (or its name, for
+    files outside it) and is recorded in the quarantine manifest, so the
+    deleted-files manager can restore it and library.deleted_keep_days ages it
+    out like any other removal. A failed move raises, which the journal
+    records as a failed item.
+    """
+    def _move(path):
+        from core.library.deleted_quarantine import record_deleted_entry
+        from core.repair_jobs.base import deleted_quarantine_root
+
+        deleted_root = deleted_quarantine_root(transfer_folder)
+        try:
+            rel = os.path.relpath(path, transfer_folder)
+        except ValueError:
+            rel = os.path.basename(path)
+        if rel.startswith('..') or os.path.isabs(rel):
+            rel = os.path.basename(path)
+        dest = os.path.join(deleted_root, rel)
+        base, ext = os.path.splitext(dest)
+        n = 1
+        while os.path.exists(dest):
+            dest = f"{base}_{n}{ext}"
+            n += 1
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.move(path, dest)
+        record_deleted_entry(deleted_root, dest, path, source)
+    return _move
 
 
 class RepairWorker:
@@ -1281,6 +1319,11 @@ class RepairWorker:
         # so history can say "you stopped this" instead of implying a crash.
         if run_status == 'completed' and self._cancel_current_job.is_set():
             run_status = 'cancelled'
+        # the job quit on its own before the end. not a crash and not done:
+        # say so, with the job's reason, instead of a clean 'completed'
+        if run_status == 'completed' and getattr(result, 'stopped_early', ''):
+            run_status = 'stopped'
+            run_error = str(result.stopped_early)[:500]
 
         # Optional Library-v2 interoperability pass. The callee repeats the
         # strict feature gate; failures are counted because the underlying
@@ -1896,6 +1939,8 @@ class RepairWorker:
         conn = None
         try:
             conn = self.db._get_connection()
+            has_error_col = self._has_column(conn.cursor(), 'repair_findings', 'last_error')
+            error_count_expr = "SUM(CASE WHEN last_error IS NOT NULL AND last_error != '' THEN 1 ELSE 0 END)" if has_error_col else "0"
             rows = conn.execute(f"""
                 SELECT {artist_expr}                        AS artist,
                        {album_expr}                         AS album,
@@ -1911,6 +1956,8 @@ class RepairWorker:
                        MAX(json_extract(details_json, '$.album_thumb_url'))  AS album_thumb_url,
                        MAX(json_extract(details_json, '$.artist_thumb_url')) AS artist_thumb_url,
                        MAX(json_extract(details_json, '$.artist_id'))        AS artist_id,
+                       GROUP_CONCAT(DISTINCT finding_type)  AS finding_types_raw,
+                       {error_count_expr}                   AS error_count,
                        MIN(created_at)                      AS first_seen,
                        MAX(created_at)                      AS last_seen
                 FROM repair_findings
@@ -1940,7 +1987,37 @@ class RepairWorker:
                               ('_best_label', 'best_quality')):
                 raw_label = d.pop(src, None) or ''
                 d[dest] = raw_label.split('|', 1)[1] if '|' in raw_label else ''
+            d['finding_types'] = [t.strip() for t in (d.pop('finding_types_raw', '') or '').split(',') if t.strip()]
+            d['error_count'] = int(d.get('error_count') or 0)
             out.append(d)
+
+        # Artwork the findings did not carry: the catalogue's, by name
+        # (Library v2 keeps it on lib2_albums / lib2_artists.image_url).
+        for key, table, thumb in (('album', 'lib2_albums', 'album_thumb_url'),
+                                  ('artist', 'lib2_artists', 'artist_thumb_url')):
+            missing = sorted({d[key] for d in out if not d.get(thumb) and d.get(key)})
+            if not missing:
+                continue
+            conn = None
+            try:
+                conn = self.db._get_connection()
+                name_col = 'title' if table == 'lib2_albums' else 'name'
+                art: Dict[str, str] = {}
+                for start in range(0, len(missing), 500):
+                    chunk = missing[start:start + 500]
+                    for name, url in conn.execute(
+                            f"SELECT {name_col}, image_url FROM {table} "
+                            f"WHERE {name_col} IN ({','.join('?' * len(chunk))}) "
+                            f"AND image_url IS NOT NULL AND image_url != ''", chunk):
+                        art.setdefault(name, url)
+                for d in out:
+                    if not d.get(thumb) and d.get(key) in art:
+                        d[thumb] = art[d[key]]
+            except Exception as e:
+                logger.debug("Failed to enrich %s thumbnails for findings: %s", key, e)
+            finally:
+                if conn:
+                    conn.close()
         return out
 
     def get_finding_groups(self) -> List[dict]:
@@ -2429,6 +2506,9 @@ class RepairWorker:
                 'fixable': fixable,
                 'destructive': slug in DESTRUCTIVE_FINDING_TYPES,
                 'job_ids': sorted(jobs_by_type.get(slug, [])),
+                # What the bulk-fix confirmation says for this type, where the
+                # generic "moves or deletes files ... cannot be undone" is wrong.
+                **({'confirm': meta['confirm']} if meta.get('confirm') else {}),
             })
         return catalog
 
@@ -2472,6 +2552,7 @@ class RepairWorker:
             'genre_enrichment': self._fix_genre_enrichment,
             'comma_artist_split': self._fix_comma_artist_split,
             'stale_index_path': self._fix_stale_index_path,
+            'suspect_album_tag': self._fix_suspect_album_tag,
         }
 
     def _execute_fix(self, finding_type: str, entity_type: str, entity_id: str,
@@ -2481,6 +2562,21 @@ class RepairWorker:
         if not handler:
             return {'success': False, 'error': f'No fix available for finding type: {finding_type}'}
         return handler(entity_type, entity_id, file_path, details)
+
+    def _fix_suspect_album_tag(self, entity_type, entity_id, file_path, details):
+        """A suspect album tag is fixed by picking the right release, which
+        only the Re-identify modal does: it searches, the user picks, and
+        /api/reidentify/apply re-files the file. A bulk fix has nothing to
+        pick with, so it says where to go.
+
+        Upstream's handler also took a ``source:track_id`` fix action and
+        called the re-identify helpers directly — with signatures they do not
+        have, so it could only fail. Nothing sends that action; it is not
+        carried over."""
+        return {
+            'success': False,
+            'error': 'Please use the Re-identify button to select the target album release.',
+        }
 
     def _fix_stale_index_path(self, entity_type, entity_id, file_path, details):
         """pathdrift25-01 — repoint one index row at the file it describes.
@@ -3257,7 +3353,8 @@ class RepairWorker:
         return 'files', 0
 
     def _remove_native_repair_file(self, file_path: str, details: dict,
-                                   *, reason: str = 'maintenance') -> dict:
+                                   *, reason: str = 'maintenance',
+                                   quarantine: bool = False) -> dict:
         """Physically remove one reviewed native file; DB lifecycle follows
         through ``sync_repair_change`` after this handler succeeds.
 
@@ -3268,6 +3365,9 @@ class RepairWorker:
         happened, and a crash mid-run left no record to recover from. ``reason``
         becomes the journal's actor (``repair:<reason>``), which is how the
         History tells an unattended delete from one a person clicked.
+
+        ``quarantine`` moves the file into the deleted-files folder instead of
+        unlinking it (restorable until retention clears it), same journal.
         """
         target = file_path or details.get('original_path') or details.get('file_path')
         if not target:
@@ -3329,6 +3429,8 @@ class RepairWorker:
                 entity_id=entity_id,
                 actor=f'repair:{reason}',
                 config_manager=self._config_manager,
+                **({'unlink': _quarantine_mover(self.transfer_folder, reason),
+                    'mode': 'quarantine'} if quarantine else {}),
                 # Containment for this path was already decided, one line
                 # above, by the rule that knows whether the resolver guessed.
                 # Re-applying the dialog's stricter rule here would silently
@@ -3395,7 +3497,7 @@ class RepairWorker:
         return {'success': True, 'action': 'applied_tags', 'message': message}
 
     def _fix_uncatalogued_bad_file(self, file_path, details, *, reason: str,
-                                   noun: str) -> dict:
+                                   noun: str, quarantine: bool = False) -> dict:
         """Apply a delete-and-re-download finding that names a FILE, not a track.
 
         The corruption detector walks the library folders as well as the
@@ -3439,14 +3541,17 @@ class RepairWorker:
             # the row as obsolete instead of leaving it pending (#1143).
             return {'success': False, 'stale': True,
                     'error': f'File no longer on disk: {os.path.basename(target)}'}
-        removed = self._remove_native_repair_file(target, details, reason=reason)
+        removed = self._remove_native_repair_file(
+            target, details, reason=reason, quarantine=quarantine)
         if not removed.get('success'):
             return removed
+        done = (f'Moved the {noun} to the deleted folder' if quarantine
+                else f'Deleted the {noun}')
         return {
             'success': True,
             'action': 'deleted_file',
-            'message': (f'Deleted the {noun}. It is not in your library, so '
-                        'nothing was queued to replace it.'),
+            'message': (f'{done}. It is not in your library, so nothing was '
+                        'queued to replace it.'),
         }
 
     def _fix_short_preview_track(self, entity_type, entity_id, file_path, details):
@@ -3482,14 +3587,19 @@ class RepairWorker:
         }
 
     def _fix_corrupt_audio(self, entity_type, entity_id, file_path, details):
-        """Approve a corrupt-file finding: delete the damaged file, drop its DB row, and
-        re-add the track to the wishlist (full payload) so the real version downloads.
+        """Approve a corrupt-file finding: move the damaged file to the deleted-files
+        quarantine and queue the track again so the real version downloads.
         Frame-corrupt audio can't be repaired by re-tagging — the data is gone — so a
-        fresh download is the only cure. Mirrors the preview-clip redownload path (#1000).
+        fresh download is the only cure (#1000).
+
+        Quarantined rather than deleted: until a replacement has actually arrived,
+        the damaged copy is still the only one, and it can be restored from the
+        deleted-files manager if the re-download never succeeds.
         """
         if not entity_id:
             return self._fix_uncatalogued_bad_file(
-                file_path, details, reason='corrupt_audio', noun='corrupt file')
+                file_path, details, reason='corrupt_audio', noun='corrupt file',
+                quarantine=True)
         stale = _stale_legacy_subject(entity_id)
         if stale:
             return stale
@@ -3497,7 +3607,8 @@ class RepairWorker:
         row = self._load_lib2_redownload_row(native_track_id)
         if not row:
             return {'success': False, 'error': 'Track not found in Library v2'}
-        removed = self._remove_native_repair_file(file_path, details, reason='corrupt_audio')
+        removed = self._remove_native_repair_file(
+            file_path, details, reason='corrupt_audio', quarantine=True)
         if not removed.get('success'):
             return removed
         title = row.get('title') or details.get('title') or 'Unknown'
@@ -3505,7 +3616,7 @@ class RepairWorker:
             'success': True,
             'action': 'redownload',
             'message': (
-                f'Deleted corrupt file and queued "{title}" for download'
+                f'Moved the corrupt file to the deleted folder and queued "{title}" for download'
                 if removed.get('deleted_file')
                 else f'Queued "{title}" for download (file already gone)'
             ),
@@ -3563,8 +3674,27 @@ class RepairWorker:
                 # Clean up empty parent directories
                 self._cleanup_empty_parents(resolved)
 
+                # Nudge the auto-import worker so the file doesn't sit in
+                # staging until the next poll cycle. When auto-import is
+                # disabled the worker isn't running and this is a safe
+                # no-op — the message below says so honestly instead of
+                # promising an import that will never come (Specialmed:
+                # "moved to staging... not automatically added to the
+                # database... ss wants to redownload the track").
+                self._trigger_auto_import_scan()
+                auto_import_on = bool(
+                    self._config_manager
+                    and self._config_manager.get('auto_import.enabled', False)
+                )
+                if auto_import_on:
+                    message = 'Moved to staging folder — auto-import will pick it up'
+                else:
+                    message = ('Moved to staging folder. Auto-import is off, so it '
+                               'will NOT be imported automatically — import it from '
+                               'the Import page, or enable auto-import in Settings.')
+
                 return {'success': True, 'action': 'moved_to_staging',
-                        'message': 'Moved to staging folder for import'}
+                        'message': message}
 
             elif fix_action == 'delete':
                 # Journalled like every other physical delete. An orphan has no
@@ -3597,14 +3727,55 @@ class RepairWorker:
         except OSError as e:
             return {'success': False, 'error': f'Failed to handle orphan file: {e}'}
 
-    def _cleanup_empty_parents(self, file_path):
-        """Remove empty parent directories up to 3 levels, never removing the transfer folder."""
+    def _protected_root_dirs(self):
+        """Configured roots that must never be auto-removed as 'empty'.
+
+        The transfer folder plus everything ``protected_root_dirs()`` knows
+        (staging / download / transfer from settings) — issue #976 / the
+        Specialmed report: a staging folder nested under the transfer folder
+        (UnRaid single-share) was rmdir'd when a repair fix emptied it.
+        All paths in canonical ``config_root_path`` form, normpath'd.
+        """
         try:
-            transfer_norm = os.path.normpath(self.transfer_folder)
+            from core.imports.file_ops import protected_root_dirs
+            roots = {os.path.normpath(p) for p in protected_root_dirs() if p}
+        except Exception:
+            roots = set()
+        roots.add(os.path.normpath(self.transfer_folder))
+        return roots
+
+    def _trigger_auto_import_scan(self):
+        """Nudge the auto-import worker to scan the staging folder now.
+
+        Best effort: the worker handle lives in ``api.import_routes`` (deferred
+        import — the repair worker must not depend on the API layer at module
+        load). ``trigger_scan()`` on a non-running worker is a safe no-op, so
+        this never starts background processing the user didn't ask for; it
+        only shortens the wait when the worker is actually running.
+        """
+        try:
+            from api.import_routes import auto_import_worker
+        except Exception as e:
+            logger.debug("Could not reach auto-import worker: %s", e)
+            return
+        try:
+            if auto_import_worker is not None:
+                auto_import_worker.trigger_scan()
+        except Exception as e:
+            logger.debug("Could not trigger auto-import scan: %s", e)
+
+    def _cleanup_empty_parents(self, file_path):
+        """Remove empty parent directories up to 3 levels.
+
+        Never removes the transfer folder or any configured root (staging /
+        download / transfer) — even when nested and empty.
+        """
+        try:
+            protected = self._protected_root_dirs()
             parent = os.path.dirname(file_path)
             for _ in range(3):
                 if (parent and os.path.isdir(parent)
-                        and os.path.normpath(parent) != transfer_norm
+                        and os.path.normpath(parent) not in protected
                         and not os.listdir(parent)):
                     os.rmdir(parent)
                     parent = os.path.dirname(parent)
@@ -4601,11 +4772,15 @@ class RepairWorker:
             if resolved and os.path.isfile(resolved):
                 try:
                     from core.tag_writer import write_tags_to_file
+                    # track_artist, not artist_name: the writer puts
+                    # artist_name into album artist, and the file stays in its
+                    # album folder, so a compilation track would split off its
+                    # album on the next server scan (#1289)
                     write_tags_to_file(
                         resolved,
                         {
                             'title': actual_title,
-                            'artist_name': actual_artist,
+                            'track_artist': actual_artist,
                             'artists_list': _split_acoustid_credit(actual_artist),
                         },
                     )
@@ -4988,11 +5163,13 @@ class RepairWorker:
                     ),
                 }
 
-            # Clean up empty source directories
+            # Clean up empty source directories (never a configured root, even
+            # when nested under the transfer folder — #976 / Specialmed)
+            protected = self._protected_root_dirs()
             parent = os.path.dirname(src)
             for _ in range(5):
                 if (parent and os.path.isdir(parent)
-                        and os.path.normpath(parent) != transfer_norm
+                        and os.path.normpath(parent) not in protected
                         and not os.listdir(parent)):
                     os.rmdir(parent)
                     parent = os.path.dirname(parent)
@@ -5173,71 +5350,22 @@ class RepairWorker:
                 logger.debug("Full ffmpeg stderr for %s:\n%s", resolved, proc.stderr)
                 return {'success': False, 'error': f'ffmpeg conversion failed: {reason}'}
 
-            # Update QUALITY tag
-            try:
-                from mutagen import File as MutagenFile
-                audio = MutagenFile(out_path)
-                if audio is not None:
-                    if codec == 'mp3':
-                        from mutagen.id3 import TXXX
-                        audio.tags.add(TXXX(encoding=3, desc='QUALITY', text=[quality_label]))
-                    elif codec == 'opus':
-                        audio['QUALITY'] = [quality_label]
-                    elif codec == 'aac':
-                        from mutagen.mp4 import MP4FreeForm
-                        audio['----:com.apple.iTunes:QUALITY'] = [MP4FreeForm(quality_label.encode('utf-8'))]
-                    audio.save()
-            except Exception as e:
-                logger.debug("Failed to write QUALITY tag on lossy copy: %s", e)
-
-            # Embed cover art from source FLAC
-            if codec in ('opus', 'aac'):
-                try:
-                    from mutagen import File as MutagenFile
-                    from mutagen.flac import FLAC as MutagenFLAC
-                    source_audio = MutagenFLAC(resolved)
-                    if source_audio and source_audio.pictures:
-                        pic = source_audio.pictures[0]
-                        dest_audio = MutagenFile(out_path)
-                        if dest_audio is not None:
-                            if codec == 'opus':
-                                import base64, struct
-                                from mutagen.oggopus import OggOpus
-                                if isinstance(dest_audio, OggOpus):
-                                    picture_data = (
-                                        struct.pack('>II', pic.type, len(pic.mime.encode('utf-8')))
-                                        + pic.mime.encode('utf-8')
-                                        + struct.pack('>I', len(pic.desc.encode('utf-8')))
-                                        + pic.desc.encode('utf-8')
-                                        + struct.pack('>IIII', pic.width, pic.height, pic.depth, pic.colors)
-                                        + struct.pack('>I', len(pic.data))
-                                        + pic.data
-                                    )
-                                    dest_audio['METADATA_BLOCK_PICTURE'] = [base64.b64encode(picture_data).decode('ascii')]
-                                    dest_audio.save()
-                            elif codec == 'aac':
-                                from mutagen.mp4 import MP4Cover
-                                fmt = MP4Cover.FORMAT_JPEG if 'jpeg' in pic.mime else MP4Cover.FORMAT_PNG
-                                dest_audio['covr'] = [MP4Cover(pic.data, imageformat=fmt)]
-                                dest_audio.save()
-                except Exception as e:
-                    logger.debug("Failed to embed cover art in lossy copy: %s", e)
+            # rebuild the copy's tags from the source: -map_metadata leaves
+            # vorbis names in an mp3 and drops the cover (#1422)
+            from core.metadata.lossy_tags import carry_tags_to_lossy_copy
+            carry_tags_to_lossy_copy(resolved, out_path, quality_label)
 
             if delete_original:
                 try:
                     from mutagen import File as MutagenFile
                     test = MutagenFile(out_path)
                     if test is not None:
-                        # The lossless original leaving the disk is the most
-                        # consequential delete this worker performs; it goes
-                        # through the same journal as every other one.
-                        removed = self._remove_native_repair_file(
-                            file_path, details, reason='lossy_converter',
-                        )
-                        if not removed.get('success'):
-                            return removed
-                        # Keep the DB's own path format — the row may hold a
-                        # container path this process resolved to something else.
+                        # S1: the catalogue FIRST. If that write fails the
+                        # original is untouched and the row still names it;
+                        # deleting first left the row pointing at a file that
+                        # was gone. Keep the DB's own path format — the row may
+                        # hold a container path this process resolved to
+                        # something else.
                         new_db_path = os.path.splitext(file_path)[0] + out_ext
                         try:
                             provenance = _lossy_provenance(source_replaced=True)
@@ -5252,8 +5380,25 @@ class RepairWorker:
                             return {
                                 'success': False,
                                 'error': (
-                                    'Lossy output was created and the original deleted, '
-                                    f'but Library v2 could not be updated: {e}'
+                                    f'Converted to {quality_label}, but Library v2 could '
+                                    f'not be updated — original kept: {e}'
+                                ),
+                            }
+                        # The lossless original leaving the disk is the most
+                        # consequential delete this worker performs; it goes
+                        # through the same journal as every other one. A
+                        # failure now leaves the library pointing at the lossy
+                        # copy, which exists, and only the original behind.
+                        removed = self._remove_native_repair_file(
+                            file_path, details, reason='lossy_converter',
+                        )
+                        if not removed.get('success'):
+                            return {
+                                'success': False,
+                                'error': (
+                                    f'Converted to {quality_label} (the library now points '
+                                    f'at it) but the original could not be deleted: '
+                                    f"{removed.get('error') or 'unknown error'}"
                                 ),
                             }
                         return {'success': True, 'action': 'converted_and_deleted',

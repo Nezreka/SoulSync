@@ -1760,9 +1760,22 @@ async function navigateToMirroredPlaylist(playlistRef, source = 'spotify') {
     }
 }
 
+/** a download process whose run is over: its modal is results, not work */
+function _isFinishedDownloadProcess(process) {
+    return Boolean(process) && (process.status === 'complete' || process.status === 'cancelled');
+}
+
 async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, spotifyTracks, album, artist, showLoadingOverlayParam = true, contextType = 'artist_album') {
     if (showLoadingOverlayParam) {
         showLoadingOverlay('Loading album...');
+    }
+    // a finished run for this album: opening the album again is a new check,
+    // not a replay of the old one. the reporter downloaded one song, closed
+    // the modal while it ran, came back for another and got the previous
+    // run until a browser refresh (#1386). the old results stay reachable
+    // from the download bubble right up to here
+    if (_isFinishedDownloadProcess(activeDownloadProcesses[virtualPlaylistId])) {
+        await closeDownloadMissingModal(virtualPlaylistId);
     }
     // Check if a process is already active for this virtual playlist
     if (activeDownloadProcesses[virtualPlaylistId]) {

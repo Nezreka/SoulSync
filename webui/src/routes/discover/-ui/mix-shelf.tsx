@@ -1,7 +1,12 @@
 import type { DiscoverSectionId } from '../-discover.layout';
 import type { DiscoverMix } from '../-discover.mixes';
 
-import { mixCoverTiles, mixTrackCount, mixUsesSolidCover } from '../-discover.mixes';
+import {
+  MIX_COVER_PLACEHOLDER,
+  mixCoverLayout,
+  mixTrackCount,
+  mixUsesSolidCover,
+} from '../-discover.mixes';
 import { DiscoverSection } from './discover-section';
 
 /**
@@ -36,6 +41,7 @@ export interface DiscoverMixCardProps {
  */
 export function DiscoverMixCard({ mix, onOpen, onPlay, playing }: DiscoverMixCardProps) {
   const count = mixTrackCount(mix);
+  const layout = mixCoverLayout(mix.tracks);
   return (
     <div className="discover-mix-card" data-mix-key={mix.key}>
       {mixUsesSolidCover(mix) ? (
@@ -51,19 +57,29 @@ export function DiscoverMixCard({ mix, onOpen, onPlay, playing }: DiscoverMixCar
           <MixCardPlay mix={mix} onPlay={onPlay} playing={playing} />
         </div>
       ) : (
-        <div className="mix-card-cover">
-          {mixCoverTiles(mix.tracks).map((cover, i) => (
+        <div className={`mix-card-cover${layout.kind === 'grid' ? '' : ' mix-card-cover--single'}`}>
+          {layout.kind === 'grid' ? (
+            layout.covers.map((cover, i) => (
+              <div
+                className="mix-card-tile"
+                key={`${cover}:${i}`}
+                style={{ backgroundImage: `url('${cover}')` }}
+              />
+            ))
+          ) : (
             <div
-              className="mix-card-tile"
-              key={`${cover}:${i}`}
-              style={{ backgroundImage: `url('${cover}')` }}
+              className="mix-card-tile mix-card-tile--full"
+              style={{
+                backgroundImage: `url('${layout.kind === 'single' ? layout.cover : MIX_COVER_PLACEHOLDER}')`,
+              }}
             />
-          ))}
+          )}
           <MixCardPlay mix={mix} onPlay={onPlay} playing={playing} />
         </div>
       )}
       <button type="button" className="mix-card-open" onClick={() => onOpen(mix.key)}>
         <span className="mix-card-name">{mix.title}</span>
+        {mix.blurb ? <span className="mix-card-blurb">{mix.blurb}</span> : null}
         <span className="mix-card-meta">{count} tracks</span>
       </button>
     </div>

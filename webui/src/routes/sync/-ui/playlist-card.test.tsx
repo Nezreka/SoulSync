@@ -111,13 +111,13 @@ describe('the meta line', () => {
 describe('the primary action', () => {
   it('offers the fix that matches the state', () => {
     expect(playlistCardPrimaryLabel(row({ total_count: 86, discovered_count: 62 }))).toBe(
-      'Sync now',
+      'Sync & download',
     );
     expect(playlistCardPrimaryLabel(row({ pipeline_state: { status: 'error' } }))).toBe('Retry');
     // NOT "Find 24 missing": that label promised a narrower action than the
     // identical pipeline.run it actually performed.
     expect(playlistCardPrimaryLabel(row({ total_count: 10, discovered_count: 10 }))).toBe(
-      'Sync now',
+      'Sync & download',
     );
   });
 
@@ -172,7 +172,7 @@ describe('the card body', () => {
         when="synced 3h ago"
         schedule="Every 6 hours"
         onOpen={vi.fn()}
-        primary={{ label: 'Sync now', onClick: vi.fn() }}
+        primary={{ label: 'Sync & download', onClick: vi.fn() }}
         onMore={vi.fn()}
         onSchedule={onSchedule}
       />,
@@ -195,7 +195,7 @@ describe('the card body', () => {
         when="x"
         schedule="Every 6 hours"
         onOpen={onOpen}
-        primary={{ label: 'Sync now', onClick: vi.fn() }}
+        primary={{ label: 'Sync & download', onClick: vi.fn() }}
         onMore={vi.fn()}
         onSchedule={onSchedule}
       />,
@@ -221,7 +221,7 @@ describe('the pill only speaks up when it has something to say', () => {
         schedule={schedule}
         scheduled={scheduled}
         onOpen={vi.fn()}
-        primary={{ label: 'Sync now', onClick: vi.fn() }}
+        primary={{ label: 'Sync & download', onClick: vi.fn() }}
         onMore={vi.fn()}
         onSchedule={vi.fn()}
       />,
@@ -251,7 +251,7 @@ describe('the pill only speaks up when it has something to say', () => {
         schedule="Not scheduled"
         scheduled={false}
         onOpen={vi.fn()}
-        primary={{ label: 'Sync now', onClick: vi.fn() }}
+        primary={{ label: 'Sync & download', onClick: vi.fn() }}
         onMore={vi.fn()}
         onSchedule={onSchedule}
       />,
@@ -426,11 +426,11 @@ describe('the meta line reports the discovery shortfall', () => {
     ).toBe('86 tracks · 24 not found');
   });
 
-  it('the button is Sync now whatever the shortfall', () => {
+  it('the button is Sync & download whatever the shortfall', () => {
     // It always called the same pipeline.run; three names for one action bought
     // nothing, and spent the card's only button on a count.
     expect(playlistCardPrimaryLabel(row({ total_count: 86, discovered_count: 62 }))).toBe(
-      'Sync now',
+      'Sync & download',
     );
   });
 });
@@ -469,5 +469,36 @@ describe('the organize-by-playlist marker', () => {
       />,
     );
     expect(container.querySelector('.pl-card-organize')?.getAttribute('title')).toMatch(/wishlist/);
+  });
+});
+
+describe('the name it syncs under', () => {
+  it('says so when another mirror shares its name, and stays quiet otherwise', () => {
+    const r = row();
+    const { rerender } = render(
+      <PlaylistCard
+        row={r}
+        name="Release Radar"
+        syncsAs="Release Radar - ThomasClan"
+        when="synced 3h ago"
+        schedule="Every 6 hours"
+        onOpen={vi.fn()}
+        onMore={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('On the server as “Release Radar - ThomasClan”')).toBeInTheDocument();
+    rerender(
+      <PlaylistCard
+        row={r}
+        name="Release Radar"
+        when="synced 3h ago"
+        schedule="Every 6 hours"
+        onOpen={vi.fn()}
+        onMore={vi.fn()}
+      />,
+    );
+    expect(document.querySelector('.pl-card-syncs-as')).toBeNull();
+    const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
+    expect(css).toContain('.pl-card-syncs-as {');
   });
 });

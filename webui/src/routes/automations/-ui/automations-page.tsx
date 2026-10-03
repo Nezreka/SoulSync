@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from 'react';
 
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
-import type { Automation } from '../-automations.types';
+import type { Automation, AutomationsSearch } from '../-automations.types';
 
 import {
   AUTOMATIONS_QUERY_KEY,
@@ -25,10 +25,9 @@ import { useVanillaBuilder } from '../-automations.builder';
 import { useAutomationDnd } from '../-automations.dnd';
 import { blockLabelLookup, formatAction, formatTrigger } from '../-automations.format';
 import {
-  automationHealth,
-  buildAutomationsView,
-  sectionGlow,
-  sectionSummary,
+  buildCollections,
+  collectionAutomations,
+  collectionGroupName,
   filterAutomations,
   filterOptions,
   forMusicSide,
@@ -37,7 +36,9 @@ import {
 import { useAutomationProgress } from '../-automations.progress';
 import { Route } from '../route';
 import { AutomationHub } from './automation-hub';
-import { AutomationsSection, groupSectionId } from './automations-section';
+import { AutomationsLibrary, type LibraryGroupActions } from './automations-library';
+import { AutomationsOverview } from './automations-overview';
+import { AutomationsSidebar } from './automations-sidebar';
 import { type DeleteGroupChoice, DeleteGroupDialog } from './delete-group-dialog';
 import { GroupDropdown } from './group-dropdown';
 
@@ -179,14 +180,90 @@ export function AutomationsPage() {
     onError: fail,
   });
 
-  // Dragging a card into another group's body reuses the same single-row PUT
-  // the 📁 dropdown issues, so both paths land on one endpoint.
+  // Dragging a card onto a sidebar group reuses the same single-row PUT the
+  // card's 📁 dropdown issues, so both paths land on one endpoint.
   const dnd = useAutomationDnd((dragged, toGroup) =>
     assign.mutate({ id: dragged.id, group: toGroup }),
   );
 
+  // Both sides share ONE endpoint; only owned_by separates them.
+  const automations = useMemo(
+    () => forMusicSide(readAutomationsList(listQuery.data)),
+    [listQuery.data],
+  );
+
+  const setSearch = (patch: Partial<AutomationsSearch>) =>
+    void navigate({ search: (prev) => ({ ...prev, ...patch }), replace: true });
+
+  // ── Navigation ─────────────────────────────────────────────────────
+  //
+  // The page is two views: the overview dashboard and the library. Inside the
+  // library the sidebar picks one collection; the main pane shows only that
+  // collection. Changing collections resets the text/trigger/action filters —
+  // carrying a query into a different collection is never what was meant.
+
+  const collections = useMemo(() => buildCollections(automations), [automations]);
+  const collectionKeys = useMemo(() => new Set(collections.map((c) => c.key)), [collections]);
+
+  // A search only exists inside the library: a bare ?q= URL (old bookmark, or
+  // a shared link) lands there too, on All, rather than on an overview that
+  // would silently swallow the query.
+  const searchActive = Boolean(search.q || search.trigger || search.action);
+  // A fresh install has no overview to show — the "No automations yet" state
+  // lives in the library, so the sidebar and the content agree on All rather
+  // than the sidebar saying Overview while the content shows a collection.
+  const inLibrary = search.view === 'library' || searchActive || automations.length === 0;
+
+  const navKey = inLibrary && collectionKeys.has(search.nav) ? search.nav : 'all';
+  // The guides are reference material for existing automations; a fresh
+  // install sees the empty state alone, not the empty state plus docs.
+  const showGuides = automations.length > 0;
+  const activeNav = inLibrary && navKey === 'guides' && !showGuides ? 'all' : navKey;
+
+  // Leaving the library leaves the search behind with it — otherwise the
+  // searchActive half of inLibrary would trap the overview out of reach.
+  const goOverview = () => setSearch({ view: 'overview', q: '', trigger: '', action: '' });
+  const goCollection = (nav: string) =>
+    setSearch({ view: 'library', nav, q: '', trigger: '', action: '' });
+  const onSidebarSearch = (q: string) =>
+    setSearch({ view: 'library', nav: 'all', q, trigger: '', action: '' });
+  const onFind = (name: string) => setSearch({ view: 'library', nav: 'all', q: name });
+
+  // The collection's members, then the filter-bar controls narrowing them.
+  // The filter dropdowns list the collection's own types — "All Triggers"
+  // inside Scheduled should not offer event triggers that cannot match.
+  const members = useMemo(
+    () => collectionAutomations(automations, activeNav),
+    [automations, activeNav],
+  );
+
+  // The vanilla filter matched the rendered label text, so the same formatters
+  // that build the card must produce the strings the filter searches.
+  const labelFor = useCallback(
+    (a: Automation) => ({
+      trigger: formatTrigger(a.trigger_type, a.trigger_config, blockLabel),
+      action: formatAction(a.action_type, blockLabel),
+    }),
+    [blockLabel],
+  );
+  const options = useMemo(() => filterOptions(members), [members]);
+  const visible = useMemo(
+    () => filterAutomations(members, search, labelFor),
+    [members, search, labelFor],
+  );
+  const filtering = Boolean(search.q || search.trigger || search.action);
+
+  const [groupMenu, setGroupMenu] = useState<{
+    id: number;
+    current: string | null;
+    anchor: { top: number; bottom: number; right: number };
+  } | null>(null);
+  const [deletingGroup, setDeletingGroup] = useState<{ name: string; count: number } | null>(null);
+
+  const masterOn = masterQuery.data?.music !== false;
+
   const idsInGroup = (name: string) =>
-    view.groups.find((g) => g.name === name)?.automations.map((a) => a.id) ?? [];
+    collectionAutomations(automations, `group:${name}`).map((a) => a.id);
 
   const onDeleteGroupChoice = (choice: DeleteGroupChoice) => {
     if (!deletingGroup) return;
@@ -204,7 +281,33 @@ export function AutomationsPage() {
     }
   };
 
-  const masterOn = masterQuery.data?.music !== false;
+  const groupName = collectionGroupName(activeNav);
+  const groupMembers = groupName !== null ? members : [];
+  const groupAllEnabled =
+    groupMembers.length > 0 && groupMembers.every((a) => a.enabled === true || a.enabled === 1);
+  const groupActions: LibraryGroupActions | undefined =
+    groupName !== null
+      ? {
+          allEnabled: groupAllEnabled,
+          onBulkToggle: () =>
+            bulkToggle.mutate({
+              ids: groupMembers.map((a) => a.id),
+              enabled: !groupAllEnabled,
+            }),
+          onRename: (next: string) =>
+            regroup.mutate({
+              ids: groupMembers.map((a) => a.id),
+              group: next,
+              toast: `Renamed to "${next}"`,
+            }),
+          onDeleteGroup: () => {
+            const count = groupMembers.length;
+            // Nothing to decide about an empty group; just refresh it away.
+            if (count === 0) return void refresh();
+            setDeletingGroup({ name: groupName, count });
+          },
+        }
+      : undefined;
 
   const cardHandlers = {
     // Every card needs to know the side is paused, or it goes on advertising
@@ -232,312 +335,69 @@ export function AutomationsPage() {
     },
   };
 
-  const groupActions = {
-    onRename: (name: string, next: string) =>
-      regroup.mutate({ ids: idsInGroup(name), group: next, toast: `Renamed to "${next}"` }),
-    onDeleteGroup: (name: string) => {
-      const count = idsInGroup(name).length;
-      // Nothing to decide about an empty group; just refresh it away.
-      if (count === 0) return void refresh();
-      setDeletingGroup({ name, count });
-    },
-  };
+  const cardDragProps = (a: Automation) =>
+    dnd.cardProps(a.id, a.group_name ?? null, a.is_system === true || a.is_system === 1);
 
-  // Both sides share ONE endpoint; only owned_by separates them.
-  const automations = useMemo(
-    () => forMusicSide(readAutomationsList(listQuery.data)),
-    [listQuery.data],
-  );
-
-  // The vanilla filter matched the rendered label text, so the same formatters
-  // that build the card must produce the strings the filter searches.
-  const labelFor = useCallback(
-    (a: Automation) => ({
-      trigger: formatTrigger(a.trigger_type, a.trigger_config, blockLabel),
-      action: formatAction(a.action_type, blockLabel),
-    }),
-    [blockLabel],
-  );
-
-  // Stats and the filter-bar threshold describe the WHOLE set: filtering down
-  // to one card must not make the bar read "1 Active" or hide the very filter
-  // being used. Only the section contents narrow.
-  const view = useMemo(() => buildAutomationsView(automations), [automations]);
-  const options = useMemo(() => filterOptions(automations), [automations]);
-  const visible = useMemo(
-    () => filterAutomations(automations, search, labelFor),
-    [automations, search, labelFor],
-  );
-  const shown = useMemo(() => new Set(visible.map((a) => a.id)), [visible]);
-  const keep = useMemo(
-    () => ({
-      system: view.system.filter((a) => shown.has(a.id)),
-      groups: view.groups
-        .map((g) => ({ ...g, automations: g.automations.filter((a) => shown.has(a.id)) }))
-        .filter((g) => g.automations.length > 0),
-      ungrouped: view.ungrouped.filter((a) => shown.has(a.id)),
-    }),
-    [view, shown],
-  );
-
-  const [groupMenu, setGroupMenu] = useState<{
-    id: number;
-    current: string | null;
-    anchor: { top: number; bottom: number; right: number };
-  } | null>(null);
-  const [deletingGroup, setDeletingGroup] = useState<{ name: string; count: number } | null>(null);
-
-  const health = useMemo(() => automationHealth(automations, !masterOn), [automations, masterOn]);
-  const filtering = Boolean(search.q || search.trigger || search.action || search.health);
-  const isEmpty = automations.length === 0;
-
-  const setSearch = (patch: Partial<typeof search>) =>
-    void navigate({ search: (prev) => ({ ...prev, ...patch }), replace: true });
-
-  // NOTE: deliberately no id attributes below.
-  //
-  // The vanilla markup in index.html keeps #automations-list, #auto-filter-bar,
-  // #auto-filter-search and friends until the cleanup PR, and three vanilla
-  // functions still reach for them with getElementById — which returns the
-  // FIRST match in document order. Rendering the same ids here would create
-  // duplicates and hand those functions the wrong node. Every rule that styles
-  // this page is class-scoped (only #automations-list-view, the outer wrapper
-  // we do not render, is an id rule), so nothing is lost by omitting them.
   return (
-    <div className="page-shell automations-container">
-      <div className="dashboard-header">
-        <div className="dashboard-header-sweep" aria-hidden="true">
-          <span />
+    <div className="page-shell automx">
+      <AutomationsSidebar
+        collections={collections}
+        automations={automations}
+        active={inLibrary ? activeNav : 'overview'}
+        onOverview={goOverview}
+        onSelect={goCollection}
+        query={inLibrary ? search.q : ''}
+        onQuery={onSidebarSearch}
+        masterOn={masterOn}
+        masterPending={master.isPending}
+        onMasterToggle={() => master.mutate(!masterOn)}
+        onNew={() => openBuilder()}
+        showGuides={showGuides}
+        dnd={{ zoneProps: dnd.zoneProps, overKey: dnd.overKey, dragging: dnd.dragging }}
+      />
+
+      <main className="automx-main">
+        {/* Keyed so the view crossfades on every navigation, not just the
+            first paint. */}
+        <div className="automx-view" key={inLibrary ? `library:${activeNav}` : 'overview'}>
+          {!inLibrary ? (
+            <AutomationsOverview
+              automations={automations}
+              paused={!masterOn}
+              blockLabel={blockLabel}
+              onRun={(a) => run.mutate(a)}
+              onEdit={(a) => openBuilder(a.id)}
+              onReviewAttention={() => goCollection('attention')}
+              onFind={onFind}
+              onResume={() => master.mutate(true)}
+            />
+          ) : activeNav === 'guides' ? (
+            <div className="automx-guides">
+              <AutomationHub />
+            </div>
+          ) : (
+            <AutomationsLibrary
+              def={collections.find((c) => c.key === activeNav) ?? collections[0]}
+              members={members}
+              visible={visible}
+              filtering={filtering}
+              search={search}
+              setSearch={setSearch}
+              filterOptions={options}
+              cardDragProps={cardDragProps}
+              isCardDragging={dnd.isDraggingCard}
+              groupActions={groupActions}
+              onNew={() => openBuilder()}
+              onClearFilters={() => setSearch({ q: '', trigger: '', action: '' })}
+              {...cardHandlers}
+            />
+          )}
         </div>
-        <div className="header-text">
-          <h2 className="header-title">
-            <img src="/static/automation.png" className="page-header-icon" alt="" />
-            <span>Automations</span>
-          </h2>
-          <p className="header-subtitle">Configure scheduled tasks and automated workflows</p>
-        </div>
-        <div className="header-spacer" />
-        <div className="header-actions">
-          <button type="button" className="auto-new-btn" onClick={() => openBuilder()}>
-            + New Automation
-          </button>
-        </div>
-      </div>
-
-      <div className="automations-stats">
-        {/* The master switch is prepended to this bar and stays reachable even
-            with nothing configured — pausing is a side-wide control. */}
-        <button
-          type="button"
-          className={`auto-master-toggle${masterOn ? ' on' : ''}`}
-          disabled={master.isPending}
-          onClick={() => master.mutate(!masterOn)}
-          title={
-            masterOn
-              ? 'Automations are live. Click to pause every scheduled and event run on this side — individual switches keep their state, and manual Run still works.'
-              : 'Automations are paused: nothing runs on a schedule or event. Individual switches keep their state, and manual Run still works.'
-          }
-        >
-          <span className="auto-master-sw" />
-          <span className="auto-master-label">
-            {masterOn ? 'Automations on' : 'Automations paused'}
-          </span>
-        </button>
-        {isEmpty ? null : (
-          <>
-            {/* The verdict, not an inventory. Active/System/Custom counted rows
-                in a table; these answer "is automation working", and each one
-                is a lens rather than a number you can only look at. */}
-            <button
-              type="button"
-              className={`auto-stat auto-stat-lens${search.health === '' ? ' active' : ''}`}
-              onClick={() => setSearch({ health: '' })}
-              title="Show every automation"
-            >
-              <strong>{health.armed}</strong> Armed
-            </button>
-            {health.failing > 0 ? (
-              <button
-                type="button"
-                className={`auto-stat auto-stat-lens failing${
-                  search.health === 'failing' ? ' active' : ''
-                }`}
-                onClick={() => setSearch({ health: 'failing' })}
-                title="Automations whose last run failed"
-              >
-                <strong>{health.failing}</strong> Failing
-              </button>
-            ) : null}
-            {health.neverRun > 0 ? (
-              <button
-                type="button"
-                className={`auto-stat auto-stat-lens waiting${
-                  search.health === 'never' ? ' active' : ''
-                }`}
-                onClick={() => setSearch({ health: 'never' })}
-                title="Enabled, but has not run yet"
-              >
-                <strong>{health.neverRun}</strong> Never run
-              </button>
-            ) : null}
-            {view.stats.total - health.armed > 0 ? (
-              <button
-                type="button"
-                className={`auto-stat auto-stat-lens${search.health === 'off' ? ' active' : ''}`}
-                onClick={() => setSearch({ health: 'off' })}
-                title="Switched off"
-              >
-                <strong>{view.stats.total - health.armed}</strong> Off
-              </button>
-            ) : null}
-            {health.ok ? <span className="auto-stat-allgood">All good</span> : null}
-          </>
-        )}
-      </div>
-
-      {view.showFilterBar ? (
-        <div className="auto-filter-bar">
-          <input
-            type="text"
-            className="auto-filter-search"
-            placeholder="Filter automations…"
-            aria-label="Filter automations"
-            value={search.q}
-            onChange={(e) => setSearch({ q: e.target.value })}
-          />
-          <select
-            className="auto-filter-select"
-            aria-label="Filter by trigger"
-            value={search.trigger}
-            onChange={(e) => setSearch({ trigger: e.target.value })}
-          >
-            <option value="">All Triggers</option>
-            {options.triggers.map((t) => (
-              <option key={t} value={t}>
-                {formatTrigger(t, {}, blockLabel)}
-              </option>
-            ))}
-          </select>
-          <select
-            className="auto-filter-select"
-            aria-label="Filter by action"
-            value={search.action}
-            onChange={(e) => setSearch({ action: e.target.value })}
-          >
-            <option value="">All Actions</option>
-            {options.actions.map((t) => (
-              <option key={t} value={t}>
-                {formatAction(t, blockLabel)}
-              </option>
-            ))}
-          </select>
-          {/* Blank unless a filter is active, exactly as the vanilla count did. */}
-          <span className="auto-filter-count">
-            {filtering ? `${visible.length} of ${automations.length}` : ''}
-          </span>
-        </div>
-      ) : null}
-
-      <div className="automations-list">
-        {/* Presence and count come from the UNFILTERED set: the vanilla filter
-            only hid cards, so a section never disappeared mid-search and its
-            count never moved. Only the cards inside narrow. */}
-        {view.system.length > 0 ? (
-          <AutomationsSection
-            id="auto-section-system"
-            label="System"
-            summary={sectionSummary(view.system)}
-            glow={sectionGlow('system')}
-            automations={keep.system}
-            totalCount={view.system.length}
-            allAutomations={view.system}
-            isProtected
-            zoneProps={dnd.zoneProps('system', null, { isProtected: true })}
-            isDragActive={dnd.dragging}
-            cardDragProps={(a) =>
-              dnd.cardProps(a.id, a.group_name ?? null, a.is_system === true || a.is_system === 1)
-            }
-            isCardDragging={dnd.isDraggingCard}
-            {...cardHandlers}
-          />
-        ) : null}
-
-        {view.groups.map((group) => (
-          <AutomationsSection
-            key={group.name}
-            id={groupSectionId(group.name)}
-            label={`📁 ${group.name}`}
-            summary={sectionSummary(group.automations)}
-            glow={sectionGlow('group', group.name)}
-            automations={keep.groups.find((g) => g.name === group.name)?.automations ?? []}
-            totalCount={group.automations.length}
-            allAutomations={group.automations}
-            groupName={group.name}
-            zoneProps={dnd.zoneProps(`group:${group.name}`, group.name)}
-            isDropTarget={dnd.overKey === `group:${group.name}`}
-            isDragActive={dnd.dragging}
-            cardDragProps={(a) =>
-              dnd.cardProps(a.id, a.group_name ?? null, a.is_system === true || a.is_system === 1)
-            }
-            isCardDragging={dnd.isDraggingCard}
-            {...groupActions}
-            onBulkToggle={(name, allEnabled) =>
-              bulkToggle.mutate({
-                // Ids come from the unfiltered data. _bulkToggleGroup scraped
-                // the DOM, which was equivalent there because its filter only
-                // set display:none and left the cards in place. React does not
-                // render filtered-out cards at all, so a DOM query here would
-                // genuinely miss them and quietly toggle a subset of the group.
-                ids: view.groups.find((g) => g.name === name)?.automations.map((a) => a.id) ?? [],
-                enabled: !allEnabled,
-              })
-            }
-            {...cardHandlers}
-          />
-        ))}
-
-        {/* The Hub is reference material, so it sits BELOW the user's own
-            automations rather than between them and System. Hidden on an empty
-            list: a fresh install should see the empty state alone, not the
-            empty state plus a wall of documentation. */}
-        {view.ungrouped.length > 0 ? (
-          <AutomationsSection
-            id="auto-section-custom"
-            label="My Automations"
-            summary={sectionSummary(view.ungrouped)}
-            glow={sectionGlow('ungrouped')}
-            automations={keep.ungrouped}
-            totalCount={view.ungrouped.length}
-            allAutomations={view.ungrouped}
-            zoneProps={dnd.zoneProps('ungrouped', null)}
-            isDropTarget={dnd.overKey === 'ungrouped'}
-            isDragActive={dnd.dragging}
-            cardDragProps={(a) =>
-              dnd.cardProps(a.id, a.group_name ?? null, a.is_system === true || a.is_system === 1)
-            }
-            isCardDragging={dnd.isDraggingCard}
-            {...cardHandlers}
-          />
-        ) : null}
-        {isEmpty ? null : <AutomationHub />}
-      </div>
-
-      {isEmpty ? (
-        <div className="automations-empty">
-          <div className="automations-empty-icon">⚡</div>
-          <div className="automations-empty-title">No automations yet</div>
-          <div className="automations-empty-text">
-            Create your first automation to schedule tasks and trigger actions automatically.
-          </div>
-          <button type="button" className="auto-new-btn" onClick={() => openBuilder()}>
-            + New Automation
-          </button>
-        </div>
-      ) : null}
+      </main>
 
       {groupMenu ? (
         <GroupDropdown
-          groups={view.groups.map((g) => g.name)}
+          groups={collections.filter((c) => c.kind === 'group').map((c) => c.groupName as string)}
           currentGroup={groupMenu.current}
           anchor={groupMenu.anchor}
           onClose={() => setGroupMenu(null)}

@@ -25,6 +25,7 @@ applies the template to what the catalogue says. Two steps, each visible.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List
 
 import pytest
@@ -33,13 +34,14 @@ from core.library2 import reorganize_plan
 
 
 def _seed(conn, *, album_title="Views", year=2016, tracks=(("One Dance", 1, 1),),
-          source_id=None):
+          source_id=None, album_type="album", secondary_types=None):
     cur = conn.cursor()
     cur.execute("INSERT INTO lib2_artists(name) VALUES('Drake')")
     artist_id = cur.lastrowid
     cur.execute(
-        "INSERT INTO lib2_albums(primary_artist_id, title, year, album_type, spotify_id)"
-        " VALUES(?,?,?,'album',?)", (artist_id, album_title, year, source_id))
+        "INSERT INTO lib2_albums(primary_artist_id, title, year, album_type, secondary_types, spotify_id)"
+        " VALUES(?,?,?,?,?,?)", (artist_id, album_title, year, album_type,
+                                  json.dumps(secondary_types or []), source_id))
     album_id = cur.lastrowid
     cur.execute("INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)",
                 (album_id, artist_id))
@@ -229,6 +231,45 @@ def test_disc_count_counts_discs_that_have_no_file_yet(imported_conn):
 
     assert len(seen) == 1, "only the track that has a file is planned"
     assert seen[0]["context"]["spotify_album"]["total_discs"] == 2
+
+
+def test_the_track_count_is_the_releases_not_the_files(imported_conn):
+    """$albumtype splits on the track count, and that count is the RELEASE's.
+    Counting files planned three downloaded tracks of a twelve-track album
+    into Single/, where the download -- which knew the release total --
+    never put them."""
+    conn = imported_conn
+    _, album_id, track_ids = _seed(conn, tracks=tuple((f"T{n}", n, 1) for n in range(1, 13)))
+    for track_id in track_ids[3:]:
+        conn.execute("DELETE FROM lib2_track_files WHERE track_id=?", (track_id,))
+    conn.commit()
+    build, seen = _recorder()
+
+    _plan(conn, album_id, build)
+
+    assert len(seen) == 3
+    assert {s["context"]["spotify_album"]["total_tracks"] for s in seen} == {12}
+
+    conn.execute("UPDATE lib2_albums SET expected_track_count=14 WHERE id=?", (album_id,))
+    conn.commit()
+    build, seen = _recorder()
+    _plan(conn, album_id, build)
+    assert seen[0]["context"]["spotify_album"]["total_tracks"] == 14
+
+
+def test_release_type_and_secondary_types_reach_the_path_builder(imported_conn):
+    """Reorganize must preserve the catalogue's release labels for $albumtype
+    and $atypes; losing them silently sends singles/EPs to album folders."""
+    conn = imported_conn
+    _, album_id, _ = _seed(conn, album_type="ep", secondary_types=["live"])
+    build, seen = _recorder()
+
+    _plan(conn, album_id, build)
+
+    album = seen[0]["context"]["spotify_album"]
+    assert album["album_type"] == "ep"
+    assert album["record_type"] == "ep"
+    assert album["secondary_types"] == ["live"]
 
 
 def test_a_corrected_artist_name_reaches_the_path(imported_conn):

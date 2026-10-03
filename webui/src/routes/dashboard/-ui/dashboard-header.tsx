@@ -26,7 +26,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { HeaderPill, HeaderPillId } from '../-dash.header';
 
 import { useDashboardHeader } from '../-dash.header';
-import { countBusyWorkers, greetingForHour, greetingLine, heroNumbers } from '../-dash.hello';
+import { countBusyWorkers, greetingForHour, heroNumbers } from '../-dash.hello';
 import { lastDbStats, subscribeDbStats } from '../-dash.library';
 
 interface OrbChrome {
@@ -510,10 +510,32 @@ function HeroIntro({ library }: { library?: ReactNode }) {
 
   const greeting = greetingForHour(new Date().getHours());
   const numbers = heroNumbers(stats);
+  // The date eyebrow above the greeting — the quiet editorial kicker.
+  const today = new Date().toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  });
+  // Two-tone greeting: the moment in muted lead, the name in full white.
+  // A question keeps its mark at the end: "up late, Boulder?" — the same
+  // strings greetingLine produced, split for styling, not reworded.
+  const question = greeting.endsWith('?');
+  const lead = question ? greeting.slice(0, -1) : greeting;
   return (
     <div className="header-text header-hello dash-hero-main">
+      <p className="dash-hero-eyebrow">{today}</p>
       <h2 className="hello-greeting">
-        <span>{greetingLine(greeting, profileName)}</span>
+        <span>
+          {profileName ? (
+            <>
+              <span className="hello-greet-lead">{lead}, </span>
+              <span className="hello-greet-name">{profileName}</span>
+              {question ? '?' : null}
+            </>
+          ) : (
+            greeting
+          )}
+        </span>
       </h2>
       {numbers.length ? (
         <div className="hello-stats dash-hero-numbers">

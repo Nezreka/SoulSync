@@ -33,6 +33,7 @@ interface Props {
   isAdmin: boolean;
   /** Re-fetch the payload (Sync found changes, reorganize batch finished). */
   onReload: () => void;
+  focusAlbumId?: string;
 }
 
 /**
@@ -43,7 +44,7 @@ interface Props {
  * single list, so a release typed anything else (compilation is the common one)
  * was fetched, grouped, and then never shown at all.
  */
-export function EnhancedView({ data, status, isAdmin, onReload }: Props) {
+export function EnhancedView({ data, status, isAdmin, onReload, focusAlbumId }: Props) {
   /**
    * Selection is page-level and shared across albums, as the vanilla's single
    * artistDetailPageState.selectedTracks was: the bulk bar acts on everything
@@ -146,6 +147,7 @@ export function EnhancedView({ data, status, isAdmin, onReload }: Props) {
             onSelectedChange={setSelected}
             onAlbumDeleted={removeAlbum}
             onReload={onReload}
+            focusAlbumId={focusAlbumId}
           />
         );
       })}
@@ -198,6 +200,7 @@ function EnhancedSection({
   onSelectedChange,
   onAlbumDeleted,
   onReload,
+  focusAlbumId,
 }: {
   type: string;
   label: string;
@@ -208,6 +211,7 @@ function EnhancedSection({
   onSelectedChange: (next: Set<string>) => void;
   onAlbumDeleted: (albumId: unknown) => void;
   onReload: () => void;
+  focusAlbumId?: string;
 }) {
   return (
     <div className="enhanced-section" data-section={type}>
@@ -227,6 +231,7 @@ function EnhancedSection({
             onSelectedChange={onSelectedChange}
             onAlbumDeleted={() => onAlbumDeleted(album.id)}
             onReload={onReload}
+            focused={focusAlbumId != null && String(album.id) === focusAlbumId}
             key={String(album.id)}
           />
         ))}
@@ -269,6 +274,7 @@ function EnhancedAlbumWrapper({
   onSelectedChange,
   onAlbumDeleted,
   onReload,
+  focused = false,
 }: {
   album: EnhancedAlbum;
   artist: Record<string, unknown> | undefined;
@@ -277,23 +283,30 @@ function EnhancedAlbumWrapper({
   onSelectedChange: (next: Set<string>) => void;
   onAlbumDeleted: () => void;
   onReload: () => void;
+  /** This is the album the URL pointed at. */
+  focused?: boolean;
 }) {
   // an issue's "edit details" asked for this album: open it, form and all
   const [editFocus] = useState(() => {
     const focus = peekArtistEdit(artist?.id as string | number | undefined);
     return albumMatchesEdit(focus, albumProp) ? focus : null;
   });
-  const [expanded, setExpanded] = useState(Boolean(editFocus));
+  // `focused` is the other way in: ?album= from the library's album grid. Both
+  // set the initial value only, so the row can still be closed again by hand.
+  const [expanded, setExpanded] = useState(Boolean(editFocus) || focused);
   const [thumbBroken, setThumbBroken] = useState(false);
   // the album's metadata form is behind "edit details" now, not always open
   const [editing, setEditing] = useState(Boolean(editFocus && isAdmin && !editFocus.trackId));
 
+  // One scroll for both entry points. The timer is what makes it land: the
+  // track panel renders only once expanded, so scrolling on mount would aim
+  // at the collapsed row's height and stop short.
   useEffect(() => {
-    if (!editFocus) return;
-    clearArtistEdit();
+    if (!editFocus && !focused) return;
+    if (editFocus) clearArtistEdit();
     // after the panel has drawn: the track row if one was asked for, else the album
     const timer = setTimeout(() => {
-      const row = editFocus.trackId
+      const row = editFocus?.trackId
         ? Array.from(document.querySelectorAll<HTMLElement>('tr[data-track-id]')).find(
             (tr) => tr.dataset.trackId === editFocus.trackId,
           )
@@ -303,7 +316,7 @@ function EnhancedAlbumWrapper({
       target?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
     }, 250);
     return () => clearTimeout(timer);
-  }, [editFocus, albumProp.id]);
+  }, [editFocus, focused, albumProp.id]);
 
   /**
    * A saved edit is applied here rather than refetching the whole artist. The

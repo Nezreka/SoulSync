@@ -47,8 +47,12 @@ export interface MirroredDetailModalProps {
   onEditSource: () => void;
   /** 1151 — Auto-Sync (runMirroredPlaylistPipeline). */
   onRunPipeline: () => void;
+  /** pull the source + discover the new tracks, nothing pushed (#1413) */
+  onRefreshFromSource?: () => void;
   /** 1153 — Discover (discoverMirroredPlaylist). */
   onDiscover: () => void;
+  /** "View discovery" once one exists, the card no longer jumps there (#1403). */
+  discoverLabel?: string;
 }
 
 function TrackRow({ track }: { track: MirroredTrack }) {
@@ -90,7 +94,9 @@ export function MirroredDetailModal({
   onDelete,
   onEditSource,
   onRunPipeline,
+  onRefreshFromSource,
   onDiscover,
+  discoverLabel = 'Discover',
 }: MirroredDetailModalProps) {
   const tracks = (data.tracks ?? []) as MirroredTrack[];
   const source = data.source || 'unknown';
@@ -184,15 +190,30 @@ export function MirroredDetailModal({
             <button type="button" className="mm-btn mm-btn-ghost" onClick={onEditSource}>
               Edit Source
             </button>
+            {onRefreshFromSource ? (
+              <button
+                type="button"
+                className="mm-btn mm-btn-ghost"
+                title="Pull the latest tracks from the source and discover the new ones. Your matches are kept, nothing is pushed to your server or downloaded"
+                onClick={onRefreshFromSource}
+              >
+                Refresh from source
+              </button>
+            ) : null}
             {/* Runs the pipeline now; the header's "Auto-Sync" schedules it. */}
-            <button type="button" className="mm-btn mm-btn-secondary" onClick={onRunPipeline}>
-              Sync now
+            <button
+              type="button"
+              className="mm-btn mm-btn-secondary"
+              title="Refresh from the source, match, push to your server and download what's missing"
+              onClick={onRunPipeline}
+            >
+              Sync &amp; download
             </button>
             <button type="button" className="mm-btn mm-btn-ghost" onClick={onClose}>
               Close
             </button>
             <button type="button" className="mm-btn mm-btn-primary" onClick={onDiscover}>
-              Discover
+              {discoverLabel}
             </button>
           </div>
         </div>

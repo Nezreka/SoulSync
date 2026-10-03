@@ -21,6 +21,7 @@
 export type DiscoverSectionId =
   | 'cache-genre-explorer'
   | 'your-mixes-section'
+  | 'mood-mixes-section'
   | 'year-mixes-section'
   | 'adv-wave'
   | 'listening-recs-section'
@@ -66,6 +67,7 @@ const pair = (a: DiscoverSectionId, b: DiscoverSectionId): DiscoverLayoutEntry =
  */
 export const DISCOVER_LAYOUT: DiscoverLayoutEntry[] = [
   single('your-mixes-section'), //                                    made for you
+  single('mood-mixes-section'), //                                    moods, from your own albums
   single('adv-wave'), //                                              the dial
   pair('listening-recs-section', 'recommended-artists-section'), //   its two targets
   single('discover-bylt-sections'), //                                because you listen
@@ -106,7 +108,13 @@ const emptyState = (message: string): EmptyPolicy => ({ kind: 'empty-state', mes
 export const DEFAULT_EMPTY_MESSAGE = 'Nothing to show';
 
 export const SECTION_EMPTY_POLICY: Partial<Record<DiscoverSectionId, EmptyPolicy>> = {
+  // Made For You holds 'Build a mix', so it stays with nothing in it yet.
+  'your-mixes-section': emptyState(
+    'Your mixes show up here after a watchlist scan. You can build your own now.',
+  ),
   // hideWhenEmpty: true — these vanish.
+  // no tagged albums, no moods: nothing to show and nothing to do about it here
+  'mood-mixes-section': HIDE,
   'recommended-artists-section': HIDE,
   'listening-recs-section': HIDE,
   'your-albums-section': HIDE,
@@ -164,7 +172,6 @@ export function isSectionVisible(
 export type DiscoverLayoutRow =
   | { kind: 'full'; id: DiscoverSectionId }
   | { kind: 'two-col'; ids: [DiscoverSectionId, DiscoverSectionId] };
-
 /**
  * Resolve the layout against which sections actually have content.
  *
@@ -192,4 +199,101 @@ export function buildLayoutRows(
     else if (present.length === 1) rows.push({ kind: 'full', id: present[0] });
   }
   return rows;
+}
+
+/**
+ * Customizable zones. The page's four zone containers, top to bottom.
+ *
+ * The section ids, zones and default order above are the render-side mirror;
+ * `core/discovery/layout.py` is the single source of truth the API validates
+ * and persists per-profile layouts against (GET/PUT /api/discover/layout).
+ */
+
+/** The four zone containers on the page. */
+export type DiscoverZoneId = 'for-you' | 'new-missing' | 'library' | 'tools';
+
+export const DISCOVER_ZONES: { id: DiscoverZoneId; label: string }[] = [
+  { id: 'for-you', label: 'For You' },
+  { id: 'new-missing', label: 'New & Missing' },
+  { id: 'library', label: 'From Your Library' },
+  { id: 'tools', label: 'Explore & Build' },
+];
+
+/** Where each section lives unless the profile's saved layout says otherwise. */
+export const DEFAULT_SECTION_ZONE: Record<DiscoverSectionId, DiscoverZoneId> = {
+  'your-mixes-section': 'for-you',
+  'mood-mixes-section': 'for-you',
+  'adv-wave': 'for-you',
+  'listening-recs-section': 'for-you',
+  'recommended-artists-section': 'for-you',
+  'discover-bylt-sections': 'for-you',
+  'recent-releases': 'new-missing',
+  'cache-genre-releases': 'new-missing',
+  'seasonal-albums-section': 'new-missing',
+  'cache-undiscovered': 'new-missing',
+  'cache-label-explorer': 'new-missing',
+  'your-albums-section': 'new-missing',
+  'your-artists-section': 'library',
+  'year-mixes-section': 'library',
+  'cache-deep-cuts': 'library',
+  'cache-genre-explorer': 'tools',
+  'lastfm-radio': 'tools',
+  listenbrainz: 'tools',
+  'deezer-editorial': 'tools',
+  'build-a-playlist': 'tools',
+};
+
+/** One customizable layout entry, as GET /api/discover/layout answers. */
+export interface DiscoverLayoutSection {
+  id: DiscoverSectionId;
+  zone: DiscoverZoneId;
+  enabled: boolean;
+  position: number;
+}
+
+/**
+ * The default layout: no saved preferences, exactly the current page order,
+ * every section enabled. The hook falls back to this while the fetch is
+ * pending or has failed, so the page never renders without sections.
+ */
+export function defaultDiscoverLayout(): DiscoverLayoutSection[] {
+  const entries: DiscoverLayoutSection[] = [];
+  for (const zone of DISCOVER_ZONES) {
+    let position = 0;
+    for (const entry of DISCOVER_LAYOUT) {
+      const ids = entry.kind === 'single' ? [entry.id] : entry.ids;
+      for (const id of ids) {
+        if (DEFAULT_SECTION_ZONE[id] === zone.id) {
+          entries.push({ id, zone: zone.id, enabled: true, position });
+          position += 1;
+        }
+      }
+    }
+  }
+  return entries;
+}
+
+/**
+ * Enabled section ids per zone, in position order. Unknown ids are dropped —
+ * the server never sends them, and a stale cached payload must not take the
+ * page down.
+ */
+export function layoutSectionsByZone(
+  entries: DiscoverLayoutSection[],
+): Record<DiscoverZoneId, DiscoverSectionId[]> {
+  const byZone: Record<DiscoverZoneId, DiscoverLayoutSection[]> = {
+    'for-you': [],
+    'new-missing': [],
+    library: [],
+    tools: [],
+  };
+  for (const entry of entries) {
+    if (!entry || !byZone[entry.zone] || !(entry.id in DEFAULT_SECTION_ZONE)) continue;
+    if (entry.enabled) byZone[entry.zone].push(entry);
+  }
+  const out = {} as Record<DiscoverZoneId, DiscoverSectionId[]>;
+  for (const zone of DISCOVER_ZONES) {
+    out[zone.id] = byZone[zone.id].sort((a, b) => a.position - b.position).map((e) => e.id);
+  }
+  return out;
 }

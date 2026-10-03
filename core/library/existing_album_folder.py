@@ -20,6 +20,19 @@ Safety rails:
   * Never reuses another release's folder. Two releases can share a title and
     differ only by musicbrainz's disambiguation (#1299); the album's release id
     (db row, else the files' own tags) has to agree before its folder is reused.
+  * Never lets a smaller release join a bigger edition's folder: when the
+    incoming release's own track total is known and the existing roster is
+    larger, it is a different edition (a 12-track standard vs a 16-track
+    deluxe) and the template path builds its own folder instead. A total of
+    1 doesn't count as known — it is album.py's unknown-fallback — so lone
+    thin-metadata tracks keep today's reuse.
+  * Never merges different release kinds: a single/EP named after its lead
+    track ("Ocean Avenue") must not join the album of the same name's folder
+    — the file would collide with the album's title track and the single
+    would never exist as its own release. When both the incoming type and
+    the stored album row's type are known and differ, reuse is refused and
+    the template builds the single/EP its own folder. Unknown on either side
+    stays lenient (today's reuse) so thin metadata never splits a real album.
   * Any failure returns None — the caller falls back to the normal template.
 """
 
@@ -66,6 +79,40 @@ def _is_under(child: str, parent: str) -> bool:
         return child_n == parent_n or child_n.startswith(parent_n + os.sep)
     except Exception:
         return False
+
+
+# Canonical release kinds for the folder-reuse type check. Anything not on
+# this map (including the empty string) is "unknown" and stays lenient.
+_RELEASE_KIND_MAP = {
+    "single": "single",
+    "ep": "ep",
+    "album": "album",
+    "compilation": "compilation",
+    "compile": "compilation",
+    "compilations": "compilation",
+}
+
+
+def _normalize_release_kind(value: Any) -> str:
+    """Map a raw album_type to a canonical release kind, or "" when unknown."""
+    if value is None:
+        return ""
+    return _RELEASE_KIND_MAP.get(str(value).strip().lower(), "")
+
+
+def _release_kinds_compatible(incoming: Any, stored: Any) -> bool:
+    """True when folder reuse is safe across these release types.
+
+    A known mismatch (single vs album) is never safe — the single would land
+    in the album's folder and collide with its title track. Unknown on either
+    side is lenient (True) so thin metadata keeps today's #829 reuse instead
+    of splitting a real album across folders.
+    """
+    incoming_kind = _normalize_release_kind(incoming)
+    stored_kind = _normalize_release_kind(stored)
+    if not incoming_kind or not stored_kind:
+        return True
+    return incoming_kind == stored_kind
 
 
 def _find_album(db: Any, spotify_album_id: Optional[str], album_name: Optional[str],
@@ -132,6 +179,27 @@ def _row_release_id(db: Any, album_id: Any) -> str:
                 pass
 
 
+def _row_album_type(db: Any, album_id: Any) -> str:
+    """The album row's stored album_type, "" when unknown/unreadable. A
+    ``lib2_albums`` id, like :func:`_row_release_id`'s."""
+    conn = None
+    try:
+        conn = db._get_connection()
+        row = conn.execute(
+            "SELECT album_type FROM lib2_albums WHERE id = ?", (int(album_id),),
+        ).fetchone()
+        return str((row[0] if row else "") or "").strip()
+    except Exception as e:
+        logger.debug("album_type lookup for album %s failed: %s", album_id, e)
+        return ""
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:  # noqa: S110 - cleanup only
+                pass
+
+
 def _same_release(db: Any, album: Any, sample_file: Optional[str],
                   release_id: str, disambiguation: str,
                   read_identity=read_release_identity) -> bool:
@@ -164,9 +232,16 @@ def resolve_existing_album_folder(
     musicbrainz_release_id: Optional[str] = None,
     disambiguation: Optional[str] = None,
     read_identity=read_release_identity,
+    incoming_album_type: Optional[str] = None,
 ) -> Optional[str]:
     """Return the on-disk folder an existing album lives in (so a new track joins
-    it) or None to fall back to the templated path. See module docstring."""
+    it) or None to fall back to the templated path. See module docstring.
+
+    ``incoming_album_type`` is the release kind of the track being imported
+    ("single" / "ep" / "album" / "compilation", "" when unknown). When it and
+    the stored album row's type are both known and differ, the folder is NOT
+    reused — a single must never be filed into its same-named album's folder.
+    """
     if not transfer_dir or not os.path.isdir(transfer_dir):
         return None
     if not db:
@@ -175,6 +250,21 @@ def resolve_existing_album_folder(
     album = _find_album(db, spotify_album_id, album_name, album_artist,
                         active_server, expected_track_count)
     if not album:
+        return None
+
+    # Release-kind gate: a single/EP sharing the album's title is a different
+    # release, not a later batch of the same one. Refuse before touching the
+    # folder so the template builds it its own Singles/EPs folder instead.
+    _stored_kind = _normalize_release_kind(
+        _row_album_type(db, getattr(album, "id", None)))
+    if not _release_kinds_compatible(incoming_album_type, _stored_kind):
+        logger.info(
+            "[Existing Album Folder] '%s' is a %s but the incoming release is "
+            "a %s — different release kinds, not reusing its folder",
+            getattr(album, "title", album_name),
+            _stored_kind or "unknown",
+            _normalize_release_kind(incoming_album_type) or "unknown",
+        )
         return None
 
     try:
@@ -205,6 +295,31 @@ def resolve_existing_album_folder(
     # or many (disc subfolders) → let the template decide.
     if len(folders) == 1:
         reuse = next(iter(folders))
+        # A smaller release never completes a bigger edition's folder. The
+        # incoming release's own track total is authoritative: when the
+        # existing album roster is LARGER, it is a different edition — a
+        # 12-track standard must not join a 16-track deluxe folder. (The
+        # edition-upgrade bonus in _calculate_album_confidence deliberately
+        # matches standard→deluxe for "already own" checks; right for
+        # existence, wrong for folder identity — and the DB row title is
+        # edition-blind, so _same_album_name can't see it either.) The
+        # reverse — fewer existing tracks than expected — is the normal
+        # multi-batch completion #829 exists for, so it still reuses. A total
+        # of 1 is not "known": album.py falls back to 1 when the source said
+        # nothing (a Soulseek single, say), so 1 means "unknown" as often as
+        # "single" — too ambiguous to judge an edition by, and refusing it
+        # would split thin-metadata tracks off their album under template
+        # drift. Totals of 2+ are never the fallback, so they judge.
+        # Library v2: the album's rows include its wanted tracklist, which has
+        # no files yet. Only tracks with a file are what the folder holds.
+        held = sum(1 for t in tracks if getattr(t, 'file_path', None))
+        if (expected_track_count and expected_track_count > 1
+                and held > expected_track_count):
+            logger.info(
+                "[Existing Album Folder] '%s' holds %d tracks but the incoming "
+                "release has %d — a different edition, not reusing it",
+                reuse, held, expected_track_count)
+            return None
         if not _same_release(db, album, sample_file,
                              (musicbrainz_release_id or "").strip(),
                              (disambiguation or "").strip(), read_identity):

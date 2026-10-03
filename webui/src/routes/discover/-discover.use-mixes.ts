@@ -11,13 +11,17 @@ import {
   fetchHiddenGems,
   fetchListeningMix,
   fetchDailyMixes,
+  fetchForYouMixes,
+  fetchMoodMixes,
   fetchPopularPicks,
   fetchReleaseRadar,
   fetchSeasonalCurrent,
   fetchSeasonalPlaylist,
 } from './-discover.api';
 import { decadeMix, type AvailableDecade } from './-discover.decade-shelf';
+import { type Explanation, explanationLine } from './-discover.explanation';
 import { discoverLimiter } from './-discover.limiter';
+import { fetchRecipes, recipeMix, type RecipeMixCard } from './-discover.recipes';
 import { seasonalHasPlaylist, seasonalMixTitles } from './-discover.seasonal';
 
 /**
@@ -74,6 +78,10 @@ export interface DiscoverMixesController {
   decadeMixes: DiscoverMix[];
   /** Every mix the modal can resolve, keyed — the registry itself (4906). */
   registry: Record<string, DiscoverMix>;
+  /** Your mix recipes, for the editor (their cards are in `mixes`). */
+  recipes: RecipeMixCard[];
+  /** the moods shelf: chill, focus, energy... built from your own albums' tags. */
+  moodMixes: DiscoverMix[];
 }
 
 /**
@@ -83,6 +91,28 @@ export interface DiscoverMixesController {
  * would fire those fetches at mount and defeat the tiering the page hook
  * exists to preserve. The slow-external feeders stay ungated on purpose.
  */
+/**
+ * a {mixes: [...]} payload as cards: moods, on repeat, repeat rewind, blends.
+ * every track is owned, so there's nothing to download or sync-match: no
+ * syncKey, which leaves Play as the one action.
+ */
+export function mixCardsFrom(payload: Record<string, unknown> | undefined): DiscoverMix[] {
+  if (!payload || !Array.isArray(payload.mixes)) return [];
+  const out: DiscoverMix[] = [];
+  for (const raw of payload.mixes as Record<string, unknown>[]) {
+    const tracks = Array.isArray(raw.tracks) ? raw.tracks : [];
+    if (!tracks.length || typeof raw.key !== 'string') continue;
+    out.push({
+      key: raw.key,
+      title: typeof raw.name === 'string' && raw.name ? raw.name : raw.key,
+      subtitle: typeof raw.subtitle === 'string' ? raw.subtitle : undefined,
+      blurb: typeof raw.subtitle === 'string' ? raw.subtitle : undefined,
+      tracks,
+    });
+  }
+  return out;
+}
+
 export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController {
   // Same keys as useDiscoverPage → served from cache, no second request.
   const popularPicks = useQuery(mixQuery('popular-picks', fetchPopularPicks));
@@ -114,6 +144,12 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
   // Slow external — enabled from mount, awaited by nothing.
   const releaseRadar = useQuery(mixQuery('release-radar', fetchReleaseRadar));
   const daily = useQuery(mixQuery('daily-mixes', fetchDailyMixes));
+  // on repeat, repeat rewind, blends: small and fast, so not held back
+  const forYou = useQuery(mixQuery('for-you', fetchForYouMixes));
+  // below the fold, and built once a day server side
+  const moodsQuery = useQuery(mixQuery('moods', fetchMoodMixes, belowFoldReady));
+  // your recipes: server-built, renewed on their own schedule
+  const recipeQuery = useQuery(mixQuery('recipes', fetchRecipes));
   const weekly = useQuery(mixQuery('discovery-weekly', fetchDiscoveryWeekly));
 
   const seasonalOutcome = seasonal.data as SectionOutcome<SeasonData> | undefined;
@@ -129,8 +165,36 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
 
   const mixes: DiscoverMix[] = [];
 
-  // LIVE_MIX_FEEDERS order: release_radar, discovery_weekly, seasonal_playlist,
-  // popular_picks, hidden_gems, listening_mix, discovery_shuffle.
+  // Daily Mixes lead. they're the most personal thing on the shelf (clustered
+  // from what you actually play, mostly owned so they play instantly) and
+  // they used to come ninth, after every generic feeder.
+  const dailyOutcome = daily.data as SectionOutcome<Record<string, unknown>> | undefined;
+  const dailyPayload = dailyOutcome?.kind === 'ok' ? dailyOutcome.data : undefined;
+  if (dailyPayload && Array.isArray(dailyPayload.mixes)) {
+    for (const raw of dailyPayload.mixes as Record<string, unknown>[]) {
+      const tracks = Array.isArray(raw.tracks) ? raw.tracks : [];
+      if (!tracks.length || typeof raw.key !== 'string') continue;
+      mixes.push({
+        key: raw.key,
+        title: String(raw.name || raw.key),
+        subtitle:
+          explanationLine(raw.explanation as Explanation | undefined) || String(raw.subtitle || ''),
+        // the card says who's in it, the way a daily mix should
+        blurb: typeof raw.subtitle === 'string' && raw.subtitle ? raw.subtitle : undefined,
+        tracks,
+      });
+    }
+  }
+
+  // then on repeat, repeat rewind and any blends: straight off what you play
+  const forYouOutcome = forYou.data as SectionOutcome<Record<string, unknown>> | undefined;
+  for (const m of mixCardsFrom(forYouOutcome?.kind === 'ok' ? forYouOutcome.data : undefined)) {
+    mixes.push(m);
+  }
+
+  // then the LIVE_MIX_FEEDERS order: release_radar, discovery_weekly,
+  // seasonal_playlist, popular_picks, hidden_gems, listening_mix,
+  // discovery_shuffle.
   const radarTracks = outcomeTracks(releaseRadar.data);
   if (radarTracks.length > 0) {
     mixes.push({
@@ -200,21 +264,10 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
     }
   }
 
-  // Daily Mixes - one card per taste cluster, subtitled by its artists.
-  const dailyOutcome = daily.data as SectionOutcome<Record<string, unknown>> | undefined;
-  const dailyPayload = dailyOutcome?.kind === 'ok' ? dailyOutcome.data : undefined;
-  if (dailyPayload && Array.isArray(dailyPayload.mixes)) {
-    for (const raw of dailyPayload.mixes as Record<string, unknown>[]) {
-      const tracks = Array.isArray(raw.tracks) ? raw.tracks : [];
-      if (!tracks.length || typeof raw.key !== 'string') continue;
-      mixes.push({
-        key: raw.key,
-        title: String(raw.name || raw.key),
-        subtitle: String(raw.subtitle || ''),
-        tracks,
-      });
-    }
-  }
+  // Your recipe mixes, last. A new recipe shows even before
+  // it has tracks, so it can be edited.
+  const recipes = (recipeQuery.data as { mixes?: RecipeMixCard[] } | undefined)?.mixes ?? [];
+  for (const card of recipes) mixes.push(recipeMix(card));
 
   const decadesOutcome = decades.data as SectionOutcome<Record<string, unknown>> | undefined;
   const availableDecades =
@@ -223,8 +276,11 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
       : [];
   const decadeMixes = availableDecades.map((d) => decadeMix(d));
 
-  const registry: Record<string, DiscoverMix> = {};
-  for (const m of [...mixes, ...decadeMixes]) registry[m.key] = m;
+  const moodOutcome = moodsQuery.data as SectionOutcome<Record<string, unknown>> | undefined;
+  const moodMixes = mixCardsFrom(moodOutcome?.kind === 'ok' ? moodOutcome.data : undefined);
 
-  return { mixes, decadeMixes, registry };
+  const registry: Record<string, DiscoverMix> = {};
+  for (const m of [...mixes, ...decadeMixes, ...moodMixes]) registry[m.key] = m;
+
+  return { mixes, decadeMixes, registry, recipes, moodMixes };
 }

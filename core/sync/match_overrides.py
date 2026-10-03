@@ -29,6 +29,21 @@ from utils.logging_config import get_logger
 logger = get_logger("sync.match_overrides")
 
 
+def match_lookup_ids(track: Any) -> List[str]:
+    """ids a user's saved match can be filed under, in lookup order.
+
+    a sync track's ``id`` is whatever discovery matched (a catalogue id, or a
+    ``wing_it_`` stub), but Find & Add files its match under the playlist's own
+    ``source_track_id``. checking only ``id`` missed every match on a wing-it
+    track or a track discovered on another provider (#1289)."""
+    ids: List[str] = []
+    for value in (getattr(track, 'id', None), getattr(track, 'source_track_id', None)):
+        text = str(value or '').strip()
+        if text and text not in ids:
+            ids.append(text)
+    return ids
+
+
 def resolve_match_overrides(
     source_tracks: List[Dict[str, Any]],
     server_tracks: List[Dict[str, Any]],
@@ -195,6 +210,30 @@ def resolve_override_server_id(
     return resolve_durable_match_server_id(
         db, profile_id, source_track_id, server_source, valid_server_ids
     )
+
+
+def manual_match_server_id(db: Any, library_track_id: Any, server_source: str) -> Optional[str]:
+    """The media server's id for a stored manual match, or None.
+
+    ``library_track_id`` is a catalogue id; every sync match path speaks the
+    server's id (that is what ``get_track_by_server_id`` and the sync cache
+    answer with). A match saved before the catalogue existed stored the
+    server's own id, so that is the fallback when no translation exists.
+    """
+    if library_track_id is None or str(library_track_id) == '':
+        return None
+    try:
+        server_id = db.server_track_id(library_track_id, server_source)
+    except Exception:  # noqa: BLE001 - an unreadable translation is a miss
+        server_id = None
+    if server_id:
+        return str(server_id)
+    try:
+        if db.get_track_by_server_id(library_track_id, server_source):
+            return str(library_track_id)
+    except Exception:  # noqa: BLE001
+        return None
+    return None
 
 
 def _playlist_server_id(db: Any, track_id: Any, valid_server_ids: set) -> Optional[str]:

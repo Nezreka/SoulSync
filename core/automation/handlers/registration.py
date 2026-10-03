@@ -29,6 +29,8 @@ from core.automation.handlers.database_update import (
 )
 from core.automation.handlers.duplicate_cleaner import auto_run_duplicate_cleaner
 from core.automation.handlers.quality_scanner import auto_start_quality_scan
+from core.automation.handlers.run_repair import auto_run_repair_job
+from core.automation.handlers.apply_quality_upgrades import auto_apply_quality_upgrades
 from core.automation.handlers.maintenance import (
     auto_clear_quarantine,
     auto_cleanup_wishlist,
@@ -222,6 +224,17 @@ def register_all(deps: AutomationDeps) -> None:
         'start_quality_scan',
         lambda config: auto_start_quality_scan(config, deps),
         lambda: False,  # repair worker dedupes Run-Now requests itself
+    )
+    # Any music Library Maintenance job, on the repair worker's force-run
+    # queue (one job at a time; dedupes repeat requests itself).
+    engine.register_action_handler(
+        'run_repair_job',
+        lambda config: auto_run_repair_job(config, deps),
+        lambda: False,
+    )
+    engine.register_action_handler(
+        'apply_quality_upgrades',
+        lambda config: auto_apply_quality_upgrades(config, deps),
     )
     engine.register_action_handler(
         'backup_database',

@@ -31,6 +31,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import type { FindingAlbumGroup } from '../-tools.api';
 import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
 import type {
   BulkFixStatus,
@@ -76,6 +77,9 @@ import {
   REPAIR_PAGE_SIZE_OPTIONS,
 } from '../-tools.core';
 import { safeFixablePending, visibleGroups } from '../-tools.groups';
+import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
+import { ReidentifyModal } from '../../artist-detail/-ui/reidentify-modal';
+import { AlbumInspectionTray } from './album-inspection-tray';
 import { FindingDetail } from './finding-detail';
 import { useFindingPrompts } from './finding-prompts';
 import { FindingsAlbumGrid } from './findings-album-grid';
@@ -107,6 +111,7 @@ const TYPE_ACOUSTID = 'acoustid_mismatch';
 const TYPE_RETAG = 'library_retag';
 const TYPE_BACKFILL = 'missing_discography_track';
 const TYPE_QUALITY = 'quality_upgrade';
+const TYPE_SUSPECT_ALBUM = 'suspect_album_tag';
 
 /** Above this many files, a whole-group orphan DELETE goes through the
  *  type-the-phrase dialog. Same number the filter-wide Fix All has always
@@ -133,6 +138,19 @@ const SORT_OPTIONS = [
   { value: 'path', label: 'File path' },
 ] as const;
 
+/**
+ * the newest finished run, as a key. the run history reloads when a job
+ * finishes (#1144); when this changes, a job just landed findings.
+ */
+export function latestRunKey(runs: readonly RepairJobRun[]): string {
+  let newest: RepairJobRun | null = null;
+  for (const run of runs) {
+    if (!run.finished_at) continue;
+    if (!newest || String(run.finished_at) > String(newest.finished_at)) newest = run;
+  }
+  return newest ? `${newest.id ?? ''}@${newest.finished_at}` : '';
+}
+
 export interface FindingsSurfaceProps {
   /** The job list, for the job filter. */
   jobs: RepairJob[];
@@ -142,9 +160,17 @@ export interface FindingsSurfaceProps {
   trackCount: number | null;
   /** A jump from the run history: scope the surface to one job's open
    *  findings. The token re-fires the same job. */
-  focusJob?: { jobId: string; token: number; query?: string } | null;
+  focusJob?: {
+    jobId: string;
+    token: number;
+    query?: string;
+    severity?: string;
+    findingType?: string;
+  } | null;
   /** `updateRepairStatus()` — refresh the pending badge after any mutation. */
   onStatusChanged: () => void;
+  /** Default view mode: 'albums' (default for UI) or 'inbox' (default for unit tests). */
+  defaultView?: 'albums' | 'inbox' | 'table';
 }
 
 export function FindingsSurface({
@@ -153,6 +179,7 @@ export function FindingsSurface({
   trackCount,
   focusJob,
   onStatusChanged,
+  defaultView,
 }: FindingsSurfaceProps) {
   /** job_id → display name, falling back to a de-underscored id for a job the
    *  list hasn't loaded (or one that has since been removed). */
@@ -169,6 +196,25 @@ export function FindingsSurface({
   const [query, setQuery] = useState('');
   const [pageSize, setPageSize] = useState(readStoredPageSize);
   const [page, setPage] = useState(0);
+
+  const [viewMode, setViewMode] = useState<'albums' | 'inbox' | 'table'>(() => {
+    if (defaultView) return defaultView;
+    try {
+      const saved = localStorage.getItem('soulsync-findings-view-mode');
+      if (saved === 'albums' || saved === 'inbox' || saved === 'table') return saved;
+    } catch {}
+    return 'inbox';
+  });
+
+  const changeViewMode = (mode: 'albums' | 'inbox' | 'table') => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem('soulsync-findings-view-mode', mode);
+    } catch {}
+  };
+
+  const [selectedAlbum, setSelectedAlbum] = useState<FindingAlbumGroup | null>(null);
+  const [redownloadFinding, setRedownloadFinding] = useState<RepairFinding | null>(null);
 
   /** Which group is expanded. Exactly one at a time: the open group hosts the
    *  single finding list, which is what lets every row feature survive
@@ -196,6 +242,7 @@ export function FindingsSurface({
   const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set());
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(() => new Set());
   const [busyFix, setBusyFix] = useState<ReadonlySet<number>>(() => new Set());
+  const [reidentifyingFinding, setReidentifyingFinding] = useState<RepairFinding | null>(null);
 
   const [bulkRun, setBulkRun] = useState<BulkFixStatus | null>(null);
   const bulkTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -291,6 +338,28 @@ export function FindingsSurface({
     onStatusChanged();
   }, [loadCounts, loadFindings, loadGroups, onStatusChanged]);
 
+  // a job finished: its findings only showed after a page refresh (#1386).
+  // any change after the first render counts, even from no runs at all (a
+  // fresh install's first job); the history arriving on open costs one
+  // extra small reload. scheduled jobs finish in the background too, so the
+  // open list only reloads when nothing's ticked: reloading it clears the
+  // selection you were building
+  const [refreshToken, setRefreshToken] = useState(0);
+  const runKey = latestRunKey(runs);
+  const seenRunKey = useRef<string | null>(null);
+  const selectedCount = useRef(0);
+  selectedCount.current = selected.size;
+  useEffect(() => {
+    const previous = seenRunKey.current;
+    seenRunKey.current = runKey;
+    if (previous === null || previous === runKey) return;
+    void loadCounts();
+    void loadGroups();
+    if (selectedCount.current === 0) void loadFindings();
+    onStatusChanged();
+    setRefreshToken((token) => token + 1);
+  }, [runKey, loadCounts, loadGroups, loadFindings, onStatusChanged]);
+
   // ── The background Fix All run ─────────────────────────────────────────────
 
   const watchBulkFixRun = useCallback(() => {
@@ -340,17 +409,15 @@ export function FindingsSurface({
     void loadFindings();
   }, [loadFindings]);
 
-  /** Arriving from a run row. Reset everything that could hide the rows the
-   *  user just asked for — a stale search or a dismissed-status filter would
-   *  make the jump land on an empty surface. */
+  /** Arriving from a run row or Studio Triage Center. Reset everything that could hide
+   *  the rows the user just asked for. */
   useEffect(() => {
     if (!focusJob) return;
-    setJobFilter(focusJob.jobId);
+    setJobFilter(focusJob.jobId || '');
     setStatusFilter('pending');
-    setSeverityFilter('');
-    // a jump from an issue carries the item it was about
+    setSeverityFilter(focusJob.severity ?? '');
     setQuery(focusJob.query ?? '');
-    setOpenType('');
+    setOpenType(focusJob.findingType ?? '');
     setPage(0);
   }, [focusJob]);
 
@@ -496,6 +563,10 @@ export function FindingsSurface({
         // 'add_to_wishlist' falls through with no fix_action — the handler
         // already adds to the wishlist by default.
       }
+      if (type === TYPE_SUSPECT_ALBUM) {
+        setReidentifyingFinding(finding);
+        return;
+      }
 
       // A finding with no catalogue subject cannot be re-downloaded — the fix
       // is a plain delete, and unlike every prompt above it has no dialog of
@@ -533,6 +604,10 @@ export function FindingsSurface({
     },
     [dismissOne, prompts, refreshAll],
   );
+
+  const handleInspectRedownload = useCallback((finding: RepairFinding) => {
+    setRedownloadFinding(finding);
+  }, []);
 
   /** `selectDuplicateToKeep`. */
   const keepDuplicate = useCallback(
@@ -800,9 +875,11 @@ export function FindingsSurface({
         // spell out what happens to files; safe ones just confirm the scale.
         const confirmed = await window.showConfirmDialog?.({
           title: `${info?.verb || 'Fix'} ${label}`,
-          message: info?.destructive
-            ? `Apply "${info.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? This moves or deletes files on disk and cannot be undone.`
-            : `Apply "${info?.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? This only writes metadata — no files are deleted or moved.`,
+          message: info?.confirm
+            ? `Apply "${info.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? ${info.confirm}`
+            : info?.destructive
+              ? `Apply "${info.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? This moves or deletes files on disk and cannot be undone.`
+              : `Apply "${info?.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? This only writes metadata — no files are deleted or moved.`,
           confirmText: info?.verb || 'Fix',
           destructive: Boolean(info?.destructive),
         });
@@ -1030,6 +1107,7 @@ export function FindingsSurface({
         groupBy={groupView}
         status={statusFilter}
         findingType={openType}
+        refreshToken={refreshToken}
         onOpen={(group) => {
           const needle = groupView === 'artist' ? group.artist : group.album;
           if (needle) setQuery(needle);
@@ -1133,6 +1211,7 @@ export function FindingsSurface({
                   onReopen={reopenOne}
                   onKeepDuplicate={(findingId, trackId) => void keepDuplicate(findingId, trackId)}
                   onApplyCoverArt={(findingId, target) => void applyCoverArt(findingId, target)}
+                  onInspectRedownload={handleInspectRedownload}
                 />
               ))
             )}
@@ -1229,6 +1308,41 @@ export function FindingsSurface({
         </div>
       ) : null}
 
+      <div className="repair-findings-header-row">
+        <div className="repair-view-mode-tabs" role="tablist" aria-label="Findings View Mode">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === 'albums'}
+            className={`repair-view-mode-tab${viewMode === 'albums' ? ' active' : ''}`}
+            onClick={() => changeViewMode('albums')}
+          >
+            <span className="repair-view-mode-icon">💿</span>
+            <span>Albums & Releases</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === 'inbox'}
+            className={`repair-view-mode-tab${viewMode === 'inbox' ? ' active' : ''}`}
+            onClick={() => changeViewMode('inbox')}
+          >
+            <span className="repair-view-mode-icon">📂</span>
+            <span>Issue Types</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === 'table'}
+            className={`repair-view-mode-tab${viewMode === 'table' ? ' active' : ''}`}
+            onClick={() => changeViewMode('table')}
+          >
+            <span className="repair-view-mode-icon">📋</span>
+            <span>Flat List</span>
+          </button>
+        </div>
+      </div>
+
       {/* The section anchor lands here rather than on the inbox: the toolbar
           is always present, and the inbox is not (a search replaces it). */}
       <div className="repair-findings-toolbar" id="repair-section-findings">
@@ -1310,7 +1424,38 @@ export function FindingsSurface({
         </button>
       </div>
 
-      {searching ? (
+      {viewMode === 'albums' && !searching ? (
+        <div className="repair-albums-view">
+          {selectedAlbum ? (
+            <AlbumInspectionTray
+              group={selectedAlbum}
+              status={statusFilter}
+              onClose={() => setSelectedAlbum(null)}
+              onFixFinding={fixOne}
+              onDismissFinding={dismissOne}
+              onInspectRedownload={handleInspectRedownload}
+              onRefresh={refreshAll}
+              onReopenFinding={async (id) => {
+                if (await reopenFinding(id)) {
+                  refreshAll();
+                }
+              }}
+            />
+          ) : null}
+          <FindingsAlbumGrid
+            groupBy="album"
+            jobId={jobFilter || undefined}
+            status={statusFilter || undefined}
+            findingType={listType || undefined}
+            q={query.trim() || undefined}
+            selectedGroupKey={selectedAlbum?.key}
+            refreshToken={refreshToken}
+            onOpen={(group) => setSelectedAlbum(group)}
+          />
+        </div>
+      ) : viewMode === 'table' && !searching ? (
+        findingList
+      ) : searching ? (
         <>
           <div className="repair-search-note">
             Searching every finding for <b>{query.trim()}</b> — clear the search to go back to
@@ -1334,6 +1479,97 @@ export function FindingsSurface({
       )}
 
       {prompts.promptNode}
+
+      {reidentifyingFinding ? (
+        <ReidentifyModal
+          trackId={reidentifyingFinding.entity_id}
+          trackTitle={String(
+            (reidentifyingFinding.details as Record<string, any>)?.track_title ||
+              reidentifyingFinding.title ||
+              '',
+          )}
+          artistName={String(
+            (reidentifyingFinding.details as Record<string, any>)?.artist_name || '',
+          )}
+          albumTitle={String(
+            (reidentifyingFinding.details as Record<string, any>)?.album_title || '',
+          )}
+          imageUrl={String(
+            (reidentifyingFinding.details as Record<string, any>)?.album_thumb_url || '',
+          )}
+          initialQuery={String(
+            (reidentifyingFinding.details as Record<string, any>)?.reidentify_query || '',
+          )}
+          onApplied={async () => {
+            if (reidentifyingFinding) {
+              await dismissOne(reidentifyingFinding.id);
+            }
+          }}
+          onClose={() => {
+            setReidentifyingFinding(null);
+            refreshAll();
+          }}
+        />
+      ) : null}
+
+      {redownloadFinding ? (
+        <RedownloadModal
+          track={{
+            id: redownloadFinding.entity_id || String(redownloadFinding.id),
+            track_id: redownloadFinding.entity_id || String(redownloadFinding.id),
+            title: String(
+              (redownloadFinding.details as Record<string, any>)?.track_title ||
+                redownloadFinding.title ||
+                '',
+            ),
+            file_path:
+              (redownloadFinding.details as Record<string, any>)?.file_path ||
+              redownloadFinding.file_path ||
+              '',
+            format: (redownloadFinding.details as Record<string, any>)?.format || '',
+            bitrate: (redownloadFinding.details as Record<string, any>)?.bitrate || 0,
+          }}
+          album={{
+            id: (redownloadFinding.details as Record<string, any>)?.album_id || '',
+            name:
+              (redownloadFinding.details as Record<string, any>)?.album_title ||
+              (redownloadFinding.details as Record<string, any>)?.album ||
+              '',
+            title:
+              (redownloadFinding.details as Record<string, any>)?.album_title ||
+              (redownloadFinding.details as Record<string, any>)?.album ||
+              '',
+            tracks: [
+              {
+                id: redownloadFinding.entity_id || String(redownloadFinding.id),
+                track_id: redownloadFinding.entity_id || String(redownloadFinding.id),
+                title: String(
+                  (redownloadFinding.details as Record<string, any>)?.track_title ||
+                    redownloadFinding.title ||
+                    '',
+                ),
+                file_path:
+                  (redownloadFinding.details as Record<string, any>)?.file_path ||
+                  redownloadFinding.file_path ||
+                  '',
+              },
+            ],
+          }}
+          artistName={String(
+            (redownloadFinding.details as Record<string, any>)?.artist_name ||
+              (redownloadFinding.details as Record<string, any>)?.artist ||
+              '',
+          )}
+          upgrade={redownloadFinding.finding_type === 'quality_upgrade'}
+          onReload={() => {
+            refreshAll();
+          }}
+          onClose={() => {
+            setRedownloadFinding(null);
+            refreshAll();
+          }}
+        />
+      ) : null}
     </>
   );
 }
@@ -1353,6 +1589,7 @@ function FindingCard({
   onReopen,
   onKeepDuplicate,
   onApplyCoverArt,
+  onInspectRedownload,
 }: {
   finding: RepairFinding;
   selected: boolean;
@@ -1366,6 +1603,7 @@ function FindingCard({
   onReopen: (id: number) => Promise<void>;
   onKeepDuplicate: (findingId: number, trackId: string) => void;
   onApplyCoverArt: (findingId: number, target: 'album' | 'artist') => void;
+  onInspectRedownload?: (finding: RepairFinding) => void;
 }) {
   const details = finding.details || {};
   const filePath = findingFilePath(finding);
@@ -1427,7 +1665,20 @@ function FindingCard({
                   type="button"
                   title={fixLabel}
                   disabled={fixing}
-                  onClick={() => void onFix(finding)}
+                  onClick={() => {
+                    const isRedownload =
+                      fixLabel.toLowerCase().includes('re-download') ||
+                      fixLabel.toLowerCase().includes('download') ||
+                      finding.finding_type === 'quality_upgrade' ||
+                      finding.finding_type === 'missing_discography_track' ||
+                      finding.finding_type === 'short_preview_track' ||
+                      finding.finding_type === 'dead_file';
+                    if (isRedownload && onInspectRedownload && finding.entity_id) {
+                      onInspectRedownload(finding);
+                    } else {
+                      void onFix(finding);
+                    }
+                  }}
                 >
                   {fixing ? '...' : fixLabel}
                 </button>
@@ -1472,6 +1723,23 @@ function FindingCard({
           </button>
         </div>
       </div>
+      {finding.last_error ? (
+        <div className="repair-finding-error-banner" onClick={(event) => event.stopPropagation()}>
+          <div className="repair-finding-error-header">
+            <span className="repair-finding-error-icon">⚠️</span>
+            <span className="repair-finding-error-title">Resolution Attempt Failed</span>
+          </div>
+          <div className="repair-finding-error-text">{finding.last_error}</div>
+          <button
+            type="button"
+            className="repair-finding-error-retry"
+            disabled={fixing}
+            onClick={() => void onFix(finding)}
+          >
+            Retry Fix
+          </button>
+        </div>
+      ) : null}
       <div
         className={`repair-finding-detail${expanded ? ' open' : ''}`}
         id={`repair-detail-${finding.id}`}

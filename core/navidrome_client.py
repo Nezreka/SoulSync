@@ -810,6 +810,7 @@ class NavidromeClient(MediaServerClient):
             album_ids = set()
             offset = 0
             page_size = 500
+            complete = True
             while True:
                 params = {
                     'type': 'alphabeticalByArtist',
@@ -819,6 +820,11 @@ class NavidromeClient(MediaServerClient):
                 }
                 response = self._make_request('getAlbumList2', params)
                 if not response:
+                    # A failed page means the index is PARTIAL — never cache
+                    # it: callers filter artists against this set, and a
+                    # partial set would silently drop real albums (and, in a
+                    # deep scan, their tracks) while looking fully trusted.
+                    complete = False
                     break
                 album_list = response.get('albumList2', {}).get('album', [])
                 if not album_list:
@@ -830,6 +836,9 @@ class NavidromeClient(MediaServerClient):
                 if len(album_list) < page_size:
                     break
                 offset += page_size
+            if not complete:
+                logger.warning("Music folder album index incomplete (page failed) — skipping folder filter this scan")
+                return None
             self._folder_album_ids = album_ids
             logger.info(f"Built music folder album index: {len(album_ids)} albums in selected folder")
             return album_ids
@@ -1102,7 +1111,9 @@ class NavidromeClient(MediaServerClient):
         scopes ``getStarred2`` and ratings to the AUTHENTICATED user with no
         admin impersonation, so reading someone else's favourites really does
         need their own credentials — which is exactly what Cremonies described.
-        With no list we read the configured account only.
+        the configured account is always read first, then each listed user,
+        once per username. reading only the listed users used to drop the
+        admin's own stars the moment anyone else had a login saved.
 
         Playlist membership is the exception: ``getPlaylists`` accepts an
         admin-only ``username`` parameter, so one admin credential can see
@@ -1115,9 +1126,14 @@ class NavidromeClient(MediaServerClient):
         if not self.ensure_connection():
             return {}
 
-        accounts = list(users or [])
-        if not accounts:
-            accounts = [(self.username, self.password)]
+        accounts = []
+        seen_names = set()
+        for username, password in [(self.username, self.password), *(users or [])]:
+            name = str(username or '').strip().lower()
+            if not name or name in seen_names:
+                continue
+            seen_names.add(name)
+            accounts.append((username, password))
 
         signals = {}
         for username, password in accounts:
@@ -1628,7 +1644,8 @@ class NavidromeClient(MediaServerClient):
             
             # Check if backup is enabled in config
             from core.settings import config_manager
-            create_backup = config_manager.get('playlist_sync.create_backup', True)
+            from core.sync.playlist_edit import playlist_backup_enabled
+            create_backup = playlist_backup_enabled(config_manager)
 
             # If we have existing playlists and want to backup, use the first one found
             if existing_playlists and create_backup:
@@ -1770,6 +1787,10 @@ class NavidromeClient(MediaServerClient):
         self._artist_cache.clear()
         self._album_cache.clear()
         self._track_cache.clear()
+        # The music-folder album index is rebuilt per scan, not per process:
+        # a stale set silently filters newly added albums out of incremental
+        # scans (their IDs aren't in it yet), and only a restart rebuilt it.
+        self._folder_album_ids = None
         logger.info("Navidrome client cache cleared")
 
     def search_tracks(self, title: str, artist: str, limit: int = 15) -> List[TrackInfo]:

@@ -2,26 +2,24 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { EnhancedAlbum, EnhancedTrack } from '../-artist-detail.enhanced';
 import type {
-  RedownloadCandidate,
   RedownloadMetadataResponse,
   RedownloadMetadataResult,
 } from '../-artist-detail.redownload';
+import type { InspectorCandidate } from '../../../features/downloads/inspector';
+import type { SourceColumnData } from '../../../features/downloads/inspector-columns';
 
 import {
-  bestCandidateIndex,
-  DOWNLOAD_SERVICE_ICONS,
-  DOWNLOAD_SERVICE_LABELS,
   METADATA_SOURCE_ICONS,
   METADATA_SOURCE_LABELS,
-  msClock,
   pollRedownloadProgress,
-  scoreClass,
   searchRedownloadMetadata,
   startRedownloadRequest,
   stopRedownloadProgress,
   streamRedownloadSources,
   trackFormatBadge,
 } from '../-artist-detail.redownload';
+import { bestCandidateIndex, msClock, scoreClass } from '../../../features/downloads/inspector';
+import { SourceColumn } from '../../../features/downloads/inspector-columns';
 
 /**
  * The 3-step redownload modal (showTrackRedownloadModal, library.js:3348):
@@ -36,10 +34,13 @@ export function RedownloadModal({
   artistName,
   onReload,
   onClose,
+  upgrade = false,
 }: {
   track: EnhancedTrack;
   album: EnhancedAlbum;
   artistName: string;
+  /** Hold every hit to the track's quality-profile cutoff: an upgrade, not a swap. */
+  upgrade?: boolean;
   /** A finished download re-fetches the enhanced payload (3871-3873). */
   onReload: () => void;
   onClose: () => void;
@@ -49,17 +50,15 @@ export function RedownloadModal({
   const [metadataError, setMetadataError] = useState('');
   const [choice, setChoice] = useState<{ source: string; index: number } | null>(null);
 
-  const [candidates, setCandidates] = useState<RedownloadCandidate[]>([]);
-  const [columns, setColumns] = useState<{ source: string; candidates: RedownloadCandidate[] }[]>(
-    [],
-  );
+  const [candidates, setCandidates] = useState<InspectorCandidate[]>([]);
+  const [columns, setColumns] = useState<SourceColumnData[]>([]);
   const [streamDone, setStreamDone] = useState(false);
   const [streamError, setStreamError] = useState('');
   const [pickedIdx, setPickedIdx] = useState<number | null>(null);
   const [deleteOld, setDeleteOld] = useState(true);
 
   const [progress, setProgress] = useState({ pct: 0, text: 'Starting download...' });
-  const [downloading, setDownloading] = useState<RedownloadCandidate | null>(null);
+  const [downloading, setDownloading] = useState<InspectorCandidate | null>(null);
   const [startError, setStartError] = useState('');
   const chosenMetaRef = useRef<RedownloadMetadataResult | null>(null);
 
@@ -103,10 +102,15 @@ export function RedownloadModal({
     meta._source = choice.source;
     chosenMetaRef.current = meta;
     setStep(2);
-    void streamRedownloadSources(track.id, meta, (source, fresh, all) => {
-      setColumns((prev) => [...prev, { source, candidates: fresh }]);
-      setCandidates([...all]);
-    })
+    void streamRedownloadSources(
+      track.id,
+      meta,
+      (source, fresh, all, rejected) => {
+        setColumns((prev) => [...prev, { source, candidates: fresh, rejected }]);
+        setCandidates([...all]);
+      },
+      { upgrade },
+    )
       .then(() => setStreamDone(true))
       .catch((error: Error) => setStreamError(error.message));
   };
@@ -118,8 +122,8 @@ export function RedownloadModal({
   const selectedIdx = pickedIdx ?? (bestIdx >= 0 ? bestIdx : null);
   const anySelectable = candidates.some((c) => !c.blacklisted);
 
-  const startDownload = async () => {
-    const candidate = selectedIdx != null ? candidates[selectedIdx] : null;
+  const startDownload = async (chosen?: InspectorCandidate) => {
+    const candidate = chosen ?? (selectedIdx != null ? candidates[selectedIdx] : null);
     if (!candidate) {
       window.showToast?.('Select a download source', 'error');
       return;
@@ -161,9 +165,11 @@ export function RedownloadModal({
       <div className="redownload-modal">
         <div className="redownload-header">
           <div>
-            <h3>Redownload Track</h3>
+            <h3>{upgrade ? 'Upgrade Track' : 'Redownload Track'}</h3>
             <p className="redownload-header-sub">
-              Find the correct version and download from your preferred source
+              {upgrade
+                ? 'Find a copy that reaches your quality profile, and replace this one'
+                : 'Find the correct version and download from your preferred source'}
             </p>
           </div>
           <button className="redownload-close" type="button" onClick={onClose}>
@@ -239,6 +245,8 @@ export function RedownloadModal({
                     selectedIdx={selectedIdx}
                     bestIdx={bestIdx}
                     onPick={setPickedIdx}
+                    expected={chosenMetaRef.current ?? {}}
+                    onOverride={(row) => void startDownload(row)}
                     key={column.source}
                   />
                 ))
@@ -315,7 +323,11 @@ export function RedownloadModal({
                 disabled={!anySelectable}
                 onClick={() => void startDownload()}
               >
-                {anySelectable ? 'Download Selected' : 'Waiting for results...'}
+                {anySelectable
+                  ? 'Download Selected'
+                  : streamDone
+                    ? 'No match to download'
+                    : 'Waiting for results...'}
               </button>
             </div>
           </div>
@@ -400,88 +412,6 @@ function MetadataColumns({
           </div>
         );
       })}
-    </div>
-  );
-}
-
-function SourceColumn({
-  column,
-  selectedIdx,
-  bestIdx,
-  onPick,
-}: {
-  column: { source: string; candidates: RedownloadCandidate[] };
-  selectedIdx: number | null;
-  bestIdx: number;
-  onPick: (globalIdx: number) => void;
-}) {
-  return (
-    <div className="rdl-src-col">
-      <div className="rdl-src-col-header">
-        <span className="rdl-src-col-icon">{DOWNLOAD_SERVICE_ICONS[column.source] || '📦'}</span>
-        <span className="rdl-src-col-label">
-          {DOWNLOAD_SERVICE_LABELS[column.source] || column.source}
-        </span>
-        <span className="rdl-src-col-count">{column.candidates.length}</span>
-      </div>
-      <div className="rdl-src-col-body">
-        {column.candidates.length === 0 ? (
-          <div className="rdl-src-col-empty">No results</div>
-        ) : (
-          column.candidates.slice(0, 10).map((c) => {
-            const confPct = Math.round((c.confidence || 0) * 100);
-            const confCls = scoreClass(confPct);
-            const isRec = c._globalIdx === bestIdx;
-            const dur = msClock(c.duration);
-            return (
-              <label
-                className={`rdl-src-item${c.blacklisted ? ' blacklisted' : ''}${isRec ? ' recommended' : ''}`}
-                key={c._globalIdx}
-              >
-                {c.blacklisted ? (
-                  <div className="rdl-src-radio-placeholder" />
-                ) : (
-                  <input
-                    type="radio"
-                    name="source-choice"
-                    value={c._globalIdx}
-                    checked={selectedIdx === c._globalIdx}
-                    onChange={() => onPick(c._globalIdx)}
-                  />
-                )}
-                <div className="rdl-src-item-body">
-                  <div className="rdl-src-item-top">
-                    <div className="rdl-src-item-name" title={String(c.filename || '')}>
-                      {c.display_name}
-                    </div>
-                    {isRec ? <span className="rdl-src-recommended">Best</span> : null}
-                  </div>
-                  <div className="rdl-src-item-details">
-                    {c.quality ? <span className="rdl-src-fmt">{c.quality}</span> : null}
-                    {c.bitrate ? <span className="rdl-src-detail">{c.bitrate}k</span> : null}
-                    <span className="rdl-src-detail">{c.size_display}</span>
-                    {dur ? <span className="rdl-src-detail">{dur}</span> : null}
-                    {column.source === 'soulseek' ? (
-                      <span className="rdl-src-detail rdl-src-user">{c.username}</span>
-                    ) : null}
-                    {column.source === 'soulseek' && c.free_upload_slots != null ? (
-                      <span className="rdl-src-detail">{c.free_upload_slots} slots</span>
-                    ) : null}
-                  </div>
-                  <div className="rdl-src-conf-bar">
-                    <div
-                      className={`rdl-src-conf-fill ${confCls}`}
-                      style={{ width: `${confPct}%` }}
-                    />
-                  </div>
-                </div>
-                <div className={`rdl-src-conf-pct ${confCls}`}>{confPct}%</div>
-                {c.blacklisted ? <span className="rdl-src-bl">Blacklisted</span> : null}
-              </label>
-            );
-          })
-        )}
-      </div>
     </div>
   );
 }

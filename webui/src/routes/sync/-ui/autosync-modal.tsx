@@ -173,6 +173,8 @@ export interface AutoSyncModalProps {
   onBulkUnschedule: (source: string) => void;
   onOpenDetails: (playlistId: number) => void;
   onRunAgain: (playlistId: number, playlistName: string) => void;
+  /** told when a playlist drag starts / ends, so the poller can hold off. */
+  onDraggingChange?: (dragging: boolean) => void;
 }
 
 export function AutoSyncModal({
@@ -191,8 +193,31 @@ export function AutoSyncModal({
   onBulkUnschedule,
   onOpenDetails,
   onRunAgain,
+  onDraggingChange,
 }: AutoSyncModalProps) {
   const [tab, setTab] = useState<AutoSyncTab>('schedule');
+  // true while a playlist is mid-drag, so every drop target can light up.
+  // empty intervals are small chips now and easy to miss otherwise.
+  const [dragging, setDragging] = useState(false);
+  // hold the poller off mid-drag too, a refresh re-renders the board under
+  // the cursor. the hook has had this switch all along, nothing flipped it.
+  const onDraggingChangeRef = useRef(onDraggingChange);
+  onDraggingChangeRef.current = onDraggingChange;
+  useEffect(() => {
+    onDraggingChangeRef.current?.(dragging);
+  }, [dragging]);
+  useEffect(() => {
+    if (!dragging) return;
+    // a card that moves lanes on drop is unmounted before its own dragend can
+    // bubble up here, so the document has to be able to end it too
+    const stop = () => setDragging(false);
+    document.addEventListener('dragend', stop);
+    document.addEventListener('drop', stop);
+    return () => {
+      document.removeEventListener('dragend', stop);
+      document.removeEventListener('drop', stop);
+    };
+  }, [dragging]);
   const [bulk, setBulk] = useState<{ source: string; top: number; left: number } | null>(null);
 
   const summary = autoSyncSummary(state);
@@ -238,13 +263,15 @@ export function AutoSyncModal({
     </div>
   );
 
-  const header = (blurb: string) => (
+  // the counts ride in the header now instead of a strip of their own, one
+  // less layer stacked above the board
+  const header = (blurb: string, aside?: React.ReactNode) => (
     <div className="auto-sync-header">
       <div>
-        <div className="auto-sync-eyebrow">Playlist automation</div>
         <h3>Auto-Sync Manager</h3>
         <p>{blurb}</p>
       </div>
+      {aside}
       {/* ONE Refresh. The vanilla grew four — monitor, hourly board, weekly
           board and history — all calling this same handler, so which one you
           reached for depended only on where you happened to be looking. */}
@@ -284,15 +311,14 @@ export function AutoSyncModal({
     );
   }
 
-  return overlay(
-    <div className="auto-sync-modal">
-      {header(BLURB)}
+  const summaryStrip = (
+    <>
       {/* One fact per slot, and the better fact.
-          - "scheduled playlists" and "active schedules" were the same number
-            until something was paused. Paused is the interesting half, so it
-            rides along and only appears when it is not zero.
-          - "mirrored tracks" was never about scheduling at all. Failed runs
-            are, and they are the one number here you would act on. */}
+        - "scheduled playlists" and "active schedules" were the same number
+          until something was paused. Paused is the interesting half, so it
+          rides along and only appears when it is not zero.
+        - "mirrored tracks" was never about scheduling at all. Failed runs
+          are, and they are the one number here you would act on. */}
       <div className="auto-sync-summary">
         <div>
           <span>{summary.scheduledCount}</span>
@@ -312,7 +338,17 @@ export function AutoSyncModal({
           </div>
         )}
       </div>
+    </>
+  );
 
+  return overlay(
+    <div
+      className={`auto-sync-modal${dragging ? ' is-dragging' : ''}`}
+      onDragStart={() => setDragging(true)}
+      onDragEnd={() => setDragging(false)}
+      onDrop={() => setDragging(false)}
+    >
+      {header(BLURB, summaryStrip)}
       <AutoSyncMonitorPanel playlists={state.playlists} onDetails={onOpenDetails} />
 
       <div className="auto-sync-tabs">

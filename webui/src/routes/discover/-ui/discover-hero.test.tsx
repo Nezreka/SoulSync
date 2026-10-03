@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DiscoverHeroArtist } from '../-discover.types';
 import type { DiscoverSectionProps } from './discover-section';
 
+import { HERO_WATCHLIST_SUBTITLE } from '../-discover.hero';
 import { DiscoverHero } from './discover-hero';
 import { DiscoverSection } from './discover-section';
 
@@ -67,12 +68,29 @@ describe('the hero', () => {
     expect(container.querySelector('.hero-genres')).toBeNull();
   });
 
+  it('says a watchlist fallback artist is on your watchlist, not similar to anything', () => {
+    const { container } = render(
+      <DiscoverHero {...heroProps({ artist: artist({ is_watchlist: true }) })} />,
+    );
+    expect(container.querySelector('#discover-hero-subtitle')!.textContent).toBe(
+      'On your watchlist',
+    );
+    expect(HERO_WATCHLIST_SUBTITLE).toBe('On your watchlist');
+  });
+
   it('subtitles with the per-artist REASON, carrying the full list as a title', () => {
     // The vanilla sets the subtitle to the "because you have X, Y" line per
     // artist (468); static copy is only the pre-load placeholder.
     const { container } = render(
       <DiscoverHero
-        {...heroProps({ artist: artist({ because: ['Squarepusher', 'Autechre'] } as never) })}
+        {...heroProps({
+          artist: artist({
+            explanation: {
+              kind: 'similar_to',
+              seeds: [{ name: 'Squarepusher' }, { name: 'Autechre' }],
+            },
+          }),
+        })}
       />,
     );
     const sub = container.querySelector('#discover-hero-subtitle')!;
@@ -89,15 +107,17 @@ describe('the hero', () => {
     expect(container.querySelector('.hero-popularity')).toBeNull();
   });
 
-  it('renders the popularity tile with the vanilla markup, banded', () => {
-    // .hero-meta-item.hero-popularity.{band} with icon / "N/100" / label
-    // (476-484) — the first draft invented flat spans and "84% match".
+  it('renders the popularity tile banded, with a five-bar meter instead of a star', () => {
+    // .hero-meta-item.hero-popularity.{band} with meter / "N/100" / label.
+    // the star went sept 29: five bars read at a glance, 84 lights four.
     const { container } = render(<DiscoverHero {...heroProps()} />);
     const tile = container.querySelector('.hero-meta-item.hero-popularity')!;
     expect(tile).toHaveClass('high');
-    expect(tile.querySelector('.meta-icon')!.textContent).toBe('⭐');
+    expect(tile.querySelector('.meta-icon')).toBeNull();
+    expect(tile.querySelectorAll('.hero-pop-meter > span')).toHaveLength(5);
+    expect(tile.querySelectorAll('.hero-pop-meter > span.on')).toHaveLength(4);
     expect(tile.querySelector('.meta-value')!.textContent).toBe('84/100');
-    expect(tile.querySelector('.meta-label')!.textContent).toBe('Popularity');
+    expect(tile.querySelector('.meta-label')!.textContent).toBe('Well known');
     // And the whole meta block sits inside the content wrapper (474).
     expect(container.querySelector('.discover-hero-meta-content')).not.toBeNull();
   });
@@ -133,6 +153,73 @@ describe('the hero', () => {
       'aria-label',
       'Go to slide 1',
     );
+  });
+
+  it('turns the dots into the artists themselves when it has the rotation', () => {
+    const rotation = [
+      artist({ artist_name: 'A', image_url: '/a.jpg' }),
+      artist({ artist_name: 'B', image_url: '' }),
+      artist({ artist_name: 'C', image_url: '/c.jpg' }),
+    ];
+    const { container } = render(
+      <DiscoverHero {...heroProps({ count: 3, index: 1, artists: rotation })} />,
+    );
+    const faces = [...container.querySelectorAll('.hero-indicator')];
+    expect(faces.map((f) => f.getAttribute('aria-label'))).toEqual(['Show A', 'Show B', 'Show C']);
+    expect(faces[0].querySelector('img')).toHaveAttribute('src', '/a.jpg');
+    // no photo: the initial, never a broken image
+    expect(faces[1].querySelector('img')).toBeNull();
+    expect(faces[1].textContent).toBe('B');
+    expect(faces[1]).toHaveClass('active');
+  });
+
+  it('falls back to the initial when a face image fails, never a broken icon', () => {
+    const rotation = [artist({ artist_name: 'Storken', image_url: '/api/image-cache/gone' })];
+    const { container } = render(
+      <DiscoverHero {...heroProps({ count: 2, index: 1, artists: [...rotation, artist()] })} />,
+    );
+    const face = container.querySelector('.hero-indicator img')!;
+    fireEvent.error(face);
+    const first = container.querySelectorAll('.hero-indicator')[0];
+    expect(first.querySelector('img')).toBeNull();
+    expect(first.textContent).toBe('S');
+  });
+
+  it('sets the named artists apart in the reason, and reads exactly the same', () => {
+    const { container } = render(
+      <DiscoverHero
+        {...heroProps({
+          artist: artist({
+            explanation: {
+              kind: 'similar_to',
+              seeds: [{ name: 'Squarepusher' }, { name: 'Autechre' }, { name: 'Boards' }],
+            },
+          }),
+        })}
+      />,
+    );
+    const sub = container.querySelector('#discover-hero-subtitle')!;
+    expect(sub.textContent).toBe('Because you have Squarepusher, Autechre +1 more');
+    expect([...sub.querySelectorAll('strong')].map((s) => s.textContent)).toEqual([
+      'Squarepusher',
+      'Autechre',
+    ]);
+  });
+
+  it('glows the colour of the picture', () => {
+    const { container } = render(<DiscoverHero {...heroProps({ glowRgb: '200, 50, 50' })} />);
+    const root = container.querySelector('.discover-hero') as HTMLElement;
+    expect(root.style.getPropertyValue('--hero-rgb')).toBe('200, 50, 50');
+  });
+
+  it('asks to hold the rotation while the pointer is on it', () => {
+    const onPauseChange = vi.fn();
+    const { container } = render(<DiscoverHero {...heroProps({ onPauseChange })} />);
+    const root = container.querySelector('.discover-hero')!;
+    fireEvent.mouseEnter(root);
+    expect(onPauseChange).toHaveBeenLastCalledWith(true);
+    fireEvent.mouseLeave(root);
+    expect(onPauseChange).toHaveBeenLastCalledWith(false);
   });
 
   it('navigates and jumps', () => {
@@ -205,7 +292,7 @@ describe('the hero', () => {
   });
 
   it.each([
-    ['idle', 'Watch All', false],
+    ['idle', 'Watch all 5', false],
     ['busy', 'Adding...', true],
     ['done', 'All Watched', true],
   ] as const)('renders Watch All in the %s state', (phase, label, disabled) => {

@@ -662,6 +662,7 @@ class SoundcloudClient(DownloadSourcePlugin):
             speed=record.get('speed', 0),
             time_remaining=record.get('time_remaining'),
             file_path=record.get('file_path'),
+            error=record.get('error'),
         )
 
     async def get_all_downloads(self) -> List[DownloadStatus]:

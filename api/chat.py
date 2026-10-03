@@ -19,6 +19,7 @@ when actually needed.
 
 import ipaddress
 import math as _math
+import os
 import re as _re
 import time
 from urllib.parse import urljoin, urlparse
@@ -122,6 +123,27 @@ def _room_name() -> str:
         return str(_config_get("soulseek.chat_room", "SoulSync") or "SoulSync")
     except Exception:
         return "SoulSync"
+
+
+RETENTION_DAYS_DEFAULT = 30
+RETENTION_DAYS_MAX = 3650  # ~10 years; beyond that you're archiving, not chatting
+
+
+def _retention_days(cfg_getter=None) -> int:
+    """The configured room-history retention in days, sanitized. 0 = keep
+    everything (the 5,000-per-room count cap still bounds disk)."""
+    get = cfg_getter or _config_get
+    try:
+        raw = get("soulseek.chat_history_retention_days", RETENTION_DAYS_DEFAULT)
+    except Exception:
+        return RETENTION_DAYS_DEFAULT
+    try:
+        days = int(raw)
+    except (TypeError, ValueError):
+        return RETENTION_DAYS_DEFAULT
+    if days != days:  # NaN
+        return RETENTION_DAYS_DEFAULT
+    return max(0, min(days, RETENTION_DAYS_MAX))
 
 
 def _extra_rooms() -> list:
@@ -243,6 +265,12 @@ def _unwrap_room_messages(messages):
                     m["av"] = _av
             except (TypeError, ValueError):
                 pass
+            # User flair badge ('bg'). badge_of re-validates on receive, so a
+            # hostile client can't smuggle a staff word past the send guard —
+            # every client folds the same verdict from the same stream.
+            _bg = chat_codec.badge_of(dec)
+            if _bg:
+                m["badge"] = _bg
             _th = dec.get("th")
             if isinstance(_th, str) and _th.strip():
                 m["th"] = _th.strip()[:160]
@@ -735,6 +763,7 @@ def create_blueprint() -> Blueprint:
                 return _config_get(key, default)
             except Exception:
                 return default
+
         return jsonify({
             "room": str(_cfg("soulseek.chat_room", "SoulSync") or "SoulSync"),
             "member_send": bool(_cfg("soulseek.chat_member_send", False)),
@@ -746,6 +775,12 @@ def create_blueprint() -> Blueprint:
             # Chosen preset avatar (0 = none). Server-side so it follows the
             # account across browsers rather than living in one localStorage.
             "avatar": int(_cfg("soulseek.chat_avatar", 0) or 0),
+            # Flair badge shown next to the account's name in the room.
+            # Server-side for the same reason as the avatar.
+            "badge": str(_cfg("soulseek.chat_badge", "") or ""),
+            # Room-history retention, in days (0 = keep everything, up to the
+            # 5,000-per-room count cap). Default 30.
+            "history_retention_days": _retention_days(_cfg),
         })
 
     @bp.route("/api/chat/settings", methods=["POST"])
@@ -778,6 +813,35 @@ def create_blueprint() -> Blueprint:
             elif not _avatar_allowed(_av, _self_username(_client())):
                 _av = 0          # reserved for someone else — don't store it
             _config_set("soulseek.chat_avatar", _av)
+        if "badge" in body:
+            # present = intentional: a value sets it, empty string clears it.
+            # badge_of is the same validator the wire uses — a staff word the
+            # user typed is refused HERE with the reason, not silently sent
+            # as nothing (the send path would 400 on it).
+            from core import chat_codec as _cc
+
+            _raw = str(body.get("badge") or "")
+            _clean = _cc.badge_of({"bg": _raw}) or ""
+            if _raw.strip() and not _clean:
+                return jsonify({"error": 'That badge can\'t be used — keep it short, plain text, and nothing staff-like ("admin", "dev"…) or profane.'}), 400
+            _config_set("soulseek.chat_badge", _clean)
+        if "history_retention_days" in body:
+            try:
+                _days = int(body.get("history_retention_days"))
+            except (TypeError, ValueError):
+                _days = RETENTION_DAYS_DEFAULT
+            _days = max(0, min(_days, RETENTION_DAYS_MAX))
+            _config_set("soulseek.chat_history_retention_days", _days)
+            # the new window applies NOW, not on tomorrow's scheduled sweep —
+            # lowering it to 7 days shouldn't leave 30 days of rows overnight
+            try:
+                _db_inst = _db()
+                if _db_inst is not None and _days > 0:
+                    _n = _db_inst.prune_chat_messages(_days)
+                    if _n:
+                        logger.info("chat: retention change pruned %d messages older than %d days", _n, _days)
+            except Exception:
+                logger.debug("chat: retention prune on save failed", exc_info=True)
         if "giphy_key" in body:
             # present = intentional: a value sets it, empty string clears it
             _config_set("soulseek.chat_giphy_key", str(body.get("giphy_key") or "").strip())
@@ -1047,6 +1111,206 @@ def create_blueprint() -> Blueprint:
         except Exception as e:
             logger.debug("chat: library search failed: %s", e)
             return jsonify({"tracks": []})
+        finally:
+            if conn:
+                conn.close()
+
+    @bp.route("/api/chat/wanted/resolve-share", methods=["POST"])
+    def chat_wanted_resolve_share():
+        """Look up local library files matching a Wanted/ISO card, computing the
+        relative share filenames for Soulseek P2P direct sharing."""
+        if not _can_send():
+            return jsonify({"error": "Sending is disabled for this profile"}), 403
+
+        db = _db()
+        if db is None:
+            return jsonify({"ok": False, "error": "Database is unavailable"}), 503
+
+        payload = request.get_json(silent=True) or {}
+        title = str(payload.get("title") or "").strip()
+        artist = str(payload.get("artist") or "").strip()
+        album = str(payload.get("album") or "").strip()
+        req_type = str(payload.get("type") or "album").strip().lower()
+
+        if not title and not artist:
+            return jsonify({"ok": False, "error": "Title or artist required"}), 400
+
+        # Try to resolve configured slskd share directories
+        share_dirs = []
+        client = _client()
+        if client is not None and _run_async is not None:
+            try:
+                if hasattr(client, "get_share_directories"):
+                    share_dirs = _run_async(client.get_share_directories()) or []
+            except Exception as e:
+                logger.debug("chat: resolve-share could not get share dirs: %s", e)
+                share_dirs = []
+
+        conn = None
+        try:
+            # Library v2: a track's file is its (scoped) primary file row, its
+            # artist the first track credit, else the album's artist. Only rows
+            # with a live file can be shared.
+            from core.library2.sql_util import owned_sql, scoped_primary_file_join
+            track_select = f"""SELECT t.id, t.title, t.track_number, t.duration,
+                                     tf.path AS file_path, tf.size AS file_size, tf.bitrate,
+                                     COALESCE(credited.name, ar.name, '') as artist,
+                                     COALESCE(al.title, '') as album,
+                                     al.image_url as album_thumb_url,
+                                     ar.image_url as artist_thumb_url
+                              FROM lib2_tracks t
+                              JOIN lib2_albums al ON al.id = t.album_id
+                              JOIN lib2_track_files tf ON {scoped_primary_file_join('t', 'tf')}
+                              LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                              LEFT JOIN lib2_artists credited ON credited.id = (
+                                   SELECT ta.artist_id FROM lib2_track_artists ta
+                                    WHERE ta.track_id = t.id
+                                    ORDER BY CASE ta.role WHEN 'primary' THEN 0 ELSE 1 END,
+                                             ta.position, ta.artist_id LIMIT 1)
+                              WHERE COALESCE(tf.file_state, 'active') = 'active'
+                                AND tf.path IS NOT NULL AND tf.path != ''"""
+            conn = db._get_connection()
+            album_row = None
+            tracks_rows = []
+
+            # 1. Match album if requested or if not strictly a single track
+            if req_type in ("album", "ep", "single") or not req_type:
+                alb_query = title or album
+                if alb_query:
+                    like_alb = "%" + alb_query.replace("%", "\\%") + "%"
+                    like_art = "%" + artist.replace("%", "\\%") + "%" if artist else "%"
+                    album_row = conn.execute(
+                        f"""SELECT al.id, al.title, al.year, COALESCE(ar.name, '') as artist,
+                                  al.image_url AS thumb_url, ar.image_url as artist_thumb_url
+                           FROM lib2_albums al
+                           LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                           WHERE al.title LIKE ? AND (ar.name LIKE ? OR ? LIKE ('%' || ar.name || '%') OR ? = '%')
+                             AND {owned_sql('album', 'al')}
+                           ORDER BY CASE WHEN LOWER(al.title) = LOWER(?) THEN 0 ELSE 1 END,
+                                    al.id LIMIT 1""",
+                        (like_alb, like_art, artist if artist else "%", like_art, alb_query)
+                    ).fetchone()
+
+                    # Fall back to album title if artist naming has slight discrepancy
+                    if not album_row and artist:
+                        album_row = conn.execute(
+                            f"""SELECT al.id, al.title, al.year, COALESCE(ar.name, '') as artist,
+                                      al.image_url AS thumb_url, ar.image_url as artist_thumb_url
+                               FROM lib2_albums al
+                               LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                               WHERE al.title LIKE ? AND {owned_sql('album', 'al')}
+                               ORDER BY CASE WHEN LOWER(al.title) = LOWER(?) THEN 0 ELSE 1 END,
+                                        al.id LIMIT 1""",
+                            (like_alb, alb_query)
+                        ).fetchone()
+
+                if album_row:
+                    tracks_rows = conn.execute(
+                        track_select + """
+                             AND t.album_id = ?
+                           ORDER BY t.track_number, t.id""",
+                        (album_row["id"],)
+                    ).fetchall()
+
+            # 2. If no album matched or if req_type is 'track', try track search
+            if not tracks_rows:
+                track_query = title
+                like_trk = "%" + track_query.replace("%", "\\%") + "%"
+                like_art = "%" + artist.replace("%", "\\%") + "%" if artist else "%"
+                tracks_rows = conn.execute(
+                    track_select + """
+                         AND t.title LIKE ? AND (ar.name LIKE ? OR credited.name LIKE ? OR ? LIKE ('%' || ar.name || '%') OR ? = '%')
+                       ORDER BY CASE WHEN LOWER(t.title) = LOWER(?) THEN 0 ELSE 1 END,
+                                t.id LIMIT ?""",
+                    (like_trk, like_art, like_art, artist if artist else "%", like_art, track_query,
+                     1 if req_type == "track" else 50)
+                ).fetchall()
+
+                # Fallback to track title alone if artist string differs
+                if not tracks_rows and track_query and artist:
+                    tracks_rows = conn.execute(
+                        track_select + """
+                             AND t.title LIKE ?
+                           ORDER BY CASE WHEN LOWER(t.title) = LOWER(?) THEN 0 ELSE 1 END,
+                                    t.id LIMIT ?""",
+                        (like_trk, track_query, 1 if req_type == "track" else 50)
+                    ).fetchall()
+
+            if not tracks_rows:
+                return jsonify({"ok": True, "found": False, "message": "No matching local files found"})
+
+            # Helper to strip share directory from file path for Soulseek
+            def _to_share_path(fp: str) -> str:
+                norm_fp = fp.replace("\\", "/")
+                for sd in share_dirs:
+                    if not sd:
+                        continue
+                    norm_sd = sd.rstrip("/") + "/"
+                    if norm_fp.lower().startswith(norm_sd.lower()):
+                        rel = norm_fp[len(norm_sd):]
+                        return rel.replace("/", "\\")
+                parts = [p for p in norm_fp.split("/") if p]
+                if len(parts) >= 3:
+                    return "\\".join(parts[-3:])
+                elif len(parts) >= 2:
+                    return "\\".join(parts[-2:])
+                return norm_fp.replace("/", "\\")
+
+            def _to_share_dir(rel_fn: str) -> str:
+                norm = rel_fn.replace("/", "\\")
+                if "\\" in norm:
+                    return norm.rsplit("\\", 1)[0]
+                return ""
+
+            out_tracks = []
+            total_size = 0
+            for r in tracks_rows:
+                fp = str(r["file_path"] or "")
+                sz = int(r["file_size"] or 0)
+                if sz == 0 and os.path.exists(fp):
+                    try:
+                        sz = os.path.getsize(fp)
+                    except Exception as exc:
+                        logger.debug("Failed to get size for %s: %s", fp, exc)
+                total_size += sz
+                share_fn = _to_share_path(fp)
+                out_tracks.append({
+                    "id": r["id"],
+                    "title": r["title"] or "Unknown",
+                    "track_number": r["track_number"] or 1,
+                    "duration": r["duration"] or 0,
+                    "size": sz,
+                    "bitrate": r["bitrate"] or 0,
+                    "filename": share_fn,
+                    "artist": r["artist"] or artist,
+                    "album": r["album"] or (album_row["title"] if album_row else "")
+                })
+
+            resolved_title = (album_row["title"] if album_row else (out_tracks[0]["album"] or out_tracks[0]["title"]))
+            resolved_artist = (album_row["artist"] if album_row else out_tracks[0]["artist"])
+            primary_dir = _to_share_dir(out_tracks[0]["filename"]) if out_tracks else ""
+            res_img = (album_row["thumb_url"] if (album_row and "thumb_url" in album_row.keys() and album_row["thumb_url"])
+                       else (tracks_rows[0]["album_thumb_url"] if (tracks_rows and "album_thumb_url" in tracks_rows[0].keys() and tracks_rows[0]["album_thumb_url"]) else ""))
+            res_ar_img = (album_row["artist_thumb_url"] if (album_row and "artist_thumb_url" in album_row.keys() and album_row["artist_thumb_url"])
+                          else (tracks_rows[0]["artist_thumb_url"] if (tracks_rows and "artist_thumb_url" in tracks_rows[0].keys() and tracks_rows[0]["artist_thumb_url"]) else ""))
+
+            return jsonify({
+                "ok": True,
+                "found": True,
+                "type": "album" if (album_row or len(out_tracks) > 1) else "track",
+                "title": resolved_title,
+                "artist": resolved_artist,
+                "year": album_row["year"] if album_row else "",
+                "image_url": res_img or "",
+                "artist_image_url": res_ar_img or "",
+                "directory": primary_dir,
+                "track_count": len(out_tracks),
+                "total_size": total_size,
+                "tracks": out_tracks
+            })
+        except Exception as e:
+            logger.exception("chat: resolve-share failed")
+            return jsonify({"ok": False, "error": str(e)}), 500
         finally:
             if conn:
                 conn.close()
@@ -1835,6 +2099,18 @@ def create_blueprint() -> Blueprint:
                 extra["av"] = _av
         except (TypeError, ValueError):
             pass
+        # User flair badge. Validated by the SAME codec the receive path
+        # uses, so anything that leaves here renders on every client.
+        # Refused loudly rather than silently dropped: a staff-impersonation
+        # word ("admin", "dev") failing quiet would leave the user thinking
+        # their badge was live.
+        _badge_raw = body.get("badge")
+        if _badge_raw:
+            _bd = chat_codec.badge_of({"bg": _badge_raw})
+            if _bd is None:
+                return jsonify({"error": 'That badge can\'t be used — keep it short, plain text, and nothing staff-like ("admin", "dev"…) or profane.'}), 400
+            extra = dict(extra or {})
+            extra["bg"] = _bd
         # Thread membership (parent message key + carried display name).
         thread = str(body.get("thread") or "").strip()[:160]
         if thread:

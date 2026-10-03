@@ -142,7 +142,8 @@ def _tm_event(artist="Aphex Twin", venue="Berghain", city="Berlin",
         "dates": {"start": start},
         "_embedded": {
             "venues": [{"name": venue, "city": {"name": city},
-                        "state": {"name": ""}, "country": {"name": "Germany"}}],
+                        "state": {"name": ""},
+                        "country": {"name": "Germany", "countryCode": "DE"}}],
             "attractions": [{"name": artist}],
         },
     }
@@ -159,6 +160,25 @@ def test_upcoming_dates_carry_the_venue_and_a_ticket_link(keys, monkeypatch):
     ev = cc.ticketmaster_upcoming("Aphex Twin")["events"][0]
     assert ev["venue"] == "Berghain" and ev["city"] == "Berlin"
     assert ev["tickets_url"] == "https://ticketmaster.com/e/1"
+
+
+def test_a_country_asks_ticketmaster_for_that_country_only(keys, monkeypatch):
+    """the discovery inbox keeps concerts local; everything else asks worldwide."""
+    keys["concerts.ticketmaster_api_key"] = "app"
+    calls = _get(monkeypatch, lambda url, **kw: _resp(200, _tm_payload(_tm_event())))
+    ev = cc.ticketmaster_upcoming("Aphex Twin", country_code="de")["events"][0]
+    assert calls[0]["params"]["countryCode"] == "DE"
+    assert ev["country_code"] == "DE"
+    cc.ticketmaster_upcoming("Aphex Twin")
+    # a different question, so not answered from the country-limited cache
+    assert len(calls) == 2 and "countryCode" not in calls[1]["params"]
+
+
+@pytest.mark.parametrize("raw,expected", [("us", "US"), (" GB ", "GB"), ("", ""),
+                                          ("USA", ""), ("1a", "")])
+def test_the_concert_country_setting_is_a_two_letter_code_or_nothing(keys, raw, expected):
+    keys["concerts.country"] = raw
+    assert cc.concert_country() == expected
 
 
 def test_only_events_whose_ATTRACTION_is_the_artist_count(keys, monkeypatch):

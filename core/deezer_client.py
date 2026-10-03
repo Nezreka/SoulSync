@@ -6,6 +6,7 @@ from functools import wraps
 from dataclasses import dataclass
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
+from core.http_error_status import http_error_status
 from utils.logging_config import get_logger
 from core.metadata.artist_album_cache import get_cached_artist_album_items, store_artist_album_items
 from core.metadata.cache import get_metadata_cache
@@ -34,7 +35,10 @@ def rate_limited(func):
             result = func(*args, **kwargs)
             return result
         except Exception as e:
-            if "rate limit" in str(e).lower() or "429" in str(e):
+            status = http_error_status(e)
+            is_rate_limit = (status == 429 if status is not None
+                             else "rate limit" in str(e).lower() or "429" in str(e))
+            if is_rate_limit:
                 logger.warning(f"Deezer rate limit hit, implementing backoff: {e}")
                 time.sleep(4.0)
             raise e
@@ -1204,6 +1208,59 @@ class DeezerClient:
 
         logger.info(f"Retrieved {len(albums)} albums for artist {artist_id}")
         return albums[:limit]
+
+    # the album-list cache keys the scanner and the artist pages use, so a
+    # genre lookup right after either reads what they already fetched
+    _GENRE_ALBUM_CACHE_KEYS = (('album,single,ep', 50), ('album,single', 200), ('album,single', 50))
+
+    def get_artist_genres(self, artist_id: str) -> List[str]:
+        """genre names for a deezer artist, worked out from their albums.
+
+        deezer's artist object has no genres, only albums do (genre_id). a
+        cached album list costs nothing, otherwise it's one album-list call.
+        [] when deezer has nothing, never raises.
+        """
+        from core.metadata.deezer_genres import artist_genres_from_albums
+        artist_id = str(artist_id or '').strip()
+        if not artist_id:
+            return []
+        try:
+            cache = get_metadata_cache()
+            items = None
+            for album_type, limit in self._GENRE_ALBUM_CACHE_KEYS:
+                items = get_cached_artist_album_items(
+                    cache, 'deezer', artist_id, album_type=album_type, limit=limit)
+                if items:
+                    break
+            if not items:
+                items = self._fetch_artist_album_items_for_genres(artist_id)
+            if not items:
+                return []
+            return artist_genres_from_albums(items, self.get_genre_names())
+        except Exception as e:
+            logger.debug("Deezer artist genres failed for %s: %s", artist_id, e)
+            return []
+
+    @rate_limited
+    def _fetch_artist_album_items_for_genres(self, artist_id: str) -> List[Dict[str, Any]]:
+        data = self._api_get(f'artist/{artist_id}/albums', {'limit': 50}, use_token=False)
+        items = (data or {}).get('data') if isinstance(data, dict) else None
+        return items if isinstance(items, list) else []
+
+    def get_genre_names(self) -> Dict[int, str]:
+        """deezer's genre id -> name map. about 25 entries, fetched once."""
+        cached = getattr(self, '_genre_names', None)
+        if cached:
+            return cached
+        names = self._fetch_genre_names()
+        if names:
+            self._genre_names = names
+        return names
+
+    @rate_limited
+    def _fetch_genre_names(self) -> Dict[int, str]:
+        from core.metadata.deezer_genres import genre_names_from_response
+        return genre_names_from_response(self._api_get('genre', use_token=False))
 
     # ==================== Interface Aliases (match iTunesClient method names) ====================
     # These allow SpotifyClient to call self._fallback.get_album() etc. without

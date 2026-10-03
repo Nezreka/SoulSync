@@ -219,14 +219,18 @@ def test_run_import_copies_and_reclaims_source():
     assert patch["status"] == "completed"
     assert patch["dest_path"].endswith(os.path.join("The Matrix (1999)", "The Matrix (1999) Bluray-1080p.mkv"))
     assert fs.copied and fs.copied[0][0] == "/dl/x/matrix.mkv"
-    assert "/dl/x/matrix.mkv" in fs.removed          # soulseek source reclaimed
+    # source reclaim is deferred: the caller removes it AFTER persisting the row
+    assert "/dl/x/matrix.mkv" not in fs.removed
+    assert patch.get("_cleanup_source") == "/dl/x/matrix.mkv"
 
 
 def test_run_import_keeps_torrent_source():
     dl = _movie_dl("The Matrix 1999 1080p BluRay", source="torrent")
     fs = FakeFS()
-    importer.run_import(dl, "/dl/x/matrix.mkv", fs=fs)
+    patch = importer.run_import(dl, "/dl/x/matrix.mkv", fs=fs)
+    assert patch["status"] == "completed"
     assert "/dl/x/matrix.mkv" not in fs.removed      # torrent left seeding
+    assert "_cleanup_source" not in patch
 
 
 def test_run_import_carries_subtitles_and_deletes_old_on_upgrade():
@@ -341,3 +345,107 @@ def test_run_import_reject_leaves_file_and_flags_manual():
     patch = importer.run_import(dl, "/dl/x/readme.nfo", fs=fs)   # not a video file
     assert patch["status"] == "import_failed" and patch["error"]
     assert not fs.copied and not fs.removed          # nothing touched on disk
+
+
+# ── show-identity (year) gate at import ───────────────────────────────────────
+def _dark_matter_dl(release):
+    return {
+        "kind": "show", "title": "Dark Matter", "source": "soulseek",
+        "release_title": release, "size_bytes": 2_000_000_000, "target_dir": "/lib/tv",
+        "search_ctx": json.dumps({"scope": "episode", "title": "Dark Matter", "year": 2024,
+                                  "season": 2, "episode": 6, "episode_title": "Ep 6"}),
+    }
+
+
+def test_import_rejects_wrong_show_year():
+    # the 2015 show's S02E06 must not file into the 2024 show's slot
+    dl = _dark_matter_dl("Dark.Matter.2015.S02E06.1080p.WEB-DL-GRP")
+    p = importer.plan_import(dl, "/dl/x/dark.matter.2015.s02e06.mkv", list_dir=lambda d: [])
+    assert p["action"] == "reject" and "2015" in p["reason"]
+
+
+def test_import_accepts_right_show_year_and_yearless():
+    dl = _dark_matter_dl("Dark.Matter.2024.S02E06.1080p.WEB-DL-GRP")
+    p = importer.plan_import(dl, "/dl/x/dark.matter.2024.s02e06.mkv", list_dir=lambda d: [])
+    assert p["action"] == "import"
+    dl2 = _dark_matter_dl("Dark.Matter.S02E06.1080p.WEB-DL-GRP")   # no year → no judgement
+    p2 = importer.plan_import(dl2, "/dl/x/dark.matter.s02e06.mkv", list_dir=lambda d: [])
+    assert p2["action"] == "import"
+
+
+# ── duration-vs-expected gate ─────────────────────────────────────────────────
+def _probed(minutes):
+    return {"ok": True, "duration_sec": minutes * 60, "resolution": "1080p",
+            "width": 1920, "height": 1080, "video_codec": "x264", "audio_codec": "aac"}
+
+
+def test_import_rejects_truncated_file():
+    # a 20-minute file for a 42-minute episode is a partial download or the wrong file
+    dl = _episode_dl("Breaking Bad S01E01 1080p WEB-DL", season=1, episode=1)
+    p = importer.plan_import(dl, "/dl/x/bb.s01e01.mkv", list_dir=lambda d: [],
+                             probe=_probed(20), expected_duration_sec=42 * 60)
+    assert p["action"] == "reject" and "20 of 42" in p["reason"]
+
+
+def test_import_accepts_full_length_file():
+    dl = _episode_dl("Breaking Bad S01E01 1080p WEB-DL", season=1, episode=1)
+    p = importer.plan_import(dl, "/dl/x/bb.s01e01.mkv", list_dir=lambda d: [],
+                             probe=_probed(43), expected_duration_sec=42 * 60)
+    assert p["action"] == "import"
+
+
+def test_duration_check_skipped_when_expected_unknown():
+    dl = _episode_dl("Breaking Bad S01E01 1080p WEB-DL", season=1, episode=1)
+    p = importer.plan_import(dl, "/dl/x/bb.s01e01.mkv", list_dir=lambda d: [],
+                             probe=_probed(20), expected_duration_sec=None)
+    assert p["action"] == "import"   # can't judge — never reject on a guess
+
+
+def test_duration_check_scales_for_multi_episode_span():
+    # S01E01E02 at 80 min ≈ 2× a 42-min episode — not truncated
+    dl = _episode_dl("Breaking Bad S01E01E02 1080p WEB-DL", season=1, episode=1)
+    p = importer.plan_import(dl, "/dl/x/bb.s01e01e02.mkv", list_dir=lambda d: [],
+                             probe=_probed(80), expected_duration_sec=42 * 60)
+    assert p["action"] == "import"
+    # but 20 min for the two-parter IS truncated
+    p2 = importer.plan_import(dl, "/dl/x/bb.s01e01e02.mkv", list_dir=lambda d: [],
+                              probe=_probed(20), expected_duration_sec=42 * 60)
+    assert p2["action"] == "reject"
+
+
+def test_duration_reject_is_a_context_reject_not_a_blocklist():
+    # a duration mismatch retries the next candidate — it doesn't prove the release bad
+    dl = _episode_dl("Breaking Bad S01E01 1080p WEB-DL", season=1, episode=1)
+    p = importer.plan_import(dl, "/dl/x/bb.s01e01.mkv", list_dir=lambda d: [],
+                             probe=_probed(20), expected_duration_sec=42 * 60)
+    assert p["action"] == "reject" and not p.get("bad_release")
+
+
+def test_duration_accepts_commercial_free_episode_cut():
+    # reality TV: TMDB lists the 60-min broadcast slot (with commercials), the file
+    # is the 42-min commercial-free cut — 0.70 of "expected" is healthy, not truncated
+    dl = _episode_dl("Below Deck Mediterranean S11E17 1080p WEB h264-EDITH",
+                     season=11, episode=17)
+    p = importer.plan_import(dl, "/dl/x/below.deck.med.s11e17.mkv", list_dir=lambda d: [],
+                             probe=_probed(42), expected_duration_sec=60 * 60)
+    assert p["action"] == "import"
+
+
+def test_duration_still_rejects_badly_truncated_episode():
+    # 36 of 60 min (0.60) is well under the episode bar — still caught
+    dl = _episode_dl("Below Deck Mediterranean S11E17 1080p WEB h264-EDITH",
+                     season=11, episode=17)
+    p = importer.plan_import(dl, "/dl/x/below.deck.med.s11e17.mkv", list_dir=lambda d: [],
+                             probe=_probed(36), expected_duration_sec=60 * 60)
+    assert p["action"] == "reject" and "36 of 60" in p["reason"]
+
+
+def test_duration_movie_bar_unchanged():
+    # movies keep the tighter 0.75 bar — TMDB film runtimes have no commercials in them
+    dl = _movie_dl("The Matrix 1999 1080p BluRay")
+    p = importer.plan_import(dl, "/dl/x/matrix.1999.1080p.bluray.mkv", list_dir=lambda d: [],
+                             probe=_probed(84), expected_duration_sec=120 * 60)
+    assert p["action"] == "reject" and "84 of 120" in p["reason"]
+    p2 = importer.plan_import(dl, "/dl/x/matrix.1999.1080p.bluray.mkv", list_dir=lambda d: [],
+                              probe=_probed(118), expected_duration_sec=120 * 60)
+    assert p2["action"] == "import"

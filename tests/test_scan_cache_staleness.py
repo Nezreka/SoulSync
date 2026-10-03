@@ -111,7 +111,9 @@ def test_full_refresh_detaches_only_after_two_verified_empty_reads(dbpath, monke
     worker.run()
 
     assert client.calls.count("get_all_artists") == 2
-    assert events == [("clear", "navidrome", None), ("process", 0)]
+    # Detachment waits until processing and identity repair have completed;
+    # a Stop click or failed identity pass must still preserve the mappings.
+    assert events == [("process", 0), ("clear", "navidrome", None)]
 
 
 def test_full_refresh_fetch_failure_never_detaches_mappings(dbpath, monkeypatch):

@@ -23,12 +23,43 @@ now `deps.X` attribute accesses.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
+
+
+def _start_scan_heartbeat(deps, interval: float = 60.0):
+    """H7: tick the scan heartbeat while the scan thread is alive.
+
+    The stuck detector (web_server.check_and_recover_stuck_flags /
+    is_watchlist_actually_scanning) only resets the scan flag when the
+    heartbeat itself is stale — so a healthy multi-hour scan (whose
+    mandatory per-artist sleeps exceed the 900s stuck timeout) is never
+    reset mid-run, which used to start a second overlapping scan.
+    Returns a ``stop()`` callable; the heartbeat must never kill a scan.
+    """
+    stop_event = threading.Event()
+
+    def _loop():
+        while not stop_event.wait(interval):
+            try:
+                with deps.watchlist_timer_lock:
+                    if deps.watchlist_auto_scanning:
+                        deps.watchlist_auto_scanning_heartbeat = time.time()
+            except Exception as _hb_err:
+                logger.debug("watchlist heartbeat tick failed: %s", _hb_err)
+
+    thread = threading.Thread(target=_loop, daemon=True, name="watchlist-scan-heartbeat")
+    thread.start()
+
+    def _stop():
+        stop_event.set()
+
+    return _stop
 
 
 @dataclass
@@ -53,6 +84,8 @@ class WatchlistAutoScanDeps:
     _set_auto_scanning: Callable[[bool], None]
     _get_auto_scanning_timestamp: Callable[[], float]
     _set_auto_scanning_timestamp: Callable[[float], None]
+    _get_auto_scanning_heartbeat: Callable[[], float]
+    _set_auto_scanning_heartbeat: Callable[[float], None]
     _get_watchlist_scan_state: Callable[[], dict]
     _set_watchlist_scan_state: Callable[[dict], None]
     get_deezer_client: Any = None  # () -> DeezerClient | None (label-phase cover/track resolution)
@@ -72,6 +105,14 @@ class WatchlistAutoScanDeps:
     @watchlist_auto_scanning_timestamp.setter
     def watchlist_auto_scanning_timestamp(self, value: float) -> None:
         self._set_auto_scanning_timestamp(value)
+
+    @property
+    def watchlist_auto_scanning_heartbeat(self) -> float:
+        return self._get_auto_scanning_heartbeat()
+
+    @watchlist_auto_scanning_heartbeat.setter
+    def watchlist_auto_scanning_heartbeat(self, value: float) -> None:
+        self._set_auto_scanning_heartbeat(value)
 
     @property
     def watchlist_scan_state(self) -> dict:
@@ -94,6 +135,7 @@ def process_watchlist_scan_automatically(automation_id=None, profile_id=None, de
     logger.info(f"[Auto-Watchlist] Timer triggered - starting automatic watchlist scan ({scope_label})...")
 
     _ew_state = {}
+    _stop_heartbeat = None
 
     try:
         # CRITICAL FIX: Use smart stuck detection BEFORE acquiring lock
@@ -112,7 +154,14 @@ def process_watchlist_scan_automatically(automation_id=None, profile_id=None, de
             import time
             deps.watchlist_auto_scanning = True
             deps.watchlist_auto_scanning_timestamp = time.time()
+            deps.watchlist_auto_scanning_heartbeat = time.time()
             logger.info(f"[Auto-Watchlist] Flag set at timestamp {deps.watchlist_auto_scanning_timestamp}")
+
+        # H7: heartbeat so the stuck detector can tell a live multi-hour scan
+        # from a dead one — without it the 900s stuck timeout fires mid-scan
+        # (mandatory per-artist sleeps exceed it) and a second scan starts on
+        # top of the first. Stopped in the finally below.
+        _stop_heartbeat = _start_scan_heartbeat(deps)
 
         # Use app context for database operations
         with deps.app.app_context():
@@ -519,6 +568,13 @@ def process_watchlist_scan_automatically(automation_id=None, profile_id=None, de
         raise  # re-raise so automation wrapper returns error status
 
     finally:
+        # H7: stop the heartbeat — a dead scan must go stale so the stuck
+        # detector can still recover it.
+        if _stop_heartbeat is not None:
+            try:
+                _stop_heartbeat()
+            except Exception as _hb_stop_err:
+                logger.debug("watchlist heartbeat stop failed: %s", _hb_stop_err)
         # Resume enrichment workers if we paused them
         deps.resume_enrichment_workers(_ew_state, 'auto-watchlist scan')
 

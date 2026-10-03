@@ -19,25 +19,42 @@ from core.personalized.types import PlaylistConfig
 
 
 # ─── daily_mix ───────────────────────────────────────────────────────
+# Daily Mix N on auto-sync is Daily Mix N on Discover. it used to be a separate
+# genre generator, so the two showed different playlists under one name.
 
 
-class _DailyMixService:
-    """Stub PersonalizedPlaylistsService for daily_mix tests."""
+def _discover_payload(n_mixes=5):
+    mixes = []
+    for i in range(1, n_mixes + 1):
+        mixes.append({
+            'key': f'daily_mix_{i}', 'name': f'Daily Mix {i}',
+            'tracks': [
+                {'name': f'Owned {i}', 'artists': [{'name': 'Katy Perry'}],
+                 'album': {'name': 'One Of The Boys', 'images': [{'url': '/api/image-cache/x'}]},
+                 'duration_ms': 179640, 'play_count': 1, 'owned': True},
+                {'id': f'dz{i}', 'source': 'deezer', 'name': f'Pick {i}',
+                 'artists': [{'name': 'M83'}], 'album': {'name': 'Hurry Up'},
+                 'duration_ms': 200000, 'owned': False},
+            ],
+        })
+    return {'mixes': mixes}
 
-    GENRE_MAPPING = {}
 
-    def __init__(self, top_genres=None, genre_tracks=None):
-        self._top = top_genres or []
-        self._tracks = genre_tracks or {}
-        self.calls: List[dict] = []
+@pytest.fixture
+def discover_mixes(monkeypatch):
+    import core.personalized.daily_mixes as dmx
+    calls = []
+    state = {'payload': _discover_payload()}
 
-    def get_top_genres_from_library(self, limit):
-        self.calls.append({'method': 'get_top_genres_from_library', 'limit': limit})
-        return self._top
+    def _get(database, profile_id=1, **kw):
+        calls.append((database, profile_id))
+        return state['payload']
+    monkeypatch.setattr(dmx, 'get_or_build_daily_mixes', _get)
+    return SimpleNamespace(calls=calls, state=state)
 
-    def get_genre_playlist(self, genre, limit, **kw):
-        self.calls.append({'method': 'get_genre_playlist', 'genre': genre, 'limit': limit})
-        return self._tracks.get(genre, [])
+
+def _dm_deps(profile_id=4):
+    return SimpleNamespace(database='db', get_current_profile_id=lambda: profile_id)
 
 
 class TestDailyMix:
@@ -46,33 +63,45 @@ class TestDailyMix:
         assert spec is not None
         assert spec.requires_variant is True
 
-    def test_variant_resolver_returns_ranks(self):
+    def test_variants_follow_the_discover_mixes(self, discover_mixes):
         spec = get_registry().get('daily_mix')
-        ranks = spec.variant_resolver(SimpleNamespace(service=_DailyMixService()))
-        assert ranks == ['1', '2', '3', '4']
+        assert spec.variant_resolver(_dm_deps()) == ['1', '2', '3', '4', '5']
 
-    def test_resolves_rank_to_top_genre(self):
-        svc = _DailyMixService(
-            top_genres=[('Rock', 100), ('Pop', 80), ('Jazz', 30)],
-            genre_tracks={'Rock': [{'track_name': 'R', 'artist_name': 'A'}]},
-        )
-        out = _dm_mod.generate(SimpleNamespace(service=svc), '1', PlaylistConfig(limit=10))
-        assert len(out) == 1
-        assert out[0].track_name == 'R'
-        # Service called for top-genre lookup + genre playlist.
-        assert {c['method'] for c in svc.calls} == {
-            'get_top_genres_from_library', 'get_genre_playlist',
-        }
+    def test_variants_default_to_four_before_discover_has_built(self, discover_mixes):
+        discover_mixes.state['payload'] = {'mixes': []}
+        assert get_registry().get('daily_mix').variant_resolver(_dm_deps()) == ['1', '2', '3', '4']
 
-    def test_rank_beyond_top_returns_empty(self):
-        svc = _DailyMixService(top_genres=[('Rock', 100)])  # only 1 top genre
-        out = _dm_mod.generate(SimpleNamespace(service=svc), '4', PlaylistConfig())
-        assert out == []
+    def test_mix_n_is_discovers_mix_n_for_this_profile(self, discover_mixes):
+        out = _dm_mod.generate(_dm_deps(profile_id=4), '3', PlaylistConfig(limit=10))
+        assert discover_mixes.calls == [('db', 4)]
+        assert [t.track_name for t in out] == ['Owned 3', 'Pick 3']
+        assert out[0].artist_name == 'Katy Perry'
+        assert out[0].album_name == 'One Of The Boys'
+        assert out[0].album_cover_url == '/api/image-cache/x'
 
-    def test_invalid_variant_raises(self):
-        deps = SimpleNamespace(service=_DailyMixService())
-        with pytest.raises(ValueError, match='must be a rank int'):
-            _dm_mod.generate(deps, 'abc', PlaylistConfig())
+    def test_owned_tracks_reach_sync_as_title_artist(self, discover_mixes):
+        from core.automation.handlers.personalized_pipeline import _track_to_sync_shape
+        owned, pick = _dm_mod.generate(_dm_deps(), '1', PlaylistConfig(limit=10))
+        shaped = _track_to_sync_shape(owned)
+        assert shaped['name'] == 'Owned 1'
+        assert shaped['artists'] == [{'name': 'Katy Perry'}]
+        assert shaped['id'] == ''          # sync skips its id caches, matches by title + artist
+        assert 'owned' not in shaped
+        # a discovery pick keeps its real id + source for sync and the wishlist
+        picked = _track_to_sync_shape(pick)
+        assert picked['id'] == 'dz1'
+        assert pick.source == 'deezer'
+
+    def test_a_mix_discover_did_not_build_today_is_empty(self, discover_mixes):
+        discover_mixes.state['payload'] = _discover_payload(2)
+        assert _dm_mod.generate(_dm_deps(), '4', PlaylistConfig()) == []
+
+    def test_limit_applies(self, discover_mixes):
+        assert len(_dm_mod.generate(_dm_deps(), '1', PlaylistConfig(limit=1))) == 1
+
+    def test_invalid_variant_raises(self, discover_mixes):
+        with pytest.raises(ValueError, match='must be a mix number'):
+            _dm_mod.generate(_dm_deps(), 'abc', PlaylistConfig())
 
 
 # ─── fresh_tape / archives shared shape ─────────────────────────────

@@ -39,6 +39,15 @@ def _repair_worker():
     return _worker_getter()
 
 
+def _safe_int(val, default=0):
+    try:
+        if val is None or val == '' or str(val).strip().lower() in ('undefined', 'null', 'nan'):
+            return default
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
+
 def create_blueprint():
     return bp
 
@@ -225,8 +234,8 @@ def repair_findings_list():
         finding_type = request.args.get('finding_type')
         sort = request.args.get('sort')
         q = request.args.get('q')
-        page = int(request.args.get('page', 0))
-        limit = int(request.args.get('limit', 50))
+        page = _safe_int(request.args.get('page'), 0)
+        limit = _safe_int(request.args.get('limit'), 50)
 
         result = _repair_worker().get_findings(
             job_id=job_id, status=status, severity=severity,
@@ -296,7 +305,7 @@ def repair_findings_albums():
             status=request.args.get('status') or 'pending',
             finding_type=request.args.get('finding_type'),
             q=request.args.get('q'),
-            limit=int(request.args.get('limit', 200)),
+            limit=_safe_int(request.args.get('limit'), 200),
         )
         # Same relative-thumb repair the flat list does; a Plex/Jellyfin path
         # is not loadable from the browser as stored.
@@ -538,7 +547,7 @@ def repair_history():
             return jsonify({'runs': []}), 200
 
         job_id = request.args.get('job_id')
-        limit = int(request.args.get('limit', 50))
+        limit = _safe_int(request.args.get('limit'), 50)
         runs = _repair_worker().get_history(job_id=job_id, limit=limit)
         return jsonify({'runs': runs}), 200
     except Exception as e:

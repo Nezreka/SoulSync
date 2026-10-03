@@ -19,6 +19,9 @@
 
 import { apiClient, readJson } from '@/app/api-client';
 
+import type { InboxPayload, InboxView } from './-discover.inbox';
+import type { DiscoverLayoutSection } from './-discover.layout';
+import type { WeekStats } from './-discover.pulse';
 import type { SectionOutcome } from './-discover.section-state';
 import type {
   DiscoverAlbum,
@@ -207,6 +210,17 @@ export const fetchPopularPicks = () =>
   section<Record<string, unknown>>('discover/personalized/popular-picks');
 export const fetchDailyMixes = () =>
   section<Record<string, unknown>>('discover/personalized/daily-mixes');
+
+/** on repeat, repeat rewind and any blends, read off your listening history. */
+export const fetchForYouMixes = () => section<Record<string, unknown>>('discover/for-you');
+
+/** a fresh flow queue: favourites and what they lead to in your library. */
+export function fetchFlow(): Promise<{ success?: boolean; tracks?: unknown[]; error?: string }> {
+  return readJson(apiClient.get('discover/flow'));
+}
+
+/** chill / focus / energy / feel good / late night, from your own tagged albums. */
+export const fetchMoodMixes = () => section<Record<string, unknown>>('discover/moods');
 export const fetchHiddenGems = () =>
   section<Record<string, unknown>>('discover/personalized/hidden-gems');
 
@@ -324,6 +338,24 @@ export function setAdventurousness(value: number): Promise<DiscoverResult & { va
   return readJson(apiClient.post('discover/adventurousness', { json: { value } }));
 }
 
+// ── Page layout ───────────────────────────────────────────────────────────
+
+export interface DiscoverLayoutResponse extends DiscoverResult {
+  sections?: DiscoverLayoutSection[];
+}
+
+/** The profile's layout: saved rows merged over the defaults by the server. */
+export function fetchDiscoverLayout(): Promise<DiscoverLayoutResponse> {
+  return readJson(apiClient.get('discover/layout'));
+}
+
+/** Replace the profile's layout. The server validates every entry. */
+export function saveDiscoverLayout(
+  sections: DiscoverLayoutSection[],
+): Promise<DiscoverLayoutResponse> {
+  return readJson(apiClient.put('discover/layout', { json: { sections } }));
+}
+
 // ── Artist blacklist ──────────────────────────────────────────────────────
 
 export function fetchArtistBlacklist(): Promise<DiscoverResult & { entries?: unknown[] }> {
@@ -336,6 +368,56 @@ export function blacklistArtist(payload: Record<string, unknown>): Promise<Disco
 
 export function unblacklistArtist(blacklistId: number): Promise<DiscoverResult> {
   return readJson(apiClient.delete(`discover/artist-blacklist/${blacklistId}`));
+}
+
+// ── Feedback (more / less like this, not now, block) ──────────────────────
+
+export type FeedbackAction = 'more' | 'less' | 'not_now' | 'block' | 'save';
+
+export interface FeedbackEntity {
+  type: 'artist' | 'album' | 'track';
+  name: string;
+  artist_name?: string;
+  ids?: Record<string, string>;
+}
+
+export function postDiscoverFeedback(body: {
+  action: FeedbackAction;
+  entity: FeedbackEntity;
+  explanation?: unknown;
+}): Promise<DiscoverResult & { id?: number }> {
+  return readJson(apiClient.post('discover/feedback', { json: body }));
+}
+
+export function resetDiscoverTaste(): Promise<DiscoverResult & { cleared?: number }> {
+  return readJson(apiClient.delete('discover/feedback'));
+}
+
+// ── Your week (the pulse banners) ──────────────────────────────────────────
+
+/**
+ * the stats worker's cached 7-day summary, the same numbers the Stats page
+ * shows. a metadata read, so it's instant and safe above the fold.
+ */
+export function fetchWeekStats(): Promise<WeekStats> {
+  return readJson(apiClient.get('stats/cached', { searchParams: { range: '7d' } }));
+}
+
+// ── The inbox ──────────────────────────────────────────────────────────────
+
+export function fetchInbox(view: InboxView): Promise<InboxPayload> {
+  return readJson(apiClient.get('discover/inbox', { searchParams: { view } }));
+}
+
+export function setInboxState(
+  itemId: number,
+  state: 'unread' | 'saved' | 'dismissed',
+): Promise<DiscoverResult> {
+  return readJson(apiClient.post(`discover/inbox/${itemId}/state`, { json: { state } }));
+}
+
+export function dismissAllInbox(): Promise<DiscoverResult & { dismissed?: number }> {
+  return readJson(apiClient.post('discover/inbox/dismiss-all'));
 }
 
 // ── Build-a-playlist ──────────────────────────────────────────────────────

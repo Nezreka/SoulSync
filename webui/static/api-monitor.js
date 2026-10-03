@@ -473,47 +473,6 @@ async function updateWatchlistButtonCount() {
     }
 }
 
-function _searchWishlistTrackManually(artistName, trackName) {
-    navigateToPage('search');
-    const query = `${artistName || ''} ${trackName || ''}`.trim();
-    // The user is here because AUTO downloads kept failing — at this point they
-    // want the FILE, not metadata browsing. Land on the Soulseek (basic) surface
-    // with the search already running, instead of the default metadata source.
-    //
-    // The source-picker controller initializes ASYNCHRONOUSLY on a fresh
-    // /search visit (settings fetch builds the icon row + sets the default
-    // source). Swapping sections before it finishes gets overridden the moment
-    // its first render fires (it re-activates the enhanced section for the
-    // default source) — the "lands on basic then flips to metadata" bug. So:
-    // WAIT for the soulseek icon to exist and click it — then the CONTROLLER
-    // holds the soulseek state and its own renders short-circuit, nothing can
-    // flip back. Only after ~4s without an icon do we fall back to a manual
-    // section swap.
-    let attempts = 0;
-    const tryHandoff = () => {
-        attempts += 1;
-        const soulseekIcon = document.querySelector('#enh-source-row [data-source="soulseek"]');
-        if (soulseekIcon) {
-            // Sync the query into the search page BEFORE clicking: the icon
-            // click hands off whatever query that page is holding, and it keeps
-            // its query across navigation, so without this the wishlist's
-            // "search manually" would run the LAST thing searched on /search
-            // instead of this track. Same seam downloads.js uses.
-            if (typeof window._searchPageSetQuery === 'function') {
-                window._searchPageSetQuery(query || '');
-            }
-            soulseekIcon.click();
-            return;
-        }
-        // Keep waiting: the icon row is React-rendered with the page, so it
-        // arrives once the route mounts. There is no manual fallback any more —
-        // the old one swapped #basic-search-section's classes and called
-        // performDownloadsSearch, and React owns both of those now.
-        if (attempts < 25) setTimeout(tryHandoff, 160);
-    };
-    setTimeout(tryHandoff, 200);
-}
-
 // Enhancement 8: open the artist. A wishlist group carries only a NAME (its
 // rows are born from failed downloads, which have no artist id) — so resolve
 // the name against the library first and jump STRAIGHT to the artist page on

@@ -21,8 +21,9 @@ import os
 JUNK_FILES = {'.ds_store', 'thumbs.db', 'desktop.ini', '.directory', 'album.nfo~'}
 # Cover art + booklet scans.
 IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif'}
-# Lyric / metadata / playlist sidecars that are worthless without their audio.
-SIDECAR_EXTS = {'.lrc', '.nfo', '.cue', '.m3u', '.m3u8'}
+# Lyric / metadata / playlist / release checksum (sfv, srr) sidecars that are worthless
+# without their audio.
+SIDECAR_EXTS = {'.lrc', '.nfo', '.cue', '.m3u', '.m3u8', '.sfv', '.srr'}
 
 
 def _ext(name: str) -> str:
@@ -41,13 +42,23 @@ def is_sidecar(name: str) -> bool:
     return _ext(name) in SIDECAR_EXTS
 
 
+def is_appledouble(name: str) -> bool:
+    return (name or "").startswith("._")
+
+
 def is_disposable(name: str) -> bool:
-    """True if this file is junk, a cover/scan image, or a lyric/metadata sidecar —
-    i.e. safe to delete from a folder that has no audio left."""
-    return is_junk(name) or is_image(name) or is_sidecar(name)
+    """True if this file is junk, a cover/scan image, a lyric/metadata sidecar, or an
+    AppleDouble sidecar — i.e. safe to delete from a folder that has no audio left."""
+    return is_junk(name) or is_image(name) or is_sidecar(name) or is_appledouble(name)
 
 
 __all__ = [
-    'JUNK_FILES', 'IMAGE_EXTS', 'SIDECAR_EXTS',
-    'is_junk', 'is_image', 'is_sidecar', 'is_disposable',
+    "JUNK_FILES",
+    "IMAGE_EXTS",
+    "SIDECAR_EXTS",
+    "is_junk",
+    "is_image",
+    "is_sidecar",
+    "is_appledouble",
+    "is_disposable",
 ]

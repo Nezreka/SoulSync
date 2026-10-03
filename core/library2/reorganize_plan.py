@@ -44,7 +44,9 @@ logger = get_logger("library2.reorganize_plan")
 def _album_row(conn, album_id: int):
     return conn.execute(
         """SELECT al.id, al.title, al.year, al.release_date, al.album_type,
+                  al.secondary_types,
                   al.image_url, al.spotify_id, al.primary_artist_id,
+                  al.expected_track_count, al.track_count,
                   ar.name AS artist_name
              FROM lib2_albums al
              LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
@@ -121,6 +123,14 @@ def _as_provider_album(album: Dict[str, Any], track_count: int,
     """Shape the catalogue album like the provider payload the context builder
     reads. Reusing that builder — rather than inventing a second context shape
     — is what keeps a reorganize destination identical to a download's."""
+    secondary_types = album.get("secondary_types") or []
+    if isinstance(secondary_types, str):
+        try:
+            decoded = json.loads(secondary_types)
+        except (TypeError, ValueError):
+            decoded = []
+        secondary_types = decoded if isinstance(decoded, list) else []
+    album_type = str(album.get("album_type") or "album").strip().lower() or "album"
     return {
         "id": album.get("spotify_id") or "",
         "name": album.get("title") or "Unknown Album",
@@ -129,6 +139,10 @@ def _as_provider_album(album: Dict[str, Any], track_count: int,
         "total_tracks": track_count,
         "total_discs": total_discs,
         "image_url": album.get("image_url") or "",
+        "album_type": album_type,
+        "record_type": album_type,
+        "secondary_types": [str(value) for value in secondary_types if value],
+        "is_compilation": album_type == "compilation",
     }
 
 
@@ -161,6 +175,7 @@ def plan_album_reorganize(
         "year": album_row["year"],
         "release_date": album_row["release_date"],
         "album_type": album_row["album_type"],
+        "secondary_types": album_row["secondary_types"],
         "image_url": album_row["image_url"],
     })
     album["spotify_id"] = album_row["spotify_id"]
@@ -190,6 +205,13 @@ def plan_album_reorganize(
     }
     if not tracks:
         return {"success": False, "status": "no_tracks", **common, "tracks": []}
+
+    # Same reasoning for the track count $albumtype splits on: it is the
+    # RELEASE's, not how many of its files have arrived. Counting files
+    # planned three downloaded tracks of a 12-track album into Single/,
+    # where the download (which knew the release total) never put them.
+    release_tracks = (album_row["expected_track_count"] or album_row["track_count"]
+                      or len(all_tracks))
 
     # ARCH-03: the disc count is a property of the ALBUM, so it is read from
     # every catalogue position — including tracks whose file has not arrived
@@ -235,7 +257,7 @@ def plan_album_reorganize(
 
         artists = _credited_artists(conn, track["id"]) or [artist_name]
         context = _build_post_process_context(
-            _as_provider_album(album, len(tracks), total_discs),
+            _as_provider_album(album, release_tracks, total_discs),
             {
                 "id": "",
                 "name": title,
@@ -249,6 +271,8 @@ def plan_album_reorganize(
             total_discs,
             local_title=title,
             local_year=(str(album["year"]) if album.get("year") else None),
+            record_type=album.get("album_type") or "album",
+            type_source="tags",
         )
         try:
             new_full, _ok = build_final_path_fn(

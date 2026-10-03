@@ -136,6 +136,16 @@ VARIANT_TAG_PENALTY = 0.4
 # strongest signal that this is the canonical recording.
 EXACT_ARTIST_BOOST = 1.5
 
+# when the user named an artist, a result by somebody else sinks below
+# anything by the right artist, even that artist's live cuts. without it a
+# tribute act's plain "Numb" beat Linkin Park's own "Numb (Live)".
+WRONG_ARTIST_PENALTY = 0.3
+
+# and the other way round: a different song by the right artist ("Good
+# Goodbye" for "Numb") sinks below any version of the song asked for.
+WRONG_TITLE_PENALTY = 0.3
+WRONG_TITLE_BELOW = 0.6
+
 
 # Album-type weights. Compilations are more likely to be tributes /
 # karaoke repackages; albums are most likely to be the canonical
@@ -224,6 +234,18 @@ def artist_similarity(track: Track, expected_artist: str) -> float:
     ).ratio()
 
 
+def is_strong_match(track: Track, expected_title: str, expected_artist: str = '') -> bool:
+    """True when a result is plainly the song asked for: the title matches
+    and, when an artist was given, the artist does too. a featured or
+    joint credit ("Helena Paparizou & Antique") still counts for
+    "Helena Paparizou"."""
+    if not expected_title or title_similarity(track, expected_title) < 0.85:
+        return False
+    if not expected_artist:
+        return True
+    return _artist_matches(track, expected_artist)
+
+
 def has_exact_artist(track: Track, expected_artist: str) -> bool:
     """True when the primary artist matches expected_artist after
     normalisation. Strict equality on the normalised form (so
@@ -231,6 +253,30 @@ def has_exact_artist(track: Track, expected_artist: str) -> bool:
     if not expected_artist:
         return False
     return _normalise(primary_artist(track)) == _normalise(expected_artist)
+
+
+def names_other_artist(track: Track, expected_artist: str) -> bool:
+    """Someone else's track whose title or album names the expected
+    artist: "Numb (Linkin Park Cover)", "Linkin Park Symphony",
+    "Babies Go Linkin Park". that's a tribute, whatever it's called."""
+    if not expected_artist or _artist_matches(track, expected_artist):
+        return False
+    want = _normalise(expected_artist)
+    return bool(want) and (want in _normalise(track.name or '') or want in _normalise(track.album or '')
+                           or want in (track.name or '').lower() or want in (track.album or '').lower())
+
+
+def _artist_matches(track: Track, expected_artist: str) -> bool:
+    """the credited artist is the one asked for. joint and featured
+    credits count ("Helena Paparizou & Antique" for "Helena Paparizou")."""
+    want = _normalise(expected_artist)
+    if not want:
+        return False
+    names = [_normalise(a.get('name', '') if isinstance(a, dict) else str(a))
+             for a in (track.artists or [])]
+    return (artist_similarity(track, expected_artist) >= 0.8
+            or any(n == want for n in names)
+            or want in ' '.join(names))
 
 
 def has_cover_pattern(track: Track) -> bool:
@@ -298,8 +344,13 @@ def score_track(
     if has_exact_artist(track, expected_artist):
         score *= EXACT_ARTIST_BOOST
 
-    if has_cover_pattern(track):
+    if has_cover_pattern(track) or names_other_artist(track, expected_artist):
         score *= COVER_KARAOKE_PENALTY
+    elif expected_artist and not _artist_matches(track, expected_artist):
+        score *= WRONG_ARTIST_PENALTY
+
+    if expected_title and title_sim < WRONG_TITLE_BELOW:
+        score *= WRONG_TITLE_PENALTY
 
     # Variant tag penalty — only when the user didn't ask for a
     # variant. Their input "Track (Live)" should rank Live versions

@@ -23,6 +23,8 @@ export interface MirroredPlaylistRow {
   id: number;
   name?: string;
   display_name?: string;
+  /** the name it syncs under on the server, when another mirror shares its name */
+  sync_name?: string;
   custom_name?: string;
   source?: string;
   source_playlist_id?: string;
@@ -357,6 +359,20 @@ export function timeAgo(dateStr: string | null | undefined, now: number): string
 /** The registry key / fake hash — the 'mirrored_' marker is PART of the id. */
 export function mirroredHash(id: number | string): string {
   return `mirrored_${id}`;
+}
+
+/**
+ * is there a discovery worth reopening? needs a non-fresh phase AND the
+ * playlist behind it. a pipeline run after "clear discovery" paints a phase
+ * onto an empty state, and opening that showed a 0 track discovery modal with
+ * nothing to do (#1405).
+ */
+export function mirroredDiscoveryReopenable(
+  state: { phase?: string; playlist?: unknown } | undefined,
+): boolean {
+  if (!state || !state.phase || state.phase === 'fresh') return false;
+  const count = Number((state.playlist as { track_count?: number } | undefined)?.track_count ?? 0);
+  return count > 0;
 }
 
 /**

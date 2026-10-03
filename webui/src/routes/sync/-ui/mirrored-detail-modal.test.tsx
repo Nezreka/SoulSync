@@ -91,13 +91,27 @@ describe('MirroredDetailModal', () => {
     expect(screen.queryByText('0 min')).toBeNull();
   });
 
+  it('Refresh from source shows when wired and calls its handler (#1413)', () => {
+    const onRefreshFromSource = vi.fn();
+    renderModal({ name: 'A', source: 'youtube', tracks: [] }, { onRefreshFromSource });
+    const btn = screen.getByText('Refresh from source');
+    expect(btn.getAttribute('title')).toMatch(/nothing is pushed to your server or downloaded/);
+    fireEvent.click(btn);
+    expect(onRefreshFromSource).toHaveBeenCalled();
+  });
+
+  it('no handler, no Refresh from source button', () => {
+    renderModal({ name: 'A', source: 'youtube', tracks: [] });
+    expect(screen.queryByText('Refresh from source')).toBeNull();
+  });
+
   it('wires the five actions, and Delete CLOSES first (1148)', () => {
     const h = renderModal({ name: 'A', source: 'spotify', tracks: [] });
     fireEvent.click(screen.getByText('Discover'));
     expect(h.onDiscover).toHaveBeenCalled();
     fireEvent.click(screen.getByText('Edit Source'));
     expect(h.onEditSource).toHaveBeenCalled();
-    fireEvent.click(screen.getByText('Sync now'));
+    fireEvent.click(screen.getByText('Sync & download'));
     expect(h.onRunPipeline).toHaveBeenCalled();
     fireEvent.click(screen.getByText('Close'));
     expect(h.onClose).toHaveBeenCalled();

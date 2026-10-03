@@ -2549,6 +2549,7 @@ const _autoIcons = {
     start_database_update: '\uD83D\uDDC4\uFE0F', start_database_update_hourly: '\uD83D\uDDC4\uFE0F', run_duplicate_cleaner: '\uD83D\uDDC2\uFE0F',
     clear_quarantine: '\uD83D\uDDD1\uFE0F', library_cleanup: '\uD83D\uDDD1\uFE0F', cleanup_wishlist: '\uD83E\uDDF9',
     update_discovery_pool: '\uD83E\uDDED', start_quality_scan: '\uD83D\uDCCA',
+    run_repair_job: '\uD83D\uDD27',
     backup_database: '\uD83D\uDCBE',
     refresh_beatport_cache: '\uD83C\uDFB5',
     clean_search_history: '\uD83D\uDDD1\uFE0F',
@@ -2958,6 +2959,7 @@ const AUTO_HUB_REFERENCE = {
             group: 'Library Tools', items: [
                 { type: 'scan_library', label: 'Scan Library', desc: 'Full scan of local music library files' },
                 { type: 'start_quality_scan', label: 'Quality Scan', desc: 'Check library tracks for quality issues' },
+                { type: 'run_repair_job', label: 'Run Maintenance Job', desc: 'Run one (or all enabled) Library Maintenance jobs, e.g. the Corrupt File Detector' },
                 { type: 'start_database_update', label: 'Update Database', desc: 'Run a database update/maintenance operation' },
                 { type: 'backup_database', label: 'Backup Database', desc: 'Create a backup of the music database' },
             ]
@@ -4212,6 +4214,7 @@ function _autoFormatAction(type) {
         clear_quarantine: 'Clear Quarantine', library_cleanup: 'Clear Quarantine + Empty Recycle Bin',
         cleanup_wishlist: 'Clean Up Wishlist',
         update_discovery_pool: 'Update Discovery', start_quality_scan: 'Run Quality Scan',
+        run_repair_job: 'Run Maintenance Job',
         backup_database: 'Backup Database',
         refresh_beatport_cache: 'Refresh Beatport Cache', clean_search_history: 'Clean Search History',
         clean_completed_downloads: 'Clean Completed Downloads',

@@ -34,6 +34,8 @@ import {
   albumTracksParams,
   isReleaseClickable,
   openReleaseArtist,
+  lockSectionType,
+  reconcileAlbumWithTracksResponse,
   releasePlaylistName,
   releaseToAlbumData,
   releaseVirtualPlaylistId,
@@ -63,7 +65,7 @@ export function ArtistDetailPage() {
   // Deliberately NOT profile-scoped: /api/artist-detail is not, and the
   // vanilla never keyed this page on a profile either.
   const { source, id } = Route.useParams();
-  const { name } = Route.useSearch();
+  const { name, album: focusAlbumId } = Route.useSearch();
 
   const query = useQuery(artistDetailQueryOptions(source, id, name));
 
@@ -129,9 +131,15 @@ export function ArtistDetailPage() {
    */
   const profile = useProfile();
   const canEnhance = showsEnhancedToggle(Boolean(profile?.isAdmin), sourceOnly);
-  // an issue's "edit details" lands here in the enhanced view, whatever was saved
+  // Two ways to land here in the library view whatever was saved: an issue's
+  // "edit details", and ?album= from the library's album grid. Both name an
+  // album you OWN, and only this view lists those. Both are one-visit
+  // overrides — the stored preference is read, never rewritten.
   const [enhanced, setEnhanced] = useState(
-    () => Boolean(peekArtistEdit(id)) || readEnhancedViewMode(profile?.profileId),
+    () =>
+      Boolean(focusAlbumId) ||
+      Boolean(peekArtistEdit(id)) ||
+      readEnhancedViewMode(profile?.profileId),
   );
   const showEnhanced = canEnhance && enhanced;
   const enhancedState = useEnhancedData(payload?.artist?.id, showEnhanced);
@@ -307,20 +315,28 @@ export function ArtistDetailPage() {
       return;
     }
 
-    const album = releaseToAlbumData(release);
-    const virtualId = releaseVirtualPlaylistId(artist, album);
+    const cardAlbum = releaseToAlbumData(release);
+    const virtualId = releaseVirtualPlaylistId(artist, cardAlbum);
     // checked before the fetch, so an album mid-download just comes back up
-    if (window.reopenActiveDownloadModal?.(virtualId)) return;
+    if (window.reopenActiveDownloadModal?.(virtualId, { runningOnly: true })) return;
 
     window.showLoadingOverlay?.('Loading album...');
     try {
       const params = new URLSearchParams(albumTracksParams(release, artist));
-      const response = await fetch(`/api/album/${album.id}/tracks?${params}`);
+      const response = await fetch(`/api/album/${cardAlbum.id}/tracks?${params}`);
       if (!response.ok) throw new Error(`Failed to load album tracks: ${response.status}`);
 
       const data = await response.json();
       if (!data.success || !data.tracks?.length)
         throw new Error('No tracks found for this release');
+
+      // The release card's count is often fabricated (see
+      // reconcileAlbumWithTracksResponse) — take the type/count from the
+      // release the fetch just returned so $albumtype and embedded tags
+      // are correct.
+      // ...and the type is locked to the section the user saw it in, so it
+      // files there rather than by a track-count guess downstream
+      const album = lockSectionType(reconcileAlbumWithTracksResponse(cardAlbum, data), release);
 
       // #1297 the download modal, same as an album in search: pick tracks,
       // download them, or add the picked ones to the wishlist from there.
@@ -490,6 +506,7 @@ export function ArtistDetailPage() {
                 status={enhancedState.status}
                 isAdmin={Boolean(profile?.isAdmin)}
                 onReload={enhancedState.reload}
+                focusAlbumId={focusAlbumId}
               />
             </div>
           ) : (

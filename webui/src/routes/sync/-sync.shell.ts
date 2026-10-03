@@ -165,6 +165,21 @@ export function rememberRoutedTab(id: string): void {
   }
 }
 
+/** the chip's ×: drop a routed tab so it stays gone after a reload (#1402).
+ *  opening that source again (Add playlist) brings it back. */
+export function forgetRoutedTab(id: string): void {
+  try {
+    const current = readRememberedRoutedTabs();
+    if (!current.includes(id as SyncTabId)) return;
+    window.localStorage.setItem(
+      OPENED_TABS_STORAGE_KEY,
+      JSON.stringify(current.filter((t) => t !== id)),
+    );
+  } catch {
+    // storage unavailable - it's gone for this session anyway
+  }
+}
+
 const IDS = new Set<string>(SYNC_TABS.map((t) => t.id));
 
 /**

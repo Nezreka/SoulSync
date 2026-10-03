@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { RecommendedArtist } from './-discover.recommended';
 
 import {
+  recommendedIds,
   DEFAULT_REC_SOURCE,
   ENRICH_ENDPOINT,
   RECOMMENDED_CARD_LIMIT,
@@ -110,8 +111,23 @@ describe('the shared card', () => {
     expect(card.chips[0].icon).toBeTruthy();
   });
 
-  it('chips REPLACE the reason line, they do not sit alongside it', () => {
-    // They are the reason, just clearer — rendering both duplicates the claim.
+  it('keeps the reason line whenever it names your artists, chips or not', () => {
+    const named = { kind: 'similar_to', seeds: [{ name: 'Tool' }] };
+    const card = recommendedCard(
+      artist({ why: [{ type: 'consensus', label: '3 of your artists' }], explanation: named }),
+      'spotify',
+    );
+    expect(card.showReason).toBe(true);
+    expect(card.showChips).toBe(true);
+    // no names to give: the chips stand in for the line
+    expect(
+      recommendedCard(artist({ why: [{ type: 'genre', label: 'x' }] }), 'spotify').showReason,
+    ).toBe(false);
+    // and with neither, the plain line still says what it can
+    expect(recommendedCard(artist(), 'spotify').showReason).toBe(true);
+  });
+
+  it('shows chips only when there are some', () => {
     expect(
       recommendedCard(artist({ why: [{ type: 'genre', label: 'x' }] }), 'spotify').showChips,
     ).toBe(true);
@@ -119,12 +135,26 @@ describe('the shared card', () => {
     expect(recommendedCard(artist({ why: [] }), 'spotify').showChips).toBe(false);
   });
 
-  it('uses a DIFFERENT reason function per section', () => {
-    const a = artist({ similar_to: 'Autechre', match_count: 3 } as Partial<RecommendedArtist>);
-    const rec = recommendedCard(a, 'spotify', 'recommended');
-    const lis = recommendedCard(a, 'spotify', 'listening');
-    expect(rec.reason).toBeTypeOf('string');
-    expect(lis.reason).toBeTypeOf('string');
+  it('words the explanation the server wrote, whichever shelf it is on', () => {
+    const similar = recommendedCard(
+      artist({ explanation: { kind: 'similar_to', seeds: [{ name: 'Autechre' }] } }),
+      'spotify',
+    );
+    expect(similar.reason).toBe('Because you have Autechre');
+    expect(similar.reasonTitle).toBe('In your library: Autechre');
+    const listened = recommendedCard(
+      artist({
+        explanation: {
+          kind: 'listened',
+          seeds: [{ name: 'Tool' }, { name: 'Deftones' }, { name: 'Soen' }],
+          confidence: 0.88,
+        },
+      }),
+      'spotify',
+    );
+    expect(listened.reason).toBe('Because you listen to Tool, Deftones +1 more');
+    expect(listened.reasonTitle).toBe('You listen to: Tool, Deftones, Soen');
+    expect(recommendedCard(artist(), 'spotify').reason).toBe('');
   });
 
   it('defaults a nameless artist to empty strings rather than undefined', () => {
@@ -302,5 +332,20 @@ describe('the "View All" modal', () => {
     expect(REC_MODAL_TITLE).toBe('Recommended Artists');
     expect(REC_MODAL_SEARCH_PLACEHOLDER).toBe('Search recommended artists...');
     expect(REC_MODAL_ADD_ALL).toBe('Add All to Watchlist');
+  });
+});
+
+describe('recommendedIds', () => {
+  it('keeps the ids a card has and drops the empty ones', () => {
+    expect(
+      recommendedIds(
+        artist({ spotify_artist_id: 'sp', deezer_artist_id: '', itunes_artist_id: 'it' }),
+      ),
+    ).toEqual({ spotify: 'sp', itunes: 'it' });
+  });
+
+  it('feeds the card its feedback entity', () => {
+    const card = recommendedCard(artist({ artist_name: 'Soen', deezer_artist_id: 'dz' }), 'x');
+    expect(card.feedbackEntity).toEqual({ type: 'artist', name: 'Soen', ids: { deezer: 'dz' } });
   });
 });

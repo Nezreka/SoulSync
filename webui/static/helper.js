@@ -3460,23 +3460,45 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
-    '3.4.7': [
-        { date: 'September 2026 · 3.4.7' },
-        { title: 'Profiles rebuilt', desc: 'A "who\'s here?" picker, a pin pad with a lockout countdown, a quick-switch menu on your avatar, and add or edit with adult, teen, kids and guest presets. A browser with no profile picked no longer gets admin rights.' },
-        { title: 'Kids limits', desc: 'Hide explicit music and cap movie and TV ratings per profile. Anything over the cap or unrated is left out of lists and refused on play.' },
-        { title: 'Invites, devices and audit log', desc: 'One-use invite links with an access preset, turn a profile off without deleting it, sign one browser out from the devices list, sign out everywhere on a new password, and an admin audit log.' },
-        { title: 'Music requests', desc: 'Profiles that ask first send requests instead of downloading. Admins approve or decline on the new Requests page, and only approved rows download.' },
-        { title: 'Video requests', desc: 'Grouped by title, pick seasons for shows, progress like "3 of 10 episodes", a quality profile per request, and request quotas.' },
-        { title: 'Issues rebuilt', desc: 'A thread per issue, followers instead of duplicates, the fix action as the main button, bulk triage for admins, and "report a problem" from the player.', page: 'issues' },
-        { title: 'Help & Docs rebuilt', desc: 'Rewritten against the current app with search (/ or Ctrl+K), a table of contents, deep links and a mobile layout (#1310).', page: 'help' },
-        { title: 'Appears on', desc: 'Featured artists and collab albums now show on every credited artist\'s page, not just the first one.', page: 'library' },
-        { title: 'Collab album tags', desc: 'Collab albums are tagged with every album artist where Navidrome reads it, and fresh installs write the multi-value artists tag by default.', page: 'settings' },
-        { title: 'Labels and genres as multi-values', desc: 'A label list like "Columbia;BMG" is written as separate values, and genres follow the write multi-value setting (#1305).', page: 'settings' },
-        { title: 'Non-latin titles match correctly', desc: 'Japanese, Hebrew and Cyrillic titles no longer fold to nothing and match each other at 100%, so track number repair stops renumbering them (#1306).', page: 'tools' },
-        { title: 'Watchlist fixes', desc: 'Watched artists read as watched on their page (#1308), and scans re-check recent days so late-listed releases are not missed (#1309).' },
-        { title: 'ListenBrainz catches up', desc: 'History imported into ListenBrainz after your first sync is picked up now (#1311).', page: 'stats' },
-        { title: 'Search and download fixes', desc: 'Files results scroll instead of clipping (#1313), Deezer retries a failed login, and video imports survive permission errors on network shares.', page: 'search' },
-        { title: 'Earlier versions', desc: '3.4.6 rebuilt search, added per-profile listening history, a redesigned dashboard and a safer wishlist. 3.4.5 added the login-gate security fix and stricter MusicBrainz matching.' },
+    '3.5.0': [
+        { date: 'October 2026 · 3.5.0' },
+        { title: 'Video discover overhaul', desc: 'The music-side visual treatment lands on video discover: story blocks, trailers, genre art, card elevation, banners, a hero badge, story tickers, and genre tiles that load eagerly with an ambient crossfade and deduped posters (#1427, #1433, #1434, #1435, #1436).' },
+        { title: '"I have this" matching', desc: 'Video detail pages get a manual library match button for when automatic matching says you do not own something you do. Rematching a video clears its artwork so the corrected match re-downloads art (#1438, #1440).' },
+        { title: 'Video import polish', desc: 'The place-file modal got restyled, commercial-free episode cuts pass the duration gate, and the picked-title hero has its styles (#1423, #1439).' },
+        { title: 'Per-profile discover', desc: 'Listening recs, the listening mix and the warmer are per profile now. A deezer editorial playlist opens to a preview first, and built playlists can be named with missing tracks landing on the wishlist (#1418, #1421).', page: 'discover' },
+        { title: 'Per-profile server playlists', desc: 'The sync page shows whose server playlist is whose, same-named mirrors stop overwriting each other, deleted tracks are noticed on the next sync, and deleting a mirror lets go of its server playlist (#1414, #1417, #1420).', page: 'sync' },
+        { title: 'No more false rate limits', desc: 'Providers stop crying rate limit when an id contains 429 or 503. The http status is trusted over digits in the url, across musicbrainz, spotify, tidal, deezer, jiosaavn, audiodb, discogs, genius and last.fm (#1391, #1443).' },
+        { title: 'Smarter canonical lookups', desc: 'Alternate editions use each provider\'s own artist id instead of soulsync\'s local key, so musicbrainz stops returning 400 invalid mbid. Musicbrainz album consistency also checks the artist and stops judging romanized titles against native script (#1415, #1426).' },
+        { title: 'Filing fixes', desc: 'Singles stop merging into same-named album folders, and a customized single path template is honored for explicitly-typed singles (#1441, #1431).', page: 'library' },
+        { title: 'Lossy copies keep their tags', desc: 'FLAC to MP3 copies get native tags and cover art, with ARTISTS following the primary source (#1422, #1425).' },
+        { title: 'Non-admin automations re-arm', desc: 'Scheduled automations owned by other profiles re-arm after a restart instead of running once and never again (#1428, #1430).', page: 'automations' },
+        { title: 'Repair job honesty', desc: 'Acoustid retag keeps the album artist, sfv and srr count as leftover junk, and a run that quit early says so (#1289).', page: 'tools' },
+        { title: 'Extension chat tab', desc: 'The server chat lives in the companion extension popup, with rooms, dms and replies. Video pages get library-status pills and watchlist actions.' },
+        { title: 'Earlier versions', desc: '3.4.9 brought the discover glow-up, player theater, sample studio and a calmer sync page.' },
+    ],
+    '3.4.9': [
+        { date: 'September 2026 · 3.4.9' },
+        { title: 'Discover home', desc: 'Opens with a grid of what you go back to, then flow, on repeat, your daily mixes, a mood for the hour, repeat rewind and a blend. One section nav replaces the fourteen pills that only scrolled.', page: 'discover' },
+        { title: 'Banners about you', desc: 'Your week in music, rows that lead with you and say why, daily mixes first with who is in them, and real mood mixes built from your own albums.', page: 'discover' },
+        { title: 'Music video banners', desc: 'The hero and spotlight play the artist video, a bento spotlight and a watch rail that plays itself, tap for sound. Playback scales to what your device can carry.', page: 'discover' },
+        { title: 'Concerts near you', desc: 'Set a country under Settings > Concerts and the inbox only shows shows there, and triages like mail.', page: 'settings' },
+        { title: 'Player Theater', desc: 'Now Playing is a full theater: animated backgrounds that follow the song, a 10-band EQ, immersive mode (press F), 8 new themes and visual options (#1388, #1389, #1392).' },
+        { title: 'Theater visuals, sharper', desc: 'Beats land once, trails are real, the accent comes from your cover, Scope is a real oscilloscope, Vinyl spins your album cover, and Dot Plane is a 3D spectrogram.' },
+        { title: 'Mini player glow', desc: 'The mini player takes on your cover colors with a soft live glow that moves with the music. Follows the Visuals switch.' },
+        { title: 'Sample Studio', desc: 'Your library is the sample pack. Chop on a waveform with a BPM grid, pitch and time-stretch, add FX, and split real stems without installing torch (#1374, #1379, #1383).', page: 'sample-studio' },
+        { title: 'Auto-sync board', desc: 'More room for the board, small drop chips for empty intervals, drop targets glow while you drag, and the dashboard opens the same manager (#1401).', page: 'sync' },
+        { title: 'Sync page cleanups', desc: 'Hide source tabs you do not use, mirrored cards always open the playlist, the three sync buttons have three names, and server playlist backups default off (#1402, #1403, #1404, #1406).', page: 'sync' },
+        { title: 'Automations run as their owner', desc: 'Process all mirrored playlists and Refresh Mirrored use the owning profile\'s mirrors instead of admin\'s (#1411).', page: 'automations' },
+        { title: 'Releases file where you saw them', desc: 'A release from the artist page or search files under the section it showed in, and paths and reorganize respect the type the source gave.', page: 'library' },
+        { title: 'Download fixes', desc: 'Playlist tracks file under their album credit, settings shows the compilation template, the download modal handles outside cancels and reopens fresh, and search badges update after a download (#1384, #1385, #1386).' },
+        { title: 'Genre playlists for Deezer', desc: 'Deezer tracks get genres and daily mixes rank real genres, so genre playlists and mixes stop coming back empty.', page: 'discover' },
+        { title: 'Smarter matching', desc: 'AcoustID keeps whole bracket titles, wishlist cleanup keeps distinct subtitles apart, and duplicates tell numbered and roman numeral parts apart (#1372, #1382).', page: 'tools' },
+        { title: 'Companion extension', desc: 'Browser extensions can call the API with an API key, the image proxy handles media-server artwork, and there is a full reference for all 87 /api/v1 endpoints (#1375, #1377, #1380, #1400).' },
+        { title: 'Torrents stay put', desc: 'A torrent slow to start on a private tracker is no longer deleted and grabbed again after 90 seconds. Torrents follow their own stall setting, and Pause really keeps them.', page: 'settings' },
+        { title: 'Duplicates keep your playlists', desc: 'Keep Best keeps the copy a server playlist points at, and each copy shows which playlists it is in, so bulk cleanup no longer breaks playlists.', page: 'tools' },
+        { title: 'Navidrome playlist account', desc: 'Settings > Navidrome can send your synced playlists to a different Navidrome user than the one SoulSync scans with.', page: 'settings' },
+        { title: 'Failed downloads say why', desc: 'A failed Deezer (or other streaming) download shows the real reason, like an expired ARL, instead of just Errored (#1349).' },
+        { title: 'Earlier versions', desc: '3.4.8 overhauled the wishlist, dashboard and automations pages, added library album views and chat P2P sharing. 3.4.7 rebuilt profiles, requests and issues.' },
     ],
 };
 
@@ -3506,30 +3528,44 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: '3.4.7: profiles, requests and a new help page',
-        description: 'Profiles, requests and issues rebuilt with kids limits and invites, a new Help & Docs page, every credited artist on their own page, and tagging and matching fixes.',
+        title: '3.5.0: video discover, per-profile sync and smarter providers',
+        description: 'Video discover gets the music-side treatment, sync and discover go per-profile, providers stop false rate-limiting, and the extension gets a chat tab.',
         features: [
-            'Profiles: a browser with no profile picked no longer gets admin rights, pins have a real brute-force limit, and a new picker, pin pad and quick-switch menu. Presets for adult, teen, kids and guest.',
-            'Kids limits hide explicit music and cap movie and TV ratings per profile. Invite links, turn a profile off, per-device sign out, sign out everywhere and an admin audit log.',
-            'Music requests: profiles that ask first send requests, admins approve on the new Requests page. Video requests pick seasons, show progress and respect quotas.',
-            'Issues: threads, followers, bulk triage and one fix button per category, shared by music and video.',
-            'Help & Docs rebuilt against the current app, with search, a table of contents, deep links and a mobile layout (#1310).',
-            'Featured artists and collab albums show under Appears on for every credited artist, and collab albums are tagged with every album artist.',
-            'Labels and genres are written as real multi-values (#1305). Non-latin titles no longer match each other at 100% (#1306).',
-            'Fixes: watchlist state on artist pages and late-listed releases (#1308, #1309), ListenBrainz history imported later (#1311), files search scrolling (#1313), Deezer login retry, and video imports on network shares.',
+            'Video discover overhaul: story blocks, trailers, genre art, hero badge, story tickers, eager genre tiles with ambient crossfade (#1427, #1433, #1434, #1435, #1436).',
+            '"I have this" manual matching on video detail pages, and rematches that actually refresh artwork (#1438, #1440).',
+            'Per-profile server playlists and discover: whose is whose, no more overwrites, deleted tracks noticed on next sync (#1414, #1417, #1420).',
+            'Providers trust the http status over digits in urls: no more false 429s across nine providers (#1391, #1443).',
+            'Canonical lookups use each provider\'s artist id; musicbrainz album consistency checks the artist (#1415, #1426).',
+            'Singles stop merging into same-named album folders; custom single path templates honored (#1441, #1431).',
+            'Non-admin automations re-arm after restart (#1428, #1430).',
+            'Companion extension: chat tab in the popup, video badges with watchlist actions.',
         ],
-        usage_note: 'Set up profiles, kids limits and invites from Manage Profiles on the sidebar avatar.',
     },
     {
-        title: 'Earlier in 3.4.6',
-        description: 'Search rebuilt, per-profile listening history from ListenBrainz or Last.fm, a redesigned dashboard and Your Library tab, and a wishlist that keeps staged tracks.',
+        title: 'Earlier in 3.4.9',
+        description: 'Discover glow-up, player theater, sample studio from your own library, calmer sync page, and filing and download fixes.',
         features: [],
+    },
+    {
+        title: '3.4.9: discover, player theater and sample studio',
+        description: 'A big discover glow-up, a full player theater, Sample Studio from your own library, a calmer sync page, and a stack of filing and download fixes.',
+        features: [
+            'Discover opens like a home page: what you go back to, daily mixes first with who is in them, your week in music, real mood mixes, and one section nav instead of fourteen scroll pills.',
+            'Music video backdrops behind the hero and spotlight, a bento spotlight and a watch rail that plays itself, and concerts near you with a country setting.',
+            'Player Theater (#1388, #1389, #1392): animated backgrounds that follow the song, a 10-band EQ, immersive mode (press F) and 8 new themes.',
+            'Sample Studio (#1374): chop your own tracks on a waveform editor, pitch and time-stretch, FX, and real stems without torch.',
+            'Sync page (#1401 to #1406): roomier auto-sync board with glowing drop targets, hideable source tabs, clear sync button names, server backups default off.',
+            'Automations: process all mirrored playlists runs on the owner\'s mirrors, not admin\'s (#1411).',
+            'Filing: releases file under the section you saw them in, playlist tracks under their album credit, and deezer genre playlists stop coming back empty.',
+            'Matching from @mandos21 (#1372, #1382), and the Companion browser extension can now use the API (#1375, #1377, #1380).',
+            'Fixes: torrents are no longer deleted after 90s at 0%, Keep Best keeps the copy your playlists use, Navidrome can take a separate playlist account, and failed downloads say why.',
+        ],
     },
 ];
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '3.4.7';
+    return btn ? btn.textContent.trim().replace('v', '') : '3.5.0';
 }
 
 // Compare two semver-ish strings ("2.4.0" vs "2.4.1" vs "2.39"). Returns

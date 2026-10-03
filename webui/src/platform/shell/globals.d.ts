@@ -35,6 +35,8 @@ declare global {
     updateWatchlistButtonCount?: () => void;
     /** Wishlist twin of updateWatchlistButtonCount — nav badge + hero count. */
     updateWishlistCount?: () => void;
+    /** Discover inbox nav badge (src/shell/discover-inbox-badge.ts). */
+    refreshDiscoverInboxBadge?: () => void;
     /**
      * Shared modals owned by other vanilla files and used from several pages
      * (origin-history.js, watchlist-history.js, blocklist.js). Declared as
@@ -42,13 +44,16 @@ declare global {
      */
     openDownloadOriginsModal?: (tab: string) => void;
     /**
-     * Wishlist -> search-page handoffs. These drive the VANILLA search page's
-     * DOM (polling for the Soulseek source icon, filling #enhanced-search-input),
-     * so they stay where they are rather than being reimplemented in React —
-     * the same call they made from the vanilla wishlist page.
+     * Wishlist -> search-page handoff. Drives the VANILLA search page's DOM
+     * (filling #enhanced-search-input), so it stays where it is rather than
+     * being reimplemented in React.
      */
-    _searchWishlistTrackManually?: (artistName: string, trackName: string) => void;
     _navigateToArtistFromWishlist?: (artistName: string) => void;
+    /** The candidate inspector for a download task (features/downloads/inspector-modal). */
+    openDownloadTaskInspector?: (
+      taskId: string,
+      track: { name?: string; artist?: string; album?: string },
+    ) => void;
     /**
      * The wishlist download flow. Cannot move to React: it reads
      * `activeDownloadProcesses` and `WishlistModalState`, both module-scoped in
@@ -141,6 +146,9 @@ declare global {
     /** media-player.js — seedless Library Radio: queues a ranked-random batch
      *  from the whole library and arms radio mode for refills. */
     startLibraryRadio?: () => void | Promise<void>;
+    /** media-player.js — the track the player has loaded (title, artist,
+     *  album, image_url, artist_id...), or null. */
+    getCurrentTrack?: () => unknown;
     /** media-player.js — play a resolved library track list (radio-row shape)
      *  as the queue, labeled with a "Playing from" context. */
     cancelPendingPlayback?: () => void;
@@ -391,7 +399,11 @@ declare global {
       virtualPlaylistId: string,
     ) => { status?: string; modalElement?: unknown; modalId?: string } | null;
     rehydrateDiscoverDownloadModal?: (virtualPlaylistId: string) => Promise<boolean>;
-    reopenActiveDownloadModal?: (virtualPlaylistId: string) => boolean;
+    /** runningOnly: skip a finished run, so the caller opens a fresh check */
+    reopenActiveDownloadModal?: (
+      virtualPlaylistId: string,
+      options?: { runningOnly?: boolean },
+    ) => boolean;
     /**
      * sync-spotify.js — hydrates listenbrainzPlaylistStates from the backend
      * (/api/listenbrainz/playlists). The vanilla discover init called this
@@ -670,6 +682,7 @@ declare global {
           artistId?: string | number;
           artistSource?: string | null;
           artistName?: string;
+          focusAlbumId?: string | number;
           labelId?: string | number;
           labelName?: string;
         },

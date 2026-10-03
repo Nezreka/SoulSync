@@ -158,6 +158,24 @@ describe('modal payloads', () => {
     expect(built.total_tracks).toBe(2);
   });
 
+  it('locks the release type to what search showed it as', () => {
+    // discord: Deezer's 3-track album Flow State Sampler sat in the Albums
+    // row and filed as a Single by track count
+    const shownAsAlbum = buildAlbumObject(
+      { ...detail, album_type: 'single' },
+      album({ album_type: 'album' }),
+    );
+    expect(shownAsAlbum.album_type).toBe('album');
+    expect(shownAsAlbum.album_type_locked).toBe(true);
+    const shownAsEp = buildAlbumObject(detail, album({ album_type: 'ep' }));
+    expect(shownAsEp).toMatchObject({ album_type: 'ep', album_type_locked: true });
+  });
+
+  it('locks nothing when the search result carried no type', () => {
+    const built = buildAlbumObject(detail, album({ album_type: undefined }));
+    expect(built.album_type_locked).toBeUndefined();
+  });
+
   it('names the artist from the detail, falling back to the row', () => {
     expect(buildArtistObject(detail, album(), 'spotify').id).toBe('art1');
     expect(buildArtistObject({ ...detail, artists: [] }, album(), 'spotify').name).toBe(
@@ -260,6 +278,10 @@ describe('openSearchAlbum', () => {
     window.reopenActiveDownloadModal = vi.fn(() => true);
 
     await openSearchAlbum(album(), 'spotify');
+    // only a download still in progress: a finished one opens fresh (#1386)
+    expect(window.reopenActiveDownloadModal).toHaveBeenCalledWith(expect.any(String), {
+      runningOnly: true,
+    });
     expect(fetched).toBe(false);
     expect(modalCalls).toHaveLength(0);
     expect(window.showLoadingOverlay).not.toHaveBeenCalled();

@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest';
 import {
   albumTracksParams,
   isReleaseClickable,
+  lockSectionType,
   openReleaseArtist,
+  reconcileAlbumWithTracksResponse,
+  releaseSectionType,
   releaseToAlbumData,
   stillCheckingMessage,
 } from './-artist-detail.open-release';
@@ -82,6 +85,57 @@ describe('releaseToAlbumData', () => {
   });
 });
 
+describe('reconcileAlbumWithTracksResponse', () => {
+  // Collision Course (Deezer): the artist-albums endpoint omits nb_tracks,
+  // so the release card fabricates total_tracks=1 while correctly carrying
+  // album_type='ep'. The /api/album/<id>/tracks fetch returns the real
+  // release (total_tracks=6). Without reconciliation the modal POSTs the
+  // fabricated count and get_album_type_display('ep', 1) files it as Single.
+  const cardAlbum = releaseToAlbumData({ id: 81827, title: 'Collision Course', album_type: 'ep' });
+  const sixTracks = Array.from({ length: 6 }, (_, i) => ({ id: i + 1 }));
+
+  it('takes the real type/count from the tracks response', () => {
+    expect(cardAlbum.total_tracks).toBe(1); // the fabricated card count
+    const album = reconcileAlbumWithTracksResponse(cardAlbum, {
+      album: { album_type: 'ep', total_tracks: 6 },
+      tracks: sixTracks,
+    });
+    expect(album.album_type).toBe('ep');
+    expect(album.total_tracks).toBe(6);
+    expect(album.id).toBe(81827);
+    expect(album.name).toBe('Collision Course');
+  });
+
+  it('falls back to the tracklist length when the album payload has no count', () => {
+    const album = reconcileAlbumWithTracksResponse(cardAlbum, {
+      album: { album_type: 'ep', total_tracks: 0 },
+      tracks: sixTracks,
+    });
+    expect(album.total_tracks).toBe(6);
+  });
+
+  it('falls back to the tracklist length when the album payload is absent', () => {
+    const album = reconcileAlbumWithTracksResponse(cardAlbum, { tracks: sixTracks });
+    expect(album.total_tracks).toBe(6);
+    expect(album.album_type).toBe('ep');
+  });
+
+  it('keeps the card values when the response carries nothing usable', () => {
+    const album = reconcileAlbumWithTracksResponse(cardAlbum, {});
+    expect(album.total_tracks).toBe(1);
+    expect(album.album_type).toBe('ep');
+  });
+
+  it('prefers the response album_type over the card', () => {
+    const album = reconcileAlbumWithTracksResponse(
+      { ...cardAlbum, album_type: 'album' },
+      { album: { album_type: 'single', total_tracks: 2 }, tracks: [{}, {}] },
+    );
+    expect(album.album_type).toBe('single');
+    expect(album.total_tracks).toBe(2);
+  });
+});
+
 describe('albumTracksParams', () => {
   const artist = { id: 1, name: 'Aphex Twin', image_url: '', source: 'spotify' };
 
@@ -111,5 +165,30 @@ describe('albumTracksParams', () => {
       { ...artist, source: null },
     );
     expect(params.source).toBe('qobuz');
+  });
+});
+
+describe('releaseSectionType', () => {
+  it('is the section the page shows the release in', () => {
+    expect(releaseSectionType({ album_type: 'EP' })).toBe('ep');
+    expect(releaseSectionType({ album_type: 'single' })).toBe('single');
+    expect(releaseSectionType({ album_type: 'compile' })).toBe('compilation');
+    expect(releaseSectionType({ album_type: 'album' })).toBe('album');
+    // anything else sits under Albums, like the backend buckets it
+    expect(releaseSectionType({ album_type: 'appears_on' })).toBe('album');
+    expect(releaseSectionType({ type: 'single' })).toBe('single');
+    expect(releaseSectionType({})).toBe('album');
+  });
+});
+
+describe('lockSectionType', () => {
+  it('pins the type to the section and marks it locked, whatever the fetch said', () => {
+    // discord: Deezer's 3-track album Flow State Sampler, shown under Albums
+    const fetched = { id: 7, name: 'Flow State Sampler', album_type: 'single', total_tracks: 3 };
+    expect(lockSectionType(fetched, { album_type: 'album' })).toEqual({
+      ...fetched,
+      album_type: 'album',
+      album_type_locked: true,
+    });
   });
 });

@@ -8,7 +8,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ServerDisambigModal, ServerPlaylistList } from './server-playlist-list';
+import {
+  LinkServerUserPrompt,
+  OtherOwnersBlock,
+  ServerDisambigModal,
+  ServerPlaylistList,
+} from './server-playlist-list';
 
 let responder: (url: string) => unknown = () => ({});
 
@@ -295,6 +300,96 @@ describe('ServerPlaylistList', () => {
   });
 });
 
+describe('ServerPlaylistList by owner (#1414)', () => {
+  const ADMIN = {
+    success: true,
+    server_type: 'navidrome',
+    scope: 'admin',
+    playlists: [{ id: '1', name: 'Discover Weekly', track_count: 30 }],
+    others: [
+      {
+        owner: 'thomas',
+        profile: 'ThomasClan',
+        playlists: [{ id: '7', name: 'Discover Weekly', track_count: 30, owner: 'thomas' }],
+      },
+      { owner: 'guest', profile: null, playlists: [{ id: '8', name: 'Party', track_count: 51 }] },
+    ],
+  };
+
+  it('gives the admin everyone else, grouped by owner', async () => {
+    responder = (url) => (url === '/api/server/playlists' ? ADMIN : []);
+    render(<ServerPlaylistList onOpenCompare={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('Everyone else')).toBeInTheDocument());
+    expect(screen.getByText('ThomasClan · thomas')).toBeInTheDocument();
+    expect(screen.getByText('No SoulSync profile · guest')).toBeInTheDocument();
+    expect(screen.getByText('Admin only')).toBeInTheDocument();
+  });
+
+  it("opens someone else's playlist on its own, never matched to the admin's mirror", async () => {
+    const onOpenCompare = vi.fn();
+    responder = (url) =>
+      url === '/api/server/playlists'
+        ? ADMIN
+        : url === '/api/mirrored-playlists'
+          ? [{ id: 9, name: 'Discover Weekly', source: 'spotify' }]
+          : [];
+    render(<ServerPlaylistList onOpenCompare={onOpenCompare} />);
+    await waitFor(() => expect(screen.getByText('Everyone else')).toBeInTheDocument());
+    const theirs = document.querySelectorAll('.server-pl-others .server-pl-card')[0] as HTMLElement;
+    fireEvent.click(theirs);
+    await waitFor(() => expect(onOpenCompare).toHaveBeenCalled());
+    expect(onOpenCompare.mock.calls[0][0]).toMatchObject({ id: '7' });
+    expect(onOpenCompare.mock.calls[0][1]).toBeNull();
+  });
+
+  it('asks a shared-account profile to link its server user, even with nothing synced', async () => {
+    const open = vi.fn();
+    vi.stubGlobal('openPersonalSettings', open);
+    responder = (url) =>
+      url === '/api/server/playlists'
+        ? { success: true, server_type: 'navidrome', scope: 'shared', playlists: [], others: [] }
+        : [];
+    render(<ServerPlaylistList onOpenCompare={vi.fn()} />);
+    await waitFor(() =>
+      expect(
+        screen.getByText('Link your Navidrome login to see your playlists'),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText('No playlists found on your media server.')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Link Navidrome login' }));
+    expect(open).toHaveBeenCalled();
+  });
+
+  it('every class the owner view renders exists in the stylesheet', async () => {
+    const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
+    responder = (url) => (url === '/api/server/playlists' ? ADMIN : []);
+    const { unmount } = render(<ServerPlaylistList onOpenCompare={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('Everyone else')).toBeInTheDocument());
+    unmount();
+    responder = (url) =>
+      url === '/api/server/playlists'
+        ? { success: true, server_type: 'plex', scope: 'shared', playlists: [], others: [] }
+        : [];
+    render(<ServerPlaylistList onOpenCompare={vi.fn()} />);
+    await waitFor(() => expect(document.querySelector('.server-pl-link-prompt')).not.toBeNull());
+    for (const c of [
+      'server-pl-others',
+      'server-pl-admin-only',
+      'server-pl-others-note',
+      'server-pl-owner-group',
+      'server-pl-owner-chip',
+      'server-pl-link-prompt',
+      'server-pl-link-prompt-title',
+      'server-pl-link-prompt-body',
+      'server-pl-link-prompt-btn',
+    ]) {
+      expect(new RegExp(`\\.${c}[\\s,:{.\\[+]`).test(css), `.${c} is not in static/style.css`).toBe(
+        true,
+      );
+    }
+  });
+});
+
 describe('ServerDisambigModal — direct (185-223)', () => {
   const NOW = Date.UTC(2026, 7, 6, 12, 0, 0);
   const CANDIDATES = [
@@ -355,5 +450,66 @@ describe('ServerDisambigModal — direct (185-223)', () => {
     );
     fireEvent.click(document.querySelectorAll('.server-disambig-card')[1]);
     expect(onPick).toHaveBeenCalledWith(CANDIDATES[1]);
+  });
+});
+
+describe('LinkServerUserPrompt + OtherOwnersBlock — direct (#1414)', () => {
+  const GROUPS = [
+    {
+      owner: 'thomas',
+      profile: 'ThomasClan',
+      playlists: [{ id: '7', name: 'Discover Weekly', track_count: 30, owner: 'thomas' }],
+    },
+    {
+      owner: 'guest',
+      profile: null,
+      playlists: [{ id: '8', name: 'Party', track_count: 51 }],
+    },
+  ];
+
+  it('names the server and links in Personal Settings (220-233)', () => {
+    const open = vi.fn();
+    vi.stubGlobal('openPersonalSettings', open);
+    render(<LinkServerUserPrompt serverType="navidrome" />);
+    expect(screen.getByText('Link your Navidrome login to see your playlists')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Link Navidrome login' }));
+    expect(open).toHaveBeenCalled();
+  });
+
+  it('falls back to generic copy for an unknown server type (221-222)', () => {
+    render(<LinkServerUserPrompt serverType={undefined} />);
+    expect(screen.getByText('Link your server login to see your playlists')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Link server login' })).toBeInTheDocument();
+  });
+
+  it('groups everyone else by owner with a running count (247-260)', () => {
+    render(
+      <OtherOwnersBlock groups={GROUPS} startIndex={0} serverType="navidrome" onOpen={vi.fn()} />,
+    );
+    expect(screen.getByText('Everyone else')).toBeInTheDocument();
+    expect(document.querySelector('.server-pl-section-count')?.textContent).toBe('2');
+    expect(screen.getByText('Admin only')).toBeInTheDocument();
+    expect(screen.getByText('ThomasClan · thomas')).toBeInTheDocument();
+    expect(screen.getByText('No SoulSync profile · guest')).toBeInTheDocument();
+  });
+
+  it('keeps numbering across groups, so hues never restart (261-263)', () => {
+    render(
+      <OtherOwnersBlock groups={GROUPS} startIndex={2} serverType="navidrome" onOpen={vi.fn()} />,
+    );
+    const cards = document.querySelectorAll('.server-pl-owner-group .server-pl-card');
+    expect(cards).toHaveLength(2);
+    // index 2 and 3, continuing the count — 200 + 37 per card, like the main list.
+    expect((cards[0] as HTMLElement).style.getPropertyValue('--card-hue')).toBe('274');
+    expect((cards[1] as HTMLElement).style.getPropertyValue('--card-hue')).toBe('311');
+  });
+
+  it("hands back the other owner's playlist untouched (280-287)", () => {
+    const onOpen = vi.fn();
+    render(
+      <OtherOwnersBlock groups={GROUPS} startIndex={0} serverType="navidrome" onOpen={onOpen} />,
+    );
+    fireEvent.click(document.querySelectorAll('.server-pl-owner-group .server-pl-card')[0]);
+    expect(onOpen).toHaveBeenCalledWith(GROUPS[0].playlists[0]);
   });
 });

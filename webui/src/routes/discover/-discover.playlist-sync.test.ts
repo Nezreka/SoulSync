@@ -117,6 +117,18 @@ describe('converting tracks for the sync API', () => {
     });
   });
 
+  it('falls back to the deezer or itunes id when there is no spotify one (#1421)', () => {
+    // no id means the wishlist refuses the track
+    expect(toSyncTracks([{ deezer_track_id: 'dz', track_name: 'n' }])[0].id).toBe('dz');
+    expect(toSyncTracks([{ itunes_track_id: 'it', track_name: 'n' }])[0].id).toBe('it');
+    expect(toSyncTracks([{ spotify_track_id: 'sp', deezer_track_id: 'dz' }])[0].id).toBe('sp');
+  });
+
+  it("keeps a row's own artist list over the joined artist_name", () => {
+    const out = toSyncTracks([{ artist_name: 'A, B', artists: ['A', 'B'] }]);
+    expect(out[0].artists).toEqual(['A', 'B']);
+  });
+
   it('FLATTENS artists to strings, which the matcher requires', () => {
     // An array of objects silently matches nothing.
     const out = toSyncTracks([{ track_data_json: { artists: [{ name: 'A' }, { name: 'B' }] } }]);

@@ -15,7 +15,12 @@ import type { CSSProperties, ReactElement } from 'react';
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
-import type { MirroredMatch, ServerPlaylist } from '../-sync.server';
+import type {
+  MirroredMatch,
+  ServerPlaylist,
+  ServerPlaylistGroup,
+  ServerPlaylistScope,
+} from '../-sync.server';
 
 import { recordServerLink } from '../-sync.api';
 import { timeAgo } from '../-sync.mirrored';
@@ -194,6 +199,101 @@ function Section({
   );
 }
 
+const SERVER_NAMES: Readonly<Record<string, string>> = {
+  plex: 'Plex',
+  jellyfin: 'Jellyfin',
+  navidrome: 'Navidrome',
+};
+
+/** what a profile links to be itself on each server (#1265) */
+const SERVER_IDENTITY: Readonly<Record<string, string>> = {
+  plex: 'Plex Home user',
+  jellyfin: 'Jellyfin user',
+  navidrome: 'Navidrome login',
+};
+
+/**
+ * #1414: a profile on the shared app account. the server can't tell its
+ * playlists from anyone else's, so it sees only the ones its own mirrors made,
+ * and the one thing worth doing is linking its own server user.
+ */
+export function LinkServerUserPrompt({ serverType }: { serverType: string | undefined }) {
+  const server = SERVER_NAMES[serverType ?? ''] ?? 'media server';
+  const identity = SERVER_IDENTITY[serverType ?? ''] ?? 'server login';
+  return (
+    <div className="server-pl-link-prompt">
+      <div className="server-pl-link-prompt-text">
+        <div className="server-pl-link-prompt-title">
+          Link your {identity} to see your playlists
+        </div>
+        <div className="server-pl-link-prompt-body">
+          Until then your synced playlists are made on the shared account, so {server} can&apos;t
+          tell they&apos;re yours. Link it once in Personal Settings and they&apos;re yours on{' '}
+          {server}.
+        </div>
+      </div>
+      <button
+        type="button"
+        className="server-pl-link-prompt-btn"
+        onClick={() => void window.openPersonalSettings?.()}
+      >
+        Link {identity}
+      </button>
+    </div>
+  );
+}
+
+/** the admin's view of everyone else's playlists, one group per owner (#1414) */
+export function OtherOwnersBlock({
+  groups,
+  startIndex,
+  serverType,
+  onOpen,
+}: {
+  groups: ServerPlaylistGroup[];
+  startIndex: number;
+  serverType: string | undefined;
+  onOpen: (playlist: ServerPlaylist) => void;
+}) {
+  const total = groups.reduce((n, g) => n + g.playlists.length, 0);
+  let index = startIndex;
+  return (
+    <div className="server-pl-section server-pl-others">
+      <div className="server-pl-section-header">
+        <span className="server-pl-section-title">Everyone else</span>
+        <span className="server-pl-section-count">{total}</span>
+        <span className="server-pl-admin-only">Admin only</span>
+      </div>
+      <p className="server-pl-others-note">
+        Other people&apos;s playlists on this server. Editing or deleting one changes it for them.
+      </p>
+      {groups.map((group) => {
+        const first = index;
+        index += group.playlists.length;
+        return (
+          <div className="server-pl-owner-group" key={group.owner}>
+            <div className="server-pl-owner-chip">
+              {group.profile ?? 'No SoulSync profile'} · {group.owner}
+            </div>
+            <div className="server-pl-grid">
+              {group.playlists.map((pl, i) => (
+                <PlaylistCard
+                  key={pl.id}
+                  playlist={pl}
+                  index={first + i}
+                  isSynced={false}
+                  icon={serverIcon(serverType)}
+                  onOpen={() => onOpen(pl)}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export interface ServerPlaylistListProps {
   /**
    * Resolved by the name lookup: exactly one mirrored match, none (server-only)
@@ -207,6 +307,8 @@ export function ServerPlaylistList({ onOpenCompare }: ServerPlaylistListProps) {
   const [state, setState] = useState<{
     synced: ServerPlaylist[];
     unsynced: ServerPlaylist[];
+    others: ServerPlaylistGroup[];
+    scope?: ServerPlaylistScope;
     serverType?: string;
   } | null>(null);
   const [placeholder, setPlaceholder] = useState<string | null>(null);
@@ -252,12 +354,19 @@ export function ServerPlaylistList({ onOpenCompare }: ServerPlaylistListProps) {
         mirroredNames,
         historyNames,
       );
-      if (synced.length === 0 && unsynced.length === 0) {
+      const others = data.others ?? [];
+      // a shared-account profile with nothing synced yet still gets the link prompt
+      if (
+        synced.length === 0 &&
+        unsynced.length === 0 &&
+        others.length === 0 &&
+        data.scope !== 'shared'
+      ) {
         setPlaceholder('No playlists found on your media server.');
         return;
       }
       serverTypeRef.current = data.server_type;
-      setState({ synced, unsynced, serverType: data.server_type });
+      setState({ synced, unsynced, others, scope: data.scope, serverType: data.server_type });
     } catch (error) {
       setPlaceholder(`Error: ${error instanceof Error ? error.message : 'unknown error'}`);
     } finally {
@@ -316,11 +425,12 @@ export function ServerPlaylistList({ onOpenCompare }: ServerPlaylistListProps) {
           <div className="playlist-placeholder">{placeholder}</div>
         ) : state ? (
           <>
+            {state.scope === 'shared' && <LinkServerUserPrompt serverType={state.serverType} />}
             {state.synced.length > 0 && (
               <Section
                 className="server-pl-section"
                 icon="🔗"
-                title="Synced Playlists"
+                title={state.scope === 'shared' ? 'Synced for You' : 'Synced Playlists'}
                 playlists={state.synced}
                 startIndex={0}
                 isSynced
@@ -338,6 +448,16 @@ export function ServerPlaylistList({ onOpenCompare }: ServerPlaylistListProps) {
                 isSynced={false}
                 serverType={state.serverType}
                 onOpen={(pl) => void openPlaylist(pl)}
+              />
+            )}
+            {state.others.length > 0 && (
+              <OtherOwnersBlock
+                groups={state.others}
+                startIndex={state.synced.length + state.unsynced.length}
+                serverType={state.serverType}
+                // never matched to a mirror by name: the admin's own mirror of
+                // the same name is not this person's playlist
+                onOpen={(pl) => openCompare(pl, null)}
               />
             )}
           </>

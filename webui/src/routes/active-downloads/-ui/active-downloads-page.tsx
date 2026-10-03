@@ -354,6 +354,11 @@ export function ActiveDownloadsPage() {
               quarantineLoaded={
                 verification.state.quarantineLoaded || verification.state.summary !== null
               }
+              quarantineTrackCount={
+                verification.state.quarantineLoaded
+                  ? groupQuarantine(verification.state.quarantine).length
+                  : null
+              }
               onSubView={verification.setSubView}
               selectedCount={selectedIds.length}
               onApproveAll={() =>

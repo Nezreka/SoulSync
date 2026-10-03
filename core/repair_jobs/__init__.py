@@ -46,6 +46,7 @@ JOB_DATA_BASIS: dict[str, str] = {
     # Reborn on the lib2 retag engine — the retired legacy job read the
     # albums/artists/tracks tables this branch removed.
     'library_retag': 'lib2',
+    'suspect_album_tag_detector': 'lib2',
 }
 
 # Exhaustive Library-v2 interoperability contract.  ``JOB_DATA_BASIS`` says
@@ -111,6 +112,9 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     # Reports tag drift; applying writes the catalogue's values into the file.
     # No row moves, nothing is created or deleted.
     'library_retag': frozenset({'observe', 'tags'}),
+    # Findings only; the fix is the Re-identify modal, which re-imports the
+    # file through the normal pipeline.
+    'suspect_album_tag_detector': frozenset({'observe'}),
 }
 
 # Jobs deliberately retired after their function moved to a native Library-v2
@@ -241,6 +245,7 @@ _JOB_MODULES = [
     'core.repair_jobs.library_reorganize',
     'core.repair_jobs.library_retag',
     'core.repair_jobs.path_drift_reconcile',
+    'core.repair_jobs.suspect_album_tag',
 ]
 
 

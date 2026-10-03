@@ -345,12 +345,17 @@ def test_catalog_covers_every_handler_and_flags_the_dead_ends(worker):
 
     # Emitted by real jobs, but no handler exists — the UI must not offer a
     # button that can only fail.
-    for dead_end in ('fake_lossless', 'album_needs_enrichment'):
+    for dead_end in ('album_needs_enrichment',):
         assert catalog[dead_end]['fixable'] is False
         assert catalog[dead_end]['verb'] is None
 
     assert catalog['orphan_file']['destructive'] is True
     assert catalog['missing_lyrics']['destructive'] is False
+
+    # Corrupt files are quarantined, so their confirmation must not claim the
+    # generic "cannot be undone"; types without their own wording send none.
+    assert 'deleted-files folder' in catalog['corrupt_audio']['confirm']
+    assert 'confirm' not in catalog['orphan_file']
 
 
 def test_catalog_reports_which_jobs_emitted_a_type(worker):

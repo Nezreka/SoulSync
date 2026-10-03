@@ -39,7 +39,9 @@ vi.mock('./url-import-tab', () => ({
   ITunesLinkTab: () => <div />,
 }));
 
-vi.mock('./lb-sync-tab', () => ({
+vi.mock('./lb-sync-tab', async (importOriginal) => ({
+  // the real open hook: it's the fetch + seed the page has to go through
+  useLbCardOpen: (await importOriginal<typeof import('./lb-sync-tab')>()).useLbCardOpen,
   ListenBrainzSyncTab: ({ onOpen }: { onOpen: (card: LbCardData) => void }) => (
     <button
       type="button"
@@ -85,7 +87,10 @@ const autoSyncStub = {
   setDragging: vi.fn(),
 };
 
-vi.mock('../-sync.use-autosync', () => ({
+// the stub stands in for the data hook only. useAutoSyncActions is the real
+// one, so these tests still pin the unschedule wiring the page gets from it.
+vi.mock('../-sync.use-autosync', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../-sync.use-autosync')>()),
   useAutoSync: () => autoSyncStub,
 }));
 
@@ -213,14 +218,31 @@ describe('the panel map', () => {
     expect(verticalsSeen.deezerLink).not.toBe(verticalsSeen.youtube);
   });
 
-  it('opens a ListenBrainz card on its MBID, not its title', () => {
+  it('opens a ListenBrainz card on its MBID, not its title, with its tracks seeded', async () => {
     // The card carries both, and only the mbid is the source id the vertical
     // prefixes downstream. The stub deliberately gives them different values.
+    // the modal renders nothing for a state that doesn't exist, so opening
+    // before the tracks are fetched and seeded made Discover do nothing.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        url.startsWith('/api/discover/listenbrainz/playlist/mb-1')
+          ? Promise.resolve({
+              ok: true,
+              json: () => Promise.resolve({ tracks: [{ track_name: 'Song', artist_name: 'A' }] }),
+            })
+          : new Promise(() => {}),
+      ),
+    );
     render(<SyncPage />);
     fireEvent.click(screen.getByText('+ Add playlist'));
     fireEvent.click(screen.getByRole('button', { name: /ListenBrainz/ }));
-    fireEvent.click(screen.getByText('lb-card'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('lb-card'));
+    });
     expect(syncModalsProps?.modals.openIdFor('listenbrainz')).toBe('mb-1');
+    const seeded = syncModalsProps?.verticals.listenbrainz.states['mb-1'];
+    expect((seeded?.playlist as { tracks?: unknown[] } | undefined)?.tracks).toHaveLength(1);
   });
 
   it('mounts the Beatport pane', () => {

@@ -7,7 +7,7 @@ import { server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 
 import { fetchDiscoveryWeekly, fetchReleaseRadar, fetchSeasonalPlaylist } from './-discover.api';
-import { useDiscoverMixes } from './-discover.use-mixes';
+import { mixCardsFrom, useDiscoverMixes } from './-discover.use-mixes';
 
 /**
  * The Your Mixes registry hook.
@@ -27,6 +27,7 @@ interface StubOptions {
   playlistAvailable?: boolean;
   personalized?: unknown[];
   decades?: unknown[];
+  daily?: unknown[];
 }
 
 let hits: string[] = [];
@@ -38,6 +39,7 @@ function stub({
   playlistAvailable = true,
   personalized = [],
   decades = [],
+  daily = [],
 }: StubOptions = {}) {
   hits = [];
   const json = (body: Record<string, unknown>) => HttpResponse.json({ success: true, ...body });
@@ -67,6 +69,9 @@ function stub({
       '/api/discover/personalized/discovery-shuffle',
       '/api/discover/personalized/listening-mix',
     ].map((path) => http.get(path, () => json({ tracks: personalized }))),
+    http.get('/api/discover/personalized/daily-mixes', () => json({ mixes: daily })),
+    http.get('/api/discover/moods', () => json({ mixes: [] })),
+    http.get('/api/discover/for-you', () => json({ mixes: [] })),
     http.get('/api/discover/decades/available', () => {
       hits.push('decades');
       return json({ decades });
@@ -87,7 +92,72 @@ afterEach(() => {
   server.resetHandlers();
 });
 
+describe('mixCardsFrom (moods, on repeat, blends)', () => {
+  it('turns the moods payload into play-only cards that say what they are', () => {
+    const mixes = mixCardsFrom({
+      mixes: [
+        {
+          key: 'mood_chill',
+          name: 'Chill',
+          subtitle: 'Downtempo, lo-fi and chillout',
+          tracks: [track('c')],
+        },
+        { key: 'mood_empty', name: 'Empty', tracks: [] },
+        { name: 'no key', tracks: [track('x')] },
+      ],
+    });
+    expect(mixes.map((m) => m.key)).toEqual(['mood_chill']);
+    expect(mixes[0]).toMatchObject({ title: 'Chill', blurb: 'Downtempo, lo-fi and chillout' });
+    // owned tracks: no syncKey, so the modal offers Play and nothing else
+    expect(mixes[0].syncKey).toBeUndefined();
+    expect(mixCardsFrom(undefined)).toEqual([]);
+    expect(mixCardsFrom({ mixes: 'nope' })).toEqual([]);
+  });
+});
+
 describe('useDiscoverMixes', () => {
+  it('subtitles a daily mix with the explanation the server wrote', async () => {
+    stub({
+      daily: [
+        {
+          key: 'daily_mix_1',
+          name: 'Daily Mix 1',
+          subtitle: 'Tool, Deftones',
+          explanation: { kind: 'listened', seeds: [{ name: 'Tool' }, { name: 'Deftones' }] },
+          tracks: [track('d')],
+        },
+        // stored before the shape: its own subtitle, as before
+        { key: 'daily_mix_2', name: 'Daily Mix 2', subtitle: 'Soen', tracks: [track('e')] },
+      ],
+    });
+    const { result } = mount();
+    await waitFor(() =>
+      expect(result.current.mixes.filter((m) => m.key.startsWith('daily_mix'))).toHaveLength(2),
+    );
+    const byKey = Object.fromEntries(result.current.mixes.map((m) => [m.key, m.subtitle]));
+    expect(byKey.daily_mix_1).toBe('Because you listen to Tool & Deftones');
+    expect(byKey.daily_mix_2).toBe('Soen');
+    // the card names who's in it; the reason stays for the modal
+    expect(result.current.mixes.find((m) => m.key === 'daily_mix_1')?.blurb).toBe('Tool, Deftones');
+  });
+
+  it('leads the shelf with the daily mixes, ahead of every generic feeder', async () => {
+    stub({
+      radar: [track('r')],
+      personalized: [track('p')],
+      daily: [{ key: 'daily_mix_1', name: 'Daily Mix 1', tracks: [track('d')] }],
+    });
+    const { result } = mount();
+    await waitFor(() => expect(result.current.mixes.map((m) => m.key)).toContain('release_radar'));
+    await waitFor(() => expect(result.current.mixes[0]?.key).toBe('daily_mix_1'));
+    expect(result.current.mixes.map((m) => m.key).slice(0, 2)).toEqual([
+      'daily_mix_1',
+      'release_radar',
+    ]);
+    // no subtitle stored, no blurb invented
+    expect(result.current.mixes[0].blurb).toBeUndefined();
+  });
+
   it('holds the SHARED below-fold queries until tier 1 settles', async () => {
     // seasonal + decades share cache keys with useDiscoverPage's gated tier-2
     // entries; an ungated observer here would fire them at mount and defeat

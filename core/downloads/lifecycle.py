@@ -131,7 +131,7 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
     if not staging_root or not transfer_dir or not os.path.isdir(staging_root):
         return True
     try:
-        from core.downloads.atomic_album_publish import publish_album_batch
+        from core.downloads.atomic_album_publish import publish_album_batch, to_final_path
         from core.imports.file_ops import safe_move_file
         from database.music_database import MusicDatabase
 
@@ -161,8 +161,26 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
         # reports it, and the stuck-task resolver checks it for existence.
         for _task_id in (batch.get('queue') or []):
             _task = download_tasks.get(_task_id)
-            if _task and _task.get('final_file_path') in pubmap:
-                _task['final_file_path'] = pubmap[_task['final_file_path']]
+            if not _task:
+                continue
+            _final = _task.get('final_file_path')
+            if _final in pubmap:
+                _task['final_file_path'] = pubmap[_final]
+                continue
+            # Healing for a failed rollback on an earlier attempt: the file is
+            # live at its published path while this task still points at the
+            # (now gone) staging path, and this retry's pubmap only covers
+            # files it moved itself. Recompute where the publish puts this
+            # staged path and remap — but ONLY if a file actually exists there,
+            # so a genuinely missing file keeps its old pointer for the stuck
+            # resolver instead of gaining a fabricated one.
+            _expected = to_final_path(_final, staging_root, transfer_dir) if _final else None
+            if _expected and _expected != _final and os.path.isfile(_expected) and not os.path.exists(_final):
+                logger.warning(
+                    "[Atomic Publish] Batch %s: task %s still points at missing staged path %s; "
+                    "file found at published path %s — remapping",
+                    batch_id, _task_id, _final, _expected)
+                _task['final_file_path'] = _expected
 
         # Per-track work registered the STAGING album folder with the repair
         # worker (now emptied by the publish above), so track-number repair would
@@ -690,9 +708,13 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
                          queue: list, finished_count: int, tag: str) -> dict:
     """Flip a finished batch to 'complete' and do the bookkeeping that has to
     happen under tasks_lock: the phase itself, sync history, the activity line,
-    the batch_complete event, the discovery-state phases, the monitor and the
-    private staging cleanup. Returns what the out-of-lock half needs: the m3u
-    rows and a snapshot of this batch's tasks. CALLED UNDER tasks_lock.
+    the batch_complete event, the discovery-state phases and the monitor.
+    Returns what the out-of-lock half needs: the m3u rows and a snapshot of
+    this batch's tasks. CALLED UNDER tasks_lock.
+
+    NOTE: the private staging rmtree deliberately lives in
+    _run_batch_completion_side_effects (the out-of-lock half): it is
+    synchronous file I/O that used to run here under the global lock.
 
     one function for both completion paths. check_batch_completion_v2 (the
     cancel and batch-healing path) used to carry its own copy of this block
@@ -740,7 +762,6 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
 
     logger.info(f"{tag} Batch {batch_id} complete - stopping monitor")
     deps.download_monitor.stop_monitoring(batch_id)
-    _cleanup_private_album_bundle_staging(batch_id, batch)
 
     # what the out-of-lock half reads: the m3u rows and this batch's tasks as
     # they are right now, so it never has to touch download_tasks unlocked
@@ -774,14 +795,24 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
 
 def _run_batch_completion_side_effects(batch_id: str, batch: dict, deps: LifecycleDeps,
                                        outcome: dict, *, tag: str) -> None:
-    """The slow half of a completed batch: m3u regen, playlist folders, the
-    track-number repair hand-off and the album consistency pass. File i/o and
-    MusicBrainz lookups, so it runs OUTSIDE tasks_lock: it used to run inside
-    it, and every status poll and every other batch's completion callback
-    waited on a rate-limited MusicBrainz search and a tag rewrite of every
-    file in the album. Nothing here needs the lock: the batch is already
-    'complete' and the tasks it reads are a snapshot taken under it."""
+    """The slow half of a completed batch: the album-bundle staging rmtree, m3u
+    regen, playlist folders, the track-number repair hand-off and the album
+    consistency pass. File i/o and MusicBrainz lookups, so it runs OUTSIDE
+    tasks_lock: it used to run inside it, and every status poll and every
+    other batch's completion callback waited on a rate-limited MusicBrainz
+    search and a tag rewrite of every file in the album. Nothing here needs
+    the lock: the batch is already 'complete' and the tasks it reads are a
+    snapshot taken under it."""
     tasks_snapshot = outcome.get('tasks_snapshot') or {}
+
+    # ALBUM-BUNDLE STAGING CLEANUP: the synchronous shutil.rmtree of the
+    # private staging tree. Runs here — outside the global lock — instead of
+    # in _mark_batch_complete, so a large staging tree can't stall the
+    # monitor ticks or other batches' completions.
+    try:
+        _cleanup_private_album_bundle_staging(batch_id, batch)
+    except Exception as _stage_err:  # noqa: BLE001 — best-effort, batch is already complete
+        logger.warning(f"{tag} Album-bundle staging cleanup failed (non-fatal): {_stage_err}")
 
     # M3U REGENERATION: Regenerate M3U with real library paths now that
     # all post-processing (tagging, moving, DB writes) is complete.

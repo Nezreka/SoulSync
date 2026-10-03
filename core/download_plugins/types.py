@@ -263,3 +263,6 @@ class DownloadStatus:
     time_remaining: Optional[int] = None
     file_path: Optional[str] = None
     audio_files: Optional[List[str]] = None
+    # why a failed download failed, in words a user can act on. the status
+    # poll shows it instead of a bare "state: Errored" (#1349)
+    error: Optional[str] = None

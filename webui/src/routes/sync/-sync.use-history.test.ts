@@ -215,7 +215,7 @@ describe('the poll', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2000);
     });
-    expect(toast).toHaveBeenCalledWith('Re-sync complete: 4/4 matched', 'success');
+    expect(toast).toHaveBeenCalledWith('Pushed again: 4/4 matched', 'success');
 
     // It lingers so the result can be read, then collapses.
     expect(result.current.resyncs[7]).toBeTruthy();

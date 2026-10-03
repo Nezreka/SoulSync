@@ -499,7 +499,8 @@ function resetFileOrganizationTemplates() {
         playlist: '$playlist/$artist - $title',
         video: '$artist/$title-video',
         podcast: '$show/Season $season/$title',
-        audiobook: '$author/$series/$seriespos - $title'
+        audiobook: '$author/$series/$seriespos - $title',
+        sample: '$artist/$track - $chop'
     };
 
     document.getElementById('template-album-path').value = defaults.album;
@@ -508,6 +509,7 @@ function resetFileOrganizationTemplates() {
     document.getElementById('template-video-path').value = defaults.video;
     document.getElementById('template-podcast-path').value = defaults.podcast;
     document.getElementById('template-audiobook-path').value = defaults.audiobook;
+    document.getElementById('template-sample-path').value = defaults.sample;
 
     debouncedAutoSaveSettings();
 }
@@ -517,12 +519,13 @@ function validateFileOrganizationTemplates() {
 
     // Valid variables for each template type
     const validVars = {
-        album: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$track', '$disc', '$discnum', '$cdnum', '$year', '$quality', '$disambiguation'],
-        single: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$track', '$year', '$quality'],
+        album: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$disc', '$discnum', '$cdnum', '$year', '$quality', '$disambiguation'],
+        single: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$year', '$quality'],
         playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality'],
         video: ['$artist', '$artistletter', '$title', '$year'],
         podcast: ['$show', '$podcast', '$author', '$artist', '$title', '$season', '$seasonnum', '$episode', '$episodenum', '$year', '$date', '$type'],
-        audiobook: ['$author', '$authorletter', '$narrator', '$title', '$series', '$seriespos', '$year', '$asin']
+        audiobook: ['$author', '$authorletter', '$narrator', '$title', '$series', '$seriespos', '$year', '$asin'],
+        sample: ['$artist', '$track', '$album', '$chop', '$stem']
     };
 
     // Get template values
@@ -530,6 +533,7 @@ function validateFileOrganizationTemplates() {
     const singlePath = document.getElementById('template-single-path').value.trim();
     const playlistPath = document.getElementById('template-playlist-path').value.trim();
     const podcastPath = document.getElementById('template-podcast-path').value.trim();
+    const samplePath = document.getElementById('template-sample-path').value.trim();
 
     // Validate album template
     if (albumPath) {
@@ -637,6 +641,31 @@ function validateFileOrganizationTemplates() {
             if (!isValid) {
                 errors.push(`Invalid variable "${normalized}" in podcast template. Valid: ${validVars.podcast.join(', ')}`);
             } else if (normalized !== lowerVar && validVars.podcast.includes(lowerVar)) {
+                errors.push(`Variable "${normalized}" should be lowercase: "${lowerVar}"`);
+            }
+        });
+    }
+
+    // Validate sample template
+    if (samplePath) {
+        if (samplePath.endsWith('/')) {
+            errors.push('Sample template cannot end with /');
+        }
+        if (samplePath.startsWith('/')) {
+            errors.push('Sample template cannot start with /');
+        }
+        if (samplePath.includes('//')) {
+            errors.push('Sample template cannot have consecutive slashes //');
+        }
+        const sampleVarPattern = /\$\{([a-zA-Z]+)\}|\$([a-zA-Z]+)/g;
+        const foundVars = samplePath.match(sampleVarPattern) || [];
+        foundVars.forEach(v => {
+            const normalized = v.startsWith('${') ? '$' + v.slice(2, -1) : v;
+            const lowerVar = normalized.toLowerCase();
+            const isValid = validVars.sample.some(validVar => validVar.toLowerCase() === lowerVar);
+            if (!isValid) {
+                errors.push(`Invalid variable "${normalized}" in sample template. Valid: ${validVars.sample.join(', ')}`);
+            } else if (normalized !== lowerVar && validVars.sample.includes(lowerVar)) {
                 errors.push(`Variable "${normalized}" should be lowercase: "${lowerVar}"`);
             }
         });
@@ -2869,6 +2898,7 @@ async function loadSettingsData() {
         document.getElementById('navidrome-url').value = settings.navidrome?.base_url || '';
         document.getElementById('navidrome-username').value = settings.navidrome?.username || '';
         document.getElementById('navidrome-password').value = settings.navidrome?.password || '';
+        loadNavidromePlaylistLogin();
 
         // Set active server and toggle visibility
         const activeServer = settings.active_media_server || 'plex';
@@ -2925,6 +2955,8 @@ async function loadSettingsData() {
         if (_tmKey) _tmKey.value = settings.concerts?.ticketmaster_api_key || '';
         const _slfmKey = document.getElementById('concerts-setlistfm-api-key');
         if (_slfmKey) _slfmKey.value = settings.concerts?.setlistfm_api_key || '';
+        const _concertCountry = document.getElementById('concerts-country');
+        if (_concertCountry) _concertCountry.value = settings.concerts?.country || '';
         document.getElementById('lastfm-api-key').value = settings.lastfm?.api_key || '';
         document.getElementById('lastfm-api-secret').value = settings.lastfm?.api_secret || '';
         const _lfmUser = document.getElementById('lastfm-username');
@@ -3168,6 +3200,7 @@ async function loadSettingsData() {
         document.getElementById('lrclib-enabled').checked = settings.metadata_enhancement?.lrclib_enabled !== false;
         document.getElementById('replaygain-enabled').checked = settings.post_processing?.replaygain_enabled === true;
         document.getElementById('audio-completeness-check').checked = settings.post_processing?.audio_completeness_check === true;
+        document.getElementById('verify-flac-decode').checked = settings.post_processing?.verify_flac_decode === true;
         document.getElementById('duration-tolerance-seconds').value = settings.post_processing?.duration_tolerance_seconds ?? 0;
         document.getElementById('retry-next-candidate').checked = settings.post_processing?.retry_next_candidate_on_mismatch !== false;
         document.getElementById('retry-exhaustive').checked = settings.post_processing?.retry_exhaustive === true;
@@ -3204,6 +3237,9 @@ async function loadSettingsData() {
         // Populate File Organization settings
         document.getElementById('file-organization-enabled').checked = settings.file_organization?.enabled !== false;
         document.getElementById('template-album-path').value = settings.file_organization?.templates?.album_path || '$albumartist/$albumartist - $album/$track - $title';
+        // compilations have their own template; it was never shown, so an album
+        // template change silently skipped every soundtrack (#1385)
+        document.getElementById('template-compilation-path').value = settings.file_organization?.templates?.compilation_path || 'Compilations/$album/$track - $artist - $title';
         // $albumartist honors the Collaborative Album Artist mode; the old
         // $artist default filed multi-artist singles under "A, B & C". A
         // stored old-default upgrades server-side too (core/imports/paths.py).
@@ -3218,6 +3254,7 @@ async function loadSettingsData() {
         document.getElementById('template-video-path').value = settings.file_organization?.templates?.video_path || '$artist/$title-video';
         document.getElementById('template-podcast-path').value = settings.file_organization?.templates?.podcast_path || '$show/Season $season/$title';
         document.getElementById('template-audiobook-path').value = settings.file_organization?.templates?.audiobook_path || '$author/$series/$seriespos - $title';
+        document.getElementById('template-sample-path').value = settings.file_organization?.templates?.sample_path || '$artist/$track - $chop';
         const podcastFormatEl = document.getElementById('podcast-media-format');
         if (podcastFormatEl) {
             podcastFormatEl.value = settings.podcasts?.media_format || 'audio';
@@ -3250,6 +3287,10 @@ async function loadSettingsData() {
             Math.round((ab.completeness_tolerance ?? 0.92) * 100));
         abVal(document.getElementById('audiobook-staging-days'), ab.staging_days ?? 7);
         abChecked(document.getElementById('audiobook-renumber-chapters'), ab.renumber_chapters);
+        // Off by default, unlike the toggles above: abChecked treats a
+        // missing key as on, which would switch this on for older configs.
+        const removeOwned = document.getElementById('audiobook-remove-owned-from-wishlist');
+        if (removeOwned) removeOwned.checked = ab.remove_owned_from_wishlist === true;
         abChecked(document.getElementById('audiobook-embed-metadata'), ab.embed_metadata);
         abChecked(document.getElementById('audiobook-embed-artwork'), ab.embed_artwork);
         abChecked(document.getElementById('audiobook-save-artwork'), ab.save_artwork);
@@ -3276,6 +3317,9 @@ async function loadSettingsData() {
         // that has never saved this key must show it ON or the checkbox lies
         // about what the importer is doing.
         document.getElementById('detect-multi-artist-compilations').checked = settings.file_organization?.detect_multi_artist_compilations !== false;
+        // !== false, not === true: same default-ON convention — the importer
+        // auto-adds the disambiguation unless the key was explicitly saved off.
+        document.getElementById('auto-disambiguation').checked = settings.file_organization?.auto_disambiguation !== false;
         document.getElementById('artist-separator').value = settings.metadata_enhancement?.tags?.artist_separator || ', ';
         document.getElementById('write-multi-artist').checked = settings.metadata_enhancement?.tags?.write_multi_artist || false;
         document.getElementById('feat-in-title').checked = settings.metadata_enhancement?.tags?.feat_in_title || false;
@@ -3284,7 +3328,7 @@ async function loadSettingsData() {
         if (_wlTtl) _wlTtl.value = settings.wishlist?.ignore_ttl_days ?? 30;
 
         // Populate Playlist Sync settings
-        document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup !== false;
+        document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup === true;
         const _syncModeEl = document.getElementById('playlist-sync-mode');
         if (_syncModeEl) _syncModeEl.value = settings.playlist_sync?.mode || 'replace';
 
@@ -3319,6 +3363,12 @@ async function loadSettingsData() {
         // Populate Music Library Paths
         const _musicPaths = settings.library?.music_paths || [];
         renderMusicPaths(_musicPaths);
+
+        // Populate Sample Studio folders (first = default destination).
+        // Configs predating the key get the Docker-aware default row.
+        const _samplePaths = settings.library?.sample_paths || [];
+        const _defaultSamplePath = isDocker ? '/app/samples' : './samples';
+        renderSamplePaths(_samplePaths.length ? _samplePaths : [_defaultSamplePath]);
 
         // Library Organize: preserve the user's casing (default on)
         const _pcEl = document.getElementById('reorganize-preserve-casing');
@@ -5309,6 +5359,66 @@ function collectMusicPaths() {
     return paths;
 }
 
+// ── Sample Studio folders ──
+// Mirrors the additional-music-folders UI above: a dynamic list of output
+// folders for saved chops. The first entry is the default destination.
+
+function renderSamplePaths(paths) {
+    const container = document.getElementById('sample-paths-list');
+    if (!container) return;
+    if (!paths || paths.length === 0) {
+        container.innerHTML = '<div style="color: rgba(255,255,255,0.3); font-size: 0.85em; padding: 4px 0;">No sample folders configured. Saved chops fall back to the default folder.</div>';
+        return;
+    }
+    container.innerHTML = paths.map((p, i) => `
+        <div class="form-group sample-path-row" style="margin-bottom: 4px;">
+            <input type="text" class="sample-path-input" value="${escapeHtml(p)}" placeholder="/samples or C:\\Samples" style="flex:1;">
+            ${i === 0 ? '<span style="color: rgba(255,255,255,0.4); font-size: 0.8em; padding: 8px 4px;">default</span>' : ''}
+            <button class="test-button" onclick="_removeSamplePathRow(this)" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
+        </div>
+    `).join('');
+    // Attach auto-save to dynamically rendered inputs
+    container.querySelectorAll('.sample-path-input').forEach(input => {
+        input.addEventListener('change', () => { if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings(); });
+    });
+}
+
+function addSamplePathRow() {
+    const container = document.getElementById('sample-paths-list');
+    if (!container) return;
+    // Clear the "no folders" message if present
+    const placeholder = container.querySelector('div[style*="color: rgba"]');
+    if (placeholder && !container.querySelector('.sample-path-row')) placeholder.remove();
+    const row = document.createElement('div');
+    row.className = 'form-group sample-path-row';
+    row.style.marginBottom = '4px';
+    row.innerHTML = `
+        <input type="text" class="sample-path-input" value="" placeholder="/samples or C:\\Samples" style="flex:1;">
+        <button class="test-button" onclick="_removeSamplePathRow(this)" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
+    `;
+    container.appendChild(row);
+    const input = row.querySelector('input');
+    input.focus();
+    // Auto-save when the user finishes typing a path
+    input.addEventListener('change', () => { if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings(); });
+}
+
+function _removeSamplePathRow(btn) {
+    btn.closest('.sample-path-row').remove();
+    // Auto-save after removing a path
+    if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
+}
+
+function collectSamplePaths() {
+    const inputs = document.querySelectorAll('.sample-path-input');
+    const paths = [];
+    inputs.forEach(input => {
+        const val = input.value.trim();
+        if (val) paths.push(val);
+    });
+    return paths;
+}
+
 // ── Genre Whitelist ──
 let _genreWhitelistCache = [];
 
@@ -6079,7 +6189,9 @@ async function saveSettings(quiet = false) {
         },
         concerts: {
             ticketmaster_api_key: _cfgStr('concerts-ticketmaster-api-key', { trim: true }),
-            setlistfm_api_key: _cfgStr('concerts-setlistfm-api-key', { trim: true })
+            setlistfm_api_key: _cfgStr('concerts-setlistfm-api-key', { trim: true }),
+            // ?. not || '': an absent field must stay undefined, or a save wipes it
+            country: _cfgStr('concerts-country', { trim: true })?.toUpperCase()
         },
         lastfm: {
             // _cfgStr rather than .value: this input is absent on the video
@@ -6249,18 +6361,21 @@ async function saveSettings(quiet = false) {
         },
         file_organization: {
             enabled: document.getElementById('file-organization-enabled').checked,
+            auto_disambiguation: document.getElementById('auto-disambiguation').checked,
             disc_label: document.getElementById('disc-label').value,
             collab_artist_mode: document.getElementById('collab-artist-mode').value,
             artistletter_symbol_fallback: document.getElementById('artistletter-symbol-fallback').checked,
             detect_multi_artist_compilations: document.getElementById('detect-multi-artist-compilations').checked,
             templates: {
                 album_path: document.getElementById('template-album-path').value,
+                compilation_path: document.getElementById('template-compilation-path').value,
                 single_path: document.getElementById('template-single-path').value,
                 playlist_path: document.getElementById('template-playlist-path').value,
                 playlist_item: document.getElementById('template-playlist-item').value,
                 video_path: document.getElementById('template-video-path').value,
                 podcast_path: document.getElementById('template-podcast-path').value,
-                audiobook_path: document.getElementById('template-audiobook-path').value
+                audiobook_path: document.getElementById('template-audiobook-path').value,
+                sample_path: document.getElementById('template-sample-path').value
             }
         },
         wishlist: {
@@ -6283,6 +6398,7 @@ async function saveSettings(quiet = false) {
         post_processing: {
             replaygain_enabled: document.getElementById('replaygain-enabled').checked,
             audio_completeness_check: document.getElementById('audio-completeness-check').checked,
+            verify_flac_decode: document.getElementById('verify-flac-decode').checked,
             duration_tolerance_seconds: parseFloat(document.getElementById('duration-tolerance-seconds').value) || 0,
             retry_next_candidate_on_mismatch: document.getElementById('retry-next-candidate').checked,
             retry_exhaustive: document.getElementById('retry-exhaustive').checked,
@@ -6292,6 +6408,7 @@ async function saveSettings(quiet = false) {
         },
         library: {
             music_paths: collectMusicPaths(),
+            sample_paths: collectSamplePaths(),
             music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos',
             podcasts_path: _cfgStr('podcasts-path', { fallback: './podcasts' }),
             audiobooks_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),
@@ -6321,6 +6438,7 @@ async function saveSettings(quiet = false) {
             staging_days: Math.min(90, Math.max(1,
                 _cfgInt('audiobook-staging-days', 7))),
             renumber_chapters: _cfgBool('audiobook-renumber-chapters'),
+            remove_owned_from_wishlist: _cfgBool('audiobook-remove-owned-from-wishlist'),
             embed_metadata: _cfgBool('audiobook-embed-metadata'),
             embed_artwork: _cfgBool('audiobook-embed-artwork'),
             save_artwork: _cfgBool('audiobook-save-artwork'),
@@ -8265,6 +8383,74 @@ async function loadNavidromeMusicFolders() {
     } catch (error) {
         console.error('Error loading Navidrome music folders:', error);
         document.getElementById('navidrome-folder-selector-container').style.display = 'none';
+    }
+}
+
+// the admin's own navidrome playlist user (Cremonies). it's the same
+// per-profile login My Account saves for everyone else, so sync already writes
+// as it. kept out of the main settings save on purpose, it's not app config.
+function _paintNavidromePlaylistLogin(username) {
+    const user = document.getElementById('navidrome-playlist-username');
+    const pass = document.getElementById('navidrome-playlist-password');
+    const status = document.getElementById('navidrome-playlist-status');
+    const clear = document.getElementById('navidrome-playlist-clear');
+    if (!user || !status) return;
+    user.value = username || '';
+    if (pass) pass.value = '';
+    if (clear) clear.style.display = username ? '' : 'none';
+    status.textContent = username
+        ? `Your synced playlists go to ${username}.`
+        : 'Your synced playlists go to this Navidrome user instead of the account above. '
+          + 'Leave it empty to use the account above. Other profiles set their own in My Account.';
+}
+
+async function loadNavidromePlaylistLogin() {
+    try {
+        const response = await fetch('/api/profiles/me/server-library');
+        const data = await response.json();
+        _paintNavidromePlaylistLogin(data && data.success ? data.navidrome_username : '');
+    } catch (error) {
+        console.debug('navidrome playlist login load failed:', error);
+    }
+}
+
+async function saveNavidromePlaylistLogin() {
+    const username = (document.getElementById('navidrome-playlist-username')?.value || '').trim();
+    const password = document.getElementById('navidrome-playlist-password')?.value || '';
+    if (!username || !password) {
+        showToast('Enter the playlist account username and password', 'warning');
+        return;
+    }
+    try {
+        const response = await fetch('/api/profiles/me/navidrome-login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            showToast(data.error || 'Could not save the playlist account', 'error');
+            return;
+        }
+        _paintNavidromePlaylistLogin(data.username || username);
+        showToast(`Playlists will sync to ${data.username || username}`, 'success');
+    } catch (error) {
+        showToast('Could not save the playlist account', 'error');
+    }
+}
+
+async function clearNavidromePlaylistLogin() {
+    try {
+        const response = await fetch('/api/profiles/me/navidrome-login', { method: 'DELETE' });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            showToast(data.error || 'Could not clear the playlist account', 'error');
+            return;
+        }
+        _paintNavidromePlaylistLogin('');
+        showToast('Playlists will sync to the account above', 'success');
+    } catch (error) {
+        showToast('Could not clear the playlist account', 'error');
     }
 }
 

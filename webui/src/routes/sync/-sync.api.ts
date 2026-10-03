@@ -619,15 +619,20 @@ export function recordServerLink(
   }).catch(() => undefined);
 }
 
-/** POST .../pipeline/run — an empty JSON body, as the vanilla sends (2468-2472). */
+/**
+ * POST .../pipeline/run — an empty JSON body, as the vanilla sends (2468-2472).
+ * `refreshOnly` pulls the source and discovers the new tracks, nothing pushed
+ * or downloaded (#1413).
+ */
 export async function runMirroredPipeline(
   playlistId: number | string,
+  opts: { refreshOnly?: boolean } = {},
 ): Promise<{ state?: MirroredPipelineState }> {
   return readPipelineResponse(
     await fetch(`/api/mirrored-playlists/${playlistId}/pipeline/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+      body: JSON.stringify(opts.refreshOnly ? { refresh_only: true } : {}),
     }),
     PIPELINE_RUN_FAILED,
   );
@@ -748,6 +753,12 @@ export async function deleteBeatportChart(chartHash: string): Promise<Response> 
 /** GET /api/automations (606). */
 export async function fetchAutomations(): Promise<Response> {
   return fetch('/api/automations');
+}
+
+/** GET /api/automations/progress: live state of running / just-finished runs,
+ *  keyed by automation id. what the notification area reads. */
+export async function fetchAutomationProgress(): Promise<Response> {
+  return fetch('/api/automations/progress');
 }
 
 /**

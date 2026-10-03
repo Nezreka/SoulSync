@@ -24,6 +24,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from core.automation.deps import AutomationDeps
+from core.profile_context import get_background_profile
 from core.playlists.source_refs import require_refresh_url
 from core.playlists.sources import PlaylistDetail, to_mirror_track_dict
 from core.playlists.sources.base import (
@@ -63,7 +64,10 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
     skip_discovery = bool(config.get('skip_discovery', False))
 
     if refresh_all:
-        playlists = db.get_mirrored_playlists()
+        # the playlists-page pipeline passes profile_id; automations don't, so
+        # use the profile the engine is running this as (the owner), not admin
+        owner = config.get('profile_id') or get_background_profile()
+        playlists = db.get_mirrored_playlists(int(owner)) if owner else db.get_mirrored_playlists()
     elif playlist_id:
         p = db.get_mirrored_playlist(int(playlist_id))
         playlists = [p] if p else []

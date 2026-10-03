@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { RepairFinding, RepairJob } from '../-tools.types';
 
-import { FindingsSurface } from './findings-surface';
+import { FindingsSurface, latestRunKey } from './findings-surface';
 
 const fetchMock = vi.fn();
 const toastSpy = vi.fn();
@@ -518,13 +518,46 @@ describe('the findings inbox', () => {
     renderSurface();
     await flush();
 
-    fireEvent.click(screen.getByText('Delete Folder…'));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Folder all (4)' }));
     await flush();
     expect(confirmSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         destructive: true,
         message: expect.stringContaining('deletes files on disk'),
       }),
+    );
+  });
+
+  it("uses the type's own confirmation when the generic warning would be wrong", async () => {
+    // Corrupt files are quarantined, not deleted: "cannot be undone" is untrue.
+    routes({
+      [GROUPS]: { groups: [group({ finding_type: 'corrupt_audio', pending: 2 })] },
+      [TYPES]: {
+        types: [
+          typeInfo({
+            type: 'corrupt_audio',
+            label: 'Corrupt Audio',
+            verb: 'Re-download',
+            destructive: true,
+            confirm: 'The damaged files move to the deleted-files folder.',
+          }),
+        ],
+      },
+      '/bulk-fix-start': { started: true, total: 2 },
+    });
+    renderSurface();
+    await flush();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Re-download all (2)' }));
+    await flush();
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destructive: true,
+        message: expect.stringContaining('The damaged files move to the deleted-files folder.'),
+      }),
+    );
+    expect(confirmSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('cannot be undone') }),
     );
   });
 
@@ -537,7 +570,7 @@ describe('the findings inbox', () => {
     renderSurface();
     await flush();
 
-    fireEvent.click(screen.getByText('Review & Move…'));
+    fireEvent.click(screen.getByRole('button', { name: 'Review & Move all (120)' }));
     await flush();
     clickPrompt('_orphan-delete');
     await flush();
@@ -1163,6 +1196,46 @@ describe('per-finding actions', () => {
     await flush();
     expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith('/8/dismiss'))).toBe(true);
     expect(onStatusChanged).toHaveBeenCalled();
+  });
+
+  it('opens the Re-identify modal when clicking fix on a suspect_album_tag finding', async () => {
+    routes({
+      [FINDINGS]: page([
+        finding({
+          id: 42,
+          finding_type: 'suspect_album_tag',
+          entity_id: '123',
+          title: 'Suspect album tag: "Song"',
+          details: {
+            track_id: 123,
+            track_title: 'Song',
+            artist_name: 'Artist',
+            album_title: 'Hitzone',
+            reidentify_query: 'Song Artist',
+          },
+        }),
+      ]),
+      '/api/reidentify/sources': {
+        success: true,
+        sources: [{ source: 'spotify', name: 'Spotify', active: true }],
+      },
+      '/api/reidentify/search?source=spotify&q=Song%20Artist': {
+        success: true,
+        results: [],
+      },
+    });
+    await renderList();
+    await flush();
+
+    const fixBtn = document.querySelector('.repair-finding-btn.fix') as HTMLElement;
+    expect(fixBtn).not.toBeNull();
+    expect(fixBtn.textContent).toBe('Re-identify');
+
+    fireEvent.click(fixBtn);
+    await flush();
+
+    expect(document.getElementById('reid-modal')).not.toBeNull();
+    expect(document.getElementById('reid-hero-title')?.textContent).toBe('Song');
   });
 });
 
@@ -2174,5 +2247,83 @@ describe('the detail renderer', () => {
       details: { artist_thumb_url: 'http://x/a.jpg' },
     });
     expect(detail.querySelector('.repair-finding-media-card--link')).toBeNull();
+  });
+});
+
+describe('a finished job refreshes the findings (#1386)', () => {
+  const run = (id: number, finished_at: string | null) => ({
+    id,
+    finished_at,
+    status: 'completed',
+  });
+
+  it('latestRunKey names the newest finished run and ignores unfinished ones', () => {
+    expect(latestRunKey([])).toBe('');
+    expect(latestRunKey([run(1, null)])).toBe('');
+    expect(
+      latestRunKey([run(1, '2026-09-29T10:00:00'), run(2, '2026-09-29T11:00:00'), run(3, null)]),
+    ).toBe('2@2026-09-29T11:00:00');
+  });
+
+  it('a background run landing keeps the findings you ticked', async () => {
+    routes({ [FINDINGS]: page([finding({ id: 1 }), finding({ id: 2 })]) });
+    const onStatusChanged = vi.fn();
+    const view = (runs: ReturnType<typeof run>[]) => (
+      <FindingsSurface jobs={JOBS} runs={runs} trackCount={4} onStatusChanged={onStatusChanged} />
+    );
+    const { rerender } = render(view([]));
+    await flush();
+    fireEvent.change(document.getElementById('repair-findings-search') as HTMLElement, {
+      target: { value: 'a' },
+    });
+    await flush();
+    fireEvent.click(document.querySelectorAll('.repair-finding-select input')[0]);
+    expect(document.querySelector('.repair-bulk-count')?.textContent).toBe('1 selected');
+    const listCalls = () =>
+      fetchMock.mock.calls.filter(([url]) => /\/api\/repair\/findings\?/.test(String(url))).length;
+    const before = listCalls();
+
+    rerender(view([run(9, '2026-09-29T12:00:00')]));
+    await flush();
+    expect(document.querySelector('.repair-bulk-count')?.textContent).toBe('1 selected');
+    expect(listCalls()).toBe(before);
+    expect(onStatusChanged).toHaveBeenCalled();
+  });
+
+  it('reloads counts, groups and the album grid when a new run lands, even the first ever', async () => {
+    routes({ [GROUPS]: [], [COUNTS]: {}, [TYPES]: [], '/api/repair/findings/albums': [] }, []);
+    const calls = (path: string) =>
+      fetchMock.mock.calls.filter(([url]) => String(url).includes(path)).length;
+    const onStatusChanged = vi.fn();
+    const view = (runs: ReturnType<typeof run>[]) => (
+      <FindingsSurface
+        jobs={JOBS}
+        runs={runs}
+        trackCount={4}
+        onStatusChanged={onStatusChanged}
+        defaultView="albums"
+      />
+    );
+    const { rerender } = render(view([]));
+    await flush();
+    const before = {
+      counts: calls(COUNTS),
+      groups: calls(GROUPS),
+      albums: calls('/api/repair/findings/albums'),
+    };
+    expect(before.albums).toBeGreaterThan(0);
+
+    // same history again: nothing new, nothing refetched
+    rerender(view([]));
+    await flush();
+    expect(calls('/api/repair/findings/albums')).toBe(before.albums);
+
+    // a fresh install's first job finishes
+    rerender(view([run(1, '2026-09-29T10:00:00')]));
+    await flush();
+    expect(calls(COUNTS)).toBeGreaterThan(before.counts);
+    expect(calls(GROUPS)).toBeGreaterThan(before.groups);
+    expect(calls('/api/repair/findings/albums')).toBeGreaterThan(before.albums);
+    expect(onStatusChanged).toHaveBeenCalled();
   });
 });

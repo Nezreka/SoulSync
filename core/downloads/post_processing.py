@@ -149,13 +149,33 @@ class PostProcessDeps:
     run_async: Callable
     docker_resolve_path: Callable[[str], str]
     extract_filename: Callable[[str], str]
-    make_context_key: Callable[[str, str], str]
+    make_context_key: Callable[..., str]
     find_completed_file: Callable
     enhance_file_metadata: Callable
     wipe_source_tags: Callable[[str], bool]
     post_process_with_verification: Callable
     mark_task_completed: Callable[[str, Optional[dict]], None]
     on_download_completed: Callable[[str, str, bool], None]
+
+
+def _get_task_context(make_context_key, username, filename, task_id):
+    """Resolve this task's post-processing context.
+
+    Writers store the context under the task-scoped key only when another
+    task already claimed the plain ``username::path`` key (see the collision
+    note in candidates.py); every other write still uses the legacy key.
+    Try the scoped key first, then fall back to the legacy key so legacy
+    contexts keep working unchanged. Returns (resolved_key, context) so the
+    caller deletes/logs the entry it actually read.
+    """
+    scoped_key = make_context_key(username, filename, task_id) if task_id else None
+    legacy_key = make_context_key(username, filename)
+    with matched_context_lock:
+        if scoped_key is not None:
+            context = matched_downloads_context.get(scoped_key)
+            if context is not None:
+                return scoped_key, context
+        return legacy_key, matched_downloads_context.get(legacy_key)
 
 
 def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDeps) -> None:
@@ -223,12 +243,14 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
         # The importer records the actual destination before moving a file.
         # Guessing its name here ignores user templates and unknown numbering.
         task_basename = deps.extract_filename(task_filename)
-        context_key = deps.make_context_key(task_username, task_filename)
+        # Resolve this task's context: task-scoped key first (only written on
+        # a peer/path collision), then the legacy key.
+        context_key, context = _get_task_context(
+            deps.make_context_key, task_username, task_filename, task_id)
 
         logger.info(f"[Post-Processing] Looking up context with key: {context_key}")
 
         with matched_context_lock:
-            context = matched_downloads_context.get(context_key)
             # Debug: Show all available context keys
             available_keys = list(matched_downloads_context.keys())
             logger.info(f"[Post-Processing] Available context keys: {available_keys[:10]}...")  # Show first 10 keys
@@ -244,6 +266,15 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
             with matched_context_lock:
                 similar_keys = [k for k in matched_downloads_context.keys()
                                 if k.startswith(f"{task_username}::") and task_basename in k]
+                if task_id:
+                    # A task-scoped key stamped with another task's id is never
+                    # this task's context — drop those before the ambiguity
+                    # check below, which would otherwise refuse a safe match.
+                    def _key_task_id(key):
+                        _ctx = matched_downloads_context.get(key)
+                        return _ctx.get('task_id') if isinstance(_ctx, dict) else None
+                    similar_keys = [k for k in similar_keys
+                                    if _key_task_id(k) in (None, task_id)]
             if len(similar_keys) > 1:
                 # jadux's wrong-metadata report: with 49 wishlist album batches
                 # in flight, guessing `similar_keys[0]` can hand this task ANOTHER
@@ -612,11 +643,9 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
         # File found in downloads folder - attempt post-processing
         try:
             # Rebuild the context key using the same function that stored it
-            context_key = deps.make_context_key(task_username, task_filename)
-
-            # Check if this download has matched context for post-processing
-            with matched_context_lock:
-                context = matched_downloads_context.get(context_key)
+            # (task-scoped key first, then the legacy key).
+            context_key, context = _get_task_context(
+                deps.make_context_key, task_username, task_filename, task_id)
 
             if context:
                 logger.info(f"[Post-Processing] Found matched context, running full post-processing for: {context_key}")

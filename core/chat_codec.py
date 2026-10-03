@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import zlib
 
 from utils.logging_config import get_logger
@@ -383,5 +384,136 @@ def want_of(payload) -> dict | None:
             out["dur"] = dur
     except (TypeError, ValueError):
         pass
+    ar_id = str(w.get("ar_id") or "").strip()[:120]
+    if ar_id:
+        out["ar_id"] = ar_id
+    ar_img = str(w.get("ar_img") or "").strip()[:1000]
+    if ar_img and (ar_img.startswith("https://") or ar_img.startswith("http://") or ar_img.startswith("/api/")):
+        out["ar_img"] = ar_img
+    al_id = str(w.get("al_id") or "").strip()[:120]
+    if al_id:
+        out["al_id"] = al_id
+    try:
+        tot = int(w.get("tot") or 0)
+        if 0 < tot < 10000:
+            out["tot"] = tot
+    except (TypeError, ValueError):
+        pass
+    try:
+        tn = int(w.get("tn") or 0)
+        if 0 < tn < 1000:
+            out["tn"] = tn
+    except (TypeError, ValueError):
+        pass
+    try:
+        disc = int(w.get("disc") or 0)
+        if 0 < disc < 100:
+            out["disc"] = disc
+    except (TypeError, ValueError):
+        pass
     return out
 
+
+
+BADGE_MAX_LEN = 24
+# Staff-impersonation guard: these read as authority in a public room, so no
+# client may wear them as flair. Enforced on SEND (api/chat refuses them) and
+# on RECEIVE (badge_of drops them) — a hostile client crafting its own
+# envelope can't dress as staff, and every client folds the same stream.
+BADGE_RESERVED = frozenset(
+    {
+        "admin",
+        "administrator",
+        "mod",
+        "moderator",
+        "dev",
+        "developer",
+        "lead dev",
+        "leaddev",
+        "soulsync",
+        "system",
+        "owner",
+        "staff",
+        "support",
+        "official",
+    }
+)
+
+
+# Profanity blocked from user flair badges. Checked with the same
+# punctuation-normalized, whole-word matching as BADGE_RESERVED, so
+# 'f.u.c.k' and 'shit-head' are caught while innocent substrings pass.
+BADGE_PROFANE = frozenset(
+    {
+        "fuck",
+        "fucker",
+        "fucking",
+        "motherfucker",
+        "shit",
+        "shite",
+        "bullshit",
+        "dipshit",
+        "horseshit",
+        "bitch",
+        "cunt",
+        "dick",
+        "dickhead",
+        "cock",
+        "pussy",
+        "whore",
+        "slut",
+        "bastard",
+        "asshole",
+        "arsehole",
+        "twat",
+        "wanker",
+        "prick",
+        "faggot",
+        "nigger",
+        "nigga",
+        "chink",
+        "spic",
+        "kike",
+        "retard",
+    }
+)
+
+
+def _badge_blocked_hit(b: str, blocked: frozenset) -> bool:
+    """True if the badge hits a blocked-word set. Punctuation is stripped
+    before the check so 'f.u.c.k', '(admin)' and 'SoulSync Admin' all match,
+    while 'device' / 'devon' (blocked word only as a substring) do not.
+    The JS _cleanBadge mirrors this exactly — keep them in sync."""
+    norm = re.sub(r"[^a-z0-9]+", " ", b.lower()).strip()
+    if not norm:
+        return False
+    if norm.replace(" ", "") in {w.replace(" ", "") for w in blocked}:
+        return True
+    return any(w in blocked for w in norm.split())
+
+
+def _badge_reserved_hit(b: str) -> bool:
+    return _badge_blocked_hit(b, BADGE_RESERVED)
+
+
+def _badge_profane_hit(b: str) -> bool:
+    return _badge_blocked_hit(b, BADGE_PROFANE)
+
+
+def badge_of(payload) -> str | None:
+    """The validated user flair badge from a decoded envelope ({'bg': ...}),
+    or None. REMOTE input — short, plain text, no markup characters (the
+    frontend escapes on render anyway; this keeps the wire value honest)."""
+    b = (payload or {}).get("bg") if isinstance(payload, dict) else None
+    if not isinstance(b, str):
+        return None
+    b = " ".join(b.split())[:BADGE_MAX_LEN].strip()
+    if not b:
+        return None
+    if any(c in b for c in "<>&\"'"):
+        return None
+    if _badge_reserved_hit(b):
+        return None
+    if _badge_profane_hit(b):
+        return None
+    return b

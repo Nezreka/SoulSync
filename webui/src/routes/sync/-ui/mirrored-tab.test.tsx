@@ -155,13 +155,23 @@ describe('MirroredTab — load and card', () => {
 
   it('a pipeline_state with no live state paints the pipeline phase (534-542)', async () => {
     stubFetch();
-    responder = (url) =>
-      url === '/api/mirrored-playlists'
-        ? [{ ...ROW, pipeline_state: { status: 'running', progress: 40, phase: 'Discovering' } }]
-        : { states: [] };
+    responder = (url) => {
+      if (url === '/api/mirrored-playlists') {
+        return [
+          { ...ROW, pipeline_state: { status: 'running', progress: 40, phase: 'Discovering' } },
+        ];
+      }
+      if (url.includes('/pipeline/status')) {
+        return { status: 'running', progress: 40, phase: 'Discovering' };
+      }
+      return { states: [] };
+    };
     render(<Harness />);
-    await waitFor(() => expect(screen.getByText('Discovering 40%')).toBeInTheDocument());
-    expect(screen.getByText('Discovering 40%')).toHaveStyle({ color: '#38bdf8' });
+    await waitFor(() => {
+      const el = screen.getByText('Discovering 40%');
+      expect(el).toBeInTheDocument();
+      expect(el).toHaveStyle({ color: '#38bdf8' });
+    });
   });
 
   it('a LIVE state beats the row pipeline_state (the 534 precedence)', async () => {
@@ -444,7 +454,7 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     fireEvent.click(document.querySelector('.pl-card-more') as HTMLElement);
     const labels = [...document.querySelectorAll('.pl-menu-item')].map((b) => b.textContent);
     expect(labels).toContain('Export');
-    expect(screen.getByText('Sync now')).toBeInTheDocument();
+    expect(screen.getByText('Sync & download')).toBeInTheDocument();
     expect(labels).toContain('Edit source link');
   });
 
@@ -510,6 +520,102 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     // playlist, not empty.
     expect(screen.getByTestId('seeded')).toHaveTextContent('Road Trip');
     // The detail modal closed on the way through (2044).
+    expect(document.querySelector('#mirrored-track-modal')).toBeNull();
+  });
+
+  it('a DISCOVERED card still opens the detail, and its button reopens the discovery (#1403)', async () => {
+    // cremonies #1403: once discovered, the card jumped straight to the
+    // discovery modal every time, so Delete Mirror / Edit Source were gone for
+    // good after the first discover.
+    stubFetch();
+    responder = (url) =>
+      url === '/api/mirrored-playlists'
+        ? [ROW]
+        : url === '/api/mirrored-playlists/3'
+          ? {
+              name: 'Road Trip',
+              source: 'spotify',
+              tracks: [
+                { id: 9, track_name: 'Alright', artist_name: 'Kendrick', duration_ms: 219000 },
+              ],
+            }
+          : url.includes('prepare-discovery')
+            ? { from_cache: true, cached_matches: 1, total_tracks: 1 }
+            : url.includes('status')
+              ? { phase: 'discovered', results: [], progress: 100, spotify_matches: 1 }
+              : { states: [] };
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Road Trip'));
+    await waitFor(() => expect(screen.getByText('Discover')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Discover'));
+    await waitFor(() => expect(screen.getByTestId('open-id')).toHaveTextContent('mirrored_3'));
+    expect(screen.getByTestId('phase')).toHaveTextContent('discovered');
+    const prepares = () => calls.filter((c) => c.url.includes('prepare-discovery')).length;
+    expect(prepares()).toBe(1);
+
+    // click the card again: detail, with its delete + edit source, not discovery.
+    // (the harness's seeded span says Road Trip too now, so aim at the card)
+    fireEvent.click(document.querySelector('#mirrored-card-3 .pl-card-name') as HTMLElement);
+    await waitFor(() => expect(document.querySelector('#mirrored-track-modal')).not.toBeNull());
+    expect(screen.getByText('Delete Mirror')).toBeInTheDocument();
+    expect(screen.getByText('Edit Source')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('View discovery'));
+    expect(screen.getByTestId('open-id')).toHaveTextContent('mirrored_3');
+    // reopened the existing one, no second prepare
+    expect(prepares()).toBe(1);
+    expect(document.querySelector('#mirrored-track-modal')).toBeNull();
+  });
+
+  it('a pipeline phase with no playlist behind it opens the detail, not an empty discovery (#1405)', async () => {
+    // cremonies #1405: clear discovery, sync, open, got "Playlist (0 tracks)"
+    // in a discovery modal with nothing to click
+    stubFetch();
+    responder = (url) =>
+      url === '/api/mirrored-playlists'
+        ? [ROW]
+        : url === '/api/mirrored-playlists/3'
+          ? { name: 'Road Trip', source: 'spotify', tracks: [] }
+          : url.endsWith('/pipeline/run')
+            ? { state: { status: 'running', progress: 0, phase: 'Refreshing' } }
+            : url.endsWith('/pipeline/status')
+              ? { status: 'running', progress: 45, phase: 'Syncing' }
+              : { states: [] };
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Sync & download'));
+    await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('pipeline_running'));
+    fireEvent.click(screen.getByText('Road Trip'));
+    await waitFor(() => expect(document.querySelector('#mirrored-track-modal')).not.toBeNull());
+    expect(screen.getByTestId('open-id')).toHaveTextContent('none');
+    expect(screen.getByText('Discover')).toBeInTheDocument();
+  });
+
+  it('Refresh from source runs the pipeline with refresh_only, nothing pushed (#1413)', async () => {
+    // radoslav-orlov #1413: added a song on youtube, wanted to pull it in
+    // without a server push or downloads, and keep the discovery
+    stubFetch();
+    responder = (url) =>
+      url === '/api/mirrored-playlists'
+        ? [ROW]
+        : url === '/api/mirrored-playlists/3'
+          ? { name: 'Road Trip', source: 'youtube', tracks: [] }
+          : url.endsWith('/pipeline/run')
+            ? { state: { status: 'running', progress: 0, phase: 'Refreshing from source...' } }
+            : url.endsWith('/pipeline/status')
+              ? { status: 'running', progress: 30, phase: 'Refreshing from source...' }
+              : { states: [] };
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Road Trip'));
+    await waitFor(() => expect(document.querySelector('#mirrored-track-modal')).not.toBeNull());
+    fireEvent.click(screen.getByText('Refresh from source'));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url.endsWith('/pipeline/run'))).toMatchObject({
+        method: 'POST',
+        body: { refresh_only: true },
+      }),
+    );
     expect(document.querySelector('#mirrored-track-modal')).toBeNull();
   });
 
@@ -592,7 +698,7 @@ describe('MirroredTab — export (#903)', () => {
 });
 
 describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
-  it('Sync now runs the pipeline and paints its phase onto the card', async () => {
+  it('Sync & download runs the pipeline and paints its phase onto the card', async () => {
     stubFetch();
     window.showToast = vi.fn() as typeof window.showToast;
     responder = (url) => {
@@ -606,7 +712,7 @@ describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
     };
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Sync now'));
+    fireEvent.click(screen.getByText('Sync & download'));
     await waitFor(() =>
       expect(calls.some((c) => c.url === '/api/mirrored-playlists/3/pipeline/run')).toBe(true),
     );
@@ -617,13 +723,13 @@ describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
     await waitFor(() => expect(screen.getByText('Syncing 45%')).toBeInTheDocument());
   });
 
-  it('the Sync now click never opens the card behind it', async () => {
+  it('the Sync & download click never opens the card behind it', async () => {
     stubFetch();
     window.showToast = vi.fn() as typeof window.showToast;
     responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Sync now'));
+    fireEvent.click(screen.getByText('Sync & download'));
     expect(screen.getByTestId('open-id')).toHaveTextContent('none');
   });
 

@@ -380,9 +380,13 @@ function FooterActions(props: DiscoveryModalProps) {
           key="sync-playlist-btn"
           type="button"
           className="modal-btn modal-btn-primary"
+          // only sends the matched tracks to the media server playlist,
+          // nothing downloads. named for that so it doesn't read like the
+          // card's Sync & download (#1404)
+          title="Send the matched tracks to the playlist on your media server"
           onClick={onStartSync}
         >
-          🔄 Sync This Playlist
+          🔄 Push to server
         </button>
       )}
       {(hasMatches || hasConverted) &&

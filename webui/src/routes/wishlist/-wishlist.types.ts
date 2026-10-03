@@ -94,7 +94,7 @@ export interface ParsedWishlistTrack {
    * 404s while the server builds the cover in the background, and an `<img>`
    * cannot read the `X-Artwork-Pending` header that says so.
    */
-  imageFallback: string;
+  imageFallback?: string;
   type: 'album' | 'single';
   id: string;
   retry: number;
@@ -107,9 +107,9 @@ export interface ParsedWishlistTrack {
    * profile change, which read as "my wishlist exploded with duplicates" —
    * they are neither missing nor duplicates, and the list has to say so.
    */
-  upgrade: boolean;
+  upgrade?: boolean;
   /** The quality of the file already on disk, for an upgrade row. */
-  currentQuality: string;
+  currentQuality?: string;
 }
 
 export interface WishlistAlbumGroup {
@@ -128,4 +128,41 @@ export interface WishlistArtistGroup {
   total: number;
   /** Tracks at or past the failing threshold; drives the warning dot + filter. */
   failingCount: number;
+}
+
+/** The three bulk queue actions POST /api/wishlist/bulk supports. */
+export type WishlistBulkAction = 'grab' | 'skip' | 'retry';
+/** One per-item outcome from a bulk action. */
+export interface WishlistBulkResult {
+  id: string;
+  ok: boolean;
+  message: string;
+}
+
+/**
+ * Bulk action payload. 207 Multi-Status carries the same shape with
+ * `success: false` — the per-item `results` are the contract, not the code.
+ */
+export interface WishlistBulkResponse {
+  success?: boolean;
+  batch_id?: string;
+  results?: WishlistBulkResult[];
+  error?: string;
+}
+
+/** A wishlist retry profile: how long failing tracks cool down between cycles. */
+export interface WishlistRetryProfile {
+  name: string;
+  label: string;
+  description: string;
+  /** Attempt count → cooldown seconds; attempts past the ladder use max_cooldown. */
+  ladder: Record<string, number>;
+  max_cooldown: number;
+}
+
+export interface WishlistRetryProfileResponse {
+  success?: boolean;
+  profile?: WishlistRetryProfile;
+  profiles?: WishlistRetryProfile[];
+  error?: string;
 }

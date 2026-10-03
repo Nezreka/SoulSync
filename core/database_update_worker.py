@@ -13,6 +13,13 @@ from core.settings import config_manager
 logger = get_logger("database_update_worker")
 
 
+# Fail-closed threshold for the mid-rescan fence below: when the
+# is_library_scanning() probe raises (scan state unknown) and more than this
+# many tracks look stale, the scan keeps them instead of deleting. Matches
+# the "mass deletion" scale of the 50% guard (>100-track DBs).
+_RESCAN_UNKNOWN_STALE_LIMIT = 100
+
+
 class ListingUnavailable(Exception):
     """the server gave no answer for a listing (albums of an artist, tracks of
     an album). not the same as an empty answer, and the deep scan must never
@@ -218,15 +225,46 @@ class DatabaseUpdateWorker:
             except Exception as e:
                 logger.warning(f"Could not clear {self.server_type} cache on stop: {e}")
     
+    def _can_detach_server_mappings(self, candidate_count=None, *, identity_repair_ok=True):
+        """Keep mappings when a stopped scan or transient server inventory is unsafe.
+
+        A rescan observed anywhere in this run invalidates its inventory even
+        if the server finishes before removal. Unknown scan status retains the
+        existing allowance for a few stale tracks, but never clears a library.
+        """
+        if self.should_stop or not identity_repair_ok:
+            return False
+        if getattr(self, '_detach_blocked_by_rescan', False):
+            return False
+        if not hasattr(self.media_client, 'is_library_scanning'):
+            return True
+        try:
+            scanning = bool(self.media_client.is_library_scanning())
+        except Exception:
+            scanning = None
+        if scanning:
+            self._detach_blocked_by_rescan = True
+        safe = (scanning is False or
+                (scanning is None and candidate_count is not None
+                 and candidate_count <= _RESCAN_UNKNOWN_STALE_LIMIT))
+        if not safe:
+            logger.warning(
+                "Keeping %s server mappings: its scan is active or its scan status is unknown",
+                self.server_type.capitalize(),
+            )
+        return safe
+
     def run(self):
         """Main worker thread execution"""
         try:
+            self._detach_blocked_by_rescan = False
             # Initialize database
             self.database = get_database(self.database_path)
             from core.library2.migration_gate import migration_required
             if migration_required(self.database):
                 self._emit_signal('error', "Library upgrade in progress; media scan deferred")
                 return
+            self._can_detach_server_mappings(0)
 
             if self.full_refresh:
                 logger.info(
@@ -288,13 +326,6 @@ class DatabaseUpdateWorker:
                             f"Could not verify empty {self.server_type} library; existing mappings were kept",
                         )
                         return
-                    if not artists_to_process:
-                        logger.info(
-                            "Full refresh: %s library verified empty twice; detaching mappings",
-                            self.server_type,
-                        )
-                        self.database.clear_server_data(
-                            self.server_type, owner_profile_id=self.owner_profile_id)
                 logger.info(f"Full refresh: Found {len(artists_to_process)} artists in {self.server_type} library")
             else:
                 logger.info("Performing smart incremental update - checking recently added content")
@@ -358,7 +389,15 @@ class DatabaseUpdateWorker:
                 except Exception as e:
                     logger.warning(f"Could not clear {self.server_type} cache: {e}")
             
-            self._repair_navidrome_identities()
+            identity_repair_ok = self._repair_navidrome_identities()
+
+            if (self.full_refresh and not artists_to_process
+                    and getattr(self, '_artists_fetch_verified', False)
+                    and self._can_detach_server_mappings(identity_repair_ok=identity_repair_ok)):
+                logger.info("Full refresh: %s library verified empty twice; detaching mappings",
+                            self.server_type)
+                self.database.clear_server_data(
+                    self.server_type, owner_profile_id=self.owner_profile_id)
 
             self._log_trashed_skipped()
 
@@ -366,7 +405,7 @@ class DatabaseUpdateWorker:
             # Only run on full refreshes — fetching the entire catalog on every
             # incremental scan is too expensive (especially for Plex) and unnecessary
             # since incremental scans add content, they don't detect removals.
-            if self.full_refresh and self.database:
+            if self.full_refresh and self.database and identity_repair_ok:
                 try:
                     removal_results = self._detect_and_remove_stale_content()
                     if removal_results:
@@ -471,12 +510,14 @@ class DatabaseUpdateWorker:
     def run_deep_scan(self):
         """Deep scan: map all known content and detach stale server identities."""
         try:
+            self._detach_blocked_by_rescan = False
             # Initialize database
             self.database = get_database(self.database_path)
             from core.library2.migration_gate import migration_required
             if migration_required(self.database):
                 self._emit_signal('error', "Library upgrade in progress; media scan deferred")
                 return
+            self._can_detach_server_mappings(0)
 
             logger.info(f"Starting deep library scan for {self.server_type}")
             self._emit_signal('phase_changed', "Deep scan: Connecting to media server...")
@@ -582,6 +623,11 @@ class DatabaseUpdateWorker:
                         self._emit_signal('phase_changed',
                                           f"Deep scan: {len(kept)} track(s) kept, their listing failed this run")
                     stale -= fenced
+            if stale and not self._can_detach_server_mappings(
+                    len(stale), identity_repair_ok=identity_repair_ok):
+                self._emit_signal('phase_changed',
+                                  "Deep scan: media server scan is not trusted, keeping every track")
+                stale = set()
             if stale:
                 # A fully-trusted scan may exceed the 50% threshold: the server
                 # answered (verified fetch), every artist processed cleanly, and
@@ -606,8 +652,14 @@ class DatabaseUpdateWorker:
                         owner_profile_id=self.owner_profile_id)
 
             if not artists and getattr(self, '_artists_fetch_verified', False):
-                self.database.clear_server_data(
-                    self.server_type, owner_profile_id=self.owner_profile_id)
+                if self._can_detach_server_mappings(identity_repair_ok=identity_repair_ok):
+                    self.database.clear_server_data(
+                        self.server_type, owner_profile_id=self.owner_profile_id)
+                else:
+                    logger.warning(
+                        "Skipping empty-library clear: %s scan is not trusted; keeping existing mappings",
+                        self.server_type.capitalize(),
+                    )
 
             # Phase 4: Cleanup
             self._emit_signal('phase_changed', "Deep scan: Cleaning up orphaned records...")
@@ -1368,6 +1420,8 @@ class DatabaseUpdateWorker:
         if not hasattr(self.media_client, 'get_all_artist_ids') or not hasattr(self.media_client, 'get_all_album_ids'):
             logger.info(f"Removal detection not supported for {self.server_type} — skipping")
             return None
+        if not self._can_detach_server_mappings():
+            return None
 
         # Fetch current IDs from the media server. The flag is deliberately
         # primed to failure before EACH call: clients that do not implement the
@@ -1490,6 +1544,8 @@ class DatabaseUpdateWorker:
                          f"Removing {len(removed_artist_ids)} artists, "
                          f"{len(removed_album_ids)} albums no longer on server...")
 
+        if not self._can_detach_server_mappings():
+            return None
         results = self.database.delete_removed_content(
             removed_artist_ids, removed_album_ids, self.server_type,
             owner_profile_id=self.owner_profile_id,

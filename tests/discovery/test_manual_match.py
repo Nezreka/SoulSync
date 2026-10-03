@@ -251,3 +251,51 @@ def test_should_rediscover_matches_original_logic_for_all_combinations():
 
     # Sanity: the fix actually triggered on the expected subset.
     assert diverged > 0
+
+
+# M12: unknown track_number must terminate after one enrichment attempt
+# ---------------------------------------------------------------------------
+
+
+def _fresh_match(track_number):
+    return {
+        'discovered': True,
+        'provider': 'itunes',
+        'matched_data': {
+            'track_number': track_number,
+            'album': {'release_date': '2020-01-01', 'id': 'al-1'},
+        },
+    }
+
+
+def test_rediscovers_unknown_track_number_without_attempt_marker():
+    """Legacy behaviour pinned: without the enrichment-attempt marker, a
+    fresh match whose provider genuinely doesn't know the track number is
+    still treated as incomplete (this is the pre-fix loop)."""
+    assert should_rediscover(_fresh_match(None)) is True
+
+
+def test_skips_unknown_track_number_after_enrichment_attempt():
+    """M12: when a fresh match completes with track_number=None, the worker
+    persists an enrichment-attempt marker — the provider doesn't know the
+    number, so re-discovering every pipeline run can never converge."""
+    extra = _fresh_match(None)
+    extra['track_number_unknown_enrichment_attempted'] = True
+    assert should_rediscover(extra) is False
+
+
+def test_attempt_marker_does_not_excuse_missing_album_metadata():
+    """The marker only covers the track-number leg: a match with no release
+    metadata at all is still worth re-trying."""
+    extra = {
+        'discovered': True,
+        'track_number_unknown_enrichment_attempted': True,
+        'matched_data': {'track_number': None, 'album': {}},
+    }
+    assert should_rediscover(extra) is True
+
+
+def test_resolved_track_number_still_skips():
+    extra = _fresh_match(7)
+    extra['track_number_unknown_enrichment_attempted'] = True
+    assert should_rediscover(extra) is False

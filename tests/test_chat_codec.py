@@ -233,3 +233,31 @@ class TestNowPlayingAndWantedCards:
         assert want_of({"want": {}}) is None
         assert want_of(None) is None
 
+    def test_want_rich_wishlist_metadata(self):
+        from core.chat_codec import want_of
+        wire = encode("ISO text", {
+            "want": {
+                "t": "Selected Ambient Works 85-92",
+                "a": "Aphex Twin",
+                "ty": "album",
+                "src": "spotify",
+                "id": "alb-456",
+                "img": "https://i.scdn.co/image/ab67616d0000b273",
+                "ar_id": "art-123",
+                "ar_img": "https://i.scdn.co/image/artist-photo",
+                "al_id": "alb-456",
+                "y": "1992",
+                "tot": 13,
+                "tn": 1,
+                "disc": 1,
+                "dur": 268000,
+            }
+        })
+        meta = want_of(decode(wire))
+        assert meta["ar_id"] == "art-123"
+        assert meta["ar_img"] == "https://i.scdn.co/image/artist-photo"
+        assert meta["al_id"] == "alb-456"
+        assert meta["tot"] == 13
+        assert meta["tn"] == 1
+        assert meta["disc"] == 1
+        assert meta["dur"] == 268000

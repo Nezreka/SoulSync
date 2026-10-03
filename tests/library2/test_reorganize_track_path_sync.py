@@ -41,7 +41,18 @@ def _make_item(*, queue_id='qid-1', album_id='10', source=None):
     item.album_id = album_id
     item.source = source
     item.rename_only = False
+    item.library = None
     return item
+
+
+@pytest.fixture(autouse=True)
+def _single_library_path_flow(monkeypatch):
+    """These tests exercise path updates, with one shared library.
+
+    Profiles from other suite modules must not send the mocked mover through
+    multi-library root selection; that routing has its own tests.
+    """
+    monkeypatch.setattr("core.library_scope.any_own_library_exists", lambda: False)
 
 
 @pytest.fixture

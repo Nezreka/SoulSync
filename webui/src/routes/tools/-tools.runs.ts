@@ -16,7 +16,7 @@ import type { RepairJobRun } from './-tools.types';
 import { parseDbTimestamp } from './-tools.core';
 
 /** What the row's glyph and colour say. */
-export type RunOutcome = 'success' | 'quiet' | 'failed' | 'running';
+export type RunOutcome = 'success' | 'quiet' | 'failed' | 'stopped' | 'running';
 
 /**
  * `quiet` is its own outcome on purpose: a scan that found nothing is the
@@ -27,6 +27,9 @@ export type RunOutcome = 'success' | 'quiet' | 'failed' | 'running';
 export function runOutcome(run: RepairJobRun): RunOutcome {
   const status = (run.status || '').toLowerCase();
   if (status === 'failed' || status === 'error' || (run.errors || 0) > 0) return 'failed';
+  // the job quit before the end on its own (a rate limit, say). not a crash,
+  // but not done either, and a green tick hid that the rest went unchecked
+  if (status === 'stopped') return 'stopped';
   if (status === 'running' || !run.finished_at) return 'running';
   if ((run.findings_created || 0) === 0 && (run.auto_fixed || 0) === 0) return 'quiet';
   return 'success';
@@ -36,6 +39,7 @@ export const RUN_OUTCOME_ICONS: Record<RunOutcome, string> = {
   success: '✓', // ✓
   quiet: '·', // ·
   failed: '✗', // ✗
+  stopped: '!',
   running: '▶', // ▶
 };
 
@@ -65,6 +69,10 @@ export function runSummary(run: RepairJobRun): string {
     const errors = run.errors || 0;
     const suffix = errors > 1 ? ` · ${errors} errors` : '';
     return `failed after ${formatDuration(run.duration_seconds)}${suffix}`;
+  }
+  if (outcome === 'stopped') {
+    const foundPart = found > 0 ? ` · ${found.toLocaleString()} found` : '';
+    return `stopped early · ${scanned.toLocaleString()} checked${foundPart} · ${formatDuration(run.duration_seconds)}`;
   }
   if (outcome === 'quiet') {
     return scanned > 0

@@ -188,7 +188,7 @@ export function groupWishlistArtists(
     const entry = ensure(track.artist);
     let album = entry.albums.get(track.album);
     if (!album) {
-      album = { image: track.image, imageFallback: track.imageFallback, tracks: [] };
+      album = { image: track.image, imageFallback: track.imageFallback ?? '', tracks: [] };
       entry.albums.set(track.album, album);
     }
     album.tracks.push(track);

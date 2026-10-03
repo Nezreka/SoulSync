@@ -82,11 +82,22 @@ class ShortPreviewTrackJob(RepairJob):
     auto_fix = False
     supports_file_scope = True
 
-    def _setting_bool(self, context: JobContext, key: str, default: bool) -> bool:
+    def _setting_raw(self, context: JobContext, key: str, default):
+        """Raw setting value. The Tools page saves job settings as one dict
+        under ``repair.jobs.<id>.settings``; this job used to read only the
+        flat ``repair.jobs.<id>.<key>``, so a value set in the UI never
+        applied. Both are read, the dict first."""
         cm = getattr(context, "config_manager", None)
         if cm is None:
             return default
-        val = cm.get(self.get_config_key(key), default)
+        saved = cm.get(self.get_config_key("settings"), {})
+        value = saved.get(key) if isinstance(saved, dict) else None
+        if value is None:
+            value = cm.get(self.get_config_key(key), default)
+        return default if value is None else value
+
+    def _setting_bool(self, context: JobContext, key: str, default: bool) -> bool:
+        val = self._setting_raw(context, key, default)
         if isinstance(val, str):
             return val.strip().lower() in ("1", "true", "yes", "on")
         return bool(val)
@@ -112,11 +123,8 @@ class ShortPreviewTrackJob(RepairJob):
         return probe_decoded_duration(resolved) if resolved else 0.0
 
     def _setting_int(self, context: JobContext, key: str, default: int) -> int:
-        cm = getattr(context, "config_manager", None)
-        if cm is None:
-            return default
         try:
-            return int(cm.get(self.get_config_key(key), default) or default)
+            return int(self._setting_raw(context, key, default) or default)
         except (TypeError, ValueError):
             return default
 

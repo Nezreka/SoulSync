@@ -47,6 +47,8 @@ export interface FindingTypeInfo {
   fixable: boolean;
   destructive: boolean;
   job_ids?: string[];
+  /** What the bulk-fix confirmation says, when the generic warning is wrong. */
+  confirm?: string;
 }
 
 // ── One line explaining every finding type ───────────────────────────────────
@@ -89,6 +91,7 @@ export const FINDING_TYPE_BLURBS: Record<string, string> = {
   canonical_version: 'Albums with several versions and no pinned favourite.',
   genre_cleanup: 'Genre tags that are junk, duplicated or wrongly cased.',
   comma_artist_split: 'One artist row holding several comma-separated names.',
+  suspect_album_tag: 'Tracks probably filed under the wrong album due to bad tags.',
   fake_lossless: 'FLAC upscaled from a lossy source. Review only.',
   album_needs_enrichment: 'Albums still waiting on a metadata enrichment pass.',
 };

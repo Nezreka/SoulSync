@@ -9,6 +9,7 @@ from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass
 import json
 import re
+import sqlite3
 import time
 from difflib import SequenceMatcher
 import requests
@@ -225,29 +226,34 @@ def is_remix_version(track_name: str, album_name: str = "") -> bool:
     # Combine track and album names for comprehensive checking
     text_to_check = f"{track_name} {album_name}".lower()
 
-    # Remix patterns (but NOT remaster/remastered)
-    remix_patterns = [
-        r'\bremix\b',                   # Remix, Remixed
-        r'\bmix\b(?!.*\bremaster)',     # Mix (but not if followed by remaster)
-        r'\bedit\b',                    # Radio Edit, Extended Edit
-        r'\bversion\b(?=.*\bmix\b)',    # Version with Mix (e.g., "Dance Version Mix")
-        r'\bclub mix\b',                # Club Mix
-        r'\bdance mix\b',               # Dance Mix
-        r'\bradio edit\b',              # Radio Edit
-        r'\bextended\b(?=.*\bmix\b)',   # Extended Mix
-        r'\bdub\b',                     # Dub version
-        r'\bvip mix\b',                 # VIP Mix
-    ]
-
     # But exclude remaster/remastered - those are originals
     if re.search(r'\bremaster(ed)?\b', text_to_check, re.IGNORECASE):
         return False
 
-    for pattern in remix_patterns:
-        if re.search(pattern, text_to_check, re.IGNORECASE):
-            return True
+    # "remix" says it outright, wherever it sits
+    if re.search(r'\b(remix(es|ed)?|rmx)\b', text_to_check, re.IGNORECASE):
+        return True
+
+    # mix / edit / dub only mean a remix inside a version qualifier: "(Club
+    # Mix)", "[Dub]", "- Radio Edit". bare, they're ordinary title words,
+    # like 311's "Mix It Up" and "Rub a Dub" (#1381), the same trap
+    # is_live_version fixed for "Live Forever"
+    for name in (track_name, album_name or ''):
+        for qualifier in _version_qualifiers(name):
+            if re.search(r'\b(mix|edit|dub)\b', qualifier, re.IGNORECASE):
+                return True
 
     return False
+
+
+def _version_qualifiers(name: str) -> list:
+    """the bracketed parts of a title and its " - " suffix, where version
+    words live: "Song (Club Mix) - Radio Edit" -> ["Club Mix", "Radio Edit"]."""
+    found = re.findall(r'[\(\[]([^\)\]]*)[\)\]]', name)
+    dash = re.search(r'\s[-–—]\s+(.+)$', name)
+    if dash:
+        found.append(dash.group(1))
+    return found
 
 def is_acoustic_version(track_name: str, album_name: str = "") -> bool:
     """
@@ -1043,7 +1049,14 @@ class WatchlistScanner:
         try:
             if source == 'spotify':
                 return client.get_artist(artist_id, allow_fallback=False)
-            return client.get_artist(artist_id)
+            data = client.get_artist(artist_id)
+            # deezer artists carry no genres, only their albums do. without
+            # this every deezer track landed in the discovery pool genre-less
+            # and genre playlists (daily mix etc.) came back empty.
+            if (source == 'deezer' and isinstance(data, dict) and not data.get('genres')
+                    and hasattr(client, 'get_artist_genres')):
+                data['genres'] = client.get_artist_genres(artist_id)
+            return data
         except Exception as e:
             logger.debug("Could not fetch artist data for %s on %s: %s", artist_id, source, e)
             return None
@@ -1580,6 +1593,7 @@ class WatchlistScanner:
                 artist_added_tracks = 0
 
                 artist_was_cancelled = False
+                albums_processed = 0
                 for album_index, album in enumerate(albums):
                     # The album loop had no cancel point at all, so a cancel
                     # could only land between ARTISTS. An artist with thirty
@@ -1592,6 +1606,10 @@ class WatchlistScanner:
                             artist.artist_name, album_index, len(albums),
                         )
                         break
+                    # H8: count only albums actually attempted — the cancel
+                    # check above means a mid-artist cancel leaves the rest
+                    # untouched, and the result must report the real count.
+                    albums_processed += 1
                     try:
                         album_data = album_fetcher(album.id, getattr(album, 'name', ''))
                         tracks = self._extract_track_items(album_data)
@@ -1715,15 +1733,20 @@ class WatchlistScanner:
                         logger.warning("Error checking album %s: %s", album.name, e)
                         continue
 
-                self.update_artist_scan_timestamp(artist)
+                # H8: a cancelled artist is NOT fully scanned — stamping the
+                # timestamp would skip it next run, and reporting success (or
+                # the full album count) would lie about what was checked.
+                if not artist_was_cancelled:
+                    self.update_artist_scan_timestamp(artist)
 
                 scan_results.append(ScanResult(
                     artist_name=artist.artist_name,
                     spotify_artist_id=source_artist_id or artist.spotify_artist_id or '',
-                    albums_checked=len(albums),
+                    albums_checked=albums_processed,
                     new_tracks_found=artist_new_tracks,
                     tracks_added_to_wishlist=artist_added_tracks,
-                    success=True,
+                    success=not artist_was_cancelled,
+                    error_message="cancelled" if artist_was_cancelled else None,
                 ))
 
                 _emit(
@@ -1732,7 +1755,7 @@ class WatchlistScanner:
                     artist_index=absolute_index,
                     total_artists=total_artists_override if total_artists_override is not None else len(watchlist_artists),
                     profile_id=profile_id,
-                    albums_checked=len(albums),
+                    albums_checked=albums_processed,
                     new_tracks_found=artist_new_tracks,
                     tracks_added_to_wishlist=artist_added_tracks,
                 )
@@ -2628,6 +2651,14 @@ class WatchlistScanner:
             logger.info(f"Track missing from library: '{original_title}' by '{artists_to_search[0] if artists_to_search else 'Unknown'}' - adding to wishlist")
             return True  # Track is missing
             
+        except sqlite3.Error as e:
+            # H11: infrastructure failure (locked DB, I/O error) — we cannot
+            # prove the track is missing. Fail CLOSED: treat it as present
+            # for this scan (it is rechecked on the next scan) rather than
+            # wishlisting — and re-downloading — an owned track.
+            track_name = track.get('name', 'Unknown') if isinstance(track, dict) else getattr(track, 'name', 'Unknown')
+            logger.warning(f"Library check failed for '{track_name}' ({e}) — treating as present this scan")
+            return False
         except Exception as e:
             # Handle both dict and object track formats for error logging
             track_name = track.get('name', 'Unknown') if isinstance(track, dict) else getattr(track, 'name', 'Unknown')
@@ -3086,6 +3117,21 @@ class WatchlistScanner:
             logger.error(f"Error fetching similar artists for {watchlist_artist.artist_name}: {e}")
             return False
 
+    def _backfill_deezer_pool_genres(self) -> None:
+        """give a batch of genre-less deezer pool tracks their genres, before
+        the playlists get curated. every discovery scan path runs this, so the
+        pool catches up over a few scans. never lets a failure stop the scan."""
+        try:
+            if 'deezer' not in (self._discovery_source_priority() or []):
+                return
+            client = get_client_for_source('deezer')
+            if not client or not hasattr(client, 'get_artist_genres'):
+                return
+            from core.discovery.deezer_genre_backfill import backfill_deezer_discovery_genres
+            backfill_deezer_discovery_genres(self.database, client.get_artist_genres)
+        except Exception as e:
+            logger.debug("deezer pool genre backfill skipped: %s", e)
+
     def populate_discovery_pool(self, top_artists_limit: int = 50, albums_per_artist: int = 10, profile_id: int = 1, progress_callback=None):
         """
         Populate discovery pool with tracks from top similar artists.
@@ -3115,6 +3161,7 @@ class WatchlistScanner:
                 self.cache_discovery_recent_albums(profile_id=profile_id)
                 if progress_callback:
                     progress_callback('phase', 'Curating playlists...')
+                self._backfill_deezer_pool_genres()
                 self.curate_discovery_playlists(profile_id=profile_id)
                 return
 
@@ -3141,6 +3188,7 @@ class WatchlistScanner:
                 self.cache_discovery_recent_albums(profile_id=profile_id)
                 if progress_callback:
                     progress_callback('phase', 'Curating playlists...')
+                self._backfill_deezer_pool_genres()
                 self.curate_discovery_playlists(profile_id=profile_id)
                 return
 
@@ -3497,6 +3545,7 @@ class WatchlistScanner:
             logger.info("Curating discovery playlists...")
             if progress_callback:
                 progress_callback('phase', 'Curating playlists...')
+            self._backfill_deezer_pool_genres()
             self.curate_discovery_playlists(profile_id=profile_id)
 
         except Exception as e:
@@ -4412,6 +4461,11 @@ class WatchlistScanner:
                              for r in artist_rows if r.get('name')}
 
             seeds = seed_identities(seed_names, by_name)
+            # a seed you asked for more of gets its shelf first; one you asked
+            # for less of goes last (stable, so play order breaks ties)
+            from core.discovery.feedback import Taste
+            taste = Taste.load(self.database, profile_id)
+            seeds = sorted(seeds, key=lambda sd: -taste.seed_weight(sd.name))
             edges = self.database.get_similar_artist_edges(
                 sorted({i for seed in seeds for i in seed.bare_ids}), profile_id=profile_id)
 
@@ -4428,6 +4482,7 @@ class WatchlistScanner:
                 # shelf a real relationship could not.
                 related = related + related_from_genres(
                     seed, genre_by_artist, pool_artists, doc_counts)
+                related = taste.adjust_related(seed.name, related)
                 per_seed.append((seed, collect_candidates(seed, related, pool_by_artist)))
 
             shelves = allocate_shelves(per_seed)
@@ -4491,12 +4546,15 @@ class WatchlistScanner:
         try:
             import json as _json
             from core.discovery.listening_recommendations import (
+                RECS_ARTISTS_KEY,
+                RECS_TRACKS_KEY,
                 aggregate_candidate_tracks,
                 build_recency_weighted_seeds,
                 choose_mix_fetch_source,
                 group_similars_by_seed,
                 names_match,
                 rank_recommended_artists,
+                recs_key,
                 to_mix_track,
             )
 
@@ -4564,10 +4622,19 @@ class WatchlistScanner:
             # popularity are independent, so the top-200 already spans pop-96 favourites down to
             # pop-1 deep cuts. The track-mix fetch below still only touches recs[:20], so the scan
             # cost is unchanged; the row itself renders 18 and the dial chooses which 18.
+            # more / less like this: seeds you asked for more of count for more,
+            # artists and seed edges you asked for less of for less
+            from core.discovery.feedback import Taste
+            taste = Taste.load(self.database, profile_id)
+            seeds = taste.adjust_seeds(seeds)
+            similars_by_seed = {seed: taste.adjust_related(seed, sims, weight_key='score')
+                                for seed, sims in similars_by_seed.items()}
             recs = rank_recommended_artists(seeds, similars_by_seed, owned, limit=200)
             if not recs:
                 logger.info("[Listening Recs] no recommendations yet (no similar-artist coverage)")
                 return
+
+            from core.discovery.explain import consensus_confidence, explanation
 
             def _enrich(r):
                 m = artist_meta_by_name.get(r.name.lower(), {})
@@ -4578,13 +4645,16 @@ class WatchlistScanner:
                     except Exception:
                         genres = None
                 return {'name': r.name, 'seed_count': r.seed_count, 'seeds': r.seeds[:5],
+                        'explanation': explanation('listened', r.seeds[:5],
+                                                   consensus_confidence(r.seed_count),
+                                                   components=r.seed_scores or None),
                         'score': r.score, 'spotify_artist_id': m.get('spotify_artist_id'),
                         'itunes_artist_id': m.get('itunes_artist_id'),
                         'deezer_artist_id': m.get('deezer_artist_id'),
                         'image_url': m.get('image_url'),
                         'genres': (genres[:3] if isinstance(genres, list) else None)}
 
-            self.database.set_metadata('listening_recs_artists',
+            self.database.set_metadata(recs_key(RECS_ARTISTS_KEY, profile_id),
                                        _json.dumps([_enrich(r) for r in recs]))
 
             # Candidate tracks for the "Listening Mix" playlist row: each recommended artist's
@@ -4682,7 +4752,7 @@ class WatchlistScanner:
             mix = aggregate_candidate_tracks(recs, top_tracks_by_artist, per_artist=3, limit=50)
             track_ids = [m.get('track_id') for m in mix if m.get('track_id')]
             if mix:
-                self.database.set_metadata('listening_recs_tracks_full', _json.dumps(mix))
+                self.database.set_metadata(recs_key(RECS_TRACKS_KEY, profile_id), _json.dumps(mix))
                 self.database.save_curated_playlist('listening_recs_tracks', track_ids, profile_id=profile_id)
 
             logger.info("[Listening Recs] %d recommended artists, %d mix tracks (%d artists via top-tracks fetch)",

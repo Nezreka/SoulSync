@@ -113,6 +113,7 @@ def cleanup_wishlist_after_db_update(config_manager) -> None:
 
             match = find_owned_match(
                 db, track_name, artists, track_album, active_server,
+                strict_identity=True, require_album=track.get('source_type') == 'album',
                 log=logger, log_prefix="[Auto Cleanup]")
 
             # If found in database, remove from wishlist

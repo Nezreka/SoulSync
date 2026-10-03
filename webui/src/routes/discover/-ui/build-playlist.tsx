@@ -4,6 +4,7 @@ import {
   bpArtistImage,
   bpResultSubtitle,
   bpSelectionState,
+  BP_NAME_MAX,
   BP_NO_SELECTION_HINT,
 } from '../-discover.build-playlist';
 import { DiscoverSection } from './discover-section';
@@ -37,6 +38,11 @@ export interface BuildPlaylistSectionProps {
   /** Present once a playlist has been generated. */
   resultSubtitle?: string;
   hasResults: boolean;
+  /** the generated playlist's name box (#1421). */
+  name: string;
+  /** what a blank box falls back to. */
+  namePlaceholder?: string;
+  onNameChange: (name: string) => void;
   /** The live sync panel's progress, when a sync is running. */
   syncing?: boolean;
   syncProgress?: Parameters<typeof SyncStatus>[0]['progress'];
@@ -65,6 +71,9 @@ export function BuildPlaylistSection({
   generating,
   resultSubtitle,
   hasResults,
+  name,
+  namePlaceholder,
+  onNameChange,
   syncing,
   syncProgress,
   children,
@@ -241,13 +250,28 @@ export function BuildPlaylistSection({
         {hasResults && (
           <div id="build-playlist-results-wrapper">
             <div className="discover-section-header" style={{ marginTop: 20 }}>
-              <div>
-                <h3
+              <div className="bp-result-head">
+                {/* the name it downloads and syncs under. a fixed "Custom
+                    Playlist" meant every sync overwrote the last one (#1421) */}
+                <label
                   id="build-playlist-results-title"
-                  style={{ margin: 0, color: '#fff', fontSize: 18 }}
+                  className="bp-result-eyebrow"
+                  htmlFor="build-playlist-name"
                 >
                   Generated Playlist
-                </h3>
+                </label>
+                <input
+                  type="text"
+                  id="build-playlist-name"
+                  className="bp-name-input"
+                  value={name}
+                  maxLength={BP_NAME_MAX}
+                  placeholder={namePlaceholder}
+                  autoComplete="off"
+                  spellCheck={false}
+                  title="Name this playlist"
+                  onChange={(e) => onNameChange(e.target.value)}
+                />
                 <p
                   id="build-playlist-results-subtitle"
                   style={{ margin: '4px 0 0 0', color: '#999', fontSize: 13 }}

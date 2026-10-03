@@ -24,7 +24,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from core.personalized_playlists import PersonalizedPlaylistsService
+from core.personalized_playlists import PersonalizedPlaylistsService, rank_library_genres
 
 
 class _Db:
@@ -106,7 +106,44 @@ class TestGenres:
         assert len(svc.get_top_genres_from_library(limit=2)) == 2
 
 
+def test_rank_library_genres_weights_and_merges_case():
+    rows = [
+        ('["House", "Techno"]', 10),
+        ('["house"]', 5),
+        ('Pop, Rock', 2),
+        ('', 99),
+        (None, 99),
+        ('[]', 99),
+    ]
+    assert rank_library_genres(rows) == [
+        ('House', 15),
+        ('Techno', 10),
+        ('Pop', 2),
+        ('Rock', 2),
+    ]
+
+
 class TestTheFallback:
+    def test_untagged_releases_rank_their_artists_genres(self, service):
+        """No release carries genres: the artists' genres, weighted by how
+        many of your tracks they have -- never the artist NAMES, which made
+        the Daily Mix ask the discovery pool for a genre called "Louis
+        Armstrong" (boulder, sept 30)."""
+        svc, db = service
+        db.album('Louis Armstrong', 'Hot Fives', tracks=9)
+        db.album('Dua Lipa', 'Future Nostalgia', tracks=6)
+        db.album('Calvin Harris', 'Motion', tracks=5)
+        db.album('Nobody Tagged', 'Plain', tracks=20)
+        for name, genres in (('Louis Armstrong', ['Jazz']),
+                             ('Dua Lipa', ['Pop', 'Dance']),
+                             ('Calvin Harris', ['Dance', 'Electro'])):
+            db._conn.execute("UPDATE lib2_artists SET genres=? WHERE name=?",
+                             (json.dumps(genres), name))
+        db._conn.commit()
+
+        names = [g for g, _ in svc.get_top_genres_from_library(limit=3)]
+        assert names == ['Dance', 'Jazz', 'Pop']
+
     def test_an_unenriched_library_falls_back_to_its_artists(self, service):
         """No genres anywhere: the mixes have to be built from something, and
         the top artists are the categories that survived the old dead branch."""

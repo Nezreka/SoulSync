@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.4.7"
+_SOULSYNC_BASE_VERSION = "3.5.0"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -542,6 +542,10 @@ def _init_flask_secret_key():
         return _secrets.token_hex(32)
 
 app.secret_key = _init_flask_secret_key()
+# Flask's default cookie name is "session". Browsers don't scope cookies by port,
+# so another app on the same host using "session" overwrote this one, dropping the
+# selected profile and falling back to profile 1 (admin).
+app.config["SESSION_COOKIE_NAME"] = "soulsync_session"
 
 # --- Reverse-proxy mode (opt-in, default OFF) ---
 # OFF by default → a strict no-op, so direct/LAN installs are unchanged. Only when
@@ -619,6 +623,40 @@ def inject_webui_assets():
         'vite_assets': build_webui_vite_assets,
     }
 
+
+# --- CORS for the JSON API (browser extensions, cross-origin clients) ---
+# Firefox doesn't apply host-permission CORS bypass to extension page fetches
+# the way Chrome does, so the Companion extension's fetch() calls fail with
+# NetworkError unless the server answers preflights and marks API responses.
+# The preflight handler is registered BEFORE the login/launch-PIN gates on
+# purpose: a preflight carries no credentials and returns no data (204), so
+# it must not be gated — the real request still goes through auth.
+from core.security.cors import preflight_headers as _cors_preflight_headers
+from core.security.cors import response_headers as _cors_response_headers
+
+
+@app.before_request
+def _cors_preflight():
+    headers = _cors_preflight_headers(request.path, request.method)
+    if headers is None:
+        return None
+    return "", 204, headers
+
+
+@app.after_request
+def _add_cors_headers(response):
+    """Stamp Access-Control-Allow-Origin on API responses (browser extensions).
+
+    Endpoints that set their own Access-Control-Allow-Origin win — we don't
+    override an explicit choice.
+    """
+    try:
+        for key, value in _cors_response_headers(request.path).items():
+            response.headers.setdefault(key, value)
+    except Exception as e:
+        logger.debug("CORS response headers failed: %s", e)
+    return response
+
 # Brute-force limiter for every PIN check: the launch unlock and picking a
 # pinned profile. keyed by (ip, profile) so a correct pin on your own card
 # doesn't wipe the failures on someone else's.
@@ -655,6 +693,12 @@ def _enforce_login():
     security.require_login is on. When on, an unauthenticated session can only
     reach the page shell + the login flow + the key-authed public API."""
     if not _require_login_enabled():
+        return
+    # API keys are admin-minted: a valid key gets the same trust as the
+    # /api/v1/* path exemption, so key-authed callers without cookie sessions
+    # (e.g. the Companion extension's <img> tags on /api/image-proxy) pass.
+    from api.auth import request_has_valid_api_key
+    if request_has_valid_api_key():
         return
     from core.security.login_gate import login_request_is_blocked
     from core.security.launch_lock import is_html_navigation
@@ -694,6 +738,10 @@ def _enforce_launch_pin():
         require_pin = False
     if not require_pin:
         return
+    # Same API-key trust as the login gate above.
+    from api.auth import request_has_valid_api_key
+    if request_has_valid_api_key():
+        return
     from core.security.launch_lock import request_is_locked, is_html_navigation
     # An auth proxy (Authelia/Authentik/oauth2-proxy) that already authenticated the
     # user counts as verified — opt-in via security.auth_proxy_header, OFF (empty)
@@ -729,6 +777,14 @@ def _set_profile_context():
     """Set g.profile_id from session for every request"""
     g.request_start_monotonic = time.perf_counter()
     g.request_start_cpu = time.thread_time()
+
+    # API keys are admin-minted: a valid key acts with admin rights (the same
+    # trust as /api/v1/*), so key-authed callers without a cookie session
+    # never reach the profile-picker logic below and its 401
+    # profile_required. Grants no more than the v1 exemption already does.
+    from api.auth import apply_api_key_request_context
+    if apply_api_key_request_context():
+        return
 
     # 1. Login mode: unauthenticated sessions have NO profile or admin rights (#GHSA-j7g5-8j44-jqhm).
     if _require_login_enabled() and not session.get('login_authenticated', False):
@@ -1066,6 +1122,7 @@ VALID_PAGE_IDS = {
     'issues',
     'podcasts',
     'audiobooks',
+    'sample-studio',
     # Video side — per-profile page toggles (admin-only surfaces are gated separately,
     # not via allowed_pages: overlay studio, video-import, video-settings, video-automations).
     'video-dashboard',
@@ -1137,14 +1194,23 @@ def extract_filename(full_path):
     else:
         return full_path
 
-def _make_context_key(username, filename):
+def _make_context_key(username, filename, task_id=None):
     """Build a unique context key from username and full Soulseek path.
 
     Uses the full remote path (not just filename) to prevent collisions
     when different tracks from the same user share a filename
     (e.g., two albums both containing '01 - Intro.flac').
+
+    Pass ``task_id`` when the key identifies a post-processing context for
+    one specific download task: two tasks can legitimately download the same
+    peer/path (album redownloads, cross-batch duplicates), and without the
+    task id the second task's context silently overwrites the first's.
+    Live-transfer lookups and all legacy callers keep the two-part key —
+    only post-processing context writes pass a task id.
     """
     normalized = filename.replace('\\', '/').lstrip('/') if filename else ''
+    if task_id:
+        return f"{username}::{task_id}::{normalized}"
     return f"{username}::{normalized}"
 
 
@@ -1500,6 +1566,11 @@ wishlist_timer_lock = threading.Lock()
 
 watchlist_auto_scanning = False
 watchlist_auto_scanning_timestamp = 0
+# H7: refreshed by the scan thread while it is alive (see
+# core/watchlist/auto_scan.py::_start_scan_heartbeat). The stuck detector
+# only resets the flag above when THIS is stale — a healthy multi-hour scan
+# must never look stuck just because its start timestamp is old.
+watchlist_auto_scanning_heartbeat = 0
 watchlist_timer_lock = threading.Lock()
 
 # Beatport scrape cache + its accessors live in api/beatport.py now (lifted
@@ -1699,6 +1770,9 @@ def _register_automation_handlers():
                 job_id, scope=scope, respect_enabled=respect_enabled)
             if repair_worker else None
         ),
+        bulk_fix_repair_findings=(
+            (lambda finding_ids: repair_worker.bulk_fix_findings(finding_ids=finding_ids))
+            if repair_worker else None),
         download_orchestrator=download_orchestrator,
         run_async=run_async,
         tasks_lock=tasks_lock,
@@ -1782,6 +1856,291 @@ try:
     logger.info("Public REST API v1 registered at /api/v1")
 except Exception as e:
     logger.error(f"Public REST API v1 failed to register: {e}")
+
+
+# --- Sample Studio legacy web UI routes (session auth) ---
+# The web UI (webui/src/app/api-client.ts) has no API key, so the v1
+# /api/v1/library/tracks and /api/v1/sample/* endpoints are unreachable from
+# the browser. These thin wrappers share the same MusicDatabase/service
+# functions and rely on the standard profile-session validation in
+# before_request — same dual-route convention as the legacy /api/library/*
+# routes.
+@app.route('/api/library/tracks', methods=['GET'])
+def library_tracks_web():
+    """Session-auth track search backing the Sample Studio library panel.
+
+    Accepts a free-text `q` (matched against both title and artist) or the
+    v1-style `title`/`artist` params. Same DB search as the API-key
+    /api/v1/library/tracks route.
+    """
+    try:
+        from api.sample import SampleHttpError, search_library_tracks
+
+        q = (request.args.get('q') or '').strip()
+        title = (request.args.get('title') or '').strip()
+        artist = (request.args.get('artist') or '').strip()
+        try:
+            limit = min(100, max(1, int(request.args.get('limit') or 50)))
+        except (TypeError, ValueError):
+            limit = 50
+        try:
+            tracks = search_library_tracks(q=q, title=title, artist=artist, limit=limit)
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+        return jsonify({"success": True, "data": {"tracks": tracks}, "error": None})
+    except Exception as e:
+        logger.error(f"web /api/library/tracks failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/analysis', methods=['GET'])
+def sample_analysis_web():
+    try:
+        from api.sample import fetch_analysis, SampleHttpError
+        try:
+            track_id = int(request.args.get('track_id') or 0)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
+        try:
+            retry = (request.args.get('retry') or '') == '1'
+            payload, status = fetch_analysis(track_id, retry=retry)
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/analysis failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/analyze', methods=['POST'])
+def sample_analyze_web():
+    try:
+        from api.sample import enqueue_track_analysis, SampleHttpError
+        data = request.get_json(silent=True) or {}
+        try:
+            track_id = int(data.get('track_id') or 0)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
+        try:
+            payload, status = enqueue_track_analysis(track_id)
+            if status != 200:
+                # Sticky worker error: the track did NOT queue. Report the
+                # failure honestly instead of a 200 "success".
+                return jsonify({"success": False, "data": payload, "error": payload["status"]}), status
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/analyze failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/peaks', methods=['GET'])
+def sample_peaks_web():
+    try:
+        from api.sample import fetch_peaks, SampleHttpError
+        try:
+            track_id = int(request.args.get('track_id') or 0)
+            buckets = int(request.args.get('buckets') or 1500)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "data": None, "error": "track_id and buckets must be integers"}), 400
+        try:
+            payload, status = fetch_peaks(track_id, buckets, stem=request.args.get('stem') or None)
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/peaks failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/preview', methods=['POST'])
+def sample_preview_web():
+    try:
+        from api.sample import _parse_render_params, render_preview, SampleHttpError
+        data = request.get_json(silent=True) or {}
+        try:
+            params = _parse_render_params(data)
+            payload, status = render_preview(**params)
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/preview failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/preview/<preview_id>', methods=['GET'])
+def sample_preview_file_web(preview_id):
+    try:
+        from api.sample import preview_file_path, SampleHttpError
+        try:
+            path = preview_file_path(preview_id)
+            return send_file(path, mimetype="audio/wav", conditional=True)
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/preview/<id> failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/chop', methods=['POST'])
+def sample_chop_web():
+    try:
+        from api.sample import _parse_render_params, save_chop, SampleHttpError
+        data = request.get_json(silent=True) or {}
+        try:
+            params = _parse_render_params(data)
+            payload, status = save_chop(
+                **params,
+                name=data.get("name"),
+                tags=data.get("tags"),
+                format=data.get("format") or "wav16",
+                folder=data.get("folder"),
+            )
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/chop failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/trim', methods=['POST'])
+def sample_trim_web():
+    try:
+        from api.sample import parse_trim_body, trim_selection, SampleHttpError
+        data = request.get_json(silent=True) or {}
+        try:
+            payload, status = trim_selection(**parse_trim_body(data))
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/trim failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/folders', methods=['GET'])
+def sample_folders_web():
+    try:
+        from api.sample import list_sample_folders, SampleHttpError
+        try:
+            payload, status = list_sample_folders()
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/folders failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stash', methods=['GET'])
+def sample_stash_web():
+    try:
+        from api.sample import list_stash_entries, SampleHttpError
+        try:
+            payload, status = list_stash_entries()
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stash failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stash/<int:entry_id>', methods=['DELETE'])
+def sample_stash_delete_web(entry_id):
+    try:
+        from api.sample import remove_stash_entry, SampleHttpError
+        try:
+            payload, status = remove_stash_entry(entry_id)
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stash/<id> DELETE failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stash/<int:entry_id>/audio', methods=['GET'])
+def sample_stash_audio_web(entry_id):
+    try:
+        from api.sample import stash_audio_path, SampleHttpError
+        try:
+            path, mimetype = stash_audio_path(entry_id)
+            return send_file(path, mimetype=mimetype, conditional=True)
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stash/<id>/audio failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stash/export', methods=['GET'])
+def sample_stash_export_web():
+    try:
+        from api.sample import export_stash_zip, SampleHttpError
+        try:
+            buf, filename = export_stash_zip()
+            return send_file(buf, mimetype="application/zip", as_attachment=True,
+                             download_name=filename)
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stash/export failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stems', methods=['POST'])
+def sample_stems_web():
+    try:
+        from api.sample import separate_stems, SampleHttpError
+        data = request.get_json(silent=True) or {}
+        try:
+            track_id = int(data.get('track_id') or 0)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
+        try:
+            payload, status = separate_stems(track_id, method=data.get('method'))
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stems failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stems/status', methods=['GET'])
+def sample_stems_status_web():
+    try:
+        from api.sample import stems_status, SampleHttpError
+        try:
+            track_id = int(request.args.get('track_id') or 0)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
+        try:
+            payload, status = stems_status(track_id, method=request.args.get('method') or None)
+            return jsonify({"success": True, "data": payload, "error": None}), status
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stems/status failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/sample/stems/<int:track_id>/<stem>/audio', methods=['GET'])
+def sample_stem_audio_web(track_id, stem):
+    try:
+        from api.sample import stem_audio_path, SampleHttpError
+        try:
+            path, mimetype = stem_audio_path(track_id, stem)
+            return send_file(path, mimetype=mimetype, conditional=True)
+        except SampleHttpError as e:
+            return jsonify({"success": False, "data": None, "error": e.message}), e.status
+    except Exception as e:
+        logger.error(f"web /api/sample/stems/<id>/<stem>/audio failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
 
 
 # --- Automation Progress Tracking ---
@@ -1962,6 +2321,7 @@ def get_cached_transfer_data():
                         'size': download.size,
                         'bytesTransferred': download.transferred,
                         'averageSpeed': download.speed,
+                        'error': getattr(download, 'error', None),
                     }
             except Exception as e:
                 logger.error(f"Could not fetch streaming source downloads: {e}")
@@ -2003,18 +2363,9 @@ from core.search.cache import (
     get_cache_key as _get_enhanced_search_cache_key_impl,
     get_cached_response as _get_cached_enhanced_search_response,
     set_cached_response as _set_cached_enhanced_search_response,
+    should_cache_enhanced_search_response,
 )
 from core.search.orchestrator import VALID_SOURCES as ENHANCED_SEARCH_VALID_SOURCES
-
-
-def _get_enhanced_search_cache_key(query, requested_source=None):
-    """Thin wrapper that wires live config providers into the cache-key builder."""
-    return _get_enhanced_search_cache_key_impl(
-        query, requested_source,
-        active_server_provider=config_manager.get_active_media_server,
-        fallback_source_provider=_get_metadata_fallback_source,
-        hydrabase_active_provider=_is_hydrabase_active,
-    )
 
 # --- Background Download Monitoring (GUI Parity) ---
 from core.downloads.monitor import (
@@ -2343,8 +2694,9 @@ def start_batch_healing_timer():
         # Schedule next healing cycle
         _schedule_batch_healing_timer(30.0)
 
-# Start the healing timer when the server starts
-start_batch_healing_timer()
+# NOTE: start_batch_healing_timer() is NOT called at module level — it is
+# started once per process from start_runtime_services(), so importers
+# (tests, CLI tools, workers) don't inherit a live 30s healing loop.
 
 # Cleanup handler for Flask shutdown/reload
 import atexit
@@ -2668,6 +3020,7 @@ def _find_streaming_download_in_all_downloads(all_downloads, track_data):
                     'bytesTransferred': download.transferred,
                     'averageSpeed': download.speed,
                     'file_path': getattr(download, 'file_path', None),
+                    'error': getattr(download, 'error', None),
                 }
 
         return None
@@ -3317,7 +3670,9 @@ def save_playlist_m3u():
 
         # Compute target folder using the template system
         transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-        m3u_folder = _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name, album_name, year)
+        m3u_folder = _compute_m3u_folder(
+            transfer_dir, context_type, playlist_name, artist_name, album_name, year,
+            sample_track_path=_first_m3u_entry(m3u_content))
         os.makedirs(m3u_folder, exist_ok=True)
 
         # Build M3U filename from playlist or album name
@@ -3480,7 +3835,9 @@ def generate_playlist_m3u():
         if save_to_disk and (force or config_manager.get('m3u_export.enabled', False)):
             transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
             m3u_folder = _compute_m3u_folder(transfer_dir, context_type, playlist_name,
-                                              artist_name_ctx, album_name, year)
+                                              artist_name_ctx, album_name, year,
+                                              sample_track_path=next(
+                                                  (p for p in file_path_map.values() if p), None))
             os.makedirs(m3u_folder, exist_ok=True)
             if context_type == 'album' and artist_name_ctx and album_name:
                 safe_fn = _sanitize_filename(f'{artist_name_ctx} - {album_name}')
@@ -5957,7 +6314,18 @@ def enhanced_search():
     if not query:
         return jsonify(_search_orchestrator.empty_response())
 
-    cache_key = _get_enhanced_search_cache_key(query, requested_source)
+    # The cached payload's db_artists are profile-scoped: the profile id is
+    # part of the key (H12) so profiles never read each other's results --
+    # and so is the library they read (#1199): an admin who switches library
+    # in the header must not get the previous library's "in your library".
+    from core.library2.sql_util import ambient_scope as _ambient_scope
+    cache_key = _get_enhanced_search_cache_key_impl(
+        query, requested_source,
+        active_server_provider=config_manager.get_active_media_server,
+        fallback_source_provider=_get_metadata_fallback_source,
+        hydrabase_active_provider=_is_hydrabase_active,
+        profile_id_provider=lambda: (get_current_profile_id(), str(_ambient_scope())),
+    )
     cached = _get_cached_enhanced_search_response(cache_key)
     if cached is not None:
         logger.info(f"Enhanced search cache hit for: '{query}'")
@@ -5968,7 +6336,10 @@ def enhanced_search():
     try:
         deps = _build_search_deps()
         response_data = _search_orchestrator.run_enhanced_search(query, requested_source, deps)
-        _set_cached_enhanced_search_response(cache_key, response_data)
+        # M16: a provider-outage response (source unavailable, empty
+        # payload) must not be cached as a successful empty search.
+        if should_cache_enhanced_search_response(response_data):
+            _set_cached_enhanced_search_response(cache_key, response_data)
         return jsonify(response_data)
     except Exception as e:
         logger.error(f"Enhanced search error: {e}")
@@ -7483,6 +7854,7 @@ def get_download_status():
                         'bytesTransferred': download.transferred,
                         'averageSpeed': download.speed,
                         'direction': 'Download',  # Required by frontend
+                        'error': getattr(download, 'error', None),
                     }
                     all_transfers.append(streaming_transfer)
 
@@ -7788,7 +8160,15 @@ def get_task_detail(task_id):
         except Exception as hist_err:
             logger.debug(f"track-detail history lookup failed: {hist_err}")
 
-        detail = build_track_detail(task, history)
+        decision = task.get('decision_summary')
+        if not decision:
+            try:
+                decision = get_database().get_download_decision(task_id)
+            except Exception as dec_err:
+                logger.debug(f"track-detail decision lookup failed: {dec_err}")
+                decision = None
+
+        detail = build_track_detail(task, history, decision)
         return jsonify({"success": True, "detail": detail})
     except Exception as e:
         logger.error(f"get_task_detail error: {e}")
@@ -7870,6 +8250,9 @@ def download_selected_candidate(task_id):
             # pick something else if it fails". Stays set until the task
             # reaches a terminal state.
             task['_user_manual_pick'] = True
+            # a "grab anyway" on a below-profile row in the inspector
+            from core.downloads.decisions import is_quality_override
+            task['_override_quality'] = is_quality_override(data.get('override'))
             # Reset retry counters so previous auto-attempts don't
             # immediately exhaust the manual pick.
             task.pop('stuck_retry_count', None)
@@ -8401,7 +8784,21 @@ def delete_download_origins():
 @app.route('/api/library/recently-added')
 def get_recently_added_albums():
     """The dashboard rail: newest albums to land, folded from library_history
-    with art backfilled from the library (see the db method's docstring)."""
+    with art backfilled from the library (see the db method's docstring).
+
+    ``type=tracks`` is Sample Studio's empty search box, which reads the
+    API envelope ``{data: {items}}`` -- answered here, or the panel opened
+    in its error state until the user typed."""
+    if request.args.get('type') == 'tracks':
+        try:
+            from api.serializers import serialize_track
+            limit = min(200, max(1, int(request.args.get('limit') or 50)))
+            items = [serialize_track(row) for row in get_database().recent_owned_tracks(limit)]
+            return jsonify({"success": True, "data": {"items": items, "type": "tracks"},
+                            "error": None})
+        except Exception as e:
+            logger.error(f"Error getting recently added tracks: {e}")
+            return jsonify({"success": False, "data": None, "error": str(e)}), 500
     try:
         limit = min(50, max(1, int(request.args.get('limit', 20))))
         db = get_database()
@@ -8498,6 +8895,7 @@ def get_library_artists():
         limit = int(request.args.get('limit', 75))
         watchlist_filter = request.args.get('watchlist', 'all')
         source_filter = request.args.get('source_filter', '')
+        quality_filter = request.args.get('quality', '')
 
         # Get database instance
         database = get_database()
@@ -8514,6 +8912,8 @@ def get_library_artists():
             watchlist_filter=watchlist_filter,
             profile_id=get_current_profile_id(),
             source_filter=source_filter,
+            quality_filter=quality_filter,
+            sort=request.args.get('sort', ''),
         )
 
         # Fix image URLs for all artists
@@ -8543,6 +8943,32 @@ def get_library_artists():
                 "has_next": False
             }
         }), 500
+
+@app.route('/api/library/albums/<album_id>/tracks')
+def get_library_album_tracks(album_id):
+    """The tracks of one owned album, for the album card's play button.
+
+    Not /api/album/<id>/tracks, which resolves a metadata SOURCE's tracklist
+    for the download-missing modal. This returns the rows that have a file, so
+    the player queues them rather than treating each as a miss to acquire.
+    """
+    try:
+        tracks = get_database().get_tracks_by_album(album_id)
+        return jsonify({
+            "success": True,
+            "tracks": [{
+                'id': t.id,
+                'title': t.title,
+                'track_number': t.track_number,
+                'file_path': t.file_path,
+                'duration': t.duration,
+                'bitrate': t.bitrate,
+            } for t in tracks if t.file_path]
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching tracks for library album {album_id}: {e}")
+        return jsonify({"success": False, "error": str(e), "tracks": []}), 500
 
 @app.route('/api/library/unmatched-summary')
 def get_library_unmatched_summary():
@@ -8761,6 +9187,24 @@ def library_check_tracks():
         # Single query: get ALL tracks by this artist from the DB
         db_tracks = db.search_tracks(artist=artist_name, limit=500, server_source=active_server)
 
+        # Ownership is per-artist. When the requested artist isn't in the
+        # library by name, search_tracks() degrades to a whole-table word-OR
+        # ("Black Rainbows" matches "Black Sabbath" on "black") and the title
+        # matcher below would credit a different artist's song as owned
+        # (Ktzenjammer follow-up to #1292: "Snowball" flagged owned via Black
+        # Sabbath's "Snowblind" — and mergeOwnership would then PLAY that
+        # wrong file). A track by another artist is never the same recording,
+        # so keep only rows credited to the requested artist, via the album
+        # artist or the per-track artist (compilations).
+        from core.text.normalize import normalize_key
+        _wanted_artist_key = normalize_key(artist_name)
+        if _wanted_artist_key:
+            db_tracks = [
+                t for t in db_tracks
+                if normalize_key(getattr(t, 'artist_name', '') or '') == _wanted_artist_key
+                or normalize_key(getattr(t, 'track_artist', '') or '') == _wanted_artist_key
+            ]
+
         if not db_tracks:
             # No tracks by this artist in DB — none owned
             owned_map = {t.get('name', ''): {"owned": False} for t in tracks if t.get('name')}
@@ -8799,7 +9243,7 @@ def library_check_tracks():
         target_album = data.get('album_name', '')
         target_album_norm = _normalize(target_album) if target_album else ''
 
-        def _match_title(search_norm, search_clean, candidates):
+        def _match_title(search_norm, search_clean, candidates, threshold=0.7):
             """Find best matching track from a list of (norm, clean, db_track) candidates."""
             from core.text.title_match import choose_best_title_candidate
             return choose_best_title_candidate(
@@ -8807,11 +9251,24 @@ def library_check_tracks():
                 search_clean,
                 candidates,
                 lambda left, right: SequenceMatcher(None, left, right).ratio(),
+                threshold=threshold,
             )
+
+        # A 0.7 title ratio is only safe inside one album's track list. The
+        # #808 fallback (and the album-less path) searches the artist's whole
+        # catalog, where different songs routinely share a stem: "Beyond I" /
+        # "Beyond Fate" = 0.74, "Solve" / "Solace" = 0.73, "Bestrafe mich" /
+        # "Heirate mich" = 0.72 (Ktzenjammer follow-up to #1292). Out there
+        # only near-identical titles may match — 0.85 is the same level
+        # titles_plausibly_same() accepts regardless of shared words, so
+        # typos ("Beleive"/"Believe" = 0.86) still match while stem-sharing
+        # different songs no longer do.
+        _WIDE_POOL_THRESHOLD = 0.85
 
         # Split DB tracks by album if album-aware matching is active
         album_entries = []
         other_entries = []
+        title_threshold = 0.7
         if target_album_norm:
             for entry in db_title_entries:
                 db_album = _normalize(getattr(entry[2], 'album_title', '') or '')
@@ -8825,11 +9282,17 @@ def library_check_tracks():
             # 'Champagne Supernova (OurVinyl Sessions)' scores ~0.5). Marking
             # every track unowned off a failed ALBUM-name comparison is wrong —
             # fall back to artist-wide title matching, which is exactly the
-            # pre-album-aware behavior and still holds the 0.7 title bar.
+            # pre-album-aware behavior, but under the near-identical bar.
             if not album_entries:
                 album_entries = other_entries
+                # ...but the wide pool only gets the near-identical bar: a 0.7
+                # ratio across the whole catalog is where the stem-sharing
+                # false positives live (see _WIDE_POOL_THRESHOLD above).
+                title_threshold = _WIDE_POOL_THRESHOLD
         else:
             other_entries = db_title_entries
+            # No album context at all: same wide pool, same near-identical bar.
+            title_threshold = _WIDE_POOL_THRESHOLD
 
         owned_map = {}
         for track in tracks:
@@ -8844,9 +9307,11 @@ def library_check_tracks():
             # prevents false positives where "Thriller" on Album A shows as owned
             # because it exists on Album B. Without album context, search all tracks.
             if target_album_norm:
-                matched_db_track = _match_title(search_norm, search_clean, album_entries)
+                matched_db_track = _match_title(search_norm, search_clean, album_entries,
+                                                threshold=title_threshold)
             else:
-                matched_db_track = _match_title(search_norm, search_clean, other_entries)
+                matched_db_track = _match_title(search_norm, search_clean, other_entries,
+                                                threshold=title_threshold)
 
             if matched_db_track:
                 import os
@@ -8894,6 +9359,11 @@ def get_artist_enhanced_detail(artist_id):
         active_server = config_manager.get_active_media_server()
         server_connected = media_server_engine.is_connected() if media_server_engine else False
         result['server_type'] = active_server if server_connected else None
+
+        # Upstream marks the tracks its quality jobs say could be better here.
+        # Those jobs are retired on this branch (upgrades are the Library v2
+        # wanted projection); the only findings left carry legacy track ids,
+        # which would mark unrelated catalogue tracks. Not annotated.
 
         return jsonify(result)
     except Exception as e:
@@ -8957,6 +9427,10 @@ def reidentify_apply():
 
         data = request.get_json(silent=True) or {}
         library_track_id = data.get('library_track_id')
+        # a repair finding names its track `lib2:<id>` (Suspect Album Tags
+        # opens this modal straight from the finding)
+        if isinstance(library_track_id, str) and library_track_id.startswith('lib2:'):
+            library_track_id = library_track_id.split(':', 1)[1]
         source = (data.get('source') or '').strip()
         track_id = (data.get('track_id') or '').strip()
         replace = bool(data.get('replace', True))
@@ -10800,9 +11274,122 @@ def remove_from_blacklist(blacklist_id):
 # TRACK REDOWNLOAD — Search metadata, search download sources, start redownload
 # ==================================================================================
 
+def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector', upgrade=False):
+    """Search every configured download source for one track and stream the
+    verdicts: NDJSON, one line per source as it answers, then {"done": true}.
+
+    The candidate inspector is the only thing that fans out like this, and
+    only when a person opens it; automatic downloads stay on source priority.
+    Each line carries the accepted rows (ranked as before) and the rejected
+    ones with their reasons (core/downloads/candidate_pool.py).
+
+    ``upgrade``: judge as an upgrade — a hit must also reach the profile's
+    upgrade cutoff (core/quality/upgrades.py), not just what the everyday
+    download filter would take.
+    """
+    search_queries = matching_engine.generate_download_queries(track_obj)
+    if not search_queries:
+        artist = track_obj.artists[0] if track_obj.artists else ''
+        search_queries = [f"{artist} {track_obj.name}".strip()]
+    # First two queries: enough to catch the usual naming, fast enough to wait on.
+    search_queries = search_queries[:2]
+    database = get_database()
+
+    # Every configured source individually — hybrid search stops at the first hit.
+    download_clients = {}
+    try:
+        if download_orchestrator and hasattr(download_orchestrator, 'configured_clients'):
+            download_clients = dict(download_orchestrator.configured_clients())
+    except Exception as e:
+        logger.warning(f"[{log_tag}] Error getting download clients: {e}")
+    if not download_clients:
+        download_clients = {'default': download_orchestrator}
+
+    logger.info(f"[{log_tag}] Streaming search across {len(download_clients)} sources: {list(download_clients.keys())}")
+
+    from core.downloads.candidate_pool import build_source_rows, empty_source_rows
+    from core.downloads.provenance import build_policy_facet, new_provenance
+    from core.quality.source_map import quality_profile_context
+
+    # One provenance per interactive inspection: every streamed source payload
+    # carries the same search_mode/searched_at/policy_run_id. The run-level
+    # policy describes the ladder in effect; each candidate row gets its own
+    # facet (the rung it reached) via policy_profile.
+    _inspection_provenance = new_provenance('interactive')
+    _inspection_profile = None
+    try:
+        from core.quality.selection import load_profile_by_id
+        _inspection_profile = load_profile_by_id(quality_profile_id)
+        _inspection_policy = build_policy_facet(_inspection_profile)
+    except Exception:  # noqa: BLE001 - the search matters more than its facet
+        _inspection_policy = build_policy_facet(None)
+
+    def _is_failed_blocklisted(candidate, source_name):
+        """Files that terminally failed import skip the inspector too —
+        fail-open, a blocklist read never sinks the search."""
+        try:
+            from core.downloads.failed_blocklist import is_candidate_blocked
+            return is_candidate_blocked(database, candidate, source_name)
+        except Exception:  # noqa: BLE001
+            return False
+
+    bar = None
+    if upgrade:
+        from core.quality.upgrades import apply_upgrade_bar, upgrade_bar
+        bar = upgrade_bar(quality_profile_id)
+
+    def _search_one_source(source_name, client):
+        evaluated = []
+        for q in search_queries:
+            try:
+                # These clients are searched directly rather than through the
+                # orchestrator, so nothing else would enter the item's profile
+                # context and quality_tier_for_source would ask each source for
+                # the tier the APP default wants.
+                with quality_profile_context(quality_profile_id):
+                    tracks_result, _ = run_async(client.search(q, timeout=20))
+                if not tracks_result:
+                    continue
+                pairs = evaluate_candidates(tracks_result, track_obj, q, quality_profile_id)
+                if bar is not None:
+                    pairs = apply_upgrade_bar(pairs, *bar)
+                evaluated.append((q, pairs))
+            except Exception as e:
+                logger.debug(f"[{log_tag}] {source_name} search failed for query '{q}': {e}")
+        return build_source_rows(
+            evaluated, source_name=source_name, is_blacklisted=database.is_blacklisted,
+            is_failed_blocked=lambda c: _is_failed_blocklisted(c, source_name),
+            provenance=_inspection_provenance, policy=_inspection_policy,
+            policy_profile=_inspection_profile,
+        )
+
+    def generate_stream():
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = {pool.submit(_search_one_source, name, client): name for name, client in download_clients.items()}
+            for future in as_completed(futures):
+                source_name = futures[future]
+                try:
+                    yield json.dumps({'source': source_name, **future.result()}) + '\n'
+                except Exception as e:
+                    yield json.dumps({'source': source_name, **empty_source_rows(
+                        str(e), provenance=_inspection_provenance,
+                        policy=_inspection_policy)}) + '\n'
+        yield json.dumps({'done': True}) + '\n'
+
+    return app.response_class(generate_stream(), mimetype='application/x-ndjson', headers={'X-Accel-Buffering': 'no'})
+
+
+def _library_track_route_id(track_id):
+    """A Tools finding opens the redownload modal with its subject id,
+    ``lib2:<id>``; the routes behind it speak the bare catalogue id."""
+    text = str(track_id or '')
+    return text.split(':', 1)[1] if text.startswith('lib2:') else track_id
+
+
 @app.route('/api/library/track/<track_id>/redownload/search-sources', methods=['POST'])
 def redownload_search_sources(track_id):
     """Search all active download sources for a track using the selected metadata."""
+    track_id = _library_track_route_id(track_id)
     try:
         data = request.get_json()
         metadata = data.get('metadata', {})
@@ -10820,7 +11407,6 @@ def redownload_search_sources(track_id):
             explicit=parse_strict_int(data.get('quality_profile_id')),
         )
 
-        # Build a track-like object for query generation
         from core.itunes_client import Track as MetaTrack
         track_obj = MetaTrack(
             id=metadata.get('id', ''),
@@ -10830,106 +11416,10 @@ def redownload_search_sources(track_id):
             duration_ms=metadata.get('duration_ms', 0),
             popularity=0,
         )
-
-        # Generate search queries
-        search_queries = matching_engine.generate_download_queries(track_obj)
-        if not search_queries:
-            search_queries = [f"{metadata.get('artist', '')} {metadata['name']}".strip()]
-
-        # Use first 2 queries for speed
-        search_queries = search_queries[:2]
-
-        # Search ALL configured download sources individually (not through hybrid which stops at first hit)
-        candidates = []
-        database = get_database()
-
-        # Get all available download source clients via the orchestrator's
-        # generic accessor — replaces the old per-source if/hasattr chain
-        # that Cin called out as defeating the purpose of the registry refactor.
-        download_clients = {}
-        try:
-            if download_orchestrator and hasattr(download_orchestrator, 'configured_clients'):
-                download_clients = dict(download_orchestrator.configured_clients())
-        except Exception as e:
-            logger.warning(f"[Redownload] Error getting download clients: {e}")
-
-        if not download_clients:
-            # Fallback: use orchestrator directly
-            download_clients = {'default': download_orchestrator}
-
-        logger.info(f"[Redownload] Streaming search across {len(download_clients)} sources: {list(download_clients.keys())}")
-
-        def _search_one_source(source_name, client):
-            """Search a single download source and return formatted candidates."""
-            source_candidates = []
-            # These clients are searched directly rather than through the
-            # orchestrator, so nothing else would enter the item's profile
-            # context and quality_tier_for_source would ask each source for the
-            # tier the APP default wants.
-            from core.quality.source_map import quality_profile_context
-            for _qi, q in enumerate(search_queries):
-                try:
-                    with quality_profile_context(quality_profile_id):
-                        tracks_result, _ = run_async(client.search(q, timeout=20))
-                    if not tracks_result:
-                        continue
-                    valid = get_valid_candidates(tracks_result, track_obj, q,
-                                                 quality_profile_id)
-                    for candidate in valid:
-                        is_bl = database.is_blacklisted(candidate.username, candidate.filename)
-                        display_name = os.path.basename(candidate.filename.replace('\\', '/'))
-                        ext = os.path.splitext(display_name)[1].lstrip('.').upper()
-                        quality = ext if ext in ('FLAC', 'MP3', 'OPUS', 'OGG', 'M4A', 'WAV') else candidate.quality or ''
-                        svc = source_name if source_name != 'default' else 'hybrid'
-                        uname = candidate.username
-                        if uname in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon'):
-                            svc = uname
-                        source_candidates.append({
-                            'username': uname,
-                            'filename': candidate.filename,
-                            'display_name': display_name,
-                            'size': candidate.size or 0,
-                            'size_display': f"{(candidate.size or 0) / 1048576:.1f} MB",
-                            'bitrate': candidate.bitrate or 0,
-                            'quality': quality,
-                            'duration': candidate.duration or 0,
-                            'confidence': round(getattr(candidate, 'confidence', 0), 3),
-                            'source_service': svc,
-                            'source_query': q,
-                            'blacklisted': is_bl,
-                            'free_upload_slots': getattr(candidate, 'free_upload_slots', 0),
-                            'upload_speed': getattr(candidate, 'upload_speed', 0),
-                            'queue_length': getattr(candidate, 'queue_length', 0),
-                        })
-                except Exception as e:
-                    logger.debug(f"[Redownload] {source_name} search failed for query '{q}': {e}")
-            # Deduplicate within source
-            seen = set()
-            unique = []
-            for c in source_candidates:
-                key = f"{c['username']}|{c['filename']}"
-                if key not in seen:
-                    seen.add(key)
-                    unique.append(c)
-            unique.sort(key=lambda c: (-int(not c['blacklisted']), -c['confidence']))
-            return unique
-
-        # Stream NDJSON — one line per source as it completes
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
-        def generate_stream():
-            with ThreadPoolExecutor(max_workers=4) as pool:
-                futures = {pool.submit(_search_one_source, name, client): name for name, client in download_clients.items()}
-                for future in as_completed(futures):
-                    source_name = futures[future]
-                    try:
-                        results = future.result()
-                        yield json.dumps({'source': source_name, 'candidates': results}) + '\n'
-                    except Exception as e:
-                        yield json.dumps({'source': source_name, 'candidates': [], 'error': str(e)}) + '\n'
-            yield json.dumps({'done': True}) + '\n'
-
-        return app.response_class(generate_stream(), mimetype='application/x-ndjson', headers={'X-Accel-Buffering': 'no'})
+        return _inspect_sources_stream(
+            track_obj, quality_profile_id, log_tag='Redownload',
+            upgrade=bool(data.get('upgrade')),
+        )
 
     except Exception as e:
         logger.error(f"Error in redownload source search: {e}", exc_info=True)
@@ -10947,12 +11437,117 @@ def redownload_start(track_id):
     dl_err = check_download_permission()
     if dl_err:
         return dl_err
-    return _redownload_start_impl(track_id)
+    return _redownload_start_impl(_library_track_route_id(track_id))
 
 
+# CANDIDATE INSPECTOR — the same per-source view, opened from a failed
+# download or a wishlist item instead of a library track.
+
+@app.route('/api/downloads/task/<task_id>/inspect', methods=['POST'])
+def inspect_task_sources(task_id):
+    """Every source's hits for a download task's track, with the verdicts.
+    A pick goes back through /download-candidate."""
+    try:
+        with tasks_lock:
+            task = download_tasks.get(task_id)
+            track_info = dict(task.get('track_info') or {}) if isinstance(task, dict) else None
+        if track_info is None:
+            return jsonify({"success": False, "error": "Task not found"}), 404
+        if not track_info.get('name'):
+            return jsonify({"success": False, "error": "This download has no track name to search for"}), 400
+        return _inspect_sources_stream(
+            _pinned_batch.track_object(track_info),
+            track_info.get('quality_profile_id'),
+            log_tag='Inspector',
+        )
+    except Exception as e:
+        logger.error(f"Error in task source inspection: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _wishlist_track_for_inspector(track_id):
+    """The wishlist row, formatted the way wishlist downloads format it, for
+    the current profile. None when it isn't there (or isn't theirs)."""
+    if not track_id:
+        return None
+    from core.wishlist.service import WishlistService
+    row = get_database().get_wishlist_track(str(track_id), profile_id=get_current_profile_id())
+    if not row:
+        return None
+    return WishlistService.format_track_for_download(row)
+
+
+@app.route('/api/wishlist/inspect', methods=['POST'])
+def inspect_wishlist_sources():
+    """Search manually for one wishlist track: every source, with the verdicts."""
+    try:
+        data = request.get_json() or {}
+        track = _wishlist_track_for_inspector(data.get('track_id'))
+        if not track:
+            return jsonify({"success": False, "error": "That track isn't on your wishlist"}), 404
+        return _inspect_sources_stream(
+            _pinned_batch.track_object(track), track.get('quality_profile_id'),
+            log_tag='Inspector',
+        )
+    except Exception as e:
+        logger.error(f"Error in wishlist source inspection: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/wishlist/inspect/download', methods=['POST'])
+def download_wishlist_pick():
+    """Download the exact file picked in the inspector for a wishlist track.
+
+    A pinned one-task batch: that file, no hunting for another if it fails.
+    The task carries the wishlist row's own metadata, so a success tags it
+    properly and takes it off the wishlist the usual way.
+    """
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
+    try:
+        data = request.get_json() or {}
+        candidate = data.get('candidate') or {}
+        if not candidate.get('username') or not candidate.get('filename'):
+            return jsonify({"success": False, "error": "candidate with username and filename required"}), 400
+        if not _pinned_batch.is_pinnable(candidate.get('username')):
+            return jsonify({"success": False, "error": (
+                "Torrent and Usenet hits are whole releases and can't be picked one track at a time. "
+                "Use Download on the wishlist instead.")}), 400
+        track = _wishlist_track_for_inspector(data.get('track_id'))
+        if not track:
+            return jsonify({"success": False, "error": "That track isn't on your wishlist"}), 404
+
+        from core.downloads.decisions import is_quality_override
+        name = f"Wishlist: {track.get('artist_name') or 'Unknown'} - {track.get('name') or 'Unknown'}"
+        batch_id, task_ids = _pinned_batch.create_pinned_batch(
+            [_pinned_batch.PinnedFile(
+                candidate=_pinned_batch.candidate_from_result(candidate),
+                track_info=dict(track),
+            )],
+            name=name, profile_id=get_current_profile_id(),
+            source_page='Wishlist', playlist_prefix='wishlist_pick',
+        )
+        if is_quality_override(data.get('override')):
+            with tasks_lock:
+                for task_id in task_ids:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['_override_quality'] = True
+        _pinned_batch.dispatch_pinned_batch(batch_id, task_ids, _pinned_batch_deps())
+        add_activity_item("", "Wishlist Download Started", name, "Now")
+        return jsonify({"success": True, "batch_id": batch_id, "task_id": task_ids[0]})
+    except Exception as e:
+        logger.error(f"Error starting wishlist pick: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+
+
+from core.discovery.blocked import WORKS as _BLOCKED_WORKS, hide_blocked_in_response as _hide_blocked_artists  # noqa: E402
 
 
 @app.route('/api/library/radio')
+@_hide_blocked_artists({'tracks': _BLOCKED_WORKS})
 def library_radio():
     """Get a smart queue of similar tracks for radio mode auto-play.
 
@@ -13161,7 +13756,82 @@ def parse_youtube_playlist(url):
 # FILE ORGANIZATION TEMPLATE ENGINE
 # ===================================================================
 
-def _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name='', album_name='', year=''):
+def _first_m3u_entry(m3u_content):
+    """The first real path in an M3U body, skipping #EXTM3U/#EXTINF/#STATUS."""
+    for line in str(m3u_content or "").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            return line
+    return None
+
+
+def _existing_album_folder_ignoring_brackets(candidate):
+    """A sibling of ``candidate`` that differs only in its bracketed parts.
+
+    The template is rendered here with artist/album/year alone, so every
+    variable needing richer metadata comes out empty and the name is a
+    near-miss: "[2017] Audiotree Live" where the audio is really in
+    "[2017][EP][Live] Audiotree Live". Creating that near-miss leaves an empty
+    directory a media server indexes as a second album, so before falling back
+    to it, look for the folder it was trying to name.
+
+    Only an unambiguous single match counts — two siblings that both reduce to
+    the same stem mean the brackets are what tells them apart, and guessing
+    between them would be worse than not guessing.
+    """
+    try:
+        if os.path.isdir(candidate):
+            return candidate
+        parent = os.path.dirname(candidate)
+        if not os.path.isdir(parent):
+            return None
+
+        def stem(name):
+            return re.sub(r"\s+", " ", re.sub(r"\[[^\]]*\]", "", name)).strip().lower()
+
+        target = stem(os.path.basename(candidate))
+        if not target:
+            return None
+        hits = [d for d in os.listdir(parent)
+                if os.path.isdir(os.path.join(parent, d)) and stem(d) == target]
+        if len(hits) == 1:
+            return os.path.join(parent, hits[0])
+    except OSError as exc:
+        logger.debug("[M3U] could not look for an existing album folder: %s", exc)
+    return None
+
+
+def _album_folder_from_track_path(track_path):
+    """The directory holding a track, or None when it can't be established.
+
+    Resolves through the shared library path resolver first: stored paths are
+    whatever the media server reported (``/music/...`` on a split-mount Docker
+    setup), which is not necessarily a path this process can see.
+    """
+    if not track_path:
+        return None
+    try:
+        from core.library.path_resolver import resolve_library_file_path
+        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+        resolved = resolve_library_file_path(
+            str(track_path), transfer_folder=transfer_dir, config_manager=config_manager)
+        if resolved and os.path.isfile(resolved):
+            folder = os.path.dirname(os.path.abspath(resolved))
+            # Only inside the library. The resolver also probes the slskd
+            # download folder, and a track row still pointing there would put
+            # the playlist among the incoming files rather than in the library.
+            root = os.path.abspath(os.path.normpath(transfer_dir))
+            if folder == root or folder.startswith(root + os.sep):
+                return folder
+            logger.debug("[M3U] %s resolves outside the library (%s) — using the template",
+                         track_path, folder)
+    except Exception as exc:  # noqa: BLE001 - fall back to the template
+        logger.debug("[M3U] could not locate the album folder from %s: %s", track_path, exc)
+    return None
+
+
+def _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name='', album_name='', year='',
+                        sample_track_path=None):
     """
     Compute the target folder for an M3U file using the template system.
 
@@ -13171,6 +13841,20 @@ def _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name='
     Returns: absolute folder path
     """
     if context_type == 'album' and artist_name and album_name:
+        # Prefer the folder the album's audio is ACTUALLY in over re-deriving it
+        # from the template. The template is evaluated here with only
+        # artist/album/year — these callers are HTTP endpoints and hold nothing
+        # else — so any variable needing richer metadata renders empty and the
+        # M3U lands beside the album instead of inside it. $atypes is the live
+        # example: "[$year]$atypes $album" computes "[2017] Audiotree Live"
+        # while the audio sits in "[2017][EP][Live] Audiotree Live", and the
+        # os.makedirs below then CREATES the empty one, which a media server
+        # indexes as a second album. The tracks are already imported by the time
+        # an M3U is written, so their own directory is the answer, and it cannot
+        # drift from the template the way a re-derivation can.
+        located = _album_folder_from_track_path(sample_track_path)
+        if located:
+            return located
         template_context = {
             'artist': artist_name,
             'albumartist': artist_name,
@@ -13183,7 +13867,8 @@ def _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name='
         }
         folder_path, _ = _get_file_path_from_template(template_context, 'album_path')
         if folder_path:
-            return os.path.join(transfer_dir, folder_path)
+            templated = os.path.join(transfer_dir, folder_path)
+            return _existing_album_folder_ignoring_brackets(templated) or templated
         # Fallback
         artist_sanitized = _sanitize_filename(artist_name)
         album_sanitized = _sanitize_filename(album_name)
@@ -13306,8 +13991,6 @@ def _get_album_type_display(raw_type, track_count) -> str:
     # so both need to match here.
     if raw in ('compilation', 'compile'):
         return 'Compilation'
-    if raw == 'album':
-        return 'Album'
     if raw in ('single', 'ep'):
         # Match download-pipeline logic: Spotify labels both singles and EPs
         # as 'single', so final classification is by track count. Applying the
@@ -13319,7 +14002,10 @@ def _get_album_type_display(raw_type, track_count) -> str:
             return 'EP'
         return 'Album'
 
-    # Unknown/missing — infer from track count
+    # 'album', missing, or anything unrecognized: a bare 'album' is the
+    # default fallback at every upstream layer — not a signal. Verify
+    # against the track count when we have one; with no count, keep the
+    # "Album" default rather than guessing. Mirrors core/imports/paths.py.
     if tc <= 0:
         return 'Album'
     if tc <= 3:
@@ -13386,6 +14072,7 @@ def _apply_path_template(template: str, context: dict) -> str:
     _bracket_map = {
         'albumartist': album_artist_value,
         'albumtype': clean_context.get('albumtype', 'Album'),
+        'atypes': clean_context.get('atypes', ''),
         'playlist': clean_context.get('playlist_name', ''),
         'artistletter': _shared_artist_letter(clean_context.get('artist', 'U')),
         'artist': clean_context.get('artist', 'Unknown Artist'),
@@ -13405,6 +14092,11 @@ def _apply_path_template(template: str, context: dict) -> str:
     result = result.replace('$disambiguation', clean_context.get('disambiguation', ''))
     result = result.replace('$albumartist', album_artist_value)
     result = result.replace('$albumtype', clean_context.get('albumtype', 'Album'))
+    # This replacer is a hand-maintained copy of core.imports.paths, so a new
+    # variable has to be added here too or it survives into the folder name:
+    # an album template of "[$year]$atypes $album" put the M3U in a directory
+    # literally called "[2019]$atypes Tokyo".
+    result = result.replace('$atypes', clean_context.get('atypes', ''))
     result = result.replace('$playlist', clean_context.get('playlist_name', ''))
 
     # Medium length variables
@@ -14021,10 +14713,11 @@ def start_simple_background_monitor():
 def check_and_recover_stuck_flags():
     """
     Check if wishlist_auto_processing or watchlist_auto_scanning flags are stuck.
-    If a flag has been True for more than 2 hours (7200 seconds), reset it.
-    This prevents indefinite blocking when processes crash without cleanup.
+    If a flag has been True for more than 15 minutes (900 seconds) with no
+    sign of life, reset it. This prevents indefinite blocking when processes
+    crash without cleanup.
     """
-    global watchlist_auto_scanning, watchlist_auto_scanning_timestamp
+    global watchlist_auto_scanning, watchlist_auto_scanning_timestamp, watchlist_auto_scanning_heartbeat
 
     import time
     current_time = time.time()
@@ -14048,13 +14741,19 @@ def check_and_recover_stuck_flags():
 
     # Check watchlist flag
     if watchlist_auto_scanning:
-        time_stuck = current_time - watchlist_auto_scanning_timestamp
+        # H7: the scan thread heartbeats while alive — only treat the flag as
+        # stuck when the heartbeat itself is stale. A healthy multi-hour scan
+        # (mandatory per-artist sleeps exceed the 900s timeout) must never be
+        # reset mid-run; that is what started overlapping scans.
+        last_sign_of_life = max(watchlist_auto_scanning_timestamp, watchlist_auto_scanning_heartbeat)
+        time_stuck = current_time - last_sign_of_life
         if time_stuck > stuck_timeout:
             stuck_minutes = time_stuck / 60
             logger.info(f"[Stuck Detection] Watchlist auto-scanning flag has been stuck for {stuck_minutes:.1f} minutes - RESETTING")
             with watchlist_timer_lock:
                 watchlist_auto_scanning = False
                 watchlist_auto_scanning_timestamp = 0
+                watchlist_auto_scanning_heartbeat = 0
             return True
 
     return False
@@ -14079,16 +14778,21 @@ def is_wishlist_actually_processing():
 def is_watchlist_actually_scanning():
     """
     Check if watchlist is truly scanning (not just flag stuck).
-    Returns True only if flag is set AND timestamp is recent (< 15 minutes).
+    Returns True only if flag is set AND there has been a sign of life
+    (scan start or heartbeat) within the last 15 minutes.
     """
-    global watchlist_auto_scanning, watchlist_auto_scanning_timestamp
+    global watchlist_auto_scanning, watchlist_auto_scanning_timestamp, watchlist_auto_scanning_heartbeat
 
     if not watchlist_auto_scanning:
         return False
 
     import time
     current_time = time.time()
-    time_since_start = current_time - watchlist_auto_scanning_timestamp
+    # H7: heartbeat-aware — a live scan refreshes the heartbeat, so only a
+    # stale heartbeat means stuck (the start timestamp alone goes stale on
+    # every healthy multi-hour scan).
+    last_sign_of_life = max(watchlist_auto_scanning_timestamp, watchlist_auto_scanning_heartbeat)
+    time_since_start = current_time - last_sign_of_life
 
     # If more than 15 minutes, flag is stuck - auto-recover and return False
     if time_since_start > 900:  # 15 minutes
@@ -14438,6 +15142,7 @@ def stop_duplicate_cleaner():
 # ===============================
 
 from core.downloads.validation import (
+    evaluate_candidates,
     get_valid_candidates,
     init as _init_download_validation,
 )
@@ -14826,6 +15531,7 @@ def _build_task_worker_deps():
         on_download_completed=lambda b, t, success: _on_download_completed(b, t, success=success),
         recover_worker_slot=_recover_worker_slot,
         try_version_mismatch_fallback=_try_version_mismatch_fallback_for_worker,
+        evaluate_candidates=evaluate_candidates,
     )
 
 
@@ -16346,51 +17052,73 @@ def _record_sync_history_completion(batch_id, batch):
 # == SERVER PLAYLIST MANAGER ==
 # ===============================
 
+def _server_playlist_scope(active_server):
+    from core.sync.server_playlist_access import scope_for
+    base = media_server_engine.client(active_server) if active_server else None
+    return scope_for(active_server, base, get_database(), get_current_profile_id(),
+                     bool(getattr(g, 'is_admin', False)))
+
+
+def _server_playlist_guard(active_server, playlist_id, playlist_name):
+    """(client, playlist_id, playlist_name, refusal) for one playlist edit (#1414).
+
+    the admin gets the shared client and what it asked for. anyone else gets
+    their own server connection and the playlist resolved from their own
+    listing, or a 403 when it is not theirs."""
+    from core.sync.server_playlist_access import resolve_allowed
+    scope = _server_playlist_scope(active_server)
+    if scope.is_admin:
+        return scope.client, playlist_id, playlist_name, None
+    hit = resolve_allowed(active_server, scope, playlist_id, playlist_name)
+    if hit is None:
+        logger.warning(f"[ServerPlaylist] profile {get_current_profile_id()} refused playlist "
+                       f"id={playlist_id} name='{playlist_name}': not theirs")
+        return scope.client, playlist_id, playlist_name, (
+            jsonify({"success": False, "error": "not_your_playlist"}), 403)
+    return scope.client, hit[0], hit[1], None
+
+
 @app.route('/api/server/playlists', methods=['GET'])
 def get_server_playlists():
-    """Get all playlists from the active media server."""
+    """Playlists on the active media server, as this profile may see them.
+
+    #1414: this listed every playlist on the server to every profile. a
+    profile now sees its own (through its own server user, or on the shared
+    account the ones its mirrors made); the admin also gets everyone else's
+    under ``others``, grouped by owner."""
     try:
         active_server = config_manager.get_active_media_server()
         logger.info(f"[ServerPlaylists] Active server: {active_server}")
         if not active_server:
             return jsonify({"success": False, "error": "No media server configured"}), 400
-
-        playlists_data = []
-        if active_server == 'plex' and media_server_engine.client('plex') and media_server_engine.client('plex').is_connected():
-            # Use raw Plex API to get playlist metadata without fetching all tracks
-            try:
-                raw_playlists = media_server_engine.client('plex').server.playlists()
-                logger.info(f"[ServerPlaylists] Plex returned {len(raw_playlists)} total playlists")
-                for playlist in raw_playlists:
-                    if getattr(playlist, 'playlistType', None) == 'audio':
-                        playlists_data.append({
-                            'id': str(playlist.ratingKey),
-                            'name': playlist.title,
-                            'track_count': playlist.leafCount,
-                        })
-                logger.info(f"[ServerPlaylists] Found {len(playlists_data)} audio playlists")
-            except Exception as e:
-                logger.error(f"[ServerPlaylists] Error fetching Plex playlists: {e}", exc_info=True)
-                return jsonify({"success": False, "error": f"Plex error: {str(e)}"}), 500
-        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin') and media_server_engine.client('jellyfin').is_connected():
-            for pl in media_server_engine.client('jellyfin').get_all_playlists():
-                playlists_data.append({
-                    'id': pl.id,
-                    'name': pl.title,
-                    'track_count': pl.leaf_count,
-                })
-        elif active_server == 'navidrome' and media_server_engine.client('navidrome') and media_server_engine.client('navidrome').is_connected():
-            for pl in media_server_engine.client('navidrome').get_all_playlists():
-                playlists_data.append({
-                    'id': pl.id,
-                    'name': pl.title,
-                    'track_count': pl.leaf_count,
-                })
-        else:
-            logger.warning(f"[ServerPlaylists] Server '{active_server}' not connected. plex_client={media_server_engine.client('plex') is not None}, jellyfin_client={media_server_engine.client('jellyfin') is not None}, navidrome_client={media_server_engine.client('navidrome') is not None}")
+        base = media_server_engine.client(active_server)
+        if not base or not base.is_connected():
+            logger.warning(f"[ServerPlaylists] Server '{active_server}' not connected")
             return jsonify({"success": False, "error": f"{active_server} not connected"}), 400
 
-        return jsonify({"success": True, "server_type": active_server, "playlists": playlists_data})
+        from core.sync.server_playlist_access import admin_split, visible_playlists
+        scope = _server_playlist_scope(active_server)
+
+        def _row(pl):
+            return {'id': str(getattr(pl, 'id', '')), 'name': getattr(pl, 'title', ''),
+                    'track_count': getattr(pl, 'leaf_count', 0) or 0,
+                    'owner': getattr(pl, 'owner', None)}
+
+        others = []
+        if scope.is_admin:
+            mine, groups = admin_split(active_server, base, get_database())
+            others = [{'owner': grp['owner'], 'profile': grp['profile'],
+                       'playlists': [_row(p) for p in grp['playlists']]} for grp in groups]
+        else:
+            mine = visible_playlists(active_server, scope)
+        return jsonify({
+            "success": True,
+            "server_type": active_server,
+            "playlists": [_row(p) for p in mine],
+            "others": others,
+            "scope": 'admin' if scope.is_admin else ('own' if scope.acting_as else 'shared'),
+            "acting_as": scope.acting_as,
+        })
     except Exception as e:
         logger.error(f"Error getting server playlists: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
@@ -16402,20 +17130,26 @@ def get_server_playlist_tracks(playlist_id):
     try:
         active_server = config_manager.get_active_media_server()
         playlist_name = request.args.get('name', '')
+        # #1414: a profile reaches only its own playlists, through its own
+        # server user when it has one, and acts on the playlist it was checked for
+        _sp_client, playlist_id, playlist_name, _sp_refusal = _server_playlist_guard(
+            active_server, playlist_id, playlist_name)
+        if _sp_refusal is not None:
+            return _sp_refusal
 
         # Get tracks from server
         server_tracks = []
-        if active_server == 'plex' and media_server_engine.client('plex'):
+        if active_server == 'plex' and _sp_client:
             try:
                 # Try by ID first, fall back to name lookup (ID changes when playlist is recreated)
                 raw_playlist = None
                 try:
-                    raw_playlist = media_server_engine.client('plex').server.fetchItem(int(playlist_id))
+                    raw_playlist = _sp_client.server.fetchItem(int(playlist_id))
                 except Exception as e:
                     logger.debug("plex playlist fetchItem failed: %s", e)
                 if not raw_playlist and playlist_name:
                     try:
-                        raw_playlist = media_server_engine.client('plex').server.playlist(playlist_name)
+                        raw_playlist = _sp_client.server.playlist(playlist_name)
                     except Exception as e:
                         logger.debug("plex playlist by-name lookup failed: %s", e)
                 if not raw_playlist:
@@ -16427,8 +17161,8 @@ def get_server_playlist_tracks(playlist_id):
                 if raw_playlist:
                     if not playlist_name:
                         playlist_name = raw_playlist.title
-                    plex_base = getattr(media_server_engine.client('plex').server, '_baseurl', '') or ''
-                    plex_token = getattr(media_server_engine.client('plex').server, '_token', '') or ''
+                    plex_base = getattr(_sp_client.server, '_baseurl', '') or ''
+                    plex_token = getattr(_sp_client.server, '_token', '') or ''
                     if not plex_base:
                         # Fallback: get from config
                         _pc = config_manager.get_plex_config()
@@ -16453,8 +17187,8 @@ def get_server_playlist_tracks(playlist_id):
                         })
             except Exception as e:
                 logger.error(f"[ServerPlaylistTracks] Plex error: {e}", exc_info=True)
-        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
-            tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id)
+        elif active_server == 'jellyfin' and _sp_client:
+            tracks = _sp_client.get_playlist_tracks(playlist_id)
             for t in (tracks or []):
                 raw = t._data if hasattr(t, '_data') else {}
                 artists = raw.get('Artists', [])
@@ -16479,8 +17213,8 @@ def get_server_playlist_tracks(playlist_id):
                     'duration': t.duration,
                     'thumb': thumb,
                 })
-        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
-            tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id)
+        elif active_server == 'navidrome' and _sp_client:
+            tracks = _sp_client.get_playlist_tracks(playlist_id)
             for t in (tracks or []):
                 raw = t._data if hasattr(t, '_data') else {}
                 # Navidrome cover art via Subsonic API
@@ -16667,7 +17401,13 @@ def server_playlist_align(playlist_id):
             return jsonify({"success": False, "error": "no matched tracks to align"}), 400
 
         active_server = config_manager.get_active_media_server()
-        client = media_server_engine.client(active_server) if active_server else None
+        # #1414: a profile reaches only its own playlists, through its own
+        # server user when it has one, and acts on the playlist it was checked for
+        _sp_client, playlist_id, playlist_name, _sp_refusal = _server_playlist_guard(
+            active_server, playlist_id, playlist_name)
+        if _sp_refusal is not None:
+            return _sp_refusal
+        client = _sp_client if active_server else None
         if active_server not in ('navidrome', 'plex', 'jellyfin') or not client:
             return jsonify({"success": False,
                             "error": "Align isn't supported on this server yet"}), 400
@@ -16761,6 +17501,12 @@ def server_playlist_replace_track(playlist_id):
             return jsonify({"success": False, "error": "playlist_name required"}), 400
 
         active_server = config_manager.get_active_media_server()
+        # #1414: a profile reaches only its own playlists, through its own
+        # server user when it has one, and acts on the playlist it was checked for
+        _sp_client, playlist_id, playlist_name, _sp_refusal = _server_playlist_guard(
+            active_server, playlist_id, playlist_name)
+        if _sp_refusal is not None:
+            return _sp_refusal
 
         # Persist the correction, exactly as Find & Add does. This endpoint
         # used to edit the server playlist and store NOTHING, so a fixed bad
@@ -16787,10 +17533,10 @@ def server_playlist_replace_track(playlist_id):
                 _src_track_id, active_server, new_track_id, _new_track_title,
                 _src_title, _src_artist, source=_src_source)
 
-        if active_server == 'plex' and media_server_engine.client('plex'):
+        if active_server == 'plex' and _sp_client:
             # ID-first, name-fallback (Plex deletes + recreates on edit
             # so the cached rating key can be stale).
-            plex_server = media_server_engine.client('plex').server
+            plex_server = _sp_client.server
             raw_playlist = None
             try:
                 raw_playlist = plex_server.fetchItem(int(playlist_id))
@@ -16810,7 +17556,7 @@ def server_playlist_replace_track(playlist_id):
             replaced = False
             for item in raw_playlist.items():
                 if str(item.ratingKey) == str(old_track_id) and not replaced:
-                    new_item = media_server_engine.client('plex').server.fetchItem(int(new_track_id))
+                    new_item = _sp_client.server.fetchItem(int(new_track_id))
                     if new_item:
                         new_tracks.append(new_item)
                         replaced = True
@@ -16823,14 +17569,14 @@ def server_playlist_replace_track(playlist_id):
                 # Delete old and recreate directly (avoid update_playlist's backup logic)
                 raw_playlist.delete()
                 from plexapi.playlist import Playlist
-                new_pl = Playlist.create(media_server_engine.client('plex').server, playlist_name, items=new_tracks)
+                new_pl = Playlist.create(_sp_client.server, playlist_name, items=new_tracks)
                 _persist_replacement()
                 return jsonify({"success": True, "message": "Track replaced", "new_playlist_id": str(new_pl.ratingKey)})
             else:
                 return jsonify({"success": False, "error": "Old track not found in playlist"}), 404
 
-        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
-            _jf = media_server_engine.client('jellyfin')
+        elif active_server == 'jellyfin' and _sp_client:
+            _jf = _sp_client
             current_tracks, _effective_id = _jellyfin_playlist_tracks_fresh(_jf, playlist_id, playlist_name)
             new_track_ids = []
             replaced = False
@@ -16852,8 +17598,8 @@ def server_playlist_replace_track(playlist_id):
                                 "new_playlist_id": _jellyfin_recreated_playlist_id(playlist_name)})
             return jsonify({"success": False, "error": "Old track not found"}), 404
 
-        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
-            current_tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id)
+        elif active_server == 'navidrome' and _sp_client:
+            current_tracks = _sp_client.get_playlist_tracks(playlist_id)
             new_track_ids = []
             replaced = False
             for t in (current_tracks or []):
@@ -16866,7 +17612,7 @@ def server_playlist_replace_track(playlist_id):
 
             if replaced:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_track_ids]
-                if not media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
+                if not _sp_client.create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
                     return jsonify({"success": False, "error": "Navidrome playlist write failed or could not be verified"}), 502
                 _persist_replacement()
                 return jsonify({"success": True, "message": "Track replaced"})
@@ -16965,12 +17711,18 @@ def server_playlist_add_track(playlist_id):
             return jsonify({"success": False, "error": "playlist_name required"}), 400
 
         active_server = config_manager.get_active_media_server()
+        # #1414: a profile reaches only its own playlists, through its own
+        # server user when it has one, and acts on the playlist it was checked for
+        _sp_client, playlist_id, playlist_name, _sp_refusal = _server_playlist_guard(
+            active_server, playlist_id, playlist_name)
+        if _sp_refusal is not None:
+            return _sp_refusal
 
-        if active_server == 'plex' and media_server_engine.client('plex'):
+        if active_server == 'plex' and _sp_client:
             # ID-first, name-fallback — Plex deletes + recreates playlists
             # on edit so the rating key the frontend cached can be stale.
             # The GET tracks endpoint uses the same lookup chain.
-            plex_server = media_server_engine.client('plex').server
+            plex_server = _sp_client.server
             raw_playlist = None
             try:
                 raw_playlist = plex_server.fetchItem(int(playlist_id))
@@ -17025,9 +17777,9 @@ def server_playlist_add_track(playlist_id):
             _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title or new_item.title, source_title, source_artist, source_provider)
             return jsonify({"success": True, "message": "Track added", "new_playlist_id": new_id})
 
-        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
+        elif active_server == 'jellyfin' and _sp_client:
             from core.sync.playlist_edit import plan_playlist_add
-            jf = media_server_engine.client('jellyfin')
+            jf = _sp_client
             current_tracks = jf.get_playlist_tracks(playlist_id) or []
             track_ids = [str(t.ratingKey) for t in current_tracks]
             # Matching an unmatched source to a track already in the playlist
@@ -17048,16 +17800,16 @@ def server_playlist_add_track(playlist_id):
             _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist, source_provider)
             return jsonify({"success": True, "message": "Track linked" if not plan['should_insert'] else "Track added"})
 
-        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
+        elif active_server == 'navidrome' and _sp_client:
             from core.sync.playlist_edit import plan_playlist_add
-            current_tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id) or []
+            current_tracks = _sp_client.get_playlist_tracks(playlist_id) or []
             track_ids = [str(t.ratingKey) for t in current_tracks]
             # Matching an unmatched source to a track already in the playlist
             # is a LINK, not a second copy — don't duplicate it (#768).
             plan = plan_playlist_add(track_ids, track_id, is_link=bool(source_track_id), position=position)
             if plan['should_insert']:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in plan['new_ids']]
-                if not media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
+                if not _sp_client.create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
                     return jsonify({"success": False, "error": "Navidrome playlist write failed or could not be verified"}), 502
             _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist, source_provider)
             return jsonify({"success": True, "message": "Track linked" if not plan['should_insert'] else "Track added"})
@@ -17082,11 +17834,17 @@ def server_playlist_remove_track(playlist_id):
             return jsonify({"success": False, "error": "playlist_name required"}), 400
 
         active_server = config_manager.get_active_media_server()
+        # #1414: a profile reaches only its own playlists, through its own
+        # server user when it has one, and acts on the playlist it was checked for
+        _sp_client, playlist_id, playlist_name, _sp_refusal = _server_playlist_guard(
+            active_server, playlist_id, playlist_name)
+        if _sp_refusal is not None:
+            return _sp_refusal
 
-        if active_server == 'plex' and media_server_engine.client('plex'):
+        if active_server == 'plex' and _sp_client:
             # ID-first, name-fallback (Plex deletes + recreates on edit
             # so the cached rating key can be stale).
-            plex_server = media_server_engine.client('plex').server
+            plex_server = _sp_client.server
             raw_playlist = None
             try:
                 raw_playlist = plex_server.fetchItem(int(playlist_id))
@@ -17116,13 +17874,13 @@ def server_playlist_remove_track(playlist_id):
             raw_playlist.delete()
             if new_items:
                 from plexapi.playlist import Playlist
-                new_pl = Playlist.create(media_server_engine.client('plex').server, playlist_name, items=new_items)
+                new_pl = Playlist.create(_sp_client.server, playlist_name, items=new_items)
                 return jsonify({"success": True, "message": "Track removed", "new_playlist_id": str(new_pl.ratingKey)})
             return jsonify({"success": True, "message": "Track removed (playlist now empty)"})
 
-        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
+        elif active_server == 'jellyfin' and _sp_client:
             from core.sync.playlist_edit import remove_one_occurrence
-            _jf = media_server_engine.client('jellyfin')
+            _jf = _sp_client
             current_tracks, _effective_id = _jellyfin_playlist_tracks_fresh(_jf, playlist_id, playlist_name)
             track_ids = [str(t.ratingKey) for t in current_tracks]
             # Remove ONE occurrence, not every copy — duplicates are the same
@@ -17136,16 +17894,16 @@ def server_playlist_remove_track(playlist_id):
             return jsonify({"success": True, "message": "Track removed",
                             "new_playlist_id": _jellyfin_recreated_playlist_id(playlist_name)})
 
-        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
+        elif active_server == 'navidrome' and _sp_client:
             from core.sync.playlist_edit import remove_one_occurrence
-            current_tracks = media_server_engine.client('navidrome').get_playlist_tracks(playlist_id) or []
+            current_tracks = _sp_client.get_playlist_tracks(playlist_id) or []
             track_ids = [str(t.ratingKey) for t in current_tracks]
             # Remove ONE occurrence, not every copy (#768).
             new_ids, removed = remove_one_occurrence(track_ids, remove_track_id)
             if not removed:
                 return jsonify({"success": False, "error": "Track not found in playlist"}), 404
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_ids]
-            if not media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
+            if not _sp_client.create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id):
                 return jsonify({"success": False, "error": "Navidrome playlist write failed or could not be verified"}), 502
             return jsonify({"success": True, "message": "Track removed"})
 
@@ -17170,9 +17928,15 @@ def server_playlist_delete(playlist_id):
             return jsonify({"success": False, "error": "playlist_name required"}), 400
 
         active_server = config_manager.get_active_media_server()
+        # #1414: a profile reaches only its own playlists, through its own
+        # server user when it has one, and acts on the playlist it was checked for
+        _sp_client, playlist_id, playlist_name, _sp_refusal = _server_playlist_guard(
+            active_server, playlist_id, playlist_name)
+        if _sp_refusal is not None:
+            return _sp_refusal
 
-        if active_server == 'plex' and media_server_engine.client('plex'):
-            plex_server = media_server_engine.client('plex').server
+        if active_server == 'plex' and _sp_client:
+            plex_server = _sp_client.server
             raw_playlist = None
             try:
                 raw_playlist = plex_server.fetchItem(int(playlist_id))
@@ -17189,8 +17953,8 @@ def server_playlist_delete(playlist_id):
             logger.info(f"[ServerPlaylist] Deleted Plex playlist '{playlist_name}' ({playlist_id})")
             return jsonify({"success": True, "message": "Playlist deleted"})
 
-        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
-            _jf = media_server_engine.client('jellyfin')
+        elif active_server == 'jellyfin' and _sp_client:
+            _jf = _sp_client
             if _jf.delete_playlist(playlist_id):
                 logger.info(f"[ServerPlaylist] Deleted Jellyfin playlist '{playlist_name}' ({playlist_id})")
                 return jsonify({"success": True, "message": "Playlist deleted"})
@@ -17206,8 +17970,8 @@ def server_playlist_delete(playlist_id):
                 return jsonify({"success": True, "message": "Playlist deleted"})
             return jsonify({"success": False, "error": "Playlist not found"}), 404
 
-        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
-            _nd = media_server_engine.client('navidrome')
+        elif active_server == 'navidrome' and _sp_client:
+            _nd = _sp_client
             if _nd.delete_playlist(playlist_id):
                 logger.info(f"[ServerPlaylist] Deleted Navidrome playlist '{playlist_name}' ({playlist_id})")
                 return jsonify({"success": True, "message": "Playlist deleted"})
@@ -17477,7 +18241,7 @@ def start_missing_tracks_process(playlist_id):
 
     # Log album context if provided
     if is_album_download and album_context and artist_context:
-        logger.info(f"[Artist Album] Received album context: '{album_context.get('name')}' by '{artist_context.get('name')}' ({album_context.get('album_type', 'album')})")
+        logger.info(f"[Artist Album] Received album context: '{album_context.get('name')}' by '{artist_context.get('name')}' ({album_context.get('album_type', 'album')}{', locked to its artist page section' if album_context.get('album_type_locked') else ''})")
         logger.info(f"   Release: {album_context.get('release_date', 'Unknown')}, Tracks: {album_context.get('total_tracks', len(tracks))}")
 
     # Log playlist folder mode if enabled
@@ -17969,6 +18733,61 @@ def get_spotify_playlists():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+def _spotify_playlist_public_response(playlist_id):
+    """Build a get_playlist_tracks-style response from the no-auth public path.
+
+    Used when the official Spotify API refuses the playlist metadata call
+    because the app owner's account has no active Premium subscription
+    (HTTP 403 "Active premium subscription required for the owner of the
+    app"). This is the same public source SoulSync's own playlist-link import
+    uses — no official API, no credentials. Fields the public source cannot
+    provide are honest empty values, never fabricated.
+    """
+    from core.spotify_public_scraper import scrape_spotify_embed
+    try:
+        from core.spotify_public_api import fetch_public_playlist_full
+        public = fetch_public_playlist_full(playlist_id)
+        complete = True
+    except Exception:
+        # Full public-API path failed — fall back to the embed scraper, which
+        # caps at ~100 tracks, so the result may be truncated.
+        public = scrape_spotify_embed('playlist', playlist_id)
+        complete = False
+    if not isinstance(public, dict) or public.get('error') or not public.get('tracks'):
+        err = public.get('error') if isinstance(public, dict) else None
+        raise RuntimeError(err or 'Public Spotify playlist fetch failed')
+    tracks = []
+    for t in public['tracks']:
+        artists = t.get('artists', [])
+        tracks.append({
+            'id': t.get('id', ''),
+            'name': t.get('name', ''),
+            'artists': artists if artists else [{'name': 'Unknown'}],
+            'album': {'name': '', 'images': []},
+            'duration_ms': t.get('duration_ms', 0),
+            'popularity': 0,
+            'spotify_track_id': t.get('id', ''),
+        })
+    # The full public-API path paginates to completion; only the embed
+    # scraper caps at ~100 tracks. A 100+ track count from the full path is
+    # a genuinely large playlist, not truncation.
+    possibly_truncated = not complete and len(tracks) >= 100
+    return jsonify({
+        'id': public.get('id', playlist_id),
+        'name': public.get('name', 'Unknown'),
+        'description': '',
+        'owner': public.get('subtitle', ''),
+        'public': True,
+        'collaborative': False,
+        'track_count': len(tracks),
+        'image_url': public.get('image_url') or None,
+        'snapshot_id': '',
+        'tracks': tracks,
+        'incomplete': possibly_truncated,
+        'expected_total': None,
+    })
+
+
 @app.route('/api/spotify/playlist/<playlist_id>', methods=['GET'])
 def get_playlist_tracks(playlist_id):
     """Fetches full track details for a specific playlist."""
@@ -18037,7 +18856,23 @@ def get_playlist_tracks(playlist_id):
         # Fetch raw playlist data to preserve full album objects
         from core.api_call_tracker import api_call_tracker
         api_call_tracker.record_call('spotify', endpoint='playlist')
-        playlist_data = client.sp.playlist(playlist_id)
+        try:
+            playlist_data = client.sp.playlist(playlist_id)
+        except Exception as playlist_err:
+            # The official API 403s when the Spotify account owning the app's
+            # credentials has no active Premium subscription ("Active premium
+            # subscription required for the owner of the app"). Fall back to
+            # the no-auth public path — the same one SoulSync's own
+            # playlist-link import uses — so the playlist still resolves.
+            # Every other error propagates unchanged.
+            from core.spotify_client import _is_premium_required_error
+            if not _is_premium_required_error(playlist_err):
+                raise
+            logger.warning(
+                f"Spotify playlist {playlist_id}: official API blocked "
+                f"(app owner lacks Premium); falling back to public fetch"
+            )
+            return _spotify_playlist_public_response(playlist_id)
 
         # Fetch all tracks with full album data
         tracks = []
@@ -18972,6 +19807,13 @@ def _build_watchlist_auto_scan_deps():
         global watchlist_auto_scanning_timestamp
         watchlist_auto_scanning_timestamp = value
 
+    def _get_hb():
+        return watchlist_auto_scanning_heartbeat
+
+    def _set_hb(value):
+        global watchlist_auto_scanning_heartbeat
+        watchlist_auto_scanning_heartbeat = value
+
     def _get_state():
         return watchlist_scan_state
 
@@ -18993,6 +19835,8 @@ def _build_watchlist_auto_scan_deps():
         _set_auto_scanning=_set_flag,
         _get_auto_scanning_timestamp=_get_ts,
         _set_auto_scanning_timestamp=_set_ts,
+        _get_auto_scanning_heartbeat=_get_hb,
+        _set_auto_scanning_heartbeat=_set_hb,
         _get_watchlist_scan_state=_get_state,
         _set_watchlist_scan_state=_set_state,
         get_deezer_client=_get_deezer_client,
@@ -20452,6 +21296,71 @@ _init_discovery_scoring(matching_engine_obj=matching_engine)
 _init_discover_hero(get_metadata_fallback_client_fn=_get_metadata_fallback_client)
 
 
+_DISCOVER_WARM_PATHS = [
+    '/api/discover/hero',
+    '/api/discover/similar-artists',
+    '/api/discover/listening-recommendations',
+    '/api/discover/recent-releases',
+    '/api/discover/genre-explorer',
+    '/api/discover/genre-new-releases',
+    '/api/discover/because-you-listen-to',
+    '/api/discover/undiscovered-albums',
+    '/api/discover/label-explorer',
+    '/api/discover/deep-cuts',
+    '/api/discover/seasonal/current',
+    '/api/discover/decades/available',
+    '/api/discover/moods',
+    '/api/discover/for-you',
+]
+
+
+def _discover_warm_sweep(paths=None):
+    """one pass over the discover shelves, as every profile.
+
+    the shelf caches are per profile, and a request with no profile is refused
+    on a multi-profile install (no-profile = no rights). the warmer used to ask
+    anonymously, so on any install with two profiles every warm request came
+    back 401 in a few ms, nothing was cached, and the first visit paid the full
+    20s. each profile now gets its own signed-in test client.
+
+    returns {'ok': n, 'skipped': n, 'failed': [(profile_id, path, status)]}.
+    a 403 is a profile that may not open discover, so it is skipped, not failed."""
+    stats = {'ok': 0, 'skipped': 0, 'failed': []}
+    try:
+        db = get_database()
+        profiles = [p for p in (db.get_all_profiles() or []) if not p.get('disabled')]
+    except Exception as e:
+        logger.debug(f"discover warmup: could not list profiles: {e}")
+        return stats
+    for prof in profiles:
+        pid = prof.get('id')
+        if pid is None:
+            continue
+        try:
+            epoch = int((db.get_profile(pid) or {}).get('session_epoch') or 0)
+        except Exception:
+            epoch = 0
+        with app.test_client() as client:
+            with client.session_transaction() as sess:
+                sess['profile_id'] = pid
+                sess['profile_epoch'] = epoch
+                sess['login_authenticated'] = True
+                sess['launch_pin_verified'] = True
+            for p in (paths or _DISCOVER_WARM_PATHS):
+                try:
+                    status = client.get(p).status_code
+                except Exception as e:
+                    logger.debug(f"discover warmup {p} as profile {pid} failed: {e}")
+                    status = 'error'
+                if status == 200:
+                    stats['ok'] += 1
+                elif status == 403:
+                    stats['skipped'] += 1
+                else:
+                    stats['failed'].append((pid, p, status))
+    return stats
+
+
 def _start_discover_warmer():
     """Pre-compute the discover page in the background, forever.
 
@@ -20465,32 +21374,20 @@ def _start_discover_warmer():
     import threading
     import time as _t
 
-    paths = [
-        '/api/discover/hero',
-        '/api/discover/similar-artists',
-        '/api/discover/listening-recommendations',
-        '/api/discover/recent-releases',
-        '/api/discover/genre-explorer',
-        '/api/discover/genre-new-releases',
-        '/api/discover/because-you-listen-to',
-        '/api/discover/undiscovered-albums',
-        '/api/discover/label-explorer',
-        '/api/discover/deep-cuts',
-        '/api/discover/seasonal/current',
-        '/api/discover/decades/available',
-    ]
-
     def loop():
         _t.sleep(15)  # let boot finish before the first sweep
         while True:
             started = _t.time()
-            with app.test_client() as client:
-                for p in paths:
-                    try:
-                        client.get(p)
-                    except Exception as e:
-                        logger.debug(f"discover warmup {p} failed: {e}")
-            logger.info(f"Discover warmup sweep finished in {_t.time() - started:.1f}s")
+            stats = _discover_warm_sweep()
+            took = _t.time() - started
+            if stats['failed']:
+                # a sweep that warms nothing looks exactly like a fast one, so say it
+                logger.warning(
+                    f"Discover warmup sweep finished in {took:.1f}s with "
+                    f"{len(stats['failed'])} failed request(s), first: {stats['failed'][:3]}")
+            else:
+                logger.info(f"Discover warmup sweep finished in {took:.1f}s "
+                            f"({stats['ok']} warmed, {stats['skipped']} skipped)")
             _t.sleep(1500)
 
     threading.Thread(target=loop, name='discover-warmer', daemon=True).start()
@@ -21014,7 +21911,8 @@ def _emit_chat_push_loop():
             if not _has_connected_clients():
                 continue
             _slsk = download_orchestrator.client("soulseek") if download_orchestrator else None
-            if not _slsk or not _slsk.base_url:
+            # slskd down or never started: back off, don't poll it every 6s (#1387)
+            if not _slsk or not _slsk.base_url or _slsk.unreachable_backoff_active():
                 continue
             room = str(config_manager.get('soulseek.chat_room', 'SoulSync') or 'SoulSync')
             if room != _chat_push_state['room']:
@@ -21098,6 +21996,13 @@ def _emit_chat_push_loop():
                                     out['av'] = _av2
                             except (TypeError, ValueError):
                                 pass
+                            # User flair badge ('bg') — validated on receive
+                            # like every other envelope tag, so a hostile
+                            # client can't smuggle a staff word through live
+                            # push either.
+                            _bg2 = chat_codec.badge_of(dec)
+                            if _bg2:
+                                out['badge'] = _bg2
                             _ed2 = chat_codec.edit_of(dec)
                             if _ed2:
                                 out['ed'] = _ed2
@@ -21153,6 +22058,20 @@ def _emit_chat_push_loop():
                     # clearing the flag must not), and never the boot baseline
                     'grew': prev >= 0 and unread > prev,
                 })
+            # Chat-archive retention: once a day at most, best-effort. The
+            # archive only grows while this loop runs (it does the archiving),
+            # so gating the sweep on the loop is no loss — and a setting
+            # change prunes immediately via /api/chat/settings anyway.
+            try:
+                import time as _t
+                if _t.time() - _chat_push_state.get('retention_pruned_at', 0) > 86400:
+                    _chat_push_state['retention_pruned_at'] = _t.time()
+                    _days = config_manager.get('soulseek.chat_history_retention_days', 30)
+                    _n = get_database().prune_chat_messages(_days)
+                    if _n:
+                        logger.info("chat: daily retention sweep pruned %d messages older than %s days", _n, _days)
+            except Exception:
+                logger.debug("chat retention sweep failed", exc_info=True)
         except Exception:
             logger.debug("chat push loop error", exc_info=True)
 
@@ -21169,7 +22088,7 @@ def _chat_auto_prove_loop():
             if not config_manager.get('soulseek.chat_auto_prove', True):
                 continue
             _slsk = download_orchestrator.client("soulseek") if download_orchestrator else None
-            if not _slsk or not _slsk.base_url:
+            if not _slsk or not _slsk.base_url or _slsk.unreachable_backoff_active():
                 continue
             replies = chat_autoprove.scan_and_respond(_slsk, run_async, state=state)
             for r in replies:
@@ -21924,6 +22843,13 @@ _cfg_is(
     _get_audio_quality_string=_get_audio_quality_string,
 )
 app.register_blueprint(_bp_is())
+
+# sample studio: resolve track files with the same resolver playback uses, so
+# a track that plays can also be analyzed, previewed and chopped. warm=False
+# keeps librosa out of boot for people who never open the studio.
+from core.sample.worker import configure as _cfg_sample
+_cfg_sample(config_manager_=config_manager,
+            resolve_path_fn=_resolve_library_file_path, warm=False)
 
 # music requests: what a profile without download rights asked for
 from api.music_requests import configure as _cfg_mr, create_blueprint as _bp_mr
@@ -23136,6 +24062,12 @@ def start_runtime_services():
         # Start OAuth callback servers
         logger.info("Starting OAuth callback servers...")
         start_oauth_callback_servers()
+
+        # Batch state healing timer — started once per process here, so it
+        # runs under both direct execution and the WSGI entrypoint. (It used
+        # to fire at module import, which started the 30s loop in every
+        # importer — tests, workers, CLI tools.)
+        start_batch_healing_timer()
 
         # One-time repair: purge artist album-list cache entries poisoned by
         # partial watchlist probes (limit=5/max_pages=1 results stored in the

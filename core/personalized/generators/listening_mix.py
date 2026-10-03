@@ -35,7 +35,11 @@ def generate(deps: Any, variant: str, config: PlaylistConfig) -> List[Track]:
     if db is None:
         raise RuntimeError("Listening Mix generator deps missing `database`")
 
-    raw = db.get_metadata(METADATA_KEY)
+    from core.discovery.listening_recommendations import read_recs_raw
+    fn = getattr(deps, 'get_current_profile_id', None) or (
+        deps.get('get_current_profile_id') if isinstance(deps, dict) else None
+    )
+    raw = read_recs_raw(db.get_metadata, METADATA_KEY, fn() if callable(fn) else 1)
     if not raw:
         return []
     try:

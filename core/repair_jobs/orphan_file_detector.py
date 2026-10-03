@@ -34,7 +34,7 @@ import re
 import time
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob, skip_deleted_quarantine
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, walk_library
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.orphan_files")
@@ -181,8 +181,7 @@ class OrphanFileDetectorJob(RepairJob):
         # Walk every scan root and find orphans
         audio_files = []
         for root_dir in roots:
-            for root, dirs, files in os.walk(root_dir):
-                skip_deleted_quarantine(root, dirs, root_dir)
+            for root, _dirs, files in walk_library(root_dir):
                 if context.check_stop():
                     return result
                 for fname in files:
@@ -391,8 +390,7 @@ class OrphanFileDetectorJob(RepairJob):
         roots = _scan_roots(context)
         count = 0
         for root_dir in roots:
-            for root, dirs, files in os.walk(root_dir):
-                skip_deleted_quarantine(root, dirs, root_dir)
+            for _root, _dirs, files in walk_library(root_dir):
                 for fname in files:
                     if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
                         count += 1

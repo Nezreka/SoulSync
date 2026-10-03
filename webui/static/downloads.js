@@ -995,7 +995,10 @@ async function closeDownloadMissingModal(playlistId) {
         // Automatic cleanup and server operations after successful downloads
         await handlePostDownloadAutomation(playlistId, process);
 
-        cleanupDownloadProcess(playlistId);
+        // awaited: it deletes the process by id after a network call, so a
+        // caller opening a fresh run for the same album right after this
+        // close would otherwise have its new process deleted from under it
+        await cleanupDownloadProcess(playlistId);
     }
 }
 
@@ -2161,7 +2164,7 @@ function startGlobalDownloadPolling() {
         Object.entries(activeDownloadProcesses).forEach(([playlistId, process]) => {
             // Include running AND recently-completed batches — ensures late task
             // status updates still reach the modal so rows don't freeze mid-download
-            if (process.batchId && (process.status === 'running' || process.status === 'complete')) {
+            if (process.batchId && !process.batchGone && (process.status === 'running' || process.status === 'complete')) {
                 activeBatchIds.push(process.batchId);
                 batchToPlaylistMap[process.batchId] = playlistId;
             }
@@ -2211,6 +2214,10 @@ function startGlobalDownloadPolling() {
             console.debug(`📊 [Global Polling] Received batched update for ${Object.keys(data.batches).length} processes`);
 
             // Process each batch's status data using existing logic
+            // a batch the server dropped is over: end it here too (#1384)
+            _vanishedBatchIds(activeBatchIds, data.batches, _batchMissCounts)
+                .forEach((batchId) => _endVanishedProcess(batchToPlaylistMap[batchId]));
+
             Object.entries(data.batches).forEach(([batchId, statusData]) => {
                 const playlistId = batchToPlaylistMap[batchId];
                 if (!playlistId || statusData.error) {
@@ -2273,7 +2280,7 @@ function startGlobalDownloadPollingWithInterval(interval) {
         let hasOpenWishlistModal = false;
 
         Object.entries(activeDownloadProcesses).forEach(([playlistId, process]) => {
-            if (process.batchId && (process.status === 'running' || process.status === 'complete')) {
+            if (process.batchId && !process.batchGone && (process.status === 'running' || process.status === 'complete')) {
                 activeBatchIds.push(process.batchId);
                 batchToPlaylistMap[process.batchId] = playlistId;
             }
@@ -2320,6 +2327,10 @@ function startGlobalDownloadPollingWithInterval(interval) {
 
             const data = await response.json();
             console.debug(`📊 [Global Polling] Received batched update for ${Object.keys(data.batches).length} processes`);
+
+            // a batch the server dropped is over: end it here too (#1384)
+            _vanishedBatchIds(activeBatchIds, data.batches, _batchMissCounts)
+                .forEach((batchId) => _endVanishedProcess(batchToPlaylistMap[batchId]));
 
             Object.entries(data.batches).forEach(([batchId, statusData]) => {
                 const playlistId = batchToPlaylistMap[batchId];
@@ -3195,6 +3206,33 @@ function processModalStatusUpdate(playlistId, data) {
     _patchOverlayActive();
 
 
+    // a batch cancelled on the server (downloads page, a card, anywhere but
+    // this modal's own Cancel All) ends here. no phase branch below took
+    // 'cancelled', and the one that tried sat inside the complete/error
+    // check, so it could never run: the modal read "running" until the
+    // server reaped the batch five minutes later, then polled it forever
+    // (#1384). first, too, so a cancel never reads as "Download complete!"
+    if (data.phase === 'cancelled') {
+        if (process.status !== 'cancelled') {
+            process.status = 'cancelled';
+            const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
+            if (cancelBtn) cancelBtn.style.display = 'none';
+            updatePlaylistCardUI(playlistId);
+
+            // Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist on cancel
+            if (playlistId.startsWith('youtube_')) {
+                const urlHash = playlistId.replace('youtube_', '');
+                updateYouTubeCardPhase(urlHash, 'discovered');
+                if (urlHash.startsWith('mirrored_')) {
+                    updateMirroredCardPhase(urlHash, 'discovered');
+                }
+            }
+
+            showToast(`Process cancelled for ${(process.playlist && process.playlist.name) || 'this download'}.`, 'info');
+        }
+        return;
+    }
+
     if (data.phase === 'queued') {
         // Submitted to the executor but no worker has picked it up yet.
         // ``missing_download_executor`` is bounded (max_workers=3 by
@@ -3527,6 +3565,7 @@ function processModalStatusUpdate(playlistId, data) {
             // Hide cancel button and mark as complete
             document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';
             process.status = 'complete';
+            _announceDownloadsFinished(playlistId, completedCount);
             updatePlaylistCardUI(playlistId);
 
             // Save M3U once on completion (not during progress polling)
@@ -3594,22 +3633,7 @@ function processModalStatusUpdate(playlistId, data) {
 
             // Note: Auto-show logic removed - wishlist modal visibility managed by user interaction only
 
-            if (data.phase === 'cancelled') {
-                if (process.status !== 'cancelled') {
-                    process.status = 'cancelled';
-
-                    // Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist on cancel
-                    if (playlistId.startsWith('youtube_')) {
-                        const urlHash = playlistId.replace('youtube_', '');
-                        updateYouTubeCardPhase(urlHash, 'discovered');
-                        if (urlHash.startsWith('mirrored_')) {
-                            updateMirroredCardPhase(urlHash, 'discovered');
-                        }
-                    }
-
-                    showToast(`Process cancelled for ${process.playlist.name}.`, 'info');
-                }
-            } else if (data.phase === 'error') {
+            if (data.phase === 'error') {
                 if (process.status !== 'complete') {
                     process.status = 'complete';
                     updatePlaylistCardUI(playlistId); // Update card to show ready for review
@@ -3629,6 +3653,7 @@ function processModalStatusUpdate(playlistId, data) {
                 if (process.status !== 'complete') {
                     process.status = 'complete';
                     updatePlaylistCardUI(playlistId); // Update card to show ready for review
+                    _announceDownloadsFinished(playlistId, completedCount);
 
                     // Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
                     if (playlistId.startsWith('youtube_')) {
@@ -3904,6 +3929,65 @@ function updateTrackSelectionCount(playlistId) {
     const wishlistBtn = document.getElementById(`add-to-wishlist-btn-${playlistId}`);
     if (wishlistBtn) {
         wishlistBtn.disabled = selected === 0;
+    }
+}
+
+// a finished download changes what the library owns. pages that show "in
+// library" badges (search) re-check on this; before it, search kept an album
+// you'd just downloaded unbadged until a browser refresh (#1386)
+function _announceDownloadsFinished(playlistId, completedCount) {
+    if (!(completedCount > 0)) return;
+    window.dispatchEvent(new CustomEvent('ss:downloads-finished', {
+        detail: { playlistId, completed: completedCount },
+    }));
+}
+
+// a batch the server no longer has is over: cancelled from the downloads
+// page, or cleaned up as stale. the modal only hears about an end through a
+// status update and a deleted batch never sends one, so it read "running"
+// for good and the global poller asked for it every 2s (#1384). two misses
+// in a row, so a batch caught mid-handover doesn't end early.
+const _batchMissCounts = {};
+
+function _vanishedBatchIds(requested, returned, misses) {
+    const gone = [];
+    for (const id of requested) {
+        if (Object.prototype.hasOwnProperty.call(returned || {}, id)) {
+            delete misses[id];
+            continue;
+        }
+        misses[id] = (misses[id] || 0) + 1;
+        if (misses[id] >= 2) {
+            gone.push(id);
+            delete misses[id];
+        }
+    }
+    return gone;
+}
+
+function _endVanishedProcess(playlistId) {
+    const process = playlistId ? activeDownloadProcesses[playlistId] : null;
+    if (!process) return;
+    // either way the poller stops asking for it
+    process.batchGone = true;
+    // a finished download the server reaped after its 5 minutes: nothing is
+    // wrong, the modal stays viewable as it was
+    if (process.status !== 'running') return;
+    // still "running" with no batch behind it: it ended somewhere this page
+    // never heard about (cancelled elsewhere, or finished while the tab was
+    // hidden and the poller paused)
+    process.status = 'cancelled';
+    if (process.poller) {
+        clearInterval(process.poller);
+        process.poller = null;
+    }
+    const hidden = !process.modalElement || process.modalElement.style.display === 'none';
+    if (hidden) {
+        // the normal close: drops the process and its search/artist/discover
+        // bubble, so reopening the playlist starts fresh
+        closeDownloadMissingModal(playlistId);
+    } else {
+        showToast(`${(process.playlist && process.playlist.name) || 'This download'} is no longer running.`, 'info');
     }
 }
 
