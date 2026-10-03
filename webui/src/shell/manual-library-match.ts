@@ -272,6 +272,10 @@ export async function _mlmSaveMatch(): Promise<void> {
       _mlmSelectedLibrary = null;
       _mlmUpdateSaveBtn();
       await _mlmLoadMatches();
+      // #1289: the save stamped mirrored in_library flags server-side; tell
+      // the sync page to refetch its card counts. No-op when the sync page
+      // isn't mounted (tool opened from elsewhere).
+      window.reloadMirroredTab?.();
       setTimeout(() => {
         if (status) status.textContent = '';
       }, 2000);
@@ -337,10 +341,16 @@ export async function _mlmDeleteMatch(id: number): Promise<void> {
     } catch {
       /* non-JSON error page */
     }
-    if (!res.ok || data.success === false) {
+    const deleted = res.ok && data.success !== false;
+    if (!deleted) {
       window.showToast?.(data.error || 'Could not remove that match', 'error');
     }
     await _mlmLoadMatches();
+    // #1289: a successful delete reset mirrored in_library flags server-side;
+    // tell the sync page to refetch its card counts. No-op when the sync page
+    // isn't mounted (tool opened from elsewhere). Skipped on failure — nothing
+    // changed, so a refetch would only flash the list for no reason (#1138).
+    if (deleted) window.reloadMirroredTab?.();
   } catch {
     window.showToast?.('Failed to remove match', 'error');
   }

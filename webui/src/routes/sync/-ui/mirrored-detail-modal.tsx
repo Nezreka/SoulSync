@@ -211,7 +211,7 @@ export function MirroredDetailModal({
                 title="Refresh from the source, match, push to your server and download what's missing"
                 onClick={onRunPipeline}
               >
-                Push to server
+                Sync & download
               </button>
               <span className="mm-btn-caption">Push the playlist and download what's missing</span>
             </div>
