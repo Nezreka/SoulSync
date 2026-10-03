@@ -7504,6 +7504,30 @@
                                                     Downloads use the same torrent, usenet and Soulseek clients as music
                                                     &mdash; set those under Downloads.</small>
 
+                                                <div class="form-group">
+                                                    <label>Audible Marketplace:</label>
+                                                    <select id="audiobook-marketplace" class="form-select">
+                                                        <option value="us">United States (audible.com)</option>
+                                                        <option value="uk">United Kingdom (audible.co.uk)</option>
+                                                        <option value="de">Germany (audible.de)</option>
+                                                        <option value="fr">France (audible.fr)</option>
+                                                        <option value="ca">Canada (audible.ca)</option>
+                                                        <option value="au">Australia (audible.com.au)</option>
+                                                        <option value="it">Italy (audible.it)</option>
+                                                        <option value="es">Spain (audible.es)</option>
+                                                        <option value="in">India (audible.in)</option>
+                                                        <option value="jp">Japan (audible.co.jp)</option>
+                                                    </select>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Which Audible
+                                                        storefront the audiobook catalogue pages, author scans and
+                                                        follow checks query. Some titles are exclusive to one country's
+                                                        store, so picking the store you buy from finds books the US
+                                                        store never lists. Default: <code>us</code></small>
+                                                </div>
+
                                                 <!-- Same story as the music one: the Audiobooks tab of the chain
                                      widget (Settings -> Downloads) IS this setting. Kept as the
                                      transport saveSettings reads, hidden as a control. -->

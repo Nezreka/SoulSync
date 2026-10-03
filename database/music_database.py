@@ -12714,18 +12714,31 @@ class MusicDatabase:
         expected_track_count: Optional[int],
         db_track_count: Optional[int],
     ) -> bool:
-        """Guard artist-page owned status against generic soundtrack false positives."""
-        if not self._is_soundtrack_like_album_title(search_title) and not self._is_soundtrack_like_album_title(db_title):
-            return True
+        """Guard artist-page owned status against generic soundtrack false positives.
 
+        #1448: in the non-soundtrack branch, reject when one normalized title is
+        a proper substring of the other — edition markers were already cleaned
+        above, so leftover words are meaningful and one title containing the
+        other means different releases (e.g. "Respiro" vs "Sessão Respiro").
+        """
         normalized_search_title = self._normalize_for_comparison(search_title)
         normalized_db_title = self._normalize_for_comparison(db_title)
-        if normalized_search_title == normalized_db_title:
+        if normalized_search_title and normalized_db_title and normalized_search_title == normalized_db_title:
             return True
 
         clean_search_title = self._normalize_for_comparison(self._clean_album_title_for_comparison(search_title))
         clean_db_title = self._normalize_for_comparison(self._clean_album_title_for_comparison(db_title))
-        if clean_search_title and clean_search_title == clean_db_title:
+        if clean_search_title and clean_db_title and clean_search_title == clean_db_title:
+            return True
+
+        if not self._is_soundtrack_like_album_title(search_title) and not self._is_soundtrack_like_album_title(db_title):
+            # #1448: edition markers were cleaned above, so leftover words are
+            # meaningful — one title containing the other means different releases.
+            # (The `and` truthiness guards are load-bearing: "" in "x" is True.)
+            if normalized_search_title and normalized_db_title and (
+                    normalized_search_title in normalized_db_title
+                    or normalized_db_title in normalized_search_title):
+                return False
             return True
 
         best_title_similarity = max(title_similarity, clean_title_similarity, normalized_title_similarity)
@@ -21052,8 +21065,56 @@ class MusicDatabase:
 
     # ==================== Discovery Pool Methods ====================
 
-    def get_discovery_pool_matched(self, limit: int = 500) -> list:
-        """Get all cached discovery matches, ordered by most recently used."""
+    def _get_playlist_discovery_keys(self, playlist_id: int, profile_id: int = None) -> set:
+        """Return the set of (normalized_title, normalized_artist) discovery keys for a playlist.
+
+        discovery_match_cache is a global cache keyed by Python-normalized
+        (clean_title, clean_artist) pairs (see _get_discovery_cache_key), so per-playlist
+        filtering re-keys the playlist's tracks with the same normalization and filters
+        the cached rows in memory. The cache has no playlist column by design.
+        """
+        keys = set()
+        try:
+            engine = _matching_engine
+            if engine is None:
+                # #1452: failing closed here would silently empty the Matched
+                # tab whenever a playlist filter is applied, so log loudly —
+                # a missing matching engine breaks the app broadly anyway.
+                logger.warning(
+                    "Discovery pool playlist filter: matching engine unavailable, "
+                    "returning no matched keys"
+                )
+                return keys
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            query = """
+                SELECT mpt.track_name, mpt.artist_name
+                FROM mirrored_playlist_tracks mpt
+                JOIN mirrored_playlists mp ON mpt.playlist_id = mp.id
+                WHERE mpt.playlist_id = ?
+            """
+            params = [playlist_id]
+            if profile_id:
+                query += " AND mp.profile_id = ?"
+                params.append(profile_id)
+            cursor.execute(query, params)
+            for row in cursor.fetchall():
+                keys.add((engine.clean_title(row['track_name'] or ''),
+                          engine.clean_artist(row['artist_name'] or '')))
+            conn.close()
+        except Exception as e:
+            logger.error(f"Error getting playlist discovery keys: {e}")
+        return keys
+
+    def get_discovery_pool_matched(self, limit: int = 500, profile_id: int = None,
+                                   playlist_id: int = None) -> list:
+        """Get cached discovery matches, ordered by most recently used.
+
+        When ``playlist_id`` is given, only matches for tracks in that playlist are
+        returned. The cache is global and carries no playlist id, so the playlist's
+        tracks are re-keyed with the same normalization and the rows are filtered
+        in memory. Without ``playlist_id`` the result is identical to before.
+        """
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -21064,8 +21125,16 @@ class MusicDatabase:
                 ORDER BY last_used_at DESC
                 LIMIT ?
             """, (limit,))
+            rows = cursor.fetchall()
+            conn.close()
+
+            if playlist_id:
+                keys = self._get_playlist_discovery_keys(playlist_id, profile_id)
+                rows = [row for row in rows
+                        if (row['normalized_title'], row['normalized_artist']) in keys]
+
             results = []
-            for row in cursor.fetchall():
+            for row in rows:
                 try:
                     matched_data = json.loads(row['matched_data_json'])
                 except (json.JSONDecodeError, TypeError):
@@ -21125,13 +21194,21 @@ class MusicDatabase:
             logger.error(f"Error deleting discovery cache entry: {e}")
             return False
 
-    def get_discovery_pool_stats(self, profile_id: int = None) -> dict:
+    def get_discovery_pool_stats(self, profile_id: int = None, playlist_id: int = None) -> dict:
         """Get counts for matched and failed discovery tracks."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) as cnt FROM discovery_match_cache")
-            matched = cursor.fetchone()['cnt']
+            if playlist_id:
+                # Scope the matched count the same way as the matched query: the cache
+                # is global, so re-key the playlist's tracks and count matching rows.
+                keys = self._get_playlist_discovery_keys(playlist_id, profile_id)
+                cursor.execute("SELECT normalized_title, normalized_artist FROM discovery_match_cache")
+                matched = sum(1 for row in cursor.fetchall()
+                              if (row['normalized_title'], row['normalized_artist']) in keys)
+            else:
+                cursor.execute("SELECT COUNT(*) as cnt FROM discovery_match_cache")
+                matched = cursor.fetchone()['cnt']
 
             query = """
                 SELECT COUNT(*) as cnt FROM mirrored_playlist_tracks mpt
@@ -21140,11 +21217,15 @@ class MusicDatabase:
                   AND mpt.extra_data NOT LIKE '%"discovered": true%'
             """
             params = []
-            if profile_id:
+            if playlist_id:
+                query += " AND mpt.playlist_id = ?"
+                params.append(playlist_id)
+            elif profile_id:
                 query += " AND mp.profile_id = ?"
                 params.append(profile_id)
             cursor.execute(query, params)
             failed = cursor.fetchone()['cnt']
+            conn.close()
             return {'matched': matched, 'failed': failed}
         except Exception as e:
             logger.error(f"Error getting discovery pool stats: {e}")
@@ -21223,7 +21304,7 @@ class MusicDatabase:
             logger.error(f"Error getting wing it pool: {e}")
             return []
 
-    def get_wing_it_pool_stats(self, profile_id: int = None) -> dict:
+    def get_wing_it_pool_stats(self, profile_id: int = None, playlist_id: int = None) -> dict:
         """Counts for both Wing It states: unverified (``wing_it``) + resolved (``matched``)."""
         try:
             conn = self._get_connection()
@@ -21233,7 +21314,10 @@ class MusicDatabase:
                 q = (f"SELECT COUNT(*) as cnt FROM mirrored_playlist_tracks mpt "
                      f"JOIN mirrored_playlists mp ON mpt.playlist_id = mp.id WHERE {where}")
                 params = []
-                if profile_id:
+                if playlist_id:
+                    q += " AND mpt.playlist_id = ?"
+                    params.append(playlist_id)
+                elif profile_id:
                     q += " AND mp.profile_id = ?"
                     params.append(profile_id)
                 cursor.execute(q, params)
@@ -22481,6 +22565,22 @@ class MusicDatabase:
                     }
                     by_key[key] = card
                     cards.append(card)
+
+                # #1453: a rebuild wipes tracks but keeps library_history
+                # (the Expired Download Cleaner grandfathers pre-rebuild
+                # downloads off surviving history rows + library_rebuilt_at),
+                # so the fold above can build cards whose play target no
+                # longer exists. Drop those here — never delete the history
+                # rows themselves.
+                from core.library.expired_cleanup import path_suffix_key  # matches the existing lazy import at :21740
+                cursor.execute("SELECT file_path FROM tracks WHERE file_path IS NOT NULL")
+                live_keys = {path_suffix_key(r[0]) for r in cursor.fetchall()}
+                cards = [
+                    c for c in cards
+                    if not c.get('play_file_path')
+                    or os.path.exists(c['play_file_path'])
+                    or path_suffix_key(c['play_file_path']) in live_keys
+                ]
 
                 # the normalized columns are indexed; the LOWER(TRIM()) form
                 # this replaced scanned every album per card (1.3 s of cpu per
@@ -24638,7 +24738,13 @@ class MusicDatabase:
         *,
         profile_id: Optional[int] = None,
     ) -> bool:
-        """Delete a mirrored playlist and its tracks (CASCADE)."""
+        """Delete a mirrored playlist and its tracks (CASCADE).
+
+        Also removes Auto-Sync board-owned pipeline automations (owned_by='auto_sync')
+        scoped to this playlist so the dashboard Sync band stops rendering ghost
+        schedule rows for the deleted mirror (#1455). User-created automations are
+        never touched, and 'all' schedules (covering every playlist) survive.
+        """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -24647,11 +24753,70 @@ class MusicDatabase:
                     "DELETE FROM mirrored_playlists WHERE id = ?" + owner_sql,
                     [playlist_id, *owner_params],
                 )
+                deleted = cursor.rowcount > 0
+                if deleted:
+                    self._delete_auto_sync_automations_for_playlist(
+                        cursor, int(playlist_id), profile_id=profile_id
+                    )
                 conn.commit()
-                return cursor.rowcount > 0
+                return deleted
         except Exception as e:
             logger.error(f"Error deleting mirrored playlist: {e}")
             return False
+
+    @staticmethod
+    def _delete_auto_sync_automations_for_playlist(
+        cursor, playlist_id: int, profile_id: Optional[int] = None
+    ):
+        """Delete board-owned Auto-Sync automations scoped to one mirrored playlist.
+
+        Only rows the Auto-Sync board owns (owned_by='auto_sync') whose
+        action_config targets exactly this playlist_id are removed. The board
+        stores playlist_id as a JSON string; 'all' schedules (true/'true') apply
+        to every playlist and are left alone (#1455).
+
+        Static: needs only a cursor, so non-MusicDatabase owners of mirror
+        deletes (e.g. ListenBrainzManager) can reuse it.
+        """
+        try:
+            if profile_id is None:
+                cursor.execute(
+                    "SELECT id, action_config FROM automations WHERE owned_by = 'auto_sync'"
+                )
+            else:
+                cursor.execute(
+                    "SELECT id, action_config FROM automations WHERE owned_by = 'auto_sync' AND profile_id = ?",
+                    (int(profile_id),),
+                )
+            to_delete = []
+            for row in cursor.fetchall():
+                try:
+                    cfg = json.loads(row["action_config"] or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if not isinstance(cfg, dict):
+                    continue
+                if cfg.get("all") is True or str(cfg.get("all")).lower() == "true":
+                    continue  # applies to every playlist — not scoped to this one
+                raw = cfg.get("playlist_id")
+                if raw in (None, ""):
+                    continue
+                try:
+                    scoped_id = int(raw)
+                except (TypeError, ValueError):
+                    continue
+                if scoped_id == int(playlist_id):
+                    to_delete.append(row["id"])
+            if to_delete:
+                cursor.execute(
+                    f"DELETE FROM automations WHERE id IN ({','.join('?' * len(to_delete))})",
+                    to_delete,
+                )
+                logger.info(
+                    f"Deleted {cursor.rowcount} auto-sync automation(s) scoped to deleted playlist {playlist_id}"
+                )
+        except Exception as e:
+            logger.error(f"Error deleting auto-sync automations for playlist {playlist_id}: {e}")
 
     # ===========================
     # AUTOMATIONS CRUD

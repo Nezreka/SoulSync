@@ -50,7 +50,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
-from flask import Blueprint, Response, jsonify, request, send_file, url_for
+from flask import Blueprint, Response, current_app, jsonify, request, send_file, url_for
 
 from core.audiobook_client import (
     SEARCH_TYPES,
@@ -113,8 +113,16 @@ def _page() -> int:
 
 
 def _marketplace() -> str:
-    """Storefront code. Unknown codes fall back to US inside the client."""
-    return (request.args.get("marketplace") or "us").strip().lower() or "us"
+    """Storefront code: request param, then the audiobooks.marketplace
+    setting, then US. Unknown codes fall back to US inside the client."""
+    code = (request.args.get("marketplace") or "").strip().lower()
+    if not code:
+        try:
+            code = (current_app.soulsync["config_manager"]
+                    .get("audiobooks.marketplace", "us") or "us").strip().lower()
+        except Exception:            # noqa: BLE001 — config unreadable: serve US
+            code = "us"
+    return code or "us"
 
 
 def _sort(default: str = "relevance") -> str:
@@ -738,7 +746,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         from core.audiobook_watchlist import run_scan
 
         try:
-            summary = run_scan()
+            summary = run_scan(marketplace=_marketplace())
         except Exception as exc:                            # noqa: BLE001
             logger.warning("Manual audiobook author scan failed: %s", exc, exc_info=True)
             return jsonify({"success": False, "error": str(exc)}), 500

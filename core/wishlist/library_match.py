@@ -273,4 +273,27 @@ def find_owned_match(music_database, track_name: str, artists: Any, album: Optio
     return None
 
 
-__all__ = ["artist_names", "find_owned_match"]
+ALBUM_SCOPED_SOURCE_TYPES = frozenset({'album', 'discography', 'watchlist', 'watchlist_label'})
+
+
+def wishlist_row_requires_album(track) -> bool:
+    """True when the wishlist row names a specific release whose ownership —
+    not just the song's — must be proven before cleanup (#1447).
+
+    Download Discography rows carry source_type="discography", watchlist rows
+    "watchlist"/"watchlist_label", and each names the requested release in
+    ``track['album']['name']``. Owning the same song on a single/EP/live
+    session must not clear the request for the unowned album.
+    """
+    source_type = (track or {}).get('source_type')
+    if source_type == 'album':
+        return True  # historical behavior, unchanged
+    if source_type in ALBUM_SCOPED_SOURCE_TYPES:
+        album = track.get('album', {})
+        album_name = album.get('name') if isinstance(album, dict) else album
+        return bool(album_name)  # album-less rows keep old behavior: never stuck
+    return False
+
+
+__all__ = ["artist_names", "find_owned_match", "wishlist_row_requires_album",
+           "ALBUM_SCOPED_SOURCE_TYPES"]
