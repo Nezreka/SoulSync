@@ -339,6 +339,14 @@ describe('the split sync buttons (#1455)', () => {
     expect(posts[0].url).toContain('/api/mirrored-playlists/7/pipeline/run');
     expect(posts[0].body).toEqual({ skip_wishlist: true });
 
+    // The first click sets the row busy (button disabled) until runNow's
+    // finally clears it — wait for the re-enable before clicking again.
+    await vi.waitFor(() =>
+      expect(
+        (view.getByLabelText('Sync Test List and download missing tracks') as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
     fireEvent.click(view.getByLabelText('Sync Test List and download missing tracks'));
     await vi.waitFor(() => expect(posts).toHaveLength(2));
     expect(posts[1].body).toEqual({ skip_wishlist: false });
