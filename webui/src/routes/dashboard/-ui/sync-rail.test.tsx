@@ -296,13 +296,17 @@ describe('the split sync buttons (#1455)', () => {
       }
       if (u === '/api/mirrored-playlists') return { ok: true, json: async () => [] };
       if (u === '/api/automations') return { ok: true, json: async () => [] };
-      if (u === '/api/playlist-pipeline/history?limit=40') return { ok: true, json: async () => ({}) };
-      if (u.startsWith('/api/sync/history')) return { ok: true, json: async () => ({ entries: [] }) };
+      if (u === '/api/playlist-pipeline/history?limit=40')
+        return { ok: true, json: async () => ({}) };
+      if (u.startsWith('/api/sync/history'))
+        return { ok: true, json: async () => ({ entries: [] }) };
       return { ok: true, json: async () => ({}) };
     });
     vi.stubGlobal('fetch', fetchMock);
     (window as unknown as Record<string, unknown>).buildAutoSyncScheduleState = () => ({
-      playlists: [{ id: 7, name: 'Test List', source: 'spotify', total_count: 10, in_library_count: 4 }],
+      playlists: [
+        { id: 7, name: 'Test List', source: 'spotify', total_count: 10, in_library_count: 4 },
+      ],
       playlistSchedules: { '7': { automation_id: 1, hours: 24, enabled: true } },
       weeklySchedules: {},
       runHistory: [],
@@ -323,10 +327,14 @@ describe('the split sync buttons (#1455)', () => {
       view = render(<SyncRail />);
     });
     await vi.waitFor(() =>
-      expect(view.getByLabelText('Sync Test List without adding missing tracks to the wishlist')).toBeTruthy(),
+      expect(
+        view.getByLabelText('Sync Test List without adding missing tracks to the wishlist'),
+      ).toBeTruthy(),
     );
 
-    fireEvent.click(view.getByLabelText('Sync Test List without adding missing tracks to the wishlist'));
+    fireEvent.click(
+      view.getByLabelText('Sync Test List without adding missing tracks to the wishlist'),
+    );
     await vi.waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0].url).toContain('/api/mirrored-playlists/7/pipeline/run');
     expect(posts[0].body).toEqual({ skip_wishlist: true });
