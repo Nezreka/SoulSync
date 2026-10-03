@@ -158,9 +158,7 @@ export async function updateAutomationTrigger(
     payload.trigger_type = triggerType;
   }
   assertOk(
-    await readJson<MutationResponse>(
-      apiClient.put(`automations/${id}`, { json: payload }),
-    ),
+    await readJson<MutationResponse>(apiClient.put(`automations/${id}`, { json: payload })),
     'Could not change the schedule',
   );
 }

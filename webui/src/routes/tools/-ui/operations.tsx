@@ -25,12 +25,11 @@
  * a separate progress panel that appears and shoves the layout around.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { Cadence, IntervalUnit } from '../-tools.ops';
 import type { RepairJob, RepairJobProgress, RepairJobRun } from '../-tools.types';
-import { updateAutomationTrigger } from '../../automations/-automations.api';
 
 import {
   runRepairJob,
@@ -58,6 +57,7 @@ import {
   jobSchedule,
   jobTrend,
 } from '../-tools.ops';
+import { updateAutomationTrigger } from '../../automations/-automations.api';
 import { OperationsStudio } from './operations-studio';
 
 function toast(message: string, type = 'info') {
@@ -107,7 +107,7 @@ function CadenceEditor({ job, onSaved }: { job: RepairJob; onSaved: () => void }
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Cadence>(() =>
     // Custom non-interval triggers start the editor at 24h; saving resets to a schedule trigger.
-    cadenceFromHours(job.interval_hours ?? 24)
+    cadenceFromHours(job.interval_hours ?? 24),
   );
   const [saving, setSaving] = useState(false);
 
@@ -123,10 +123,14 @@ function CadenceEditor({ job, onSaved }: { job: RepairJob; onSaved: () => void }
         // Write to the automation's schedule trigger. The trigger_type is
         // reset to 'schedule' in case the user had set a daily/weekly/monthly
         // schedule via the Custom schedule link.
-        await updateAutomationTrigger(job.automation_id, {
-          interval: hours,
-          unit: 'hours',
-        }, 'schedule');
+        await updateAutomationTrigger(
+          job.automation_id,
+          {
+            interval: hours,
+            unit: 'hours',
+          },
+          'schedule',
+        );
       } else {
         // Fallback: legacy path (migration hasn't seeded the row yet).
         await saveRepairJobSettings(job.job_id, hours, { ...(job.settings || {}) });

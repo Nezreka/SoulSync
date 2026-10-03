@@ -202,8 +202,8 @@ def ensure_repair_job_automations(engine, database, config_manager,
                         auto_id,
                         next_run=first_run.strftime("%Y-%m-%d %H:%M:%S"),
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Could not set next_run for %s: %s", job_id, e)
                 # Arm the timer now.
                 try:
                     engine.schedule_automation(auto_id)

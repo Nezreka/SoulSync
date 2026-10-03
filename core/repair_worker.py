@@ -614,8 +614,8 @@ class RepairWorker:
             auto_id = self._get_job_automation_id(job_id)
             if auto_id:
                 self.db.update_automation(auto_id, enabled=1 if enabled else 0)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not bridge job toggle to automation for %s: %s", job_id, e)
         # Turning a job OFF must also stop it if it's mid-run — otherwise the toggle
         # only affects the NEXT scheduled run and the current scan keeps going (#970).
         if not enabled:
@@ -758,8 +758,8 @@ class RepairWorker:
                     }
                 except Exception:
                     continue
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not scan system automations: %s", e)
         return result
 
     def _get_job_automation_id(self, job_id: str) -> Optional[int]:
@@ -836,8 +836,8 @@ class RepairWorker:
         try:
             self.db.set_metadata('automation_master_music_enabled',
                                  '1' if enabled else '0')
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not bridge master toggle to engine metadata: %s", e)
 
     # Backward compatibility
     def pause(self):
