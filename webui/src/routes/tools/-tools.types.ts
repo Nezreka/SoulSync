@@ -81,6 +81,10 @@ export interface RepairJob {
    *  `writes_library_files` in core/repair_jobs/base.py). The settings drawer
    *  shows its strongest dry-run warning on exactly these jobs. */
   writes_library_files?: boolean | null;
+  /** #1289 item 12: the system automation row driving this job's schedule.
+   *  The cadence editor writes to the automation's trigger, not the legacy
+   *  interval_hours config. Null until the migration seeds the row. */
+  automation_id?: number | null;
 }
 
 /** Live progress frame pushed on `repair:progress`, keyed by job id. */

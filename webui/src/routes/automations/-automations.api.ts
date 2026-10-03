@@ -148,10 +148,18 @@ export async function assignAutomationGroup(id: number, groupName: string | null
 export async function updateAutomationTrigger(
   id: number,
   triggerConfig: Record<string, unknown>,
+  triggerType?: string,
 ): Promise<void> {
+  const payload: Record<string, unknown> = { trigger_config: triggerConfig };
+  // #1289 item 12: when the Tools page writes an interval, it must also reset
+  // the trigger type to 'schedule' — otherwise a daily/weekly/monthly trigger
+  // keeps its type but gets an interval config, corrupting the schedule.
+  if (triggerType) {
+    payload.trigger_type = triggerType;
+  }
   assertOk(
     await readJson<MutationResponse>(
-      apiClient.put(`automations/${id}`, { json: { trigger_config: triggerConfig } }),
+      apiClient.put(`automations/${id}`, { json: payload }),
     ),
     'Could not change the schedule',
   );

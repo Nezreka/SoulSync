@@ -606,6 +606,16 @@ class RepairWorker:
         """Enable or disable a specific job."""
         if self._config_manager:
             self._config_manager.set(f'repair.jobs.{job_id}.enabled', enabled)
+        # #1289 item 12: bridge to the system automation row so the engine's
+        # scheduler honors the toggle. The row's enabled flag is the source of
+        # truth for scheduling; the legacy config remains for the worker's
+        # respect_enabled check on manual/Run Now paths.
+        try:
+            auto_id = self._get_job_automation_id(job_id)
+            if auto_id:
+                self.db.update_automation(auto_id, enabled=1 if enabled else 0)
+        except Exception:
+            pass
         # Turning a job OFF must also stop it if it's mid-run — otherwise the toggle
         # only affects the NEXT scheduled run and the current scan keeps going (#970).
         if not enabled:
@@ -651,16 +661,31 @@ class RepairWorker:
         # job instead of N round trips.
         pending_by_job = self._get_pending_count_by_job()
 
+        # #1289 item 12: single scan of system automations for all jobs
+        # (not N+1). Maps job_id -> (automation_id, interval_hours, next_run).
+        auto_by_job = self._get_system_automations_by_job()
+
         jobs_info = []
         for job_id, job in self._jobs.items():
             config = self.get_job_config(job_id)
             last_run = self._get_last_run(job_id)
-            next_run = None
-            if last_run and config['enabled']:
-                last_dt = datetime.fromisoformat(last_run['finished_at']) if last_run.get('finished_at') else None
-                if last_dt:
-                    next_dt = last_dt + timedelta(hours=config['interval_hours'])
-                    next_run = next_dt.isoformat()
+
+            # Prefer the automation's schedule; fall back to legacy config
+            # if the migration hasn't run yet.
+            auto = auto_by_job.get(job_id)
+            if auto:
+                interval_hours = auto["interval_hours"]
+                automation_id = auto["automation_id"]
+                next_run = auto["next_run"]
+            else:
+                interval_hours = config['interval_hours']
+                automation_id = None
+                next_run = None
+                if last_run and config['enabled']:
+                    last_dt = datetime.fromisoformat(last_run['finished_at']) if last_run.get('finished_at') else None
+                    if last_dt:
+                        next_dt = last_dt + timedelta(hours=config['interval_hours'])
+                        next_run = next_dt.isoformat()
 
             jobs_info.append({
                 'job_id': job_id,
@@ -674,7 +699,7 @@ class RepairWorker:
                 'category': job_category(job_id),
                 'auto_fix': job.auto_fix,
                 'enabled': config['enabled'],
-                'interval_hours': config['interval_hours'],
+                'interval_hours': interval_hours,
                 'settings': config['settings'],
                 'default_settings': job.default_settings.copy(),
                 # Per-setting choice lists so the UI can render a dropdown
@@ -689,8 +714,62 @@ class RepairWorker:
                 'next_run': next_run,
                 'is_running': self._current_job_id == job_id,
                 'pending_findings_count': pending_by_job.get(job_id, 0),
+                # #1289 item 12: the system automation row driving this job's
+                # schedule (if the migration has run). The Tools UI edits the
+                # automation's trigger instead of the legacy interval_hours.
+                'automation_id': automation_id,
             })
         return jobs_info
+
+    def _get_system_automations_by_job(self) -> dict:
+        """Single scan of system automations, keyed by job_id.
+
+        Returns {job_id: {'automation_id': int, 'interval_hours': float,
+        'next_run': str|None}}. Used by get_all_job_info to avoid N+1 queries.
+        """
+        result = {}
+        try:
+            from core.automation.migrate_repair_jobs import _SYSTEM_OWNER
+            import json
+            automations = self.db.get_automations(1)
+            for a in automations or []:
+                if a.get("owned_by") != _SYSTEM_OWNER:
+                    continue
+                if a.get("action_type") != "run_repair_job":
+                    continue
+                try:
+                    cfg = a.get("action_config") or "{}"
+                    if isinstance(cfg, str):
+                        cfg = json.loads(cfg)
+                    job_id = cfg.get("job_id")
+                    if not job_id or job_id in result:
+                        continue  # Skip duplicates; migration logs them.
+                    # Extract interval from trigger_config if it's a schedule trigger.
+                    interval_hours = None
+                    if a.get("trigger_type") == "schedule":
+                        tcfg = a.get("trigger_config") or "{}"
+                        if isinstance(tcfg, str):
+                            tcfg = json.loads(tcfg)
+                        interval_hours = tcfg.get("interval")
+                    result[job_id] = {
+                        "automation_id": a.get("id"),
+                        "interval_hours": interval_hours,
+                        "next_run": a.get("next_run"),
+                    }
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return result
+
+    def _get_job_automation_id(self, job_id: str) -> Optional[int]:
+        """Return the system automation ID for a repair job, if seeded.
+
+        Deprecated: use _get_system_automations_by_job() for batch lookups.
+        Kept for backward compatibility.
+        """
+        auto = self._get_system_automations_by_job().get(job_id)
+        return auto["automation_id"] if auto else None
 
     def _get_pending_count_by_job(self) -> dict:
         """Return ``{job_id: pending_count}`` for every job that has
@@ -743,9 +822,7 @@ class RepairWorker:
 
     def toggle(self) -> bool:
         """Toggle master enabled state. Returns new state."""
-        self.enabled = not self.enabled
-        if self._config_manager:
-            self._config_manager.set('repair.master_enabled', self.enabled)
+        self.set_enabled(not self.enabled)
         logger.info("Repair worker %s", "enabled" if self.enabled else "disabled")
         return self.enabled
 
@@ -754,6 +831,13 @@ class RepairWorker:
         self.enabled = enabled
         if self._config_manager:
             self._config_manager.set('repair.master_enabled', enabled)
+        # #1289 item 12: bridge to the automation engine's metadata so
+        # pause()/resume() (which call this) keep stopping scheduled jobs.
+        try:
+            self.db.set_metadata('automation_master_music_enabled',
+                                 '1' if enabled else '0')
+        except Exception:
+            pass
 
     # Backward compatibility
     def pause(self):
@@ -849,6 +933,10 @@ class RepairWorker:
     # Main loop
     # ------------------------------------------------------------------
     def _run(self):
+        # #1289 item 12: the worker no longer picks jobs by staleness —
+        # scheduling lives in the automation engine now. This loop is a pure
+        # executor: it drains the force-run queue (Run Now clicks + automation
+        # triggers) and sleeps otherwise.
         logger.info("Repair worker thread started")
         self._ensure_jobs_loaded()
 
@@ -866,28 +954,11 @@ class RepairWorker:
                         break
                     continue
 
-                if not self.enabled:
-                    self._current_job_id = None
-                    self._current_job_name = None
-                    if self._sleep_or_stop(2):
-                        break
-                    continue
-
-                # Find the next job to run based on staleness
-                next_job = self._pick_next_job()
-
-                if not next_job:
-                    # Nothing due — sleep and re-check
-                    self._current_job_id = None
-                    self._current_job_name = None
-                    if self._sleep_or_stop(10):
-                        break
-                    continue
-
-                # Run the selected job
-                self._run_job(next_job)
-
-                # Brief pause between jobs
+                # Nothing queued — sleep until the next check or a wakeup.
+                # Automation timers queue jobs via run_job_now(); there is no
+                # staleness picker anymore.
+                self._current_job_id = None
+                self._current_job_name = None
                 if self._sleep_or_stop(5):
                     break
 
@@ -899,66 +970,6 @@ class RepairWorker:
                     break
 
         logger.info("Repair worker thread finished")
-
-    @staticmethod
-    def _hours_since(finished_at_iso: str, now_utc: datetime) -> float:
-        """Hours between a stored ``finished_at`` and ``now_utc``, both in UTC.
-
-        ``finished_at`` is written by SQLite's CURRENT_TIMESTAMP, which is ALWAYS
-        UTC (and naive). #885: the scheduler compared it against ``datetime.now()``
-        (naive LOCAL), so the local↔UTC offset leaked into the elapsed time. For a
-        zone AHEAD of UTC (Australia/Sydney = +11) every job looked ~11h stale and
-        fired every poll; behind UTC (the Americas) it just waited too long. Parse
-        the naive timestamp AS UTC and subtract a UTC ``now`` so scheduling is
-        timezone-independent."""
-        dt = datetime.fromisoformat(finished_at_iso)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return (now_utc - dt).total_seconds() / 3600
-
-    def _pick_next_job(self) -> Optional[str]:
-        """Pick the next job to run based on staleness priority.
-
-        Returns job_id of the stalest job whose interval has elapsed,
-        or None if nothing is due.
-        """
-        now = datetime.now(timezone.utc)
-        best_job_id = None
-        best_staleness = -1
-
-        for job_id, _job in self._jobs.items():
-            config = self.get_job_config(job_id)
-            if not config['enabled']:
-                continue
-
-            interval_hours = config['interval_hours']
-            if not interval_hours or interval_hours <= 0:
-                continue  # Skip jobs with invalid interval
-
-            last_run = self._get_last_run(job_id)
-
-            if not last_run or not last_run.get('finished_at'):
-                # Never run — highest staleness
-                best_job_id = job_id
-                best_staleness = float('inf')
-                continue
-
-            try:
-                elapsed_hours = self._hours_since(last_run['finished_at'], now)
-
-                if elapsed_hours < interval_hours:
-                    continue  # Not due yet
-
-                staleness = elapsed_hours / interval_hours
-                if staleness > best_staleness:
-                    best_staleness = staleness
-                    best_job_id = job_id
-            except (ValueError, TypeError):
-                # Malformed timestamp — treat as never run
-                best_job_id = job_id
-                best_staleness = float('inf')
-
-        return best_job_id
 
     def _run_job(self, job_id: str, forced: bool = False):
         """Execute a single job and record the run.
