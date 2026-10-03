@@ -25,6 +25,7 @@ interface MlmLibraryTrack {
   album_title?: string;
   file_path?: string;
   bitrate?: number;
+  server_source?: string;
 }
 
 type MlmResultsEl = HTMLElement & {
@@ -243,6 +244,11 @@ export function _mlmSelectSource(idx: number): void {
 // playlist (context is a playlist name, not "Wishlist"). The backend resolves
 // the name through the stored server link (item 6) when available, so renames
 // don't break it.
+//
+// The checkbox is only shown when the SELECTED LIBRARY TRACK exists on a
+// media server (has a server_source). A local download's DB id is an
+// auto-increment integer, not a server ratingKey — sending it to the
+// server's add-track endpoint would resolve to an unrelated item.
 function _mlmUpdatePlaylistCheckbox(): void {
   const wrap = document.getElementById('mlm-add-to-playlist-wrap');
   const label = document.getElementById('mlm-add-to-playlist-label');
@@ -250,11 +256,14 @@ function _mlmUpdatePlaylistCheckbox(): void {
   if (!wrap || !label || !box) return;
   const ctx = (_mlmSelectedSource?.context || '').trim();
   const isPlaylist = ctx !== '' && ctx.toLowerCase() !== 'wishlist';
-  if (isPlaylist) {
+  const isServerTrack = !!(_mlmSelectedLibrary?.server_source);
+  if (isPlaylist && isServerTrack) {
     label.textContent = `Also add to server playlist "${ctx}"?`;
     wrap.style.display = '';
   } else {
     wrap.style.display = 'none';
+    box.checked = false;
+  }
     box.checked = false;
   }
 }
@@ -323,12 +332,14 @@ export async function _mlmSaveMatch(): Promise<void> {
             if (status)
               status.textContent =
                 'Match saved, but playlist add failed: ' + (_addData.error || 'unknown');
+          } else if (status) {
+            status.textContent = `Saved + added to "${_plName}"!`;
           }
         } catch {
           if (status) status.textContent = 'Match saved, but playlist add failed (network)';
         }
       }
-      if (status && !status.textContent.startsWith('Match saved, but'))
+      if (status && !status.textContent.startsWith('Match saved') && !status.textContent.includes('added to'))
         status.textContent = 'Saved!';
       _mlmSelectedSource = null;
       _mlmSelectedLibrary = null;

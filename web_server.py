@@ -18393,6 +18393,36 @@ def server_playlist_add_track(playlist_id):
             return jsonify({"success": False, "error": "playlist_name required"}), 400
 
         active_server = config_manager.get_active_media_server()
+        # #1289 item 7: the track_id must be a server-side track ID (ratingKey),
+        # not a SoulSync DB auto-increment integer. A local download's DB id
+        # would resolve to an unrelated server item — reject it with a clear
+        # 400 instead of corrupting the playlist. The frontend gates the
+        # checkbox on server_source, this is defense in depth.
+        try:
+            db = get_database()
+            track_rows = db.api_get_tracks_by_ids([track_id])
+            track_source = (track_rows[0].get('server_source') or '') if track_rows else ''
+            if track_source and track_source.lower() != active_server.lower():
+                return jsonify({
+                    "success": False,
+                    "error": f"Track is from {track_source}, not the active {active_server} server"
+                }), 400
+            # A track with no server_source is a local download — its DB id
+            # is not a valid server ratingKey.
+            if not track_source:
+                # Allow it only if the track_id looks like a server ID (not a
+                # bare integer). Plex ratingKeys are integers, but a DB
+                # auto-increment would also be an integer — we can't distinguish
+                # here, so require the DB lookup to have found a server track.
+                # If the DB has no record, fall through to the server's own
+                # lookup (Find & Add path uses server IDs directly).
+                if track_rows:
+                    return jsonify({
+                        "success": False,
+                        "error": "Track is a local download, not on the media server"
+                    }), 400
+        except Exception as e:
+            logger.debug(f"add-track track validation failed: {e}")
         # #1289 item 7 + item 6: the frontend sends playlist_id=0 and a name.
         # If this name matches a mirrored playlist with a stored server link,
         # follow the stored server ID (survives server-side renames) instead
