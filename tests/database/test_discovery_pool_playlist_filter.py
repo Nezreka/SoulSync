@@ -142,3 +142,26 @@ def test_wing_it_stats_filtered_by_playlist(pool_db, monkeypatch):
     assert db.get_wing_it_pool_stats() == {"wing_it": 1, "matched": 1}
     assert db.get_wing_it_pool_stats(playlist_id=pid_a) == {"wing_it": 1, "matched": 0}
     assert db.get_wing_it_pool_stats(playlist_id=pid_b) == {"wing_it": 0, "matched": 1}
+
+
+def test_filter_keys_match_write_path_keys(pool_db):
+    """The per-playlist filter must re-key tracks exactly the way the cache
+    write path does (#1452 review follow-up).
+
+    The fixture writes cache rows with the engine methods directly; the real
+    writer is ``_get_discovery_cache_key`` in api.source_playlists (it also
+    runs artist names through ``_extract_artist_name``). If the writer ever
+    changes its normalization, the in-memory filter would silently stop
+    matching — this test pins the two together. Skipped where the full app
+    stack (spotipy et al) isn't importable.
+    """
+    source_playlists = pytest.importorskip(
+        "api.source_playlists", reason="write path needs the full app stack"
+    )
+    db, pid_a, _pid_b = pool_db
+    write_keys = {
+        source_playlists._get_discovery_cache_key(title, artist)
+        for title, artist in (("Alpha", "Artist One"), ("Beta", "Artist Two"))
+    }
+    filter_keys = db._get_playlist_discovery_keys(pid_a, profile_id=1)
+    assert write_keys <= filter_keys

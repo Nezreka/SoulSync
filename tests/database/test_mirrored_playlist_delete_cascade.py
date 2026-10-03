@@ -110,3 +110,23 @@ def test_delete_with_no_automations_still_succeeds(db):
 
     assert db.delete_mirrored_playlist(pk, profile_id=1) is True
     assert db.get_mirrored_playlist(pk) is None
+
+
+def test_delete_keeps_all_schedule_even_with_playlist_id_set(db):
+    pk = _mirror(db)
+    # A board row marked all=true is never scoped to one playlist, even when a
+    # playlist_id is also present — matches the runner's `if process_all:`
+    # precedence (core/playlists/pipeline.py).
+    aid = db.create_automation(
+        name="Auto-Sync: everything",
+        trigger_type="schedule",
+        trigger_config=json.dumps({"hours": [8]}),
+        action_type="playlist_pipeline",
+        action_config=json.dumps({"all": True, "playlist_id": str(pk)}),
+        profile_id=1,
+        group_name="Playlist Auto-Sync",
+        owned_by="auto_sync",
+    )
+
+    assert db.delete_mirrored_playlist(pk, profile_id=1) is True
+    assert aid in _automation_ids(db)
