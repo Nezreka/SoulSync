@@ -284,7 +284,7 @@ function AutoSyncHistoryEntryCard({
             <span className="flow-arrow">-&gt;</span>
             <span className="flow-action">Refresh</span>
             <span className="flow-arrow">-&gt;</span>
-            <span className="flow-action">Discover</span>
+            <span className="flow-action">Identify</span>
             <span className="flow-arrow">-&gt;</span>
             <span className="flow-notify">Sync + wishlist</span>
           </div>

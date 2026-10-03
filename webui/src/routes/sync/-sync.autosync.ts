@@ -1022,7 +1022,7 @@ const TRIGGER_LABELS: Record<string, string> = {
   watchlist_new_release: 'New Release Found',
   playlist_synced: 'Playlist Synced',
   playlist_changed: 'Playlist Changed',
-  discovery_completed: 'Discovery Complete',
+  discovery_completed: 'Identification Complete',
   wishlist_processing_completed: 'Wishlist Processed',
   watchlist_scan_completed: 'Watchlist Scan Done',
   database_update_completed: 'Database Updated',

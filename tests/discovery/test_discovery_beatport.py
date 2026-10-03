@@ -267,7 +267,7 @@ def test_completion_marks_discovered():
 
 
 def test_activity_feed_logged():
-    """Completion appends activity feed entry mentioning Beatport Discovery Complete."""
+    """Completion appends activity feed entry mentioning Beatport Identification Complete."""
     states = {}
     _seed_state('h8', states, tracks=[_track()])
     deps = _build_deps(states=states)
@@ -276,7 +276,7 @@ def test_activity_feed_logged():
 
     args, _ = deps._activity_log[0]
     title = args[1]
-    assert 'Beatport Discovery Complete' in title
+    assert 'Beatport Identification Complete' in title
 
 
 # ---------------------------------------------------------------------------

@@ -187,6 +187,14 @@ export function ServerSearchOverlay({ track, mode, onClose, onSelect }: ServerSe
                 <span className="server-search-context-name">{seed.contextName}</span>
               </div>
             ) : null}
+            {mode === 'add' ? (
+              <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
+                Adds the picked track to the server playlist — this edits the server, not just a
+                match.
+                <br />
+                Saved as: server playlist edit. Affects next sync: yes, directly.
+              </div>
+            ) : null}
           </div>
           <button type="button" className="server-search-close" onClick={onClose}>
             ×

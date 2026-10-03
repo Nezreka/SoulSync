@@ -53,6 +53,8 @@ export function openManualLibraryMatchTool(prefill?: string): void {
                     <div class="playlist-quick-info">
                         <span class="playlist-owner">Link source tracks to library tracks to stop re-downloads</span>
                     </div>
+                    <div class="mlm-direction-note" style="font-size:12px;opacity:0.7;margin-top:6px;">Links a source track to a library track &mdash; nothing is added to any playlist.</div>
+                    <div class="mlm-persist-note" style="font-size:12px;opacity:0.7;margin-top:2px;">Saved as: link only. Affects next sync: yes.</div>
                 </div>
                 <span class="playlist-modal-close" onclick="_mlmClose()">&times;</span>
             </div>

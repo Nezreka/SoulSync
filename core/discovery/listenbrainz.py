@@ -330,7 +330,7 @@ def run_listenbrainz_discovery_worker(state_key, deps: ListenbrainzDiscoveryDeps
 
         playlist_name = playlist.get('name') or playlist.get('title') or 'Unknown Playlist'
         source_label = discovery_source.upper()
-        deps.add_activity_item("", f"ListenBrainz Discovery Complete ({source_label})", f"'{playlist_name}' - {state['spotify_matches']}/{len(tracks)} tracks found", "Now")
+        deps.add_activity_item("", f"ListenBrainz Identification Complete ({source_label})", f"'{playlist_name}' - {state['spotify_matches']}/{len(tracks)} tracks found", "Now")
 
         logger.info(f"ListenBrainz discovery complete ({discovery_source}): {state['spotify_matches']}/{len(tracks)} tracks matched")
 

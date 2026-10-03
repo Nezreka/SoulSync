@@ -557,6 +557,11 @@ function MatcherHeader({ item }: { item: ImportInboxItem }) {
       <span className={styles.heroMeta}>
         <code>{item.rel_path || item.folder_name}</code> · {describeItemFiles(item)}
       </span>
+      <span style={{ fontSize: 12, opacity: 0.7, flexBasis: '100%' }}>
+        Matches each inbox file to a catalogue release — importing moves them into your library.
+        <br />
+        Saved as: new library tracks (files moved into place). Affects next sync: yes.
+      </span>
     </div>
   );
 }

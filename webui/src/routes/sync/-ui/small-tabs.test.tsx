@@ -69,7 +69,7 @@ describe('SourceCard', () => {
         onClick={onClick}
       />,
     );
-    expect(screen.getByText('Discovery Complete')).toBeInTheDocument();
+    expect(screen.getByText('Identification Complete')).toBeInTheDocument();
     expect(screen.getByText('View Results')).toBeInTheDocument();
     expect(screen.getByText('♪ 25 / ✓ 20 / ✗ 5 / 80%')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Weekly Jams'));
@@ -375,7 +375,7 @@ describe('SourceModals', () => {
     stubFetch();
     render(<Harness />);
     fireEvent.click(screen.getByText('open-it'));
-    expect(screen.getByText('🎵 ListenBrainz Playlist Discovery')).toBeInTheDocument();
+    expect(screen.getByText('🎵 ListenBrainz Playlist Identification')).toBeInTheDocument();
     fireEvent.click(screen.getByText('🔍 Download Missing Tracks'));
     expect(engine).toHaveBeenCalledWith('listenbrainz_mbid-1', 'Jams', [
       { id: 'sp1', name: 'Matched' },

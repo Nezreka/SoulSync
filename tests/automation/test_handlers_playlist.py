@@ -701,7 +701,7 @@ class TestSyncPlaylist:
         deps = _build_deps(get_database=lambda: db)
         result = auto_sync_playlist({'playlist_id': '1'}, deps)
         assert result['status'] == 'skipped'
-        assert 'No discovered tracks' in result['reason']
+        assert 'No identified tracks' in result['reason']
         assert result['skipped_tracks'] == '2'
 
     def test_discovered_track_starts_sync_thread(self):

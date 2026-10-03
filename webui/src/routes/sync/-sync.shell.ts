@@ -229,8 +229,8 @@ export const SYNC_HEADER_ACTIONS: readonly SyncHeaderAction[] = [
   },
   {
     key: 'discovery-pool',
-    label: 'Discovery Pool',
-    title: 'View matched and failed discovery tracks',
+    label: 'Match Review',
+    title: 'View matched and failed identification tracks',
   },
   {
     key: 'wing-it-pool',

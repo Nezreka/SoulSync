@@ -49,11 +49,11 @@ describe('metadataSourceLabel (bug #5 knowing fix)', () => {
 
 describe('title/label/description ladders (9356-9379, 9930-9944)', () => {
   it('titles per source + the lastfm hash special', () => {
-    expect(modalTitle('tidal', 'tidal_1')).toBe('🎵 Tidal Playlist Discovery');
-    expect(modalTitle('beatport', 'h')).toBe('🎵 Beatport Chart Discovery');
-    expect(modalTitle('mirrored', 'mirrored_5')).toBe('🎵 Mirrored Playlist Discovery');
-    expect(modalTitle('listenbrainz', 'lastfm_radio_abc')).toBe('📻 Last.fm Radio Discovery');
-    expect(modalTitle('youtube', 'h4sh')).toBe('🎵 YouTube Playlist Discovery');
+    expect(modalTitle('tidal', 'tidal_1')).toBe('🎵 Tidal Playlist Identification');
+    expect(modalTitle('beatport', 'h')).toBe('🎵 Beatport Chart Identification');
+    expect(modalTitle('mirrored', 'mirrored_5')).toBe('🎵 Mirrored Playlist Identification');
+    expect(modalTitle('listenbrainz', 'lastfm_radio_abc')).toBe('📻 Last.fm Radio Identification');
+    expect(modalTitle('youtube', 'h4sh')).toBe('🎵 YouTube Playlist Identification');
     expect(isLastfmRadioHash('lastfm_radio_x')).toBe(true);
     expect(isLastfmRadioHash('mbid')).toBe(false);
   });
@@ -71,23 +71,23 @@ describe('title/label/description ladders (9356-9379, 9930-9944)', () => {
     expect(descriptionSourceWord('mirrored', 'mirrored_5')).toBe('mirrored');
     expect(descriptionSourceWord('listenbrainz', 'lastfm_radio_x')).toBe('Last.fm Radio');
     expect(modalDescription('fresh', 'Tidal', 'Spotify')).toBe(
-      'Ready to discover clean Spotify metadata for Tidal tracks...',
+      'Ready to identify Tidal tracks with clean Spotify metadata...',
     );
     expect(modalDescription('discovering', 'Deezer', 'iTunes')).toBe(
-      'Discovering clean iTunes metadata for Deezer tracks...',
+      'Identifying clean iTunes metadata for Deezer tracks...',
     );
     expect(modalDescription('discovered', 'Tidal', 'Spotify')).toBe(
-      'Discovery complete! View the results below.',
+      'Identification complete! View the results below.',
     );
     expect(modalDescription('syncing', 'Tidal', 'Spotify')).toBe(
-      'Discovering clean Spotify metadata for Tidal tracks...', // the default arm
+      'Identifying clean Spotify metadata for Tidal tracks...', // the default arm
     );
   });
 
   it('initial progress text arms + the live progress line', () => {
-    expect(initialProgressText('fresh')).toBe('Click Start Discovery to begin...');
-    expect(initialProgressText('discovering')).toBe('Starting discovery...');
-    expect(initialProgressText('download_complete')).toBe('Discovery completed!');
+    expect(initialProgressText('fresh')).toBe('Click Start Identifying to begin...');
+    expect(initialProgressText('discovering')).toBe('Starting identification...');
+    expect(initialProgressText('download_complete')).toBe('Identification complete!');
     expect(progressLineText(3, 10, 30)).toBe('3 / 10 tracks matched (30%)');
   });
 });

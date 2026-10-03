@@ -371,7 +371,7 @@ def run_beatport_discovery_worker(url_hash, deps: BeatportDiscoveryDeps):
         # Add activity for completion
         chart_name = chart.get('name', 'Unknown Chart')
         source_label = discovery_source.upper()
-        deps.add_activity_item("", f"Beatport Discovery Complete ({source_label})",
+        deps.add_activity_item("", f"Beatport Identification Complete ({source_label})",
                          f"'{chart_name}' - {state['spotify_matches']}/{len(tracks)} tracks found", "Now")
 
         logger.info(f"Beatport discovery complete ({source_label}): {state['spotify_matches']}/{len(tracks)} tracks found")

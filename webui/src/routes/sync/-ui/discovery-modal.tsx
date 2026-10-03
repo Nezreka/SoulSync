@@ -317,7 +317,7 @@ function FooterActions(props: DiscoveryModalProps) {
           className="modal-btn modal-btn-primary"
           onClick={onStartDiscovery}
         >
-          🔍 Start Discovery
+          🔍 Start Identifying
         </button>
         <WingItButton key="wing-it-btn" config={config} state={state} onClose={onClose} />
       </>
@@ -327,7 +327,7 @@ function FooterActions(props: DiscoveryModalProps) {
   if (state.phase === 'discovering') {
     return (
       <div key="discovering-info" className="modal-info">
-        🔍 Discovering {metadataSourceLabel()} matches...
+        🔍 Identifying {metadataSourceLabel()} matches...
       </div>
     );
   }
@@ -426,7 +426,7 @@ function FooterActions(props: DiscoveryModalProps) {
           className="modal-btn modal-btn-secondary"
           onClick={onRediscover}
         >
-          🔄 Rediscover
+          🔄 Re-identify
         </button>
       )}
       <WingItButton key="wing-it-btn" config={config} state={state} onClose={onClose} />
@@ -477,7 +477,7 @@ export function DiscoveryModal(props: DiscoveryModalProps) {
             </div>
           )}
           <div className="progress-section">
-            <div className="progress-label">🔍 {metadataLabel} Discovery Progress</div>
+            <div className="progress-label">🔍 {metadataLabel} Identification Progress</div>
             <div className="progress-bar-container">
               <div className="progress-bar-fill" style={{ width: `${seeded.progress}%` }} />
             </div>

@@ -49,8 +49,8 @@ export function DiscoveryPoolCard() {
     <ToolCard
       variant="launcher"
       id="discovery-pool-card"
-      title="Discovery Pool"
-      info="View and fix matched/failed discovery results across all mirrored playlists"
+      title="Match Review"
+      info="View and fix matched/failed identification results across all mirrored playlists"
       statsId="discovery-pool-stats"
       stats={[
         { label: 'Matched:', valueId: 'discovery-pool-matched-count', value: matched },
@@ -63,7 +63,7 @@ export function DiscoveryPoolCard() {
       ]}
       controls={
         <button type="button" onClick={() => window.openDiscoveryPoolModal?.()}>
-          Open Discovery Pool
+          Open Match Review
         </button>
       }
     />

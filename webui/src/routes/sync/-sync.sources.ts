@@ -159,7 +159,7 @@ export interface SourceVerticalConfig {
     /**
      * The toast a finished discovery raises, or null for none. Real drift, not
      * an oversight: youtube + mirrored share _discoveryCompleteToast's
-     * 'Discovery complete!' (9204), listenbrainz words its own differently
+     * 'Identification complete!' (9204), listenbrainz words its own differently
      * (11076, 11171), and the other six raise NOTHING — they complete with a
      * console.log only (759 tidal, 3180 deezer, 7106 spotify_public, 8132
      * itunes_link, and the qobuz/beatport twins). Resolved through
@@ -302,7 +302,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       cardProgressFormat: 'slash-text',
       foundVariant: 'lenient',
       downloadEntry: 'youtube',
-      discoveryCompleteToast: 'Discovery complete!',
+      discoveryCompleteToast: 'Identification complete!',
       resetErrorNoun: 'playlist',
     },
   },
@@ -333,7 +333,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       foundVariant: 'lenient',
       // Shares youtube's download modal (M3U export + quality-profile chrome),
       downloadEntry: 'youtube',
-      discoveryCompleteToast: 'Discovery complete!',
+      discoveryCompleteToast: 'Identification complete!',
       resetErrorNoun: 'playlist',
     },
   },
@@ -484,7 +484,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       cardProgressFormat: 'slash-text',
       foundVariant: 'lenient',
       downloadEntry: 'youtube',
-      discoveryCompleteToast: 'ListenBrainz discovery complete!',
+      discoveryCompleteToast: 'ListenBrainz identification complete!',
       resetErrorNoun: 'playlist',
     },
   },
@@ -522,7 +522,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       cardProgressFormat: 'slash-text',
       foundVariant: 'lenient',
       downloadEntry: 'youtube',
-      discoveryCompleteToast: 'Discovery complete!',
+      discoveryCompleteToast: 'Identification complete!',
       resetErrorNoun: 'playlist',
     },
   },

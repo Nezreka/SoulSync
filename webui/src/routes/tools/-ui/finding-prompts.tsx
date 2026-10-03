@@ -222,6 +222,12 @@ function AcoustidPrompt({
       cancelId="_acid-cancel"
       onCancel={() => resolve(null)}
     >
+      <div style={{ fontSize: 12, opacity: 0.7, margin: '0 0 12px', textAlign: 'left' }}>
+        Picks which catalogue recording this file really is — nothing is re-downloaded.
+        <br />
+        Saved as: library row + file tags (relocate also moves the file). Affects next sync:
+        indirectly.
+      </div>
       {ambiguous ? (
         <div style={{ display: 'grid', gap: 6, margin: '0 0 12px', textAlign: 'left' }}>
           {candidates!.map((label, i) => (
