@@ -8505,52 +8505,6 @@ class MusicDatabase:
             logger.error(f"get_manual_library_match error: {e}")
             return None
 
-    def get_manual_library_match_by_id(self, match_id: int,
-                                           profile_id: int) -> Optional[Dict[str, Any]]:
-        """Return a manual match row by PK id, scoped to profile_id.
-
-        #1289: the delete path needs the row's source_track_id BEFORE
-        deleting so mirrored in-library flags can be reset. The capped
-        list_manual_library_matches() cannot serve this — a match older than
-        the 100 most-recently-updated would silently skip the flag reset.
-        """
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT * FROM manual_library_track_matches
-                    WHERE id = ? AND profile_id = ?
-                """, (match_id, profile_id))
-                row = cursor.fetchone()
-                return dict(row) if row else None
-        except Exception as e:
-            logger.error(f"get_manual_library_match_by_id error: {e}")
-            return None
-
-    def find_all_manual_library_matches_by_source_track_id(
-        self, profile_id: int, source_track_id: str
-    ) -> list:
-        """Return ALL manual matches for a source track ID, any server_source.
-
-        #1289: the delete path's surviving-match guard must be
-        server-agnostic AND consider every survivor. The server-filtered
-        finder's SQL (`AND (server_source = ? OR server_source = '')`)
-        cannot see a survivor under a different server_source, and a
-        LIMIT 1 would let one dead survivor mask a live one — either
-        wrongly clears the mirrored in-library flag.
-        """
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT * FROM manual_library_track_matches
-                    WHERE profile_id = ? AND source_track_id = ?
-                """, (profile_id, source_track_id))
-                return [dict(row) for row in cursor.fetchall()]
-        except Exception as e:
-            logger.error(f"find_all_manual_library_matches_by_source_track_id error: {e}")
-            return []
-
     def find_manual_library_match_by_source_track_id(self, profile_id: int,
                                                      source_track_id: str,
                                                      server_source: str = '') -> Optional[Dict[str, Any]]:
@@ -18716,7 +18670,7 @@ class MusicDatabase:
                 'server_source': server_source
             }
 
-    def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50, watchlist_filter: str = "all", profile_id: int = 1, source_filter: str = "", quality_filter: str = "", sort: str = "name") -> Dict[str, Any]:
+    def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50, watchlist_filter: str = "all", profile_id: int = 1, source_filter: str = "", quality_filter: str = "", sort: str = "name", skip_server_filter: bool = False) -> Dict[str, Any]:
         """
         Get artists for the library page with search, filtering, and pagination
 
@@ -18803,13 +18757,14 @@ class MusicDatabase:
                     where_conditions.append(f"(a.name, a.server_source) IN ({_upgradable_names_sql})")
                     params.extend(UPGRADE_JOBS)
 
-                # Get active server for filtering
-                from core.settings import config_manager
-                active_server = config_manager.get_active_media_server()
+                # Get active server for filtering (skip for API clients)
+                if not skip_server_filter:
+                    from core.settings import config_manager
+                    active_server = config_manager.get_active_media_server()
 
-                # Add active server filter to where conditions
-                where_conditions.append("a.server_source = ?")
-                params.append(active_server)
+                    # Add active server filter to where conditions
+                    where_conditions.append("a.server_source = ?")
+                    params.append(active_server)
 
                 # whose library this page shows (#1199)
                 scope_sql, scope_params = self._current_scope_sql('a.owner_profile_id')
