@@ -3402,7 +3402,7 @@ async function loadSettingsData() {
         const _folderArtistEl = document.getElementById('import-folder-artist-override');
         if (_folderArtistEl) _folderArtistEl.checked = settings.import?.folder_artist_override !== false;
         const _transferPermEl = document.getElementById('import-transfer-permanent');
-        if (_transferPermEl) _transferPermEl.checked = settings.import?.transfer_is_permanent === true;
+        if (_transferPermEl) _transferPermEl.checked = settings.import?.transfer_is_permanent !== false;
 
         // Populate M3U Export settings
         document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;

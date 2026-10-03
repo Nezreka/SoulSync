@@ -8610,18 +8610,19 @@
                                                 <div class="setting-row">
                                                     <label class="checkbox-label">
                                                         <input type="checkbox" id="import-transfer-permanent">
-                                                        Transfer is my permanent library — never move files out
+                                                        Music Library is my permanent library — never move files out
                                                     </label>
                                                     <span class="info-icon" role="button" tabindex="0"
                                                         title="What's this?" onclick="toggleSettingHelp(this)"
                                                         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                                 </div>
                                                 <div class="help-text setting-help-body" hidden>
-                                                    Off by default. Turn this <strong>on</strong> if your Transfer
-                                                    folder is your
-                                                    real, permanent library (served by Navidrome/Plex/etc.) rather than
-                                                    a scratch
-                                                    drop area. A Deep Scan then never relocates files it doesn't
+                                                    On by default for new installs. Turn this <strong>off</strong> if
+                                                    your Music Library
+                                                    folder is just a scratch
+                                                    drop area rather than your real, permanent library (served by
+                                                    Navidrome/Plex/etc.). A Deep Scan then never relocates files it
+                                                    doesn't
                                                     recognize out to
                                                     Staging — it leaves them in place and just reports them. Even with
                                                     this off, a
@@ -8801,13 +8802,13 @@
                                             <div class="form-group">
                                                 <label>Whole-library M3U output folder:</label>
                                                 <input type="text" id="library-m3u-path" class="form-input"
-                                                    placeholder="leave empty for the Transfer folder">
+                                                    placeholder="leave empty for the Music Library folder">
                                                 <span class="info-icon" role="button" tabindex="0" title="What's this?"
                                                     onclick="toggleSettingHelp(this)"
                                                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                                 <div class="help-text setting-help-body" hidden>
                                                     Where the whole-library M3U is written. Leave empty to use your
-                                                    Transfer folder.
+                                                    Music Library folder.
                                                 </div>
                                             </div>
 
