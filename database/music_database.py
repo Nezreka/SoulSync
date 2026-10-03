@@ -12714,18 +12714,31 @@ class MusicDatabase:
         expected_track_count: Optional[int],
         db_track_count: Optional[int],
     ) -> bool:
-        """Guard artist-page owned status against generic soundtrack false positives."""
-        if not self._is_soundtrack_like_album_title(search_title) and not self._is_soundtrack_like_album_title(db_title):
-            return True
+        """Guard artist-page owned status against generic soundtrack false positives.
 
+        #1448: in the non-soundtrack branch, reject when one normalized title is
+        a proper substring of the other — edition markers were already cleaned
+        above, so leftover words are meaningful and one title containing the
+        other means different releases (e.g. "Respiro" vs "Sessão Respiro").
+        """
         normalized_search_title = self._normalize_for_comparison(search_title)
         normalized_db_title = self._normalize_for_comparison(db_title)
-        if normalized_search_title == normalized_db_title:
+        if normalized_search_title and normalized_db_title and normalized_search_title == normalized_db_title:
             return True
 
         clean_search_title = self._normalize_for_comparison(self._clean_album_title_for_comparison(search_title))
         clean_db_title = self._normalize_for_comparison(self._clean_album_title_for_comparison(db_title))
-        if clean_search_title and clean_search_title == clean_db_title:
+        if clean_search_title and clean_db_title and clean_search_title == clean_db_title:
+            return True
+
+        if not self._is_soundtrack_like_album_title(search_title) and not self._is_soundtrack_like_album_title(db_title):
+            # #1448: edition markers were cleaned above, so leftover words are
+            # meaningful — one title containing the other means different releases.
+            # (The `and` truthiness guards are load-bearing: "" in "x" is True.)
+            if normalized_search_title and normalized_db_title and (
+                    normalized_search_title in normalized_db_title
+                    or normalized_db_title in normalized_search_title):
+                return False
             return True
 
         best_title_similarity = max(title_similarity, clean_title_similarity, normalized_title_similarity)
