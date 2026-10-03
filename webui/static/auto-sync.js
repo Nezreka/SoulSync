@@ -1017,7 +1017,7 @@ function autoSyncWeeklyCardHtml(playlist, schedule) {
             <div class="auto-sync-scheduled-actions">
                 ${playlist._personalized
                     ? `<button class="run" onclick="event.stopPropagation(); runAutoSyncScheduledPlaylist(${playlist.id})" title="Run the playlist pipeline now" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Running' : 'Run now'}</button>`
-                    : `<button class="run" onclick="event.stopPropagation(); runAutoSyncScheduledPlaylist(${playlist.id}, true)" title="Sync now — updates the playlist without downloading missing tracks" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Running' : 'Sync'}</button>
+                    : `<button class="run" onclick="event.stopPropagation(); runAutoSyncScheduledPlaylist(${playlist.id}, true)" title="Sync now — updates the playlist without adding missing tracks to the wishlist" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Running' : 'Sync'}</button>
                 <button class="run" onclick="event.stopPropagation(); runAutoSyncScheduledPlaylist(${playlist.id}, false)" title="Sync now and download missing tracks" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Running' : 'Sync + download'}</button>`}
                 <button onclick="event.stopPropagation(); unscheduleAutoSyncWeekly(${playlist.id})" title="Remove this weekly schedule">&times;</button>
             </div>
@@ -1774,7 +1774,7 @@ function autoSyncHistoryDetailHtml(entry, before, after, result, deltas) {
               ${mirrorStillExists ? `
               <button type="button" class="auto-sync-history-run-again"
                   onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${parseInt(playlistId, 10)}, '${_escAttr(playlistName)}', true)"
-                  title="Sync now — updates the playlist without downloading missing tracks">
+                  title="Sync now — updates the playlist without adding missing tracks to the wishlist">
                   Sync
               </button>
               <button type="button" class="auto-sync-history-run-again"
@@ -2006,7 +2006,7 @@ function autoSyncScheduledCardHtml(playlist, schedule) {
             <div class="auto-sync-scheduled-actions">
                 ${playlist._personalized
                     ? `<button class="run" onclick="event.stopPropagation(); runAutoSyncScheduledPlaylist(${playlist.id})" title="Run the playlist pipeline now" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Running' : 'Run now'}</button>`
-                    : `<button class="run" onclick="event.stopPropagation(); runAutoSyncScheduledPlaylist(${playlist.id}, true)" title="Sync now — updates the playlist without downloading missing tracks" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Running' : 'Sync'}</button>
+                    : `<button class="run" onclick="event.stopPropagation(); runAutoSyncScheduledPlaylist(${playlist.id}, true)" title="Sync now — updates the playlist without adding missing tracks to the wishlist" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Running' : 'Sync'}</button>
                 <button class="run" onclick="event.stopPropagation(); runAutoSyncScheduledPlaylist(${playlist.id}, false)" title="Sync now and download missing tracks" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Running' : 'Sync + download'}</button>`}
                 <button onclick="event.stopPropagation(); unscheduleAutoSyncPlaylist(${playlist.id})" title="Remove this Auto-Sync schedule">&times;</button>
             </div>

@@ -544,7 +544,7 @@ export function Row({
               type="button"
               className="syncband-btn"
               disabled={busy}
-              title="Sync now — updates the playlist without downloading missing tracks"
+              title="Sync now — updates the playlist without adding missing tracks to the wishlist"
               onClick={() => onRun(row, true)}
             >
               {busy ? '…' : 'Sync'}
@@ -918,8 +918,8 @@ export function SyncRail() {
                           type="button"
                           className="dash-sync-act"
                           disabled={busy || !!live}
-                          title="Sync — updates the playlist without downloading missing tracks"
-                          aria-label={`Sync ${row.name} without downloading missing tracks`}
+                          title="Sync — updates the playlist without adding missing tracks to the wishlist"
+                          aria-label={`Sync ${row.name} without adding missing tracks to the wishlist`}
                           onClick={() => void runNow(row, true)}
                         >
                           ⟳

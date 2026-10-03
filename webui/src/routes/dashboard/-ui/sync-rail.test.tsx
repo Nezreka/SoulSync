@@ -323,10 +323,10 @@ describe('the split sync buttons (#1455)', () => {
       view = render(<SyncRail />);
     });
     await vi.waitFor(() =>
-      expect(view.getByLabelText('Sync Test List without downloading missing tracks')).toBeTruthy(),
+      expect(view.getByLabelText('Sync Test List without adding missing tracks to the wishlist')).toBeTruthy(),
     );
 
-    fireEvent.click(view.getByLabelText('Sync Test List without downloading missing tracks'));
+    fireEvent.click(view.getByLabelText('Sync Test List without adding missing tracks to the wishlist'));
     await vi.waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0].url).toContain('/api/mirrored-playlists/7/pipeline/run');
     expect(posts[0].body).toEqual({ skip_wishlist: true });

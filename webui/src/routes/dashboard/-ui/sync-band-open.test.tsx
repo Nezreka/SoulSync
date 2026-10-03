@@ -170,7 +170,7 @@ describe('the split sync buttons (#1455)', () => {
 
   it('"Sync" runs the pipeline with skip_wishlist=true', () => {
     const { getByTitle } = render(scheduledRow());
-    fireEvent.click(getByTitle(/without downloading missing tracks/));
+    fireEvent.click(getByTitle(/without adding missing tracks to the wishlist/));
     expect(onRun).toHaveBeenCalledTimes(1);
     expect(onRun.mock.calls[0][1]).toBe(true);
   });

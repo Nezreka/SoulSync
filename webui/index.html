@@ -8867,11 +8867,13 @@
                                                     onclick="toggleSettingHelp(this)"
                                                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                                 <div class="help-text setting-help-body" hidden>
-                                                    When on, syncing a playlist queues any tracks missing from your
-                                                    library for download. Turn it off and syncs only ever update the
-                                                    playlist itself — nothing is queued for download. The Sync /
-                                                    Sync + download buttons always choose per click, regardless of
-                                                    this setting.
+                                                    When on, syncing a playlist adds tracks missing from your
+                                                    library to the wishlist (which queues them for download).
+                                                    Turn it off and syncs skip the wishlist step — missing tracks
+                                                    are never added to the wishlist. (A playlist's own
+                                                    organize/folder-download setting is separate and still
+                                                    applies.) The Sync / Sync + download buttons always choose
+                                                    per click, regardless of this setting.
                                                 </div>
                                             </div>
 
