@@ -3337,6 +3337,10 @@ async function loadSettingsData() {
         document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup === true;
         const _syncModeEl = document.getElementById('playlist-sync-mode');
         if (_syncModeEl) _syncModeEl.value = settings.playlist_sync?.mode || 'reconcile';
+        // #1455: default ON — older installs come back undefined and read as
+        // today's behavior (wishlist missing tracks during sync).
+        document.getElementById('playlist-sync-wishlist-missing').checked =
+            settings.playlist_sync?.wishlist_missing_tracks !== false;
 
         // Populate Post-Download Conversion settings
         document.getElementById('downsample-hires').checked = settings.lossy_copy?.downsample_hires === true;
@@ -6384,7 +6388,8 @@ async function saveSettings(quiet = false) {
         },
         playlist_sync: {
             create_backup: document.getElementById('create-backup').checked,
-            mode: _cfgStr('playlist-sync-mode', { fallback: 'reconcile' })
+            mode: _cfgStr('playlist-sync-mode', { fallback: 'reconcile' }),
+            wishlist_missing_tracks: document.getElementById('playlist-sync-wishlist-missing').checked
         },
         content_filter: {
             allow_explicit: document.getElementById('allow-explicit').checked,

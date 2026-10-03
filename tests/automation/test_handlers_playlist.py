@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import threading
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional
 
 import pytest
@@ -94,7 +95,15 @@ def _build_deps(**overrides) -> AutomationDeps:
     defaults = dict(
         engine=object(),
         state=AutomationState(),
-        config_manager=object(),
+        # Handlers call config_manager.get(...) directly (production
+        # ConfigManager); the fake needs the same surface. Defaults mirror
+        # production defaults so tests exercise today's behavior.
+        config_manager=SimpleNamespace(
+            get=lambda key, default=None: {
+                'playlist_sync.wishlist_missing_tracks': True,
+            }.get(key, default),
+            get_active_media_server=lambda: None,
+        ),
         update_progress=lambda *a, **k: None,
         logger=_StubLogger(),
         get_database=lambda: _StubDB(),

@@ -818,7 +818,12 @@ class ConfigManager:
                 #   reconcile — edit in place (add/remove delta), preserving the
                 #               playlist's custom image, description, and identity (#792)
                 #   append    — only add new tracks, never remove
-                "mode": "replace"
+                "mode": "replace",
+                # Add tracks missing from the library to the wishlist during
+                # playlist syncs (#1455). ON (default) = today's behavior:
+                # syncing queues missing tracks for download. OFF = syncs only
+                # ever update the playlist itself; nothing is queued.
+                "wishlist_missing_tracks": True
             },
             "settings": {
                 "audio_quality": "flac"

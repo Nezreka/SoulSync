@@ -196,7 +196,7 @@ Mirrored playlists can refresh and re-sync on a schedule from the **Bulk schedul
 
 - Pick an interval per playlist — from every hour up to weekly (1, 2, 4, 8, 12, 16, 24, 48, 72, or 168 hours)
 - Weekly schedules let you choose specific days
-- Scheduled runs refresh the playlist, run discovery on new tracks, and sync them to your wishlist — fully hands-free
+- Scheduled runs refresh the playlist, run discovery on new tracks, and sync them to your wishlist — fully hands-free (unless you've turned off **Add missing tracks to the wishlist during sync** in Settings → Playlists)
 `
         },
         {

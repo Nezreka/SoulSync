@@ -8860,6 +8860,25 @@
 
                                             <div class="form-group">
                                                 <label class="checkbox-label">
+                                                    <input type="checkbox" id="playlist-sync-wishlist-missing" checked>
+                                                    Add missing tracks to the wishlist during sync
+                                                </label>
+                                                <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                                    onclick="toggleSettingHelp(this)"
+                                                    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                <div class="help-text setting-help-body" hidden>
+                                                    When on, syncing a playlist adds tracks missing from your
+                                                    library to the wishlist (which queues them for download).
+                                                    Turn it off and syncs skip the wishlist step — missing tracks
+                                                    are never added to the wishlist. (A playlist's own
+                                                    organize/folder-download setting is separate and still
+                                                    applies.) The Sync / Sync + download buttons always choose
+                                                    per click, regardless of this setting.
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label class="checkbox-label">
                                                     <input type="checkbox" id="create-backup">
                                                     Keep a "&lt;name&gt; Backup" copy on the server before a Replace sync
                                                 </label>

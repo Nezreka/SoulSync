@@ -857,7 +857,8 @@ def test_plex_cover_goes_to_the_profiles_own_user(patched_db, monkeypatch):
     deps = _build_deps(sync_service=svc, plex=px, config=cfg)
 
     ds.run_sync_task('pPX', 'PPX', [_track()], profile_id=2,
-                     playlist_image_url='https://img/p.png', deps=deps)
+                     playlist_image_url='https://img/p.png', deps=deps,
+                     sync_mode='replace')  # reconcile (now the default) never pushes covers
 
     assert px.image_calls == [], "the app account uploaded the cover"
     assert [v.acting_as for v in px.views] == ['Kids', 'Kids']
@@ -866,7 +867,8 @@ def test_plex_cover_goes_to_the_profiles_own_user(patched_db, monkeypatch):
     px2 = _PlexWithUsers()
     deps = _build_deps(sync_service=svc, plex=px2, config=cfg)
     ds.run_sync_task('pPX', 'PPX', [_track()], profile_id=3,
-                     playlist_image_url='https://img/p.png', deps=deps)
+                     playlist_image_url='https://img/p.png', deps=deps,
+                     sync_mode='replace')  # reconcile (now the default) never pushes covers
     assert px2.image_calls == [('PPX', 'https://img/p.png')] and px2.views == []
 
 
@@ -900,5 +902,6 @@ def test_jellyfin_cover_goes_to_the_profiles_own_user(patched_db, monkeypatch):
     jf2 = _JellyWithUsers()
     deps = _build_deps(sync_service=svc, jellyfin=jf2, config=cfg)
     ds.run_sync_task('pJF', 'PJF', [_track()], profile_id=3,
-                     playlist_image_url='https://img/j.png', deps=deps)
+                     playlist_image_url='https://img/j.png', deps=deps,
+                     sync_mode='replace')  # reconcile (now the default) never pushes covers
     assert jf2.image_calls == [('PJF', 'https://img/j.png')] and jf2.views == []

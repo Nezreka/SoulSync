@@ -282,3 +282,73 @@ describe('a running sync', () => {
     expect(shown).toHaveLength(ROWS.length);
   });
 });
+
+describe('the split sync buttons (#1455)', () => {
+  const posts: Array<{ url: string; body: unknown }> = [];
+
+  beforeEach(() => {
+    posts.length = 0;
+    const fetchMock = vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+      const u = String(url);
+      if (u.endsWith('/pipeline/run')) {
+        posts.push({ url: u, body: JSON.parse(String((init as { body?: string })?.body)) });
+        return { ok: true, json: async () => ({}) };
+      }
+      if (u === '/api/mirrored-playlists') return { ok: true, json: async () => [] };
+      if (u === '/api/automations') return { ok: true, json: async () => [] };
+      if (u === '/api/playlist-pipeline/history?limit=40')
+        return { ok: true, json: async () => ({}) };
+      if (u.startsWith('/api/sync/history'))
+        return { ok: true, json: async () => ({ entries: [] }) };
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    (window as unknown as Record<string, unknown>).buildAutoSyncScheduleState = () => ({
+      playlists: [
+        { id: 7, name: 'Test List', source: 'spotify', total_count: 10, in_library_count: 4 },
+      ],
+      playlistSchedules: { '7': { automation_id: 1, hours: 24, enabled: true } },
+      weeklySchedules: {},
+      runHistory: [],
+    });
+    (window as unknown as Record<string, unknown>).showToast = vi.fn();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    delete (window as unknown as Record<string, unknown>).buildAutoSyncScheduleState;
+    delete (window as unknown as Record<string, unknown>).showToast;
+  });
+
+  it('scheduled rows offer Sync and Sync + download with the right bodies', async () => {
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<SyncRail />);
+    });
+    await vi.waitFor(() =>
+      expect(
+        view.getByLabelText('Sync Test List without adding missing tracks to the wishlist'),
+      ).toBeTruthy(),
+    );
+
+    fireEvent.click(
+      view.getByLabelText('Sync Test List without adding missing tracks to the wishlist'),
+    );
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0].url).toContain('/api/mirrored-playlists/7/pipeline/run');
+    expect(posts[0].body).toEqual({ skip_wishlist: true });
+
+    // The first click sets the row busy (button disabled) until runNow's
+    // finally clears it — wait for the re-enable before clicking again.
+    await vi.waitFor(() =>
+      expect(
+        (view.getByLabelText('Sync Test List and download missing tracks') as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+    fireEvent.click(view.getByLabelText('Sync Test List and download missing tracks'));
+    await vi.waitFor(() => expect(posts).toHaveLength(2));
+    expect(posts[1].body).toEqual({ skip_wishlist: false });
+  });
+});

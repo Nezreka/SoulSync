@@ -593,6 +593,9 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
         data = request.get_json(silent=True) or {}
         # refresh from source (#1413): pull + discover the new tracks only
         refresh_only = bool(data.get('refresh_only', False))
+        # #1455: per-click skip_wishlist wins; otherwise the global toggle.
+        from core.playlists.pipeline import resolve_pipeline_skip_wishlist
+        skip_wishlist = resolve_pipeline_skip_wishlist(data, config_manager)
         state = _replace_playlist_pipeline_state(playlist_id, {
             'run_id': _playlist_pipeline_state_key(playlist_id, profile_id),
             'playlist_id': int(playlist_id),
@@ -614,7 +617,7 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
 
         threading.Thread(
             target=_run_mirrored_playlist_pipeline_for_ui,
-            args=(playlist_id, bool(data.get('skip_wishlist', False)), int(profile_id), refresh_only),
+            args=(playlist_id, skip_wishlist, int(profile_id), refresh_only),
             daemon=True,
             name=f"playlist-pipeline-{playlist_id}",
         ).start()
