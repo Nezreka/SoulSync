@@ -226,17 +226,19 @@ function useSyncBand() {
   }, [anyRunning, loadAll]);
 
   const runNow = useCallback(
-    async (row: SyncBandRow) => {
+    async (row: SyncBandRow, skipWishlist: boolean) => {
       const sched = row.schedule;
       if (!sched) return;
       setBusyId(sched.automationId);
       try {
         // The board's run path — the ONLY one that registers the pipeline
         // progress state the board modal and this band's running UI read.
+        // skipWishlist is an explicit per-click choice (#1455): true = sync
+        // only, false = sync and queue missing tracks for download.
         const res = await fetch(`/api/mirrored-playlists/${sched.key}/pipeline/run`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
+          body: JSON.stringify({ skip_wishlist: skipWishlist }),
         });
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         if (!res.ok) window.showToast?.(data.error || `Could not run ${row.name}`, 'error');
@@ -429,7 +431,7 @@ export function Row({
   busy: boolean;
   fading: boolean;
   live: LiveSync | null;
-  onRun: (row: SyncBandRow) => void;
+  onRun: (row: SyncBandRow, skipWishlist: boolean) => void;
   onSyncAgain: (row: SyncBandRow) => void;
   onListen: (id: number | string, name: string) => void;
   onRemove: (id: number | string) => void;
@@ -537,15 +539,26 @@ export function Row({
 
       <div className="syncband-actions" onClick={(e) => e.stopPropagation()}>
         {sched && !running ? (
-          <button
-            type="button"
-            className="syncband-btn"
-            disabled={busy}
-            title="Run this pipeline now"
-            onClick={() => onRun(row)}
-          >
-            {busy ? '…' : 'Run'}
-          </button>
+          <>
+            <button
+              type="button"
+              className="syncband-btn"
+              disabled={busy}
+              title="Sync now — updates the playlist without downloading missing tracks"
+              onClick={() => onRun(row, true)}
+            >
+              {busy ? '…' : 'Sync'}
+            </button>
+            <button
+              type="button"
+              className="syncband-btn"
+              disabled={busy}
+              title="Sync now and download missing tracks"
+              onClick={() => onRun(row, false)}
+            >
+              {busy ? '…' : 'Sync + download'}
+            </button>
+          </>
         ) : null}
         {row.kind === 'manual' && lastId !== undefined && row.last?.typeLabel !== 'album' ? (
           <button
@@ -656,7 +669,7 @@ export function SyncBand() {
                 }
                 fading={row.last?.id !== undefined && fadingIds.has(row.last.id)}
                 live={liveForRow(row)}
-                onRun={(r) => void runNow(r)}
+                onRun={(r, skipWishlist) => void runNow(r, skipWishlist)}
                 onSyncAgain={(r) => void syncAgain(r)}
                 onListen={(id, name) => void listen(id, name)}
                 onRemove={(id) => void removeEntry(id)}
@@ -899,16 +912,41 @@ export function SyncRail() {
                         ▶
                       </button>
                     ) : null}
-                    <button
-                      type="button"
-                      className="dash-sync-act"
-                      disabled={busy || !!live}
-                      title={row.schedule ? 'Run now' : 'Sync again'}
-                      aria-label={`${row.schedule ? 'Run' : 'Sync'} ${row.name} now`}
-                      onClick={() => void (row.schedule ? runNow(row) : syncAgain(row))}
-                    >
-                      ⟳
-                    </button>
+                    {row.schedule ? (
+                      <>
+                        <button
+                          type="button"
+                          className="dash-sync-act"
+                          disabled={busy || !!live}
+                          title="Sync — updates the playlist without downloading missing tracks"
+                          aria-label={`Sync ${row.name} without downloading missing tracks`}
+                          onClick={() => void runNow(row, true)}
+                        >
+                          ⟳
+                        </button>
+                        <button
+                          type="button"
+                          className="dash-sync-act"
+                          disabled={busy || !!live}
+                          title="Sync + download — syncs and downloads missing tracks"
+                          aria-label={`Sync ${row.name} and download missing tracks`}
+                          onClick={() => void runNow(row, false)}
+                        >
+                          ⤓
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className="dash-sync-act"
+                        disabled={busy || !!live}
+                        title="Sync again"
+                        aria-label={`Sync ${row.name} now`}
+                        onClick={() => void syncAgain(row)}
+                      >
+                        ⟳
+                      </button>
+                    )}
                   </span>
                 </div>
               );

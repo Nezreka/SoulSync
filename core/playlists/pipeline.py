@@ -32,6 +32,22 @@ SyncOneFn = Callable[[Dict[str, Any], Any], Dict[str, Any]]
 SyncAndWishlistFn = Callable[..., Dict[str, int]]
 
 
+def resolve_pipeline_skip_wishlist(data: Dict[str, Any], config_manager=None) -> bool:
+    """Decide whether a pipeline run skips the wishlist phase (#1455).
+
+    An explicit ``skip_wishlist`` in the request data is a per-click manual
+    override and always wins. Otherwise the global
+    ``playlist_sync.wishlist_missing_tracks`` toggle decides (default True =
+    today's behavior: missing tracks are wishlisted).
+    """
+    explicit = data.get('skip_wishlist', None)
+    if explicit is not None:
+        return bool(explicit)
+    if config_manager is None:
+        return False
+    return not config_manager.get('playlist_sync.wishlist_missing_tracks', True)
+
+
 def run_mirrored_playlist_pipeline(
     config: Dict[str, Any],
     deps: Any,
