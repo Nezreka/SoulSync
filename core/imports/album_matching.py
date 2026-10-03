@@ -614,17 +614,23 @@ def match_files_to_tracks(
         remaining_files, file_tags, quality_rank=quality_rank, similarity=similarity)
 
     # Phase 3 — fuzzy scoring on remaining tracks.
+    # #1289: was greedy per-track in tracklist order — an early track with a
+    # mediocre score (0.402) could permanently claim a file that a later
+    # track would match at 1.0 (the Give Up Deluxe cover mislabeling). Now
+    # collect all candidate scores first and claim in descending-score order,
+    # so the best match always wins regardless of track order.
+    # Note: descending-greedy is not globally optimal (Hungarian assignment
+    # could match more tracks in adversarial score matrices), but it is a
+    # strict improvement over track-order greedy for the reported bug class.
     duration_rejected = 0     # diagnostics for the "no matches" case
-    below_threshold = 0
     sample_rejection_logged = False
+    scored: list[tuple[float, int, str]] = []  # (score, track_idx, file)
+    below_threshold_tracks: set[int] = set()
     for i, track in enumerate(tracks):
         if i in used_track_indices:
             continue
 
         track_duration = _track_duration_ms(track)
-
-        best_file = None
-        best_score = 0.0
 
         for f in deduped:
             if f in used_files:
@@ -666,19 +672,24 @@ def match_files_to_tracks(
                 target_album=target_album,
                 similarity=similarity,
             )
-            if score > best_score and score >= MATCH_THRESHOLD:
-                best_score = score
-                best_file = f
+            if score >= MATCH_THRESHOLD:
+                scored.append((score, i, f))
+            else:
+                below_threshold_tracks.add(i)
 
-        if best_file:
-            used_files.add(best_file)
-            matches.append({
-                'track': track,
-                'file': best_file,
-                'confidence': round(best_score, 3),
-            })
-        elif deduped:
-            below_threshold += 1
+    # Claim in descending-score order. A track/file already claimed by a
+    # higher-scoring pair is skipped.
+    scored.sort(key=lambda t: t[0], reverse=True)
+    for best_score, i, best_file in scored:
+        if i in used_track_indices or best_file in used_files:
+            continue
+        used_files.add(best_file)
+        used_track_indices.add(i)
+        matches.append({
+            'track': tracks[i],
+            'file': best_file,
+            'confidence': round(best_score, 3),
+        })
 
     # Diagnostic surface — when the matcher returns 0 matches against
     # a non-trivial input, it's nearly always one of: duration gate too
@@ -691,7 +702,7 @@ def match_files_to_tracks(
             "%d duration-rejected pairs, %d tracks below threshold. "
             "Album: %r",
             len(audio_files), len(tracks),
-            duration_rejected, below_threshold, target_album,
+            duration_rejected, len(below_threshold_tracks), target_album,
         )
 
     # Final unmatched list: every file that didn't get used in any
