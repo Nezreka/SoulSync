@@ -1661,6 +1661,29 @@ def _register_automation_handlers():
     )
     _register_extracted_handlers(_automation_deps)
 
+    # #1289 item 12: seed one system automation per repair job so the
+    # automation engine (not the worker's staleness queue) drives scheduling.
+    # Idempotent — existing rows are never clobbered.
+    if automation_engine is not None:
+        try:
+            from core.automation.migrate_repair_jobs import ensure_repair_job_automations
+            try:
+                from api.video import get_video_db
+                _video_db = get_video_db()
+            except Exception:
+                _video_db = None
+            _mig = ensure_repair_job_automations(
+                automation_engine, get_database(), config_manager,
+                video_db=_video_db)
+            if _mig.get("created"):
+                logger.info("Seeded %d repair-job automations", _mig["created"])
+        except Exception:
+            logger.exception("Could not seed repair-job automations")
+    else:
+        logger.warning(
+            "Automation engine not initialized; repair-job scheduling is disabled. "
+            "The repair workers are drain-only and will not run scheduled jobs.")
+
     # Bridge the isolated video download monitor's batch-complete signal into the
     # automation engine (core/video can't import the engine). Mirrors how the music
     # web_scan_manager forwards library_scan_completed. ONE forwarder relays EVERY

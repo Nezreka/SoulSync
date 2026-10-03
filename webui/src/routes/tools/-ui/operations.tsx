@@ -25,6 +25,7 @@
  * a separate progress panel that appears and shoves the layout around.
  */
 
+import { Link } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { Cadence, IntervalUnit } from '../-tools.ops';
@@ -56,6 +57,7 @@ import {
   jobSchedule,
   jobTrend,
 } from '../-tools.ops';
+import { updateAutomationTrigger } from '../../automations/-automations.api';
 import { OperationsStudio } from './operations-studio';
 
 function toast(message: string, type = 'info') {
@@ -94,14 +96,19 @@ const UNITS: IntervalUnit[] = ['hours', 'days', 'weeks'];
  * The schedule control, on the tile face.
  *
  * It speaks the same language as the auto-sync page — an interval and a unit —
- * rather than the raw hours the config stores. What it deliberately does NOT
- * offer is a time of day: the worker is a staleness queue that runs whichever
- * enabled job is furthest past its interval whenever it is idle, so "every 6
- * hours" is a promise it can keep and "at 03:00" is not.
+ * rather than the raw hours the config stores.
+ *
+ * #1289 item 12: the interval now writes to the job's system automation row
+ * (via the automations API), not the legacy repair config. The "custom
+ * schedule" link deep-links to the automation builder for daily/weekly/
+ * monthly triggers.
  */
 function CadenceEditor({ job, onSaved }: { job: RepairJob; onSaved: () => void }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<Cadence>(() => cadenceFromHours(job.interval_hours));
+  const [draft, setDraft] = useState<Cadence>(() =>
+    // Custom non-interval triggers start the editor at 24h; saving resets to a schedule trigger.
+    cadenceFromHours(job.interval_hours ?? 24),
+  );
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -111,10 +118,24 @@ function CadenceEditor({ job, onSaved }: { job: RepairJob; onSaved: () => void }
   const save = useCallback(async () => {
     setSaving(true);
     try {
-      // The other settings ride along unchanged — the endpoint replaces the
-      // whole settings blob, so sending only the interval would wipe them.
-      await saveRepairJobSettings(job.job_id, hoursFromCadence(draft), { ...(job.settings || {}) });
-      toast(`${job.display_name} now runs ${cadenceLabel(hoursFromCadence(draft))}`, 'success');
+      const hours = hoursFromCadence(draft);
+      if (job.automation_id) {
+        // Write to the automation's schedule trigger. The trigger_type is
+        // reset to 'schedule' in case the user had set a daily/weekly/monthly
+        // schedule via the Custom schedule link.
+        await updateAutomationTrigger(
+          job.automation_id,
+          {
+            interval: hours,
+            unit: 'hours',
+          },
+          'schedule',
+        );
+      } else {
+        // Fallback: legacy path (migration hasn't seeded the row yet).
+        await saveRepairJobSettings(job.job_id, hours, { ...(job.settings || {}) });
+      }
+      toast(`${job.display_name} now runs ${cadenceLabel(hours)}`, 'success');
       setEditing(false);
       onSaved();
     } catch {
@@ -122,7 +143,7 @@ function CadenceEditor({ job, onSaved }: { job: RepairJob; onSaved: () => void }
     } finally {
       setSaving(false);
     }
-  }, [draft, job.display_name, job.job_id, job.settings, onSaved]);
+  }, [draft, job.automation_id, job.display_name, job.job_id, job.settings, onSaved]);
 
   if (!editing) {
     return (
@@ -180,6 +201,15 @@ function CadenceEditor({ job, onSaved }: { job: RepairJob; onSaved: () => void }
       >
         Cancel
       </button>
+      {job.automation_id && (
+        <Link
+          to="/automations"
+          className="repair-tile-cadence-custom"
+          title="Set a daily, weekly, or monthly schedule"
+        >
+          Custom schedule
+        </Link>
+      )}
     </span>
   );
 }

@@ -131,6 +131,10 @@ class VideoRepairWorker:
         return {"success": False, "error": "not running"}
 
     def _run(self) -> None:
+        # #1289 item 12: the worker no longer picks jobs by staleness —
+        # scheduling lives in the automation engine now. This loop is a pure
+        # executor: it drains the force-run queue (Run Now clicks + automation
+        # triggers) and sleeps otherwise.
         logger.info("video repair worker started")
         while not self._stop_event.is_set():
             if self._paused:
@@ -140,40 +144,14 @@ class VideoRepairWorker:
             with self._lock:
                 if self._force_queue:
                     job_id = self._force_queue.pop(0)
-            forced = job_id is not None
-            if job_id is None and self.master_enabled():
-                job_id = self._pick_next_job()
             if job_id:
                 try:
-                    self._run_job(job_id, forced=forced)
+                    self._run_job(job_id, forced=True)
                 except Exception:   # noqa: BLE001 - the scheduler must survive any job
                     logger.exception("repair job %s crashed", job_id)
             else:
                 self._wake.wait(_IDLE_SLEEP)   # a Run Now click ends the nap instantly
                 self._wake.clear()
-
-    def _pick_next_job(self) -> Optional[str]:
-        """The stalest enabled job whose interval has elapsed (music policy)."""
-        best, best_age = None, -1.0
-        now = time.time()
-        for job_id in get_all_jobs():
-            cfg = self.job_config(job_id)
-            if not cfg.get("enabled"):
-                continue
-            last = self.db.repair_last_run(job_id)
-            if last and last.get("status") == "running":
-                continue   # crashed-mid-run rows still block re-pick until restart clears
-            age_h = 1e9
-            if last and last.get("finished_at"):
-                try:
-                    from datetime import datetime, timezone
-                    dt = datetime.fromisoformat(last["finished_at"]).replace(tzinfo=timezone.utc)
-                    age_h = (now - dt.timestamp()) / 3600.0
-                except (ValueError, TypeError):
-                    pass
-            if age_h >= cfg["interval_hours"] and age_h > best_age:
-                best, best_age = job_id, age_h
-        return best
 
     # ── one job ───────────────────────────────────────────────────────────────
     def _run_job(self, job_id: str, forced: bool = False) -> None:
@@ -362,6 +340,10 @@ class VideoRepairWorker:
                 "last_run": last, "next_run": next_run,
                 "is_running": self._current_job_id == job_id,
                 "pending_findings_count": counts.get(job_id, 0),
+                # #1289 item 12: video has no Tools UI for repair jobs yet;
+                # automation_id is null until one exists. The schedule still
+                # runs via the seeded system automation rows.
+                "automation_id": None,
             })
         return out
 

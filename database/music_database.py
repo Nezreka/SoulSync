@@ -24860,21 +24860,26 @@ class MusicDatabase:
                           action_type: str, action_config: str, profile_id: int = 1,
                           notify_type: str = None, notify_config: str = '{}',
                           then_actions: str = '[]', group_name: str = None,
-                          owned_by: str = None):
+                          owned_by: str = None, is_system: bool = False,
+                          enabled: bool = True):
         """Create a new automation. Returns the new automation ID or None.
 
         ``owned_by`` tags an automation as managed by a feature surface
         (e.g. ``'auto_sync'`` for entries the Playlist Auto-Sync board
         creates) so that surface can recognize its own rows without
         scraping the display name.
+
+        ``is_system`` marks first-party system rows (e.g. repair-job
+        schedules from #1289): they render in the System section and
+        cannot be deleted via the API.
         """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    INSERT INTO automations (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions, group_name, owned_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions, group_name, owned_by))
+                    INSERT INTO automations (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions, group_name, owned_by, is_system, enabled)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions, group_name, owned_by, 1 if is_system else 0, 1 if enabled else 0))
                 conn.commit()
                 return cursor.lastrowid
         except Exception as e:

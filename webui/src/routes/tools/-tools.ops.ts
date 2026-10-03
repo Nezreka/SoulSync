@@ -89,6 +89,9 @@ export function hoursFromCadence(cadence: Cadence): number {
 
 /** "every 6 hours" / "daily" / "weekly" — what the tile face reads. */
 export function cadenceLabel(hours: number | null | undefined): string {
+  // #1289 item 12: null means a custom non-interval trigger (e.g. daily at
+  // 3am set via the Automations page). Don't guess — say it's custom.
+  if (hours == null) return 'custom schedule';
   const { interval, unit } = cadenceFromHours(hours);
   if (unit === 'days' && interval === 1) return 'daily';
   if (unit === 'weeks' && interval === 1) return 'weekly';
