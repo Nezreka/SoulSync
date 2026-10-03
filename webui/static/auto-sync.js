@@ -1760,10 +1760,18 @@ function autoSyncHistoryDetailHtml(entry, before, after, result, deltas) {
     const logsHtml = autoSyncHistoryLogsCompactHtml(entry.log_lines);
     const playlistId = entry.playlist_id || after.playlist_id || before.playlist_id || '';
     const playlistName = entry.playlist_name || after.name || before.name || '';
+    // #1455: history entries outlive their mirrors — a deleted mirror's button
+    // would POST /pipeline/run and just 404. Disable it (not hidden) so the
+    // audit entry still reads naturally.
+    const mirrorStillExists = !!playlistId
+        && Array.isArray(_autoSyncScheduleState.playlists)
+        && _autoSyncScheduleState.playlists.some(p => parseInt(p.id, 10) === parseInt(playlistId, 10));
     const runAgainHtml = playlistId
         ? `<div class="auto-sync-history-detail-actions">
               <button type="button" class="auto-sync-history-run-again"
-                  onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${parseInt(playlistId, 10)}, '${_escAttr(playlistName)}')">
+                  ${mirrorStillExists
+                      ? `onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${parseInt(playlistId, 10)}, '${_escAttr(playlistName)}')"`
+                      : 'disabled title="Playlist no longer exists"'}>
                   Run pipeline again
               </button>
            </div>`

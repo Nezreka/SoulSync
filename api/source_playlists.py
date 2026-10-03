@@ -5315,17 +5315,18 @@ def start_playlist_sync_from_payload(data):
     if not all([playlist_id, playlist_name, tracks_json]):
         return jsonify({"success": False, "error": "Missing playlist_id, name, or tracks."}), 400
 
-    # Add activity for sync start
-    # every source comes through here (history re-sync, dashboard, account
-    # tabs), not just spotify, so don't name one (#1404)
-    add_activity_item("", "Sync Started", f"'{playlist_name}' - {len(tracks_json)} tracks ({sync_mode})", "Now")
-
     logger.info(f"Starting playlist sync for '{playlist_name}' with {len(tracks_json)} tracks (mode: {sync_mode})")
     logger.debug(f"Request parsed at {time.strftime('%H:%M:%S')} (took {(time.time()-request_start_time)*1000:.1f}ms)")
 
     with sync_lock:
         if playlist_id in active_sync_workers and not active_sync_workers[playlist_id].done():
             return jsonify({"success": False, "error": "Sync is already in progress for this playlist."}), 409
+
+        # Add activity for sync start (#1455): after the in-progress guard, so
+        # rejected duplicate clicks don't log a "Sync Started" that never ran.
+        # Every source comes through here (history re-sync, dashboard, account
+        # tabs), not just spotify, so don't name one (#1404)
+        add_activity_item("", "Sync Started", f"'{playlist_name}' - {len(tracks_json)} tracks ({sync_mode})", "Now")
 
         # Initial state
         sync_states[playlist_id] = {

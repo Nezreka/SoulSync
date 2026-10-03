@@ -24731,7 +24731,13 @@ class MusicDatabase:
         *,
         profile_id: Optional[int] = None,
     ) -> bool:
-        """Delete a mirrored playlist and its tracks (CASCADE)."""
+        """Delete a mirrored playlist and its tracks (CASCADE).
+
+        Also removes Auto-Sync board-owned pipeline automations (owned_by='auto_sync')
+        scoped to this playlist so the dashboard Sync band stops rendering ghost
+        schedule rows for the deleted mirror (#1455). User-created automations are
+        never touched, and 'all' schedules (covering every playlist) survive.
+        """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -24740,11 +24746,66 @@ class MusicDatabase:
                     "DELETE FROM mirrored_playlists WHERE id = ?" + owner_sql,
                     [playlist_id, *owner_params],
                 )
+                deleted = cursor.rowcount > 0
+                if deleted:
+                    self._delete_auto_sync_automations_for_playlist(
+                        cursor, int(playlist_id), profile_id=profile_id
+                    )
                 conn.commit()
-                return cursor.rowcount > 0
+                return deleted
         except Exception as e:
             logger.error(f"Error deleting mirrored playlist: {e}")
             return False
+
+    def _delete_auto_sync_automations_for_playlist(
+        self, cursor, playlist_id: int, profile_id: Optional[int] = None
+    ):
+        """Delete board-owned Auto-Sync automations scoped to one mirrored playlist.
+
+        Only rows the Auto-Sync board owns (owned_by='auto_sync') whose
+        action_config targets exactly this playlist_id are removed. The board
+        stores playlist_id as a JSON string; 'all' schedules (true/'true') apply
+        to every playlist and are left alone (#1455).
+        """
+        try:
+            if profile_id is None:
+                cursor.execute(
+                    "SELECT id, action_config FROM automations WHERE owned_by = 'auto_sync'"
+                )
+            else:
+                cursor.execute(
+                    "SELECT id, action_config FROM automations WHERE owned_by = 'auto_sync' AND profile_id = ?",
+                    (int(profile_id),),
+                )
+            to_delete = []
+            for row in cursor.fetchall():
+                try:
+                    cfg = json.loads(row["action_config"] or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if not isinstance(cfg, dict):
+                    continue
+                if cfg.get("all") is True or str(cfg.get("all")).lower() == "true":
+                    continue  # applies to every playlist — not scoped to this one
+                raw = cfg.get("playlist_id")
+                if raw in (None, ""):
+                    continue
+                try:
+                    scoped_id = int(raw)
+                except (TypeError, ValueError):
+                    continue
+                if scoped_id == int(playlist_id):
+                    to_delete.append(row["id"])
+            if to_delete:
+                cursor.execute(
+                    f"DELETE FROM automations WHERE id IN ({','.join('?' * len(to_delete))})",
+                    to_delete,
+                )
+                logger.info(
+                    f"Deleted {cursor.rowcount} auto-sync automation(s) scoped to deleted playlist {playlist_id}"
+                )
+        except Exception as e:
+            logger.error(f"Error deleting auto-sync automations for playlist {playlist_id}: {e}")
 
     # ===========================
     # AUTOMATIONS CRUD
