@@ -165,3 +165,40 @@ def test_filter_keys_match_write_path_keys(pool_db):
     }
     filter_keys = db._get_playlist_discovery_keys(pid_a, profile_id=1)
     assert write_keys <= filter_keys
+
+
+def _cache_titles(db):
+    return {r["original_title"] for r in db.get_discovery_pool_matched()}
+
+
+def test_clear_all_empties_cache(pool_db):
+    db, pid_a, pid_b = pool_db
+    assert _cache_titles(db) == {"Alpha", "Beta", "Gamma"}
+    assert db.clear_discovery_cache() == 3
+    assert _cache_titles(db) == set()
+
+
+def test_clear_scoped_to_playlist(pool_db):
+    db, pid_a, pid_b = pool_db
+    # pid_a's tracks re-key to the Alpha + Beta cache rows; Gamma belongs to pid_b
+    assert db.clear_discovery_cache(playlist_id=pid_a) == 2
+    assert _cache_titles(db) == {"Gamma"}
+
+
+def test_clear_scoped_to_other_playlist(pool_db):
+    db, pid_a, pid_b = pool_db
+    assert db.clear_discovery_cache(playlist_id=pid_b) == 1
+    assert _cache_titles(db) == {"Alpha", "Beta"}
+
+
+def test_clear_respects_profile_scoping(pool_db):
+    db, pid_a, pid_b = pool_db
+    # pid_a belongs to profile 1; clearing it as profile 2 must touch nothing
+    assert db.clear_discovery_cache(playlist_id=pid_a, profile_id=2) == 0
+    assert _cache_titles(db) == {"Alpha", "Beta", "Gamma"}
+
+
+def test_clear_unknown_playlist_deletes_nothing(pool_db):
+    db, pid_a, pid_b = pool_db
+    assert db.clear_discovery_cache(playlist_id=99999) == 0
+    assert _cache_titles(db) == {"Alpha", "Beta", "Gamma"}

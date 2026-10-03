@@ -16319,6 +16319,27 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: rgba(255, 255, 255, 0.3);
 }
 
+.pool-sort-select {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 7px 10px;
+    color: #fff;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.pool-sort-select:focus {
+    outline: none;
+    border-color: rgba(var(--accent-rgb), 0.4);
+}
+
+.pool-sort-select option {
+    background: #1a1a1a;
+    color: #fff;
+}
+
 .pool-rematch-btn {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.1);
