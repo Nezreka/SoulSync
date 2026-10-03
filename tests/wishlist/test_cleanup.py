@@ -127,3 +127,45 @@ def test_processing_cleanup_checks_identity_and_accepts_edition_noise(owned_titl
     assert status == 200
     assert payload['removed_count'] == int(removed)
     assert service.removed_ids == ({'wish'} if removed else set())
+
+
+@pytest.mark.parametrize('source_type', ['discography', 'watchlist', 'watchlist_label'])
+def test_processing_cleanup_discography_row_survives_song_owned_on_other_release(source_type):
+    # #1447: a discography row names a specific release; owning the song on a
+    # different release must not clear the request for the unowned album.
+    service = _FakeWishlistService([{
+        'id': 'wish', 'spotify_track_id': 'sp-1', 'name': 'Runaway Train',
+        'artists': [{'name': 'Soul Asylum'}],
+        'album': {'name': 'Grave Dancers Union'}, 'source_type': source_type,
+    }])
+    owned = SimpleNamespace(title='Runaway Train', album_title='Greatest Hits 1990-2020',
+                            artist_name='Soul Asylum', file_path='/music/owned.flac')
+    db = _FakeMusicDatabase()
+    db.check_track_exists = lambda *a, **kw: (owned, 0.99)
+
+    payload, status = processing.cleanup_wishlist_against_library(
+        service, db, 1, 'navidrome', logger=_FakeLogger())
+
+    assert status == 200
+    assert payload['removed_count'] == 0
+    assert service.removed_ids == set()
+
+
+def test_processing_cleanup_discography_row_cleared_when_requested_album_owned():
+    # Sanity: when the requested release itself is owned, the row still clears.
+    service = _FakeWishlistService([{
+        'id': 'wish', 'spotify_track_id': 'sp-1', 'name': 'Runaway Train',
+        'artists': [{'name': 'Soul Asylum'}],
+        'album': {'name': 'Grave Dancers Union'}, 'source_type': 'discography',
+    }])
+    owned = SimpleNamespace(title='Runaway Train', album_title='Grave Dancers Union',
+                            artist_name='Soul Asylum', file_path='/music/owned.flac')
+    db = _FakeMusicDatabase()
+    db.check_track_exists = lambda *a, **kw: (owned, 0.99)
+
+    payload, status = processing.cleanup_wishlist_against_library(
+        service, db, 1, 'navidrome', logger=_FakeLogger())
+
+    assert status == 200
+    assert payload['removed_count'] == 1
+    assert service.removed_ids == {'sp-1'}

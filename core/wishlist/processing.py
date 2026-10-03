@@ -677,12 +677,12 @@ def _cleanup_one(wishlist_service, music_database, _mlm, profile_id, track, acti
                 logger.error(f"{log_prefix} [Manual Match] Error removing track: {_mlm_err}")
             return cleanup_removed
 
-        from core.wishlist.library_match import find_owned_match
+        from core.wishlist.library_match import find_owned_match, wishlist_row_requires_album
         from core.wishlist.removal_guard import REASON_ALREADY_OWNED
 
         match = find_owned_match(
             music_database, track_name, artists, track_album, active_server,
-            strict_identity=True, require_album=track.get('source_type') == 'album',
+            strict_identity=True, require_album=wishlist_row_requires_album(track),
             log=logger, log_prefix=log_prefix)
 
         if match:
