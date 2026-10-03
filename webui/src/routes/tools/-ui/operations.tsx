@@ -25,7 +25,7 @@
  * a separate progress panel that appears and shoves the layout around.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { Cadence, IntervalUnit } from '../-tools.ops';
 import type { RepairJob, RepairJobProgress, RepairJobRun } from '../-tools.types';
@@ -60,6 +60,16 @@ import { OperationsStudio } from './operations-studio';
 
 function toast(message: string, type = 'info') {
   window.showToast?.(message, type);
+}
+
+/**
+ * True when a dry_run value — boolean or one of its text forms from a
+ * dropdown — means the run will go live.
+ */
+function isDryRunOff(value: unknown): boolean {
+  if (typeof value === 'boolean') return !value;
+  if (typeof value === 'string') return value.toLowerCase() === 'false';
+  return false;
 }
 
 /**
@@ -206,6 +216,69 @@ function JobSettings({
     }
   }, [job.interval_hours, job.job_id, onSaved, values]);
 
+  /**
+   * Boulder: flipping dry run OFF must warn, at the moment of the flip — with
+   * dry run off the job directly manages the library on its next scheduled
+   * run instead of reporting findings for review. Jobs flagged
+   * `writes_library_files` move/retag/rewrite real files, so they get the
+   * strongest wording; finding-only jobs get a lighter note. No dialog host
+   * (or a cancelled dialog) fails closed: dry run stays on.
+   */
+  const confirmDryRunOff = useCallback(async (): Promise<boolean> => {
+    const writesFiles = job.writes_library_files === true;
+    return Boolean(
+      await window.showConfirmDialog?.({
+        title: 'Turn Off Dry Run?',
+        message: writesFiles
+          ? 'This job will now directly manage your library — it can move, retag, or rewrite files without asking first. Continue?'
+          : 'This job will now apply its fixes automatically instead of only reporting findings for your review. Continue?',
+        confirmText: 'Turn off dry run',
+        cancelText: 'Keep dry run',
+        destructive: true,
+      }),
+    );
+  }, [job.writes_library_files]);
+
+  // Tracks whether a dry-run-off confirm dialog is currently open. While it
+  // is, the dry_run control is disabled and any stale dialog resolution is
+  // ignored, so a rapid double-toggle can't defeat the guard (#1289 item 10).
+  const confirmInFlight = useRef(false);
+  const [confirmPending, setConfirmPending] = useState(false);
+
+  /**
+   * A setting change routed through the dry-run guard when it would turn dry
+   * run off. Everything else applies to the draft immediately — it still needs
+   * Save Settings to reach the server. When the guard is declined, the draft
+   * never changed but the browser already flipped the control, so `revert`
+   * puts the control back on the value the draft still holds.
+   */
+  const handleSettingChange = useCallback(
+    async (key: string, next: unknown, revert: () => void) => {
+      if (key === 'dry_run' && isDryRunOff(next) && !isDryRunOff(values[key])) {
+        // Ignore stale input while a confirm is already pending.
+        if (confirmInFlight.current) {
+          revert();
+          return;
+        }
+        confirmInFlight.current = true;
+        setConfirmPending(true);
+        let confirmed = false;
+        try {
+          confirmed = await confirmDryRunOff();
+        } finally {
+          confirmInFlight.current = false;
+          setConfirmPending(false);
+        }
+        if (!confirmed) {
+          revert();
+          return;
+        }
+      }
+      setValues((previous) => ({ ...previous, [key]: next }));
+    },
+    [confirmDryRunOff, values],
+  );
+
   return (
     <div
       className="repair-job-settings"
@@ -231,9 +304,13 @@ function JobSettings({
                 data-job={job.job_id}
                 data-key={key}
                 value={settingText(current)}
-                onChange={(event) =>
-                  setValues((previous) => ({ ...previous, [key]: event.target.value }))
-                }
+                disabled={key === 'dry_run' && confirmPending}
+                onChange={(event) => {
+                  const target = event.target;
+                  void handleSettingChange(key, target.value, () => {
+                    target.value = settingText(values[key]);
+                  });
+                }}
               >
                 {field.options.map((option) => (
                   <option value={option} key={option}>
@@ -248,9 +325,13 @@ function JobSettings({
                 data-job={job.job_id}
                 data-key={key}
                 checked={Boolean(current)}
-                onChange={(event) =>
-                  setValues((previous) => ({ ...previous, [key]: event.target.checked }))
-                }
+                disabled={key === 'dry_run' && confirmPending}
+                onChange={(event) => {
+                  const target = event.target;
+                  void handleSettingChange(key, target.checked, () => {
+                    target.checked = Boolean(values[key]);
+                  });
+                }}
               />
             ) : field.kind === 'number' ? (
               <input

@@ -366,3 +366,148 @@ describe('the schedule on the tile face', () => {
     expect(container.querySelector('.repair-tile-next')?.textContent).toBe('never run yet');
   });
 });
+
+describe('the dry-run warning', () => {
+  const confirmSpy = vi.fn();
+
+  beforeEach(() => {
+    confirmSpy.mockReset();
+    Object.assign(window, { showConfirmDialog: confirmSpy });
+  });
+
+  afterEach(() => {
+    delete (window as { showConfirmDialog?: unknown }).showConfirmDialog;
+  });
+
+  /** Opens the settings drawer and returns the dry_run control. */
+  function dryRunControl(container: HTMLElement): HTMLInputElement | HTMLSelectElement {
+    fireEvent.click(container.querySelector('.repair-settings-btn') as HTMLElement);
+    return container.querySelector('.repair-job-settings [data-key="dry_run"]') as
+      | HTMLInputElement
+      | HTMLSelectElement;
+  }
+
+  function dialogOptions() {
+    return confirmSpy.mock.calls[0][0] as {
+      title?: string;
+      message?: string;
+      confirmText?: string;
+      cancelText?: string;
+      destructive?: boolean;
+    };
+  }
+
+  it('warns with the strong wording when a file-writing job is taken off dry run', async () => {
+    confirmSpy.mockResolvedValue(true);
+    const { container } = renderOps([
+      job({ settings: { dry_run: true }, writes_library_files: true }),
+    ]);
+    const box = dryRunControl(container) as HTMLInputElement;
+    fireEvent.click(box);
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalledTimes(1));
+    const options = dialogOptions();
+    expect(options.title).toBe('Turn Off Dry Run?');
+    expect(options.message).toContain('directly manage your library');
+    expect(options.message).toContain('move, retag, or rewrite files');
+    expect(options.confirmText).toBe('Turn off dry run');
+    expect(options.cancelText).toBe('Keep dry run');
+    expect(options.destructive).toBe(true);
+    // The flip was allowed through once confirmed.
+    await waitFor(() => expect(box.checked).toBe(false));
+  });
+
+  it('keeps dry run on when the warning is dismissed', async () => {
+    confirmSpy.mockResolvedValue(false);
+    const { container } = renderOps([
+      job({ settings: { dry_run: true }, writes_library_files: true }),
+    ]);
+    const box = dryRunControl(container) as HTMLInputElement;
+    fireEvent.click(box);
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalledTimes(1));
+    // The draft never changed, and the box was flipped back.
+    expect(box.checked).toBe(true);
+  });
+
+  it('uses a lighter note for finding-only jobs', async () => {
+    confirmSpy.mockResolvedValue(true);
+    const { container } = renderOps([job({ settings: { dry_run: true } })]);
+    const box = dryRunControl(container) as HTMLInputElement;
+    fireEvent.click(box);
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalledTimes(1));
+    const options = dialogOptions();
+    expect(options.message).toContain('apply its fixes automatically');
+    expect(options.message).not.toContain('rewrite files');
+  });
+
+  it('does not warn when dry run is turned back on', () => {
+    confirmSpy.mockResolvedValue(true);
+    const { container } = renderOps([
+      job({ settings: { dry_run: false }, writes_library_files: true }),
+    ]);
+    const box = dryRunControl(container) as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    fireEvent.click(box);
+    expect(box.checked).toBe(true);
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not warn for unrelated settings', async () => {
+    const { container } = renderOps([
+      job({ settings: { dry_run: true, min_score: 0.5 }, writes_library_files: true }),
+    ]);
+    fireEvent.click(container.querySelector('.repair-settings-btn') as HTMLElement);
+    const score = container.querySelector(
+      '.repair-job-settings [data-key="min_score"]',
+    ) as HTMLInputElement;
+    fireEvent.change(score, { target: { value: '0.7' } });
+    await waitFor(() => expect(score.value).toBe('0.7'));
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+
+  it('guards the dropdown form of the setting too', async () => {
+    confirmSpy.mockResolvedValue(true);
+    const { container } = renderOps([
+      job({
+        settings: { dry_run: true },
+        setting_options: { dry_run: [true, false] },
+        writes_library_files: true,
+      }),
+    ]);
+    fireEvent.click(container.querySelector('.repair-settings-btn') as HTMLElement);
+    const select = container.querySelector(
+      '.repair-job-settings select[data-key="dry_run"]',
+    ) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'false' } });
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalledTimes(1));
+    expect(dialogOptions().message).toContain('directly manage your library');
+  });
+
+  it('reverts the dropdown when its warning is dismissed', async () => {
+    confirmSpy.mockResolvedValue(false);
+    const { container } = renderOps([
+      job({
+        settings: { dry_run: true },
+        setting_options: { dry_run: [true, false] },
+        writes_library_files: true,
+      }),
+    ]);
+    fireEvent.click(container.querySelector('.repair-settings-btn') as HTMLElement);
+    const select = container.querySelector(
+      '.repair-job-settings select[data-key="dry_run"]',
+    ) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'false' } });
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalledTimes(1));
+    expect(select.value).toBe('true');
+  });
+
+  it('keeps dry run on when the dialog host is unavailable', async () => {
+    // Fails closed: no dialog, no flip.
+    delete (window as { showConfirmDialog?: unknown }).showConfirmDialog;
+    const { container } = renderOps([
+      job({ settings: { dry_run: true }, writes_library_files: true }),
+    ]);
+    const box = dryRunControl(container) as HTMLInputElement;
+    fireEvent.click(box);
+    await waitFor(() => expect(box.checked).toBe(true));
+  });
+});

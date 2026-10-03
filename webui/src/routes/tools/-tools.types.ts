@@ -76,6 +76,11 @@ export interface RepairJob {
   settings?: RepairJobSettings | null;
   /** Per-key allowed values; presence turns the input into a <select>. */
   setting_options?: Record<string, unknown[]> | null;
+  /** True when this job MOVES or REWRITES real library files once dry run is
+   *  off (served by the backend from the job class flag — see
+   *  `writes_library_files` in core/repair_jobs/base.py). The settings drawer
+   *  shows its strongest dry-run warning on exactly these jobs. */
+  writes_library_files?: boolean | null;
 }
 
 /** Live progress frame pushed on `repair:progress`, keyed by job id. */
