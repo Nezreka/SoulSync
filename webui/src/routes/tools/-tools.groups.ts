@@ -67,6 +67,7 @@ export const FINDING_TYPE_BLURBS: Record<string, string> = {
   empty_folder: 'Folders left behind with no audio inside.',
   expired_download: 'Finished downloads older than your retention window.',
   metadata_gap: 'Missing genres, years or IDs that enrichment can fill in.',
+  bpm_backfill: 'Tracks missing BPM that Deezer or local analysis can fill in.',
   duplicate_tracks: 'The same track stored more than once.',
   single_album_redundant: 'Singles you also own inside the full album.',
   mbid_mismatch: 'Track MusicBrainz IDs disagree with the tags on disk.',
