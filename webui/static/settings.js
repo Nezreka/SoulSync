@@ -3326,6 +3326,8 @@ async function loadSettingsData() {
         document.getElementById('allow-duplicate-tracks').checked = settings.wishlist?.allow_duplicate_tracks !== false;
         const _wlTtl = document.getElementById('wishlist-ignore-ttl');
         if (_wlTtl) _wlTtl.value = settings.wishlist?.ignore_ttl_days ?? 30;
+        const _wlWingIt = document.getElementById('wishlist-wing-it-guesses');
+        if (_wlWingIt) _wlWingIt.checked = settings.wishlist?.wing_it_guesses === true;
 
         // Populate Playlist Sync settings
         document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup === true;
@@ -6374,6 +6376,7 @@ async function saveSettings(quiet = false) {
             allow_duplicate_tracks: document.getElementById('allow-duplicate-tracks').checked,
             ignore_ttl_days: Math.max(1, Math.min(365,
                 _cfgInt('wishlist-ignore-ttl', 30))),
+            wing_it_guesses: document.getElementById('wishlist-wing-it-guesses')?.checked === true,
         },
         playlist_sync: {
             create_backup: document.getElementById('create-backup').checked,

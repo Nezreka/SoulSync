@@ -7799,6 +7799,22 @@
                                                 </div>
 
                                                 <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="wishlist-wing-it-guesses">
+                                                        <span>Search Wing It guesses as wishlist tracks</span>
+                                                    </label>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Wing It
+                                                        means a track couldn't be matched in the metadata catalogue
+                                                        — these are unmatched guesses, not tracks missing from your
+                                                        library. Off by default: guesses stay in the Wing It Pool for
+                                                        manual review. Turn this on to let guesses be searched like
+                                                        any other wishlist track.</small>
+                                                </div>
+
+                                                <div class="form-group">
                                                     <label for="wishlist-ignore-ttl">Removed-track re-try window
                                                         (days)</label>
                                                     <input type="number" id="wishlist-ignore-ttl" min="1" max="365"
