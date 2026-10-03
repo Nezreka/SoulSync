@@ -290,3 +290,44 @@ def test_download_cleanup_checks_identity_and_accepts_edition_noise(
     )
     cleanup_wishlist_after_db_update(_FakeConfig())
     assert ws.mark_calls == ([('wish', True)] if removed else [])
+
+
+def test_discography_row_survives_when_song_owned_on_different_release(install):
+    # #1447: a discography row names a specific release; owning the song on a
+    # different release must not clear the request for the unowned album.
+    from core.downloads.cleanup import cleanup_wishlist_after_db_update
+    track = {
+        'spotify_track_id': 'sp-1',
+        'name': 'Chasing Cars',
+        'artists': ['Snow Patrol'],
+        'album': {'name': 'Eyes Open'},
+        'source_type': 'discography',
+    }
+    ws, _, _ = install(
+        profiles=[{'id': 1}],
+        tracks_per_profile={1: [track]},
+        hits={('Chasing Cars', 'Snow Patrol'):
+              (_owned('Chasing Cars', 'Snow Patrol', album='Up To Now'), 0.99)},
+    )
+    cleanup_wishlist_after_db_update(_FakeConfig())
+    assert ws.mark_calls == []
+
+
+def test_discography_row_cleared_when_requested_album_owned(install):
+    # Sanity: when the requested release itself is owned, the row still clears.
+    from core.downloads.cleanup import cleanup_wishlist_after_db_update
+    track = {
+        'spotify_track_id': 'sp-1',
+        'name': 'Chasing Cars',
+        'artists': ['Snow Patrol'],
+        'album': {'name': 'Eyes Open'},
+        'source_type': 'discography',
+    }
+    ws, _, _ = install(
+        profiles=[{'id': 1}],
+        tracks_per_profile={1: [track]},
+        hits={('Chasing Cars', 'Snow Patrol'):
+              (_owned('Chasing Cars', 'Snow Patrol', album='Eyes Open'), 0.99)},
+    )
+    cleanup_wishlist_after_db_update(_FakeConfig())
+    assert ws.mark_calls == [('sp-1', True)]
