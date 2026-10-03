@@ -393,19 +393,14 @@ describe('the hero', () => {
   });
 
   it('pauses the rotation while something in it has focus', () => {
-    // The rotation is paused by stopping the JS timer on focusin (and
-    // resuming when focus leaves the hero), so the slide can't change out
-    // from under a focused control. The old CSS rule that also froze the
-    // active dot's progress fill was removed in the Oct 2026 Discover
-    // redesign — the fill is cosmetic and restarts with each slide.
     expect(JS).toContain("heroEl.addEventListener('focusin', stopHeroTimer)");
+    expect(CSS).toContain('.vdsc-hero:focus-within .vdsc-dot--on::after');
   });
 
-  it('gives the dots their own strip and a tappable target', () => {
+  it('gives the dots their own strip and a finger-sized target', () => {
     // The dots sat bottom-right, on top of the Trailer button on a phone, and
     // mobile.css's blanket button min-height stretched each 9px dot into a
-    // 38px lozenge. The Oct 2026 redesign sized the buttons at 34x28px with
-    // an explicit min-height so the global button styles can't stretch them.
+    // 38px lozenge.
     const dots = /\.vdsc-dots \{([^}]*)\}/.exec(CSS)![1];
     expect(dots).toContain('left: 0');
     expect(dots).toContain('right: 0');
