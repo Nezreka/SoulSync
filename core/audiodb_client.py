@@ -51,7 +51,7 @@ def rate_limited(func):
 class AudioDBClient:
     """Client for interacting with TheAudioDB API"""
 
-    BASE_URL = "https://www.theaudiodb.com/api/v1/json/2"
+    BASE_URL = "https://www.theaudiodb.com/api/v1/json/123"
 
     def __init__(self):
         self.session = requests.Session()
