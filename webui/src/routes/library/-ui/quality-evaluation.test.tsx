@@ -44,6 +44,22 @@ function track(overrides: Partial<LibraryV2Track> = {}): LibraryV2Track {
 }
 
 describe('Library v2 quality evaluation state', () => {
+  it('describes an untargeted format as a profile choice', () => {
+    render(
+      <TrackQualityProfileBadge
+        track={track({
+          meets_profile: false,
+          upgrade_candidate: true,
+          quality_issue: 'format_not_targeted',
+        })}
+      />,
+    );
+    expect(
+      screen.getByTitle('Format not targeted by the effective quality profile'),
+    ).toBeInTheDocument();
+    expect(screen.queryByTitle("Below the album's quality profile")).not.toBeInTheDocument();
+  });
+
   it('renders unknown quality as an explicit third state', () => {
     render(<TrackQualityProfileBadge track={track()} />);
 

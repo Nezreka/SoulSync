@@ -854,6 +854,25 @@ def test_get_album_evaluates_explicit_track_profile_not_album_profile(imported_c
     assert track["upgrade_candidate"] is True
 
 
+def test_get_album_distinguishes_an_untargeted_format_from_low_quality(imported_conn):
+    profile_id = imported_conn.execute(
+        "INSERT INTO quality_profiles(name, ranked_targets, upgrade_policy) "
+        "VALUES('MP3 only', '[{\"format\":\"mp3\",\"min_bitrate\":320}]', 'until_cutoff')"
+    ).lastrowid
+    tid, album_id = imported_conn.execute(
+        "SELECT id, album_id FROM lib2_tracks WHERE legacy_track_id=100"
+    ).fetchone()
+    imported_conn.execute(
+        "UPDATE lib2_tracks SET quality_profile_id=?, quality_profile_explicit=1 WHERE id=?", (profile_id, tid)
+    )
+    imported_conn.execute(
+        "UPDATE lib2_track_files SET format='flac', bit_depth=16, sample_rate=44100 WHERE track_id=?", (tid,)
+    )
+    album = Q.get_album(imported_conn, album_id)
+    row = next(item for item in album["tracks"] if item["id"] == tid)
+    assert row["quality_issue"] == "format_not_targeted"
+
+
 def test_get_album_surfaces_first_missing_scan_without_marking_track_missing(imported_conn):
     track_id = imported_conn.execute(
         "SELECT id FROM lib2_tracks WHERE legacy_track_id=100"

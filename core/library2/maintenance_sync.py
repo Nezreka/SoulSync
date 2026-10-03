@@ -633,6 +633,13 @@ def sync_repair_change(
         from core.repair_jobs import JOB_LIBRARY_V2_EFFECTS
 
         effects = set(JOB_LIBRARY_V2_EFFECTS.get(job_id, frozenset({"observe"})))
+        # Native quality approval already committed measured facts, monitoring
+        # and its OWNER's outbox. Only record that action here; the generic
+        # rescan/admin mirror would turn Leave As-is into an acquisition and
+        # could queue a second library's copy after a successful approval.
+        native_quality_review = job_id == "quality_profile_audit"
+        if native_quality_review:
+            effects = {"observe"}
         links = _resolve_links(
             conn,
             entity_type=entity_type,
@@ -648,6 +655,8 @@ def sync_repair_change(
             return {"enabled": True, "reason": "subject_unlinked", "converged": False}
 
         changed_fields: set[str] = set(effects - {"observe", "none"})
+        if native_quality_review and action == "queued_upgrade":
+            changed_fields.update({"quality", "wanted"})
         deleting = (
             action in _DELETE_ACTIONS
             or result.get("library_v2_file_deleted") is True

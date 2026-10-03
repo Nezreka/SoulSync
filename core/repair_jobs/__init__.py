@@ -37,6 +37,7 @@ JOB_DATA_BASIS: dict[str, str] = {
     'audio_corruption_detector': 'lib2',
     'monitoring_list_reconcile': 'lib2',
     'quality_info_backfill': 'lib2',
+    'quality_profile_audit': 'lib2',
     'expired_download_cleaner': 'filesystem',
     'library_reorganize': 'lib2',
     'genre_cleanup': 'lib2',
@@ -98,6 +99,7 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     # quality_tier columns on existing rows — a catalogue metadata update,
     # nothing file/wanted/artwork related.
     'quality_info_backfill': frozenset({'metadata'}),
+    'quality_profile_audit': frozenset({'observe', 'metadata', 'wanted'}),
     'expired_download_cleaner': frozenset({'delete', 'wanted'}),
     'library_reorganize': frozenset({'observe', 'path'}),
     # Rewrites artists.genres / albums.genres to the kept (whitelisted) list.
@@ -220,6 +222,7 @@ _JOB_MODULES = [
     'core.repair_jobs.cache_evictor',
     'core.repair_jobs.orphan_file_detector',
     'core.repair_jobs.quality_info_backfill',
+    'core.repair_jobs.quality_profile_audit',
     'core.repair_jobs.dead_file_cleaner',
     'core.repair_jobs.acoustid_scanner',
     'core.repair_jobs.missing_cover_art',

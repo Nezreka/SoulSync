@@ -539,72 +539,19 @@ def _load_upgrade_snapshot(track_id: int) -> _UpgradeSnapshot:
 
 def _decide_snapshot_upgrade(snapshot: _UpgradeSnapshot, incoming_path: str):
     from core.imports.file_ops import probe_audio_quality
-    from core.library2.quality_eval import (
-        UpgradeDecision,
-        is_upgrade_policy,
-        profile_targets,
-        upgrade_complete,
-    )
-    from core.quality.model import rank_candidate
-    from core.quality.retention import best_quality_for_targets
-    from core.quality.selection import targets_from_profile
+    from core.library2.quality_eval import UpgradeDecision, decide_probed_upgrade
 
-    base = {
-        "track_id": snapshot.track_id,
-        "profile_id": snapshot.profile.get("id"),
-        "existing_path": snapshot.primary_path,
-        "existing_resolved_path": snapshot.primary_resolved_path,
-    }
     if snapshot.primary_id is None:
-        return UpgradeDecision(False, True, "The track has no previous primary file", **base)
-    old_quality = (
-        probe_audio_quality(snapshot.primary_resolved_path)
-        if snapshot.primary_resolved_path else None
-    )
-    new_quality = probe_audio_quality(incoming_path)
-    base.update(existing_quality=old_quality, incoming_quality=new_quality)
-    if old_quality is None:
-        return UpgradeDecision(True, False, "Existing file quality could not be verified", **base)
-    if new_quality is None:
-        return UpgradeDecision(True, False, "Retained file quality could not be verified", **base)
-    targets, policy, cutoff = profile_targets(snapshot.profile)
-    if not targets or not is_upgrade_policy(policy):
-        return UpgradeDecision(True, False, "The effective profile no longer requests upgrades", **base)
-    _targets, fallback_enabled = targets_from_profile(snapshot.profile)
-    effective_old_quality = best_quality_for_targets(
-        old_quality,
-        targets,
+        return UpgradeDecision(False, True, "The track has no previous primary file",
+                               snapshot.track_id, profile_id=snapshot.profile.get("id"))
+    old_quality = (probe_audio_quality(snapshot.primary_resolved_path)
+                   if snapshot.primary_resolved_path else None)
+    return decide_probed_upgrade(
+        old_quality, probe_audio_quality(incoming_path), snapshot.profile,
+        track_id=snapshot.track_id, existing_path=snapshot.primary_path,
+        existing_resolved_path=snapshot.primary_resolved_path,
         acquired_quality_json=snapshot.acquired_quality_json,
         retention_json=snapshot.retention_json,
-    ) or old_quality
-    base["existing_quality"] = effective_old_quality
-    old_rank, old_score = rank_candidate(effective_old_quality, targets)
-    new_rank, new_score = rank_candidate(new_quality, targets)
-    if not fallback_enabled and new_rank == len(targets):
-        return UpgradeDecision(True, False, "Retained file is outside the strict profile", **base)
-    if upgrade_complete(old_rank, len(targets), policy, cutoff):
-        return UpgradeDecision(True, False, "The existing file already meets the upgrade cutoff", **base)
-    if not (
-        new_rank < old_rank
-        or (
-            new_rank == old_rank
-            and new_score > old_score + 0.001
-            and (
-                new_rank == len(targets)
-                or str(new_quality.format).lower() == str(effective_old_quality.format).lower()
-            )
-        )
-    ):
-        return UpgradeDecision(
-            True, False,
-            f"Retained quality {new_quality.label()} is not better than "
-            f"{effective_old_quality.label()}",
-            **base,
-        )
-    return UpgradeDecision(
-        True, True,
-        f"Upgrade {effective_old_quality.label()} → {new_quality.label()}",
-        **base,
     )
 
 

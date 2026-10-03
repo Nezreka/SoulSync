@@ -60,37 +60,21 @@ def effective_track_profile(conn, track_id: int) -> Dict[str, Any]:
     return profile
 
 
-def decide_track_upgrade(conn, track_id: int, incoming_path: str) -> UpgradeDecision:
-    """Compare real old/new audio under the track's live profile and cutoff."""
-    from core.settings import config_manager
-    from core.imports.file_ops import probe_audio_quality
-    from core.library2.paths import resolve_lib2_path
-    from core.library2.track_files import primary_file_row
+def decide_probed_upgrade(old_quality, new_quality, profile: Dict[str, Any], *,
+                          track_id: int, existing_path=None, existing_resolved_path=None,
+                          acquired_quality_json=None, retention_json=None) -> UpgradeDecision:
+    """The shared replacement verdict for catalogue and import snapshots.
+
+    Callers own file lookup, locking and probing. This decision uses the same
+    profile, cutoff and intentional-retention rules for both consumers.
+    """
     from core.quality.model import rank_candidate
     from core.quality.retention import best_quality_for_targets
 
-    track_id = int(track_id)
-    profile = effective_track_profile(conn, track_id)
-    existing = primary_file_row(conn, track_id)
-    if not existing:
-        return UpgradeDecision(
-            False, True, "The previous file is no longer present", track_id,
-            profile_id=profile["id"],
-        )
-
-    existing_path = str(existing.get("path") or "")
-    resolved_existing = existing_path if os.path.isfile(existing_path) else resolve_lib2_path(
-        existing_path, config_manager=config_manager,
-    )
-    old_quality = probe_audio_quality(resolved_existing) if resolved_existing else None
-    new_quality = probe_audio_quality(incoming_path)
     base = {
-        "track_id": track_id,
-        "profile_id": profile["id"],
-        "existing_path": existing_path,
-        "existing_resolved_path": resolved_existing,
-        "existing_quality": old_quality,
-        "incoming_quality": new_quality,
+        "track_id": int(track_id), "profile_id": profile.get("id"),
+        "existing_path": existing_path, "existing_resolved_path": existing_resolved_path,
+        "existing_quality": old_quality, "incoming_quality": new_quality,
     }
     if old_quality is None:
         return UpgradeDecision(True, False, "Existing file quality could not be verified", **base)
@@ -104,8 +88,8 @@ def decide_track_upgrade(conn, track_id: int, incoming_path: str) -> UpgradeDeci
     effective_old_quality = best_quality_for_targets(
         old_quality,
         targets,
-        acquired_quality_json=existing.get("acquired_quality_json"),
-        retention_json=existing.get("retention_json"),
+        acquired_quality_json=acquired_quality_json,
+        retention_json=retention_json,
     ) or old_quality
     base["existing_quality"] = effective_old_quality
     old_rank, old_score = rank_candidate(effective_old_quality, targets)
@@ -142,6 +126,37 @@ def decide_track_upgrade(conn, track_id: int, incoming_path: str) -> UpgradeDeci
         True,
         f"Upgrade {effective_old_quality.label()} → {new_quality.label()}",
         **base,
+    )
+
+
+
+def decide_track_upgrade(conn, track_id: int, incoming_path: str) -> UpgradeDecision:
+    """Compare real old/new audio under the track's live profile and cutoff."""
+    from core.settings import config_manager
+    from core.imports.file_ops import probe_audio_quality
+    from core.library2.paths import resolve_lib2_path
+    from core.library2.track_files import primary_file_row
+
+    track_id = int(track_id)
+    profile = effective_track_profile(conn, track_id)
+    existing = primary_file_row(conn, track_id, scoped=True)
+    if not existing:
+        return UpgradeDecision(
+            False, True, "The previous file is no longer present", track_id,
+            profile_id=profile["id"],
+        )
+
+    existing_path = str(existing.get("path") or "")
+    resolved_existing = existing_path if os.path.isfile(existing_path) else resolve_lib2_path(
+        existing_path, config_manager=config_manager,
+    )
+    old_quality = probe_audio_quality(resolved_existing) if resolved_existing else None
+    new_quality = probe_audio_quality(incoming_path)
+    return decide_probed_upgrade(
+        old_quality, new_quality, profile, track_id=track_id,
+        existing_path=existing_path, existing_resolved_path=resolved_existing,
+        acquired_quality_json=existing.get("acquired_quality_json"),
+        retention_json=existing.get("retention_json"),
     )
 
 
@@ -214,6 +229,36 @@ def profile_targets(profile_row: Optional[Dict[str, Any]]) -> Tuple[List[Any], s
     return targets, policy, cutoff
 
 
+def quality_issue(file_row: Optional[Dict[str, Any]], profile: Dict[str, Any]) -> str:
+    """Distinguish insufficient quality from an intentional format preference."""
+    targets, policy, cutoff = profile_targets(profile)
+    verdict = evaluate_file(file_row, targets, policy, cutoff)
+    if verdict["meets_profile"] is None:
+        return "unknown"
+    quality = audio_quality_from_file(file_row)
+    if verdict["meets_profile"] is False and quality and not any(
+        not target.format or target.format.lower() == quality.format.lower()
+        for target in targets
+    ):
+        return "format_not_targeted"
+    return "below_cutoff" if verdict["upgrade_candidate"] else "satisfied"
+
+
+def probe_profile_file(file_row: Dict[str, Any], config_manager=None):
+    """Read physical audio facts without writing the catalogue or the file."""
+    from core.imports.file_ops import probe_audio_quality
+    from core.library2.paths import resolve_lib2_path
+
+    path = str(file_row.get("path") or "")
+    resolved = path if os.path.isfile(path) else resolve_lib2_path(path, config_manager=config_manager)
+    measured = probe_audio_quality(resolved) if resolved else None
+    observed = dict(file_row)
+    observed.update(measured.to_dict() if measured is not None else {
+        "format": "unknown", "bitrate": None, "sample_rate": None, "bit_depth": None,
+    })
+    return observed, measured
+
+
 def evaluate_file(file_row: Optional[Dict[str, Any]], targets: List[Any],
                   upgrade_policy: str, cutoff_index: int = 0) -> Dict[str, Any]:
     """Return tri-state ``{meets_profile, upgrade_candidate}`` for one file.
@@ -250,6 +295,7 @@ def evaluate_file(file_row: Optional[Dict[str, Any]], targets: List[Any],
 __all__ = [
     "audio_quality_from_file",
     "decide_track_upgrade",
+    "decide_probed_upgrade",
     "effective_track_profile",
     "evaluate_file",
     "is_upgrade_policy",

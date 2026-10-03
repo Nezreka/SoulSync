@@ -9869,22 +9869,26 @@ function TrackRow({
             {label ? (
               <span
                 className={`${styles.qualityProfileBadge} ${
-                  track.meets_profile === false
-                    ? styles.qpBelow
-                    : track.upgrade_candidate === true
-                      ? styles.qpUpgrade
-                      : track.meets_profile === null && track.file
-                        ? styles.qpUnknown
-                        : styles.qpDefault
+                  track.quality_issue === 'format_not_targeted'
+                    ? styles.qpUnknown
+                    : track.meets_profile === false
+                      ? styles.qpBelow
+                      : track.upgrade_candidate === true
+                        ? styles.qpUpgrade
+                        : track.meets_profile === null && track.file
+                          ? styles.qpUnknown
+                          : styles.qpDefault
                 }`}
                 title={
-                  track.meets_profile === false
-                    ? `Quality profile: ${label} · Below profile`
-                    : track.upgrade_candidate === true
-                      ? `Quality profile: ${label} · Upgrade candidate available`
-                      : track.meets_profile === null && track.file
-                        ? `Quality profile: ${label} · Quality unknown - scan to evaluate`
-                        : `Quality profile: ${label} · Meets profile`
+                  track.quality_issue === 'format_not_targeted'
+                    ? `Quality profile: ${label} · Format not targeted`
+                    : track.meets_profile === false
+                      ? `Quality profile: ${label} · Below profile`
+                      : track.upgrade_candidate === true
+                        ? `Quality profile: ${label} · Upgrade candidate available`
+                        : track.meets_profile === null && track.file
+                          ? `Quality profile: ${label} · Quality unknown - scan to evaluate`
+                          : `Quality profile: ${label} · Meets profile`
                 }
               >
                 <SvgIcon name="star" />
@@ -11607,6 +11611,14 @@ export function TrackHistoryPanel({ trackId }: { trackId: number }) {
 
 export function TrackQualityProfileBadge({ track }: { track: LibraryV2Track }) {
   if (!track.file) return null;
+  if (track.quality_issue === 'format_not_targeted') {
+    return (
+      <span
+        className={styles.qualityStatusDotBlue}
+        title="Format not targeted by the effective quality profile"
+      />
+    );
+  }
   if (track.meets_profile === false) {
     return (
       <span className={styles.qualityStatusDotRed} title="Below the album's quality profile" />

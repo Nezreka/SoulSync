@@ -179,8 +179,12 @@ describe('finding labels', () => {
     // know only `critical`, which nothing has ever emitted. Both map to the
     // same icon and the same CSS class while old rows exist.
     expect(Object.keys(FINDING_SEVERITY_ICONS)).toHaveLength(4);
-    expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(24);
-    expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(22);
+    expect(FINDING_TYPE_LABELS.quality_upgrade_review).toBe('Quality Upgrade Review');
+    expect(FINDING_TYPE_LABELS.quality_format_not_targeted).toBe('Format Not in Profile');
+    expect(FINDING_TYPE_LABELS.quality_unknown).toBe('Quality Unknown');
+    expect(FINDING_FIXABLE_TYPES.quality_upgrade_review).toBe('Monitor & Upgrade');
+    expect(FINDING_FIXABLE_TYPES.quality_format_not_targeted).toBe('Leave As-is');
+    expect(FINDING_FIXABLE_TYPES.quality_unknown).toBe('Leave As-is');
     expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(13);
   });
 

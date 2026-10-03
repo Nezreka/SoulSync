@@ -1771,7 +1771,8 @@ def _register_automation_handlers():
             if repair_worker else None
         ),
         bulk_fix_repair_findings=(
-            (lambda finding_ids: repair_worker.bulk_fix_findings(finding_ids=finding_ids))
+            (lambda finding_ids, fix_action=None: repair_worker.bulk_fix_findings(
+                finding_ids=finding_ids, fix_action=fix_action))
             if repair_worker else None),
         download_orchestrator=download_orchestrator,
         run_async=run_async,
@@ -9360,10 +9361,9 @@ def get_artist_enhanced_detail(artist_id):
         server_connected = media_server_engine.is_connected() if media_server_engine else False
         result['server_type'] = active_server if server_connected else None
 
-        # Upstream marks the tracks its quality jobs say could be better here.
-        # Those jobs are retired on this branch (upgrades are the Library v2
-        # wanted projection); the only findings left carry legacy track ids,
-        # which would mark unrelated catalogue tracks. Not annotated.
+        # Native live-profile badges, independent of maintenance findings.
+        from core.quality.upgrades import annotate_enhanced_payload
+        annotate_enhanced_payload(database, result)
 
         return jsonify(result)
     except Exception as e:

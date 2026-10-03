@@ -107,6 +107,9 @@ FINDING_TYPE_META = {
     'suspect_album_tag':        {'label': 'Suspect Album Tags', 'verb': 'Re-identify'},
     'acoustid_mismatch':        {'label': 'AcoustID Mismatch', 'verb': 'Re-tag'},
     'quality_upgrade':          {'label': 'Quality Upgrades', 'verb': 'Upgrade'},
+    'quality_upgrade_review':   {'label': 'Quality Upgrade Review', 'verb': 'Monitor & Upgrade'},
+    'quality_format_not_targeted': {'label': 'Format Not in Profile', 'verb': 'Leave As-is'},
+    'quality_unknown':          {'label': 'Quality Unknown', 'verb': 'Leave As-is'},
     'missing_discography_track':{'label': 'Missing Discography', 'verb': 'Add to Wishlist'},
     'library_retag':            {'label': 'Library Re-tag', 'verb': 'Apply Tags'},
     'short_preview_track':      {'label': 'Preview Clips', 'verb': 'Re-download'},
@@ -161,6 +164,7 @@ JOB_CATEGORIES = {
     'fake_lossless_detector': 'Audio quality',
     'acoustid_scanner': 'Audio quality',
     'quality_info_backfill': 'Audio quality',
+    'quality_profile_audit': 'Audio quality',
     'short_preview_track': 'Audio quality',
     'replaygain_filler': 'Audio quality',
     # What is written on and about the tracks.
@@ -2541,6 +2545,9 @@ class RepairWorker:
             'unwanted_content': self._fix_unwanted_content,
             'acoustid_mismatch': self._fix_acoustid_mismatch,
             'quality_below_cutoff': self._fix_quality_below_cutoff,
+            'quality_upgrade_review': self._fix_quality_profile_audit,
+            'quality_format_not_targeted': self._fix_quality_profile_audit,
+            'quality_unknown': self._fix_quality_profile_audit,
             'quality_upgrade': self._fix_legacy_quality_upgrade,
             'missing_discography_track': self._fix_legacy_discography_track,
             'missing_discography_release': self._fix_discography_release,
@@ -3086,6 +3093,9 @@ class RepairWorker:
 
     def _fix_legacy_quality_upgrade(self, entity_type, entity_id, file_path, details):
         """Approve a preserved pre-V2 quality finding without deleting its file."""
+        action = str(details.get('_fix_action') or '')
+        if (not action or action.startswith('scheduled_quality_upgrade:')) and details.get('quality_issue') in ('format_not_in_profile', 'format_not_targeted'):
+            return {'success': True, 'action': 'ignored', 'message': 'Format not targeted by profile; file left as-is'}
         track_data = (details.get('matched_track_data') or details.get('track_data')
                       or self._legacy_quality_track_data(entity_id, details))
         if not track_data:
@@ -3167,6 +3177,88 @@ class RepairWorker:
             }
         except Exception as exc:
             return {'success': False, 'error': str(exc)}
+
+    def _fix_quality_profile_audit(self, entity_type, entity_id, file_path, details):
+        """Revalidate a reviewed native file before opting its track into monitoring."""
+        if details.get('quality_issue') != 'below_cutoff':
+            return {'success': True, 'action': 'ignored', 'message': 'Review the file or profile; no replacement queued'}
+        tid = _lib2_id(entity_id)
+        if tid is None:
+            return {'success': False, 'error': 'Not a Library-v2 track finding'}
+        from core.library_scope import library_scope
+        from core.library2.quality_eval import effective_track_profile, probe_profile_file, quality_issue
+        from core.library2.track_files import primary_file_row
+        from core.library2.monitor_rules import record_rule, PROVENANCE_USER
+        from core.library2.wanted import recompute_wanted, track_is_wanted
+        from core.library2.mirror_outbox import enqueue_projected_tracks, drain
+
+        conn = self.db._get_connection()
+        try:
+            # Keep live owner/profile/monitor validation and intent creation
+            # in one writer transaction; a scheduled action cannot overwrite
+            # an unmonitor decision made between its selection and this fix.
+            conn.execute('BEGIN IMMEDIATE')
+            row = conn.execute("SELECT * FROM lib2_track_files WHERE id=? AND track_id=? AND COALESCE(file_state,'active')='active'",
+                               (details.get('lib2_file_id'), tid)).fetchone()
+            if not row or row['path'] != file_path:
+                return {'success': False, 'error': 'The reviewed file is no longer active; rerun the audit'}
+            owner = int(row['owner_profile_id'] or 1)
+            action = str(details.get('_fix_action') or '')
+            scheduled = action.startswith('scheduled_quality_upgrade:')
+            if scheduled and int(action.split(':', 1)[1]) != owner:
+                return {'success': False, 'error': 'Scheduled upgrade belongs to another library'}
+            if row['owner_profile_id'] != details.get('owner_profile_id'):
+                return {'success': False, 'error': 'The file now belongs to a different library; rerun the audit'}
+            with library_scope(owner if owner != 1 else 'shared'):
+                primary = primary_file_row(conn, tid, scoped=True)
+                if not primary or primary['id'] != row['id']:
+                    return {'success': False, 'error': 'The primary file changed; rerun the audit'}
+                from core.library2.manual_skips import active_skip_paths
+                from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
+                if (row['path'] in active_skip_paths(conn, ('quality', 'bit_depth'), profile_id=owner)
+                        or is_hand_tagged_path(row['path'], hand_tagged_path_keys(self.db))):
+                    return {'success': True, 'action': 'ignored', 'message': 'A manual quality choice protects this file'}
+                profile = effective_track_profile(conn, tid)
+                if scheduled and profile.get('upgrade_policy') not in ('until_cutoff', 'until_top'):
+                    return {'success': False, 'error': 'The live profile no longer permits scheduled cutoff upgrades'}
+                observed, measured = probe_profile_file(dict(row), self._config_manager)
+                if quality_issue(observed, profile) != 'below_cutoff':
+                    return {'success': True, 'action': 'no_longer_candidate', 'message': 'The live file/profile no longer requests an upgrade'}
+                recompute_wanted(conn, profile_id=owner, track_ids=[tid])
+                if not track_is_wanted(conn, tid, profile_id=owner):
+                    if scheduled:
+                        return {'success': False, 'error': 'Track is no longer monitored; proposal left for manual review'}
+                    record_rule(conn, 'track', tid, True, PROVENANCE_USER, profile_id=owner)
+                # The audit never writes facts. Approval persists this fresh
+                # measurement so the shared mirror cannot decide on stale facts.
+                conn.execute("UPDATE lib2_track_files SET format=?, bitrate=?, sample_rate=?, bit_depth=? WHERE id=?",
+                             (measured.format, measured.bitrate, measured.sample_rate, measured.bit_depth, row['id']))
+                recompute_wanted(conn, profile_id=owner, track_ids=[tid])
+                outbox_ids = enqueue_projected_tracks(
+                    conn, [tid], profile_id=owner, user_initiated=not scheduled,
+                )
+                conn.commit()
+            drain(self.db)
+            if not outbox_ids:
+                return {'success': False, 'error': 'No upgrade could be queued'}
+            marks = ','.join('?' for _ in outbox_ids)
+            done = conn.execute(f"SELECT COUNT(*) FROM lib2_mirror_outbox WHERE id IN ({marks}) AND status='done'",
+                                outbox_ids).fetchone()[0]
+            if done != len(outbox_ids):
+                return {'success': False, 'error': 'Upgrade mirror is pending; retry after Library Maintenance recovers'}
+            for outbox in conn.execute(f"SELECT op, payload FROM lib2_mirror_outbox WHERE id IN ({marks})", outbox_ids):
+                data = json.loads(outbox['payload'])
+                if outbox['op'] != 'wishlist_add' or not conn.execute(
+                    "SELECT 1 FROM wishlist_tracks WHERE spotify_track_id=? AND profile_id=?",
+                    (data['key'], owner),
+                ).fetchone():
+                    return {'success': False, 'error': 'The Wishlist did not accept this upgrade; review acquisition exclusions'}
+            return {'success': True, 'action': 'queued_upgrade', 'message': 'Track monitored and upgrade queued'}
+        except Exception as exc:
+            conn.rollback()
+            return {'success': False, 'error': str(exc)}
+        finally:
+            conn.close()
 
     def _fix_quality_below_cutoff(self, entity_type, entity_id, file_path, details):
         """Approve a native quality-review finding: queue the upgrade search

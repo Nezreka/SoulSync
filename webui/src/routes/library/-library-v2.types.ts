@@ -480,6 +480,7 @@ export interface LibraryV2Track {
   /** Quality vs the album's profile (null when missing or not measurable). */
   meets_profile?: boolean | null;
   upgrade_candidate?: boolean | null;
+  quality_issue?: 'satisfied' | 'below_cutoff' | 'format_not_targeted' | 'unknown' | null;
   /** Field-level admin corrections applied over provider metadata. */
   user_overrides?: Record<string, unknown>;
 }

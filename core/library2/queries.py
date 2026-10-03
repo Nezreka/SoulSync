@@ -1830,7 +1830,7 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
     # Global profile.  A track override must affect both the profile shown in
     # the row and its upgrade badge; evaluating the entire album against the
     # album profile made those two UI statements contradict each other.
-    from core.library2.quality_eval import evaluate_file, profile_targets
+    from core.library2.quality_eval import evaluate_file, profile_targets, quality_issue
     profile_ids = sorted({
         int(t["quality_profile_id"])
         for t in tracks if t.get("quality_profile_id") is not None
@@ -1853,6 +1853,10 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
                 if t.get("quality_profile_id") is not None else None
             )
             ev = evaluate_file(t["file"], targets, upgrade_policy, cutoff_index)
+            t["quality_issue"] = quality_issue(
+                t["file"], profile_rows.get(int(t["quality_profile_id"]))
+                if t.get("quality_profile_id") is not None else {},
+            )
             t["meets_profile"] = ev["meets_profile"]
             candidate = ev["upgrade_candidate"]
             t["upgrade_candidate"] = (
@@ -1864,6 +1868,7 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         else:
             t["meets_profile"] = None
             t["upgrade_candidate"] = False
+            t["quality_issue"] = None
 
     # Lidarr keeps expected missing recordings visible in the track table. When
     # we only know the album's expected size, expose those slots as missing rows
