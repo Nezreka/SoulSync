@@ -14054,6 +14054,18 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: rgb(var(--accent-neon-rgb));
 }
 
+/* #1455: disabled re-run on history entries whose mirror was deleted */
+.auto-sync-history-run-again:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.auto-sync-history-run-again:disabled:hover {
+    background: rgba(var(--accent-rgb), 0.12);
+    border-color: rgba(var(--accent-rgb), 0.3);
+    color: rgb(var(--accent-light-rgb));
+}
+
 /* ───────────────────────────────────────────────────────────────────── */
 /* Weekly schedule board (PR 3 of schedule-types feature)               */
 /* ───────────────────────────────────────────────────────────────────── */
