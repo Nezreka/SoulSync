@@ -4352,7 +4352,11 @@ class RepairWorker:
             if aid_title:
                 tag_updates['title'] = aid_title
             if aid_artist:
-                tag_updates['artist_name'] = aid_artist
+                # track_artist, not artist_name: the writer puts artist_name
+                # into album artist, and the file lands in staging with its
+                # album tag intact — a compilation track would split off its
+                # album (#1289, mirrors the retag fix below).
+                tag_updates['track_artist'] = aid_artist
                 tag_updates['artists_list'] = _split_acoustid_credit(aid_artist)
 
             def _drop_row():
