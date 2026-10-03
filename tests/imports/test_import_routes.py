@@ -775,3 +775,59 @@ def test_staging_scan_is_shared_across_files_groups_hints(tmp_path):
 
     # 2 files × ONE shared scan = 2 reads — not 6 (which is 2 files × 3 endpoints).
     assert sorted(reads) == [os.path.join("Album", "01.mp3"), os.path.join("Album", "02.mp3")]
+
+
+class TestBackfillStaleHistory:
+    """#1289 Bug 2: a stale terminal history row older than the 200-row
+    get_results window must still attach to its candidate."""
+
+    def _cand(self, path, folder_hash):
+        c = type('C', (), {})()
+        c.path = path
+        c.folder_hash = folder_hash
+        c.audio_files = []
+        return c
+
+    def _worker(self, db_rows):
+        import sqlite3
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE auto_import_history (id INTEGER PRIMARY KEY, folder_hash TEXT, folder_path TEXT, status TEXT, created_at TEXT)")
+        for r in db_rows:
+            conn.execute("INSERT INTO auto_import_history (folder_hash, folder_path, status, created_at) VALUES (?,?,?,?)", r)
+        conn.commit()
+        w = type('W', (), {})()
+        w.database = type('D', (), {'_get_connection': lambda self: conn})()
+        return w
+
+    def test_stale_partial_row_backfilled(self):
+        from core.imports.routes import _backfill_stale_history
+        w = self._worker([('oldhash', '/staging/Old', 'partial', '2020-01-01')])
+        cand = self._cand('/staging/Old', 'oldhash')
+        out = _backfill_stale_history(w, [cand], [])
+        assert len(out) == 1
+        assert out[0]['status'] == 'partial'
+        assert out[0]['folder_hash'] == 'oldhash'
+
+    def test_window_row_not_duplicated(self):
+        from core.imports.routes import _backfill_stale_history
+        w = self._worker([('h1', '/staging/A', 'completed', '2024-01-01')])
+        cand = self._cand('/staging/A', 'h1')
+        window = [{'folder_hash': 'h1', 'folder_path': '/staging/A', 'status': 'completed'}]
+        out = _backfill_stale_history(w, [cand], window)
+        assert out == window
+
+    def test_none_path_does_not_crash(self):
+        from core.imports.routes import _backfill_stale_history
+        w = self._worker([])
+        cand = self._cand(None, None)
+        # must not raise TypeError from os.path.normpath(None)
+        assert _backfill_stale_history(w, [cand], []) == []
+
+    def test_path_fallback_when_hash_missing(self):
+        from core.imports.routes import _backfill_stale_history
+        w = self._worker([(None, '/staging/ByPath', 'failed', '2020-01-01')])
+        cand = self._cand('/staging/ByPath', 'newhash')
+        out = _backfill_stale_history(w, [cand], [])
+        assert len(out) == 1
+        assert out[0]['status'] == 'failed'
