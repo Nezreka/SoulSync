@@ -164,15 +164,13 @@ class BpmBackfillJob(RepairJob):
             bpm_value = None
             bpm_source = None
 
-            # 1. Try Deezer API first
+            # 1. Try Deezer API first (same lookup as the download path in
+            # core/metadata/source.py:563 — top-level 'bpm' key)
             if deezer_client and deezer_id:
                 try:
                     track_data = deezer_client.get_track_details(deezer_id)
                     if track_data:
-                        # BPM is in raw_data, not top-level (DeezerClient returns
-                        # Spotify-compatible dict; raw API response has bpm)
-                        raw = track_data.get('raw_data') or {}
-                        bpm_val = raw.get('bpm') or track_data.get('bpm')
+                        bpm_val = track_data.get('bpm')
                         if bpm_val and float(bpm_val) > 0:
                             bpm_value = round(float(bpm_val), 1)
                             bpm_source = 'deezer'
