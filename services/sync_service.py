@@ -490,7 +490,7 @@ class PlaylistSyncService:
                 "Reconcile sync errored for '%s' (%s) — falling back to replace", playlist_name, e)
         return client.update_playlist(playlist_name, tracks)
 
-    async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None, sync_mode: str = 'replace') -> SyncResult:
+    async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None, sync_mode: str = 'reconcile') -> SyncResult:
         # scoped to this task, not the shared instance (see _sync_profile_id).
         # the library scope rides along: "do we own this" is answered through
         # the profile's library, not the app account's (#1199)

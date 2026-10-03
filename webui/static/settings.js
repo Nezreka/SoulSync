@@ -3330,7 +3330,7 @@ async function loadSettingsData() {
         // Populate Playlist Sync settings
         document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup === true;
         const _syncModeEl = document.getElementById('playlist-sync-mode');
-        if (_syncModeEl) _syncModeEl.value = settings.playlist_sync?.mode || 'replace';
+        if (_syncModeEl) _syncModeEl.value = settings.playlist_sync?.mode || 'reconcile';
 
         // Populate Post-Download Conversion settings
         document.getElementById('downsample-hires').checked = settings.lossy_copy?.downsample_hires === true;
@@ -6377,7 +6377,7 @@ async function saveSettings(quiet = false) {
         },
         playlist_sync: {
             create_backup: document.getElementById('create-backup').checked,
-            mode: _cfgStr('playlist-sync-mode', { fallback: 'replace' })
+            mode: _cfgStr('playlist-sync-mode', { fallback: 'reconcile' })
         },
         content_filter: {
             allow_explicit: document.getElementById('allow-explicit').checked,
