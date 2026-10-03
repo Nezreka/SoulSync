@@ -462,11 +462,17 @@ class PlaylistSyncService:
                 synced_tracks=synced_tracks,
             ))
     
-    def _reconcile_or_replace(self, client, playlist_name: str, tracks) -> bool:
+    def _reconcile_or_replace(self, client, playlist_name: str, tracks,
+                                playlist_id: Optional[str] = None) -> bool:
         """Reconcile mode (#792): edit the playlist in place (add/remove delta,
         preserving its image + description + identity). If the client lacks
         reconcile or it fails, fall back to the destructive replace so the sync
         still succeeds — logged loudly so a failing in-place edit is diagnosable.
+
+        ``playlist_id`` is Navidrome-only (#1289 item 6): a validated stored
+        server playlist ID the sync follows instead of resolving by name. It
+        is only ever passed for the Navidrome client, whose write methods
+        accept it — Plex/Jellyfin keep their existing signatures.
         """
         fn = getattr(client, 'reconcile_playlist', None)
         if fn is None:
@@ -475,7 +481,7 @@ class PlaylistSyncService:
         if isinstance(client, NavidromeClient):
             # A refused/failed Navidrome write must not trigger another destructive attempt.
             try:
-                return bool(fn(playlist_name, tracks))
+                return bool(fn(playlist_name, tracks, playlist_id=playlist_id))
             except Exception as exc:
                 logger.error("Navidrome reconcile failed for %r: %s", playlist_name, exc)
                 return False
@@ -490,7 +496,35 @@ class PlaylistSyncService:
                 "Reconcile sync errored for '%s' (%s) — falling back to replace", playlist_name, e)
         return client.update_playlist(playlist_name, tracks)
 
-    async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None, sync_mode: str = 'reconcile') -> SyncResult:
+    def _resolve_mirrored_server_playlist_id(
+        self,
+        playlist,
+        server_type: str,
+        media_client,
+        profile_id,
+    ) -> Optional[str]:
+        """#1289 item 6 (read-half): resolve the server playlist ID for a
+        mirrored playlist sync.
+
+        Returns the server playlist ID the sync should write to, or None when
+        the legacy name-match / create path should run. Navidrome-only for
+        now — other server types always return None (their clients grow the
+        same surface in a later pass). Never raises.
+        """
+        try:
+            from core.sync.mirrored_server_link import resolve_sync_server_playlist_id
+        except Exception as e:  # noqa: BLE001 - link is best-effort
+            logger.debug("server-link unavailable: %s", e)
+            return None
+        return resolve_sync_server_playlist_id(
+            playlist_id=getattr(playlist, 'id', ''),
+            playlist_name=getattr(playlist, 'name', '') or '',
+            server_type=server_type,
+            media_client=media_client,
+            profile_id=profile_id,
+        )
+
+    async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None, sync_mode: str = 'replace') -> SyncResult:
         # scoped to this task, not the shared instance (see _sync_profile_id).
         # the library scope rides along: "do we own this" is answered through
         # the profile's library, not the app account's (#1199)
@@ -706,16 +740,40 @@ class PlaylistSyncService:
                         f"Syncing playlist '{playlist.name}' to {server_type.upper()} server "
                         f"(mode: {sync_mode})"
                     )
-                    # media server calls block, keep them off the shared loop
+                    # #1289 item 6 (read-half): a mirrored playlist that already
+                    # resolved its server playlist follows the stored server
+                    # ID silently — a server-side rename no longer orphans it
+                    # into a duplicate. Navidrome-first: other server types
+                    # keep the legacy name-match.
+                    server_playlist_id = self._resolve_mirrored_server_playlist_id(
+                        playlist, server_type, media_client, profile_id)
+                    # media server calls block, keep them off the shared loop.
+                    # Only the Navidrome client accepts playlist_id; Plex /
+                    # Jellyfin keep their existing signatures.
+                    _navidrome_id_kw = (
+                        {'playlist_id': server_playlist_id}
+                        if server_type == 'navidrome' else {}
+                    )
                     if sync_mode == 'append':
                         sync_success = await asyncio.to_thread(
-                            media_client.append_to_playlist, playlist.name, plex_tracks)
+                            media_client.append_to_playlist, playlist.name, plex_tracks,
+                            **_navidrome_id_kw)
                     elif sync_mode == 'reconcile':
                         sync_success = await asyncio.to_thread(
-                            self._reconcile_or_replace, media_client, playlist.name, plex_tracks)
+                            self._reconcile_or_replace, media_client, playlist.name,
+                            plex_tracks, **_navidrome_id_kw)
                     else:
                         sync_success = await asyncio.to_thread(
-                            media_client.update_playlist, playlist.name, plex_tracks)
+                            media_client.update_playlist, playlist.name, plex_tracks,
+                            **_navidrome_id_kw)
+
+                    if (sync_success and server_type == 'navidrome'
+                            and server_playlist_id is None and media_client is not None):
+                        # Nothing was linked and the name-match found nothing,
+                        # so the write above created the playlist — record its
+                        # server ID now so the next sync follows it by ID.
+                        self._resolve_mirrored_server_playlist_id(
+                            playlist, server_type, media_client, profile_id)
 
                 if not sync_success:
                     return self._create_error_result(playlist.name, [
