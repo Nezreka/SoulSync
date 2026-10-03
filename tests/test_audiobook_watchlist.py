@@ -43,7 +43,7 @@ class _Catalogue:
         self.calls = []
 
     def get_by_author(self, name, limit=20, sort="newest", **kwargs):
-        self.calls.append({"name": name, "limit": limit, "sort": sort})
+        self.calls.append({"name": name, "limit": limit, "sort": sort, **kwargs})
         return self.books
 
 
@@ -130,6 +130,24 @@ def test_the_newest_titles_are_asked_for_first(db):
     assert catalogue.calls[0]["sort"] == "newest"
 
 
+def test_the_scan_asks_the_configured_marketplace(db):
+    # The follow scan must ask the same store the user picked in settings —
+    # a US check on a UK-only title would never see it.
+    db.follow_author("Brandon Sanderson", since_date="2026-01-01")
+    row = db.get_watchlist()[0]
+    catalogue = _Catalogue([_book("NEW", "Wind and Truth", "2026-06-01")])
+    scan_author(row, db=db, client=catalogue, marketplace="uk")
+    assert catalogue.calls[0]["marketplace"] == "uk"
+
+
+def test_the_scan_defaults_to_the_us_store(db):
+    db.follow_author("Brandon Sanderson", since_date="2026-01-01")
+    row = db.get_watchlist()[0]
+    catalogue = _Catalogue([_book("NEW", "Wind and Truth", "2026-06-01")])
+    scan_author(row, db=db, client=catalogue)
+    assert catalogue.calls[0]["marketplace"] == "us"
+
+
 def test_scanning_records_the_result(db):
     db.follow_author("Brandon Sanderson", since_date="2026-01-01")
     row = db.get_watchlist()[0]
@@ -188,6 +206,17 @@ def test_a_pass_walks_the_authors_due(db):
     assert summary["authors"] == 2
 
 
+def test_a_pass_forwards_the_marketplace(db):
+    # The scheduled pass runs outside any request context, so it cannot read
+    # the query-string override — it is handed the configured storefront.
+    db.follow_author("Brandon Sanderson", since_date="2026-01-01")
+    catalogue = _Catalogue([])
+    with patch("core.audiobook_client.get_audiobook_client",
+               return_value=catalogue):
+        run_scan(db=db, marketplace="de")
+    assert catalogue.calls[0]["marketplace"] == "de"
+
+
 def test_a_pass_respects_the_daily_spacing(db):
     db.follow_author("Brandon Sanderson", since_date="2026-01-01")
     with patch("core.audiobook_client.get_audiobook_client",
@@ -244,14 +273,42 @@ def test_the_handler_skips_an_unused_install():
 
 
 def test_the_handler_never_raises_into_the_engine():
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
     from core.automation.handlers.audiobook_scan_watchlist import (
         auto_scan_audiobook_watchlist,
     )
 
+    manager = MagicMock()
+    manager.get.return_value = "de"
+    deps = SimpleNamespace(config_manager=manager)
     with patch("core.audiobook_database.subsystem_in_use", return_value=True), \
          patch("core.audiobook_watchlist.run_scan", side_effect=RuntimeError("boom")):
-        result = auto_scan_audiobook_watchlist({}, deps=None)
+        result = auto_scan_audiobook_watchlist({}, deps=deps)
     assert result["status"] == "error"
+
+
+def test_the_handler_reads_the_marketplace_from_config():
+    # The scheduled pass runs outside any request context, so the handler
+    # resolves the configured storefront itself rather than the watchlist
+    # module reaching for a config global.
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from core.automation.handlers.audiobook_scan_watchlist import (
+        auto_scan_audiobook_watchlist,
+    )
+
+    manager = MagicMock()
+    manager.get.return_value = "uk"
+    deps = SimpleNamespace(config_manager=manager)
+    with patch("core.audiobook_database.subsystem_in_use", return_value=True), \
+         patch("core.audiobook_watchlist.run_scan") as scan:
+        result = auto_scan_audiobook_watchlist({}, deps=deps)
+    assert result["status"] == "completed"
+    assert scan.call_args.kwargs["marketplace"] == "uk"
+    manager.get.assert_any_call("audiobooks.marketplace", "us")
 
 
 # ---------------------------------------------------------------------------

@@ -202,6 +202,7 @@ def test_a_short_book_is_staged_not_dropped(defaults):
 # A key missing from here is a key nobody can change without editing the
 # database by hand, which is how the first ten of these spent a week invisible.
 _EXPOSED = {
+    "marketplace": "audiobook-marketplace",
     "download_source.mode": "audiobook-download-mode",
     "quality.format_order": "audiobook-format-first",
     "quality.min_bitrate_kbps": "audiobook-min-bitrate",

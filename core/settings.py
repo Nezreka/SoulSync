@@ -964,6 +964,11 @@ class ConfigManager:
             },
             "audiobooks": {
                 "download_path": default_audiobook_path,
+                # Which Audible storefront the catalogue pages query. Valid
+                # codes: us/uk/de/fr/ca/au/it/es/in/jp. An unknown code falls
+                # back to the US store inside the audiobook client, so a
+                # typo degrades to US results instead of breaking.
+                "marketplace": "us",
                 # Audiobooks get their OWN source chain rather than inheriting
                 # music's. Five of music's sources (tidal, qobuz, hifi, deezer,
                 # amazon) are music-streaming services with no audiobooks in
