@@ -37,6 +37,9 @@ let _mlmSelectedSource: MlmSourceTrack | null = null;
 let _mlmSelectedLibrary: MlmLibraryTrack | null = null;
 let _mlmSourceTimer: ReturnType<typeof setTimeout> | null = null;
 let _mlmLibraryTimer: ReturnType<typeof setTimeout> | null = null;
+// #1289: pre-populated worklist of unmatched wanted tracks, loaded when the
+// modal opens. Clearing the search box restores this list.
+let _mlmUnmatchedCache: MlmSourceTrack[] | null = null;
 
 export function openManualLibraryMatchTool(prefill?: string): void {
   if (_mlmOverlay) _mlmOverlay.remove();
@@ -70,9 +73,9 @@ export function openManualLibraryMatchTool(prefill?: string): void {
                             Source Track
                         </div>
                         <div class="mlm-panel-search-wrap">
-                            <input class="mlm-search" id="mlm-source-search" placeholder="Search wishlist &amp; sync history&hellip;" oninput="_mlmSourceDebounce(this.value)">
+                            <input class="mlm-search" id="mlm-source-search" placeholder="Search unmatched tracks&hellip;" oninput="_mlmSourceDebounce(this.value)">
                         </div>
-                        <div class="server-col-scroll" id="mlm-source-results"><p class="mlm-hint">Type to search</p></div>
+                        <div class="server-col-scroll" id="mlm-source-results"><p class="mlm-hint">Loading unmatched tracks&hellip;</p></div>
                     </div>
                     <div class="mlm-panel library">
                         <div class="server-col-header">
@@ -115,6 +118,7 @@ export function openManualLibraryMatchTool(prefill?: string): void {
   _mlmOverlay = overlay;
   _mlmSelectedSource = null;
   _mlmSelectedLibrary = null;
+  _mlmUnmatchedCache = null;
   _mlmUpdateSaveBtn();
   void _mlmLoadMatches();
 
@@ -124,6 +128,10 @@ export function openManualLibraryMatchTool(prefill?: string): void {
       src.value = prefill;
       void _mlmSourceSearch(prefill);
     }
+  } else {
+    // #1289: pre-populate the source panel with every unmatched wanted
+    // track instead of an empty "type to search" box.
+    void _mlmLoadUnmatched();
   }
 }
 
@@ -134,6 +142,7 @@ export function _mlmClose(): void {
   }
   _mlmSelectedSource = null;
   _mlmSelectedLibrary = null;
+  _mlmUnmatchedCache = null;
 }
 
 export function _mlmSourceDebounce(q: string): void {
@@ -149,7 +158,12 @@ async function _mlmSourceSearch(q: string): Promise<void> {
   const el = document.getElementById('mlm-source-results') as MlmResultsEl | null;
   if (!el) return;
   if (!q.trim()) {
-    el.innerHTML = '<p class="mlm-hint">Type to search</p>';
+    // #1289: clearing the box restores the pre-populated worklist.
+    if (_mlmUnmatchedCache) {
+      _mlmRenderSourceResults(_mlmUnmatchedCache);
+    } else {
+      el.innerHTML = '<p class="mlm-hint">Type to search</p>';
+    }
     return;
   }
   el.innerHTML = '<p class="mlm-hint">Searching&hellip;</p>';
@@ -161,6 +175,31 @@ async function _mlmSourceSearch(q: string): Promise<void> {
     _mlmRenderSourceResults(data.tracks || []);
   } catch {
     el.innerHTML = '<p class="mlm-hint mlm-error">Search failed</p>';
+  }
+}
+
+// #1289: fetch every unmatched wanted track once and render it into the
+// source panel with the existing row renderer. Never clobbers a search the
+// user started while the fetch was in flight.
+async function _mlmLoadUnmatched(): Promise<void> {
+  const el = document.getElementById('mlm-source-results') as MlmResultsEl | null;
+  if (!el || !_mlmOverlay) return;
+  const input = document.getElementById('mlm-source-search') as HTMLInputElement | null;
+  if (input && input.value.trim()) return;
+  el.innerHTML = '<p class="mlm-hint">Loading unmatched tracks&hellip;</p>';
+  try {
+    const res = await fetch('/api/manual-library-matches/unmatched?limit=200');
+    const data = (await res.json()) as { tracks?: MlmSourceTrack[] };
+    _mlmUnmatchedCache = data.tracks || [];
+    if (!_mlmOverlay) return;
+    const cur = document.getElementById('mlm-source-search') as HTMLInputElement | null;
+    if (cur && cur.value.trim()) return;
+    _mlmRenderSourceResults(_mlmUnmatchedCache);
+  } catch {
+    if (!_mlmOverlay) return;
+    const cur = document.getElementById('mlm-source-search') as HTMLInputElement | null;
+    if (cur && cur.value.trim()) return;
+    el.innerHTML = '<p class="mlm-hint mlm-error">Could not load unmatched tracks</p>';
   }
 }
 
@@ -347,6 +386,9 @@ export async function _mlmSaveMatch(): Promise<void> {
       _mlmSelectedLibrary = null;
       _mlmUpdateSaveBtn();
       await _mlmLoadMatches();
+      // The just-matched track is no longer unmatched: refresh the worklist
+      // (no-op while the user is mid-search).
+      void _mlmLoadUnmatched();
       // #1289: the save stamped mirrored in_library flags server-side; tell
       // the sync page to refetch its card counts. No-op when the sync page
       // isn't mounted (tool opened from elsewhere).
@@ -428,6 +470,8 @@ export async function _mlmDeleteMatch(id: number): Promise<void> {
     // isn't mounted (tool opened from elsewhere). Skipped on failure — nothing
     // changed, so a refetch would only flash the list for no reason (#1138).
     if (deleted) window.reloadMirroredTab?.();
+    // The un-matched track may belong in the worklist again (no-op mid-search).
+    if (deleted) void _mlmLoadUnmatched();
   } catch {
     window.showToast?.('Failed to remove match', 'error');
   }

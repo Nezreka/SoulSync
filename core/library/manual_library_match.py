@@ -525,6 +525,164 @@ def search_source_candidates(db, query: str, profile_id: int, limit: int = 15) -
     return sorted_results[:limit]
 
 
+def _matched_source_track_ids(db, profile_id: int) -> set:
+    """All source_track_ids covered by a manual match for this profile.
+
+    Server-agnostic (any source label / server_source), matching the rule
+    ``find_all_manual_library_matches_by_source_track_id`` documents: a
+    track linked under one label must not reappear as unmatched under
+    another.
+    """
+    try:
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT DISTINCT source_track_id FROM manual_library_track_matches"
+                " WHERE profile_id = ?",
+                (profile_id,),
+            )
+            return {str(r[0]) for r in cursor.fetchall() if r[0]}
+    except Exception as exc:
+        logger.debug("unmatched worklist matched-ids query failed: %s", exc)
+        return set()
+
+
+def _mirrored_extra_in_library(track: dict) -> bool:
+    """Does this mirrored track's stored cache say it is in the library?
+
+    Reads the same ``extra_data.in_library`` flag the sync-time
+    ``_record_library_membership`` writes and ``save_match()`` stamps via
+    ``refresh_mirrored_library_flags``.
+    """
+    raw = track.get("extra_data")
+    if not raw:
+        return False
+    try:
+        extra = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return bool(isinstance(extra, dict) and extra.get("in_library"))
+
+
+def list_unmatched_wanted_tracks(db, profile_id: int, limit: int = 200) -> list[dict]:
+    """Pre-populated worklist of wanted-but-unmatched tracks (#1289).
+
+    The manual-match modal's source panel used to start empty ("Type to
+    search"), so users had to already know which tracks were unmatched.
+    This returns every wanted track with no library link and no manual
+    match, most-recent first, in the same dict shape as
+    ``search_source_candidates``:
+
+    - wishlist rows (context "Wishlist"), skipping rows whose Spotify id is
+      already a library track (``api_get_track_by_external_id`` — the same
+      external-ID-first resolution ``api/library.py`` uses to map source
+      tracks to library tracks) or is covered by a manual match;
+    - mirrored playlist tracks (context = playlist name), skipping rows
+      whose stored ``extra_data.in_library`` is true or covered by a manual
+      match.
+
+    The fuzzy strict-identity ownership check (``find_owned_match``) is
+    deliberately NOT run here: it costs a library search per track and the
+    background wishlist cleanup already removes those rows. A lingering
+    owned-but-unmatched row simply shows up in the worklist, where the user
+    can link it in one click.
+    """
+    try:
+        limit = max(1, int(limit))
+    except (TypeError, ValueError):
+        limit = 200
+    results: dict[tuple, dict] = {}
+    matched_ids = _matched_source_track_ids(db, profile_id)
+
+    # 1) Wishlist tracks
+    try:
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT
+                    spotify_track_id AS track_id,
+                    json_extract(spotify_data, '$.name') AS title,
+                    json_extract(spotify_data, '$.artists[0].name') AS artist,
+                    json_extract(spotify_data, '$.album.name')      AS album,
+                    date_added AS added_at
+                FROM wishlist_tracks
+                WHERE profile_id = ?
+                ORDER BY date_added DESC, id DESC
+            """, (profile_id,))
+            wishlist_rows = [dict(r) for r in cursor.fetchall()]
+    except Exception as exc:
+        logger.debug("unmatched worklist wishlist query failed: %s", exc)
+        wishlist_rows = []
+    ext_lookup = getattr(db, "api_get_track_by_external_id", None)
+    for r in wishlist_rows:
+        tid = r.get("track_id") or ""
+        if not tid:
+            continue
+        key = ("spotify", tid)
+        if key in results or tid in matched_ids:
+            continue
+        # Already in the library under its external id: nothing to link.
+        try:
+            if ext_lookup is not None and ext_lookup(tid):
+                continue
+        except Exception as exc:  # noqa: BLE001 - one bad lookup must not abort the list
+            logger.debug("unmatched worklist external-id lookup failed: %s", exc)
+        results[key] = {
+            "source": "spotify",
+            "source_track_id": tid,
+            "title": r["title"] or "",
+            "artist": r["artist"] or "",
+            "album": r["album"] or "",
+            "context": "Wishlist",
+            "added_at": r["added_at"] or "",
+        }
+
+    # 2) Mirrored playlist tracks
+    try:
+        playlists = db.get_mirrored_playlists(profile_id=profile_id) or []
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("unmatched worklist playlist list failed: %s", exc)
+        playlists = []
+    for pl in playlists:
+        if not isinstance(pl, dict):
+            continue
+        pid = pl.get("id")
+        if pid is None:
+            continue
+        pl_name = pl.get("name") or ""
+        pl_source = (pl.get("source") or "spotify").strip() or "spotify"
+        pl_updated = pl.get("updated_at") or ""
+        try:
+            tracks = db.get_mirrored_playlist_tracks(pid) or []
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("unmatched worklist tracks failed for playlist %s: %s", pid, exc)
+            continue
+        for track in tracks:
+            if not isinstance(track, dict):
+                continue
+            sid = str(track.get("source_track_id") or "")
+            if not sid or sid in matched_ids:
+                continue
+            if _mirrored_extra_in_library(track):
+                continue
+            key = (pl_source, sid)
+            if key in results:
+                continue
+            results[key] = {
+                "source": pl_source,
+                "source_track_id": sid,
+                "title": track.get("track_name") or "",
+                "artist": track.get("artist_name") or "",
+                "album": track.get("album_name") or "",
+                "context": pl_name,
+                "added_at": pl_updated,
+            }
+
+    # Sort by recency and cap
+    sorted_results = sorted(results.values(), key=lambda r: r.get("added_at", ""), reverse=True)
+    return sorted_results[:limit]
+
+
 def search_library_candidates(db, query: str, limit: int = 15) -> list[dict[str, Any]]:
     """Search library tracks using the existing api_search_tracks method."""
     if not query or not query.strip():
