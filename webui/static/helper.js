@@ -3474,6 +3474,14 @@ const WHATS_NEW = {
         { title: 'Non-admin automations re-arm', desc: 'Scheduled automations owned by other profiles re-arm after a restart instead of running once and never again (#1428, #1430).', page: 'automations' },
         { title: 'Repair job honesty', desc: 'Acoustid retag keeps the album artist, sfv and srr count as leftover junk, and a run that quit early says so (#1289).', page: 'tools' },
         { title: 'Extension chat tab', desc: 'The server chat lives in the companion extension popup, with rooms, dms and replies. Video pages get library-status pills and watchlist actions.' },
+        { title: 'Repair jobs join automations', desc: 'Maintenance jobs run on the automation engine now as system automations, scheduled from the automations page. New BPM backfill job (Deezer or local analysis), and manual match opens with a worklist of every unmatched wanted track (#1289, #1476).', page: 'automations' },
+        { title: 'Safer defaults, clearer language', desc: 'Sync defaults to Reconcile, "Transfer is my permanent library" defaults on, Discovery becomes Identify, and the import inbox gets honest about partials, stale rows and match stealing (#1289, #1474, #1477).' },
+        { title: 'Community fix batch', desc: 'Wishlist cleanup respects album scope, discography matching rejects substring-only titles, the discovery pool filter actually filters, Audible gets a marketplace setting, and AudioDB uses the working free key (#1447, #1448, #1452, #1453, #1455, #1458, #1475).' },
+        { title: 'Playlist sync wishlist control', desc: 'Syncing no longer has to re-download everything you deleted: a global toggle plus Sync vs Sync + download buttons (#1455).', page: 'sync' },
+        { title: 'Discovery pool upgrades', desc: 'Matches sort by match percentage and cached matches can be cleared per playlist (#1452).', page: 'discover' },
+        { title: 'Video calendar status badges', desc: 'Episode cards and the hero show Wanted, Downloading, Queued, Failed and Missing — not just the owned check (#1480).' },
+        { title: 'Deezer reissues stop showing as missing', desc: 'The year check no longer vetoes a same-title match when Deezer reports a reissue date (#1492).' },
+        { title: 'New v1 API endpoints', desc: 'Library playlists and tracks, recently played, mirrored playlists, and fixed artists scoping — built for the extension mini player (#1459, #1461, #1469, #1472, #1473).' },
         { title: 'Earlier versions', desc: '3.4.9 brought the discover glow-up, player theater, sample studio and a calmer sync page.' },
     ],
     '3.4.9': [
@@ -3528,8 +3536,8 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: '3.5.0: video discover, per-profile sync and smarter providers',
-        description: 'Video discover gets the music-side treatment, sync and discover go per-profile, providers stop false rate-limiting, and the extension gets a chat tab.',
+        title: '3.5.0: video discover, per-profile sync, repair engine and community fixes',
+        description: 'Video discover gets the music-side treatment, sync and discover go per-profile, providers stop false rate-limiting, repair jobs join the automation engine, and a community fix batch lands.',
         features: [
             'Video discover overhaul: story blocks, trailers, genre art, hero badge, story tickers, eager genre tiles with ambient crossfade (#1427, #1433, #1434, #1435, #1436).',
             '"I have this" manual matching on video detail pages, and rematches that actually refresh artwork (#1438, #1440).',
@@ -3539,6 +3547,12 @@ const VERSION_MODAL_SECTIONS = [
             'Singles stop merging into same-named album folders; custom single path templates honored (#1441, #1431).',
             'Non-admin automations re-arm after restart (#1428, #1430).',
             'Companion extension: chat tab in the popup, video badges with watchlist actions.',
+            'Repair jobs run on the automation engine as system automations; new BPM backfill job; manual-match worklist of unmatched wanted tracks (#1289, #1476).',
+            '#1289 clarity batch: safer defaults (Reconcile, permanent-library on), clearer language (Identify, Music Library), 7 import-inbox bug fixes (#1474, #1477).',
+            'Community fixes: wishlist album scope, discography substring matching, discovery pool filter, Audible marketplace, working AudioDB key (#1447, #1448, #1452, #1453, #1455, #1458, #1475).',
+            'Playlist sync wishlist control: global toggle plus Sync / Sync + download buttons (#1455).',
+            'New v1 endpoints: library playlists + tracks, recently-played, mirrored playlists (#1459, #1461, #1469).',
+            'Video calendar status badges; Deezer reissue years stop marking owned albums missing (#1480, #1492).',
         ],
     },
     {
