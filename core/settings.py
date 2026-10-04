@@ -554,6 +554,11 @@ class ConfigManager:
                 # this many GB free (0 = off). A fresh LXC install left on the
                 # default paths otherwise fills its 8GB root until it hangs.
                 "min_free_disk_gb": 5.0,
+                # 'own' touches only transfers/searches this client created
+                # when cleaning slskd (it may be shared with Lidarr's slskd
+                # plugin or another SoulSync). 'all' clears every client's
+                # state, the pre-#1499 behavior for single-client installs.
+                "cleanup_scope": "own",
             },
             "download_source": {
                 "max_mb_per_minute": 0,  # Optional advertised music size limit; 0 = off
