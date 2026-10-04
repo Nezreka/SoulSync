@@ -95,6 +95,34 @@ def _row_value(row, column: str, default=None):
         return default
     return default if value is None else value
 
+
+def _deezer_id_conflicts_with_card(db, candidate_album_id, card_source_id) -> bool:
+    """Does the library candidate carry a stored Deezer id that conflicts with the card's?
+
+    A stored id that differs from the card's is hard proof of different releases
+    (e.g. owned standard vs deluxe card), so the #1289 year-gate exemption must
+    not fire. Returns False — no conflict — when the card has no id, the
+    candidate has no stored Deezer id, a stored id equals the card's, or the
+    lookup is unavailable: a year mismatch alone cannot prove "different
+    release" for Deezer cards.
+    """
+    want = str(card_source_id or "").strip()
+    if not want:
+        return False
+    get_ids = getattr(db, "get_album_source_ids", None)
+    if not callable(get_ids):
+        return False
+    try:
+        id_map = get_ids([candidate_album_id]) or {}
+    except Exception:
+        return False
+    vals = id_map.get(candidate_album_id) or {}
+    for col in ("deezer_id", "album_deezer_id"):
+        stored = vals.get(col)
+        if stored and str(stored).strip() and str(stored).strip() != want:
+            return True
+    return False
+
 # ── MetaSync export column sets ──────────────────────────────────────────
 #
 # Named explicitly, never SELECT *: column ORDER differs between a fresh
@@ -12342,7 +12370,7 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None, completeness_cache: Optional[Dict[Any, Any]] = None, candidate_tracks: Optional[List[Any]] = None) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
+    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None, completeness_cache: Optional[Dict[Any, Any]] = None, candidate_tracks: Optional[List[Any]] = None, metadata_source: Optional[str] = None, card_source_id: Optional[str] = None) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
         """
         Check if an album exists in the database with completeness information.
         Enhanced to handle edition matching (standard <-> deluxe variants).
@@ -12351,10 +12379,18 @@ class MusicDatabase:
         When `candidate_albums` is provided (via get_candidate_albums_for_artist),
         the matcher runs in-memory against that list instead of firing per-album
         SQL searches. `None` preserves the original search-every-time behavior.
+
+        `metadata_source` is the metadata provider the card came from
+        ('deezer', 'spotify', ...). Only 'deezer' relaxes the re-release year
+        gate (its release_date is the digital reissue date); any other value
+        keeps the historical behavior byte-for-byte. `card_source_id` is the
+        card's provider-side album id (Deezer album id for Deezer cards): when
+        the library candidate carries a different stored Deezer id, that is
+        hard proof of different releases and the exemption does not fire.
         """
         try:
             # Try enhanced edition-aware matching first with expected track count for Smart Edition Matching
-            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source, candidate_albums=candidate_albums, strict_discography_match=strict_discography_match, expected_year=expected_year)
+            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source, candidate_albums=candidate_albums, strict_discography_match=strict_discography_match, expected_year=expected_year, metadata_source=metadata_source, card_source_id=card_source_id)
 
             if not album:
                 return None, 0.0, 0, 0, False, []
@@ -12371,7 +12407,7 @@ class MusicDatabase:
             logger.error(f"Error checking album existence with completeness for '{title}' by '{artist}': {e}")
             return None, 0.0, 0, 0, False, []
     
-    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None) -> Tuple[Optional[DatabaseAlbum], float]:
+    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None, metadata_source: Optional[str] = None, card_source_id: Optional[str] = None) -> Tuple[Optional[DatabaseAlbum], float]:
         """
         Enhanced album existence check that handles edition variants.
         Matches standard albums with deluxe/platinum/special editions and vice versa.
@@ -12393,8 +12429,35 @@ class MusicDatabase:
                 # expected-track-count edition matching, so we don't need the
                 # per-variation SQL widening that the legacy path does.
                 logger.debug(f"Edition matching for '{title}' by '{artist}': batched against {len(candidate_albums)} candidates")
+                # #1289 (Deezer reissue dates): Deezer's release_date is the
+                # digital reissue date, so a year mismatch on a DEEZER card no
+                # longer proves "different release". When exactly ONE candidate
+                # has an exact normalized-title match, the year cannot be
+                # disambiguating anything — skip the re-release year gate for
+                # that candidate only. Scoped to Deezer: other sources'
+                # release years are trustworthy originals, so their gate (and
+                # any unknown/None source) stays byte-for-byte as before.
+                # With 0 or >=2 same-title candidates the gate stays exactly
+                # as before (>=2 is the true re-release ambiguity it was built
+                # for). Even for a single candidate the exemption does NOT fire
+                # when the library row carries a stored Deezer id that conflicts
+                # with the card's — hard proof of different releases (e.g. owned
+                # standard vs deluxe card). Normalization here is diacritics/case
+                # only, NOT edition-stripping, so "X (Deluxe)" never counts as "X".
+                gate_exempt = None
+                if expected_year is not None and (metadata_source or "").strip().lower() == "deezer":
+                    wanted_norm = self._normalize_for_comparison(title or "")
+                    if wanted_norm:
+                        exact = [a for a in candidate_albums
+                                 if self._normalize_for_comparison(getattr(a, "title", "") or "") == wanted_norm]
+                        if len(exact) == 1:
+                            candidate = exact[0]
+                            if not _deezer_id_conflicts_with_card(self, getattr(candidate, "id", None), card_source_id):
+                                gate_exempt = candidate
+                                logger.debug(f"  Year gate skipped for single exact-title candidate '{title}' (deezer card, #1289)")
                 for album in candidate_albums:
-                    confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year)
+                    ey = None if album is gate_exempt else expected_year
+                    confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=ey)
                     if confidence > best_confidence:
                         best_confidence = confidence
                         best_match = album

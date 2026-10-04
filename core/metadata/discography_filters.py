@@ -224,6 +224,8 @@ def owned_release_tracks(
     server_source: Optional[str],
     candidate_albums: Optional[List[Any]] = None,
     candidate_tracks: Optional[List[Any]] = None,
+    metadata_source: Optional[str] = None,
+    card_source_id: Optional[str] = None,
 ) -> Optional[List[Any]]:
     """the library's tracks for THIS release, found the way the artist page
     finds it (check_album_exists_with_completeness, strict, year-gated).
@@ -234,6 +236,12 @@ def owned_release_tracks(
     release itself is in the library, showed it missing (discord,
     SeadogsBooty: Yellowcard's singles). checking songs against this list
     instead makes the two agree.
+
+    `metadata_source` / `card_source_id` carry the card's provider and
+    provider-side album id through so the #1289 Deezer reissue-date
+    exemption (and its ID-conflict guard) applies here exactly as on the
+    artist page — the downloader's ownership check never disagrees with
+    what the page shows.
 
     [] when the release isn't in the library. None when the lookup failed:
     the caller falls back to the artist-wide check, since a redundant skip is
@@ -252,6 +260,8 @@ def owned_release_tracks(
             candidate_albums=candidate_albums,
             strict_discography_match=True,
             expected_year=year,
+            metadata_source=metadata_source,
+            card_source_id=card_source_id,
         )
     except Exception:
         return None
