@@ -71,6 +71,18 @@ def get_scan_status() -> Dict[str, Any]:
         return dict(_last_scan_status)
 
 
+def _profile_may_download(db, profile_id: int) -> bool:
+    """Whether this profile may start downloads. The automation runs as the
+    system (profile 1) but queues for other profiles' watchlists, so the
+    check is per the row's owner, not the session."""
+    try:
+        from core.permissions import download_denied_reason
+        return download_denied_reason(
+            profile_id, lambda pid: db.get_profile(pid)) is None
+    except Exception:  # noqa: BLE001 - fail open like the session check does
+        return True
+
+
 # How many missing episodes one show may claim in a single pass.
 #
 # The scan used to take the newest episode and nothing else, which loses the
@@ -164,7 +176,12 @@ def scan_and_auto_download_podcasts(profile_id: Optional[int] = None) -> Dict[st
                 db.mark_watchlist_podcast_scanned(feed_url, episode_count=ep_count)
 
                 # 3. If auto_download is enabled, find the single most recent episode
-                if auto_download and show.episodes:
+                # The follow endpoint gates new rows, but older rows (or rows
+                # written any other way) can still carry auto_download for a
+                # profile that may not download — the queue step re-checks, so
+                # the permission is enforced where the download actually starts.
+                if auto_download and show.episodes and _profile_may_download(
+                        db, profile_id):
                     from api.podcasts import queue_podcast_download
 
                     def _ep_sort_key(e):
