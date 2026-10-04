@@ -16,10 +16,12 @@ Registered from ``web_server.py`` via ``register_library_v2_routes(app, ...)``.
 
 from __future__ import annotations
 
+import functools
 import json
 import sqlite3
 import threading
 import time
+from contextlib import closing
 from typing import Any, Callable, Dict, List, Optional
 
 from flask import jsonify, make_response, request, send_file
@@ -34,6 +36,11 @@ from core.library_scope import carrying_scope
 from utils.logging_config import get_logger
 
 logger = get_logger("api.library_v2")
+
+
+def _fail(error: Any, status: Any = 400):
+    return jsonify({"success": False, "error": error}), status
+
 
 # In-process import job state (single library, single job at a time).
 _import_lock = threading.Lock()
@@ -293,15 +300,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return False
 
     def _guard():
-        # There is no "is Library v2 enabled" check: it always is
-        # (core/library2/feature.py returns True unconditionally), so the 403
-        # that stood here was unreachable and no client ever handled its shape.
-        # The PROFILE permission 403 below is the live one.
+        # Library v2 is always enabled; the profile's page permission is the gate.
         if not _page_allowed():
-            return jsonify({
-                "success": False,
-                "error": "Library access is not allowed for this profile",
-            }), 403
+            return _fail("Library access is not allowed for this profile", 403)
         # ADR-01 (admin-only): Library v2 has exactly ONE authoritative user
         # intent — the admin profile (profiles.id = 1). Mutations from any
         # other profile are rejected outright, not silently ignored: the lib2
@@ -317,13 +318,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # stays with the admin.
             if request.endpoint in _OWN_LIBRARY_WISH_ENDPOINTS and _can_wish():
                 return _named_row_hidden()
-            return jsonify({
-                "success": False,
-                "error": "Library v2 changes require the admin profile",
-            }), 403
+            return _fail("Library v2 changes require the admin profile", 403)
         # E-06: for a profile, another library's row does not exist -- its
         # page, its tags, its history alike
         return _named_row_hidden()
+
+    def _route(rule, **options):
+        """``app.route`` for an endpoint that ``_guard`` answers first."""
+        def register(view):
+            @functools.wraps(view)
+            def guarded(*args, **kwargs):
+                return _guard() or view(*args, **kwargs)
+            return app.route(rule, **options)(guarded)
+        return register
 
     def _named_row_hidden():
         """A 404 when the route names a row outside the caller's library, else
@@ -338,13 +345,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                       if f"{e}_id" in args), ("", None))
         if entity not in ("artist", "album", "track") or _is_admin():
             return None
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             hidden = _hidden_from_caller(conn, entity, int(entity_id))
-        finally:
-            conn.close()
         if hidden:
-            return jsonify({"success": False, "error": f"{entity.capitalize()} not found"}), 404
+            return _fail(f"{entity.capitalize()} not found", 404)
         return None
 
     def _hidden_from_caller(conn, entity: str, entity_id: int) -> bool:
@@ -492,7 +496,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     # -- read endpoints -------------------------------------------------------
 
-    @app.route("/api/library/v2/scopes")
+    @_route("/api/library/v2/scopes")
     def lib2_scopes():
         """Which libraries the caller may look at, and which one they are on.
 
@@ -503,9 +507,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         use (E-05, E-11). `target` is where a download started now would land,
         which the pages show next to their download buttons.
         """
-        guard = _guard()
-        if guard:
-            return guard
         from core.library_scope import (
             current_library_scope, own_library_ids, owner_for_new_file,
         )
@@ -581,7 +582,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "options": options if switchable else [],
         })
 
-    @app.route("/api/library/v2/scope", methods=["POST"])
+    @_route("/api/library/v2/scope", methods=["POST"])
     def lib2_set_scope():
         """Point this session's library page at one directory.
 
@@ -590,24 +591,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         session rather than a query parameter keeps it out of shared links and
         makes it survive the page changes a download goes through.
         """
-        guard = _guard()
-        if guard:
-            return guard
         from core.library_scope import SCOPE_PARKED, SESSION_KEY
 
         if SCOPE_PARKED:
-            return jsonify({"success": False,
-                            "error": "Own libraries are not available in this build yet."}), 400
+            return _fail("Own libraries are not available in this build yet.")
         if not _is_admin():
-            return jsonify({"success": False,
-                            "error": "Switching libraries requires an admin profile"}), 403
+            return _fail("Switching libraries requires an admin profile", 403)
         body = request.get_json(silent=True) or {}
         wanted = str(body.get("scope") or "").strip()
         from core.library_scope import own_library_ids
         live = own_library_ids()
         allowed = ({"shared", "all"} | {str(pid) for pid in live}) if live else set()
         if wanted not in allowed:
-            return jsonify({"success": False, "error": "Unknown library"}), 400
+            return _fail("Unknown library")
         from flask import session
         session[SESSION_KEY] = wanted
         return jsonify({"success": True, "scope": wanted})
@@ -632,23 +628,17 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     # -- acquisition requests / decisions (Phase 4) -------------------------
 
-    @app.route("/api/library/v2/acquisition/requests", methods=["POST"])
+    @_route("/api/library/v2/acquisition/requests", methods=["POST"])
     def lib2_create_acquisition_request():
-        guard = _guard()
-        if guard:
-            return guard
         body = request.get_json(silent=True) or {}
         scope = str(body.get("scope") or "").strip().lower()
         idempotency_key = str(body.get("idempotency_key") or "").strip()
         try:
             entity_id = int(body.get("entity_id"))
         except (TypeError, ValueError):
-            return jsonify({"success": False, "error": "entity_id must be an integer"}), 400
+            return _fail("entity_id must be an integer")
         if body.get("search_options") not in (None, {}):
-            return jsonify({
-                "success": False,
-                "error": "search_options are server-managed",
-            }), 400
+            return _fail("search_options are server-managed")
         conn = _conn()
         try:
             from core.acquisition import ensure_acquisition_schema
@@ -696,51 +686,36 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             }), 201 if created else 200
         except ValueError as exc:
             conn.rollback()
-            return jsonify({"success": False, "error": str(exc)}), 400
+            return _fail(str(exc))
         finally:
             conn.close()
 
-    @app.route("/api/library/v2/acquisition/requests/<request_id>")
+    @_route("/api/library/v2/acquisition/requests/<request_id>")
     def lib2_get_acquisition_request(request_id):
-        guard = _guard()
-        if guard:
-            return guard
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             from core.acquisition.requests import get_request
             acquisition_request = get_request(conn, request_id)
             if acquisition_request is None:
-                return jsonify({"success": False, "error": "Request not found"}), 404
+                return _fail("Request not found", 404)
             if acquisition_request.profile_id != ADMIN_PROFILE_ID:
-                return jsonify({"success": False, "error": "Request not found"}), 404
+                return _fail("Request not found", 404)
             return jsonify({"success": True, "request": acquisition_request.to_dict()})
-        finally:
-            conn.close()
 
-    @app.route("/api/library/v2/acquisition/requests/<request_id>/history")
+    @_route("/api/library/v2/acquisition/requests/<request_id>/history")
     def lib2_get_acquisition_history(request_id):
-        guard = _guard()
-        if guard:
-            return guard
         try:
             limit = int(request.args.get("limit", 200))
         except (TypeError, ValueError):
-            return jsonify({
-                "success": False,
-                "error": "limit must be an integer between 1 and 1000",
-            }), 400
+            return _fail("limit must be an integer between 1 and 1000")
         if not 1 <= limit <= 1000:
-            return jsonify({
-                "success": False,
-                "error": "limit must be an integer between 1 and 1000",
-            }), 400
+            return _fail("limit must be an integer between 1 and 1000")
         conn = _conn()
         try:
             from core.acquisition.history import list_history_events
             from core.acquisition.requests import get_request
             acquisition_request = get_request(conn, request_id)
             if acquisition_request is None or acquisition_request.profile_id != ADMIN_PROFILE_ID:
-                return jsonify({"success": False, "error": "Request not found"}), 404
+                return _fail("Request not found", 404)
             events = list_history_events(
                 conn, request_id=request_id, limit=limit)
             return jsonify({
@@ -748,58 +723,46 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 "events": [event.to_public_dict() for event in events],
             })
         except ValueError as exc:
-            return jsonify({"success": False, "error": str(exc)}), 400
+            return _fail(str(exc))
         finally:
             conn.close()
 
-    @app.route(
+    @_route(
         "/api/library/v2/acquisition/requests/<request_id>/retry",
         methods=["POST"],
     )
     def lib2_retry_acquisition_request(request_id):
-        guard = _guard()
-        if guard:
-            return guard
         conn = _conn()
         try:
             from core.acquisition.requests import get_request
             from core.acquisition.workflow import retry_acquisition_request
             acquisition_request = get_request(conn, request_id)
             if acquisition_request is None or acquisition_request.profile_id != ADMIN_PROFILE_ID:
-                return jsonify({"success": False, "error": "Request not found"}), 404
+                return _fail("Request not found", 404)
             retried = retry_acquisition_request(conn, request_id)
             conn.commit()
             return jsonify({"success": True, "request": retried.to_dict()})
         except ValueError as exc:
             conn.rollback()
-            return jsonify({"success": False, "error": str(exc)}), 409
+            return _fail(str(exc), 409)
         finally:
             conn.close()
 
-    @app.route("/api/library/v2/acquisition/blocklist")
+    @_route("/api/library/v2/acquisition/blocklist")
     def lib2_get_acquisition_blocklist():
-        guard = _guard()
-        if guard:
-            return guard
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             from core.acquisition.blocklist import list_blocklist_entries
             entries = list_blocklist_entries(conn)
             return jsonify({
                 "success": True,
                 "entries": [entry.to_public_dict() for entry in entries],
             })
-        finally:
-            conn.close()
 
-    @app.route(
+    @_route(
         "/api/library/v2/acquisition/blocklist/<entry_id>",
         methods=["DELETE"],
     )
     def lib2_delete_acquisition_blocklist_entry(entry_id):
-        guard = _guard()
-        if guard:
-            return guard
         conn = _conn()
         try:
             from core.acquisition.blocklist import unblock_candidate
@@ -813,26 +776,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             })
         except KeyError:
             conn.rollback()
-            return jsonify({"success": False, "error": "Blocklist entry not found"}), 404
+            return _fail("Blocklist entry not found", 404)
         except ValueError as exc:
             conn.rollback()
-            return jsonify({"success": False, "error": str(exc)}), 400
+            return _fail(str(exc))
         finally:
             conn.close()
 
-    @app.route("/api/library/v2/acquisition/requests/<request_id>/candidates")
+    @_route("/api/library/v2/acquisition/requests/<request_id>/candidates")
     def lib2_get_acquisition_candidates(request_id):
-        guard = _guard()
-        if guard:
-            return guard
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             from core.acquisition.candidates import list_request_candidates
             from core.acquisition.decisions import latest_decision_run
             from core.acquisition.requests import get_request
             acquisition_request = get_request(conn, request_id)
             if acquisition_request is None or acquisition_request.profile_id != ADMIN_PROFILE_ID:
-                return jsonify({"success": False, "error": "Request not found"}), 404
+                return _fail("Request not found", 404)
             payload = []
             for candidate in list_request_candidates(conn, request_id):
                 decision = latest_decision_run(conn, candidate.id)
@@ -842,17 +801,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     "decision": decision.decision.to_public_dict() if decision else None,
                 })
             return jsonify({"success": True, "candidates": payload})
-        finally:
-            conn.close()
 
-    @app.route(
+    @_route(
         "/api/library/v2/acquisition/requests/<request_id>/evaluate",
         methods=["POST"],
     )
     def lib2_evaluate_acquisition_request(request_id):
-        guard = _guard()
-        if guard:
-            return guard
         conn = _conn()
         try:
             from core.acquisition.catalog import resolve_request_context
@@ -861,7 +815,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             from core.acquisition.workflow import evaluate_request_candidates
             acquisition_request = get_request(conn, request_id)
             if acquisition_request is None or acquisition_request.profile_id != ADMIN_PROFILE_ID:
-                return jsonify({"success": False, "error": "Request not found"}), 404
+                return _fail("Request not found", 404)
             automatic = acquisition_request.trigger != "manual"
             catalog, policy = resolve_request_context(
                 conn, acquisition_request, config_get=config_get)
@@ -883,26 +837,23 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return jsonify({"success": True, **result.to_public_dict()})
         except ValueError as exc:
             conn.rollback()
-            return jsonify({"success": False, "error": str(exc)}), 400
+            return _fail(str(exc))
         finally:
             conn.close()
 
-    @app.route(
+    @_route(
         "/api/library/v2/acquisition/requests/<request_id>/grab",
         methods=["POST"],
     )
     def lib2_grab_acquisition_candidate(request_id):
         """Persist intent first, then submit to the external client."""
-        guard = _guard()
-        if guard:
-            return guard
         body = request.get_json(silent=True) or {}
         candidate_id = str(body.get("candidate_id") or "").strip()
         if not candidate_id:
-            return jsonify({"success": False, "error": "candidate_id is required"}), 400
+            return _fail("candidate_id is required")
         force = body.get("force", False)
         if not isinstance(force, bool):
-            return jsonify({"success": False, "error": "force must be a boolean"}), 400
+            return _fail("force must be a boolean")
 
         prepare_conn = _conn()
         try:
@@ -918,7 +869,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             from core.acquisition.workflow import prepare_candidate_grab
             acquisition_request = get_request(prepare_conn, request_id)
             if acquisition_request is None or acquisition_request.profile_id != ADMIN_PROFILE_ID:
-                return jsonify({"success": False, "error": "Request not found"}), 404
+                return _fail("Request not found", 404)
             # ACQ-01: scope idempotency to the request's CURRENT attempt. A
             # repeated call inside one attempt still gets the same grab (so a
             # double-click cannot submit twice); an explicitly retried request
@@ -956,7 +907,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             prepare_conn.commit()
         except ValueError as exc:
             prepare_conn.rollback()
-            return jsonify({"success": False, "error": str(exc)}), 409
+            return _fail(str(exc), 409)
         finally:
             prepare_conn.close()
 
@@ -1045,16 +996,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             submit_conn.rollback()
             from core.acquisition.search_contract import safe_external_error
             safe_error = safe_external_error(exc)
-            recovery_conn = _conn()
-            try:
+            with closing(_conn()) as recovery_conn:
                 grab = record_uncertain_submission(
                     recovery_conn,
                     prepared,
                     f"External job accepted but correlation persistence failed: {safe_error}",
                 )
                 recovery_conn.commit()
-            finally:
-                recovery_conn.close()
             return jsonify({
                 "success": True,
                 "created": True,
@@ -1082,25 +1030,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "grab": public_grab(grab),
         }), 202
 
-    @app.route("/api/library/v2/acquisition/grabs/<download_id>")
+    @_route("/api/library/v2/acquisition/grabs/<download_id>")
     def lib2_get_acquisition_grab(download_id):
-        guard = _guard()
-        if guard:
-            return guard
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             from core.acquisition.grabs import get_grab, public_grab
             from core.acquisition.requests import get_request
             grab = get_grab(conn, download_id)
             if grab is None or not grab.get("acquisition_request_id"):
-                return jsonify({"success": False, "error": "Grab not found"}), 404
+                return _fail("Grab not found", 404)
             acquisition_request = get_request(
                 conn, grab["acquisition_request_id"])
             if acquisition_request is None or acquisition_request.profile_id != ADMIN_PROFILE_ID:
-                return jsonify({"success": False, "error": "Grab not found"}), 404
+                return _fail("Grab not found", 404)
             return jsonify({"success": True, "grab": public_grab(grab)})
-        finally:
-            conn.close()
 
     # -- acquisition import review; filesystem paths remain server-only -----
 
@@ -1147,33 +1089,23 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "quarantined": quarantined,
         }
 
-    @app.route("/api/library/v2/acquisition/imports")
+    @_route("/api/library/v2/acquisition/imports")
     def lib2_list_acquisition_imports():
-        guard = _guard()
-        if guard:
-            return guard
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             from core.acquisition.imports import list_open_imports
             records = list_open_imports(conn)
             return jsonify({
                 "success": True,
                 "imports": [record.to_public_dict() for record in records],
             })
-        finally:
-            conn.close()
 
-    @app.route("/api/library/v2/acquisition/path-health")
+    @_route("/api/library/v2/acquisition/path-health")
     def lib2_acquisition_path_health():
-        guard = _guard()
-        if guard:
-            return guard
         from core.acquisition.path_health import (
             inspect_mapping_configuration,
             inspect_reported_path,
         )
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             from core.acquisition.grabs import get_grab
             from core.acquisition.imports import list_open_imports
             imports = []
@@ -1195,23 +1127,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     config_get).to_public_dict(),
                 "imports": imports,
             })
-        finally:
-            conn.close()
 
-    @app.route("/api/library/v2/acquisition/correlation-coverage")
+    @_route("/api/library/v2/acquisition/correlation-coverage")
     def lib2_acquisition_correlation_coverage():
-        guard = _guard()
-        if guard:
-            return guard
         try:
             days = int(request.args.get("days", 7))
         except (TypeError, ValueError):
-            return jsonify({
-                "success": False,
-                "error": "days must be an integer between 1 and 90",
-            }), 400
-        conn = _conn()
-        try:
+            return _fail("days must be an integer between 1 and 90")
+        with closing(_conn()) as conn:
             from core.acquisition.correlation_coverage import (
                 correlation_coverage_summary,
             )
@@ -1221,7 +1144,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             try:
                 coverage = correlation_coverage_summary(conn, days=days)
             except ValueError as exc:
-                return jsonify({"success": False, "error": str(exc)}), 400
+                return _fail(str(exc))
             return jsonify({
                 "success": True,
                 "enforcement_key": CORRELATION_ENFORCEMENT_KEY,
@@ -1229,48 +1152,34 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     CORRELATION_ENFORCEMENT_KEY, False) is True,
                 "coverage": coverage,
             })
-        finally:
-            conn.close()
 
-    @app.route("/api/library/v2/acquisition/imports/<import_id>")
+    @_route("/api/library/v2/acquisition/imports/<import_id>")
     def lib2_get_acquisition_import(import_id):
-        guard = _guard()
-        if guard:
-            return guard
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             record, owner = _owned_import(conn, import_id)
             if record is None:
-                return jsonify({"success": False, "error": "Import not found"}), 404
+                return _fail("Import not found", 404)
             expected = _expected_import_tracks(conn, record, owner)
             return jsonify({
                 "success": True,
                 "import": _public_import_detail(record, expected),
             })
-        finally:
-            conn.close()
 
-    @app.route(
+    @_route(
         "/api/library/v2/acquisition/imports/<import_id>/resolve",
         methods=["POST"],
     )
     def lib2_resolve_acquisition_import(import_id):
-        guard = _guard()
-        if guard:
-            return guard
         assignments = (request.get_json(silent=True) or {}).get("assignments")
         if not isinstance(assignments, list):
-            return jsonify({
-                "success": False,
-                "error": "assignments must be a list",
-            }), 400
+            return _fail("assignments must be a list")
         conn = _conn()
         try:
             from core.acquisition.bundle_matching import build_manual_matches
             from core.acquisition.imports import record_manual_resolution
             record, owner = _owned_import(conn, import_id)
             if record is None:
-                return jsonify({"success": False, "error": "Import not found"}), 404
+                return _fail("Import not found", 404)
             expected = _expected_import_tracks(conn, record, owner)
             matches = build_manual_matches(record, expected, assignments)
             updated = record_manual_resolution(conn, record.id, matches)
@@ -1281,31 +1190,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             })
         except ValueError as exc:
             conn.rollback()
-            return jsonify({"success": False, "error": str(exc)}), 400
+            return _fail(str(exc))
         finally:
             conn.close()
 
-    @app.route(
+    @_route(
         "/api/library/v2/acquisition/imports/<import_id>/rescan",
         methods=["POST"],
     )
     def lib2_rescan_acquisition_import(import_id):
-        guard = _guard()
-        if guard:
-            return guard
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             record, owner = _owned_import(conn, import_id)
             if record is None:
-                return jsonify({"success": False, "error": "Import not found"}), 404
+                return _fail("Import not found", 404)
             if record.status not in {"pending", "matching", "needs_review"}:
-                return jsonify({
-                    "success": False,
-                    "error": f"Import cannot be rescanned while {record.status}",
-                }), 409
+                return _fail(f"Import cannot be rescanned while {record.status}", 409)
             output_path = record.output_path
-        finally:
-            conn.close()
 
         from core.acquisition.bundle_inventory import collect_bundle_inventory
         inventory = collect_bundle_inventory(output_path, config_get=config_get)
@@ -1320,7 +1220,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             from core.acquisition.imports import record_inventory_result
             record, _owner = _owned_import(conn, import_id)
             if record is None:
-                return jsonify({"success": False, "error": "Import not found"}), 404
+                return _fail("Import not found", 404)
             updated = record_inventory_result(
                 conn,
                 record.id,
@@ -1335,11 +1235,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             })
         except ValueError as exc:
             conn.rollback()
-            return jsonify({"success": False, "error": str(exc)}), 400
+            return _fail(str(exc))
         finally:
             conn.close()
 
-    @app.route(
+    @_route(
         "/api/library/v2/acquisition/imports/<import_id>/resume",
         methods=["POST"],
     )
@@ -1350,26 +1250,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         request can be retried safely, while the durable import row remains
         the source of truth across refreshes and restarts.
         """
-        guard = _guard()
-        if guard:
-            return guard
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             record, _owner = _owned_import(conn, import_id)
             if record is None:
-                return jsonify({"success": False, "error": "Import not found"}), 404
+                return _fail("Import not found", 404)
             if record.status == "needs_review":
-                return jsonify({
-                    "success": False,
-                    "error": "Resolve all assignments before resuming the import",
-                }), 409
+                return _fail("Resolve all assignments before resuming the import", 409)
             if record.status not in {"pending", "matching", "importing"}:
-                return jsonify({
-                    "success": False,
-                    "error": f"Import cannot be resumed while {record.status}",
-                }), 409
-        finally:
-            conn.close()
+                return _fail(f"Import cannot be resumed while {record.status}", 409)
 
         from core.acquisition.import_pipeline import advance_import
 
@@ -1378,29 +1266,23 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             import_id,
             config_get=config_get,
         )
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             updated, owner = _owned_import(conn, import_id)
             if updated is None:
-                return jsonify({"success": False, "error": "Import not found"}), 404
+                return _fail("Import not found", 404)
             expected = _expected_import_tracks(conn, updated, owner)
             return jsonify({
                 "success": True,
                 "outcome": outcome,
                 "import": _public_import_detail(updated, expected),
             })
-        finally:
-            conn.close()
 
-    @app.route(
+    @_route(
         "/api/library/v2/acquisition/requests/<request_id>/search",
         methods=["POST"],
     )
     def lib2_search_acquisition_request(request_id):
         """Search configured sources without holding a database transaction."""
-        guard = _guard()
-        if guard:
-            return guard
 
         read_conn = _conn()
         try:
@@ -1412,12 +1294,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             from core.acquisition.search_contract import build_search_criteria
             acquisition_request = get_request(read_conn, request_id)
             if acquisition_request is None or acquisition_request.profile_id != ADMIN_PROFILE_ID:
-                return jsonify({"success": False, "error": "Request not found"}), 404
+                return _fail("Request not found", 404)
             if acquisition_request.status != "searching":
-                return jsonify({
-                    "success": False,
-                    "error": f"Request cannot be searched while {acquisition_request.status}",
-                }), 409
+                return _fail(f"Request cannot be searched while {acquisition_request.status}", 409)
             criteria = build_search_criteria(
                 acquisition_request,
                 resolve_catalog_context(read_conn, acquisition_request),
@@ -1428,7 +1307,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 config_get=config_get,
             )
         except ValueError as exc:
-            return jsonify({"success": False, "error": str(exc)}), 400
+            return _fail(str(exc))
         finally:
             read_conn.close()
 
@@ -1463,12 +1342,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 from core.acquisition.requests import get_request, transition_request
                 current = get_request(write_conn, request_id)
                 if current is None or current.profile_id != ADMIN_PROFILE_ID:
-                    return jsonify({"success": False, "error": "Request not found"}), 404
+                    return _fail("Request not found", 404)
                 if current.status != "searching":
-                    return jsonify({
-                        "success": False,
-                        "error": "Request changed while sources were being searched",
-                    }), 409
+                    return _fail("Request changed while sources were being searched", 409)
                 current = transition_request(
                     write_conn,
                     current.id,
@@ -1516,12 +1392,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             from core.acquisition.workflow import evaluate_request_candidates
             current = get_request(write_conn, request_id)
             if current is None or current.profile_id != ADMIN_PROFILE_ID:
-                return jsonify({"success": False, "error": "Request not found"}), 404
+                return _fail("Request not found", 404)
             if current.status != "searching":
-                return jsonify({
-                    "success": False,
-                    "error": "Request changed while sources were being searched",
-                }), 409
+                return _fail("Request changed while sources were being searched", 409)
             persisted = persist_search_results(write_conn, collection)
             from core.acquisition.history import record_history_event
             record_history_event(
@@ -1562,23 +1435,20 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             })
         except ValueError as exc:
             write_conn.rollback()
-            return jsonify({"success": False, "error": str(exc)}), 400
+            return _fail(str(exc))
         finally:
             write_conn.close()
 
-    @app.route(
+    @_route(
         "/api/library/v2/acquisition/wanted/materialize",
         methods=["POST"],
     )
     def lib2_materialize_wanted_acquisition():
         """Create Phase-4 shadow requests; legacy Wishlist remains operative."""
-        guard = _guard()
-        if guard:
-            return guard
         body = request.get_json(silent=True) or {}
         track_ids = body.get("track_ids")
         if track_ids is not None and not isinstance(track_ids, list):
-            return jsonify({"success": False, "error": "track_ids must be an array"}), 400
+            return _fail("track_ids must be an array")
         conn = _conn()
         try:
             from core.acquisition import ensure_acquisition_schema
@@ -1598,55 +1468,40 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             })
         except (TypeError, ValueError) as exc:
             conn.rollback()
-            return jsonify({"success": False, "error": str(exc)}), 400
+            return _fail(str(exc))
         finally:
             conn.close()
 
-    @app.route("/api/library/v2/wanted-projection/status")
+    @_route("/api/library/v2/wanted-projection/status")
     def lib2_wanted_projection_status():
-        guard = _guard()
-        if guard:
-            return guard
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             from core.library2.wanted import wanted_projection_status
             status = wanted_projection_status(conn, profile_id=_intent_profile())
             return jsonify({"success": True, **status})
-        finally:
-            conn.close()
 
-    @app.route("/api/library/v2/wanted")
+    @_route("/api/library/v2/wanted")
     def lib2_list_wanted():
         """§64 I2: library-wide Missing / Cutoff Unmet lists, Lidarr-style.
 
         ``kind`` selects the list (``missing`` default, or ``cutoff_unmet``);
         ``search``/``page``/``limit`` mirror the artists endpoint.
         """
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2 import wanted_views as WV
         kind = request.args.get("kind", "missing")
         if kind not in ("missing", "cutoff_unmet"):
-            return jsonify({"success": False, "error": "kind must be missing or cutoff_unmet"}), 400
+            return _fail("kind must be missing or cutoff_unmet")
         search = request.args.get("search", "")
         try:
             page = int(request.args.get("page", 1))
             limit = int(request.args.get("limit", 75))
         except (TypeError, ValueError):
-            return jsonify({"success": False, "error": "page/limit must be integers"}), 400
+            return _fail("page/limit must be integers")
         if page < 1 or not 1 <= limit <= 500:
-            return jsonify({
-                "success": False,
-                "error": "page must be positive and limit must be between 1 and 500",
-            }), 400
-        conn = _conn()
-        try:
+            return _fail("page must be positive and limit must be between 1 and 500")
+        with closing(_conn()) as conn:
             lister = WV.list_missing if kind == "missing" else WV.list_cutoff_unmet
             rows, total = lister(conn, search=search, page=page, limit=limit,
                                  profile_id=_intent_profile())
-        finally:
-            conn.close()
         total_pages = (total + limit - 1) // limit if limit else 0
         return jsonify({
             "success": True,
@@ -1659,11 +1514,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             },
         })
 
-    @app.route("/api/library/v2/artists")
+    @_route("/api/library/v2/artists")
     def lib2_list_artists():
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2 import queries as Q
         search = request.args.get("search", "")
         sort = request.args.get("sort", "name")
@@ -1672,14 +1524,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             page = int(request.args.get("page", 1))
             limit = int(request.args.get("limit", 75))
         except (TypeError, ValueError):
-            return jsonify({"success": False, "error": "page/limit must be integers"}), 400
+            return _fail("page/limit must be integers")
         if page < 1 or not 1 <= limit <= 500:
-            return jsonify({
-                "success": False,
-                "error": "page must be positive and limit must be between 1 and 500",
-            }), 400
-        conn = _conn()
-        try:
+            return _fail("page must be positive and limit must be between 1 and 500")
+        with closing(_conn()) as conn:
             # perf25-03/rev25-06/rev25-11: the disk-space roll-up needs a
             # window function over every file of the page's artists — by far
             # the heaviest part of the query, so it stays opt-in.  It used to
@@ -1699,8 +1547,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             artists, total = Q.list_artists(conn, search=search, sort=sort,
                                             monitored=monitored, page=page, limit=limit,
                                             include_size=include_size)
-        finally:
-            conn.close()
         for a in artists:
             _apply_artwork_urls(a, "artist")
         total_pages = (total + limit - 1) // limit if limit else 0
@@ -1714,7 +1560,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             },
         })
 
-    @app.route("/api/library/v2/discovery/artist", methods=["GET", "POST"])
+    @_route("/api/library/v2/discovery/artist", methods=["GET", "POST"])
     def lib2_discovery_artist():
         """ldp-01/ldp-02: bridge a provider artist identity into the catalogue.
 
@@ -1726,16 +1572,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         ``autolink`` resolver every other entry path uses, so a bookmark from
         discovery lands on the identical entity a finished download would.
         """
-        guard = _guard()
-        if guard:
-            return guard
         body = request.get_json(silent=True) or {} if request.method == "POST" else {}
         source = str(body.get("source") or request.args.get("source") or "").strip().lower()
         provider_id = str(body.get("provider_id") or request.args.get("provider_id") or "").strip()
         name = str(body.get("name") or request.args.get("name") or "").strip()
         if not provider_id and not name:
-            return jsonify({"success": False,
-                            "error": "provider_id or name is required"}), 400
+            return _fail("provider_id or name is required")
         # `library` is the legacy media-server namespace, not a metadata provider: its ids are opaque
         # legacy `artists.id` values and must never be written into a provider id column (guide §5).
         legacy = source in ("", "library")
@@ -1787,17 +1629,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 services=(configured_match_services_getter()
                           if configured_match_services_getter else None))
         if create and artist_id is None:
-            return jsonify({"success": False,
-                            "error": "Could not materialize this artist"}), 400
+            return _fail("Could not materialize this artist")
         return jsonify({"success": True, "artist_id": artist_id,
                         "monitored": monitor})
 
-    @app.route("/api/library/v2/discovery/album", methods=["POST"])
+    @_route("/api/library/v2/discovery/album", methods=["POST"])
     def lib2_discovery_album():
         """Materialize and monitor one provider release; browsing never calls this."""
-        guard = _guard()
-        if guard:
-            return guard
         body = request.get_json(silent=True) or {}
         source = str(body.get("source") or "").strip().lower()
         artist_source = str(body.get("artist_source") or source).strip().lower()
@@ -1806,8 +1644,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         artist_provider_id = str(body.get("artist_provider_id") or "").strip()
         album_provider_id = str(body.get("album_provider_id") or "").strip()
         if not artist_name or not album_name:
-            return jsonify({"success": False,
-                            "error": "artist_name and album_name are required"}), 400
+            return _fail("artist_name and album_name are required")
         try:
             track_count = max(0, int(body.get("track_count") or 0))
         except (TypeError, ValueError):
@@ -1885,7 +1722,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         return jsonify({"success": True, "artist_id": artist_id,
                         "album_id": album_id, "monitored": True})
 
-    @app.route("/api/library/v2/discovery/track-status")
+    @_route("/api/library/v2/discovery/track-status")
     def lib2_discovery_track_status():
         """Which of these provider track titles already exist and are wanted.
 
@@ -1895,9 +1732,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         ``find_or_create_track`` writes with — so a title cannot resolve here
         and miss there.
         """
-        guard = _guard()
-        if guard:
-            return guard
         titles = [t for t in request.args.getlist("title") if t.strip()]
         artist_name = str(request.args.get("artist_name") or "").strip()
         provider_id = str(request.args.get("artist_provider_id") or "").strip()
@@ -1906,8 +1740,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return jsonify({"success": True, "statuses": {}})
         from core.library2.autolink import find_or_create_artist
         from core.library2.importer import dedup_title_key
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             artist_id = find_or_create_artist(
                 conn, artist_name, spotify_id=provider_id or None,
                 source=source, create=False)
@@ -1947,11 +1780,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     if match is not None:
                         statuses[title] = {"track_id": int(match["id"]),
                                            "monitored": bool(match["monitored"])}
-        finally:
-            conn.close()
         return jsonify({"success": True, "statuses": statuses})
 
-    @app.route("/api/library/v2/discovery/track", methods=["POST"])
+    @_route("/api/library/v2/discovery/track", methods=["POST"])
     def lib2_discovery_track():
         """ldp-06: give a provider track (a Top Track row) the catalogue rows
         it needs so the normal ``/tracks/<id>/monitor`` Bookmark can act on it.
@@ -1959,15 +1790,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         With ``monitored=true`` creation and user intent commit atomically, so
         a failed follow-up request cannot leave provider-only ghost rows.
         """
-        guard = _guard()
-        if guard:
-            return guard
         body = request.get_json(silent=True) or {}
         artist_name = str(body.get("artist_name") or "").strip()
         track_title = str(body.get("track_title") or "").strip()
         if not artist_name or not track_title:
-            return jsonify({"success": False,
-                            "error": "artist_name and track_title are required"}), 400
+            return _fail("artist_name and track_title are required")
         source = str(body.get("source") or "").strip().lower() or None
         artist_source = str(body.get("artist_source") or source or "").strip().lower() or None
         monitor = bool(body.get("monitored", False))
@@ -1975,8 +1802,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             track_number = int(body["track_number"]) if body.get("track_number") else None
             disc_number = int(body["disc_number"]) if body.get("disc_number") else None
         except (TypeError, ValueError):
-            return jsonify({"success": False,
-                            "error": "track_number and disc_number must be integers"}), 400
+            return _fail("track_number and disc_number must be integers")
         from core.library2.autolink import (
             find_or_create_album, find_or_create_artist, find_or_create_track,
         )
@@ -1989,8 +1815,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 spotify_id=str(body.get("artist_provider_id") or "").strip() or None,
                 source=artist_source)
             if artist_id is None:
-                return jsonify({"success": False,
-                                "error": "Could not resolve this artist"}), 400
+                return _fail("Could not resolve this artist")
             known_albums = {
                 int(r["id"]) for r in conn.execute(
                     "SELECT id FROM lib2_albums WHERE primary_artist_id=?", (artist_id,))}
@@ -2051,47 +1876,35 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         "album_id": album_id, "track_id": track_id,
                         "monitored": monitor})
 
-    @app.route("/api/library/v2/artists/<int:artist_id>")
+    @_route("/api/library/v2/artists/<int:artist_id>")
     def lib2_get_artist(artist_id):
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2 import queries as Q
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             data = Q.get_artist(conn, artist_id)
-        finally:
-            conn.close()
         if data is None:
-            return jsonify({"success": False, "error": "Artist not found"}), 404
+            return _fail("Artist not found", 404)
         _apply_artwork_urls(data, "artist")
         for entry in data.get("albums", []) + data.get("eps", []) + data.get("singles", []):
             _apply_artwork_urls(entry, "album",
                                 prefer_remote=_is_uncached_discography_row(entry))
         return jsonify({"success": True, "artist": data})
 
-    @app.route("/api/library/v2/artists/<int:artist_id>/aliases")
+    @_route("/api/library/v2/artists/<int:artist_id>/aliases")
     def lib2_get_artist_aliases(artist_id):
         """§40: the artist's full alias group (canonical + linked aliases —
         works whether ``artist_id`` is itself the canonical row or one of its
         aliases). See docs/library-v2.md §24."""
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.artist_aliases import resolve_alias_group
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             if not conn.execute(
                     "SELECT 1 FROM lib2_artists WHERE id=?", (artist_id,)).fetchone():
-                return jsonify({"success": False, "error": "Artist not found"}), 404
+                return _fail("Artist not found", 404)
             group = resolve_alias_group(conn, artist_id)
             rows = conn.execute(
                 f"SELECT id, name, image_url FROM lib2_artists "
                 f"WHERE id IN ({','.join('?' for _ in group)})",
                 tuple(group),
             ).fetchall()
-        finally:
-            conn.close()
         by_id = {int(r["id"]): dict(r) for r in rows}
         members = [by_id[i] for i in group if i in by_id]
         for m in members:
@@ -2102,55 +1915,40 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "aliases": members,
         })
 
-    @app.route("/api/library/v2/artists/<int:artist_id>/link-alias", methods=["POST"])
+    @_route("/api/library/v2/artists/<int:artist_id>/link-alias", methods=["POST"])
     def lib2_link_artist_alias(artist_id):
         """§40: mark ``artist_id`` as an alias of another artist row — the same
         real artist under a different, unlinked provider identity. Body
         ``{"alias_of": <artist_id>}``. Both rows keep their own albums/tracks
         (soft link); see docs/library-v2.md §24."""
-        guard = _guard()
-        if guard:
-            return guard
         body = request.get_json(silent=True) or {}
         try:
             alias_of = int(body.get("alias_of"))
         except (TypeError, ValueError):
-            return jsonify({
-                "success": False,
-                "error": "alias_of must be an integer artist id",
-            }), 400
+            return _fail("alias_of must be an integer artist id")
         from core.library2.artist_aliases import AliasLinkError, link_artist_alias
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             try:
                 link_artist_alias(conn, artist_id, alias_of)
             except AliasLinkError as exc:
-                return jsonify({"success": False, "error": str(exc)}), exc.status
+                return _fail(str(exc), exc.status)
             conn.commit()
-        finally:
-            conn.close()
         return jsonify({
             "success": True,
             "artist_id": artist_id,
             "canonical_artist_id": alias_of,
         })
 
-    @app.route("/api/library/v2/artists/<int:artist_id>/link-alias", methods=["DELETE"])
+    @_route("/api/library/v2/artists/<int:artist_id>/link-alias", methods=["DELETE"])
     def lib2_unlink_artist_alias(artist_id):
         """§40: detach ``artist_id`` from its canonical artist, if any."""
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.artist_aliases import AliasLinkError, unlink_artist_alias
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             try:
                 unlink_artist_alias(conn, artist_id)
             except AliasLinkError as exc:
-                return jsonify({"success": False, "error": str(exc)}), exc.status
+                return _fail(str(exc), exc.status)
             conn.commit()
-        finally:
-            conn.close()
         return jsonify({"success": True, "artist_id": artist_id})
 
     _tracklist_resolves: set = set()
@@ -2223,14 +2021,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         threading.Thread(target=carrying_scope(_run), name=f"lib2-tracklist-{album_id}",
                          daemon=True).start()
 
-    @app.route("/api/library/v2/albums/<int:album_id>")
+    @_route("/api/library/v2/albums/<int:album_id>")
     def lib2_get_album(album_id):
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2 import queries as Q
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             # ``?resolve=1``: materialize the provider tracklist first, so a
             # discography-only release (no track rows yet) shows its real
             # tracklist when the user expands it — Lidarr-style.
@@ -2289,47 +2083,33 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     conn.commit()
                     _schedule_tracklist_resolve(album_id)
             data = Q.get_album(conn, album_id)
-        finally:
-            conn.close()
         if data is None:
-            return jsonify({"success": False, "error": "Album not found"}), 404
+            return _fail("Album not found", 404)
         _apply_artwork_urls(data, "album")
         return jsonify({"success": True, "album": data})
 
-    @app.route("/api/library/v2/tracks/<int:track_id>")
+    @_route("/api/library/v2/tracks/<int:track_id>")
     def lib2_get_track(track_id):
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2 import queries as Q
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             data = Q.get_track(conn, track_id)
-        finally:
-            conn.close()
         if data is None:
-            return jsonify({"success": False, "error": "Track not found"}), 404
+            return _fail("Track not found", 404)
         return jsonify({"success": True, "track": data})
 
-    @app.route("/api/library/v2/tracks/<int:track_id>/source-info")
+    @_route("/api/library/v2/tracks/<int:track_id>/source-info")
     def lib2_track_source_info(track_id):
         """Download provenance for a track (legacy 'Source Info' popover parity)."""
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.source_info import track_source_info
         from core.library2.manual_skips import skip_history_for_path
         from core.library2.track_files import primary_file_row
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             downloads = track_source_info(conn, track_id)
             file_row = primary_file_row(conn, track_id, scoped=True)
             manual_skips = skip_history_for_path(conn, file_row["path"]) if file_row else []
-        finally:
-            conn.close()
         return jsonify({"success": True, "downloads": downloads, "manual_skips": manual_skips})
 
-    @app.route("/api/library/v2/tracks/<int:track_id>/file-tags")
+    @_route("/api/library/v2/tracks/<int:track_id>/file-tags")
     def lib2_track_file_tags(track_id):
         """Live embedded tags + lyrics read straight from the file (§18.1).
 
@@ -2338,16 +2118,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         ``core.tag_writer.read_file_tags`` (that one is shaped for DB-diffing
         and doesn't surface lyrics or the full tag set).
         """
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.paths import resolve_lib2_path
         from core.library2.track_files import primary_file_row
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             file_row = primary_file_row(conn, track_id, scoped=True)
-        finally:
-            conn.close()
         if not file_row or not file_row.get("path"):
             return jsonify({"success": True, "available": False, "reason": "No file on this track."})
         abs_path = resolve_lib2_path(file_row["path"])
@@ -2355,24 +2129,21 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         result = read_embedded_tags(abs_path or file_row["path"])
         return jsonify({"success": True, **result})
 
-    @app.route("/api/library/v2/tracks/<int:track_id>/file-tags/edit", methods=["POST"])
+    @_route("/api/library/v2/tracks/<int:track_id>/file-tags/edit", methods=["POST"])
     def lib2_track_file_tags_edit(track_id):
         """Edit or delete a single embedded tag in a track's file."""
-        guard = _guard()
-        if guard:
-            return guard
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict) or "key" not in body:
-            return jsonify({"success": False, "error": "JSON body must contain 'key'"}), 400
+            return _fail("JSON body must contain 'key'")
         # iss29-D08: `{"key": 5}` used to raise AttributeError on `.strip()`.
         # There is no Flask errorhandler anywhere in this project, so the client
         # got an HTML 500 page instead of the JSON error shape every other
         # branch here returns — unparseable by the caller.
         if not isinstance(body["key"], str):
-            return jsonify({"success": False, "error": "'key' must be a string"}), 400
+            return _fail("'key' must be a string")
         key = body["key"].strip()
         if not key:
-            return jsonify({"success": False, "error": "'key' must not be empty"}), 400
+            return _fail("'key' must not be empty")
         value = body.get("value")
         if value is not None and not isinstance(value, str):
             value = str(value)
@@ -2381,56 +2152,41 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
         from core.library2.paths import resolve_lib2_path
         from core.library2.track_files import primary_file_row
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             file_row = primary_file_row(conn, track_id, scoped=True)
-        finally:
-            conn.close()
         if not file_row or not file_row.get("path"):
-            return jsonify({"success": False, "error": "No file on this track."}), 400
+            return _fail("No file on this track.")
         abs_path = resolve_lib2_path(file_row["path"])
 
         from core.library.file_tags import write_embedded_tag
         res = write_embedded_tag(abs_path or file_row["path"], key, value)
         return jsonify(res)
 
-    @app.route("/api/library/v2/artists/<int:artist_id>/match-status")
+    @_route("/api/library/v2/artists/<int:artist_id>/match-status")
     def lib2_artist_match_status(artist_id):
         """Per-provider metadata match chips for an artist (legacy parity)."""
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.match_status import (
             artist_enrichment_coverage, entity_match_status,
         )
         available = configured_match_services_getter() if configured_match_services_getter else None
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             services = entity_match_status(conn, "artist", artist_id, available_services=available)
             # ldp-05: the rich header's enrichment rings. Same request as the
             # chips it sits under — no second round trip for one panel.
             coverage = artist_enrichment_coverage(conn, artist_id)
-        finally:
-            conn.close()
         return jsonify({"success": True, "services": services,
                         "enrichment_coverage": coverage})
 
-    @app.route("/api/library/v2/albums/<int:album_id>/match-status")
+    @_route("/api/library/v2/albums/<int:album_id>/match-status")
     def lib2_album_match_status(album_id):
         """Album chips + per-track chip map in one batched read (legacy parity)."""
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.match_status import album_match_bundle
         available = configured_match_services_getter() if configured_match_services_getter else None
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             bundle = album_match_bundle(conn, album_id, available_services=available)
-        finally:
-            conn.close()
         return jsonify({"success": True, **bundle})
 
-    @app.route(
+    @_route(
         "/api/library/v2/<entity_type>/<int:entity_id>/manual-match",
         methods=["PUT", "DELETE"],
     )
@@ -2441,17 +2197,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         closes the dead-end for Wishlist/provider/featured-credit artists whose
         chips were visible but disabled because no legacy numeric id existed.
         """
-        guard = _guard()
-        if guard:
-            return guard
         body = request.get_json(silent=True) or {}
         service = str(body.get("service") or "").strip().lower()
         service_id = str(body.get("service_id") or "").strip()
         if not service or (request.method == "PUT" and not service_id):
-            return jsonify({
-                "success": False,
-                "error": "service and service_id are required",
-            }), 400
+            return _fail("service and service_id are required")
         conn = _conn()
         try:
             from core.library2.match_status import set_library_v2_match
@@ -2488,10 +2238,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 ).fetchone()
                 if not artist or not watchlist or str(artist["name"] or "").casefold() \
                         != str(watchlist["artist_name"] or "").casefold():
-                    return jsonify({
-                        "success": False,
-                        "error": "Watchlist artist does not match this Library v2 artist",
-                    }), 409
+                    return _fail("Watchlist artist does not match this Library v2 artist", 409)
                 columns = {
                     row[1] for row in conn.execute("PRAGMA table_info(watchlist_artists)")
                 }
@@ -2505,10 +2252,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.commit()
         except LookupError as exc:
             conn.rollback()
-            return jsonify({"success": False, "error": str(exc)}), 404
+            return _fail(str(exc), 404)
         except ValueError as exc:
             conn.rollback()
-            return jsonify({"success": False, "error": str(exc)}), 400
+            return _fail(str(exc))
         finally:
             conn.close()
 
@@ -2530,21 +2277,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                              entity_id, exc)
         return jsonify({"success": True})
 
-    @app.route(
+    @_route(
         "/api/library/v2/albums/<int:album_id>/missing-tracks/materialize",
         methods=["POST"],
     )
     def lib2_materialize_missing_track(album_id):
         """Turn a missing album slot into a real track row (legacy "Add to
         Library" prerequisite). Monitoring is a separate /monitor call."""
-        guard = _guard()
-        if guard:
-            return guard
         body = request.get_json(silent=True) or {}
         try:
             track_number = int(body.get("track_number"))
         except (TypeError, ValueError):
-            return jsonify({"success": False, "error": "track_number is required"}), 400
+            return _fail("track_number is required")
         try:
             disc_number = int(body.get("disc_number") or 1)
         except (TypeError, ValueError):
@@ -2564,21 +2308,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 config_manager=config_manager,
             )
         except MissingTrackError as exc:
-            return jsonify({"success": False, "error": str(exc)}), exc.status
+            return _fail(str(exc), exc.status)
         finally:
             conn.close()
         return jsonify({"success": True, **result})
 
-    @app.route("/api/library/v2/albums/<int:album_id>/replaygain", methods=["POST"])
+    @_route("/api/library/v2/albums/<int:album_id>/replaygain", methods=["POST"])
     def lib2_album_replaygain(album_id):
         """Analyze an album's files and write track+album ReplayGain tags
         (legacy Enrich→ReplayGain parity). Background job; poll jobs/status."""
-        guard = _guard()
-        if guard:
-            return guard
         from core.replaygain import is_ffmpeg_available
         if not is_ffmpeg_available():
-            return jsonify({"success": False, "error": "ffmpeg not found on PATH"}), 500
+            return _fail("ffmpeg not found on PATH", 500)
         try:
             job = _job_registry.start("replaygain")
         except JobAlreadyRunning as exc:
@@ -2592,8 +2333,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         def _run():
             db = get_database()
             try:
-                conn = db._get_connection()
-                try:
+                with closing(db._get_connection()) as conn:
                     from core.library2.replaygain import analyze_album_replaygain
 
                     def _progress(current, total, _title):
@@ -2605,8 +2345,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         progress=_progress,
                     )
                     _job_registry.update(job_id, result=result)
-                finally:
-                    conn.close()
             except Exception as e:  # noqa: BLE001
                 logger.error("ReplayGain album %s failed: %s", album_id, e, exc_info=True)
                 _job_registry.update(job_id, error=str(e))
@@ -2616,64 +2354,46 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         threading.Thread(target=carrying_scope(_run), name="lib2-replaygain", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
-    @app.route("/api/library/v2/tracks/<int:track_id>/replaygain", methods=["POST"])
+    @_route("/api/library/v2/tracks/<int:track_id>/replaygain", methods=["POST"])
     def lib2_track_replaygain(track_id):
         """Analyze one track and write its track-level ReplayGain tags
         (synchronous — a single track runs in ~1-3s)."""
-        guard = _guard()
-        if guard:
-            return guard
         from core.replaygain import is_ffmpeg_available
         if not is_ffmpeg_available():
-            return jsonify({"success": False, "error": "ffmpeg not found on PATH"}), 500
+            return _fail("ffmpeg not found on PATH", 500)
         from core.library2.replaygain import analyze_track_replaygain
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             result = analyze_track_replaygain(conn, track_id, config_manager=config_manager)
-        finally:
-            conn.close()
         if not result["analyzed"]:
-            return jsonify({"success": False, "error": result["error"] or "Analysis failed"}), 400
+            return _fail(result["error"] or "Analysis failed")
         return jsonify({"success": True, **result})
 
-    @app.route("/api/library/v2/tracks/<int:track_id>/fetch-lyrics", methods=["POST"])
+    @_route("/api/library/v2/tracks/<int:track_id>/fetch-lyrics", methods=["POST"])
     def lib2_track_fetch_lyrics(track_id):
         """Fetch + write lyrics for one track from LRClib — the "LR" badge's
         missing→click path (deep-dive B3), synchronous like the track
         ReplayGain endpoint next to it."""
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.lyrics import fetch_track_lyrics
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             result = fetch_track_lyrics(conn, track_id, config_manager=config_manager)
-        finally:
-            conn.close()
         if not result["fetched"]:
-            return jsonify({"success": False, "error": result["error"] or "Fetch failed"}), 400
+            return _fail(result["error"] or "Fetch failed")
         return jsonify({"success": True, **result})
 
     # -- reorganize (docs §50, bridges onto the legacy planner/queue) ---------
 
-    @app.route("/api/library/v2/reorganize/sources")
+    @_route("/api/library/v2/reorganize/sources")
     def lib2_reorganize_sources_global():
         """Sources authed/configured on this instance — used by the artist-
         level "Reorganize All" source picker (no per-album ID coverage
         check, mirrors the legacy bulk modal)."""
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.reorganize_bridge import global_reorganize_sources
         return jsonify({"success": True, "sources": global_reorganize_sources()})
 
-    @app.route("/api/library/v2/albums/<int:album_id>/reorganize/sources")
+    @_route("/api/library/v2/albums/<int:album_id>/reorganize/sources")
     def lib2_album_reorganize_sources(album_id):
         """Sources this album has a stored provider ID for AND an
         authenticated client — used by the per-album source picker."""
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.reorganize_bridge import (
             ReorganizeBridgeError,
             album_reorganize_sources,
@@ -2681,16 +2401,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         try:
             sources = album_reorganize_sources(get_database(), album_id)
         except ReorganizeBridgeError as exc:
-            return jsonify({"success": False, "error": str(exc)}), exc.status
+            return _fail(str(exc), exc.status)
         return jsonify({"success": True, "sources": sources})
 
-    @app.route("/api/library/v2/albums/<int:album_id>/reorganize/preview", methods=["POST"])
+    @_route("/api/library/v2/albums/<int:album_id>/reorganize/preview", methods=["POST"])
     def lib2_album_reorganize_preview(album_id):
         """Preview current-vs-proposed file paths for one lib2 album, WITHOUT
         moving anything. Body: ``{source?, mode?: 'api'|'tags'}``."""
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.reorganize_bridge import (
             ReorganizeBridgeError,
             preview_album_reorganize,
@@ -2703,16 +2420,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 mode=body.get("mode") or "api",
             )
         except ReorganizeBridgeError as exc:
-            return jsonify({"success": False, "error": str(exc)}), exc.status
+            return _fail(str(exc), exc.status)
         return jsonify(result)
 
-    @app.route("/api/library/v2/albums/<int:album_id>/reorganize", methods=["POST"])
+    @_route("/api/library/v2/albums/<int:album_id>/reorganize", methods=["POST"])
     def lib2_album_reorganize_apply(album_id):
         """Enqueue one lib2 album for reorganize. Returns immediately — the
         queue worker processes items FIFO. Body: ``{source?, mode?, rename_only?}``."""
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.reorganize_bridge import (
             ReorganizeBridgeError,
             enqueue_album_reorganize,
@@ -2726,17 +2440,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 rename_only=bool(body.get("rename_only")),
             )
         except ReorganizeBridgeError as exc:
-            return jsonify({"success": False, "error": str(exc)}), exc.status
+            return _fail(str(exc), exc.status)
         return jsonify({"success": True, **result})
 
-    @app.route("/api/library/v2/artists/<int:artist_id>/reorganize-all", methods=["POST"])
+    @_route("/api/library/v2/artists/<int:artist_id>/reorganize-all", methods=["POST"])
     def lib2_artist_reorganize_all(artist_id):
         """Enqueue every album of one lib2 artist for reorganize. Body:
         ``{source?, mode?}`` applied to every album (same as legacy bulk
         modal — per-album overrides aren't supported here)."""
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.reorganize_bridge import (
             ReorganizeBridgeError,
             enqueue_artist_reorganize_all,
@@ -2749,25 +2460,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 mode=body.get("mode") or "api",
             )
         except ReorganizeBridgeError as exc:
-            return jsonify({"success": False, "error": str(exc)}), exc.status
+            return _fail(str(exc), exc.status)
         return jsonify({"success": True, **result})
 
-    @app.route("/api/library/v2/quality-profiles/sync", methods=["POST"])
+    @_route("/api/library/v2/quality-profiles/sync", methods=["POST"])
     def lib2_sync_quality_profiles():
         """Compatibility endpoint: profiles are the app-wide ``quality_profiles``
         rows (managed in Settings → Quality) — there is nothing to sync anymore.
         Returns the live count so old UIs still show a sensible number."""
-        guard = _guard()
-        if guard:
-            return guard
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             count = conn.execute("SELECT COUNT(*) FROM quality_profiles").fetchone()[0]
-        finally:
-            conn.close()
         return jsonify({"success": True, "synced": count})
 
-    @app.route("/api/library/v2/quality-profiles")
+    @_route("/api/library/v2/quality-profiles")
     def lib2_quality_profiles():
         """List app-wide profiles with the canonical upgrade-policy contract.
 
@@ -2775,40 +2480,25 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         persisted legacy alias ``until_top``. For ``until_cutoff``, clients
         use ``upgrade_cutoff_index``; ``until_top`` always means index 0.
         """
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2 import queries as Q
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             profiles = Q.list_quality_profiles(conn)
-        finally:
-            conn.close()
         return jsonify({"success": True, "profiles": profiles})
 
     # -- UI display preferences (B5: configurable columns/match-providers) ---
 
-    @app.route("/api/library/v2/ui-preferences")
+    @_route("/api/library/v2/ui-preferences")
     def lib2_get_ui_preferences():
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.ui_preferences import get_ui_preferences
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             preferences = get_ui_preferences(conn)
-        finally:
-            conn.close()
         return jsonify({"success": True, "preferences": preferences})
 
-    @app.route("/api/library/v2/ui-preferences", methods=["PUT"])
+    @_route("/api/library/v2/ui-preferences", methods=["PUT"])
     def lib2_update_ui_preferences():
-        guard = _guard()
-        if guard:
-            return guard
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict):
-            return jsonify({"success": False, "error": "JSON body must be an object"}), 400
+            return _fail("JSON body must be an object")
         from core.library2.ui_preferences import update_ui_preferences
         conn = _conn()
         try:
@@ -2824,10 +2514,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             if "locked" not in str(exc).lower() and "busy" not in str(exc).lower():
                 raise
             logger.debug("UI preference write skipped, database busy: %s", exc)
-            return jsonify({
-                "success": False,
-                "error": "The database is busy; the layout was not saved",
-            }), 503
+            return _fail("The database is busy; the layout was not saved", 503)
         finally:
             conn.close()
         return jsonify({"success": True, "preferences": preferences})
@@ -2843,7 +2530,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     # rendered page holds at most a screenful of pending covers anyway.
     _ARTWORK_STATUS_MAX_IDS = 200
 
-    @app.route("/api/library/v2/artwork/status")
+    @_route("/api/library/v2/artwork/status")
     def lib2_artwork_status():
         """Tell an already-rendered page what happened to its pending covers.
 
@@ -2855,12 +2542,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         waiting is bounded by the real build and ends decisively for entities
         that have no image at all.
         """
-        guard = _guard()
-        if guard:
-            return guard
         kind = str(request.args.get("kind") or "").strip().lower()
         if kind not in ("artist", "album"):
-            return jsonify({"success": False, "error": "kind must be artist or album"}), 400
+            return _fail("kind must be artist or album")
         raw_ids = str(request.args.get("ids") or "")
         ids = []
         for chunk in raw_ids.split(","):
@@ -2870,7 +2554,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             try:
                 value = int(chunk)
             except ValueError:
-                return jsonify({"success": False, "error": "ids must be integers"}), 400
+                return _fail("ids must be integers")
             if value > 0 and value not in ids:
                 ids.append(value)
             if len(ids) >= _ARTWORK_STATUS_MAX_IDS:
@@ -2886,11 +2570,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         response.headers["Cache-Control"] = "no-store"
         return response
 
-    @app.route("/api/library/v2/artwork/<kind>/<int:eid>")
+    @_route("/api/library/v2/artwork/<kind>/<int:eid>")
     def lib2_artwork(kind, eid):
-        guard = _guard()
-        if guard:
-            return guard
         if kind not in ("artist", "album"):
             return "", 404
         from core.library2.artwork import (
@@ -2944,11 +2625,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return response
         # build_artwork owns the shared per-entity single-flight lock, so HTTP
         # requests and the background precache cannot duplicate provider/NAS work.
-        conn = db._get_connection()
-        try:
+        with closing(db._get_connection()) as conn:
             path = build_artwork(db, conn, config_manager, kind, eid, force=force)
-        finally:
-            conn.close()
         if not path:
             return "", 404
         target = thumb_file(db, kind, eid) if want_thumb else artwork_file(db, kind, eid)
@@ -2960,7 +2638,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     _art_options_cache_lock = threading.Lock()
     _ART_OPTIONS_TTL_S = 300
 
-    @app.route("/api/library/v2/albums/<int:album_id>/art-options")
+    @_route("/api/library/v2/albums/<int:album_id>/art-options")
     def lib2_album_art_options(album_id):
         """Candidate cover-art images for an album, for the art picker
         (docs §49, read-only). Mirrors the legacy ``/api/album/<id>/art-options``
@@ -2969,12 +2647,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         artist/album/MBID from the lib2 row (with overrides applied) instead
         of query params — works for discography-only albums too, no legacy
         record needed."""
-        guard = _guard()
-        if guard:
-            return guard
         force_refresh = request.args.get("refresh") == "1"
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             row = conn.execute(
                 """SELECT al.title, al.musicbrainz_id AS release_group_mbid,
                           ar.id AS artist_id, ar.name AS artist_name,
@@ -2986,7 +2660,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 (album_id,),
             ).fetchone()
             if row is None:
-                return jsonify({"success": False, "error": "Album not found"}), 404
+                return _fail("Album not found", 404)
 
             from core.library2.metadata_overrides import project_metadata
             album_effective, _album_overrides = project_metadata(
@@ -3000,8 +2674,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             album_title = album_effective["title"]
             artist_name = artist_effective["name"]
             mbid = row["edition_mbid"] or row["release_group_mbid"]
-        finally:
-            conn.close()
 
         now = time.time()
         if not force_refresh:
@@ -3020,20 +2692,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             _art_options_cache[album_id] = (now, candidates)
         return jsonify({"success": True, "count": len(candidates), "candidates": candidates})
 
-    @app.route("/api/library/v2/albums/<int:album_id>/art", methods=["POST", "DELETE"])
+    @_route("/api/library/v2/albums/<int:album_id>/art", methods=["POST", "DELETE"])
     def lib2_album_art_apply(album_id):
         """Apply a cover chosen in the picker (docs §49). Body: ``{"url": "<image url>"}``.
         Pins the choice as a metadata override so a later refresh won't clobber
         it, and writes it into the managed artwork cache immediately."""
-        guard = _guard()
-        if guard:
-            return guard
         if request.method == "DELETE":
             from core.library2.artwork import invalidate_artwork
             from core.library2.metadata_overrides import clear_field_override
 
-            conn = _conn()
-            try:
+            with closing(_conn()) as conn:
                 removed = clear_field_override(
                     conn, entity_type="release_group", entity_id=album_id,
                     field_name="image_url", profile_id=_profile(),
@@ -3044,10 +2712,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 ).rowcount
                 if not updated:
                     conn.rollback()
-                    return jsonify({"success": False, "error": "Album not found"}), 404
+                    return _fail("Album not found", 404)
                 conn.commit()
-            finally:
-                conn.close()
             invalidate_artwork(get_database(), "album", album_id)
             return jsonify({
                 "success": True, "album_id": album_id,
@@ -3056,7 +2722,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         body = request.get_json(silent=True) or {}
         url = str(body.get("url") or "").strip()
         if not url:
-            return jsonify({"success": False, "error": "url is required"}), 400
+            return _fail("url is required")
 
         from core.library2.artwork import apply_manual_artwork
         from core.library2.metadata_overrides import MetadataOverrideError
@@ -3071,24 +2737,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 conn.rollback()
         except MetadataOverrideError as exc:
             conn.rollback()
-            return jsonify({"success": False, "error": str(exc)}), exc.status
+            return _fail(str(exc), exc.status)
         except sqlite3.OperationalError as exc:
             # dd28-03: a busy-timeout expiry here used to escape as a generic
             # HTML 500, which the client renders as an unexplained "API error"
             # for an operation that is simply worth retrying.
             conn.rollback()
             logger.warning("Library v2 album art apply hit a locked database: %s", exc)
-            return jsonify({
-                "success": False,
-                "error": "The database is busy right now — try again in a moment.",
-            }), 503
+            return _fail("The database is busy right now — try again in a moment.", 503)
         finally:
             conn.close()
         if not ok:
-            return jsonify({
-                "success": False,
-                "error": "Could not download or validate that image URL",
-            }), 400
+            return _fail("Could not download or validate that image URL")
 
         # A1: a picked cover only lands in the DB/cache above — without this,
         # existing files keep their old embedded art forever (build_tag_diff
@@ -3102,11 +2762,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         embed_error: Optional[str] = None
         try:
             from core.library2 import retag
-            scope_conn = _conn()
-            try:
+            with closing(_conn()) as scope_conn:
                 track_ids = retag.album_track_ids(scope_conn, album_id)
-            finally:
-                scope_conn.close()
             if track_ids:
                 try:
                     job = _job_registry.start("retag", total=len(track_ids))
@@ -3150,24 +2807,20 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     _artist_art_options_cache: Dict[int, tuple] = {}
     _artist_art_options_cache_lock = threading.Lock()
 
-    @app.route("/api/library/v2/artists/<int:artist_id>/art-options")
+    @_route("/api/library/v2/artists/<int:artist_id>/art-options")
     def lib2_artist_art_options(artist_id):
         """Candidate photos for an artist, for the image picker (deep-dive
         A9, read-only). Stored provider ids are tried exactly before a guarded
         name fallback via ``core.metadata.artist_image`` — no legacy record
         needed, works for discography-only artists too."""
-        guard = _guard()
-        if guard:
-            return guard
         force_refresh = request.args.get("refresh") == "1"
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             row = conn.execute(
                 "SELECT name, spotify_id, musicbrainz_id, external_ids "
                 "FROM lib2_artists WHERE id=?", (artist_id,)
             ).fetchone()
             if row is None:
-                return jsonify({"success": False, "error": "Artist not found"}), 404
+                return _fail("Artist not found", 404)
             from core.library2.metadata_overrides import project_metadata
             effective, _overrides = project_metadata(
                 conn, entity_type="artist", entity_id=artist_id,
@@ -3186,8 +2839,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 "audiodb_id": external_ids.get("audiodb"),
                 "discogs_id": external_ids.get("discogs"),
             }
-        finally:
-            conn.close()
 
         now = time.time()
         if not force_refresh:
@@ -3205,21 +2856,17 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             _artist_art_options_cache[artist_id] = (now, candidates)
         return jsonify({"success": True, "count": len(candidates), "candidates": candidates})
 
-    @app.route("/api/library/v2/artists/<int:artist_id>/art", methods=["POST", "DELETE"])
+    @_route("/api/library/v2/artists/<int:artist_id>/art", methods=["POST", "DELETE"])
     def lib2_artist_art_apply(artist_id):
         """Apply a photo chosen in the picker (deep-dive A9). Body:
         ``{"url": "<image url>"}``. Pins the choice as a metadata override
         (same mechanism as the album cover picker, §49) — no cover-embed
         retag needed, an artist photo isn't embedded into any audio file."""
-        guard = _guard()
-        if guard:
-            return guard
         if request.method == "DELETE":
             from core.library2.artwork import invalidate_artwork
             from core.library2.metadata_overrides import clear_field_override
 
-            conn = _conn()
-            try:
+            with closing(_conn()) as conn:
                 removed = clear_field_override(
                     conn, entity_type="artist", entity_id=artist_id,
                     field_name="image_url", profile_id=_profile(),
@@ -3230,10 +2877,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 ).rowcount
                 if not updated:
                     conn.rollback()
-                    return jsonify({"success": False, "error": "Artist not found"}), 404
+                    return _fail("Artist not found", 404)
                 conn.commit()
-            finally:
-                conn.close()
             invalidate_artwork(get_database(), "artist", artist_id)
             return jsonify({
                 "success": True, "artist_id": artist_id,
@@ -3242,7 +2887,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         body = request.get_json(silent=True) or {}
         url = str(body.get("url") or "").strip()
         if not url:
-            return jsonify({"success": False, "error": "url is required"}), 400
+            return _fail("url is required")
 
         from core.library2.artwork import apply_manual_artwork
         from core.library2.metadata_overrides import MetadataOverrideError
@@ -3257,22 +2902,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 conn.rollback()
         except MetadataOverrideError as exc:
             conn.rollback()
-            return jsonify({"success": False, "error": str(exc)}), exc.status
+            return _fail(str(exc), exc.status)
         except sqlite3.OperationalError as exc:
             # dd28-03: see the matching handler on the album art route.
             conn.rollback()
             logger.warning("Library v2 artist art apply hit a locked database: %s", exc)
-            return jsonify({
-                "success": False,
-                "error": "The database is busy right now — try again in a moment.",
-            }), 503
+            return _fail("The database is busy right now — try again in a moment.", 503)
         finally:
             conn.close()
         if not ok:
-            return jsonify({
-                "success": False,
-                "error": "Could not download or validate that image URL",
-            }), 400
+            return _fail("Could not download or validate that image URL")
         return jsonify({
             "success": True, "artist_id": artist_id,
             "image_url": _artwork_url("artist", artist_id),
@@ -3280,29 +2919,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     # -- monitoring (mirrors watchlist / wishlist) ----------------------------
 
-    @app.route("/api/library/v2/mirror-status")
+    @_route("/api/library/v2/mirror-status")
     def lib2_mirror_status():
         """Outbox visibility (audit P0-04): pending/failed mirror ops and the
         most recent errors, so a mirror failure is a UI state, not a log line."""
-        guard = _guard()
-        if guard:
-            return guard
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             from core.library2.mirror_outbox import outbox_status
             return jsonify({"success": True, **outbox_status(conn)})
-        finally:
-            conn.close()
 
-    @app.route("/api/library/v2/mirror-retry", methods=["POST"])
+    @_route("/api/library/v2/mirror-retry", methods=["POST"])
     def lib2_mirror_retry():
         """Reset failed mirror ops and drain the outbox once."""
-        guard = _guard()
-        if guard:
-            return guard
         db = get_database()
-        conn = db._get_connection()
-        try:
+        with closing(db._get_connection()) as conn:
             from core.library2.mirror_outbox import drain, outbox_status, prune_done, retry_failed
             retried = retry_failed(conn)
             prune_done(conn)
@@ -3310,21 +2939,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             result = drain(db)
             return jsonify({"success": True, "retried": retried, **result,
                             **outbox_status(conn)})
-        finally:
-            conn.close()
 
-    @app.route("/api/library/v2/<entity>/<int:eid>/monitor", methods=["POST"])
+    @_route("/api/library/v2/<entity>/<int:eid>/monitor", methods=["POST"])
     def lib2_set_monitored(entity, eid):
-        guard = _guard()
-        if guard:
-            return guard
         table = _MONITOR_TABLES.get(entity)
         if not table:
-            return jsonify({"success": False, "error": "Unknown entity"}), 400
+            return _fail("Unknown entity")
         monitored = bool((request.get_json(silent=True) or {}).get("monitored", True))
         db = get_database()
-        conn = db._get_connection()
-        try:
+        with closing(db._get_connection()) as conn:
             cur = conn.cursor()
             entity_ids = [eid]
             if entity == "artists":
@@ -3357,7 +2980,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             marks = ",".join("?" for _ in entity_ids)
             if not conn.execute(f"SELECT 1 FROM {table} WHERE id IN ({marks})",
                                 entity_ids).fetchone():
-                return jsonify({"success": False, "error": "Not found"}), 404
+                return _fail("Not found", 404)
             shared_intent = _shared_intent()
             if shared_intent:
                 cur.execute(
@@ -3451,53 +3074,44 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     f"SELECT COUNT(*) FROM lib2_mirror_outbox "
                     f"WHERE id IN ({marks}) AND status='done'", outbox_ids).fetchone()[0]
                 mirror_pending = len(outbox_ids) - mirrored
-        finally:
-            conn.close()
         return jsonify({"success": True, "monitored": monitored,
                         "mirrored": mirrored, "mirror_pending": mirror_pending,
                         "preserved_tracks": len(preserved_track_ids)})
 
-    @app.route("/api/library/v2/<entity>/<int:eid>/quality-profile", methods=["POST"])
+    @_route("/api/library/v2/<entity>/<int:eid>/quality-profile", methods=["POST"])
     def lib2_set_quality_profile(entity, eid):
         """Assign a profile without changing its upgrade-policy semantics.
 
         Explicit ``monitor_existing`` applies to every enabled upgrade mode;
         ``none`` never turns existing tracks into wanted upgrades.
         """
-        guard = _guard()
-        if guard:
-            return guard
         table = _PROFILE_TABLES.get(entity)
         if not table:
-            return jsonify({"success": False, "error": "Unknown entity"}), 400
+            return _fail("Unknown entity")
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict):
-            return jsonify({"success": False, "error": "JSON body must be an object"}), 400
+            return _fail("JSON body must be an object")
         inherit = body.get("inherit", False)
         if not isinstance(inherit, bool):
-            return jsonify({"success": False, "error": "inherit must be a boolean"}), 400
+            return _fail("inherit must be a boolean")
         raw_profile_id = body.get("quality_profile_id")
         if not inherit and (
             isinstance(raw_profile_id, bool)
             or not isinstance(raw_profile_id, int)
             or raw_profile_id <= 0
         ):
-            return jsonify({
-                "success": False,
-                "error": "quality_profile_id must be a positive integer",
-            }), 400
+            return _fail("quality_profile_id must be a positive integer")
         requested_profile_id = None if inherit else raw_profile_id
         # P1-15: assigning a profile is a QUALITY decision, not a wanted-
         # action. Monitoring existing tracks (and thereby queueing upgrade
         # downloads) only happens on explicit opt-in from the UI.
         monitor_existing = bool(body.get("monitor_existing", False))
         db = get_database()
-        conn = db._get_connection()
-        try:
+        with closing(db._get_connection()) as conn:
             if requested_profile_id is not None and conn.execute(
                 "SELECT 1 FROM quality_profiles WHERE id=?", (requested_profile_id,)
             ).fetchone() is None:
-                return jsonify({"success": False, "error": "Quality profile not found"}), 404
+                return _fail("Quality profile not found", 404)
             from core.library2.profile_lookup import assign_quality_profile
             try:
                 entity_ids = [eid]
@@ -3511,7 +3125,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 ]
                 assignment = assignments[0]
             except LookupError:
-                return jsonify({"success": False, "error": "Not found"}), 404
+                return _fail("Not found", 404)
             profile_id = int(assignment["id"])
             profile = conn.execute(
                 "SELECT id, upgrade_policy, repair_job_id, repair_settings "
@@ -3519,7 +3133,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 (profile_id,),
             ).fetchone()
             if profile is None:  # defensive: resolver always returns a live profile
-                return jsonify({"success": False, "error": "Quality profile not found"}), 404
+                return _fail("Quality profile not found", 404)
             try:
                 settings = json.loads(profile["repair_settings"] or "{}")
                 if not isinstance(settings, dict):
@@ -3624,8 +3238,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     mirror_ids,
                     profile_id=_intent_profile(),
                 )
-        finally:
-            conn.close()
         return jsonify({
             "success": True,
             "quality_profile_id": profile_id,
@@ -3645,7 +3257,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     # -- discography (all releases of an artist, Lidarr-style) ----------------
 
-    @app.route("/api/library/v2/artists/<int:artist_id>/discography/refresh", methods=["POST"])
+    @_route("/api/library/v2/artists/<int:artist_id>/discography/refresh", methods=["POST"])
     def lib2_discography_refresh(artist_id):
         """Fetch the artist's full provider discography and persist it as
         browsable (unmonitored) ``origin='discography'`` releases.
@@ -3662,9 +3274,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         double-click on one gets the running job's id back instead of starting
         a second walk over the same catalogue.
         """
-        guard = _guard()
-        if guard:
-            return guard
         try:
             job = _job_registry.start(f"discography-refresh:{artist_id}")
         except JobAlreadyRunning as exc:
@@ -3727,23 +3336,20 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                          daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
-    @app.route("/api/library/v2/maintenance/repair-duplicates", methods=["POST"])
+    @_route("/api/library/v2/maintenance/repair-duplicates", methods=["POST"])
     def lib2_repair_duplicates():
         """§62.6 Stufe 4: fold same-name artist twins (and their album twins)
         left behind by pre-fix imports; alias-link conflicting groups."""
-        guard = _guard()
-        if guard:
-            return guard
         db = get_database()
         try:
             from core.library2.dedup_repair import repair_duplicate_artists
             stats = repair_duplicate_artists(db)
         except Exception as e:  # noqa: BLE001
             logger.error("Duplicate repair failed: %s", e)
-            return jsonify({"success": False, "error": str(e)}), 500
+            return _fail(str(e), 500)
         return jsonify({"success": True, **stats})
 
-    @app.route("/api/library/v2/maintenance/reconcile-unmapped-artists", methods=["POST"])
+    @_route("/api/library/v2/maintenance/reconcile-unmapped-artists", methods=["POST"])
     def lib2_reconcile_unmapped_artists():
         """Heal the unmapped-native-artist backlog.
 
@@ -3754,9 +3360,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         lib2 row. Collaboration names no provider models as one entity stay
         unmatched (counted, never fabricated). Background job; poll
         ``/api/library/v2/jobs/status``."""
-        guard = _guard()
-        if guard:
-            return guard
         try:
             job = _job_registry.start("reconcile-artists")
         except JobAlreadyRunning as exc:
@@ -3768,8 +3371,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         def _run():
             db = get_database()
             try:
-                conn = db._get_connection()
-                try:
+                with closing(db._get_connection()) as conn:
                     from core.library2.artwork import (
                         drop_borrowed_album_cover_portraits,
                         invalidate_artwork,
@@ -3809,8 +3411,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     except Exception as exc:  # noqa: BLE001
                         logger.debug("borrowed-portrait sweep failed: %s", exc)
                     _job_registry.update(job_id, result=stats)
-                finally:
-                    conn.close()
             except Exception as e:  # noqa: BLE001
                 logger.error("Reconcile unmapped artists failed: %s", e, exc_info=True)
                 _job_registry.update(job_id, error=str(e))
@@ -3820,7 +3420,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         threading.Thread(target=carrying_scope(_run), name="lib2-reconcile-artists", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
-    @app.route("/api/library/v2/maintenance/reconcile-wishlist", methods=["POST"])
+    @_route("/api/library/v2/maintenance/reconcile-wishlist", methods=["POST"])
     def lib2_reconcile_wishlist():
         """Re-assert the wanted projection into the Wishlist (§69.1).
 
@@ -3830,9 +3430,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         mirrors it: monitored+missing tracks whose entry disappeared are re-added
         and no-longer-wanted entries are pruned. Respects the ignore-list.
         Background job; poll ``/api/library/v2/jobs/status``."""
-        guard = _guard()
-        if guard:
-            return guard
         try:
             job = _job_registry.start("reconcile-wishlist")
         except JobAlreadyRunning as exc:
@@ -3864,17 +3461,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         threading.Thread(target=carrying_scope(_run), name="lib2-reconcile-wishlist", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
-    @app.route("/api/library/v2/maintenance/duplicate-findings", methods=["GET"])
+    @_route("/api/library/v2/maintenance/duplicate-findings", methods=["GET"])
     def lib2_duplicate_findings():
         """Open release-group/duplicate findings the automatic folds left for
         the user (§62.6 Stufe 3/4: both sides carry real files or user
         intent, so nothing was merged silently)."""
-        guard = _guard()
-        if guard:
-            return guard
         db = get_database()
-        conn = db._get_connection()
-        try:
+        with closing(db._get_connection()) as conn:
             from core.library2.mb_reconcile import LIB2_RELEASE_GROUP_REVIEW_DDL
             conn.execute(LIB2_RELEASE_GROUP_REVIEW_DDL)
             rows = conn.execute(
@@ -3890,68 +3483,46 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     ORDER BY rv.id DESC""").fetchall()
             return jsonify({"success": True,
                             "findings": [dict(r) for r in rows]})
-        finally:
-            conn.close()
 
-    @app.route(
+    @_route(
         "/api/library/v2/maintenance/reconcile-acquisition",
         methods=["GET", "POST"],
     )
     def lib2_reconcile_acquisition():
         """Admin audit by default; POST with apply=true commits safe transitions."""
-        guard = _guard()
-        if guard:
-            return guard
         if not _is_admin():
-            return jsonify({
-                "success": False,
-                "error": "Acquisition reconciliation requires the admin profile",
-            }), 403
+            return _fail("Acquisition reconciliation requires the admin profile", 403)
         if acquisition_reconciliation_runner is None:
-            return jsonify({
-                "success": False,
-                "error": "Acquisition reconciliation is unavailable",
-            }), 503
+            return _fail("Acquisition reconciliation is unavailable", 503)
         body = request.get_json(silent=True) or {}
         apply_changes = request.method == "POST" and body.get("apply") is True
         try:
             report = acquisition_reconciliation_runner(dry_run=not apply_changes)
         except Exception as exc:  # noqa: BLE001
             logger.error("Acquisition reconciliation failed: %s", exc)
-            return jsonify({"success": False, "error": str(exc)}), 500
+            return _fail(str(exc), 500)
         return jsonify({"success": True, "report": report})
 
-    @app.route(
+    @_route(
         "/api/library/v2/maintenance/integrity-report", methods=["GET"],
     )
     def lib2_integrity_report():
         """Admin-only, read-only report over every available integrity index."""
-        guard = _guard()
-        if guard:
-            return guard
         if not _is_admin():
-            return jsonify({
-                "success": False,
-                "error": "The integrity report requires the admin profile",
-            }), 403
+            return _fail("The integrity report requires the admin profile", 403)
         if integrity_report_runner is None:
-            return jsonify({
-                "success": False,
-                "error": "The integrity report is unavailable",
-            }), 503
+            return _fail("The integrity report is unavailable", 503)
         try:
             max_findings = min(
                 5000, max(0, int(request.args.get("max_findings", 1000))),
             )
         except (TypeError, ValueError):
-            return jsonify({
-                "success": False, "error": "max_findings must be an integer",
-            }), 400
+            return _fail("max_findings must be an integer")
         try:
             report = integrity_report_runner(max_findings=max_findings)
         except Exception as exc:  # noqa: BLE001
             logger.error("Library-v2 integrity report failed: %s", exc)
-            return jsonify({"success": False, "error": str(exc)}), 500
+            return _fail(str(exc), 500)
         return jsonify({"success": True, "report": report})
 
     def _bulk_track_ids_for_albums(conn, album_ids: List[int]) -> List[int]:
@@ -3961,7 +3532,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         return [r["id"] for r in conn.execute(
             f"SELECT id FROM lib2_tracks WHERE album_id IN ({marks})", album_ids)]
 
-    @app.route("/api/library/v2/artists/<int:artist_id>/releases/monitor", methods=["POST"])
+    @_route("/api/library/v2/artists/<int:artist_id>/releases/monitor", methods=["POST"])
     def lib2_bulk_monitor(artist_id):
         """Bulk-set the monitor flag on an artist's releases.
 
@@ -3971,9 +3542,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         Runs in the background: monitoring unowned releases resolves each
         tracklist from a metadata provider before mirroring to the wishlist.
         """
-        guard = _guard()
-        if guard:
-            return guard
         body = request.get_json(silent=True) or {}
         scope = str(body.get("scope") or "all")
         monitored = bool(body.get("monitored", True))
@@ -3981,14 +3549,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         album_allowlist = None
         if requested_album_ids is not None:
             if not isinstance(requested_album_ids, list) or len(requested_album_ids) > 5000:
-                return jsonify({"success": False, "error": "album_ids must be a list of at most 5000 IDs"}), 400
+                return _fail("album_ids must be a list of at most 5000 IDs")
             if any(
                 isinstance(album_id, bool)
                 or not isinstance(album_id, int)
                 or album_id <= 0
                 for album_id in requested_album_ids
             ):
-                return jsonify({"success": False, "error": "album_ids must contain positive integers"}), 400
+                return _fail("album_ids must contain positive integers")
             album_allowlist = sorted(set(requested_album_ids))
         from core.library2.sql_util import owner_clause
         type_filter = {
@@ -4011,7 +3579,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             )""",
         }.get(scope)
         if not type_filter:
-            return jsonify({"success": False, "error": "Unknown scope"}), 400
+            return _fail("Unknown scope")
         try:
             # All monitor scopes mutate the same rule/projection set and must
             # therefore serialize with each other. Other job kinds stay free.
@@ -4032,8 +3600,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         def _run():
             db = get_database()
             try:
-                conn = db._get_connection()
-                try:
+                with closing(db._get_connection()) as conn:
                     from core.library2.artist_aliases import artist_album_scope_ids
 
                     albums = []
@@ -4142,8 +3709,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         job_id,
                         result={"albums": len(albums), "mirrored": mirrored},
                     )
-                finally:
-                    conn.close()
             except Exception as e:  # noqa: BLE001
                 logger.error("Bulk monitor failed (artist %s): %s", artist_id, e, exc_info=True)
                 _job_registry.update(job_id, error=str(e))
@@ -4153,15 +3718,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         threading.Thread(target=carrying_scope(_run), name="lib2-bulk-monitor", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
-    @app.route("/api/library/v2/jobs/status")
+    @_route("/api/library/v2/jobs/status")
     def lib2_job_status():
-        guard = _guard()
-        if guard:
-            return guard
         job_id = str(request.args.get("job_id") or "").strip()
         state = _job_registry.get(job_id) if job_id else _job_registry.latest()
         if job_id and state is None:
-            return jsonify({"success": False, "error": "Job not found"}), 404
+            return _fail("Job not found", 404)
         if state is None:
             state = {
                 "job_id": None,
@@ -4191,7 +3753,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             logger.debug("optional Watchlist metadata sources unavailable: %s", exc)
         return list(dict.fromkeys(sources))
 
-    @app.route(
+    @_route(
         "/api/library/v2/artists/<int:artist_id>/settings",
         methods=["GET", "PUT"],
     )
@@ -4204,9 +3766,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         combined response lets the React page present one coherent settings
         surface without creating another configuration model (§52.3/§52.4).
         """
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.artist_settings import (
             ArtistSettingsError,
             get_artist_settings,
@@ -4250,47 +3809,37 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             })
         except ArtistSettingsError as exc:
             conn.rollback()
-            return jsonify({"success": False, "error": str(exc)}), exc.status
+            return _fail(str(exc), exc.status)
         finally:
             conn.close()
 
-    @app.route("/api/library/v2/artists/<int:artist_id>/edit", methods=["POST"])
+    @_route("/api/library/v2/artists/<int:artist_id>/edit", methods=["POST"])
     def lib2_edit_artist(artist_id):
         """Update artist-level settings. Currently: ``monitor_new_items``
         ('all'|'none'|'new') — how future discography refreshes should treat
         newly discovered releases."""
-        guard = _guard()
-        if guard:
-            return guard
         body = request.get_json(silent=True) or {}
         monitor_new = str(body.get("monitor_new_items") or "").strip()
         if monitor_new not in ("all", "none", "new"):
-            return jsonify({"success": False, "error": "monitor_new_items must be all|none|new"}), 400
-        conn = _conn()
-        try:
+            return _fail("monitor_new_items must be all|none|new")
+        with closing(_conn()) as conn:
             cur = conn.execute(
                 "UPDATE lib2_artists SET monitor_new_items=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (monitor_new, artist_id))
             if not cur.rowcount:
-                return jsonify({"success": False, "error": "Artist not found"}), 404
+                return _fail("Artist not found", 404)
             conn.commit()
-        finally:
-            conn.close()
         return jsonify({"success": True, "monitor_new_items": monitor_new})
 
     _ALBUM_TYPES = ("album", "single", "ep", "compilation", "live")
 
-    @app.route("/api/library/v2/albums/<int:album_id>/edit", methods=["POST"])
+    @_route("/api/library/v2/albums/<int:album_id>/edit", methods=["POST"])
     def lib2_edit_album(album_id):
         """Correct the effective album type without rewriting provider data."""
-        guard = _guard()
-        if guard:
-            return guard
         body = request.get_json(silent=True) or {}
         album_type = str(body.get("album_type") or "").strip().lower()
         if album_type not in _ALBUM_TYPES:
-            return jsonify({"success": False,
-                            "error": f"album_type must be one of {'|'.join(_ALBUM_TYPES)}"}), 400
+            return _fail(f"album_type must be one of {'|'.join(_ALBUM_TYPES)}")
         conn = _conn()
         try:
             from core.library2.metadata_overrides import (
@@ -4309,40 +3858,31 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.commit()
         except MetadataOverrideError as exc:
             conn.rollback()
-            return jsonify({"success": False, "error": str(exc)}), exc.status
+            return _fail(str(exc), exc.status)
         finally:
             conn.close()
         return jsonify({"success": True, "album_type": album_type})
 
-    @app.route(
+    @_route(
         "/api/library/v2/metadata-overrides/<entity_type>/<int:entity_id>",
         methods=["PATCH"],
     )
     def lib2_metadata_overrides_batch(entity_type, entity_id):
         """Atomically set and clear validated metadata corrections."""
-        guard = _guard()
-        if guard:
-            return guard
         body = request.get_json(silent=True)
         if not isinstance(body, dict):
-            return jsonify({"success": False, "error": "JSON body is required"}), 400
+            return _fail("JSON body is required")
         values = body.get("set", {})
         clear = body.get("clear", [])
         if not isinstance(values, dict) or not isinstance(clear, list) or not all(
             isinstance(field, str) for field in clear
         ):
-            return jsonify({
-                "success": False,
-                "error": "set must be an object and clear must be a string array",
-            }), 400
+            return _fail("set must be an object and clear must be a string array")
         overlap = set(values).intersection(clear)
         if overlap:
-            return jsonify({
-                "success": False,
-                "error": "fields cannot be both set and cleared: " + ",".join(sorted(overlap)),
-            }), 400
+            return _fail("fields cannot be both set and cleared: " + ",".join(sorted(overlap)))
         if not values and not clear:
-            return jsonify({"success": False, "error": "no metadata changes supplied"}), 400
+            return _fail("no metadata changes supplied")
 
         from core.library2.metadata_overrides import (
             MetadataOverrideError,
@@ -4378,7 +3918,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.commit()
         except MetadataOverrideError as exc:
             conn.rollback()
-            return jsonify({"success": False, "error": str(exc)}), exc.status
+            return _fail(str(exc), exc.status)
         finally:
             conn.close()
         return jsonify({
@@ -4389,15 +3929,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             },
         })
 
-    @app.route(
+    @_route(
         "/api/library/v2/metadata-overrides/<entity_type>/<int:entity_id>/<field_name>",
         methods=["PUT", "DELETE"],
     )
     def lib2_metadata_override(entity_type, entity_id, field_name):
         """Set or clear one validated admin metadata correction."""
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.metadata_overrides import (
             MetadataOverrideError,
             clear_field_override,
@@ -4418,10 +3955,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
             body = request.get_json(silent=True)
             if not isinstance(body, dict) or "value" not in body:
-                return jsonify({
-                    "success": False,
-                    "error": "JSON body must contain value",
-                }), 400
+                return _fail("JSON body must contain value")
             override = set_field_override(
                 conn,
                 entity_type=entity_type,
@@ -4444,7 +3978,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             })
         except MetadataOverrideError as exc:
             conn.rollback()
-            return jsonify({"success": False, "error": str(exc)}), exc.status
+            return _fail(str(exc), exc.status)
         finally:
             conn.close()
 
@@ -4509,22 +4043,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except Exception as e:  # noqa: BLE001
             logger.debug("artwork cleanup failed (%s %s): %s", kind, eid, e)
 
-    @app.route("/api/library/v2/artists/<int:artist_id>/delete-preview")
+    @_route("/api/library/v2/artists/<int:artist_id>/delete-preview")
     def lib2_artist_delete_preview(artist_id):
         """Impact preview for artist delete: what cascades, what survives.
 
         Only releases the artist owns (``primary_artist_id``) are removed.
         Featured/various participations on other artists' releases are merely
         detached; the UI shows both numbers before the user commits."""
-        guard = _guard()
-        if guard:
-            return guard
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             row = conn.execute("SELECT name FROM lib2_artists WHERE id=?",
                                (artist_id,)).fetchone()
             if not row:
-                return jsonify({"success": False, "error": "Artist not found"}), 404
+                return _fail("Artist not found", 404)
             album_ids = [r["id"] for r in conn.execute(
                 "SELECT id FROM lib2_albums WHERE primary_artist_id=?", (artist_id,))]
             track_ids = _bulk_track_ids_for_albums(conn, album_ids)
@@ -4542,10 +4072,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return jsonify({"success": True, "artist": row["name"],
                             "albums": len(album_ids), "tracks": len(track_ids),
                             "file_links": file_links, "detached_albums": detached})
-        finally:
-            conn.close()
 
-    @app.route("/api/library/v2/<entity>/<int:eid>/file-delete-preview")
+    @_route("/api/library/v2/<entity>/<int:eid>/file-delete-preview")
     def lib2_file_delete_preview(entity, eid):
         """ADR-05 preview for the separate physical-file command.
 
@@ -4553,9 +4081,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         scope to a caller-selected subset — the Manage Track Files "Files"
         tab bulk-delete uses this to preview/execute only the checked rows.
         """
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.file_delete import FileDeleteError, preview_entity_files
         file_ids = None
         raw_ids = request.args.get("file_ids")
@@ -4563,16 +4088,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             try:
                 file_ids = [int(v) for v in raw_ids.split(",") if v.strip()]
             except ValueError:
-                return jsonify({"success": False, "error": "file_ids must be integers"}), 400
+                return _fail("file_ids must be integers")
         try:
             preview = preview_entity_files(
                 get_database(), entity=entity, entity_id=eid, file_ids=file_ids
             )
             return jsonify({"success": True, **preview})
         except FileDeleteError as exc:
-            return jsonify({"success": False, "error": str(exc)}), exc.status
+            return _fail(str(exc), exc.status)
 
-    @app.route(
+    @_route(
         "/api/library/v2/<entity>/<int:eid>/file-delete",
         methods=["POST"],
     )
@@ -4583,9 +4108,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         produced ``preview_token``, otherwise the stale-preview check rejects
         it same as any other scope drift.
         """
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.file_delete import FileDeleteError, delete_entity_files
         try:
             body = request.get_json(silent=True)
@@ -4609,7 +4131,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             _reproject_after_file_removal(operation.get("track_ids") or [])
             return jsonify({"success": True, "operation": operation})
         except FileDeleteError as exc:
-            return jsonify({"success": False, "error": str(exc)}), exc.status
+            return _fail(str(exc), exc.status)
 
     def _reproject_after_file_removal(track_ids: List[int]) -> None:
         """A removed file can turn a monitored track into Wanted again."""
@@ -4617,8 +4139,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if not ids:
             return
         db = get_database()
-        conn = db._get_connection()
-        try:
+        with closing(db._get_connection()) as conn:
             from core.library2.wanted import recompute_wanted_for_entity
             for track_id in ids:
                 recompute_wanted_for_entity(
@@ -4627,20 +4148,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             from core.library2.mirror_outbox import enqueue_projected_tracks
             enqueue_projected_tracks(conn, ids, profile_id=_intent_profile())
             conn.commit()
-        finally:
-            conn.close()
         from core.library2.mirror_outbox import drain as drain_mirror_outbox
         drain_mirror_outbox(db)
 
-    @app.route(
+    @_route(
         "/api/library/v2/<entity>/<int:eid>/file-remove",
         methods=["POST"],
     )
     def lib2_file_remove(entity, eid):
         """Remove selected file records from Library v2, keeping disk files."""
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.file_delete import (
             FileDeleteError,
             remove_entity_file_records,
@@ -4667,13 +4183,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             _reproject_after_file_removal(operation.get("track_ids") or [])
             return jsonify({"success": True, "operation": operation})
         except FileDeleteError as exc:
-            return jsonify({"success": False, "error": str(exc)}), exc.status
+            return _fail(str(exc), exc.status)
 
-    @app.route("/api/library/v2/file-delete-operations/<operation_id>")
+    @_route("/api/library/v2/file-delete-operations/<operation_id>")
     def lib2_file_delete_operation(operation_id):
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.file_delete import FileDeleteError, get_delete_operation
         try:
             return jsonify({
@@ -4681,22 +4194,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 "operation": get_delete_operation(get_database(), operation_id),
             })
         except FileDeleteError as exc:
-            return jsonify({"success": False, "error": str(exc)}), exc.status
+            return _fail(str(exc), exc.status)
 
-    @app.route("/api/library/v2/artists/<int:artist_id>", methods=["DELETE"])
+    @_route("/api/library/v2/artists/<int:artist_id>", methods=["DELETE"])
     def lib2_delete_artist(artist_id):
         """Remove an artist (and their releases/tracks/file links) from
         Library v2. Files on disk are untouched; watchlist + wishlist mirrors
         are removed so nothing keeps auto-downloading for it."""
-        guard = _guard()
-        if guard:
-            return guard
         db = get_database()
-        conn = db._get_connection()
-        try:
+        with closing(db._get_connection()) as conn:
             row = conn.execute("SELECT id FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()
             if not row:
-                return jsonify({"success": False, "error": "Artist not found"}), 404
+                return _fail("Artist not found", 404)
             from core.library2.mirror_outbox import drain as drain_mirror_outbox
             from core.library2.mirror_outbox import enqueue_artist_watchlist
             enqueue_artist_watchlist(conn, artist_id, False, profile_id=_intent_profile())
@@ -4720,30 +4229,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.commit()
             drain_mirror_outbox(db)
             _delete_artwork_files(db, "artist", artist_id)
-        finally:
-            conn.close()
         return jsonify({"success": True, **stats})
 
-    @app.route("/api/library/v2/albums/<int:album_id>", methods=["DELETE"])
+    @_route("/api/library/v2/albums/<int:album_id>", methods=["DELETE"])
     def lib2_delete_album(album_id):
-        guard = _guard()
-        if guard:
-            return guard
         db = get_database()
-        conn = db._get_connection()
-        try:
+        with closing(db._get_connection()) as conn:
             row = conn.execute("SELECT id FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
             if not row:
-                return jsonify({"success": False, "error": "Album not found"}), 404
+                return _fail("Album not found", 404)
             stats = _unmonitor_tracks_and_delete(db, conn, album_ids=[album_id])
             conn.commit()
             from core.library2.mirror_outbox import drain as drain_mirror_outbox
             drain_mirror_outbox(db)
-        finally:
-            conn.close()
         return jsonify({"success": True, **stats})
 
-    @app.route("/api/library/v2/artists/<int:artist_id>/duplicates")
+    @_route("/api/library/v2/artists/<int:artist_id>/duplicates")
     def lib2_artist_duplicates(artist_id):
         """Single↔album duplicate pairs for Manage Tracks: tracks whose
         ``canonical_track_id`` links a single release to the same recording on
@@ -4751,13 +4252,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         quality and monitor state so the user can decide which version to keep
         wanted. File links can be consolidated onto either recording and
         unwanted physical files are removed explicitly from Manage Tracks."""
-        guard = _guard()
-        if guard:
-            return guard
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             if not conn.execute("SELECT 1 FROM lib2_artists WHERE id=?", (artist_id,)).fetchone():
-                return jsonify({"success": False, "error": "Artist not found"}), 404
+                return _fail("Artist not found", 404)
             from core.library2.artist_aliases import artist_album_scope_ids
 
             album_ids = artist_album_scope_ids(conn, artist_id)
@@ -4833,41 +4330,30 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     "playlists": playlists.get(int(r["canonical_id"]), []),
                 },
             } for r in rows]
-        finally:
-            conn.close()
         return jsonify({"success": True, "pairs": pairs})
 
-    @app.route("/api/library/v2/artists/<int:artist_id>/track-files")
+    @_route("/api/library/v2/artists/<int:artist_id>/track-files")
     def lib2_artist_track_files(artist_id):
         """C2: Lidarr-style flat file list for Manage Track Files — every
         physical file this artist owns (quality/size/state), paginated.
         Independent of the single↔album duplicate pairs above; feeds the
         "Files" tab whose selection drives the ADR-05 preview/delete above."""
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2 import queries as Q
         search = request.args.get("search", "")
         try:
             page = int(request.args.get("page", 1))
             limit = int(request.args.get("limit", 100))
         except (TypeError, ValueError):
-            return jsonify({"success": False, "error": "page/limit must be integers"}), 400
+            return _fail("page/limit must be integers")
         if page < 1 or not 1 <= limit <= 500:
-            return jsonify({
-                "success": False,
-                "error": "page must be positive and limit must be between 1 and 500",
-            }), 400
-        conn = _conn()
-        try:
+            return _fail("page must be positive and limit must be between 1 and 500")
+        with closing(_conn()) as conn:
             if not conn.execute(
                 "SELECT 1 FROM lib2_artists WHERE id=?", (artist_id,)
             ).fetchone():
-                return jsonify({"success": False, "error": "Artist not found"}), 404
+                return _fail("Artist not found", 404)
             files, total = Q.list_artist_track_files(
                 conn, artist_id, search=search, page=page, limit=limit)
-        finally:
-            conn.close()
         total_pages = (total + limit - 1) // limit if limit else 0
         return jsonify({
             "success": True,
@@ -4879,7 +4365,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             },
         })
 
-    @app.route("/api/library/v2/artists/<int:artist_id>/play-queue")
+    @_route("/api/library/v2/artists/<int:artist_id>/play-queue")
     def lib2_artist_play_queue(artist_id):
         """What the artist Play button queues: one playable file per track,
         scoped by CREDIT rather than by album artist.
@@ -4888,30 +4374,21 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         ``primary_artist_id`` scope exists so a selection matches what the
         delete preview will see — and reusing it here dropped every release
         the artist only guests on, which the artist page itself shows."""
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2 import queries as Q
         try:
             page = int(request.args.get("page", 1))
             limit = int(request.args.get("limit", 100))
         except (TypeError, ValueError):
-            return jsonify({"success": False, "error": "page/limit must be integers"}), 400
+            return _fail("page/limit must be integers")
         if page < 1 or not 1 <= limit <= 500:
-            return jsonify({
-                "success": False,
-                "error": "page must be positive and limit must be between 1 and 500",
-            }), 400
-        conn = _conn()
-        try:
+            return _fail("page must be positive and limit must be between 1 and 500")
+        with closing(_conn()) as conn:
             if not conn.execute(
                 "SELECT 1 FROM lib2_artists WHERE id=?", (artist_id,)
             ).fetchone():
-                return jsonify({"success": False, "error": "Artist not found"}), 404
+                return _fail("Artist not found", 404)
             files, total = Q.list_artist_playback_files(
                 conn, artist_id, page=page, limit=limit)
-        finally:
-            conn.close()
         total_pages = (total + limit - 1) // limit if limit else 0
         return jsonify({
             "success": True,
@@ -4923,7 +4400,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             },
         })
 
-    @app.route("/api/library/v2/tracks/<int:track_id>/canonical", methods=["POST"])
+    @_route("/api/library/v2/tracks/<int:track_id>/canonical", methods=["POST"])
     def lib2_set_canonical(track_id):
         """Link/unlink a track to the canonical recording it duplicates.
 
@@ -4931,15 +4408,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         single↔album detection can then be corrected/extended manually);
         ``{"canonical_track_id": null}`` unlinks — the track becomes its own
         canonical again and stops showing as "also on album"."""
-        guard = _guard()
-        if guard:
-            return guard
         body = request.get_json(silent=True) or {}
         raw = body.get("canonical_track_id")
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             if not conn.execute("SELECT 1 FROM lib2_tracks WHERE id=?", (track_id,)).fetchone():
-                return jsonify({"success": False, "error": "Track not found"}), 404
+                return _fail("Track not found", 404)
             if raw in (None, "", 0):
                 conn.execute(
                     "UPDATE lib2_tracks SET canonical_track_id=NULL, "
@@ -4949,8 +4422,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             try:
                 canonical_id = int(raw)
             except (TypeError, ValueError):
-                return jsonify({"success": False,
-                                "error": "canonical_track_id must be an integer"}), 400
+                return _fail("canonical_track_id must be an integer")
             from core.library2.duplicate_relationship import (
                 DuplicateRelationshipError,
                 validate_duplicate_pair,
@@ -4958,43 +4430,32 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             try:
                 validate_duplicate_pair(conn, track_id, canonical_id)
             except DuplicateRelationshipError as exc:
-                return jsonify({"success": False, "error": str(exc)}), exc.status
+                return _fail(str(exc), exc.status)
             conn.execute(
                 "UPDATE lib2_tracks SET canonical_track_id=?, "
                 "updated_at=CURRENT_TIMESTAMP WHERE id=?", (canonical_id, track_id))
             conn.commit()
-        finally:
-            conn.close()
         return jsonify({"success": True, "canonical_track_id": canonical_id})
 
-    @app.route(
+    @_route(
         "/api/library/v2/tracks/<int:track_id>/files/<int:file_id>/primary",
         methods=["POST"],
     )
     def lib2_set_primary_track_file(track_id, file_id):
         """Persist a deliberate primary choice for one physical version."""
-        guard = _guard()
-        if guard:
-            return guard
         from core.library2.track_files import set_primary_file
 
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             if not conn.execute(
                 "SELECT 1 FROM lib2_tracks WHERE id=?", (track_id,)
             ).fetchone():
-                return jsonify({"success": False, "error": "Track not found"}), 404
+                return _fail("Track not found", 404)
             if not set_primary_file(conn, track_id, file_id):
-                return jsonify({
-                    "success": False,
-                    "error": "File is not an active version of this track",
-                }), 404
+                return _fail("File is not an active version of this track", 404)
             conn.commit()
-        finally:
-            conn.close()
         return jsonify({"success": True, "track_id": track_id, "file_id": file_id})
 
-    @app.route("/api/library/v2/tracks/<int:track_id>/move-file", methods=["POST"])
+    @_route("/api/library/v2/tracks/<int:track_id>/move-file", methods=["POST"])
     def lib2_move_track_file(track_id):
         """Move this track's file link onto another track (single↔album move).
 
@@ -5002,16 +4463,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         the library's file↔track link moves; run Rename/Reorganize afterwards
         to re-folder it. The source track is unmonitored so the consolidated-
         away variant isn't immediately re-downloaded."""
-        guard = _guard()
-        if guard:
-            return guard
         body = request.get_json(silent=True) or {}
         try:
             to_track_id = int(body.get("to_track_id") or 0)
         except (TypeError, ValueError):
             to_track_id = 0
         if not to_track_id:
-            return jsonify({"success": False, "error": "to_track_id required"}), 400
+            return _fail("to_track_id required")
         from core.library2.track_file_move import MoveError, move_track_file
         db = get_database()
         conn = db._get_connection()
@@ -5019,126 +4477,87 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             result = move_track_file(db, conn, track_id, to_track_id,
                                      wishlist_profile_id=_intent_profile())
         except MoveError as e:
-            return jsonify({"success": False, "error": str(e)}), e.status
+            return _fail(str(e), e.status)
         except Exception as e:  # noqa: BLE001
             logger.error("track file move failed (%s → %s): %s", track_id,
                          to_track_id, e, exc_info=True)
-            return jsonify({"success": False, "error": str(e)}), 500
+            return _fail(str(e), 500)
         finally:
             conn.close()
         return jsonify({"success": True, **result})
 
-    @app.route("/api/library/v2/artists/<int:artist_id>/history")
+    @_route("/api/library/v2/artists/<int:artist_id>/history")
     def lib2_artist_history(artist_id):
         """Merged history for this artist (Lidarr's History tab): grabs,
         imports, quarantine, catalog moves and physical deletes — not just
         raw downloads (§A6/C3, see ``core.library2.history_feed``)."""
-        guard = _guard()
-        if guard:
-            return guard
         try:
             limit = int(request.args.get("limit", 50))
         except (TypeError, ValueError):
-            return jsonify({
-                "success": False,
-                "error": "limit must be an integer between 1 and 200",
-            }), 400
+            return _fail("limit must be an integer between 1 and 200")
         if not 1 <= limit <= 200:
-            return jsonify({
-                "success": False,
-                "error": "limit must be an integer between 1 and 200",
-            }), 400
+            return _fail("limit must be an integer between 1 and 200")
         from core.library2.history_feed import scoped_history
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             artist = conn.execute(
                 "SELECT name FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()
             if not artist:
-                return jsonify({"success": False, "error": "Artist not found"}), 404
+                return _fail("Artist not found", 404)
             history = scoped_history(
                 conn, scope="artist", entity_id=artist_id, limit=limit,
                 artist_name=artist["name"],
             )
-        finally:
-            conn.close()
         return jsonify({"success": True, "history": history})
 
-    @app.route("/api/library/v2/tracks/<int:track_id>/history")
+    @_route("/api/library/v2/tracks/<int:track_id>/history")
     def lib2_track_history(track_id):
         """Merged pipeline history for this track (§52.9): search/grab/quality/
         quarantine/import events correlated via ``acquisition_history``, plus
         catalog moves and manual overrides — not just the latest download row.
         Surfaces failed attempts that never reached a ``lib2_track_files`` row
         (see ``core.library2.history_feed``)."""
-        guard = _guard()
-        if guard:
-            return guard
         try:
             limit = int(request.args.get("limit", 50))
         except (TypeError, ValueError):
-            return jsonify({
-                "success": False,
-                "error": "limit must be an integer between 1 and 500",
-            }), 400
+            return _fail("limit must be an integer between 1 and 500")
         if not 1 <= limit <= 500:
-            return jsonify({
-                "success": False,
-                "error": "limit must be an integer between 1 and 500",
-            }), 400
+            return _fail("limit must be an integer between 1 and 500")
         from core.library2.history_feed import scoped_history
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             track = conn.execute(
                 "SELECT id FROM lib2_tracks WHERE id=?", (track_id,)).fetchone()
             if not track:
-                return jsonify({"success": False, "error": "Track not found"}), 404
+                return _fail("Track not found", 404)
             history = scoped_history(conn, scope="track", entity_id=track_id, limit=limit)
-        finally:
-            conn.close()
         return jsonify({"success": True, "history": history})
 
-    @app.route("/api/library/v2/albums/<int:album_id>/history")
+    @_route("/api/library/v2/albums/<int:album_id>/history")
     def lib2_album_history(album_id):
         """Merged history for this album/EP/single (§52.9 album branch): grabs,
         imports, quarantine, catalog moves and physical deletes, scoped to just
         this release — reuses the same resolver as the artist/track scopes
         (see ``core.library2.history_feed``)."""
-        guard = _guard()
-        if guard:
-            return guard
         try:
             limit = int(request.args.get("limit", 50))
         except (TypeError, ValueError):
-            return jsonify({
-                "success": False,
-                "error": "limit must be an integer between 1 and 500",
-            }), 400
+            return _fail("limit must be an integer between 1 and 500")
         if not 1 <= limit <= 500:
-            return jsonify({
-                "success": False,
-                "error": "limit must be an integer between 1 and 500",
-            }), 400
+            return _fail("limit must be an integer between 1 and 500")
         from core.library2.history_feed import scoped_history
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             album = conn.execute(
                 "SELECT id FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
             if not album:
-                return jsonify({"success": False, "error": "Album not found"}), 404
+                return _fail("Album not found", 404)
             history = scoped_history(conn, scope="album", entity_id=album_id, limit=limit)
-        finally:
-            conn.close()
         return jsonify({"success": True, "history": history})
 
     # -- upgrade scan (lib2-aware quality upgrade pass) ------------------------
 
-    @app.route("/api/library/v2/upgrade-scan", methods=["POST"])
+    @_route("/api/library/v2/upgrade-scan", methods=["POST"])
     def lib2_upgrade_scan():
         """Queue every monitored track whose file is an upgrade candidate under
         its ``until_top`` quality profile into the wishlist using Library v2."""
-        guard = _guard()
-        if guard:
-            return guard
         try:
             job = _job_registry.start("upgrade-scan")
         except JobAlreadyRunning as exc:
@@ -5155,8 +4574,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         def _run():
             db = get_database()
             try:
-                conn = db._get_connection()
-                try:
+                with closing(db._get_connection()) as conn:
                     from core.library2.wishlist_mirror import upgrade_candidate_track_ids
                     # the wanted rows -- and the files -- of the library it runs for
                     track_ids = upgrade_candidate_track_ids(conn, profile_id=active_profile)
@@ -5176,8 +4594,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         job_id,
                         result={"checked": len(track_ids), "queued": queued},
                     )
-                finally:
-                    conn.close()
             except Exception as e:  # noqa: BLE001
                 logger.error("Upgrade scan failed: %s", e, exc_info=True)
                 _job_registry.update(job_id, error=str(e))
@@ -5189,7 +4605,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     # -- scoped Automatic Search (deep-dive C1) ---------------------------------
 
-    @app.route("/api/library/v2/<entity>/<int:eid>/search", methods=["POST"])
+    @_route("/api/library/v2/<entity>/<int:eid>/search", methods=["POST"])
     def lib2_scoped_search(entity, eid):
         """Lidarr-style scoped Automatic Search: missing tracks AND, if the
         quality profile allows it, upgrades — for exactly this artist/album/
@@ -5201,19 +4617,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         dispatches it without a Wishlist write. Both paths converge on the one
         candidate-walk/retry/import pipeline.
         """
-        guard = _guard()
-        if guard:
-            return guard
         table = _MONITOR_TABLES.get(entity)
         if not table:
-            return jsonify({"success": False, "error": "Unknown entity"}), 400
+            return _fail("Unknown entity")
         db = get_database()
-        conn = db._get_connection()
-        try:
+        with closing(db._get_connection()) as conn:
             if not conn.execute(f"SELECT 1 FROM {table} WHERE id=?", (eid,)).fetchone():
-                return jsonify({"success": False, "error": "Not found"}), 404
-        finally:
-            conn.close()
+                return _fail("Not found", 404)
 
         active_profile = _intent_profile()
         try:
@@ -5314,7 +4724,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     # -- §73/I6: live queue status for track/album rows -------------------------
 
-    @app.route("/api/library/v2/<entity>/<int:eid>/queue-status")
+    @_route("/api/library/v2/<entity>/<int:eid>/queue-status")
     def lib2_queue_status(entity, eid):
         """Read-only live download-queue status for this scope's tracks.
 
@@ -5324,21 +4734,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         state (docs §73) — terminal/idle tracks are simply absent, there is
         no persisted "last outcome" here.
         """
-        guard = _guard()
-        if guard:
-            return guard
         table = _MONITOR_TABLES.get(entity)
         if not table:
-            return jsonify({"success": False, "error": "Unknown entity"}), 400
+            return _fail("Unknown entity")
         db = get_database()
-        conn = db._get_connection()
-        try:
+        with closing(db._get_connection()) as conn:
             if not conn.execute(f"SELECT 1 FROM {table} WHERE id=?", (eid,)).fetchone():
-                return jsonify({"success": False, "error": "Not found"}), 404
+                return _fail("Not found", 404)
             from core.library2.wanted import entity_track_ids
             track_ids = entity_track_ids(conn, entity, eid)
-        finally:
-            conn.close()
 
         if make_context_key is None or get_cached_transfer_data is None or not track_ids:
             return jsonify({"tracks": {}, "albums": {}})
@@ -5356,28 +4760,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     # -- Phase C: tag preview / re-tag -----------------------------------------
 
-    @app.route("/api/library/v2/<entity>/<int:eid>/tag-preview")
+    @_route("/api/library/v2/<entity>/<int:eid>/tag-preview")
     def lib2_tag_preview(entity, eid):
         """Diff of file tags vs lib2 metadata for an album's or artist's tracks."""
-        guard = _guard()
-        if guard:
-            return guard
         if entity not in ("artists", "albums"):
-            return jsonify({"success": False, "error": "Unsupported entity"}), 400
+            return _fail("Unsupported entity")
         from core.library2 import retag
         db = get_database()
-        conn = db._get_connection()
-        try:
+        with closing(db._get_connection()) as conn:
             exists = conn.execute(
                 f"SELECT 1 FROM lib2_{entity} WHERE id=?", (eid,)).fetchone()
             if not exists:
-                return jsonify({"success": False, "error": "Not found"}), 404
+                return _fail("Not found", 404)
             track_ids = (retag.album_track_ids(conn, eid) if entity == "albums"
                          else retag.artist_track_ids(conn, eid))
             truncated = len(track_ids) > retag.MAX_TRACKS
             contexts = retag.track_contexts(conn, track_ids[:retag.MAX_TRACKS])
-        finally:
-            conn.close()
         preview = retag.tag_preview(contexts)
         return jsonify({
             "success": True,
@@ -5386,19 +4784,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "truncated": truncated,
         })
 
-    @app.route("/api/library/v2/tags/write", methods=["POST"])
+    @_route("/api/library/v2/tags/write", methods=["POST"])
     def lib2_write_tags():
         """Write lib2 metadata into the given tracks' file tags (background job).
 
         Body: ``{"track_ids": [...], "embed_cover": true}``. Poll
         ``/api/library/v2/jobs/status`` for progress/result.
         """
-        guard = _guard()
-        if guard:
-            return guard
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict):
-            return jsonify({"success": False, "error": "JSON body must be an object"}), 400
+            return _fail("JSON body must be an object")
         raw_track_ids = body.get("track_ids")
         if not isinstance(raw_track_ids, list) or any(
             isinstance(track_id, bool)
@@ -5406,16 +4801,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             or track_id <= 0
             for track_id in raw_track_ids
         ):
-            return jsonify({
-                "success": False,
-                "error": "track_ids must be an array of positive integers",
-            }), 400
+            return _fail("track_ids must be an array of positive integers")
         from core.library2 import retag
         if not raw_track_ids or len(raw_track_ids) > retag.MAX_TRACKS:
-            return jsonify({
-                "success": False,
-                "error": f"track_ids must contain between 1 and {retag.MAX_TRACKS} IDs",
-            }), 400
+            return _fail(f"track_ids must contain between 1 and {retag.MAX_TRACKS} IDs")
         track_ids = list(dict.fromkeys(raw_track_ids))
         embed_cover = bool(body.get("embed_cover", True))
         # Fields a person set by hand win by default. `overwrite_manual` is how
@@ -5485,7 +4874,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         threading.Thread(target=carrying_scope(_run), name="lib2-retag", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
-    @app.route("/api/library/v2/tracks/<int:eid>/fill-tag-gaps", methods=["POST"])
+    @_route("/api/library/v2/tracks/<int:eid>/fill-tag-gaps", methods=["POST"])
     def lib2_fill_tag_gaps(eid):
         """iss27-02: the Tags-Match "N tag gaps" click. Unlike plain
         ``/tags/write`` (which only ever pushes whatever the catalogue
@@ -5496,19 +4885,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         get filled, THEN writes the track's tags. Best-effort, source-
         priority walk; a provider with nothing new is not an error.
         """
-        guard = _guard()
-        if guard:
-            return guard
-        conn = _conn()
-        try:
+        with closing(_conn()) as conn:
             row = conn.execute(
                 "SELECT id, album_id FROM lib2_tracks WHERE id=?", (eid,),
             ).fetchone()
             if not row:
-                return jsonify({"success": False, "error": "Track not found"}), 404
+                return _fail("Track not found", 404)
             album_id = row["album_id"]
-        finally:
-            conn.close()
 
         try:
             job = _job_registry.start("retag", total=1)
@@ -5563,23 +4946,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     # -- refresh & scan (re-read tags into DB + bust artwork cache) -----------
 
-    @app.route("/api/library/v2/<entity>/<int:eid>/refresh", methods=["POST"])
+    @_route("/api/library/v2/<entity>/<int:eid>/refresh", methods=["POST"])
     def lib2_refresh(entity, eid):
-        guard = _guard()
-        if guard:
-            return guard
         if entity not in ("artists", "albums"):
-            return jsonify({"success": False, "error": "Unsupported entity"}), 400
+            return _fail("Unsupported entity")
         db = get_database()
-        conn = db._get_connection()
-        try:
+        with closing(db._get_connection()) as conn:
             # The entity must exist — an unknown id must be a 404, not a scan
             # whose empty scope silently widens to the whole library.
             table = "lib2_albums" if entity == "albums" else "lib2_artists"
             exists = conn.execute(f"SELECT 1 FROM {table} WHERE id=?", (eid,)).fetchone()
             if not exists:
-                return jsonify({"success": False,
-                                "error": f"{entity[:-1].capitalize()} {eid} not found"}), 404
+                return _fail(f"{entity[:-1].capitalize()} {eid} not found", 404)
             # Capture the exact scope before handing the filesystem work to
             # the observable background job.
             if entity == "albums":
@@ -5592,8 +4970,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 )
                 album_ids = artist_album_scope_ids(conn, eid)
                 artist_ids = resolve_alias_group(conn, eid)
-        finally:
-            conn.close()
 
         try:
             job = _job_registry.start(f"refresh:{entity}:{eid}")
@@ -5668,7 +5044,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         ).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
 
-    @app.route("/api/library/v2/<entity>/<int:eid>/enrich", methods=["POST"])
+    @_route("/api/library/v2/<entity>/<int:eid>/enrich", methods=["POST"])
     def lib2_enrich(entity, eid):
         """Re-query ONE metadata provider for one entity (docs §44).
 
@@ -5676,24 +5052,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         provider facade falls back to another provider, the actual provider
         namespace is returned and stored with its own ID.
         """
-        guard = _guard()
-        if guard:
-            return guard
         if entity not in ("artists", "albums", "tracks"):
-            return jsonify({"success": False, "error": "Unsupported entity"}), 400
+            return _fail("Unsupported entity")
         data = request.get_json(silent=True) or {}
         service = data.get("service")
         if not service:
-            return jsonify({"success": False, "error": "service is required"}), 400
+            return _fail("service is required")
 
         singular = entity[:-1]
         from core.library2.match_status import SERVICES
         valid_services = {s for s, _label, cols in SERVICES if singular in cols}
         if service not in valid_services:
-            return jsonify({
-                "success": False,
-                "error": f"{service} does not support {singular} enrichment",
-            }), 400
+            return _fail(f"{service} does not support {singular} enrichment")
 
         conn = _conn()
         try:
@@ -5704,11 +5074,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.commit()
         except LookupError as exc:
             conn.rollback()
-            return jsonify({"success": False, "error": str(exc)}), 404
+            return _fail(str(exc), 404)
         except Exception as exc:  # noqa: BLE001
             conn.rollback()
             logger.debug("native enrich failed (%s %s): %s", entity, eid, exc)
-            return jsonify({"success": False, "error": str(exc)}), 500
+            return _fail(str(exc), 500)
         finally:
             conn.close()
         return jsonify({
@@ -5723,23 +5093,17 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     # -- importer -------------------------------------------------------------
 
-    @app.route("/api/library/v2/import", methods=["POST"])
+    @_route("/api/library/v2/import", methods=["POST"])
     def lib2_import():
-        guard = _guard()
-        if guard:
-            return guard
         payload = (request.get_json(silent=True) or {}) if request.is_json else {}
         reset = bool(payload.get("reset"))
         force = bool(payload.get("force"))
 
         with _import_lock:
             if _import_state["running"]:
-                return jsonify({"success": False, "error": "Import already running"}), 409
+                return _fail("Import already running", 409)
             if _artwork_cache_snapshot()["running"]:
-                return jsonify({
-                    "success": False,
-                    "error": "Artwork caching is still running; retry when it finishes",
-                }), 409
+                return _fail("Artwork caching is still running; retry when it finishes", 409)
             # Ordered AFTER the in-progress checks on purpose: "a run is
             # already happening" is the more specific answer, and the existing
             # contract tests read it back.
@@ -5788,10 +5152,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # import_legacy_library() concurrently with the background autostart.
             bootstrap_owner = lib2_bootstrap.try_claim(get_database())
             if not bootstrap_owner:
-                return jsonify({
-                    "success": False,
-                    "error": "Library import already running in the background",
-                }), 409
+                return _fail("Library import already running in the background", 409)
             _reset_artwork_cache_state()
             _import_state.update(running=True, stage="starting", current=0, total=0,
                                  stats=None, error=None, finished_at=None)
@@ -5894,7 +5255,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         "lib2_external_id_history",
     }
 
-    @app.route("/api/library/v2/reset", methods=["POST"])
+    @_route("/api/library/v2/reset", methods=["POST"])
     def lib2_reset():
         """Empty the catalogue and re-arm the automatic migration.
 
@@ -5910,24 +5271,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         the wishlist are the migration's *source*, so wiping them would remove
         what is being tested rather than reset it.
         """
-        guard = _guard()
-        if guard:
-            return guard
 
         with _import_lock:
             if _import_state["running"]:
-                return jsonify({
-                    "success": False,
-                    "error": "An import is running; wait for it to finish",
-                }), 409
+                return _fail("An import is running; wait for it to finish", 409)
         # Fence against a migration in flight: it holds the bootstrap claim and
         # would keep writing rows into the database we are emptying.
         owner_token = lib2_bootstrap.try_claim(get_database())
         if not owner_token:
-            return jsonify({
-                "success": False,
-                "error": "A library migration is running in the background",
-            }), 409
+            return _fail("A library migration is running in the background", 409)
 
         cleared: Dict[str, int] = {}
         conn = _conn()
@@ -5964,7 +5316,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.rollback()
             lib2_bootstrap.mark_failed(get_database(), owner_token, str(exc))
             logger.error("Library v2 reset failed: %s", exc, exc_info=True)
-            return jsonify({"success": False, "error": str(exc)}), 500
+            return _fail(str(exc), 500)
         finally:
             conn.execute("PRAGMA foreign_keys=ON")
             conn.close()
@@ -5982,11 +5334,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             ),
         })
 
-    @app.route("/api/library/v2/import/status")
+    @_route("/api/library/v2/import/status")
     def lib2_import_status():
-        guard = _guard()
-        if guard:
-            return guard
         # "bootstrap" is the persisted state (core/library2/bootstrap.py) — unlike
         # _import_state (this process, this click) it also reflects an automatic
         # background import that this request didn't itself trigger.
