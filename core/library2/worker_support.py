@@ -135,6 +135,23 @@ def accept_artist_match(conn, service: str, provider_id: Any, artist_id: Any,
     return True, ""
 
 
+def parent_artist_id(conn, entity_type: str, entity_id: Any) -> Optional[int]:
+    """The lib2 artist that owns an album or track.
+
+    A track's artist is two joins away in lib2 — track → album → primary artist —
+    where legacy carried ``tracks.artist_id`` on the row itself.
+    """
+    sql = {
+        "album": "SELECT primary_artist_id FROM lib2_albums WHERE id=?",
+        "track": ("SELECT al.primary_artist_id FROM lib2_tracks t "
+                  "JOIN lib2_albums al ON al.id=t.album_id WHERE t.id=?"),
+    }.get(entity_type)
+    if not sql:
+        return None
+    row = conn.execute(sql, (entity_id,)).fetchone()
+    return row[0] if row else None
+
+
 def owned_album_titles(conn, artist_id: Any) -> List[str]:
     """Album titles the library actually has for this artist.
 

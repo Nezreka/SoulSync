@@ -20,27 +20,11 @@ from core.library2.worker_support import (
     accept_artist_match,
     honor_stored_match,
     owned_album_titles,
+    parent_artist_id,
     provider_id_conflict,
 )
 
 logger = get_logger("deezer_worker")
-
-def _parent_artist_id(conn, entity_type: str, entity_id) -> Optional[int]:
-    """The lib2 artist that owns an album or track.
-
-    A track's artist is two joins away in lib2 — track → album → primary artist —
-    where legacy carried ``tracks.artist_id`` on the row itself.
-    """
-    sql = {
-        'album': "SELECT primary_artist_id FROM lib2_albums WHERE id=?",
-        'track': ("SELECT al.primary_artist_id FROM lib2_tracks t "
-                  "JOIN lib2_albums al ON al.id=t.album_id WHERE t.id=?"),
-    }.get(entity_type)
-    if not sql:
-        return None
-    row = conn.execute(sql, (entity_id,)).fetchone()
-    return row[0] if row else None
-
 
 
 class DeezerWorker:
@@ -298,7 +282,7 @@ class DeezerWorker:
             from core.library2.provider_writes import write_provider_enrichment
 
             conn = self.db._get_connection()
-            artist_id = _parent_artist_id(conn, item['type'], item['id'])
+            artist_id = parent_artist_id(conn, item['type'], item['id'])
             if artist_id is None:
                 return
 

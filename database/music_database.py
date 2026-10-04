@@ -492,6 +492,45 @@ def mirrored_cover_from_match(extra_data: dict) -> str:
     return ''
 
 
+# A mirrored playlist row counts as in the library when the sync matcher said
+# so. Rows it never checked fall back to Library v2, id-first: the source id
+# against the Spotify column or external_ids, else the exact artist/title
+# relation. Every hit must own an active file; a provider-only discography
+# row is known, not owned.
+_MIRRORED_ROW_IN_LIBRARY = """SUM(CASE
+    WHEN mpt.extra_data LIKE '%"in_library": true%' THEN 1
+    WHEN mpt.extra_data LIKE '%"library_checked_at"%' THEN 0
+    WHEN EXISTS (
+        SELECT 1 FROM lib2_tracks t
+         WHERE (
+           (mpt.source_track_id IS NOT NULL
+            AND mpt.source_track_id != ''
+            AND COALESCE(
+                  NULLIF(t.spotify_id, ''),
+                  NULLIF(json_extract(t.external_ids, '$.spotify'), '')
+                ) = mpt.source_track_id)
+           OR (t.title = mpt.track_name AND (
+             EXISTS (
+               SELECT 1 FROM lib2_track_artists ta
+                 JOIN lib2_artists a ON a.id = ta.artist_id
+                WHERE ta.track_id = t.id
+                  AND a.name = mpt.artist_name)
+             OR EXISTS (
+               SELECT 1 FROM lib2_albums al
+                 JOIN lib2_artists a ON a.id = al.primary_artist_id
+                WHERE al.id = t.album_id
+                  AND a.name = mpt.artist_name)
+           ))
+         )
+           AND EXISTS (
+             SELECT 1 FROM lib2_track_files f
+              WHERE f.track_id = t.id
+                AND f.path IS NOT NULL AND TRIM(f.path) <> ''
+                AND COALESCE(f.file_state, 'active') = 'active')
+    ) THEN 1
+    ELSE 0 END)"""
+
+
 class MusicDatabase:
     """SQLite database manager for SoulSync music library data"""
     
@@ -22711,7 +22750,7 @@ class MusicDatabase:
                     }
 
                 # Core counts: total + discovered, grouped per playlist
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT mpt.playlist_id,
                            COUNT(*) as total,
                            SUM(CASE WHEN mpt.extra_data LIKE '%"discovered": true%' THEN 1 ELSE 0 END) as discovered,
@@ -22734,44 +22773,7 @@ class MusicDatabase:
                            -- for tracks nobody has checked. The expensive branch
                            -- therefore stops running for a playlist the moment it
                            -- syncs once.
-                           SUM(CASE
-                               WHEN mpt.extra_data LIKE '%"in_library": true%' THEN 1
-                               WHEN mpt.extra_data LIKE '%"library_checked_at"%' THEN 0
-                               -- The fallback reads Library v2, id-first: the
-                               -- mirrored row's source id against the promoted
-                               -- Spotify column OR the external_ids JSON, then
-                               -- the case-sensitive artist/title relation. Every
-                               -- hit must own an ACTIVE file — a provider-only
-                               -- discography row is known, not owned.
-                               WHEN EXISTS (
-                                   SELECT 1 FROM lib2_tracks t
-                                    WHERE (
-                                      (mpt.source_track_id IS NOT NULL
-                                       AND mpt.source_track_id != ''
-                                       AND COALESCE(
-                                             NULLIF(t.spotify_id, ''),
-                                             NULLIF(json_extract(t.external_ids, '$.spotify'), '')
-                                           ) = mpt.source_track_id)
-                                      OR (t.title = mpt.track_name AND (
-                                        EXISTS (
-                                          SELECT 1 FROM lib2_track_artists ta
-                                            JOIN lib2_artists a ON a.id = ta.artist_id
-                                           WHERE ta.track_id = t.id
-                                             AND a.name = mpt.artist_name)
-                                        OR EXISTS (
-                                          SELECT 1 FROM lib2_albums al
-                                            JOIN lib2_artists a ON a.id = al.primary_artist_id
-                                           WHERE al.id = t.album_id
-                                             AND a.name = mpt.artist_name)
-                                      ))
-                                    )
-                                      AND EXISTS (
-                                        SELECT 1 FROM lib2_track_files f
-                                         WHERE f.track_id = t.id
-                                           AND f.path IS NOT NULL AND TRIM(f.path) <> ''
-                                           AND COALESCE(f.file_state, 'active') = 'active')
-                               ) THEN 1
-                               ELSE 0 END) as in_library,
+                           {_MIRRORED_ROW_IN_LIBRARY} as in_library,
                            -- How many rows have EVER been checked. Without this a
                            -- never-synced playlist reads as "you own none of it"
                            -- rather than "nobody has looked".
@@ -22888,39 +22890,8 @@ class MusicDatabase:
                 # relation. Case-sensitive equality keeps the name/title indexes
                 # usable on very large catalogues.
                 try:
-                    cursor.execute("""
-                        SELECT SUM(CASE
-                            WHEN mpt.extra_data LIKE '%"in_library": true%' THEN 1
-                            WHEN mpt.extra_data LIKE '%"library_checked_at"%' THEN 0
-                            WHEN EXISTS (
-                                SELECT 1 FROM lib2_tracks t
-                                 WHERE (
-                                   (mpt.source_track_id IS NOT NULL
-                                    AND mpt.source_track_id != ''
-                                    AND COALESCE(
-                                          NULLIF(t.spotify_id, ''),
-                                          NULLIF(json_extract(t.external_ids, '$.spotify'), '')
-                                        ) = mpt.source_track_id)
-                                   OR (t.title = mpt.track_name AND (
-                                     EXISTS (
-                                       SELECT 1 FROM lib2_track_artists ta
-                                         JOIN lib2_artists a ON a.id = ta.artist_id
-                                        WHERE ta.track_id = t.id
-                                          AND a.name = mpt.artist_name)
-                                     OR EXISTS (
-                                       SELECT 1 FROM lib2_albums al
-                                         JOIN lib2_artists a ON a.id = al.primary_artist_id
-                                        WHERE al.id = t.album_id
-                                          AND a.name = mpt.artist_name)
-                                   ))
-                                 )
-                                   AND EXISTS (
-                                     SELECT 1 FROM lib2_track_files f
-                                      WHERE f.track_id = t.id
-                                        AND f.path IS NOT NULL AND TRIM(f.path) <> ''
-                                        AND COALESCE(f.file_state, 'active') = 'active')
-                            ) THEN 1
-                            ELSE 0 END) as in_library
+                    cursor.execute(f"""
+                        SELECT {_MIRRORED_ROW_IN_LIBRARY} as in_library
                         FROM mirrored_playlist_tracks mpt
                         WHERE mpt.playlist_id = ?
                     """, (playlist_id,))
