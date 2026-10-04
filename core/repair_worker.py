@@ -345,6 +345,7 @@ NATIVE_SUBJECT_FINDING_TYPES = frozenset({
     'fake_lossless',
     'metadata_gap',
     'missing_cover_art',
+    'genre_cleanup',
     'genre_enrichment',
     'library_retag',
     'path_mismatch',
