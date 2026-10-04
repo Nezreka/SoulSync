@@ -54427,16 +54427,23 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);
     color: rgba(255,255,255,0.6); cursor: pointer; transition: all 0.15s ease;
     font-family: inherit;
+    /* Static homes: the label flips Cancel/Close between phases — pin the
+       width so the button never shifts. */
+    min-width: 84px;
 }
 
 .discog-cancel-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
 
 .discog-submit-btn {
-    display: flex; align-items: center; gap: 6px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
     padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 700;
     background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.7));
     border: none; color: #fff; cursor: pointer;
     transition: all 0.2s ease; font-family: inherit;
+    /* Static homes: the label changes by phase ("Add 2 to Wishlist" vs
+       "Done"), so pin the width — otherwise Cancel/Close jumps when the
+       run ends. */
+    min-width: 200px;
 }
 
 .discog-submit-btn:hover { filter: brightness(1.15); box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.3); }
@@ -80044,6 +80051,14 @@ select.ma-input { appearance: auto; }
 .adl-quality-chip { display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 600; letter-spacing: 0.02em; color: rgba(255,255,255,0.78); background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 0 6px; line-height: 16px; cursor: help; vertical-align: middle; }
 .verif-badge.verif-human { color: #3498db; background: rgba(52,152,219,0.14); }
 .verif-actions { display: inline-flex; gap: 6px; margin-left: 10px; align-items: center; }
+/* Static button homes for review rows: the annotation chips vary per row, so
+   the action buttons live in their own right-anchored slot that never moves. */
+.verif-quar-row .adl-row-info { flex: 0 1 auto; }
+.verif-quar-row .verif-actions { display: flex; flex: 1 1 auto; }
+.verif-quar-row .verif-chips { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.verif-quar-row .verif-btns { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; flex-shrink: 0; }
+/* Approve and Recover share one slot width so Delete never shifts. */
+.verif-quar-row .verif-act.verif-act-labeled { min-width: 96px; justify-content: center; }
 .verif-act { border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.85); border-radius: 6px; padding: 2px 8px; font-size: 12px; cursor: pointer; line-height: 18px; }
 .verif-act:hover { background: rgba(255,255,255,0.14); }
 .verif-act-ok:hover { background: rgba(46,204,113,0.25); border-color: rgba(46,204,113,0.5); }
