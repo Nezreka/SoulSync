@@ -286,18 +286,20 @@ export function ExplorerWishlistModal({
               <button type="button" className="discog-cancel-btn" onClick={onClose}>
                 {phase === 'done' ? 'Close' : 'Cancel'}
               </button>
-              {phase === 'select' ? (
-                <button
-                  type="button"
-                  className="discog-submit-btn"
-                  id="explorer-wishlist-submit"
-                  disabled={footer.disabled}
-                  onClick={() => void submit()}
-                >
-                  <span className="discog-submit-icon">⬇</span>
-                  <span id="explorer-wishlist-submit-text">{footer.submitText}</span>
-                </button>
-              ) : null}
+              {/* Static home: the submit button stays mounted through every
+                  phase (disabled while running/done) so Cancel/Close never
+                  jumps when it would otherwise unmount. */}
+              <button
+                type="button"
+                className="discog-submit-btn"
+                id="explorer-wishlist-submit"
+                disabled={phase !== 'select' || footer.disabled}
+                title={phase === 'running' ? 'Processing…' : undefined}
+                onClick={() => void submit()}
+              >
+                <span className="discog-submit-icon">⬇</span>
+                <span id="explorer-wishlist-submit-text">{footer.submitText}</span>
+              </button>
             </div>
           </div>
         </div>

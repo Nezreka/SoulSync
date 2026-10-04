@@ -622,6 +622,36 @@ function EmptyState({
   );
 }
 
+/**
+ * Static action slot: an inapplicable action renders an invisible,
+ * non-focusable placeholder of identical size, so Approve / Retry /
+ * Identify / Dismiss keep the same home on every row instead of
+ * shifting with each row's action set.
+ */
+function ActionPlaceholder({
+  variant,
+  label,
+  minWidth,
+}: {
+  variant: 'primary' | 'secondary' | 'ghost';
+  label: string;
+  minWidth?: number;
+}) {
+  return (
+    <span aria-hidden="true" style={{ visibility: 'hidden', display: 'inline-flex' }}>
+      <Button
+        variant={variant}
+        size="sm"
+        disabled
+        tabIndex={-1}
+        style={minWidth ? { minWidth } : undefined}
+      >
+        {label}
+      </Button>
+    </span>
+  );
+}
+
 function InboxRow({
   item,
   focused,
@@ -768,32 +798,46 @@ function InboxRow({
         ) : null}
         {actions.length > 0 ? (
           <div className={styles.rowActions}>
+            {/* Static homes: all four slots render in the same order on every
+                row; inapplicable actions are invisible placeholders so the
+                visible buttons never shift. */}
             {actions.includes('approve') ? (
               <Button variant="primary" size="sm" disabled={busy} onClick={onApprove}>
                 Approve
               </Button>
-            ) : null}
+            ) : (
+              <ActionPlaceholder variant="primary" label="Approve" />
+            )}
             {actions.includes('retry') ? (
               <Button variant="secondary" size="sm" disabled={busy} onClick={onRetry}>
                 Retry
               </Button>
-            ) : null}
+            ) : (
+              <ActionPlaceholder variant="secondary" label="Retry" />
+            )}
             {actions.includes('identify') ? (
               <Button
                 variant={actions.includes('approve') ? 'secondary' : 'primary'}
                 size="sm"
                 onClick={openMatcher}
+                // Static home: "Fix match" is wider than "Identify" — pin the
+                // width so Dismiss never shifts between rows.
+                style={{ minWidth: 86 }}
               >
                 {item.status === 'needs_review' || item.status === 'failed'
                   ? 'Fix match'
                   : 'Identify'}
               </Button>
-            ) : null}
+            ) : (
+              <ActionPlaceholder variant="primary" label="Identify" minWidth={86} />
+            )}
             {actions.includes('dismiss') ? (
               <Button variant="ghost" size="sm" disabled={busy} onClick={onDismiss}>
                 Dismiss
               </Button>
-            ) : null}
+            ) : (
+              <ActionPlaceholder variant="ghost" label="Dismiss" />
+            )}
           </div>
         ) : null}
       </div>

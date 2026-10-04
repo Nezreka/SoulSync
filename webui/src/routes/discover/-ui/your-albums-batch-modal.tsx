@@ -177,22 +177,21 @@ export function YourAlbumsBatchModal({
             <button type="button" className="discog-cancel-btn" onClick={onClose}>
               Cancel
             </button>
-            {/* The submit button leaves the layout mid-run (2024) and returns
-                disabled once the stream ends. */}
-            {phase !== 'running' && (
-              <button
-                type="button"
-                className="discog-submit-btn"
-                id="your-albums-batch-submit-btn"
-                disabled={phase === 'done' || footer.submitDisabled}
-                onClick={onSubmit}
-              >
-                <span className="discog-submit-icon">⬇</span>
-                <span id="your-albums-batch-submit-text">
-                  {phase === 'done' ? BATCH_DONE_TEXT : footer.submitText}
-                </span>
-              </button>
-            )}
+            {/* Static home: the submit button stays mounted through every phase
+                (disabled while running) so Cancel never jumps. */}
+            <button
+              type="button"
+              className="discog-submit-btn"
+              id="your-albums-batch-submit-btn"
+              disabled={phase === 'running' || phase === 'done' || footer.submitDisabled}
+              title={phase === 'running' ? 'Processing…' : undefined}
+              onClick={onSubmit}
+            >
+              <span className="discog-submit-icon">⬇</span>
+              <span id="your-albums-batch-submit-text">
+                {phase === 'done' ? BATCH_DONE_TEXT : footer.submitText}
+              </span>
+            </button>
           </div>
         </div>
       </div>
