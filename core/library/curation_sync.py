@@ -153,19 +153,28 @@ def navidrome_user_credentials(db) -> List[tuple]:
     Subsonic scopes starred items and ratings to the AUTHENTICATED user and
     offers no admin impersonation for them, so "keep it if ANYONE starred it"
     genuinely requires each user's own credentials — which is what Cremonies
-    said. They live in the existing named-credential store (its schema has
-    covered navidrome all along; nothing read it until now).
+    said. Two places hold them: each profile's own Navidrome login (Personal
+    Settings, #1265), and the older named-credential store, whose admin UI was
+    removed, so on a current install the profile logins are the real source.
 
-    Returns [] on any failure, which makes the caller fall back to the single
-    configured account rather than reading nothing.
+    The configured account is always read too (the client adds it). [] on any
+    failure just means only that account is read.
     """
+    pairs = []
+    try:
+        for prof in db.get_all_profiles() or []:
+            login = db.get_profile_navidrome_login(prof.get('id'))
+            if login and login[0] and login[1]:
+                pairs.append((login[0], login[1]))
+    except Exception as e:
+        logger.debug("curation sync: could not read profile navidrome logins: %s", e)
+
     try:
         sets = db.list_service_credentials('navidrome') or []
     except Exception as e:
         logger.debug("curation sync: could not list navidrome credentials: %s", e)
-        return []
+        return pairs
 
-    pairs = []
     for meta in sets:
         try:
             full = db.get_service_credential(meta.get('id'))

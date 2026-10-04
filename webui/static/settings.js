@@ -3268,6 +3268,10 @@ async function loadSettingsData() {
         const abSource = ab.download_source || {};
         const abVal = (el, value) => { if (el) el.value = value; };
         const abChecked = (el, value) => { if (el) el.checked = value !== false; };
+        // Which Audible storefront the catalogue pages query. No deep merge
+        // of new defaults into an existing config row, so older installs come
+        // back undefined and read as the US store, same as before.
+        abVal(document.getElementById('audiobook-marketplace'), ab.marketplace || 'us');
         abVal(document.getElementById('audiobook-download-mode'), abSource.mode || 'hybrid');
         _audiobookHybrid = (abSource.hybrid_order || [])
             .filter(src => AUDIOBOOK_SOURCES.includes(src));
@@ -3326,11 +3330,17 @@ async function loadSettingsData() {
         document.getElementById('allow-duplicate-tracks').checked = settings.wishlist?.allow_duplicate_tracks !== false;
         const _wlTtl = document.getElementById('wishlist-ignore-ttl');
         if (_wlTtl) _wlTtl.value = settings.wishlist?.ignore_ttl_days ?? 30;
+        const _wlWingIt = document.getElementById('wishlist-wing-it-guesses');
+        if (_wlWingIt) _wlWingIt.checked = settings.wishlist?.wing_it_guesses === true;
 
         // Populate Playlist Sync settings
         document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup === true;
         const _syncModeEl = document.getElementById('playlist-sync-mode');
-        if (_syncModeEl) _syncModeEl.value = settings.playlist_sync?.mode || 'replace';
+        if (_syncModeEl) _syncModeEl.value = settings.playlist_sync?.mode || 'reconcile';
+        // #1455: default ON — older installs come back undefined and read as
+        // today's behavior (wishlist missing tracks during sync).
+        document.getElementById('playlist-sync-wishlist-missing').checked =
+            settings.playlist_sync?.wishlist_missing_tracks !== false;
 
         // Populate Post-Download Conversion settings
         document.getElementById('downsample-hires').checked = settings.lossy_copy?.downsample_hires === true;
@@ -3400,7 +3410,7 @@ async function loadSettingsData() {
         const _folderArtistEl = document.getElementById('import-folder-artist-override');
         if (_folderArtistEl) _folderArtistEl.checked = settings.import?.folder_artist_override !== false;
         const _transferPermEl = document.getElementById('import-transfer-permanent');
-        if (_transferPermEl) _transferPermEl.checked = settings.import?.transfer_is_permanent === true;
+        if (_transferPermEl) _transferPermEl.checked = settings.import?.transfer_is_permanent !== false;
 
         // Populate M3U Export settings
         document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;
@@ -6374,10 +6384,12 @@ async function saveSettings(quiet = false) {
             allow_duplicate_tracks: document.getElementById('allow-duplicate-tracks').checked,
             ignore_ttl_days: Math.max(1, Math.min(365,
                 _cfgInt('wishlist-ignore-ttl', 30))),
+            wing_it_guesses: document.getElementById('wishlist-wing-it-guesses').checked,
         },
         playlist_sync: {
             create_backup: document.getElementById('create-backup').checked,
-            mode: _cfgStr('playlist-sync-mode', { fallback: 'replace' })
+            mode: _cfgStr('playlist-sync-mode', { fallback: 'reconcile' }),
+            wishlist_missing_tracks: document.getElementById('playlist-sync-wishlist-missing').checked
         },
         content_filter: {
             allow_explicit: document.getElementById('allow-explicit').checked,
@@ -6411,6 +6423,7 @@ async function saveSettings(quiet = false) {
             media_format: _cfgStr('podcast-media-format', { fallback: 'audio' }),
         },
         audiobooks: {
+            marketplace: _cfgStr('audiobook-marketplace', { fallback: 'us' }),
             download_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),
             download_source: {
                 mode: _cfgStr('audiobook-download-mode', { fallback: 'hybrid' }),

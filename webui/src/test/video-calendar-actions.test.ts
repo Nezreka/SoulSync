@@ -132,3 +132,98 @@ describe('the card actions', () => {
     expect(body).toContain('monitored: false');
   });
 });
+
+describe('the card status badges', () => {
+  function realAcqBadge() {
+    const labels = JS.slice(JS.indexOf('var ACQ_LABEL'), JS.indexOf('function filterEps'));
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    return new Function(
+      `function esc(s) { return String(s == null ? '' : s); }\n${labels}\nreturn acqBadge;`,
+    )() as (ep: unknown, extra?: string) => string;
+  }
+
+  // Run a real card renderer with stubbed helpers.
+  function renderCard(name: string, ...args: unknown[]) {
+    const deps: Record<string, unknown> = {
+      showHue: () => 200,
+      airMins: () => null,
+      fmtMins: () => '',
+      esc: (s: unknown) => String(s == null ? '' : s),
+      acqBadge: realAcqBadge(),
+      whenLabel: () => 'Today',
+      state: { offset: 0, movieEvents: [] },
+      MOVIE_TYPE: {
+        cinema: { chip: 'In Cinemas', cls: 'vcal-mv--cinema' },
+        available: { chip: 'Home Release', cls: 'vcal-mv--home' },
+      },
+    };
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const fn = new Function(
+      ...Object.keys(deps),
+      'args',
+      `${extractFunction(name, JS)}\nreturn ${name}(...args);`,
+    );
+    return fn(...Object.values(deps), args) as string;
+  }
+
+  const EP = { id: 7, show_id: 3, show_title: 'Show', season_number: 1, episode_number: 2 };
+
+  it('grid episode cards badge the wishlist, not just the library', () => {
+    // Owned keeps the ✓ flag and gets no acquisition badge.
+    const owned = renderCard('epCell', { ...EP, has_file: 1, acq: 'owned' });
+    expect(owned).toContain('vcal-flag');
+    expect(owned).not.toContain('vcal-acq');
+    // Wishlisted (wanted) shows the badge the agenda already had.
+    const wanted = renderCard('epCell', { ...EP, has_file: 0, acq: 'wanted' });
+    expect(wanted).not.toContain('vcal-flag');
+    expect(wanted).toContain('vcal-acq--want');
+    expect(wanted).toContain('Wanted');
+    // Other in-flight states ride along too.
+    expect(renderCard('epCell', { ...EP, has_file: 0, acq: 'downloading' })).toContain(
+      'Downloading',
+    );
+    // The ordinary unaired case stays clean.
+    const unaired = renderCard('epCell', { ...EP, has_file: 0, acq: 'unaired' });
+    expect(unaired).not.toContain('vcal-flag');
+    expect(unaired).not.toContain('vcal-acq');
+  });
+
+  it('grid movie cards say wishlist until owned', () => {
+    // The movie lane is built from the wishlist, so a non-owned card is
+    // wishlisted by construction.
+    const wished = renderCard('movieCell', {
+      title: 'Film',
+      tmdb_id: 9,
+      type: 'available',
+      owned: 0,
+    });
+    expect(wished).not.toContain('vcal-flag');
+    expect(wished).toContain('vcal-acq--want');
+    expect(wished).toContain('Wishlist');
+    const owned = renderCard('movieCell', {
+      title: 'Film',
+      tmdb_id: 9,
+      type: 'available',
+      owned: 1,
+      library_id: 4,
+    });
+    expect(owned).toContain('vcal-flag');
+    expect(owned).not.toContain('vcal-acq');
+  });
+
+  it('the hero billboard badges status, not just ownership', () => {
+    const d = { today: '2026-10-03' };
+    const owned = renderCard('heroPanel', { ...EP, has_file: 1, acq: 'owned' }, d, {});
+    expect(owned).toContain('In your library');
+    const wanted = renderCard('heroPanel', { ...EP, has_file: 0, acq: 'wanted' }, d, {});
+    expect(wanted).not.toContain('In your library');
+    expect(wanted).toContain('Wanted');
+  });
+
+  it('the calendar refetches when the wishlist changes', () => {
+    // The modal's "Wishlist episode" button fires this; without the listener
+    // the card behind it keeps its stale badge until a week change.
+    expect(JS).toContain("addEventListener('soulsync:video-wishlist-changed'");
+    expect(extractFunction('wire', JS)).toContain('load({ quiet: true })');
+  });
+});

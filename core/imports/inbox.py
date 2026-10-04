@@ -26,7 +26,7 @@ _HISTORY_STATUS = {
     'approved': 'queued',
     'processing': 'importing',
     'completed': 'imported',
-    'partial': 'imported',
+    'partial': 'partial',
     'failed': 'failed',
     'rejected': 'dismissed',
 }
@@ -34,7 +34,7 @@ _HISTORY_STATUS = {
 # history rows whose files are gone from staging are worth keeping only when
 # they are a record of something. a stale "needs identify" for a folder the
 # user already moved away is noise.
-_KEEP_WITHOUT_FILES = {'imported', 'failed', 'dismissed'}
+_KEEP_WITHOUT_FILES = {'imported', 'partial', 'failed', 'dismissed'}
 
 # active-import phases -> inbox status
 _LIVE_STATUS = {
@@ -61,6 +61,10 @@ def derive_status(history_status: Optional[str], live_status: Optional[str], in_
     history row, then "waiting" for files nobody has looked at yet."""
     if live_status and live_status in _LIVE_STATUS:
         return _LIVE_STATUS[live_status]
+    # partial means some tracks errored. with files still in staging the import
+    # did not finish, so it is a failure the user can retry, not "imported".
+    if history_status == 'partial' and in_staging:
+        return 'failed'
     if history_status:
         return _HISTORY_STATUS.get(history_status, history_status)
     return 'waiting' if in_staging else 'imported'
@@ -178,8 +182,12 @@ def build_inbox(
         rows.append({
             'key': cand.folder_hash,
             'kind': 'single' if getattr(cand, 'is_single', False) else 'album',
-            'name': (hist or {}).get('album_name') or _most_common(f['album'] for f in files)
-                    or (files[0]['title'] if getattr(cand, 'is_single', False) and files else cand.name),
+            # #1289: the row is named by the folder, not the guessed tag — the
+            # tags said "Sgt. Pepper" for a folder the user named "Beatles".
+            # the guess survives as a subtitle so the signal isn't lost.
+            'name': cand.name or '',
+            'guessed_name': (hist or {}).get('album_name') or _most_common(f['album'] for f in files)
+                    or (files[0]['title'] if getattr(cand, 'is_single', False) and files else None),
             'artist': (hist or {}).get('artist_name') or _most_common(f['artist'] for f in files),
             'folder_name': cand.name,
             'folder_path': cand.path,
@@ -216,7 +224,9 @@ def build_inbox(
         rows.append({
             'key': row.get('folder_hash') or f"history-{row.get('id')}",
             'kind': 'album' if (row.get('total_files') or 0) > 1 else 'single',
-            'name': row.get('album_name') or row.get('folder_name') or '',
+            # #1289: folder name first, same as staging rows above.
+            'name': row.get('folder_name') or row.get('album_name') or '',
+            'guessed_name': row.get('album_name') or None,
             'artist': row.get('artist_name') or '',
             'folder_name': row.get('folder_name') or '',
             'folder_path': row.get('folder_path') or '',

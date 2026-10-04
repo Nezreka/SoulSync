@@ -32,6 +32,22 @@ SyncOneFn = Callable[[Dict[str, Any], Any], Dict[str, Any]]
 SyncAndWishlistFn = Callable[..., Dict[str, int]]
 
 
+def resolve_pipeline_skip_wishlist(data: Dict[str, Any], config_manager=None) -> bool:
+    """Decide whether a pipeline run skips the wishlist phase (#1455).
+
+    An explicit ``skip_wishlist`` in the request data is a per-click manual
+    override and always wins. Otherwise the global
+    ``playlist_sync.wishlist_missing_tracks`` toggle decides (default True =
+    today's behavior: missing tracks are wishlisted).
+    """
+    explicit = data.get('skip_wishlist', None)
+    if explicit is not None:
+        return bool(explicit)
+    if config_manager is None:
+        return False
+    return not config_manager.get('playlist_sync.wishlist_missing_tracks', True)
+
+
 def run_mirrored_playlist_pipeline(
     config: Dict[str, Any],
     deps: Any,
@@ -391,8 +407,8 @@ def _run_discovery_phase(
     deps.update_progress(
         automation_id,
         progress=26,
-        phase='Phase 2/4: Discovering metadata...',
-        log_line='Phase 2: Discover',
+        phase='Phase 2/4: Identifying metadata...',
+        log_line='Phase 2: Identify',
         log_type='info',
     )
 
@@ -428,13 +444,13 @@ def _run_discovery_phase(
         deps.update_progress(
             automation_id,
             progress=min(26 + elapsed // 4, 54),
-            phase=f'Phase 2/4: Discovering... ({elapsed}s)',
+            phase=f'Phase 2/4: Identifying... ({elapsed}s)',
         )
         if elapsed > DISCOVERY_TIMEOUT_SECONDS:
             timed_out = True
             deps.update_progress(
                 automation_id,
-                log_line='Discovery timed out after 1 hour',
+                log_line='Identification timed out after 1 hour',
                 log_type='warning',
             )
             break
@@ -449,8 +465,8 @@ def _run_discovery_phase(
         deps.update_progress(
             automation_id,
             progress=55,
-            phase='Phase 2/4: Discovery timed out',
-            log_line='Phase 2: discovery timed out' + (
+            phase='Phase 2/4: Identification timed out',
+            log_line='Phase 2: identification timed out' + (
                 ' (worker still running after grace period)' if still_running else ''),
             log_type='error',
         )
@@ -466,8 +482,8 @@ def _run_discovery_phase(
         deps.update_progress(
             automation_id,
             progress=55,
-            phase='Phase 2/4: Discovery failed',
-            log_line=f'Phase 2 failed: discovery error: {error}',
+            phase='Phase 2/4: Identification failed',
+            log_line=f'Phase 2 failed: identification error: {error}',
             log_type='error',
         )
         return {'status': 'failed', 'error': error}
@@ -475,8 +491,8 @@ def _run_discovery_phase(
     deps.update_progress(
         automation_id,
         progress=55,
-        phase='Phase 2/4: Discovery complete',
-        log_line='Phase 2 done: discovery complete',
+        phase='Phase 2/4: Identification complete',
+        log_line='Phase 2 done: identification complete',
         log_type='success',
     )
     return {'status': 'completed', 'error': ''}

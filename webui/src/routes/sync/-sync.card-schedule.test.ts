@@ -14,6 +14,7 @@ import {
   CARD_SCHEDULE_OPTIONS,
   cardScheduleLabel,
   cardSchedulesFrom,
+  hasAllPlaylistPipeline,
   useCardSchedules,
 } from './-sync.card-schedule';
 
@@ -29,6 +30,23 @@ function hourly(playlistId: number, hours: number, id = 100 + playlistId) {
     trigger_config: { interval: hours, unit: 'hours' },
     action_type: 'playlist_pipeline',
     action_config: { playlist_id: playlistId },
+  };
+}
+
+/** A Playlist Pipeline with "Process all mirrored playlists" checked. */
+function allPipeline(
+  id = 200,
+  opts: { enabled?: boolean; owned?: boolean; trigger?: string; all?: unknown } = {},
+) {
+  const { enabled = true, owned = true, trigger = 'schedule', all = true } = opts;
+  return {
+    id,
+    name: owned ? 'Auto-Sync: all playlists' : "someone else's pipeline",
+    enabled,
+    trigger_type: trigger,
+    trigger_config: { interval: 6, unit: 'hours' },
+    action_type: 'playlist_pipeline',
+    action_config: { all },
   };
 }
 
@@ -94,6 +112,34 @@ describe('reading schedules', () => {
 
   it('never appends a next run to "Not scheduled"', () => {
     expect(cardScheduleLabel(undefined, Date.now())).toBe('Not scheduled');
+  });
+
+  it('detects an all-playlists pipeline, and only when enabled and owned', () => {
+    expect(hasAllPlaylistPipeline([allPipeline()])).toBe(true);
+    expect(hasAllPlaylistPipeline([allPipeline(201, { enabled: false })])).toBe(false);
+    expect(hasAllPlaylistPipeline([allPipeline(202, { owned: false })])).toBe(false);
+    expect(hasAllPlaylistPipeline([hourly(7, 6)])).toBe(false);
+    expect(hasAllPlaylistPipeline([])).toBe(false);
+  });
+
+  it('ignores manual-trigger all-pipelines and accepts the string form', () => {
+    // A manual- or event-trigger "process all" pipeline runs nothing on its own.
+    expect(hasAllPlaylistPipeline([allPipeline(203, { trigger: 'manual' })])).toBe(false);
+    expect(hasAllPlaylistPipeline([allPipeline(204, { trigger: 'event' })])).toBe(false);
+    // The backend scheduler treats all four timer triggers as self-running.
+    expect(hasAllPlaylistPipeline([allPipeline(205, { trigger: 'weekly_time' })])).toBe(true);
+    expect(hasAllPlaylistPipeline([allPipeline(207, { trigger: 'daily_time' })])).toBe(true);
+    expect(hasAllPlaylistPipeline([allPipeline(208, { trigger: 'monthly_time' })])).toBe(true);
+    expect(hasAllPlaylistPipeline([allPipeline(206, { all: 'true' })])).toBe(true);
+  });
+
+  it('labels a playlist covered by the all-pipeline as scheduled (#1289)', () => {
+    expect(cardScheduleLabel(undefined, Date.now(), true)).toBe('All-playlists pipeline');
+    expect(cardScheduleLabel(undefined, Date.now(), false)).toBe('Not scheduled');
+    // A per-playlist schedule still wins over the pipeline.
+    expect(
+      cardScheduleLabel({ hours: 6, automationId: 1, weekly: false }, Date.now(), true),
+    ).toContain('6');
   });
 
   it('offers "Not scheduled" first, so turning it off is one click', () => {

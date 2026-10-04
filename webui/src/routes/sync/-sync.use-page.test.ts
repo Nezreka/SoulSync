@@ -195,4 +195,20 @@ describe('what it assembles', () => {
     expect(result.current.modals.open).toBeNull();
     expect(result.current.modals.openIdFor('tidal')).toBeNull();
   });
+
+  it('exposes the mirrored refetch on window for the vanilla match tool (#1289)', () => {
+    const reload = vi.fn();
+    const { result, unmount } = renderHook(() => useSyncPage());
+    // Set on mount
+    expect(window.reloadMirroredTab).toBe(result.current.reloadMirrored);
+    // Delegates to the registered tab reload
+    act(() => {
+      result.current.registerMirroredReload(reload);
+    });
+    window.reloadMirroredTab?.();
+    expect(reload).toHaveBeenCalledTimes(1);
+    // Removed on unmount
+    unmount();
+    expect(window.reloadMirroredTab).toBeUndefined();
+  });
 });

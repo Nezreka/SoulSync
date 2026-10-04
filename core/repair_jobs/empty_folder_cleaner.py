@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 from typing import Iterable, List
 
-from core.library.residual_files import JUNK_FILES, is_disposable, is_junk  # noqa: F401 — JUNK_FILES/is_junk re-exported
+from core.library.residual_files import JUNK_FILES, is_disposable, is_junk, is_release_junk  # noqa: F401 — JUNK_FILES/is_junk re-exported
 from core.repair_jobs import register_job
 from core.repair_jobs.base import is_internal_transfer_dir, JobContext, JobResult, RepairJob, walk_library
 from utils.logging_config import get_logger
@@ -36,9 +36,10 @@ def dir_is_removable(files: Iterable[str], surviving_subdirs: Iterable[str],
 
     Removable iff it has **no surviving subdirectories** and **no real files** —
     where "no real files" means literally empty, or (when ``ignore_junk``) only
-    OS-junk files, or (when ``ignore_disposable`` — #891) only *residual* files:
-    junk + cover/scan images + lyric/metadata sidecars. ``ignore_disposable`` is the
-    broader opt-in that clears the cover.jpg-only folders a reorganize leaves behind.
+    OS-junk files or release junk (nfo/sfv/srr/m3u — #1289), or (when
+    ``ignore_disposable`` — #891) only *residual* files: junk + cover/scan
+    images + lyric/metadata sidecars. ``ignore_disposable`` is the broader
+    opt-in that clears the cover.jpg-only folders a reorganize leaves behind.
     ``surviving_subdirs`` is the list of child dirs that are NOT themselves being
     removed (i.e. still hold content).
     """
@@ -50,7 +51,10 @@ def dir_is_removable(files: Iterable[str], surviving_subdirs: Iterable[str],
     if ignore_disposable:
         return all(is_disposable(f) for f in files)
     if ignore_junk:
-        return all(is_junk(f) for f in files)
+        # #1289: release junk (nfo/sfv/srr/m3u/m3u8) is worthless without
+        # audio, so it counts as junk by default. Cover images stay opt-in
+        # via ignore_disposable (#891); .cue/.lrc stay opt-in too.
+        return all(is_junk(f) or is_release_junk(f) for f in files)
     return False
 
 
@@ -135,11 +139,13 @@ class EmptyFolderCleanerJob(RepairJob):
                 continue
 
             flagged.add(dirpath)
-            junk = [f for f in filenames if is_junk(f)]
-            # Files that will be swept along with the folder (junk always; images/
-            # sidecars only when the residual option is on).
+            junk = [f for f in filenames if is_junk(f) or is_release_junk(f)]
+            # Files that will be swept along with the folder (junk + release junk
+            # always; images/sidecars only when the residual option is on).
+            # Must match _purgeable() in remove_empty_folder (#1289).
             purgeable = [f for f in filenames
-                         if is_junk(f) or (ignore_disposable and is_disposable(f))]
+                         if is_junk(f) or is_release_junk(f)
+                         or (ignore_disposable and is_disposable(f))]
             residual = [f for f in purgeable if not is_junk(f)]
             rel = os.path.relpath(dirpath, root)
             if context.report_progress:
@@ -213,7 +219,8 @@ def remove_empty_folder(folder_path: str, *, junk_files: List[str], remove_junk:
     def _purgeable(e: str) -> bool:
         if isdir(os.path.join(folder_path, e)):
             return False   # only files are leftovers; a subdir holds entries of its own
-        return (remove_junk and is_junk(e)) or (remove_disposable and is_disposable(e))
+        # #1289: release junk counts as junk by default (mirrors dir_is_removable)
+        return (remove_junk and (is_junk(e) or is_release_junk(e))) or (remove_disposable and is_disposable(e))
 
     # Re-check at apply time: only purgeable leftovers now? (Anything else = leave it.)
     entries = list(listdir(folder_path))
@@ -234,4 +241,4 @@ def remove_empty_folder(folder_path: str, *, junk_files: List[str], remove_junk:
     return {'removed': True, 'error': None}
 
 
-__all__ = ['dir_is_removable', 'is_junk', 'remove_empty_folder', 'EmptyFolderCleanerJob']
+__all__ = ['dir_is_removable', 'is_junk', 'is_release_junk', 'remove_empty_folder', 'EmptyFolderCleanerJob']

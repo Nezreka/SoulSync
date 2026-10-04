@@ -267,7 +267,7 @@ describe('discovery completion announcement', () => {
     act(() => result.current.resumeDiscovery('h1'));
 
     act(() => frame({ id: 'h1', platform: 'youtube', complete: true, spotify_matches: 4 }));
-    expect(spy).toHaveBeenCalledWith('Discovery complete!', 'success');
+    expect(spy).toHaveBeenCalledWith('Identification complete!', 'success');
     // The vanilla's socket AND always-on poll can both reach the block (9233,
     // 9281); the port announces once per run.
     act(() => frame({ id: 'h1', platform: 'youtube', complete: true, spotify_matches: 4 }));
@@ -333,7 +333,7 @@ describe('discovery completion announcement', () => {
     // The baseline is gone, so the NEXT run reports plainly (9198).
     act(() => result.current.resumeDiscovery('mirrored_3'));
     act(() => frame({ id: 'mirrored_3', platform: 'youtube', complete: true }));
-    expect(spy).toHaveBeenLastCalledWith('Discovery complete!', 'success');
+    expect(spy).toHaveBeenLastCalledWith('Identification complete!', 'success');
   });
 
   it('fires the source hook — how the LB mirror is reached (11075/11170)', () => {
@@ -358,7 +358,7 @@ describe('discovery completion announcement', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(SYNC_SOURCES.youtube.discovery.pollMs);
     });
-    expect(spy).toHaveBeenCalledWith('Discovery complete!', 'success');
+    expect(spy).toHaveBeenCalledWith('Identification complete!', 'success');
   });
 });
 
@@ -486,14 +486,14 @@ describe('resetDiscovery — the 🔄 Rediscover hard reset (10785 / 10837)', ()
     const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.youtube));
     act(() => result.current.hydrate('h1', HYDRATED));
     act(() => frame({ id: 'h1', platform: 'youtube', complete: true }));
-    expect(spy).toHaveBeenCalledWith('Discovery complete!', 'success');
+    expect(spy).toHaveBeenCalledWith('Identification complete!', 'success');
     spy.mockClear();
 
     await act(async () => {
       await result.current.resetDiscovery('h1');
     });
     act(() => frame({ id: 'h1', platform: 'youtube', complete: true }));
-    expect(spy).toHaveBeenCalledWith('Discovery complete!', 'success');
+    expect(spy).toHaveBeenCalledWith('Identification complete!', 'success');
   });
 });
 

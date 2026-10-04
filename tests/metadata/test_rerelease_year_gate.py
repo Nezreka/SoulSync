@@ -81,6 +81,8 @@ class TestMatcherYearGate:
     def test_rerelease_card_does_not_match_owned_original(self, db):
         # THE reported bug: own the 2005 original; the 2024 re-release card
         # must not read as owned.
+        # (#1289's year-gate exemption is Deezer-scoped, so this default/
+        # sourceless path keeps the gate: metadata_source=None here.)
         owned = [_album("Album X", 2005)]
         assert _match(db, "Album X", owned, year="2024") is None
 
@@ -108,6 +110,8 @@ class TestMatcherYearGate:
         # The gate now fires for ANY caller that supplies expected_year;
         # callers that pass no year (all other non-strict callers) are
         # byte-identical to before (see test_no_year_still_edition_matches...).
+        # (#1289's exemption is Deezer-scoped; no metadata_source here, so
+        # the gate holds.)
         owned = [_album("Album X", 2005)]
         assert _match(db, "Album X", owned, year="2024", strict=False) is None
 

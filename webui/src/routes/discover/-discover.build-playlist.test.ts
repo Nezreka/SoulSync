@@ -10,12 +10,14 @@ import {
   BP_GENERATE_FAILED,
   BP_MAX_REACHED,
   BP_MAX_SEEDS,
+  BP_NAME_MAX,
   BP_NEED_ONE,
   BP_NO_PLAYLIST_TRACKS,
   BP_NO_TRACKS,
   BP_PLAYLIST_SIZE,
   BP_RESULT_TITLE,
   BP_SEARCH_DEBOUNCE_MS,
+  BP_SYNC_STATUS_BASE,
   bpAddArtist,
   bpArtistImage,
   bpDownloadName,
@@ -23,12 +25,15 @@ import {
   bpGenerateError,
   bpMetaStats,
   bpNoResultsMessage,
+  bpPlaylistName,
   bpQueryIsEmpty,
   bpRemoveArtist,
   bpResultSubtitle,
   bpSearchOutcome,
   bpSearchUrl,
   bpSelectionState,
+  bpSyncDoneToast,
+  bpSyncId,
 } from './-discover.build-playlist';
 
 const a = (id: string, name = id): SeedArtist => ({ id, name });
@@ -207,5 +212,39 @@ describe('downloading the result', () => {
 
   it('keeps the no-tracks warning', () => {
     expect(BP_NO_PLAYLIST_TRACKS).toBe('No playlist tracks available');
+  });
+});
+
+describe('naming it (#1421)', () => {
+  it('caps the name box at BP_NAME_MAX', () => {
+    expect(BP_NAME_MAX).toBe(100);
+  });
+
+  it('trims and truncates the custom name', () => {
+    expect(bpPlaylistName('  My Mix  ', [])).toBe('My Mix');
+    expect(bpPlaylistName('x'.repeat(150), [])).toBe('x'.repeat(100));
+  });
+
+  it('falls back to the seed-built default on a blank name', () => {
+    // Clearing the box never sends an empty name the sync start refuses.
+    expect(bpPlaylistName('   ', [a('1', 'Alpha'), a('2', 'Beta')])).toBe(
+      'Custom Playlist - Alpha, Beta',
+    );
+  });
+
+  it('keys the sync id on the normalized name', () => {
+    // One fixed id meant every build overwrote the last "Custom Playlist";
+    // the hash keeps two names on two playlists and re-syncs in place.
+    expect(bpSyncId('My Mix')).toBe('discover_build_playlist_oen4nh');
+    expect(bpSyncId('  MY MIX  ')).toBe(bpSyncId('My Mix'));
+    expect(bpSyncId('Other Mix')).not.toBe(bpSyncId('My Mix'));
+  });
+
+  it('reads progress from the shared status base', () => {
+    expect(BP_SYNC_STATUS_BASE).toBe('build-playlist');
+  });
+
+  it('toasts the finished name', () => {
+    expect(bpSyncDoneToast('My Mix')).toBe('My Mix sync complete!');
   });
 });

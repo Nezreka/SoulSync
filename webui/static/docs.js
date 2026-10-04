@@ -1044,6 +1044,19 @@
                 ['limit', 'int', 0, 'Max items (max 200)', '50'],
                 ['fields', 'string', 0, 'Comma-separated field names'],
             ] }),
+            _ddE('GET', '/library/playlists', 'List curated playlists with track counts', { q: [
+                ['fields', 'string', 0, 'Comma-separated field names'],
+                ['profile_id', 'int', 0, 'Profile scope (or X-Profile-Id header)', '1'],
+            ] }),
+            _ddE('GET', '/library/playlists/{playlist_id}/tracks', 'Tracks in a playlist, in order', { q: [
+                ['fields', 'string', 0, 'Comma-separated field names'],
+                ['profile_id', 'int', 0, 'Profile scope (or X-Profile-Id header)', '1'],
+            ] }),
+            _ddE('GET', '/library/recently-played', 'Recently played tracks from listening history', { q: [
+                ['limit', 'int', 0, 'Max items (max 100)', '20'],
+                ['fields', 'string', 0, 'Comma-separated field names'],
+                ['profile_id', 'int', 0, 'Profile scope (or X-Profile-Id header)', '1'],
+            ] }),
             _ddE('GET', '/library/lookup', 'Resolve an artist/album/track by external provider ID', { q: [
                 ['type', 'string', 1, '"artist", "album", or "track"'],
                 ['provider', 'string', 1, '"spotify", "musicbrainz", "itunes", "deezer", "audiodb", "tidal", "qobuz", or "genius" (genius + type=album is a 400)'],

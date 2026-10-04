@@ -268,6 +268,8 @@ class QualityUpgradeScannerJob(RepairJob):
         for base in base_dirs:
             for root, _dirs, files in walk_library(base):
                 if context.check_stop():
+                    # #1289: must not record 'completed' for a partial scan.
+                    result.stopped_early = "Scan interrupted during directory walk."
                     return result
                 for fname in files:
                     if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
@@ -308,10 +310,16 @@ class QualityUpgradeScannerJob(RepairJob):
             context.config_manager, context.db, logger=logger,
         )
         hand_tagged = hand_tagged_path_keys(context.db)
+        total = len(audio_files)
         for i, fpath in enumerate(audio_files):
             if context.check_stop():
+                # #1289: must not record 'completed' for a partial scan.
+                result.stopped_early = (
+                    f"Scan interrupted. Stopped at file {i + 1} of {total}.")
                 return result
             if i % 20 == 0 and context.wait_if_paused():
+                result.stopped_early = (
+                    f"Scan interrupted. Stopped at file {i + 1} of {total}.")
                 return result
 
             fname = os.path.basename(fpath)
@@ -407,7 +415,15 @@ class QualityUpgradeScannerJob(RepairJob):
                     cutoff_index=cutoff_index,
                     acquired_quality_json=meta.get('acquired_quality_json'),
                     retention_json=meta.get('retention_json')):
-                issue = 'below_profile'
+                # #1289: a file whose format the profile doesn't target at all
+                # (FLAC under an MP3-only profile) is not "below" anything —
+                # flag it honestly instead of mislabeling it.
+                if aq.format and not any(
+                        not t.format or t.format.lower() == aq.format.lower()
+                        for t in targets):
+                    issue = 'format_not_in_profile'
+                else:
+                    issue = 'below_profile'
                 current_label = aq.label()
             else:
                 # Decodes fully AND meets the profile → genuinely good.
@@ -424,6 +440,14 @@ class QualityUpgradeScannerJob(RepairJob):
                 _desc = (f'"{disp_title}" by {disp_artist} failed real-audio '
                          f'verification (ffmpeg): {broken_reason}')
                 _severity = 'warning'
+            elif issue == 'format_not_in_profile':
+                _title = f'Format not in profile: {disp_title} ({current_label})'
+                _desc = (f'"{disp_title}" by {disp_artist} is {current_label}, '
+                         f'which your quality profile does not target '
+                         f'({", ".join(target_labels[:3])}'
+                         f'{"…" if len(target_labels) > 3 else ""}). '
+                         f'Add a {aq.format.upper()} target to stop flagging these.')
+                _severity = 'info'
             else:
                 _pref = targets[cutoff_index].label if cutoff_index is not None else None
                 _title = f'{"Upgradeable" if _pref else "Below quality"}: {disp_title} ({current_label})'

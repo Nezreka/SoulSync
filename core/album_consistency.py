@@ -16,6 +16,7 @@ from mutagen.mp4 import MP4, MP4FreeForm
 from mutagen.oggvorbis import OggVorbis
 from mutagen.oggopus import OggOpus
 
+from core.metadata.musicbrainz_tags import release_by_artist, track_title_agrees
 from utils.logging_config import get_logger
 
 logger = get_logger("album_consistency")
@@ -153,6 +154,21 @@ def _normalize_title(s):
     return ' '.join(s.split())
 
 
+def _credited_to(release, artist_name, mb_service, memo):
+    """release_by_artist, with the artist's musicbrainz id as a second chance: a
+    credit in another script ("宇多田ヒカル" for "Hikaru Utada") only matches by id.
+    the id lookup is cached and runs only when the names disagree."""
+    if release_by_artist(release, artist_name):
+        return True
+    if 'mbid' not in memo:
+        try:
+            memo['mbid'] = (mb_service.match_artist(artist_name) or {}).get('mbid')
+        except Exception as e:  # noqa: BLE001 - no id means names only
+            logger.debug("match_artist for release check failed: %s", e)
+            memo['mbid'] = None
+    return bool(memo['mbid']) and release_by_artist(release, artist_name, memo['mbid'])
+
+
 def _find_best_release(album_name, artist_name, track_count, mb_service):
     """Search MusicBrainz for the best release matching this album.
 
@@ -209,6 +225,7 @@ def _find_best_release(album_name, artist_name, track_count, mb_service):
         # Fetch full release data for each candidate and score them
         best_release = None
         best_score = -1
+        artist_memo = {}
 
         for mbid in candidate_mbids[:8]:  # Cap at 8 to limit API calls
             try:
@@ -217,6 +234,12 @@ def _find_best_release(album_name, artist_name, track_count, mb_service):
                                     'media', 'artist-credits']
                 )
                 if not release:
+                    continue
+                # a same-titled album by another band is not a worse candidate,
+                # it's the wrong one: "Mammoth" by Mammoth Mammoth (#1426)
+                if not _credited_to(release, artist_name, mb_service, artist_memo):
+                    logger.info("Skipping release %s... '%s': not credited to '%s'",
+                                mbid[:8], release.get('title'), artist_name)
                     continue
 
                 score = _score_release(release, track_count)
@@ -284,10 +307,13 @@ def _resolve_album_release(album_name, artist_name, track_count, mb_service):
                 release = mb_service.mb_client.get_release(
                     pinned, includes=['recordings', 'release-groups', 'labels',
                                       'media', 'artist-credits'])
-                if release and release.get('id'):
+                if release and release.get('id') and _credited_to(release, artist_name, mb_service, {}):
                     logger.info("Album consistency reusing pinned release %s... for '%s'",
                                 pinned[:8], album_name)
                     return release
+                if release and release.get('id'):
+                    logger.info("Pinned release %s... is not by '%s'; re-searching",
+                                pinned[:8], artist_name)
             except Exception as e:   # noqa: BLE001 - fall through to a fresh search
                 logger.debug("Pinned release %s fetch failed (%s); re-searching", pinned[:8], e)
 
@@ -322,10 +348,11 @@ def _match_files_to_tracklist(file_infos, release):
     matched = {}
     unmatched = []
 
-    # Pass 1: exact disc+track number match
+    # Pass 1: disc+track number match, if the title agrees. a slot alone pairs
+    # "Mr. Ed" with another album's "500 Horsepower" (#1426)
     for fi in file_infos:
         key = (fi.get('disc_number', 1), fi.get('track_number', 1))
-        if key in mb_lookup:
+        if key in mb_lookup and track_title_agrees(fi.get('title'), mb_lookup[key]):
             matched[fi['path']] = mb_lookup[key]
         else:
             unmatched.append(fi)

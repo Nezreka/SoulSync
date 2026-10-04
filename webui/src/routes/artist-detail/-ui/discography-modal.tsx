@@ -313,10 +313,21 @@ export function DiscographyModal({
                   <button className="discog-cancel-btn" type="button" onClick={onClose}>
                     Close
                   </button>
-                  {totals && totals.total_added > 0 && !asksFirst ? (
+                  {/* Static home: always mounted for download-capable profiles so
+                      Close never shifts when results arrive — enabled once
+                      processing finishes with wishlist additions. */}
+                  {!asksFirst ? (
                     <button
                       className="discog-submit-btn"
                       type="button"
+                      disabled={!(totals && totals.total_added > 0)}
+                      title={
+                        totals
+                          ? totals.total_added > 0
+                            ? 'Process the wishlist now'
+                            : 'Nothing was added to the wishlist'
+                          : 'Available when processing finishes'
+                      }
                       onClick={() => {
                         onClose();
                         void fetch('/api/wishlist/process', { method: 'POST' });

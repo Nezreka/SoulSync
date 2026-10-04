@@ -6,6 +6,7 @@ from functools import wraps
 from dataclasses import dataclass
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
+from core.http_error_status import http_error_status
 from utils.logging_config import get_logger
 from core.metadata.artist_album_cache import get_cached_artist_album_items, store_artist_album_items
 from core.metadata.cache import get_metadata_cache
@@ -34,7 +35,10 @@ def rate_limited(func):
             result = func(*args, **kwargs)
             return result
         except Exception as e:
-            if "rate limit" in str(e).lower() or "429" in str(e):
+            status = http_error_status(e)
+            is_rate_limit = (status == 429 if status is not None
+                             else "rate limit" in str(e).lower() or "429" in str(e))
+            if is_rate_limit:
                 logger.warning(f"Deezer rate limit hit, implementing backoff: {e}")
                 time.sleep(4.0)
             raise e

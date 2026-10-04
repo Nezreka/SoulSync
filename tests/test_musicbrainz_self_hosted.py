@@ -246,6 +246,28 @@ def test_http_failure_stays_on_mirror_and_respects_retry_budget(monkeypatch, ser
     assert sleeps == ([2.0, 4.0] if expected_calls == 3 else [])
 
 
+@pytest.mark.parametrize('release_group_id', [
+    '70f22429-9f90-477e-99ed-372346c584e7',  # URL contains "429"
+    'eb385037-b356-4147-868e-0ea773bb9a89',  # URL contains "503"
+])
+def test_404_with_transient_digits_in_release_id_is_not_retried(monkeypatch, server, release_group_id):
+    url, calls, outcomes = server
+    monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_BASE_URL', url)
+    monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_REQUEST_INTERVAL', '0.2')
+    clock = [100.0]
+    sleeps = []
+    _own_thread_clock(monkeypatch, clock, sleeps)
+    outcomes.append((404, {}))
+    client = mb.MusicBrainzClient()
+    client.session.trust_env = False
+
+    with pytest.raises(requests.HTTPError):
+        client._get(f'/release-group/{release_group_id}')
+
+    assert len(calls) == 1
+    assert sleeps == []
+
+
 def test_public_requests_are_paced_at_transport_boundary(monkeypatch):
     clock = [100.0]
     starts = []

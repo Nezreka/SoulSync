@@ -55,6 +55,31 @@ def _get(row: object, attr: str):
     return getattr(row, attr, None)
 
 
+RECS_ARTISTS_KEY = 'listening_recs_artists'
+RECS_TRACKS_KEY = 'listening_recs_tracks_full'
+
+
+def recs_key(base: str, profile_id: object) -> str:
+    """per-profile metadata key for stored recs. the metadata table is plain kv, so
+    the bare key was shared and the last profile scanned overwrote everyone else."""
+    try:
+        pid = int(profile_id)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        pid = 1
+    return f"{base}:{pid}"
+
+
+def read_recs_raw(get_metadata, base: str, profile_id: object):
+    """the stored blob for this profile. profile 1 falls back to the old bare key
+    so a single-user install keeps its recs until the next scan rewrites them."""
+    raw = get_metadata(recs_key(base, profile_id))
+    if raw:
+        return raw
+    if recs_key(base, profile_id) == recs_key(base, 1):
+        return get_metadata(base)
+    return None
+
+
 def choose_mix_fetch_source(active_source: object, active_can_fetch: bool) -> str:
     """Pick which source to fetch the "Listening Mix" top tracks from.
 

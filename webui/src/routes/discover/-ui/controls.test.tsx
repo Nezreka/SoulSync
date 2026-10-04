@@ -325,6 +325,8 @@ describe('build a playlist', () => {
       results: [],
       selected: [],
       hasResults: false,
+      name: '',
+      onNameChange: vi.fn(),
       onQueryChange: vi.fn(),
       onAdd: vi.fn(),
       onRemove: vi.fn(),
@@ -475,6 +477,15 @@ describe('build a playlist', () => {
       <BuildPlaylistSection {...bp({ selected: [seed('1', 'Aphex')], hasResults: true })} />,
     );
     expect(container.querySelector('#build-playlist-sync-status')).toBeNull();
+  });
+
+  it('lets the user name the generated playlist (#1421)', () => {
+    const p = bp({ selected: [seed('1', 'Aphex')], hasResults: true, name: 'Custom Playlist' });
+    render(<BuildPlaylistSection {...p} />);
+    const box = screen.getByLabelText('Generated Playlist') as HTMLInputElement;
+    expect(box.value).toBe('Custom Playlist');
+    fireEvent.change(box, { target: { value: 'Late Night' } });
+    expect(p.onNameChange).toHaveBeenCalledWith('Late Night');
   });
 
   it('downloads and syncs the generated playlist', () => {

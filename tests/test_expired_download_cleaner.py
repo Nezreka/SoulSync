@@ -159,3 +159,47 @@ def test_delete_origin_download_removes_real_file(tmp_path):
     res = delete_origin_download(db, entry, cfg)
     assert res["file_deleted"] is True and not f.exists()
     assert db.deleted_history == [5]
+
+
+# ── #1416: every profile's mirrors and watchlists protect, under every name ──
+
+@pytest.fixture()
+def real_db(tmp_path):
+    from database.music_database import MusicDatabase
+
+    class _Real(MusicDatabase):
+        candidates = []
+
+        def get_origin_cleanup_candidates(self):
+            return [dict(c) for c in self.candidates]
+
+    return _Real(str(tmp_path / 'm.db'))
+
+
+def _expired_ids(db):
+    findings = []
+    ctx = _ctx(db, {'playlist_retention': '2mo', 'watchlist_retention': '2mo',
+                    'keep_if_played_at_least': 2, 'use_curation_signals': False}, findings)
+    ctx.config_manager.get_active_media_server = lambda: 'navidrome'
+    ExpiredDownloadCleanerJob().scan(ctx)
+    return {f['details']['history_id'] for f in findings}
+
+
+def test_another_profiles_mirror_and_watchlist_protect_their_downloads(real_db):
+    thomas = real_db.create_profile('ThomasClan')
+    real_db.mirror_playlist('spotify', 'p-t', 'Thomas Mix', [], profile_id=thomas)
+    real_db.add_artist_to_watchlist('art-1', 'Kavinsky', profile_id=thomas)
+    real_db.candidates = [_cand(1, ctx='Thomas Mix'), _cand(2, origin='watchlist', ctx='Kavinsky'),
+                          _cand(3, ctx='Deleted Playlist')]
+    assert _expired_ids(real_db) == {3}
+
+
+def test_a_renamed_or_suffixed_mirror_still_protects(real_db):
+    thomas = real_db.create_profile('ThomasClan')
+    mid = real_db.mirror_playlist('spotify', 'p-r', 'Upstream Name', [], profile_id=thomas)
+    real_db.set_mirrored_playlist_custom_name(mid, 'My Rename', profile_id=thomas)
+    real_db.mirror_playlist('spotify', 'rr-a', 'Release Radar', [], profile_id=1)
+    real_db.mirror_playlist('spotify', 'rr-t', 'Release Radar', [], profile_id=thomas)
+    real_db.candidates = [_cand(1, ctx='My Rename'), _cand(2, ctx='Release Radar - ThomasClan'),
+                          _cand(3, ctx='Upstream Name')]
+    assert _expired_ids(real_db) == set()

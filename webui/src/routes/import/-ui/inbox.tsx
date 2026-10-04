@@ -622,6 +622,36 @@ function EmptyState({
   );
 }
 
+/**
+ * Static action slot: an inapplicable action renders an invisible,
+ * non-focusable placeholder of identical size, so Approve / Retry /
+ * Identify / Dismiss keep the same home on every row instead of
+ * shifting with each row's action set.
+ */
+function ActionPlaceholder({
+  variant,
+  label,
+  minWidth,
+}: {
+  variant: 'primary' | 'secondary' | 'ghost';
+  label: string;
+  minWidth?: number;
+}) {
+  return (
+    <span aria-hidden="true" style={{ visibility: 'hidden', display: 'inline-flex' }}>
+      <Button
+        variant={variant}
+        size="sm"
+        disabled
+        tabIndex={-1}
+        style={minWidth ? { minWidth } : undefined}
+      >
+        {label}
+      </Button>
+    </span>
+  );
+}
+
 function InboxRow({
   item,
   focused,
@@ -657,6 +687,12 @@ function InboxRow({
       ? (item.live.track_index / item.live.track_total) * 100
       : null;
   const openMatcher = () => void navigate({ to: '/import/match/$key', params: { key: item.key } });
+  // #1289: singles lead with the title tag (the prettiest signal); the
+  // filename stays as the subtitle below. Albums keep the folder-name
+  // primary from fix 1. guessed_name is the *album* guess, not the title —
+  // the title tag lives on files[0].
+  const singleTitle = item.kind === 'single' ? item.files[0]?.title : null;
+  const displayTitle = singleTitle || item.name || item.folder_name;
 
   return (
     <article
@@ -673,7 +709,7 @@ function InboxRow({
         <Checkbox
           checked={selected}
           disabled={!selectable}
-          aria-label={`Select ${item.name}`}
+          aria-label={`Select ${displayTitle}`}
           onCheckedChange={(next) => onSelectedChange(Boolean(next))}
         />
       </div>
@@ -694,10 +730,15 @@ function InboxRow({
 
       <div className={styles.rowBody}>
         <div className={styles.rowTitleLine}>
-          <span className={styles.rowTitle} title={item.name}>
-            {item.name || item.folder_name}
+          <span className={styles.rowTitle} title={displayTitle}>
+            {displayTitle}
           </span>
         </div>
+        {item.guessed_name && item.guessed_name !== displayTitle ? (
+          <span className={styles.rowGuessed} title={item.guessed_name}>
+            tags say “{item.guessed_name}”
+          </span>
+        ) : null}
         {item.artist ? (
           <span className={styles.rowArtist} title={item.artist}>
             {item.artist}
@@ -757,32 +798,46 @@ function InboxRow({
         ) : null}
         {actions.length > 0 ? (
           <div className={styles.rowActions}>
+            {/* Static homes: all four slots render in the same order on every
+                row; inapplicable actions are invisible placeholders so the
+                visible buttons never shift. */}
             {actions.includes('approve') ? (
               <Button variant="primary" size="sm" disabled={busy} onClick={onApprove}>
                 Approve
               </Button>
-            ) : null}
+            ) : (
+              <ActionPlaceholder variant="primary" label="Approve" />
+            )}
             {actions.includes('retry') ? (
               <Button variant="secondary" size="sm" disabled={busy} onClick={onRetry}>
                 Retry
               </Button>
-            ) : null}
+            ) : (
+              <ActionPlaceholder variant="secondary" label="Retry" />
+            )}
             {actions.includes('identify') ? (
               <Button
                 variant={actions.includes('approve') ? 'secondary' : 'primary'}
                 size="sm"
                 onClick={openMatcher}
+                // Static home: "Fix match" is wider than "Identify" — pin the
+                // width so Dismiss never shifts between rows.
+                style={{ minWidth: 86 }}
               >
                 {item.status === 'needs_review' || item.status === 'failed'
                   ? 'Fix match'
                   : 'Identify'}
               </Button>
-            ) : null}
+            ) : (
+              <ActionPlaceholder variant="primary" label="Identify" minWidth={86} />
+            )}
             {actions.includes('dismiss') ? (
               <Button variant="ghost" size="sm" disabled={busy} onClick={onDismiss}>
                 Dismiss
               </Button>
-            ) : null}
+            ) : (
+              <ActionPlaceholder variant="ghost" label="Dismiss" />
+            )}
           </div>
         ) : null}
       </div>

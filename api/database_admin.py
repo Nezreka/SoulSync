@@ -103,7 +103,10 @@ def create_blueprint():
 # == DATABASE UPDATER API      ==
 # ===============================
 
-def _db_update_progress_callback(current_item, processed, total, percentage):
+def _db_update_progress_callback(current_item, processed, total, percentage, unit="artists"):
+    # unit labels what processed/total count ("artists" for the scan phases,
+    # "tracks" for the post-scan tag reconcile) so the Tools page progress
+    # line reads "176 / 191 tracks" instead of "176 / 191 artists".
     logger.info(f"[DB Progress] {current_item} - {processed}/{total} ({percentage:.1f}%)")
     with db_update_lock:
         db_update_state.update({
@@ -111,6 +114,7 @@ def _db_update_progress_callback(current_item, processed, total, percentage):
             "processed": processed,
             "total": total,
             "progress": percentage,
+            "unit": unit,
             "last_progress_at": time.time(),  # heartbeat for the stall watchdog
         })
     _update_automation_progress(_db_update_automation_id,
@@ -569,7 +573,7 @@ def _run_soulsync_deep_scan():
         from core.library.standalone_scan import (
             plan_standalone_deep_scan, BLOCK_TRANSFER_PERMANENT, BLOCK_DESYNC,
         )
-        never_move = bool(config_manager.get('import.transfer_is_permanent', False))
+        never_move = bool(config_manager.get('import.transfer_is_permanent', True))
         plan = plan_standalone_deep_scan(transfer_files, db_paths, never_move=never_move)
         untracked = plan['untracked']
         move_blocked = plan['move_blocked']
@@ -581,15 +585,15 @@ def _run_soulsync_deep_scan():
         if untracked and move_blocked:
             blocked_count = len(untracked)
             if block_reason == BLOCK_TRANSFER_PERMANENT:
-                warn = (f"Deep scan: {blocked_count} file(s) in Transfer aren't in the database, "
-                        f"but Transfer is marked your permanent library — nothing was moved.")
+                warn = (f"Deep scan: {blocked_count} file(s) in your Music Library aren't in the database, "
+                        f"but it's marked your permanent library — nothing was moved.")
             else:  # BLOCK_DESYNC
                 pct = round(100 * blocked_count / max(1, len(transfer_files)))
                 warn = (f"Deep scan STOPPED to protect your library: {blocked_count} of "
-                        f"{len(transfer_files)} files in Transfer ({pct}%) aren't in the database. "
+                        f"{len(transfer_files)} files in your Music Library ({pct}%) aren't in the database. "
                         f"That usually means the database is out of sync with disk, not that you "
                         f"have {blocked_count} new files — so NOTHING was moved. Re-sync/import "
-                        f"before scanning, or enable 'Transfer is my permanent library'.")
+                        f"before scanning, or enable 'Music Library is my permanent library'.")
             logger.warning(f"[SoulSync Deep Scan] {warn}")
             add_activity_item("", "SoulSync Deep Scan — move blocked", warn, "Now")
         elif untracked and os.path.isdir(staging_path):
@@ -966,6 +970,7 @@ def start_database_update():
             "status": "running",
             "phase": f"{scan_type}: Initializing...",
             "progress": 0, "current_item": "", "processed": 0, "total": 0, "error_message": "",
+            "unit": "artists",
             # H16: new run epoch — a stale worker from a watchdog-superseded
             # run must not overwrite this run's terminal state.
             "run_epoch": db_update_state.get("run_epoch", 0) + 1,

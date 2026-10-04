@@ -206,3 +206,42 @@ export const BP_DOWNLOAD_PLAYLIST_ID = 'build_playlist_custom';
 export function bpDownloadName(selected: SeedArtist[]): string {
   return `Custom Playlist - ${selected.map((a) => a.name).join(', ')}`;
 }
+
+// ── Naming it (#1421) ───────────────────────────────────────────────────────
+
+/** the max the name box takes. server playlist names past this get silly. */
+export const BP_NAME_MAX = 100;
+
+/**
+ * the name the playlist goes out under, for download and sync alike.
+ *
+ * blank falls back to the seed-built default, so clearing the box never
+ * sends an empty name the sync start refuses.
+ */
+export function bpPlaylistName(raw: string, selected: SeedArtist[]): string {
+  const name = raw.trim().slice(0, BP_NAME_MAX);
+  return name || bpDownloadName(selected);
+}
+
+/**
+ * the sync id for one named playlist.
+ *
+ * the server playlist is found by NAME, and replace mode rebuilds it, so one
+ * fixed id meant every build overwrote the last "Custom Playlist". keyed on
+ * the name, two builds with two names are two playlists, and re-syncing the
+ * same name updates that one. the hash keeps non-latin names distinct.
+ */
+export function bpSyncId(name: string): string {
+  let h = 5381;
+  for (const ch of name.trim().toLowerCase()) {
+    h = ((h * 33) ^ ch.codePointAt(0)!) >>> 0;
+  }
+  return `discover_build_playlist_${h.toString(36)}`;
+}
+
+/** the progress block's base, the one the section reads. */
+export const BP_SYNC_STATUS_BASE = 'build-playlist';
+
+export function bpSyncDoneToast(name: string): string {
+  return `${name} sync complete!`;
+}

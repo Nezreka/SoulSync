@@ -20,7 +20,7 @@ import type {
 export function actionButtonText(phase: string): string {
   switch (phase) {
     case 'fresh':
-      return 'Discover';
+      return 'Identify';
     case 'discovering':
       return 'View Progress';
     case 'discovered':
@@ -41,11 +41,11 @@ export function actionButtonText(phase: string): string {
 export function phaseText(phase: string): string {
   switch (phase) {
     case 'fresh':
-      return 'Ready to discover';
+      return 'Ready to identify';
     case 'discovering':
-      return 'Discovering...';
+      return 'Identifying...';
     case 'discovered':
-      return 'Discovery Complete';
+      return 'Identification Complete';
     case 'syncing':
       return 'Syncing...';
     case 'sync_complete':

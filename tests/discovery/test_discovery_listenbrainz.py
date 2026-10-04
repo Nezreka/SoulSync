@@ -270,7 +270,7 @@ def test_completion_marks_phase_discovered():
 
 
 def test_activity_feed_logged():
-    """Completion appends activity feed entry mentioning ListenBrainz Discovery Complete."""
+    """Completion appends activity feed entry mentioning ListenBrainz Identification Complete."""
     states = {}
     _seed_state('lb8', states, tracks=[_track()])
     deps = _build_deps(states=states)
@@ -279,7 +279,7 @@ def test_activity_feed_logged():
 
     args, _ = deps._activity_log[0]
     title = args[1]
-    assert 'ListenBrainz Discovery Complete' in title
+    assert 'ListenBrainz Identification Complete' in title
 
 
 # ---------------------------------------------------------------------------

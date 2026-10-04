@@ -298,6 +298,9 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
     # the wrong file wearing the right name — reject it instead of filing a broken
     # item. Multi-episode spans scale the expectation (S01E01E02 ≈ 2× one episode).
     # Unknown expected runtime → no judgement (never reject on a guess).
+    # Episodes get a looser bar than movies: TV metadata runtimes are the broadcast
+    # slot WITH commercials (~60 min), while the files are the commercial-free cut
+    # (~42 min) — 0.70 of "expected" is a healthy episode, not a truncation.
     if probe is not None and not force and expected_duration_sec:
         actual = probe.get("duration_sec") or 0
         if probe.get("ok") and actual > 0:
@@ -305,7 +308,8 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
             if scope == "episode" and parsed.get("episode") and parsed.get("episode_end"):
                 span = max(1, (parsed.get("episode_end") or 0) - parsed["episode"] + 1)
             want = float(expected_duration_sec) * span
-            if want > 0 and actual < 0.75 * want:
+            ratio = 0.65 if scope == "episode" else 0.75
+            if want > 0 and actual < ratio * want:
                 return _reject("Runs %d of %d min — truncated download or the wrong file"
                                % (int(actual // 60), int(want // 60)))
 

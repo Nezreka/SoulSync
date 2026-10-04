@@ -145,6 +145,19 @@ def test_apply_sweeps_residual_then_folder_when_enabled(tmp_path):
     assert res['removed'] is True and not d.exists()
 
 
+def test_release_leftovers_count_as_residual(tmp_path):
+    # #1289: a scene release leaves nfo/sfv/srr/m3u behind once its audio moves
+    assert dir_is_removable(['album.nfo', 'album.sfv', 'album.srr', '00-album.m3u'], [],
+                            ignore_disposable=True) is True
+    root = tmp_path / 'lib'; root.mkdir()
+    d = root / 'Artist' / 'Old Release'; d.mkdir(parents=True)
+    for n in ('album.nfo', 'album.sfv', 'album.srr', '00-album.m3u'):
+        (d / n).write_text('x')
+    res = remove_empty_folder(str(d), junk_files=[], remove_junk=True,
+                              remove_disposable=True, root=str(root), **_fx())
+    assert res['removed'] is True and not d.exists()
+
+
 def test_apply_without_residual_opt_leaves_image_folder(tmp_path):
     # The default apply (no residual opt) must NOT delete a cover.jpg folder.
     root = tmp_path / 'lib'; root.mkdir()
@@ -211,3 +224,40 @@ def test_scan_keeps_residual_folder_when_opt_off(tmp_path):
         tmp_path, {'remove_junk_files': True, 'remove_residual_files': False})
     assert res_dir not in flagged
     assert keep not in flagged
+
+
+def test_release_junk_only_dir_removable_by_default():
+    """#1289 Bug 7: a folder holding only nfo/sfv/srr/m3u was never cleaned
+    because release sidecars were lumped into the opt-in disposable tier.
+    They are worthless without audio, so they count as junk by default."""
+    from core.repair_jobs.empty_folder_cleaner import dir_is_removable
+    assert dir_is_removable(['album.nfo', 'album.sfv', 'album.srr'], []) is True
+    assert dir_is_removable(['playlist.m3u', 'playlist.m3u8'], []) is True
+    # cover images stay opt-in (#891) — not release junk
+    assert dir_is_removable(['cover.jpg'], []) is False
+    # .cue/.lrc stay opt-in via disposable tier (not in bug scope)
+    assert dir_is_removable(['album.cue'], []) is False
+    assert dir_is_removable(['song.lrc'], []) is False
+    # real audio still blocks
+    assert dir_is_removable(['song.flac', 'album.nfo'], []) is False
+
+
+def test_apply_removes_release_junk_folder(tmp_path):
+    """#1289: the apply path must agree with the scan path — a folder the
+    scan flags as removable must actually be removable."""
+    from core.repair_jobs.empty_folder_cleaner import remove_empty_folder
+    d = tmp_path / 'release'
+    d.mkdir()
+    (d / 'album.nfo').write_text('x')
+    (d / 'album.sfv').write_text('x')
+    removed = []
+    folder = str(d)
+    result = remove_empty_folder(
+        folder, junk_files=[], remove_junk=True, root=str(tmp_path),
+        listdir=lambda p: [x.name for x in d.iterdir()],
+        isdir=lambda p: p == folder, islink=lambda p: False,
+        remove_file=lambda p: removed.append(p),
+        rmdir=lambda p: removed.append(f'rmdir:{p}'),
+    )
+    assert result['removed'] is True, result
+    assert any('album.nfo' in str(p) for p in removed)

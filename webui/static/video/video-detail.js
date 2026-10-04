@@ -779,6 +779,19 @@
                 '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">' + showGetLabel + '</span>' +
                 '<span class="discog-btn-shimmer"></span></button>';
         }
+        // "I have this" — the auto-matcher keys library rows by tmdb_id and
+        // sometimes whiffs (a title on disk with a NULL/wrong tmdb_id reads as
+        // "not in library"). TMDB preview pages are never owned — owned ones
+        // redirect to the library detail — so this is exactly the unowned
+        // case: let the user point this TMDB id at the right library row.
+        // Admin-gated server-side like the other library mutations.
+        if (d.source === 'tmdb' && (d.kind === 'movie' || d.kind === 'show') &&
+                d.tmdb_id && _canManualMatch()) {
+            html += '<button class="library-artist-watchlist-btn vd-action-secondary" type="button" data-vd-act="ihavethis" ' +
+                'title="Link this title to the copy already in your library">' +
+                '<span class="watchlist-icon">✓</span>' +
+                '<span class="watchlist-text">I have this</span></button>';
+        }
         // Whole-show wishlist — every missing AIRED episode across every season in
         // one click (the season bar only covers the selected season). YouTube
         // channels have their own wishlist system (yt wish buttons), so skip them.
@@ -830,6 +843,24 @@
                 '<span class="vd-manage-ic">' + (d.watched ? '↺' : '✓') + '</span> ' +
                 (d.watched ? 'Mark unwatched' : 'Mark watched') + '</button>';
         }
+        // Manual "I have this" link state — library pages only. When this row
+        // was linked by hand, the More menu offers the unlink (two-click).
+        var _mmLibId = (d.source !== 'tmdb' && (d.kind === 'movie' || d.kind === 'show') && d.id != null)
+            ? d.id : null;
+        if (_mmLibId != null && !d._mm_checked && _canManualMatch()) {
+            d._mm_checked = true;
+            fetch('/api/video/manual-match/status?kind=' + d.kind + '&library_id=' + _mmLibId,
+                { headers: { 'Accept': 'application/json' } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (res && res.tmdb_id) { d._mm_tmdb = res.tmdb_id; if (data === d) renderActions(d); }
+                }).catch(function () { /* stay silent — no link, no menu item */ });
+        }
+        if (d._mm_tmdb) {
+            more += '<button class="vd-manage-btn" type="button" data-vd-act="unlink" ' +
+                'title="This title was linked to your library by hand (I have this). Remove the link?">' +
+                '<span class="vd-manage-ic">🔗</span> Linked by hand — unlink</button>';
+        }
         // One button instead of four. With a single item behind it the menu is
         // pure overhead, so that item just rides in the main row.
         if (more) {
@@ -861,6 +892,220 @@
             var b = q('[data-vd-more] .vd-more-btn');
             if (b) b.setAttribute('aria-expanded', 'false');
         }
+    }
+
+    // ── "I have this" — manual library match ────────────────────────────────
+    // The auto-matcher keys library rows by tmdb_id; when it whiffs, the user
+    // points the TMDB id at the right library row themselves. After a link,
+    // the detail reload hits the redirect and lands on the library page —
+    // every surface (cards, rails, detail) then reads the title as owned.
+    function _canManualMatch() {
+        // Writes are admin-gated server-side (like the other library
+        // mutations); fail open here the way canDownload does.
+        try {
+            if (typeof getCurrentProfileContext !== 'function') return true;
+            var ctx = getCurrentProfileContext();
+            return !ctx || !!ctx.isAdmin;
+        } catch (e) { return true; }
+    }
+
+    var _vhtStyled = false;
+    function _haveThisStyles() {
+        if (_vhtStyled) return; _vhtStyled = true;
+        var css =
+            '.vht-overlay{position:fixed;inset:0;z-index:1200;display:flex;align-items:center;justify-content:center;' +
+            'background:rgba(4,4,8,.72);backdrop-filter:blur(6px);animation:vd-fade .18s ease;}' +
+            '.vht-modal{width:min(560px,94vw);max-height:86vh;display:flex;flex-direction:column;overflow:hidden;' +
+            'background:#14141c;border:1px solid rgba(255,255,255,.1);border-radius:16px;' +
+            'box-shadow:0 24px 80px rgba(0,0,0,.6);}' +
+            '.vht-head{display:flex;align-items:flex-start;gap:12px;padding:18px 18px 0;}' +
+            '.vht-title{font-size:17px;font-weight:700;}' +
+            '.vht-sub{font-size:13px;opacity:.65;margin-top:4px;line-height:1.45;}' +
+            '.vht-x{margin-left:auto;background:none;border:0;color:inherit;font-size:16px;cursor:pointer;opacity:.6;padding:4px;}' +
+            '.vht-x:hover{opacity:1;}' +
+            '.vht-search{margin:14px 18px 0;padding:10px 14px;font-size:14px;color:inherit;background:rgba(255,255,255,.06);' +
+            'border:1px solid rgba(255,255,255,.14);border-radius:10px;outline:none;}' +
+            '.vht-search:focus{border-color:rgba(255,255,255,.35);}' +
+            '.vht-results{overflow-y:auto;padding:10px 12px 4px;min-height:120px;}' +
+            '.vht-hint{padding:26px 10px;text-align:center;font-size:13px;opacity:.5;}' +
+            '.vht-row{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:8px;border:0;border-radius:10px;' +
+            'background:none;color:inherit;cursor:pointer;}' +
+            '.vht-row:hover{background:rgba(255,255,255,.06);}' +
+            '.vht-row--sel{background:rgba(88,101,242,.18);outline:1px solid rgba(88,101,242,.55);}' +
+            '.vht-poster{width:40px;height:60px;object-fit:cover;border-radius:6px;background:rgba(255,255,255,.06);flex:none;}' +
+            '.vht-row-t{display:flex;flex-direction:column;gap:2px;min-width:0;}' +
+            '.vht-row-title{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+            '.vht-row-sub{font-size:12px;opacity:.55;}' +
+            '.vht-check{margin-left:auto;font-size:16px;color:#5865f2;opacity:0;flex:none;}' +
+            '.vht-row--sel .vht-check{opacity:1;}' +
+            '.vht-foot{display:flex;justify-content:flex-end;gap:10px;padding:14px 18px 18px;}' +
+            '.vht-foot button{padding:9px 18px;font-size:14px;border-radius:10px;cursor:pointer;border:1px solid rgba(255,255,255,.14);' +
+            'background:rgba(255,255,255,.06);color:inherit;}' +
+            '.vht-foot .vht-link{background:#5865f2;border-color:#5865f2;color:#fff;font-weight:600;}' +
+            '.vht-foot .vht-link:disabled{opacity:.4;cursor:default;}';
+        var st = document.createElement('style');
+        st.textContent = css;
+        document.head.appendChild(st);
+    }
+
+    function closeHaveThisModal() {
+        var ov = document.querySelector('.vht-overlay');
+        if (ov) ov.remove();
+        document.removeEventListener('keydown', _vhtKey);
+    }
+    function _vhtKey(e) {
+        if (e.key === 'Escape') closeHaveThisModal();
+    }
+
+    function openHaveThisModal() {
+        if (!data || data.source !== 'tmdb' || !data.tmdb_id ||
+                (data.kind !== 'movie' && data.kind !== 'show')) return;
+        _haveThisStyles();
+        closeHaveThisModal();
+        var kind = data.kind, tmdbId = data.tmdb_id, d = data;
+        var kindNoun = kind === 'movie' ? 'movies' : 'shows';
+        var ov = document.createElement('div');
+        ov.className = 'vht-overlay';
+        ov.innerHTML =
+            '<div class="vht-modal" role="dialog" aria-modal="true" aria-label="I have this">' +
+                '<div class="vht-head"><div>' +
+                    '<div class="vht-title">I have this</div>' +
+                    '<div class="vht-sub">SoulSync couldn\u2019t match <b>' + esc(d.title || '') + '</b> ' +
+                    'to your library. Search below for the copy you actually own, then link them.</div>' +
+                '</div><button class="vht-x" type="button" data-vht="close" aria-label="Close">\u2715</button></div>' +
+                '<input class="vht-search" type="search" placeholder="Search your ' + kindNoun + '\u2026" ' +
+                    'autocomplete="off" value="' + esc(d.title || '') + '">' +
+                '<div class="vht-results" data-vht-results></div>' +
+                '<div class="vht-foot"><button type="button" data-vht="close">Cancel</button>' +
+                '<button class="vht-link" type="button" data-vht="link" disabled>Link selected</button></div>' +
+            '</div>';
+        document.body.appendChild(ov);
+        document.addEventListener('keydown', _vhtKey);
+        var input = ov.querySelector('.vht-search');
+        var box = ov.querySelector('[data-vht-results]');
+        var linkBtn = ov.querySelector('[data-vht="link"]');
+        var selected = null, timer = null, seq = 0;
+
+        function hint(t) { box.innerHTML = '<div class="vht-hint">' + t + '</div>'; }
+        function search(qry, mySeq) {
+            fetch('/api/video/manual-match/search?kind=' + kind + '&q=' + encodeURIComponent(qry),
+                { headers: { 'Accept': 'application/json' } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (mySeq !== seq || !document.body.contains(ov)) return;
+                    selected = null; linkBtn.disabled = true;
+                    var list = (res && res.results) || [];
+                    if (!list.length) { hint('No matches in your library — try a shorter search.'); return; }
+                    box.innerHTML = list.map(function (r) {
+                        var note = (r.tmdb_id && String(r.tmdb_id) !== String(tmdbId))
+                            ? 'auto-matched elsewhere' : (r.tmdb_id ? 'already matched' : 'unmatched');
+                        return '<button class="vht-row" type="button" data-vht-pick="' + r.id + '">' +
+                            '<img class="vht-poster" src="/api/video/poster/' + kind + '/' + r.id + '" alt="" loading="lazy" ' +
+                                'onerror="this.style.visibility=\'hidden\'">' +
+                            '<span class="vht-row-t"><span class="vht-row-title">' + esc(r.title || '') + '</span>' +
+                            '<span class="vht-row-sub">' + esc(r.year || '\u2014') + ' \u00b7 ' + note + '</span></span>' +
+                            '<span class="vht-check">\u2713</span></button>';
+                    }).join('');
+                })
+                .catch(function () { if (mySeq === seq) hint('Search failed — try again.'); });
+        }
+        function kick() {
+            var qry = input.value.trim();
+            clearTimeout(timer);
+            if (qry.length < 2) {
+                selected = null; linkBtn.disabled = true;
+                hint('Type at least 2 characters to search your ' + kindNoun + '.');
+                return;
+            }
+            timer = setTimeout(function () { search(qry, ++seq); }, 300);
+        }
+        ov.addEventListener('click', function (e) {
+            var c = e.target.closest('[data-vht]');
+            if (c) {
+                var w = c.getAttribute('data-vht');
+                if (w === 'close') { closeHaveThisModal(); return; }
+                if (w === 'link') { doLink(); return; }
+            }
+            var pick = e.target.closest('[data-vht-pick]');
+            if (pick) {
+                selected = pick.getAttribute('data-vht-pick');
+                var rows = box.querySelectorAll('.vht-row');
+                for (var i = 0; i < rows.length; i++)
+                    rows[i].classList.toggle('vht-row--sel', rows[i] === pick);
+                linkBtn.disabled = false;
+                return;
+            }
+            if (e.target === ov) closeHaveThisModal();
+        });
+        function doLink() {
+            if (!selected || linkBtn.disabled) return;
+            linkBtn.disabled = true;
+            linkBtn.textContent = 'Linking\u2026';
+            fetch('/api/video/manual-match', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ kind: kind, tmdb_id: tmdbId, library_id: parseInt(selected, 10) })
+            })
+                .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+                .then(function (res) {
+                    if (res.ok && res.j && res.j.success) {
+                        closeHaveThisModal();
+                                                    toast('Linked \u2014 this title now shows as in your library');
+                        // The reload hits the new manual link: tmdb_detail
+                        // answers with the redirect and we land on the
+                        // library page.
+                        if (kind === 'movie') loadMovie(currentId, 'tmdb');
+                        else loadShow(currentId, 'tmdb');
+                    } else {
+                        linkBtn.disabled = false;
+                        linkBtn.textContent = 'Link selected';
+                                                    toast('Couldn\u2019t link \u2014 is that title still in your library?', 'error');
+                    }
+                })
+                .catch(function () {
+                    linkBtn.disabled = false;
+                    linkBtn.textContent = 'Link selected';
+                    if (typeof showToast === 'function') showToast('Couldn\u2019t reach the server', 'error');
+                });
+        }
+        input.addEventListener('input', kick);
+        input.focus();
+        try { input.select(); } catch (e) { /* noop */ }
+        kick();   // the TMDB title is pre-filled — search it immediately
+    }
+
+    // Remove a hand-made link. Two-click arm (no native confirm anywhere on
+    // this page): first click arms, second click unlinks.
+    function unlinkManualMatch(btn) {
+        if (!data || data.source === 'tmdb' || !data._mm_tmdb) return;
+        if (!btn.getAttribute('data-vht-armed')) {
+            btn.setAttribute('data-vht-armed', '1');
+            btn.innerHTML = '<span class="vd-manage-ic">\uD83D\uDD17</span> Click again to unlink';
+            setTimeout(function () {
+                if (data && data._mm_tmdb && !btn.getAttribute('data-vht-done')) renderActions(data);
+            }, 4000);
+            return;
+        }
+        btn.setAttribute('data-vht-done', '1');
+        btn.disabled = true;
+        fetch('/api/video/manual-match', {
+            method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: data.kind, tmdb_id: data._mm_tmdb })
+        })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) {
+                if (res && res.success) {
+                    data._mm_tmdb = null; data._mm_checked = false;
+                    toast('Manual link removed');
+                    renderActions(data);
+                } else {
+                    btn.disabled = false;
+                    toast('Couldn\u2019t remove the link', 'error');
+                }
+            })
+            .catch(function () {
+                btn.disabled = false;
+                toast('Couldn\u2019t reach the server', 'error');
+            });
     }
 
     // Continue Watching: played/unplayed toggle → POST /detail/<kind>/<id>/watched
@@ -3079,6 +3324,8 @@
             else if (which === 'sync-show') syncShowNow(act);
             else if (which === 'sync-movie') syncMovieNow(act);
             else if (which === 'watched-toggle') toggleWatchedState(act);
+            else if (which === 'ihavethis') openHaveThisModal();
+            else if (which === 'unlink') unlinkManualMatch(act);
             else if (which === 'yt-follow') toggleYtFollow();
             else if (which === 'yt-pl-follow') toggleYtPlaylistFollowHero();
             else if (which === 'trailer' && data && data.trailer) openTrailer(data.trailer.key);

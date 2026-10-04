@@ -69,6 +69,7 @@ from core.metadata_service import (
     get_primary_source,
     get_source_priority,
 )
+from core.source_ids import id_column
 from utils.logging_config import get_logger
 
 logger = get_logger("library_reorganize")
@@ -264,15 +265,16 @@ def _resolve_better_edition(album_data, source_ids, file_tracks, primary_source)
     from core.metadata.canonical_resolver import (
         default_fetch_alternates,
         default_fetch_tracklist,
+        provider_artist_id,
         resolve_canonical_for_album,
     )
-    art_id = str(album_data.get('artist_id') or '')
     art_name = album_data.get('artist_name') or ''
     title = album_data.get('title') or ''
 
     def _alts(source, aid):
         return default_fetch_alternates(
-            source, aid, artist_id=art_id, artist_name=art_name, album_title=title,
+            source, aid, artist_id=provider_artist_id(album_data, source),
+            artist_name=art_name, album_title=title,
         )
 
     try:
@@ -811,7 +813,8 @@ def load_album_and_tracks(db, album_id):
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT al.*, ar.name as artist_name
+            SELECT al.*, ar.name as artist_name,
+                   ar.id as _artist_columns_start, ar.*
             FROM albums al
             JOIN artists ar ON al.artist_id = ar.id
             WHERE al.id = ?
@@ -821,7 +824,25 @@ def load_album_and_tracks(db, album_id):
         album_row = cursor.fetchone()
         if not album_row:
             return None, []
-        album_data = dict(album_row)
+        # Older and partial schemas may lack some enrichment columns. Read the
+        # artist side by position because album and artist rows share names
+        # like id and deezer_id; a combined sqlite3.Row resolves those names
+        # to the album value.
+        columns = [column[0] for column in cursor.description]
+        if '_artist_columns_start' in columns:
+            artist_start = columns.index('_artist_columns_start')
+            album_data = {
+                name: album_row[i] for i, name in enumerate(columns)
+                if i < artist_start
+            }
+            artist_columns = {
+                name: album_row[i] for i, name in enumerate(columns)
+                if i > artist_start
+            }
+            for source in ('spotify', 'itunes', 'deezer', 'discogs', 'musicbrainz'):
+                album_data[f'artist_{source}_id'] = artist_columns.get(id_column(source, 'artist'))
+        else:
+            album_data = dict(album_row)  # Legacy dict-backed database adapters.
 
         cursor.execute(
             """

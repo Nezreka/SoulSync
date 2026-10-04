@@ -91,7 +91,12 @@ let discoverPageInitialized = false;
  */
 window.startDiscoverVirtualSync = function (virtualPlaylistId, name, spotifyTracks) {
     playlistTrackCache[virtualPlaylistId] = spotifyTracks;
-    if (!spotifyPlaylists.find(p => p.id === virtualPlaylistId)) {
+    const existing = spotifyPlaylists.find(p => p.id === virtualPlaylistId);
+    if (existing) {
+        // same id, new run: the sync reads the name off this row
+        existing.name = name;
+        existing.track_count = spotifyTracks.length;
+    } else {
         spotifyPlaylists.push({ id: virtualPlaylistId, name, track_count: spotifyTracks.length });
     }
     return startPlaylistSync(virtualPlaylistId);
@@ -353,11 +358,11 @@ window.openLbPlaylistDiscovery = async function (identifier, title, tracks) {
                 console.log(`✅ Started ListenBrainz discovery for: ${title}`);
             } else {
                 console.error('❌ Error starting ListenBrainz discovery:', result.error);
-                showToast(`Error starting discovery: ${result.error}`, 'error');
+                showToast(`Error starting identification: ${result.error}`, 'error');
             }
         } catch (error) {
             console.error('❌ Error starting ListenBrainz discovery:', error);
-            showToast(`Error starting discovery: ${error.message}`, 'error');
+            showToast(`Error starting identification: ${error.message}`, 'error');
         }
 
         // Open the existing YouTube discovery modal infrastructure
@@ -367,7 +372,7 @@ window.openLbPlaylistDiscovery = async function (identifier, title, tracks) {
 
     } catch (error) {
         console.error('Error opening discovery modal for ListenBrainz playlist:', error);
-        showToast('Failed to open discovery modal', 'error');
+        showToast('Failed to open identification modal', 'error');
     }
 };
 

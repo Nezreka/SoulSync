@@ -23,6 +23,8 @@ export interface MirroredPlaylistRow {
   id: number;
   name?: string;
   display_name?: string;
+  /** the name it syncs under on the server, when another mirror shares its name */
+  sync_name?: string;
   custom_name?: string;
   source?: string;
   source_playlist_id?: string;
@@ -361,7 +363,7 @@ export function mirroredHash(id: number | string): string {
 
 /**
  * is there a discovery worth reopening? needs a non-fresh phase AND the
- * playlist behind it. a pipeline run after "clear discovery" paints a phase
+ * playlist behind it. a pipeline run after "clear identification" paints a phase
  * onto an empty state, and opening that showed a 0 track discovery modal with
  * nothing to do (#1405).
  */

@@ -285,6 +285,52 @@ class ExpiredDownloadCleanerJob(RepairJob):
             False,
         )
 
+    def _protected_names(self, context: JobContext):
+        """(mirrored playlist names, watched artist names), case-folded, that
+        keep their downloads.
+
+        every profile's, not just the admin's: these defaulted to profile 1,
+        so another profile's still-mirrored playlist protected nothing and its
+        downloads aged out from under it (#1416). a download records the name
+        the sync ran under, which is the upstream name, the user's rename, or
+        a collision-suffixed sync name, so all three count."""
+        db = context.db
+        try:
+            pids = [p.get('id') for p in (db.get_all_profiles() or []) if p.get('id') is not None]
+        except Exception as e:
+            logger.debug("expired cleanup: profile list failed: %s", e)
+            pids = []
+        pids = pids or [1]
+
+        mirrored, watched = set(), set()
+
+        def _add(target, name):
+            n = str(name or '').strip().casefold()
+            if n:
+                target.add(n)
+
+        for pid in pids:
+            try:
+                for p in (db.get_mirrored_playlists(profile_id=pid) or []):
+                    if isinstance(p, dict):
+                        _add(mirrored, p.get('name'))
+                        _add(mirrored, p.get('custom_name'))
+            except Exception as e:
+                logger.debug("expired cleanup: mirrored lookup failed for %s: %s", pid, e)
+            try:
+                for a in (db.get_watchlist_artists(profile_id=pid) or []):
+                    _add(watched, getattr(a, 'artist_name', None))
+            except Exception as e:
+                logger.debug("expired cleanup: watchlist lookup failed for %s: %s", pid, e)
+        try:
+            from core.playlists.sync_names import all_sync_names
+            server = context.config_manager.get_active_media_server() if context.config_manager else None
+            for name in all_sync_names(db, server).values():
+                _add(mirrored, name)
+        except Exception as e:
+            logger.debug("expired cleanup: sync names unavailable: %s", e)
+        return mirrored, watched
+
     def _get_settings(self, context: JobContext) -> dict:
         merged = dict(self.default_settings)
         if context.config_manager:
@@ -309,23 +355,7 @@ class ExpiredDownloadCleanerJob(RepairJob):
         if not candidates:
             return result
 
-        # Build the "protected" set: still-mirrored playlists + still-watched
-        # artists (by name — what origin_context stores). Case-folded.
-        mirrored_names, watched_names = set(), set()
-        try:
-            for p in (context.db.get_mirrored_playlists() or []):
-                n = (p.get('name') if isinstance(p, dict) else None) or ''
-                if n:
-                    mirrored_names.add(n.strip().casefold())
-        except Exception as e:
-            logger.debug("expired cleanup: mirrored-playlist lookup failed: %s", e)
-        try:
-            for a in (context.db.get_watchlist_artists() or []):
-                n = getattr(a, 'artist_name', None) or ''
-                if n:
-                    watched_names.add(n.strip().casefold())
-        except Exception as e:
-            logger.debug("expired cleanup: watchlist lookup failed: %s", e)
+        mirrored_names, watched_names = self._protected_names(context)
 
         # Anything downloaded before the library database was last rebuilt is
         # permanently out of scope. A rebuild wipes tracks/albums/artists —

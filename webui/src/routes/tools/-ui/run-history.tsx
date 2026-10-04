@@ -210,7 +210,9 @@ function RunRow({
 
           {run.error_text ? (
             <div className="repair-run-error">
-              <div className="repair-run-error-title">Why it failed</div>
+              <div className="repair-run-error-title">
+                {outcome === 'stopped' ? 'Why it stopped early' : 'Why it failed'}
+              </div>
               <pre className="repair-run-error-text">{run.error_text}</pre>
             </div>
           ) : outcome === 'failed' ? (

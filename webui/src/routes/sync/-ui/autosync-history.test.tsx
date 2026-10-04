@@ -196,7 +196,7 @@ describe('the entry card (1478-1572)', () => {
     const { container } = renderPanel([entry()]);
     expect(container.querySelector('.auto-sync-history-name')?.textContent).toBe('Late Night');
     expect(container.querySelector('.auto-sync-history-flow')?.textContent).toBe(
-      'auto_sync->Refresh->Discover->Sync + wishlist',
+      'auto_sync->Refresh->Identify->Sync + wishlist',
     );
     const delta = container.querySelector('.auto-sync-history-delta') as HTMLElement;
     expect(delta.textContent).toBe('12 tracks (+2)');

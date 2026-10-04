@@ -242,3 +242,22 @@ def test_chunk_refuses_bad_ids_paths_and_indexes(tmp_path):
     for kw in bad:
         _, status = routes.upload_chunk_to_staging(rt, chunk=_storage('a.flac'), **kw)
         assert status == 400, kw
+
+
+def test_partial_import_message_stranded_files():
+    """#1289 Bug 5: files left in Staging get file counts."""
+    from core.auto_import_worker import AutoImportWorker
+    w = AutoImportWorker.__new__(AutoImportWorker)
+    msg = w._partial_import_message(
+        {'matched_count': 1, 'unmatched_files': ['a.flac'] * 11}, [])
+    assert msg == "Only 1 of 12 files matched; 11 file(s) left in Staging"
+
+
+def test_partial_import_message_processing_failure():
+    """#1289 Bug 5: post-processing failures must not claim '0 files left'."""
+    from core.auto_import_worker import AutoImportWorker
+    w = AutoImportWorker.__new__(AutoImportWorker)
+    msg = w._partial_import_message(
+        {'matched_count': 3, 'unmatched_files': []}, ['disk full'])
+    assert msg == "Import partially failed: disk full"
+    assert '0 file' not in msg

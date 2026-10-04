@@ -1713,6 +1713,13 @@
                         <div class="vdsc-amb" data-vdsc-amb aria-hidden="true"></div>
                         <div class="vdsc-hero hidden" data-vdsc-hero></div>
 
+                        <!-- Story blocks — music-Discover parity: editorial story cards
+                             and a vertical trailer rail, composed from data the page
+                             already fetches. Hidden until the JS fills them. -->
+                        <section class="vdsc-stories hidden" data-vdsc-stories aria-label="Stories">
+                            <div class="vdsc-stories-row" data-vdsc-stories-row></div>
+                        </section>
+
                         <!-- ONE control row. Everything preference-shaped lives inside the
                              Preferences popover; browsing lives in the tile strip below. -->
                         <div class="vdsc-bar">
@@ -1775,9 +1782,22 @@
 
                         <div class="vdsc-shelves" data-vdsc-shelves></div>
 
+                        <!-- Trailers — a cinematic breather between the rails and the
+                             endless feed. Each card opens the title; the play button
+                             plays its trailer. Hidden until the JS fills it. -->
+                        <section class="vdsc-trailers hidden" data-vdsc-trailers aria-label="Trailers">
+                            <div class="vdsc-shelf-head">
+                                <div class="vdsc-shelf-titles">
+                                    <h3 class="vdsc-shelf-title">Trailers</h3>
+                                    <p class="vdsc-shelf-sub">Fresh previews, picked for you — play the trailer or open the title</p>
+                                </div>
+                            </div>
+                            <div class="vdsc-trail-rail" data-vdsc-trail-rail></div>
+                        </section>
+
                         <!-- Endless catalog feed — fills forever below the last rail group. -->
                         <section class="vdsc-explore" data-vdsc-explore hidden>
-                            <h2 class="vdsc-group-head">Keep exploring</h2>
+                            <div class="vdsc-group-head"><h2>Keep exploring</h2><p>An endless mix of movies &amp; shows</p></div>
                             <div class="vsr-grid vdsc-grid" data-vdsc-explore-grid></div>
                             <div class="vsr-loading hidden" data-vdsc-explore-loading>
                                 <div class="loading-spinner"></div>
@@ -1830,22 +1850,15 @@
                                 <div class="vdsc-chips" data-vdsc-chipset="providers" aria-label="Streaming service">
                                     <button class="vdsc-chip vdsc-chip--reset vdsc-chip--on" type="button"
                                         data-val="">Any service</button>
-                                    <button class="vdsc-chip" type="button" data-val="8"
-                                        style="--c: 229, 9, 20;">Netflix</button>
-                                    <button class="vdsc-chip" type="button" data-val="9" style="--c: 0, 168, 225;">Prime
+                                    <button class="vdsc-chip" type="button" data-val="8">Netflix</button>
+                                    <button class="vdsc-chip" type="button" data-val="9">Prime
                                         Video</button>
-                                    <button class="vdsc-chip" type="button" data-val="337"
-                                        style="--c: 37, 99, 235;">Disney+</button>
-                                    <button class="vdsc-chip" type="button" data-val="1899"
-                                        style="--c: 139, 92, 246;">Max</button>
-                                    <button class="vdsc-chip" type="button" data-val="350"
-                                        style="--c: 200, 200, 210;">Apple TV+</button>
-                                    <button class="vdsc-chip" type="button" data-val="15"
-                                        style="--c: 28, 231, 131;">Hulu</button>
-                                    <button class="vdsc-chip" type="button" data-val="531"
-                                        style="--c: 14, 116, 240;">Paramount+</button>
-                                    <button class="vdsc-chip" type="button" data-val="386"
-                                        style="--c: 147, 112, 219;">Peacock</button>
+                                    <button class="vdsc-chip" type="button" data-val="337">Disney+</button>
+                                    <button class="vdsc-chip" type="button" data-val="1899">Max</button>
+                                    <button class="vdsc-chip" type="button" data-val="350">Apple TV+</button>
+                                    <button class="vdsc-chip" type="button" data-val="15">Hulu</button>
+                                    <button class="vdsc-chip" type="button" data-val="531">Paramount+</button>
+                                    <button class="vdsc-chip" type="button" data-val="386">Peacock</button>
                                 </div>
                                 <div class="vdsc-filter-row">
                                     <div class="vdsc-chips vdsc-chips--era" data-vdsc-chipset="decade"
@@ -7491,6 +7504,30 @@
                                                     Downloads use the same torrent, usenet and Soulseek clients as music
                                                     &mdash; set those under Downloads.</small>
 
+                                                <div class="form-group">
+                                                    <label>Audible Marketplace:</label>
+                                                    <select id="audiobook-marketplace" class="form-select">
+                                                        <option value="us">United States (audible.com)</option>
+                                                        <option value="uk">United Kingdom (audible.co.uk)</option>
+                                                        <option value="de">Germany (audible.de)</option>
+                                                        <option value="fr">France (audible.fr)</option>
+                                                        <option value="ca">Canada (audible.ca)</option>
+                                                        <option value="au">Australia (audible.com.au)</option>
+                                                        <option value="it">Italy (audible.it)</option>
+                                                        <option value="es">Spain (audible.es)</option>
+                                                        <option value="in">India (audible.in)</option>
+                                                        <option value="jp">Japan (audible.co.jp)</option>
+                                                    </select>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Which Audible
+                                                        storefront the audiobook catalogue pages, author scans and
+                                                        follow checks query. Some titles are exclusive to one country's
+                                                        store, so picking the store you buy from finds books the US
+                                                        store never lists. Default: <code>us</code></small>
+                                                </div>
+
                                                 <!-- Same story as the music one: the Audiobooks tab of the chain
                                      widget (Settings -> Downloads) IS this setting. Kept as the
                                      transport saveSettings reads, hidden as a control. -->
@@ -7783,6 +7820,22 @@
                                                         (e.g., completing a discography where albums share tracks). When
                                                         disabled, tracks with the same name and artist are
                                                         skipped.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="wishlist-wing-it-guesses">
+                                                        <span>Search Wing It guesses as wishlist tracks</span>
+                                                    </label>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Wing It
+                                                        means a track couldn't be matched in the metadata catalogue
+                                                        — these are unmatched guesses, not tracks missing from your
+                                                        library. Off by default: guesses stay in the Wing It Pool for
+                                                        manual review. Turn this on to let guesses be searched like
+                                                        any other wishlist track.</small>
                                                 </div>
 
                                                 <div class="form-group">
@@ -8581,18 +8634,19 @@
                                                 <div class="setting-row">
                                                     <label class="checkbox-label">
                                                         <input type="checkbox" id="import-transfer-permanent">
-                                                        Transfer is my permanent library — never move files out
+                                                        Music Library is my permanent library — never move files out
                                                     </label>
                                                     <span class="info-icon" role="button" tabindex="0"
                                                         title="What's this?" onclick="toggleSettingHelp(this)"
                                                         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                                 </div>
                                                 <div class="help-text setting-help-body" hidden>
-                                                    Off by default. Turn this <strong>on</strong> if your Transfer
-                                                    folder is your
-                                                    real, permanent library (served by Navidrome/Plex/etc.) rather than
-                                                    a scratch
-                                                    drop area. A Deep Scan then never relocates files it doesn't
+                                                    On by default for new installs. Turn this <strong>off</strong> if
+                                                    your Music Library
+                                                    folder is just a scratch
+                                                    drop area rather than your real, permanent library (served by
+                                                    Navidrome/Plex/etc.). A Deep Scan then never relocates files it
+                                                    doesn't
                                                     recognize out to
                                                     Staging — it leaves them in place and just reports them. Even with
                                                     this off, a
@@ -8772,13 +8826,13 @@
                                             <div class="form-group">
                                                 <label>Whole-library M3U output folder:</label>
                                                 <input type="text" id="library-m3u-path" class="form-input"
-                                                    placeholder="leave empty for the Transfer folder">
+                                                    placeholder="leave empty for the Music Library folder">
                                                 <span class="info-icon" role="button" tabindex="0" title="What's this?"
                                                     onclick="toggleSettingHelp(this)"
                                                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                                 <div class="help-text setting-help-body" hidden>
                                                     Where the whole-library M3U is written. Leave empty to use your
-                                                    Transfer folder.
+                                                    Music Library folder.
                                                 </div>
                                             </div>
 
@@ -8786,9 +8840,9 @@
                                                 <label>Sync mode:</label>
                                                 <select id="playlist-sync-mode" class="form-select">
                                                     <option value="replace">Replace — recreate the playlist each sync
-                                                        (default)</option>
-                                                    <option value="reconcile">Reconcile — edit in place, keep image
-                                                        &amp; description</option>
+                                                    </option>
+                                                    <option value="reconcile" selected>Reconcile — edit in place, keep image
+                                                        &amp; description (default)</option>
                                                     <option value="append">Append — only add new tracks, never remove
                                                     </option>
                                                 </select>
@@ -8801,6 +8855,25 @@
                                                     same playlist in place (adds new tracks, removes ones no longer in
                                                     the source) so your custom image and description survive. "Append"
                                                     only ever adds.
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label class="checkbox-label">
+                                                    <input type="checkbox" id="playlist-sync-wishlist-missing" checked>
+                                                    Add missing tracks to the wishlist during sync
+                                                </label>
+                                                <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                                    onclick="toggleSettingHelp(this)"
+                                                    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                <div class="help-text setting-help-body" hidden>
+                                                    When on, syncing a playlist adds tracks missing from your
+                                                    library to the wishlist (which queues them for download).
+                                                    Turn it off and syncs skip the wishlist step — missing tracks
+                                                    are never added to the wishlist. (A playlist's own
+                                                    organize/folder-download setting is separate and still
+                                                    applies.) The Sync / Sync + download buttons always choose
+                                                    per click, regardless of this setting.
                                                 </div>
                                             </div>
 

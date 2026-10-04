@@ -76,7 +76,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 47   # v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 48   # v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -1022,6 +1022,11 @@ class VideoDatabase:
             return None
         conn = self._get_connection()
         try:
+            # The user's explicit "I have this" link wins over the row's own
+            # tmdb_id — that override is the whole point of the table.
+            manual = self._manual_match_map(conn, kind, [tmdb_id], server_source)
+            if tmdb_id in manual:
+                return manual[tmdb_id]
             if server_source:
                 row = conn.execute(
                     f"SELECT id FROM {table} WHERE tmdb_id=? AND server_source=? LIMIT 1",
@@ -1053,8 +1058,13 @@ class VideoDatabase:
             return out
         conn = self._get_connection()
         try:
+            # Manual "I have this" links first — the user's word beats the
+            # auto-matcher, and setdefault below keeps it that way.
+            out.update(self._manual_match_map(conn, kind, ids, server_source))
             for i in range(0, len(ids), 400):   # stay under SQLite's variable cap
-                chunk = ids[i:i + 400]
+                chunk = [x for x in ids[i:i + 400] if x not in out]
+                if not chunk:
+                    continue
                 ph = ",".join("?" * len(chunk))
                 sql = f"SELECT id, tmdb_id FROM {table} WHERE tmdb_id IN ({ph})"
                 args = list(chunk)
@@ -1066,6 +1076,148 @@ class VideoDatabase:
             return out
         except sqlite3.Error:
             return out
+        finally:
+            conn.close()
+
+    # ── manual library matches ("I have this") ─────────────────────────────
+    def set_manual_match(self, kind: str, tmdb_id, library_id) -> bool:
+        """Record that TMDB id ``tmdb_id`` IS library row ``library_id`` — the
+        user's explicit override for a title the auto-matcher whiffed on.
+        Returns False (and writes nothing) for a bad kind, non-integer ids, or
+        a library row that doesn't exist."""
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        try:
+            tmdb_id, library_id = int(tmdb_id), int(library_id)
+        except (TypeError, ValueError):
+            return False
+        if not table or tmdb_id <= 0 or library_id <= 0:
+            return False
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                f"SELECT id FROM {table} WHERE id=? LIMIT 1", (library_id,)).fetchone()
+            if not row:
+                return False
+            conn.execute(
+                "INSERT INTO video_manual_matches (kind, tmdb_id, library_id)"
+                " VALUES (?, ?, ?)"
+                " ON CONFLICT (kind, tmdb_id) DO UPDATE SET library_id=excluded.library_id,"
+                " created_at=CURRENT_TIMESTAMP",
+                (kind, tmdb_id, library_id))
+            conn.commit()
+            return True
+        except sqlite3.Error:
+            return False
+        finally:
+            conn.close()
+
+    def clear_manual_match(self, kind: str, tmdb_id) -> bool:
+        """Remove the user's manual link for a TMDB id. True when a row was
+        actually deleted."""
+        if kind not in ("movie", "show"):
+            return False
+        try:
+            tmdb_id = int(tmdb_id)
+        except (TypeError, ValueError):
+            return False
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM video_manual_matches WHERE kind=? AND tmdb_id=?",
+                (kind, tmdb_id))
+            conn.commit()
+            return cur.rowcount > 0
+        except sqlite3.Error:
+            return False
+        finally:
+            conn.close()
+
+    def manual_match_for_tmdb(self, kind: str, tmdb_id):
+        """The library row id the user manually linked to this TMDB id, or None."""
+        if kind not in ("movie", "show"):
+            return None
+        try:
+            tmdb_id = int(tmdb_id)
+        except (TypeError, ValueError):
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT library_id FROM video_manual_matches WHERE kind=? AND tmdb_id=?",
+                (kind, tmdb_id)).fetchone()
+            return int(row["library_id"]) if row else None
+        except sqlite3.Error:
+            return None
+        finally:
+            conn.close()
+
+    def manual_match_for_library(self, kind: str, library_id):
+        """The TMDB id the user manually linked to this library row, or None —
+        drives the 'manually linked' chip on the library detail page."""
+        if kind not in ("movie", "show"):
+            return None
+        try:
+            library_id = int(library_id)
+        except (TypeError, ValueError):
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT tmdb_id FROM video_manual_matches WHERE kind=? AND library_id=?",
+                (kind, library_id)).fetchone()
+            return int(row["tmdb_id"]) if row else None
+        except sqlite3.Error:
+            return None
+        finally:
+            conn.close()
+
+    def _manual_match_map(self, conn, kind: str, tmdb_ids, server_source=None) -> dict:
+        """{tmdb_id: library_id} manual links for these TMDB ids, restricted to
+        library rows that still exist (and to the active server when scoped)."""
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        ids = []
+        for x in (tmdb_ids or []):
+            try:
+                ids.append(int(x))
+            except (TypeError, ValueError):
+                pass
+        if not table or not ids:
+            return {}
+        ph = ",".join("?" * len(ids))
+        sql = ("SELECT m.tmdb_id, m.library_id FROM video_manual_matches m "
+               f"JOIN {table} t ON t.id = m.library_id "
+               f"WHERE m.kind=? AND m.tmdb_id IN ({ph})")
+        args = [kind] + ids
+        if server_source:
+            sql += " AND t.server_source=?"
+            args.append(server_source)
+        try:
+            return {r["tmdb_id"]: r["library_id"] for r in conn.execute(sql, args)}
+        except sqlite3.Error:
+            return {}
+
+    def search_library_titles(self, kind: str, query: str, limit: int = 12) -> list:
+        """Library rows whose title matches — the 'I have this' picker's search.
+
+        Unlike ``search_owned_titles`` this deliberately includes rows the
+        auto-matcher never linked (NULL tmdb_id): those are exactly the rows
+        the user is trying to point at. Returns
+        [{id, title, year, tmdb_id}]."""
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        if not table or not (query or "").strip():
+            return []
+        like = ("%" + query.strip().replace("\\", "\\\\").replace("%", "\\%")
+                .replace("_", "\\_") + "%")
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                f"SELECT id, title, year, tmdb_id FROM {table} "
+                f"WHERE {self._ON_SERVER} AND title LIKE ? ESCAPE '\\' "
+                f"ORDER BY title LIMIT ?",
+                (like, max(1, min(int(limit or 12), 50)))).fetchall()
+            return [dict(r) for r in rows]
+        except sqlite3.Error:
+            return []
         finally:
             conn.close()
 
@@ -1155,6 +1307,23 @@ class VideoDatabase:
             return r["tmdb_id"] if r and r["tmdb_id"] else None
         except (sqlite3.Error, ValueError, TypeError):
             return None
+        finally:
+            conn.close()
+
+    def episode_in_library(self, show_tmdb_id: int, season_number: int, episode_number: int) -> bool:
+        """Is a specific episode in the library (has_file=1)?"""
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                """SELECT e.id FROM episodes e
+                   JOIN shows s ON s.id = e.show_id
+                   WHERE s.tmdb_id = ? AND e.season_number = ? AND e.episode_number = ?
+                   AND e.has_file = 1 LIMIT 1""",
+                (int(show_tmdb_id), int(season_number), int(episode_number)),
+            ).fetchone()
+            return row is not None
+        except (sqlite3.Error, ValueError, TypeError):
+            return False
         finally:
             conn.close()
 
@@ -1579,6 +1748,9 @@ class VideoDatabase:
           or to 'not_found' on a clear;
         - textual metadata the old match gap-filled is cleared (unlocked fields
           only — user edits stay theirs), because gap-fill never overwrites;
+        - art (poster/backdrop/logo) the old match downloaded is cleared
+          (unlocked fields only), so the workers re-fetch for the new id —
+          otherwise the wrong title's backdrop sits on the detail page forever;
         - details/episodes/ratings sync flags and every backfill service's
           status reset, so the whole derived pipeline re-runs;
         - enrichment-sourced credits are dropped (they were the wrong title's).
@@ -1635,9 +1807,17 @@ class VideoDatabase:
                 sets.append("tmdb_match_status=" +
                             ("NULL" if external_id is not None else "'not_found'"))
                 sets.append("tmdb_last_attempted=NULL")
-                # Clear what the old match derived (never a locked field, never art).
+                # Clear what the old match derived (never a locked field).
                 for col in sorted(self._REMATCH_CLEAR_COLS & cols - locked):
                     sets.append(f"{col}=NULL")
+                # Art was derived from the old match too — a wrong TMDB id
+                # means the poster/backdrop/logo are the wrong title's. Clear
+                # them (unless the user locked the field) so the workers
+                # re-download for the new id; otherwise the stale wrong art
+                # sits on the detail page forever.
+                for col in ("poster_url", "backdrop_url", "logo_url"):
+                    if col in cols and col not in locked:
+                        sets.append(f"{col}=NULL")
                 # Re-run everything: detail backfill, episode cascade, OMDb
                 # ratings, and every id-keyed backfill service.
                 for flag in ("details_synced", "episodes_synced", "ratings_synced"):
@@ -9008,9 +9188,16 @@ class VideoDatabase:
                     d["has_file"] = bool(d.get("has_file"))
                 items.append(d)
             total_pages = max(1, (total + limit - 1) // limit)
-            return {"items": items, "total_size_bytes": total_size or 0, "pagination": {
+            result = {"items": items, "total_size_bytes": total_size or 0, "pagination": {
                 "page": page, "total_pages": total_pages, "total_count": total,
                 "has_prev": page > 1, "has_next": page < total_pages}}
+            if is_shows:
+                # Cheap global episode total for dashboard stats (extension, etc.).
+                try:
+                    result["total_episodes"] = conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
+                except Exception:
+                    result["total_episodes"] = 0
+            return result
         finally:
             conn.close()
 

@@ -873,3 +873,20 @@ CREATE TABLE IF NOT EXISTS video_extto_cache (
     fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_extto_cache_at ON video_extto_cache(fetched_at);
+
+-- Manual library matches ("I have this"). The auto-matcher keys library rows
+-- by tmdb_id, and sometimes it whiffs — a show sits in the library with a
+-- NULL or wrong tmdb_id while TMDB insists you own nothing (Australian
+-- Survivor: almost every season on disk, "not in library" on the detail
+-- page). This table records the user's explicit override: TMDB id X IS
+-- library row Y. Consulted FIRST by library_id_for_tmdb(_s), so the user's
+-- word beats both the row's own tmdb_id and any future re-match. Survives
+-- rescans — nothing but the user (or an explicit unlink) clears it.
+CREATE TABLE IF NOT EXISTS video_manual_matches (
+    kind       TEXT NOT NULL CHECK (kind IN ('movie', 'show')),
+    tmdb_id    INTEGER NOT NULL,
+    library_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (kind, tmdb_id)
+);
+CREATE INDEX IF NOT EXISTS idx_manual_matches_library ON video_manual_matches(library_id);

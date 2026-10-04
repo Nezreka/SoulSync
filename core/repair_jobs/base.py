@@ -173,6 +173,10 @@ class JobResult:
     auto_fixed: int = 0
     errors: int = 0
     skipped: int = 0
+    # set when the scan quit before the end for a reason that is not the user's
+    # stop (a rate limit, no provider). the run is then recorded as 'stopped'
+    # with this as the reason, not 'completed' (#1289)
+    stopped_early: str = ''
 
 
 @dataclass

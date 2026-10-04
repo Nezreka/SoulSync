@@ -14,6 +14,9 @@ class _FakeDB:
     def get_automations(self, profile_id=None):
         return self._autos
 
+    def get_all_automations(self):
+        return self._autos
+
 
 def test_no_automations_returns_empty():
     db = _FakeDB([])
@@ -69,6 +72,9 @@ def test_malformed_then_actions_swallowed():
 def test_db_failure_returns_empty():
     class _BrokenDB:
         def get_automations(self, profile_id=None):
+            raise RuntimeError("db dead")
+
+        def get_all_automations(self):
             raise RuntimeError("db dead")
     assert signals.collect_known_signals(_BrokenDB()) == []
 

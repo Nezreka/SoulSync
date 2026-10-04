@@ -108,12 +108,12 @@ def cleanup_wishlist_after_db_update(config_manager) -> None:
             # Check each artist. A match whose library row still points into
             # atomic-publish staging is not ownership (#1289) — the file is
             # quarantined and may never publish, so the request has to stand.
-            from core.wishlist.library_match import find_owned_match
+            from core.wishlist.library_match import find_owned_match, wishlist_row_requires_album
             from core.wishlist.removal_guard import REASON_ALREADY_OWNED
 
             match = find_owned_match(
                 db, track_name, artists, track_album, active_server,
-                strict_identity=True, require_album=track.get('source_type') == 'album',
+                strict_identity=True, require_album=wishlist_row_requires_album(track),
                 log=logger, log_prefix="[Auto Cleanup]")
 
             # If found in database, remove from wishlist

@@ -95,6 +95,34 @@ def _row_value(row, column: str, default=None):
         return default
     return default if value is None else value
 
+
+def _deezer_id_conflicts_with_card(db, candidate_album_id, card_source_id) -> bool:
+    """Does the library candidate carry a stored Deezer id that conflicts with the card's?
+
+    A stored id that differs from the card's is hard proof of different releases
+    (e.g. owned standard vs deluxe card), so the #1289 year-gate exemption must
+    not fire. Returns False — no conflict — when the card has no id, the
+    candidate has no stored Deezer id, a stored id equals the card's, or the
+    lookup is unavailable: a year mismatch alone cannot prove "different
+    release" for Deezer cards.
+    """
+    want = str(card_source_id or "").strip()
+    if not want:
+        return False
+    get_ids = getattr(db, "get_album_source_ids", None)
+    if not callable(get_ids):
+        return False
+    try:
+        id_map = get_ids([candidate_album_id]) or {}
+    except Exception:
+        return False
+    vals = id_map.get(candidate_album_id) or {}
+    for col in ("deezer_id", "album_deezer_id"):
+        stored = vals.get(col)
+        if stored and str(stored).strip() and str(stored).strip() != want:
+            return True
+    return False
+
 # ── MetaSync export column sets ──────────────────────────────────────────
 #
 # Named explicitly, never SELECT *: column ORDER differs between a fresh
@@ -8505,6 +8533,52 @@ class MusicDatabase:
             logger.error(f"get_manual_library_match error: {e}")
             return None
 
+    def get_manual_library_match_by_id(self, match_id: int,
+                                           profile_id: int) -> Optional[Dict[str, Any]]:
+        """Return a manual match row by PK id, scoped to profile_id.
+
+        #1289: the delete path needs the row's source_track_id BEFORE
+        deleting so mirrored in-library flags can be reset. The capped
+        list_manual_library_matches() cannot serve this — a match older than
+        the 100 most-recently-updated would silently skip the flag reset.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM manual_library_track_matches
+                    WHERE id = ? AND profile_id = ?
+                """, (match_id, profile_id))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"get_manual_library_match_by_id error: {e}")
+            return None
+
+    def find_all_manual_library_matches_by_source_track_id(
+        self, profile_id: int, source_track_id: str
+    ) -> list:
+        """Return ALL manual matches for a source track ID, any server_source.
+
+        #1289: the delete path's surviving-match guard must be
+        server-agnostic AND consider every survivor. The server-filtered
+        finder's SQL (`AND (server_source = ? OR server_source = '')`)
+        cannot see a survivor under a different server_source, and a
+        LIMIT 1 would let one dead survivor mask a live one — either
+        wrongly clears the mirrored in-library flag.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM manual_library_track_matches
+                    WHERE profile_id = ? AND source_track_id = ?
+                """, (profile_id, source_track_id))
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"find_all_manual_library_matches_by_source_track_id error: {e}")
+            return []
+
     def find_manual_library_match_by_source_track_id(self, profile_id: int,
                                                      source_track_id: str,
                                                      server_source: str = '') -> Optional[Dict[str, Any]]:
@@ -12296,7 +12370,7 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None, completeness_cache: Optional[Dict[Any, Any]] = None, candidate_tracks: Optional[List[Any]] = None) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
+    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None, completeness_cache: Optional[Dict[Any, Any]] = None, candidate_tracks: Optional[List[Any]] = None, metadata_source: Optional[str] = None, card_source_id: Optional[str] = None) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
         """
         Check if an album exists in the database with completeness information.
         Enhanced to handle edition matching (standard <-> deluxe variants).
@@ -12305,10 +12379,18 @@ class MusicDatabase:
         When `candidate_albums` is provided (via get_candidate_albums_for_artist),
         the matcher runs in-memory against that list instead of firing per-album
         SQL searches. `None` preserves the original search-every-time behavior.
+
+        `metadata_source` is the metadata provider the card came from
+        ('deezer', 'spotify', ...). Only 'deezer' relaxes the re-release year
+        gate (its release_date is the digital reissue date); any other value
+        keeps the historical behavior byte-for-byte. `card_source_id` is the
+        card's provider-side album id (Deezer album id for Deezer cards): when
+        the library candidate carries a different stored Deezer id, that is
+        hard proof of different releases and the exemption does not fire.
         """
         try:
             # Try enhanced edition-aware matching first with expected track count for Smart Edition Matching
-            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source, candidate_albums=candidate_albums, strict_discography_match=strict_discography_match, expected_year=expected_year)
+            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source, candidate_albums=candidate_albums, strict_discography_match=strict_discography_match, expected_year=expected_year, metadata_source=metadata_source, card_source_id=card_source_id)
 
             if not album:
                 return None, 0.0, 0, 0, False, []
@@ -12325,7 +12407,7 @@ class MusicDatabase:
             logger.error(f"Error checking album existence with completeness for '{title}' by '{artist}': {e}")
             return None, 0.0, 0, 0, False, []
     
-    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None) -> Tuple[Optional[DatabaseAlbum], float]:
+    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None, metadata_source: Optional[str] = None, card_source_id: Optional[str] = None) -> Tuple[Optional[DatabaseAlbum], float]:
         """
         Enhanced album existence check that handles edition variants.
         Matches standard albums with deluxe/platinum/special editions and vice versa.
@@ -12347,8 +12429,35 @@ class MusicDatabase:
                 # expected-track-count edition matching, so we don't need the
                 # per-variation SQL widening that the legacy path does.
                 logger.debug(f"Edition matching for '{title}' by '{artist}': batched against {len(candidate_albums)} candidates")
+                # #1289 (Deezer reissue dates): Deezer's release_date is the
+                # digital reissue date, so a year mismatch on a DEEZER card no
+                # longer proves "different release". When exactly ONE candidate
+                # has an exact normalized-title match, the year cannot be
+                # disambiguating anything — skip the re-release year gate for
+                # that candidate only. Scoped to Deezer: other sources'
+                # release years are trustworthy originals, so their gate (and
+                # any unknown/None source) stays byte-for-byte as before.
+                # With 0 or >=2 same-title candidates the gate stays exactly
+                # as before (>=2 is the true re-release ambiguity it was built
+                # for). Even for a single candidate the exemption does NOT fire
+                # when the library row carries a stored Deezer id that conflicts
+                # with the card's — hard proof of different releases (e.g. owned
+                # standard vs deluxe card). Normalization here is diacritics/case
+                # only, NOT edition-stripping, so "X (Deluxe)" never counts as "X".
+                gate_exempt = None
+                if expected_year is not None and (metadata_source or "").strip().lower() == "deezer":
+                    wanted_norm = self._normalize_for_comparison(title or "")
+                    if wanted_norm:
+                        exact = [a for a in candidate_albums
+                                 if self._normalize_for_comparison(getattr(a, "title", "") or "") == wanted_norm]
+                        if len(exact) == 1:
+                            candidate = exact[0]
+                            if not _deezer_id_conflicts_with_card(self, getattr(candidate, "id", None), card_source_id):
+                                gate_exempt = candidate
+                                logger.debug(f"  Year gate skipped for single exact-title candidate '{title}' (deezer card, #1289)")
                 for album in candidate_albums:
-                    confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year)
+                    ey = None if album is gate_exempt else expected_year
+                    confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=ey)
                     if confidence > best_confidence:
                         best_confidence = confidence
                         best_match = album
@@ -12668,18 +12777,31 @@ class MusicDatabase:
         expected_track_count: Optional[int],
         db_track_count: Optional[int],
     ) -> bool:
-        """Guard artist-page owned status against generic soundtrack false positives."""
-        if not self._is_soundtrack_like_album_title(search_title) and not self._is_soundtrack_like_album_title(db_title):
-            return True
+        """Guard artist-page owned status against generic soundtrack false positives.
 
+        #1448: in the non-soundtrack branch, reject when one normalized title is
+        a proper substring of the other — edition markers were already cleaned
+        above, so leftover words are meaningful and one title containing the
+        other means different releases (e.g. "Respiro" vs "Sessão Respiro").
+        """
         normalized_search_title = self._normalize_for_comparison(search_title)
         normalized_db_title = self._normalize_for_comparison(db_title)
-        if normalized_search_title == normalized_db_title:
+        if normalized_search_title and normalized_db_title and normalized_search_title == normalized_db_title:
             return True
 
         clean_search_title = self._normalize_for_comparison(self._clean_album_title_for_comparison(search_title))
         clean_db_title = self._normalize_for_comparison(self._clean_album_title_for_comparison(db_title))
-        if clean_search_title and clean_search_title == clean_db_title:
+        if clean_search_title and clean_db_title and clean_search_title == clean_db_title:
+            return True
+
+        if not self._is_soundtrack_like_album_title(search_title) and not self._is_soundtrack_like_album_title(db_title):
+            # #1448: edition markers were cleaned above, so leftover words are
+            # meaningful — one title containing the other means different releases.
+            # (The `and` truthiness guards are load-bearing: "" in "x" is True.)
+            if normalized_search_title and normalized_db_title and (
+                    normalized_search_title in normalized_db_title
+                    or normalized_db_title in normalized_search_title):
+                return False
             return True
 
         best_title_similarity = max(title_similarity, clean_title_similarity, normalized_title_similarity)
@@ -18670,7 +18792,7 @@ class MusicDatabase:
                 'server_source': server_source
             }
 
-    def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50, watchlist_filter: str = "all", profile_id: int = 1, source_filter: str = "", quality_filter: str = "", sort: str = "name") -> Dict[str, Any]:
+    def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50, watchlist_filter: str = "all", profile_id: int = 1, source_filter: str = "", quality_filter: str = "", sort: str = "name", skip_server_filter: bool = False) -> Dict[str, Any]:
         """
         Get artists for the library page with search, filtering, and pagination
 
@@ -18757,13 +18879,14 @@ class MusicDatabase:
                     where_conditions.append(f"(a.name, a.server_source) IN ({_upgradable_names_sql})")
                     params.extend(UPGRADE_JOBS)
 
-                # Get active server for filtering
-                from core.settings import config_manager
-                active_server = config_manager.get_active_media_server()
+                # Get active server for filtering (skip for API clients)
+                if not skip_server_filter:
+                    from core.settings import config_manager
+                    active_server = config_manager.get_active_media_server()
 
-                # Add active server filter to where conditions
-                where_conditions.append("a.server_source = ?")
-                params.append(active_server)
+                    # Add active server filter to where conditions
+                    where_conditions.append("a.server_source = ?")
+                    params.append(active_server)
 
                 # whose library this page shows (#1199)
                 scope_sql, scope_params = self._current_scope_sql('a.owner_profile_id')
@@ -21005,8 +21128,56 @@ class MusicDatabase:
 
     # ==================== Discovery Pool Methods ====================
 
-    def get_discovery_pool_matched(self, limit: int = 500) -> list:
-        """Get all cached discovery matches, ordered by most recently used."""
+    def _get_playlist_discovery_keys(self, playlist_id: int, profile_id: int = None) -> set:
+        """Return the set of (normalized_title, normalized_artist) discovery keys for a playlist.
+
+        discovery_match_cache is a global cache keyed by Python-normalized
+        (clean_title, clean_artist) pairs (see _get_discovery_cache_key), so per-playlist
+        filtering re-keys the playlist's tracks with the same normalization and filters
+        the cached rows in memory. The cache has no playlist column by design.
+        """
+        keys = set()
+        try:
+            engine = _matching_engine
+            if engine is None:
+                # #1452: failing closed here would silently empty the Matched
+                # tab whenever a playlist filter is applied, so log loudly —
+                # a missing matching engine breaks the app broadly anyway.
+                logger.warning(
+                    "Discovery pool playlist filter: matching engine unavailable, "
+                    "returning no matched keys"
+                )
+                return keys
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            query = """
+                SELECT mpt.track_name, mpt.artist_name
+                FROM mirrored_playlist_tracks mpt
+                JOIN mirrored_playlists mp ON mpt.playlist_id = mp.id
+                WHERE mpt.playlist_id = ?
+            """
+            params = [playlist_id]
+            if profile_id:
+                query += " AND mp.profile_id = ?"
+                params.append(profile_id)
+            cursor.execute(query, params)
+            for row in cursor.fetchall():
+                keys.add((engine.clean_title(row['track_name'] or ''),
+                          engine.clean_artist(row['artist_name'] or '')))
+            conn.close()
+        except Exception as e:
+            logger.error(f"Error getting playlist discovery keys: {e}")
+        return keys
+
+    def get_discovery_pool_matched(self, limit: int = 500, profile_id: int = None,
+                                   playlist_id: int = None) -> list:
+        """Get cached discovery matches, ordered by most recently used.
+
+        When ``playlist_id`` is given, only matches for tracks in that playlist are
+        returned. The cache is global and carries no playlist id, so the playlist's
+        tracks are re-keyed with the same normalization and the rows are filtered
+        in memory. Without ``playlist_id`` the result is identical to before.
+        """
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -21017,8 +21188,16 @@ class MusicDatabase:
                 ORDER BY last_used_at DESC
                 LIMIT ?
             """, (limit,))
+            rows = cursor.fetchall()
+            conn.close()
+
+            if playlist_id:
+                keys = self._get_playlist_discovery_keys(playlist_id, profile_id)
+                rows = [row for row in rows
+                        if (row['normalized_title'], row['normalized_artist']) in keys]
+
             results = []
-            for row in cursor.fetchall():
+            for row in rows:
                 try:
                     matched_data = json.loads(row['matched_data_json'])
                 except (json.JSONDecodeError, TypeError):
@@ -21078,13 +21257,55 @@ class MusicDatabase:
             logger.error(f"Error deleting discovery cache entry: {e}")
             return False
 
-    def get_discovery_pool_stats(self, profile_id: int = None) -> dict:
+    def clear_discovery_cache(self, playlist_id: int = None, profile_id: int = None) -> int:
+        """Delete cached discovery matches, optionally scoped to one playlist.
+
+        With playlist_id, only cache rows whose (normalized_title,
+        normalized_artist) key matches one of the playlist's tracks are
+        removed; without it the whole cache is emptied. Mirrored-playlist
+        track flags are untouched — the failed tab is per-track workflow
+        state, not cache. Returns the number of rows deleted. (#1452)
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            if playlist_id:
+                keys = self._get_playlist_discovery_keys(playlist_id, profile_id)
+                if not keys:
+                    return 0
+                # Note: the cache is global (no playlist column), so a row
+                # shared with other playlists is removed for them too. The
+                # only consequence is re-identification on next discovery.
+                placeholders = ",".join(["(?, ?)"] * len(keys))
+                flat = [v for pair in keys for v in pair]
+                cursor.execute(
+                    f"DELETE FROM discovery_match_cache WHERE (normalized_title, normalized_artist) IN ({placeholders})",
+                    flat,
+                )
+            else:
+                cursor.execute("DELETE FROM discovery_match_cache")
+            deleted = cursor.rowcount
+            conn.commit()
+            return deleted
+        except Exception as e:
+            logger.error(f"Error clearing discovery cache: {e}")
+            return 0
+
+    def get_discovery_pool_stats(self, profile_id: int = None, playlist_id: int = None) -> dict:
         """Get counts for matched and failed discovery tracks."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) as cnt FROM discovery_match_cache")
-            matched = cursor.fetchone()['cnt']
+            if playlist_id:
+                # Scope the matched count the same way as the matched query: the cache
+                # is global, so re-key the playlist's tracks and count matching rows.
+                keys = self._get_playlist_discovery_keys(playlist_id, profile_id)
+                cursor.execute("SELECT normalized_title, normalized_artist FROM discovery_match_cache")
+                matched = sum(1 for row in cursor.fetchall()
+                              if (row['normalized_title'], row['normalized_artist']) in keys)
+            else:
+                cursor.execute("SELECT COUNT(*) as cnt FROM discovery_match_cache")
+                matched = cursor.fetchone()['cnt']
 
             query = """
                 SELECT COUNT(*) as cnt FROM mirrored_playlist_tracks mpt
@@ -21093,11 +21314,15 @@ class MusicDatabase:
                   AND mpt.extra_data NOT LIKE '%"discovered": true%'
             """
             params = []
-            if profile_id:
+            if playlist_id:
+                query += " AND mpt.playlist_id = ?"
+                params.append(playlist_id)
+            elif profile_id:
                 query += " AND mp.profile_id = ?"
                 params.append(profile_id)
             cursor.execute(query, params)
             failed = cursor.fetchone()['cnt']
+            conn.close()
             return {'matched': matched, 'failed': failed}
         except Exception as e:
             logger.error(f"Error getting discovery pool stats: {e}")
@@ -21176,7 +21401,7 @@ class MusicDatabase:
             logger.error(f"Error getting wing it pool: {e}")
             return []
 
-    def get_wing_it_pool_stats(self, profile_id: int = None) -> dict:
+    def get_wing_it_pool_stats(self, profile_id: int = None, playlist_id: int = None) -> dict:
         """Counts for both Wing It states: unverified (``wing_it``) + resolved (``matched``)."""
         try:
             conn = self._get_connection()
@@ -21186,7 +21411,10 @@ class MusicDatabase:
                 q = (f"SELECT COUNT(*) as cnt FROM mirrored_playlist_tracks mpt "
                      f"JOIN mirrored_playlists mp ON mpt.playlist_id = mp.id WHERE {where}")
                 params = []
-                if profile_id:
+                if playlist_id:
+                    q += " AND mpt.playlist_id = ?"
+                    params.append(playlist_id)
+                elif profile_id:
                     q += " AND mp.profile_id = ?"
                     params.append(profile_id)
                 cursor.execute(q, params)
@@ -22435,6 +22663,22 @@ class MusicDatabase:
                     by_key[key] = card
                     cards.append(card)
 
+                # #1453: a rebuild wipes tracks but keeps library_history
+                # (the Expired Download Cleaner grandfathers pre-rebuild
+                # downloads off surviving history rows + library_rebuilt_at),
+                # so the fold above can build cards whose play target no
+                # longer exists. Drop those here — never delete the history
+                # rows themselves.
+                from core.library.expired_cleanup import path_suffix_key  # matches the existing lazy import at :21740
+                cursor.execute("SELECT file_path FROM tracks WHERE file_path IS NOT NULL")
+                live_keys = {path_suffix_key(r[0]) for r in cursor.fetchall()}
+                cards = [
+                    c for c in cards
+                    if not c.get('play_file_path')
+                    or os.path.exists(c['play_file_path'])
+                    or path_suffix_key(c['play_file_path']) in live_keys
+                ]
+
                 # the normalized columns are indexed; the LOWER(TRIM()) form
                 # this replaced scanned every album per card (1.3 s of cpu per
                 # dashboard load on 70k albums). the norm also folds accents,
@@ -23060,12 +23304,231 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             scope_sql, scope_params = self._current_scope_sql('owner_profile_id')
-            cursor.execute(f"SELECT * FROM {table} WHERE {scope_sql} ORDER BY created_at DESC LIMIT ?",
+            # COALESCE handles rows where created_at was never backfilled —
+            # updated_at is always set on write.
+            cursor.execute(f"SELECT * FROM {table} WHERE {scope_sql} ORDER BY COALESCE(created_at, updated_at) DESC LIMIT ?",
                            (*scope_params, limit))
             return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"API: Error getting recently added {entity_type}: {e}")
             return []
+
+    def api_list_curated_playlists(self, profile_id: int = 1) -> List[Dict[str, Any]]:
+        """List discovery curated playlists for a profile with track counts."""
+        try:
+            import json
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """SELECT id, playlist_type, track_ids_json, curated_date
+                       FROM discovery_curated_playlists
+                       WHERE profile_id = ?
+                       ORDER BY curated_date DESC""",
+                    (profile_id,),
+                )
+                out = []
+                for row in cursor.fetchall():
+                    d = dict(row)
+                    try:
+                        track_ids = json.loads(d.get("track_ids_json") or "[]")
+                    except Exception:
+                        track_ids = []
+                    out.append({
+                        "id": d.get("id"),
+                        "name": str(d.get("playlist_type") or "").replace("_", " ").title(),
+                        "playlist_type": d.get("playlist_type"),
+                        "track_count": len(track_ids),
+                        "curated_date": d.get("curated_date"),
+                    })
+                return out
+        except Exception as e:
+            logger.error(f"API: Error listing curated playlists: {e}")
+            return []
+
+    def api_get_curated_playlist_tracks(self, playlist_id: int, profile_id: int = 1) -> List[Dict[str, Any]]:
+        """Get track dicts for a curated playlist, in order.
+
+        Handles the different payload formats stored in track_ids_json:
+        - List of track IDs: [1, 2, 3]
+        - Dict with "tracks": {"tracks": [{"id": 1}, ...]} or {"tracks": [1, 2, 3]}
+        - Dict with "mixes" (Daily Mixes): {"mixes": [{"tracks": [...]}, ...]}
+
+        For entries without database IDs, falls back to title/artist matching.
+        """
+        try:
+            import json
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """SELECT track_ids_json FROM discovery_curated_playlists
+                       WHERE id = ? AND profile_id = ?""",
+                    (playlist_id, profile_id),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return []
+                try:
+                    payload = json.loads(row["track_ids_json"] or "[]")
+                except Exception:
+                    return []
+                # Debug: log payload structure.
+                if isinstance(payload, dict):
+                    logger.info(f"Playlist {playlist_id}: dict payload with keys {list(payload.keys())}")
+                    if "tracks" in payload and isinstance(payload["tracks"], list):
+                        logger.info(f"Playlist {playlist_id}: tracks list len={len(payload['tracks'])}, first={str(payload['tracks'][0])[:200] if payload['tracks'] else 'empty'}")
+                    if "mixes" in payload and isinstance(payload["mixes"], list):
+                        logger.info(f"Playlist {playlist_id}: mixes len={len(payload['mixes'])}")
+                elif isinstance(payload, list):
+                    logger.info(f"Playlist {playlist_id}: list payload len={len(payload)}, first={str(payload[0])[:200] if payload else 'empty'}")
+                entries = self._extract_curated_track_ids(payload)
+                logger.info(f"Playlist {playlist_id}: extracted {len(entries)} entries")
+                if not entries:
+                    return []
+                # Separate ID-based lookups from title/artist fallbacks.
+                id_entries = [(tid, t, a) for (tid, t, a) in entries if tid is not None]
+                name_entries = [(t, a) for (tid, t, a) in entries if tid is None and t]
+                by_id = {}
+                by_external = {}
+                if id_entries:
+                    tids = [tid for (tid, _, _) in id_entries]
+                    # Only bind int/str, never dicts.
+                    safe_tids = [tid for tid in tids if isinstance(tid, (int, str))]
+                    if safe_tids:
+                        placeholders = ",".join("?" for _ in safe_tids)
+                        # 1. Try database IDs.
+                        cursor.execute(
+                            f"SELECT * FROM tracks WHERE id IN ({placeholders})",
+                            tuple(safe_tids),
+                        )
+                        by_id = {str(r["id"]): dict(r) for r in cursor.fetchall()}
+                        # 2. Try Deezer IDs (numeric external IDs).
+                        # 3. Try Spotify IDs (string external IDs).
+                        remaining = [tid for tid in safe_tids if str(tid) not in by_id]
+                        if remaining:
+                            placeholders = ",".join("?" for _ in remaining)
+                            cursor.execute(
+                                f"SELECT * FROM tracks WHERE deezer_id IN ({placeholders})",
+                                tuple(remaining),
+                            )
+                            for r in cursor.fetchall():
+                                d = dict(r)
+                                if d.get("deezer_id"):
+                                    by_external[str(d["deezer_id"])] = d
+                            cursor.execute(
+                                f"SELECT * FROM tracks WHERE spotify_track_id IN ({placeholders})",
+                                tuple(remaining),
+                            )
+                            for r in cursor.fetchall():
+                                d = dict(r)
+                                if d.get("spotify_track_id"):
+                                    by_external[str(d["spotify_track_id"])] = d
+                # Title/artist fallback for entries without IDs.
+                # Tries exact match, then fuzzy (LIKE), then title-only.
+                name_matches = {}
+                for (title, artist) in name_entries:
+                    if not title:
+                        continue
+                    key = (title.lower(), (artist or "").lower())
+                    if key in name_matches:
+                        continue
+                    try:
+                        r = None
+                        if artist:
+                            # 1. Exact title + artist.
+                            cursor.execute(
+                                """SELECT t.* FROM tracks t
+                                   JOIN artists ar ON ar.id = t.artist_id
+                                   WHERE LOWER(t.title) = LOWER(?)
+                                   AND LOWER(ar.name) = LOWER(?)
+                                   LIMIT 1""",
+                                (title, artist),
+                            )
+                            r = cursor.fetchone()
+                            # 2. Fuzzy title + exact artist.
+                            if not r:
+                                cursor.execute(
+                                    """SELECT t.* FROM tracks t
+                                       JOIN artists ar ON ar.id = t.artist_id
+                                       WHERE LOWER(t.title) LIKE ?
+                                       AND LOWER(ar.name) = LOWER(?)
+                                       LIMIT 1""",
+                                    (f"%{title.lower()}%", artist),
+                                )
+                                r = cursor.fetchone()
+                        # 3. Title-only exact.
+                        if not r:
+                            cursor.execute(
+                                "SELECT * FROM tracks WHERE LOWER(title) = LOWER(?) LIMIT 1",
+                                (title,),
+                            )
+                            r = cursor.fetchone()
+                        # 4. Title-only fuzzy.
+                        if not r:
+                            cursor.execute(
+                                "SELECT * FROM tracks WHERE LOWER(title) LIKE ? LIMIT 1",
+                                (f"%{title.lower()}%",),
+                            )
+                            r = cursor.fetchone()
+                        if r:
+                            name_matches[key] = dict(r)
+                    except Exception as e:
+                        logger.warning(f"Playlist track fallback match failed for '{title}': {e}")
+                        continue
+                # Build result in playlist order.
+                out = []
+                for (tid, title, artist) in entries:
+                    if tid is not None and str(tid) in by_id:
+                        out.append(by_id[str(tid)])
+                    elif tid is not None and str(tid) in by_external:
+                        out.append(by_external[str(tid)])
+                    elif title:
+                        key = (title.lower(), (artist or "").lower())
+                        if key in name_matches:
+                            out.append(name_matches[key])
+                logger.info(f"Playlist {playlist_id}: matched {len(out)}/{len(entries)} entries ({len(by_id)} by ID, {len(by_external)} by external ID, {len(name_matches)} by name)")
+                if entries and not out:
+                    # Log a sample to diagnose matching failures.
+                    sample = entries[0]
+                    logger.info(f"Playlist {playlist_id}: sample entry title='{sample[1]}' artist='{sample[2]}'")
+                return out
+        except Exception as e:
+            logger.error(f"API: Error getting playlist tracks: {e}")
+            return []
+
+    def _extract_curated_track_ids(self, payload) -> List:
+        """Extract ordered track IDs from a curated playlist payload.
+
+        Returns a list of (id_or_none, title, artist) tuples. The ID may be
+        None if the payload only has display data (title/artist).
+        Handles both owned-track keys (title/artist) and discovery-pool
+        keys (track_name/artist_name).
+        """
+        def _title(d):
+            return d.get("title") or d.get("track_name") or d.get("name")
+        def _artist(d):
+            return d.get("artist") or d.get("artist_name")
+        if isinstance(payload, list):
+            out = []
+            for item in payload:
+                if isinstance(item, dict):
+                    tid = item.get("id") or item.get("track_id")
+                    if isinstance(tid, (int, str)):
+                        out.append((tid, _title(item), _artist(item)))
+                    elif _title(item):
+                        out.append((None, _title(item), _artist(item)))
+                elif isinstance(item, (int, str)):
+                    out.append((item, None, None))
+            return out
+        if isinstance(payload, dict):
+            if "tracks" in payload:
+                return self._extract_curated_track_ids(payload["tracks"])
+            if "mixes" in payload and isinstance(payload["mixes"], list):
+                out = []
+                for mix in payload["mixes"]:
+                    if isinstance(mix, dict) and "tracks" in mix:
+                        out.extend(self._extract_curated_track_ids(mix["tracks"]))
+                return out
+        return []
 
     def api_list_albums(self, search: str = "", artist_id: int = None,
                         year: int = None, page: int = 1, limit: int = 50) -> Dict[str, Any]:
@@ -23959,6 +24422,48 @@ class MusicDatabase:
             logger.error(f"Error getting mirrored playlist tracks: {e}")
             return []
 
+    def api_get_track_by_external_id(self, external_id: str) -> Optional[Dict[str, Any]]:
+        """Find a library track by Spotify/Deezer/etc external ID."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """SELECT t.*, a.name as artist_name
+                       FROM tracks t
+                       LEFT JOIN artists a ON t.artist_id = a.id
+                       WHERE t.spotify_track_id = ? OR t.deezer_id = ?
+                       LIMIT 1""",
+                    (external_id, external_id),
+                )
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception:
+            return None
+
+    def api_find_track_by_title_artist(self, title: str, artist: str = "") -> Optional[Dict[str, Any]]:
+        """Find a library track by title and artist name (fuzzy)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                if artist:
+                    cursor.execute(
+                        """SELECT t.*, ar.name as artist_name
+                           FROM tracks t
+                           JOIN artists ar ON ar.id = t.artist_id
+                           WHERE LOWER(t.title) LIKE ? AND LOWER(ar.name) = LOWER(?)
+                           LIMIT 1""",
+                        (f"%{title.lower()}%", artist),
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT t.*, a.name as artist_name FROM tracks t LEFT JOIN artists a ON t.artist_id = a.id WHERE LOWER(t.title) LIKE ? LIMIT 1",
+                        (f"%{title.lower()}%",),
+                    )
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception:
+            return None
+
     def update_mirrored_playlist_source_ref(
         self,
         playlist_id: int,
@@ -24330,7 +24835,13 @@ class MusicDatabase:
         *,
         profile_id: Optional[int] = None,
     ) -> bool:
-        """Delete a mirrored playlist and its tracks (CASCADE)."""
+        """Delete a mirrored playlist and its tracks (CASCADE).
+
+        Also removes Auto-Sync board-owned pipeline automations (owned_by='auto_sync')
+        scoped to this playlist so the dashboard Sync band stops rendering ghost
+        schedule rows for the deleted mirror (#1455). User-created automations are
+        never touched, and 'all' schedules (covering every playlist) survive.
+        """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -24339,11 +24850,70 @@ class MusicDatabase:
                     "DELETE FROM mirrored_playlists WHERE id = ?" + owner_sql,
                     [playlist_id, *owner_params],
                 )
+                deleted = cursor.rowcount > 0
+                if deleted:
+                    self._delete_auto_sync_automations_for_playlist(
+                        cursor, int(playlist_id), profile_id=profile_id
+                    )
                 conn.commit()
-                return cursor.rowcount > 0
+                return deleted
         except Exception as e:
             logger.error(f"Error deleting mirrored playlist: {e}")
             return False
+
+    @staticmethod
+    def _delete_auto_sync_automations_for_playlist(
+        cursor, playlist_id: int, profile_id: Optional[int] = None
+    ):
+        """Delete board-owned Auto-Sync automations scoped to one mirrored playlist.
+
+        Only rows the Auto-Sync board owns (owned_by='auto_sync') whose
+        action_config targets exactly this playlist_id are removed. The board
+        stores playlist_id as a JSON string; 'all' schedules (true/'true') apply
+        to every playlist and are left alone (#1455).
+
+        Static: needs only a cursor, so non-MusicDatabase owners of mirror
+        deletes (e.g. ListenBrainzManager) can reuse it.
+        """
+        try:
+            if profile_id is None:
+                cursor.execute(
+                    "SELECT id, action_config FROM automations WHERE owned_by = 'auto_sync'"
+                )
+            else:
+                cursor.execute(
+                    "SELECT id, action_config FROM automations WHERE owned_by = 'auto_sync' AND profile_id = ?",
+                    (int(profile_id),),
+                )
+            to_delete = []
+            for row in cursor.fetchall():
+                try:
+                    cfg = json.loads(row["action_config"] or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if not isinstance(cfg, dict):
+                    continue
+                if cfg.get("all") is True or str(cfg.get("all")).lower() == "true":
+                    continue  # applies to every playlist — not scoped to this one
+                raw = cfg.get("playlist_id")
+                if raw in (None, ""):
+                    continue
+                try:
+                    scoped_id = int(raw)
+                except (TypeError, ValueError):
+                    continue
+                if scoped_id == int(playlist_id):
+                    to_delete.append(row["id"])
+            if to_delete:
+                cursor.execute(
+                    f"DELETE FROM automations WHERE id IN ({','.join('?' * len(to_delete))})",
+                    to_delete,
+                )
+                logger.info(
+                    f"Deleted {cursor.rowcount} auto-sync automation(s) scoped to deleted playlist {playlist_id}"
+                )
+        except Exception as e:
+            logger.error(f"Error deleting auto-sync automations for playlist {playlist_id}: {e}")
 
     # ===========================
     # AUTOMATIONS CRUD
@@ -24353,21 +24923,26 @@ class MusicDatabase:
                           action_type: str, action_config: str, profile_id: int = 1,
                           notify_type: str = None, notify_config: str = '{}',
                           then_actions: str = '[]', group_name: str = None,
-                          owned_by: str = None):
+                          owned_by: str = None, is_system: bool = False,
+                          enabled: bool = True):
         """Create a new automation. Returns the new automation ID or None.
 
         ``owned_by`` tags an automation as managed by a feature surface
         (e.g. ``'auto_sync'`` for entries the Playlist Auto-Sync board
         creates) so that surface can recognize its own rows without
         scraping the display name.
+
+        ``is_system`` marks first-party system rows (e.g. repair-job
+        schedules from #1289): they render in the System section and
+        cannot be deleted via the API.
         """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    INSERT INTO automations (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions, group_name, owned_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions, group_name, owned_by))
+                    INSERT INTO automations (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions, group_name, owned_by, is_system, enabled)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions, group_name, owned_by, 1 if is_system else 0, 1 if enabled else 0))
                 conn.commit()
                 return cursor.lastrowid
         except Exception as e:
@@ -24386,6 +24961,27 @@ class MusicDatabase:
                 return [dict(row) for row in rows]
         except Exception as e:
             logger.error(f"Error getting automations: {e}")
+            return []
+
+    def get_all_automations(self):
+        """Get every automation in the table, regardless of owning profile.
+
+        Engine/internal view — the automation engine (start(), event cache,
+        signal-cycle detection) must see all enabled automations, not just
+        profile 1's, or non-admin automations silently stop after a restart
+        (timers are in-memory; issue #1428). The profile-filtered
+        ``get_automations()`` keeps serving the UI, which must stay scoped.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM automations ORDER BY is_system DESC, created_at DESC
+                """)
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting all automations: {e}")
             return []
 
     def get_system_automation_by_action(self, action_type: str):

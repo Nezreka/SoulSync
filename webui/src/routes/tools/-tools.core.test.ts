@@ -180,7 +180,7 @@ describe('finding labels', () => {
     expect(Object.keys(FINDING_SEVERITY_ICONS)).toHaveLength(4);
     expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(24);
     expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(22);
-    expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(13);
+    expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(14);
   });
 
   it('labels known finding types', () => {

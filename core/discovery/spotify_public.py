@@ -328,7 +328,7 @@ def run_spotify_public_discovery_worker(url_hash, deps: SpotifyPublicDiscoveryDe
 
         # Add activity for discovery completion
         source_label = discovery_source.upper()
-        deps.add_activity_item("", f"{deps.activity_label} Discovery Complete ({source_label})", f"'{playlist['name']}' - {successful_discoveries}/{len(tracks)} tracks found", "Now")
+        deps.add_activity_item("", f"{deps.activity_label} Identification Complete ({source_label})", f"'{playlist['name']}' - {successful_discoveries}/{len(tracks)} tracks found", "Now")
 
         logger.info(f"{deps.source_label} discovery complete ({source_label}): {successful_discoveries}/{len(tracks)} tracks found")
 

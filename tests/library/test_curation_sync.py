@@ -460,3 +460,36 @@ def test_malformed_settings_fall_back_to_defaults():
     cfg = _Cfg(settings=None)
     cfg._values['repair.jobs.expired_download_cleaner']['settings'] = "junk"
     assert curation_sweep_due(cfg, _StampDB()) is True
+
+
+def test_each_profiles_own_navidrome_login_counts(tmp_path):
+    """Cremonies: a song another user starred was still deletable, because only
+    the admin account was read. each profile's own login (Personal Settings) is
+    now read as well, alongside the configured account."""
+    from database.music_database import MusicDatabase
+    from core.library.curation_sync import navidrome_user_credentials
+    from core.navidrome_client import NavidromeClient
+
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    pid = db.create_profile("Thomas")
+    assert db.set_profile_navidrome_login(pid, "thomas", "thomaspw")
+    creds = navidrome_user_credentials(db)
+    assert ("thomas", "thomaspw") in creds
+
+    nav = NavidromeClient.__new__(NavidromeClient)
+    nav.base_url, nav.username, nav.password = "http://nav:4533", "admin", "adminpw"
+    nav.ensure_connection = lambda: True
+    starred_as = []
+
+    def _make_request(endpoint, params=None, as_user=None):
+        if endpoint == "getStarred2":
+            starred_as.append(as_user[0])
+            return {"starred2": {"song": [{"path": f"{as_user[0]}/Album/01.flac"}]}}
+        return {"playlists": {"playlist": []}}
+
+    nav._make_request = _make_request
+    stored = _DB()
+    summary = sync_curation_signals(stored, {"navidrome": nav},
+                                    user_credentials={"navidrome": creds})
+    assert starred_as == ["admin", "thomas"]
+    assert summary["users"] == 2 and summary["complete"]

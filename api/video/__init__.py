@@ -100,7 +100,11 @@ def create_video_blueprint() -> Blueprint:
             admin = admin or _p("/api/video/bulk", "/api/video/monitor",
                                  # single-episode monitor flip from the calendar
                                  "/api/video/episode/monitor",
-                                 "/api/video/poster/set", "/api/video/downloads/blocklist") \
+                                 "/api/video/poster/set", "/api/video/downloads/blocklist",
+                                 # manual "I have this" links — library matching
+                                 # management, same as the overrides below. The
+                                 # GETs (search/status) stay open.
+                                 "/api/video/manual-match") \
                 or path.endswith(("/metadata", "/lock", "/refresh-art",
                                   # season-wide monitor flip — same library
                                   # management as /api/video/monitor above
@@ -160,6 +164,7 @@ def create_video_blueprint() -> Blueprint:
     from .notifications import register_routes as reg_notifications
     from .backups import register_routes as reg_backups
     from .watch import register_routes as reg_watch
+    from .manual_match import register_routes as reg_manual_match
     reg_dashboard(bp)
     reg_scan(bp)
     reg_library(bp)
@@ -185,5 +190,6 @@ def create_video_blueprint() -> Blueprint:
     reg_notifications(bp)
     reg_backups(bp)
     reg_watch(bp)
+    reg_manual_match(bp)
 
     return bp

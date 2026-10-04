@@ -154,10 +154,13 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
         original_title = spotify_track.name
         spotify_id = getattr(spotify_track, 'id', '') or ''
 
-        # --- Sync match cache fast-path ---
-        if spotify_id:
+        # the discovered id first, then the playlist's own id: Find & Add files its
+        # match under the latter, which a wing-it stub never equals (#1289)
+        from core.sync.match_overrides import match_lookup_ids
+        for _match_id in match_lookup_ids(spotify_track):
+            # --- Sync match cache fast-path ---
             try:
-                cached = db.read_sync_match_cache(spotify_id, active_server)
+                cached = db.read_sync_match_cache(_match_id, active_server)
                 if cached:
                     db_track_check = db.get_track_by_id(cached['server_track_id'])
                     if db_track_check:
@@ -171,17 +174,16 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
                     logger.warning(f"Sync cache stale for '{original_title}' — track gone")
             except Exception as e:
                 logger.debug("sync match cache fast-path failed: %s", e)
-        # --- End cache fast-path ---
+            # --- End cache fast-path ---
 
-        # Durable manual library match (#787) — survives a library rescan (the
-        # sync_match_cache above does not), so a user's Find & Add pairing keeps
-        # sticking across auto-syncs instead of being re-matched from scratch (#895
-        # follow-up). Self-heals a stale library id via the stored file path.
-        if spotify_id:
+            # Durable manual library match (#787) — survives a library rescan (the
+            # sync_match_cache above does not), so a user's Find & Add pairing keeps
+            # sticking across auto-syncs instead of being re-matched from scratch (#895
+            # follow-up). Self-heals a stale library id via the stored file path.
             try:
                 from core.artists.map import get_current_profile_id
                 m = db.find_manual_library_match_by_source_track_id(
-                    get_current_profile_id(), str(spotify_id), active_server)
+                    get_current_profile_id(), str(_match_id), active_server)
                 if m:
                     lib_id = m.get('library_track_id')
                     dt = db.get_track_by_id(lib_id) if lib_id is not None else None
@@ -286,8 +288,12 @@ def _record_library_membership(tracks_json, match_details) -> None:
             db_track_id = (tracks_json[idx] or {}).get('db_track_id')
             if not db_track_id:
                 continue
+            found = detail.get('status') == 'found'
             db.update_mirrored_track_extra_data(db_track_id, {
-                'in_library': detail.get('status') == 'found',
+                'in_library': found,
+                # which library row: the next sync's skip checks it still
+                # exists, or a deleted file was never noticed (#1417)
+                'library_track_id': ((detail.get('matched_track') or {}).get('id') or None) if found else None,
                 # Stamped so the count can say WHEN it was true. The flag is a
                 # cache: deleting files outside SoulSync will not update it
                 # until the next sync, and a number that cannot say how old it
@@ -308,7 +314,7 @@ def run_sync_task(
     profile_id=1,
     playlist_image_url='',
     deps: SyncDeps = None,
-    sync_mode: str = 'replace',
+    sync_mode: str = 'reconcile',  # #1289: safer default (preserves server edits)
     skip_wishlist_add: bool = False,
 ):
     """The actual sync function that runs in the background thread."""
@@ -390,7 +396,8 @@ def run_sync_task(
                 popularity=t.get('popularity', 0),
                 preview_url=t.get('preview_url'),
                 external_urls=t.get('external_urls'),
-                image_url=_track_image or None
+                image_url=_track_image or None,
+                source_track_id=t.get('source_track_id') or None,
             )
             tracks.append(track)
             if i < 3:  # Log first 3 tracks for debugging

@@ -776,7 +776,7 @@ def update_discovery_match(
             original_name = (data.get('original_name') or '').strip()
             original_artist = (data.get('original_artist') or '').strip()
             if not original_name and not original_artist:
-                return {'error': 'Discovery state not found'}, 404
+                return {'error': 'Identification state not found'}, 404
             if not original_name:
                 original_name = spotify_track['name']
             # Key the cache by the FIRST artist — every in-memory + sync path uses

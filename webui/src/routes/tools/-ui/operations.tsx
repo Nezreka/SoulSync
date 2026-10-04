@@ -25,7 +25,8 @@
  * a separate progress panel that appears and shoves the layout around.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from '@tanstack/react-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { Cadence, IntervalUnit } from '../-tools.ops';
 import type { RepairJob, RepairJobProgress, RepairJobRun } from '../-tools.types';
@@ -56,10 +57,21 @@ import {
   jobSchedule,
   jobTrend,
 } from '../-tools.ops';
+import { updateAutomationTrigger } from '../../automations/-automations.api';
 import { OperationsStudio } from './operations-studio';
 
 function toast(message: string, type = 'info') {
   window.showToast?.(message, type);
+}
+
+/**
+ * True when a dry_run value — boolean or one of its text forms from a
+ * dropdown — means the run will go live.
+ */
+function isDryRunOff(value: unknown): boolean {
+  if (typeof value === 'boolean') return !value;
+  if (typeof value === 'string') return value.toLowerCase() === 'false';
+  return false;
 }
 
 /**
@@ -84,14 +96,19 @@ const UNITS: IntervalUnit[] = ['hours', 'days', 'weeks'];
  * The schedule control, on the tile face.
  *
  * It speaks the same language as the auto-sync page — an interval and a unit —
- * rather than the raw hours the config stores. What it deliberately does NOT
- * offer is a time of day: the worker is a staleness queue that runs whichever
- * enabled job is furthest past its interval whenever it is idle, so "every 6
- * hours" is a promise it can keep and "at 03:00" is not.
+ * rather than the raw hours the config stores.
+ *
+ * #1289 item 12: the interval now writes to the job's system automation row
+ * (via the automations API), not the legacy repair config. The "custom
+ * schedule" link deep-links to the automation builder for daily/weekly/
+ * monthly triggers.
  */
 function CadenceEditor({ job, onSaved }: { job: RepairJob; onSaved: () => void }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<Cadence>(() => cadenceFromHours(job.interval_hours));
+  const [draft, setDraft] = useState<Cadence>(() =>
+    // Custom non-interval triggers start the editor at 24h; saving resets to a schedule trigger.
+    cadenceFromHours(job.interval_hours ?? 24),
+  );
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -101,10 +118,24 @@ function CadenceEditor({ job, onSaved }: { job: RepairJob; onSaved: () => void }
   const save = useCallback(async () => {
     setSaving(true);
     try {
-      // The other settings ride along unchanged — the endpoint replaces the
-      // whole settings blob, so sending only the interval would wipe them.
-      await saveRepairJobSettings(job.job_id, hoursFromCadence(draft), { ...(job.settings || {}) });
-      toast(`${job.display_name} now runs ${cadenceLabel(hoursFromCadence(draft))}`, 'success');
+      const hours = hoursFromCadence(draft);
+      if (job.automation_id) {
+        // Write to the automation's schedule trigger. The trigger_type is
+        // reset to 'schedule' in case the user had set a daily/weekly/monthly
+        // schedule via the Custom schedule link.
+        await updateAutomationTrigger(
+          job.automation_id,
+          {
+            interval: hours,
+            unit: 'hours',
+          },
+          'schedule',
+        );
+      } else {
+        // Fallback: legacy path (migration hasn't seeded the row yet).
+        await saveRepairJobSettings(job.job_id, hours, { ...(job.settings || {}) });
+      }
+      toast(`${job.display_name} now runs ${cadenceLabel(hours)}`, 'success');
       setEditing(false);
       onSaved();
     } catch {
@@ -112,7 +143,7 @@ function CadenceEditor({ job, onSaved }: { job: RepairJob; onSaved: () => void }
     } finally {
       setSaving(false);
     }
-  }, [draft, job.display_name, job.job_id, job.settings, onSaved]);
+  }, [draft, job.automation_id, job.display_name, job.job_id, job.settings, onSaved]);
 
   if (!editing) {
     return (
@@ -170,6 +201,15 @@ function CadenceEditor({ job, onSaved }: { job: RepairJob; onSaved: () => void }
       >
         Cancel
       </button>
+      {job.automation_id && (
+        <Link
+          to="/automations"
+          className="repair-tile-cadence-custom"
+          title="Set a daily, weekly, or monthly schedule"
+        >
+          Custom schedule
+        </Link>
+      )}
     </span>
   );
 }
@@ -206,6 +246,69 @@ function JobSettings({
     }
   }, [job.interval_hours, job.job_id, onSaved, values]);
 
+  /**
+   * Boulder: flipping dry run OFF must warn, at the moment of the flip — with
+   * dry run off the job directly manages the library on its next scheduled
+   * run instead of reporting findings for review. Jobs flagged
+   * `writes_library_files` move/retag/rewrite real files, so they get the
+   * strongest wording; finding-only jobs get a lighter note. No dialog host
+   * (or a cancelled dialog) fails closed: dry run stays on.
+   */
+  const confirmDryRunOff = useCallback(async (): Promise<boolean> => {
+    const writesFiles = job.writes_library_files === true;
+    return Boolean(
+      await window.showConfirmDialog?.({
+        title: 'Turn Off Dry Run?',
+        message: writesFiles
+          ? 'This job will now directly manage your library — it can move, retag, or rewrite files without asking first. Continue?'
+          : 'This job will now apply its fixes automatically instead of only reporting findings for your review. Continue?',
+        confirmText: 'Turn off dry run',
+        cancelText: 'Keep dry run',
+        destructive: true,
+      }),
+    );
+  }, [job.writes_library_files]);
+
+  // Tracks whether a dry-run-off confirm dialog is currently open. While it
+  // is, the dry_run control is disabled and any stale dialog resolution is
+  // ignored, so a rapid double-toggle can't defeat the guard (#1289 item 10).
+  const confirmInFlight = useRef(false);
+  const [confirmPending, setConfirmPending] = useState(false);
+
+  /**
+   * A setting change routed through the dry-run guard when it would turn dry
+   * run off. Everything else applies to the draft immediately — it still needs
+   * Save Settings to reach the server. When the guard is declined, the draft
+   * never changed but the browser already flipped the control, so `revert`
+   * puts the control back on the value the draft still holds.
+   */
+  const handleSettingChange = useCallback(
+    async (key: string, next: unknown, revert: () => void) => {
+      if (key === 'dry_run' && isDryRunOff(next) && !isDryRunOff(values[key])) {
+        // Ignore stale input while a confirm is already pending.
+        if (confirmInFlight.current) {
+          revert();
+          return;
+        }
+        confirmInFlight.current = true;
+        setConfirmPending(true);
+        let confirmed = false;
+        try {
+          confirmed = await confirmDryRunOff();
+        } finally {
+          confirmInFlight.current = false;
+          setConfirmPending(false);
+        }
+        if (!confirmed) {
+          revert();
+          return;
+        }
+      }
+      setValues((previous) => ({ ...previous, [key]: next }));
+    },
+    [confirmDryRunOff, values],
+  );
+
   return (
     <div
       className="repair-job-settings"
@@ -231,9 +334,13 @@ function JobSettings({
                 data-job={job.job_id}
                 data-key={key}
                 value={settingText(current)}
-                onChange={(event) =>
-                  setValues((previous) => ({ ...previous, [key]: event.target.value }))
-                }
+                disabled={key === 'dry_run' && confirmPending}
+                onChange={(event) => {
+                  const target = event.target;
+                  void handleSettingChange(key, target.value, () => {
+                    target.value = settingText(values[key]);
+                  });
+                }}
               >
                 {field.options.map((option) => (
                   <option value={option} key={option}>
@@ -248,9 +355,13 @@ function JobSettings({
                 data-job={job.job_id}
                 data-key={key}
                 checked={Boolean(current)}
-                onChange={(event) =>
-                  setValues((previous) => ({ ...previous, [key]: event.target.checked }))
-                }
+                disabled={key === 'dry_run' && confirmPending}
+                onChange={(event) => {
+                  const target = event.target;
+                  void handleSettingChange(key, target.checked, () => {
+                    target.checked = Boolean(values[key]);
+                  });
+                }}
               />
             ) : field.kind === 'number' ? (
               <input

@@ -533,7 +533,10 @@ export function FindingsSurface({
       if (type === TYPE_ACOUSTID) {
         // an ambiguous finding carries its candidate recordings - hand them to
         // the dialog so the user can pick which one to retag/relocate as
-        const d = (finding.details || {}) as { ambiguous?: boolean; candidates?: string[] };
+        const d = (finding.details || {}) as {
+          ambiguous?: boolean;
+          candidates?: string[];
+        };
         fixAction = await prompts.promptAcoustid(d.ambiguous ? d.candidates : undefined);
         if (!fixAction) return;
       }
@@ -676,7 +679,7 @@ export function FindingsSurface({
     const acoustidIds = withType(TYPE_ACOUSTID);
     let acoustidAction: string | null = null;
     if (acoustidIds.length > 0) {
-      acoustidAction = await prompts.promptAcoustid();
+      acoustidAction = await prompts.promptAcoustid(undefined, acoustidIds.length);
       if (!acoustidAction) return;
     }
 
@@ -806,7 +809,7 @@ export function FindingsSurface({
         fixAction = await prompts.promptDeadFile();
         if (!fixAction) return;
       } else if (group.finding_type === TYPE_ACOUSTID) {
-        fixAction = await prompts.promptAcoustid();
+        fixAction = await prompts.promptAcoustid(undefined, count);
         if (!fixAction) return;
       } else if (group.finding_type === TYPE_QUALITY) {
         fixAction = await prompts.promptQuality();
@@ -856,7 +859,10 @@ export function FindingsSurface({
       }
 
       try {
-        const result = await startBulkFix({ findingType: group.finding_type, fixAction });
+        const result = await startBulkFix({
+          findingType: group.finding_type,
+          fixAction,
+        });
         if (result.started) {
           toast(`Fixing ${result.total} ${label.toLowerCase()} in the background…`, 'info');
           watchBulkFixRun();

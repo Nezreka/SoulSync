@@ -295,7 +295,7 @@ def test_the_listening_recs_scan_ranks_with_it(library, monkeypatch):
 
     def ranked():
         scanner._build_listening_recommendations(1, [])
-        return [r['name'] for r in json.loads(library.get_metadata('listening_recs_artists'))]
+        return [r['name'] for r in json.loads(library.get_metadata('listening_recs_artists:1'))]
 
     assert ranked() == ['SebastiAn', 'Kavinsky']          # two of yours agree on SebastiAn
     record(library, 1, 'less', {'type': 'artist', 'name': 'SebastiAn'},

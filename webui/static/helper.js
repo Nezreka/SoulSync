@@ -300,10 +300,10 @@ const HELPER_CONTENT = {
         docsId: 'dashboard'
     },
     '#discovery-pool-card': {
-        title: 'Discovery Pool',
-        description: 'Collection of tracks from similar artists discovered during watchlist scans. Matched tracks feed the Discover page\'s personalized playlists and genre browser. Failed matches can be fixed manually.',
+        title: 'Match Review',
+        description: 'Review matched and failed track identifications across all mirrored playlists. Matched tracks feed the Discover page\'s personalized playlists and genre browser. Failed matches can be fixed manually.',
         tips: [
-            'Click "Open Discovery Pool" to review matched and failed tracks',
+            'Click "Open Match Review" to review matched and failed tracks',
             '"Rematch" button on matched tracks lets you pick a different match',
             'Search filter helps find specific tracks in large pools'
         ],
@@ -660,13 +660,13 @@ const HELPER_CONTENT = {
     },
     '.sync-tab-button[data-tab="deezer"]': {
         title: 'Deezer Playlists',
-        description: 'Import Deezer playlists by URL. Paste a playlist URL, load it, then discover and sync tracks.',
+        description: 'Import Deezer playlists by URL. Paste a playlist URL, load it, then identify and sync tracks.',
         docsId: 'sync-deezer'
     },
     '.sync-tab-button[data-tab="youtube"]': {
         title: 'YouTube Playlists',
-        description: 'Import YouTube Music playlists by URL. Tracks go through the discovery pipeline to match official metadata before downloading.',
-        tips: ['Paste any YouTube Music playlist URL', 'Discovery matches video titles to official tracks', 'Unmatched tracks can be fixed manually'],
+        description: 'Import YouTube Music playlists by URL. Tracks go through the identification pipeline to match official metadata before downloading.',
+        tips: ['Paste any YouTube Music playlist URL', 'Identification matches video titles to official tracks', 'Unmatched tracks can be fixed manually'],
         docsId: 'sync-youtube'
     },
     '.sync-tab-button[data-tab="beatport"]': {
@@ -683,7 +683,7 @@ const HELPER_CONTENT = {
     },
     '.sync-tab-button[data-tab="mirrored"]': {
         title: 'Mirrored Playlists',
-        description: 'All imported playlists from every source, saved persistently. Shows discovery status, download progress, and allows re-syncing.',
+        description: 'All imported playlists from every source, saved persistently. Shows identification status, download progress, and allows re-syncing.',
         tips: ['Every parsed playlist is automatically mirrored here', 'Cards show live state: Discovering, Discovered, Syncing, Complete', 'Re-parsing the same URL updates the existing mirror'],
         docsId: 'sync-mirrored'
     },
@@ -745,12 +745,12 @@ const HELPER_CONTENT = {
     // Playlist card action buttons
     '.playlist-card-action-btn': {
         title: 'Playlist Action',
-        description: 'The action depends on the playlist state: "Discover" matches tracks to metadata, "Sync" downloads missing tracks, "Download" processes the playlist.',
+        description: 'The action depends on the playlist state: "Identify" matches tracks to metadata, "Sync" downloads missing tracks, "Download" processes the playlist.',
     },
     '.youtube-playlist-card': {
         title: 'Imported Playlist',
-        description: 'An imported playlist card. Shows track count, discovery status, and sync progress. Click the action button to advance to the next step.',
-        tips: ['Progress shows: total tracks / matched / failed / percentage', 'Phase colors: gray=fresh, blue=discovering, green=discovered, orange=syncing'],
+        description: 'An imported playlist card. Shows track count, identification status, and sync progress. Click the action button to advance to the next step.',
+        tips: ['Progress shows: total tracks / matched / failed / percentage', 'Phase colors: gray=fresh, blue=identifying, green=identified, orange=syncing'],
     },
 
     // Sidebar
@@ -777,7 +777,7 @@ const HELPER_CONTENT = {
     },
     '#import-file-import-btn': {
         title: 'Import as Playlist',
-        description: 'Creates a mirrored playlist from the parsed file. Give it a name and click Import — the playlist will appear in the Mirrored tab for discovery and sync.',
+        description: 'Creates a mirrored playlist from the parsed file. Give it a name and click Import — the playlist will appear in the Mirrored tab for identification and sync.',
     },
 
     // Beatport elements
@@ -798,8 +798,8 @@ const HELPER_CONTENT = {
 
     // Mirrored tab
     '.pool-trigger-btn': {
-        title: 'Discovery Pool',
-        description: 'Open the Discovery Pool to view matched and failed track discoveries across all mirrored playlists. Fix failed matches manually.',
+        title: 'Match Review',
+        description: 'Open the Match Review to view matched and failed track identifications across all mirrored playlists. Fix failed matches manually.',
         docsId: 'sync-discovery'
     },
     '#mirrored-refresh-btn': {
@@ -810,12 +810,12 @@ const HELPER_CONTENT = {
     // ─── DISCOVERY MODAL (used by YouTube, Tidal, Deezer, Beatport, ListenBrainz, Mirrored) ───
 
     '.youtube-discovery-modal .modal-header': {
-        title: 'Discovery Modal Header',
-        description: 'Shows the playlist name, track count, and current phase description. The discovery pipeline matches raw track titles from the source to official metadata on your configured metadata service.',
+        title: 'Identification Modal Header',
+        description: 'Shows the playlist name, track count, and current phase description. The identification pipeline matches raw track titles from the source to official metadata on your configured metadata service.',
         docsId: 'sync-discovery'
     },
     '.progress-section': {
-        title: 'Discovery Progress',
+        title: 'Identification Progress',
         description: 'Real-time progress of the track matching process. Each track from the source playlist is compared against your metadata service (Spotify, iTunes, or Deezer) using fuzzy matching with a 0.7 confidence threshold.',
         tips: [
             'Green progress = tracks successfully matched',
@@ -825,7 +825,7 @@ const HELPER_CONTENT = {
         docsId: 'sync-discovery'
     },
     '.discovery-table-container': {
-        title: 'Discovery Results Table',
+        title: 'Identification Results Table',
         description: 'Shows each source track alongside its matched metadata result. Green rows = matched, red = failed, gray = pending. Failed matches can be fixed manually.',
         tips: [
             'Source columns show the original track/artist from the playlist',
@@ -840,14 +840,14 @@ const HELPER_CONTENT = {
         tips: [
             'Edit the search terms to improve results',
             'Results come from your active metadata source',
-            'Selecting a match updates the discovery cache for future use'
+            'Selecting a match updates the identification cache for future use'
         ]
     },
     '[id^="youtube-discovery-modal"] .modal-footer': {
-        title: 'Discovery Actions',
-        description: 'Action buttons change based on the current phase. "Start Discovery" begins matching, "Sync to Wishlist" queues matched tracks for download, "Download Missing" starts downloading immediately.',
+        title: 'Identification Actions',
+        description: 'Action buttons change based on the current phase. "Start Identifying" begins matching, "Sync to Wishlist" queues matched tracks for download, "Download Missing" starts downloading immediately.',
         tips: [
-            'Discovery: matches source tracks to official metadata',
+            'Identification: matches source tracks to official metadata',
             'Sync: adds matched tracks to your wishlist',
             'Download: searches your download sources and downloads missing tracks',
             'You can close the modal — operations continue in the background'
@@ -2351,7 +2351,7 @@ const HELPER_TOURS = {
             { page: 'sync', selector: '.sync-tab-button[data-tab="youtube"]', title: 'YouTube Music', description: 'Paste a YouTube Music playlist URL. The parser extracts track titles and artists, then matches them against your metadata source.' },
             { page: 'sync', selector: '.sync-tab-button[data-tab="beatport"]', title: 'Beatport', description: 'For electronic music — paste a Beatport playlist URL to import DJ sets and charts.' },
             { page: 'sync', selector: '.sync-tab-button[data-tab="import-file"]', title: 'File Import', description: 'Import a playlist from a local file — M3U, CSV, or plain text. Map columns to track/artist/album fields.' },
-            { page: 'sync', selector: '.sync-tab-button[data-tab="mirrored"]', title: 'Mirrored Playlists', description: 'Every imported playlist is saved here permanently. Re-sync anytime to catch new additions, check match status, or view the Discovery Pool for unmatched tracks.' },
+            { page: 'sync', selector: '.sync-tab-button[data-tab="mirrored"]', title: 'Mirrored Playlists', description: 'Every imported playlist is saved here permanently. Re-sync anytime to catch new additions, check match status, or view the Match Review for unmatched tracks.' },
 
             // Sidebar
             { page: 'sync', selector: '.sync-sidebar', title: 'Sync Controls', description: 'The command center. Select playlists with checkboxes on the left, then click "Start Sync" here. Progress bars, match counts, and logs update in real-time. That\'s the sync flow! 🎉' },
@@ -3460,6 +3460,30 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
+    '3.5.0': [
+        { date: 'October 2026 · 3.5.0' },
+        { title: 'Video discover overhaul', desc: 'The music-side visual treatment lands on video discover: story blocks, trailers, genre art, card elevation, banners, a hero badge, story tickers, and genre tiles that load eagerly with an ambient crossfade and deduped posters (#1427, #1433, #1434, #1435, #1436).' },
+        { title: '"I have this" matching', desc: 'Video detail pages get a manual library match button for when automatic matching says you do not own something you do. Rematching a video clears its artwork so the corrected match re-downloads art (#1438, #1440).' },
+        { title: 'Video import polish', desc: 'The place-file modal got restyled, commercial-free episode cuts pass the duration gate, and the picked-title hero has its styles (#1423, #1439).' },
+        { title: 'Per-profile discover', desc: 'Listening recs, the listening mix and the warmer are per profile now. A deezer editorial playlist opens to a preview first, and built playlists can be named with missing tracks landing on the wishlist (#1418, #1421).', page: 'discover' },
+        { title: 'Per-profile server playlists', desc: 'The sync page shows whose server playlist is whose, same-named mirrors stop overwriting each other, deleted tracks are noticed on the next sync, and deleting a mirror lets go of its server playlist (#1414, #1417, #1420).', page: 'sync' },
+        { title: 'No more false rate limits', desc: 'Providers stop crying rate limit when an id contains 429 or 503. The http status is trusted over digits in the url, across musicbrainz, spotify, tidal, deezer, jiosaavn, audiodb, discogs, genius and last.fm (#1391, #1443).' },
+        { title: 'Smarter canonical lookups', desc: 'Alternate editions use each provider\'s own artist id instead of soulsync\'s local key, so musicbrainz stops returning 400 invalid mbid. Musicbrainz album consistency also checks the artist and stops judging romanized titles against native script (#1415, #1426).' },
+        { title: 'Filing fixes', desc: 'Singles stop merging into same-named album folders, and a customized single path template is honored for explicitly-typed singles (#1441, #1431).', page: 'library' },
+        { title: 'Lossy copies keep their tags', desc: 'FLAC to MP3 copies get native tags and cover art, with ARTISTS following the primary source (#1422, #1425).' },
+        { title: 'Non-admin automations re-arm', desc: 'Scheduled automations owned by other profiles re-arm after a restart instead of running once and never again (#1428, #1430).', page: 'automations' },
+        { title: 'Repair job honesty', desc: 'Acoustid retag keeps the album artist, sfv and srr count as leftover junk, and a run that quit early says so (#1289).', page: 'tools' },
+        { title: 'Extension chat tab', desc: 'The server chat lives in the companion extension popup, with rooms, dms and replies. Video pages get library-status pills and watchlist actions.' },
+        { title: 'Repair jobs join automations', desc: 'Maintenance jobs run on the automation engine now as system automations, scheduled from the automations page. New BPM backfill job (Deezer or local analysis), and manual match opens with a worklist of every unmatched wanted track (#1289, #1476).', page: 'automations' },
+        { title: 'Safer defaults, clearer language', desc: 'Sync defaults to Reconcile, "Transfer is my permanent library" defaults on, Discovery becomes Identify, and the import inbox gets honest about partials, stale rows and match stealing (#1289, #1474, #1477).' },
+        { title: 'Community fix batch', desc: 'Wishlist cleanup respects album scope, discography matching rejects substring-only titles, the discovery pool filter actually filters, Audible gets a marketplace setting, and AudioDB uses the working free key (#1447, #1448, #1452, #1453, #1455, #1458, #1475).' },
+        { title: 'Playlist sync wishlist control', desc: 'Syncing no longer has to re-download everything you deleted: a global toggle plus Sync vs Sync + download buttons (#1455).', page: 'sync' },
+        { title: 'Discovery pool upgrades', desc: 'Matches sort by match percentage and cached matches can be cleared per playlist (#1452).', page: 'discover' },
+        { title: 'Video calendar status badges', desc: 'Episode cards and the hero show Wanted, Downloading, Queued, Failed and Missing — not just the owned check (#1480).' },
+        { title: 'Deezer reissues stop showing as missing', desc: 'The year check no longer vetoes a same-title match when Deezer reports a reissue date (#1492).' },
+        { title: 'New v1 API endpoints', desc: 'Library playlists and tracks, recently played, mirrored playlists, and fixed artists scoping — built for the extension mini player (#1459, #1461, #1469, #1472, #1473).' },
+        { title: 'Earlier versions', desc: '3.4.9 brought the discover glow-up, player theater, sample studio and a calmer sync page.' },
+    ],
     '3.4.9': [
         { date: 'September 2026 · 3.4.9' },
         { title: 'Discover home', desc: 'Opens with a grid of what you go back to, then flow, on repeat, your daily mixes, a mood for the hour, repeat rewind and a blend. One section nav replaces the fourteen pills that only scrolled.', page: 'discover' },
@@ -3512,6 +3536,31 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
+        title: '3.5.0: video discover, per-profile sync, repair engine and community fixes',
+        description: 'Video discover gets the music-side treatment, sync and discover go per-profile, providers stop false rate-limiting, repair jobs join the automation engine, and a community fix batch lands.',
+        features: [
+            'Video discover overhaul: story blocks, trailers, genre art, hero badge, story tickers, eager genre tiles with ambient crossfade (#1427, #1433, #1434, #1435, #1436).',
+            '"I have this" manual matching on video detail pages, and rematches that actually refresh artwork (#1438, #1440).',
+            'Per-profile server playlists and discover: whose is whose, no more overwrites, deleted tracks noticed on next sync (#1414, #1417, #1420).',
+            'Providers trust the http status over digits in urls: no more false 429s across nine providers (#1391, #1443).',
+            'Canonical lookups use each provider\'s artist id; musicbrainz album consistency checks the artist (#1415, #1426).',
+            'Singles stop merging into same-named album folders; custom single path templates honored (#1441, #1431).',
+            'Non-admin automations re-arm after restart (#1428, #1430).',
+            'Companion extension: chat tab in the popup, video badges with watchlist actions.',
+            'Repair jobs run on the automation engine as system automations; new BPM backfill job; manual-match worklist of unmatched wanted tracks (#1289, #1476).',
+            '#1289 clarity batch: safer defaults (Reconcile, permanent-library on), clearer language (Identify, Music Library), 7 import-inbox bug fixes (#1474, #1477).',
+            'Community fixes: wishlist album scope, discography substring matching, discovery pool filter, Audible marketplace, working AudioDB key (#1447, #1448, #1452, #1453, #1455, #1458, #1475).',
+            'Playlist sync wishlist control: global toggle plus Sync / Sync + download buttons (#1455).',
+            'New v1 endpoints: library playlists + tracks, recently-played, mirrored playlists (#1459, #1461, #1469).',
+            'Video calendar status badges; Deezer reissue years stop marking owned albums missing (#1480, #1492).',
+        ],
+    },
+    {
+        title: 'Earlier in 3.4.9',
+        description: 'Discover glow-up, player theater, sample studio from your own library, calmer sync page, and filing and download fixes.',
+        features: [],
+    },
+    {
         title: '3.4.9: discover, player theater and sample studio',
         description: 'A big discover glow-up, a full player theater, Sample Studio from your own library, a calmer sync page, and a stack of filing and download fixes.',
         features: [
@@ -3526,16 +3575,11 @@ const VERSION_MODAL_SECTIONS = [
             'Fixes: torrents are no longer deleted after 90s at 0%, Keep Best keeps the copy your playlists use, Navidrome can take a separate playlist account, and failed downloads say why.',
         ],
     },
-    {
-        title: 'Earlier in 3.4.8',
-        description: 'Wishlist, dashboard and automations redesigned, library album views with sorting, chat P2P sharing and badges, and filing, scan and matching fixes.',
-        features: [],
-    },
 ];
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '3.4.9';
+    return btn ? btn.textContent.trim().replace('v', '') : '3.5.0';
 }
 
 // Compare two semver-ish strings ("2.4.0" vs "2.4.1" vs "2.39"). Returns

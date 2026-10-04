@@ -55,6 +55,12 @@ export interface PlaylistCardProps {
    * look at once, so it moved here.
    */
   nameTitle?: string;
+  /**
+   * the name it lands on the server under, when that is not `name`: two
+   * mirrors that would write one server playlist get distinct names
+   * (core/playlists/sync_names).
+   */
+  syncsAs?: string;
   /** "synced 3h ago" — the tail of the meta line. */
   when: string;
   /** Current schedule, e.g. "Every 6 hours · next in 3h". */
@@ -180,6 +186,7 @@ export function PlaylistCard({
   row,
   name,
   nameTitle,
+  syncsAs,
   when,
   schedule,
   health,
@@ -274,6 +281,14 @@ export function PlaylistCard({
             </span>
           ) : null}
         </div>
+        {syncsAs ? (
+          <div
+            className="pl-card-syncs-as"
+            title="Another mirror has the same name, so this one gets its own playlist on the server"
+          >
+            On the server as &ldquo;{syncsAs}&rdquo;
+          </div>
+        ) : null}
         <div className="pl-card-meta card-meta">{status ?? playlistCardMeta(row, when)}</div>
         {/* The schedule is a CONTROL, not a label: with Auto-Sync's board
             gone this is the only place a cadence gets set. It still reads as a

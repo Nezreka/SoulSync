@@ -6,6 +6,7 @@ import time
 import threading
 from functools import wraps
 from dataclasses import dataclass
+from core.http_error_status import http_error_status
 from utils.logging_config import get_logger
 from core.settings import config_manager
 from core.metadata.artist_album_cache import get_cached_artist_album_items, store_artist_album_items
@@ -311,11 +312,12 @@ def _detect_and_set_rate_limit(exception, endpoint_name="unknown"):
     """Check if a Spotify exception is a 429 rate limit and activate global ban if so.
     Returns True if rate limit was detected."""
     error_str = str(exception)
-    # Check both string matching and http_status attribute (SpotifyException has it)
-    is_429 = getattr(exception, 'http_status', None) == 429
-    is_rate_limit_str = "429" in error_str or "rate limit" in error_str.lower()
+    # SpotifyException exposes the HTTP status; use text only for statusless errors.
+    status = http_error_status(exception)
+    is_rate_limit = (status == 429 if status is not None
+                     else "429" in error_str or "rate limit" in error_str.lower())
 
-    if is_429 or is_rate_limit_str:
+    if is_rate_limit:
         # Try to extract Retry-After from exception headers
         retry_after = None
         has_real_header = False
@@ -410,8 +412,11 @@ def rate_limited(func):
                 raise  # Don't retry our own ban errors
             except Exception as e:
                 error_str = str(e).lower()
-                is_rate_limit = "rate limit" in error_str or "429" in str(e)
-                is_server_error = "502" in str(e) or "503" in str(e)
+                status = http_error_status(e)
+                is_rate_limit = (status == 429 if status is not None
+                                 else "rate limit" in error_str or "429" in error_str)
+                is_server_error = (status in (502, 503) if status is not None
+                                   else "502" in error_str or "503" in error_str)
 
                 if is_rate_limit:
                     # Try to extract Retry-After from spotipy exception headers
@@ -471,6 +476,9 @@ class Track:
     album_type: Optional[str] = None
     total_tracks: Optional[int] = None
     explicit: Optional[bool] = None
+    # the mirrored playlist's own id when ``id`` is what discovery matched
+    # instead. saved manual matches are filed under it (#1289)
+    source_track_id: Optional[str] = None
 
     @classmethod
     def from_spotify_track(cls, track_data: Dict[str, Any]) -> 'Track':

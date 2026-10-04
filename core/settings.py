@@ -818,7 +818,12 @@ class ConfigManager:
                 #   reconcile — edit in place (add/remove delta), preserving the
                 #               playlist's custom image, description, and identity (#792)
                 #   append    — only add new tracks, never remove
-                "mode": "replace"
+                "mode": "replace",
+                # Add tracks missing from the library to the wishlist during
+                # playlist syncs (#1455). ON (default) = today's behavior:
+                # syncing queues missing tracks for download. OFF = syncs only
+                # ever update the playlist itself; nothing is queued.
+                "wishlist_missing_tracks": True
             },
             "settings": {
                 "audio_quality": "flac"
@@ -964,6 +969,11 @@ class ConfigManager:
             },
             "audiobooks": {
                 "download_path": default_audiobook_path,
+                # Which Audible storefront the catalogue pages query. Valid
+                # codes: us/uk/de/fr/ca/au/it/es/in/jp. An unknown code falls
+                # back to the US store inside the audiobook client, so a
+                # typo degrades to US results instead of breaking.
+                "marketplace": "us",
                 # Audiobooks get their OWN source chain rather than inheriting
                 # music's. Five of music's sources (tidal, qobuz, hifi, deezer,
                 # amazon) are music-streaming services with no audiobooks in

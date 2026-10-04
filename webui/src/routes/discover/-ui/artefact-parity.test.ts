@@ -78,6 +78,8 @@ const NEW_IDS = [
   // with no key. A shelf the vanilla never had, so its section anchor is new.
   'deezer-editorial',
   'build-a-playlist',
+  // the generated playlist's name box (#1421): the vanilla never let you name it
+  'build-playlist-name',
   'lastfm-radio',
   'listenbrainz',
   'recent-releases',
