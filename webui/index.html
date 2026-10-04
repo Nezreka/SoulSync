@@ -7885,6 +7885,18 @@
                                                     left alone —
                                                     no needless renames. Turn off to match the metadata source exactly.
                                                 </div>
+                                                <label class="toggle-row" style="margin-top: 10px;">
+                                                    <input type="checkbox" id="write-artist-nfo">
+                                                    <span>Write artist.nfo (Jellyfin / Kodi / Emby)</span>
+                                                </label>
+                                                <div class="help-text" style="margin-top: 6px;">
+                                                    When an import creates an artist folder, also write a Kodi-format
+                                                    <em>artist.nfo</em> containing the artist's name and MusicBrainz
+                                                    artist ID, so Jellyfin / Kodi / Emby identify the artist instead
+                                                    of guessing by name. An existing <em>artist.nfo</em> with a
+                                                    different ID is never overwritten. To backfill folders you
+                                                    already have, run the <em>Artist NFO Backfill</em> repair job.
+                                                </div>
                                             </div>
 
                                         </div>
@@ -8381,6 +8393,19 @@
                                                                     data-config="musicbrainz.tags.genres" checked>
                                                                 Genres</label>
                                                         </div>
+                                                    </div>
+
+                                                    <label class="toggle-row" style="margin: 8px 0 2px;">
+                                                        <input type="checkbox" id="mb-use-original-date-for-date">
+                                                        <span>Use original release date for DATE</span>
+                                                    </label>
+                                                    <div class="help-text" style="margin-top: 6px;">
+                                                        Beets-style: write the MusicBrainz release-group's
+                                                        first-release-date as the DATE tag instead of the downloaded
+                                                        edition's date (a 2016 reissue of a 2010 album gets 2010).
+                                                        The original date is still kept in ORIGINALDATE either way,
+                                                        and a more precise same-year date is never replaced by a
+                                                        vaguer one.
                                                     </div>
 
                                                     <!-- Deezer -->
