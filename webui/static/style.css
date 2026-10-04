@@ -48327,6 +48327,7 @@ div.artist-hero-badge {
     position: relative;
     display: flex;
     align-items: center;
+    margin-right: 12px;
 }
 
 .soulid-button {
