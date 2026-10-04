@@ -212,7 +212,8 @@ def resolve_override_server_id(
     )
 
 
-def manual_match_server_id(db: Any, library_track_id: Any, server_source: str) -> Optional[str]:
+def manual_match_server_id(db: Any, library_track_id: Any, server_source: str,
+                           id_kind: Optional[str] = None) -> Optional[str]:
     """The media server's id for a stored manual match, or None.
 
     ``library_track_id`` is a catalogue id; every sync match path speaks the
@@ -222,12 +223,17 @@ def manual_match_server_id(db: Any, library_track_id: Any, server_source: str) -
     """
     if library_track_id is None or str(library_track_id) == '':
         return None
+    if id_kind == 'untyped':
+        return None
     try:
-        server_id = db.server_track_id(library_track_id, server_source)
+        server_id = (None if id_kind in {'legacy', 'server'} else
+                     db.server_track_id(library_track_id, server_source))
     except Exception:  # noqa: BLE001 - an unreadable translation is a miss
         server_id = None
     if server_id:
         return str(server_id)
+    if id_kind == 'lib2':
+        return None
     try:
         if db.get_track_by_server_id(library_track_id, server_source):
             return str(library_track_id)
@@ -236,7 +242,8 @@ def manual_match_server_id(db: Any, library_track_id: Any, server_source: str) -
     return None
 
 
-def _playlist_server_id(db: Any, track_id: Any, valid_server_ids: set) -> Optional[str]:
+def _playlist_server_id(db: Any, track_id: Any, valid_server_ids: set,
+                        id_kind: Optional[str] = None) -> Optional[str]:
     """The id THIS playlist knows for a matched library track, or None.
 
     ``library_track_id`` is a catalogue id. It used to be the media server's
@@ -246,8 +253,12 @@ def _playlist_server_id(db: Any, track_id: Any, valid_server_ids: set) -> Option
     """
     if track_id is None:
         return None
-    if str(track_id) in valid_server_ids:
+    if id_kind == 'untyped':
+        return None
+    if id_kind != 'lib2' and str(track_id) in valid_server_ids:
         return str(track_id)
+    if id_kind in {'legacy', 'server'}:
+        return None
     reader = getattr(db, "server_track_id", None)
     if reader is None:
         return None
@@ -326,7 +337,7 @@ def build_bulk_override_lookup(
         if not match:
             return None
         lib_id = match.get("library_track_id")
-        resolved = _playlist_server_id(db, lib_id, valid_server_ids)
+        resolved = _playlist_server_id(db, lib_id, valid_server_ids, match.get('library_track_id_kind'))
         if resolved is not None:
             return resolved
         # Stale pointer — re-resolve via the stored file path and self-heal.
@@ -337,7 +348,8 @@ def build_bulk_override_lookup(
                 new_id = resolver(file_path)
             except Exception:
                 new_id = None
-            resolved = _playlist_server_id(db, new_id, valid_server_ids)
+            resolved = _playlist_server_id(db, new_id, valid_server_ids,
+                                           'lib2' if match.get('library_track_id_kind') else None)
             if resolved is not None:
                 _self_heal_match_id(db, match, str(new_id))
                 return resolved
@@ -398,7 +410,7 @@ def resolve_durable_match_server_id(
         return None
 
     lib_id = match.get("library_track_id")
-    resolved = _playlist_server_id(db, lib_id, valid_server_ids)
+    resolved = _playlist_server_id(db, lib_id, valid_server_ids, match.get('library_track_id_kind'))
     if resolved is not None:
         return resolved
 
@@ -410,7 +422,8 @@ def resolve_durable_match_server_id(
             new_id = resolver(file_path)
         except Exception:
             new_id = None
-        resolved = _playlist_server_id(db, new_id, valid_server_ids)
+        resolved = _playlist_server_id(db, new_id, valid_server_ids,
+                                       'lib2' if match.get('library_track_id_kind') else None)
         if resolved is not None:
             _self_heal_match_id(db, match, str(new_id))
             return resolved

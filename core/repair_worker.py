@@ -4376,12 +4376,28 @@ class RepairWorker:
                 album_title = album_title or meta_row[0]
                 artist_name = artist_name or meta_row[1]
                 mbid = mbid or meta_row[2]
+            linked = details.get('library_v2') or {}
+            selected_ids = linked.get('file_ids') or ([linked['file_id']] if linked.get('file_id') else [])
+            if 'library_owner_id' in details:
+                owners = [details['library_owner_id']]
+            elif file_path:
+                owners = [r[0] for r in cursor.execute(
+                    "SELECT DISTINCT owner_profile_id FROM lib2_track_files WHERE path=?", (file_path,))]
+            elif selected_ids:
+                owners = [r[0] for r in cursor.execute(
+                    "SELECT DISTINCT owner_profile_id FROM lib2_track_files WHERE id IN (%s)"
+                    % ','.join('?' for _ in selected_ids), selected_ids)]
+            else:
+                from core.library_scope import current_library_scope, owner_for_scope
+                owners = [owner_for_scope(current_library_scope())]
+            owner_sql = ' OR '.join('f.owner_profile_id IS ?' for _ in owners) or '0'
             cursor.execute("""
                 SELECT f.path FROM lib2_track_files f
                 JOIN lib2_tracks t ON t.id = f.track_id
                 WHERE t.album_id = ? AND f.path IS NOT NULL AND f.path != ''
                   AND COALESCE(f.file_state,'active') = 'active'
-            """, (native_album_id,))
+                  AND (%s)
+            """ % owner_sql, (native_album_id, *owners))
             track_paths = [r[0] for r in cursor.fetchall()]
         finally:
             if conn:

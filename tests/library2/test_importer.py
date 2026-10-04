@@ -27,6 +27,37 @@ def _on_legacy(path, *statements):
         conn.commit()
 
 
+def test_import_preserves_acquired_quality_and_native_reimport_provenance(legacy_db):
+    acquired = '{"format":"flac","bit_depth":24,"sample_rate":96000}'
+    retention = '[{"type":"downsample_hires_flac","source_replaced":true,"target_bit_depth":16,"target_sample_rate":44100}]'
+    with closing(legacy_db._get_connection()) as conn:
+        conn.execute("ALTER TABLE tracks ADD COLUMN acquired_quality_json TEXT")
+        conn.execute("ALTER TABLE tracks ADD COLUMN retention_json TEXT")
+        conn.execute("ALTER TABLE tracks ADD COLUMN sample_rate INTEGER")
+        conn.execute("ALTER TABLE tracks ADD COLUMN bit_depth INTEGER")
+        conn.execute("UPDATE tracks SET acquired_quality_json=?, retention_json=? WHERE id=100",
+                     (acquired, retention))
+        conn.execute("UPDATE tracks SET sample_rate=44100, bit_depth=16 WHERE id=100")
+        conn.commit()
+    import_legacy_library(legacy_db)
+    with closing(legacy_db._get_connection()) as conn:
+        row = conn.execute("SELECT acquired_quality_json, retention_json FROM lib2_track_files WHERE legacy_track_id=100").fetchone()
+        assert tuple(row) == (acquired, retention)
+        from core.library2.quality_eval import evaluate_file, profile_targets
+        targets, policy, cutoff = profile_targets({
+            'ranked_targets': '[{"format":"flac","bit_depth":24,"min_sample_rate":96000}]',
+            'upgrade_policy': 'until_cutoff', 'upgrade_cutoff_index': 0,
+        })
+        file_row = dict(conn.execute("SELECT * FROM lib2_track_files WHERE legacy_track_id=100").fetchone())
+        assert evaluate_file(file_row, targets, policy, cutoff) == {'meets_profile': True, 'upgrade_candidate': False}
+        conn.execute("UPDATE lib2_track_files SET acquired_quality_json='native', retention_json='newer' WHERE legacy_track_id=100")
+        conn.commit()
+    import_legacy_library(legacy_db)
+    with closing(legacy_db._get_connection()) as conn:
+        row = conn.execute("SELECT acquired_quality_json, retention_json FROM lib2_track_files WHERE legacy_track_id=100").fetchone()
+        assert tuple(row) == ('native', 'newer')
+
+
 # --- credit splitter ---------------------------------------------------------
 
 @pytest.mark.parametrize("raw,expected", [

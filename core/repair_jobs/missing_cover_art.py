@@ -98,6 +98,7 @@ class MissingCoverArtJob(RepairJob):
             )
             details = {
                 "album_id": f"lib2:{subject['album_id']}",
+                "library_owner_id": subject.get("owner_profile_id"),
                 "album_title": subject.get("title"),
                 "artist": subject.get("artist_name"),
                 "artist_id": subject.get("artist_id"),
@@ -159,4 +160,3 @@ class MissingCoverArtJob(RepairJob):
             return len(active_album_subjects(context.db, context.config_manager))
         except Exception:
             return 0
-

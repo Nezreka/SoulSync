@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from contextlib import closing
 
+import pytest
+
 from core.repair_jobs.base import JobContext, JobResult
 from tests.lib2_seed import row_conn
 
@@ -25,6 +27,78 @@ def _import(legacy_db):
     from core.library2.importer import import_legacy_library
 
     import_legacy_library(legacy_db)
+
+
+@pytest.mark.parametrize('owner', [None, 2, 3])
+def test_redownload_repair_preserves_the_selected_file_owner(legacy_db, owner):
+    from core.library2.maintenance_sync import sync_repair_change
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    from core.library_scope import library_scope
+
+    _import(legacy_db)
+    with closing(legacy_db._get_connection()) as conn:
+        track_id, file_id = conn.execute(
+            'SELECT track_id,id FROM lib2_track_files WHERE legacy_track_id=100').fetchone()
+        conn.execute('UPDATE lib2_track_files SET owner_profile_id=? WHERE id=?', (owner, file_id))
+        for profile in (1, 2, 3):
+            record_rule(conn, 'track', track_id, False, PROVENANCE_USER, profile_id=profile)
+        conn.commit()
+    with library_scope(owner or 'shared'):
+        outcome = sync_repair_change(
+            legacy_db, _Config(True), job_id='dead_file_cleaner', finding_type='dead_file',
+            action='redownload', entity_type='track', entity_id=f'lib2:{track_id}',
+            file_path='/m/01.flac', details={'library_v2': {'track_id': track_id, 'file_ids': [file_id]}},
+            result={'library_v2_file_deleted': True, 'repair_intent': 'redownload'},
+        )
+    assert outcome['converged'] is True
+    with closing(legacy_db._get_connection()) as conn:
+        rules = dict(conn.execute(
+            "SELECT profile_id,monitored FROM lib2_monitor_rules WHERE entity_type='track' AND entity_id=?",
+            (track_id,)).fetchall())
+        assert rules == {profile: int(profile == (owner or 1)) for profile in (1, 2, 3)}
+        assert conn.execute('SELECT wanted FROM lib2_wanted_tracks WHERE profile_id=? AND track_id=?',
+                            (owner or 1, track_id)).fetchone()[0] == 1
+
+
+def test_persisted_cover_repair_writes_only_the_selected_library(legacy_db, tmp_path, monkeypatch):
+    from core.repair_worker import RepairWorker
+    from core.library_scope import library_scope
+
+    _import(legacy_db)
+    with closing(legacy_db._get_connection()) as conn:
+        track_id, file_id = conn.execute(
+            'SELECT track_id,id FROM lib2_track_files WHERE legacy_track_id=100').fetchone()
+        album_id = conn.execute('SELECT album_id FROM lib2_tracks WHERE id=?', (track_id,)).fetchone()[0]
+        conn.execute('DELETE FROM lib2_track_files')
+        paths = {}
+        for owner in (None, 2, 3):
+            path = tmp_path / str(owner) / 'song.flac'
+            path.parent.mkdir()
+            path.write_bytes(b'audio')
+            paths[owner] = str(path)
+            new_id = conn.execute('INSERT INTO lib2_track_files(track_id,path,owner_profile_id) VALUES(?,?,?)',
+                                  (track_id, str(path), owner)).lastrowid
+            if owner == 2:
+                file_id = new_id
+        conn.commit()
+    def write_cover(files, metadata, album_info, folder):
+        for path in files:
+            with open(path, 'ab') as audio:
+                audio.write(b'cover')
+        return {'embedded_ok': len(files), 'embedded_failed': 0, 'sidecar_written': True}
+    monkeypatch.setattr('core.metadata.art_apply.apply_art_to_album_files', write_cover)
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db, worker.transfer_folder, worker._config_manager = legacy_db, str(tmp_path), _Config(True)
+    with library_scope('shared'):
+        result = worker._fix_missing_cover_art('album', f'lib2:{album_id}', paths[2], {
+            'found_artwork_url': 'http://new-art',
+            'library_v2': {'file_ids': [file_id]},
+        })
+    assert result['success'], result
+    from pathlib import Path
+    assert Path(paths[2]).read_bytes() == b'audiocover'
+    assert Path(paths[None]).read_bytes() == b'audio'
+    assert Path(paths[3]).read_bytes() == b'audio'
 
 
 def _add_v2_only_file(legacy_db, path, *, title="V2-only Song"):

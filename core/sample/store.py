@@ -354,14 +354,15 @@ _TRACK_ARTIST_SQL = """COALESCE(
              WHERE al3.id = t.album_id))"""
 
 _STASH_SELECT = f"""
-    SELECT s.id, s.name, s.tags_json, s.track_id,
+    SELECT s.id, s.name, s.tags_json,
+           CASE WHEN s.track_id_kind='lib2' THEN s.track_id END AS track_id,
            COALESCE(t.title, '') AS track_title,
            COALESCE({_TRACK_ARTIST_SQL}, '') AS artist_name,
            s.start_s, s.end_s, s.pitch_st, s.target_bpm,
            s.format, s.file_path, s.created_at, s.stem, s.folder,
            s.normalize, s.fade_ms, s.reverse, s.space, s.delay_json
     FROM sample_stash s
-    LEFT JOIN lib2_tracks t ON t.id = s.track_id
+    LEFT JOIN lib2_tracks t ON t.id = s.track_id AND s.track_id_kind = 'lib2'
 """
 
 
@@ -411,8 +412,8 @@ def create_stash_entry(
             """INSERT INTO sample_stash
                    (name, tags_json, track_id, start_s, end_s, pitch_st,
                     target_bpm, format, file_path, created_at, stem, folder,
-                    normalize, fade_ms, reverse, space, delay_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    normalize, fade_ms, reverse, space, delay_json, track_id_kind)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'lib2')""",
             (
                 name,
                 json.dumps([str(t) for t in (tags or [])]),

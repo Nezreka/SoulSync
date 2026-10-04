@@ -190,7 +190,7 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
                     # answers with the server's id (#1417 records it)
                     from core.sync.match_overrides import manual_match_server_id
                     lib_id = m.get('library_track_id')
-                    sid = manual_match_server_id(db, lib_id, active_server)
+                    sid = manual_match_server_id(db, lib_id, active_server, m.get('library_track_id_kind'))
                     dt = db.get_track_by_server_id(sid, active_server) if sid else None
                     if not dt and m.get('library_file_path'):
                         new_id = db.find_track_id_by_file_path(m['library_file_path'])

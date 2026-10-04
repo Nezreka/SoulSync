@@ -442,11 +442,11 @@ def annotate_finding_details(
             "artist_id": links["artists"][0] if links["artists"] else None,
             "album_id": links["albums"][0] if links["albums"] else None,
             "track_id": links["tracks"][0] if links["tracks"] else None,
-            "file_id": links["files"][0] if links["files"] else None,
+            "file_id": (links["direct_files"] or links["files"])[0] if links["files"] else None,
             "artist_ids": links["artists"][:100],
             "album_ids": links["albums"][:100],
             "track_ids": links["tracks"][:500],
-            "file_ids": links["files"][:500],
+            "file_ids": (links["direct_files"] or links["files"])[:500],
         }
     return payload
 
@@ -651,6 +651,23 @@ def sync_repair_change(
         if not any(links.values()):
             return {"enabled": True, "reason": "subject_unlinked", "converged": False}
 
+        # Persisted file subjects retain their owner even when a queued repair
+        # runs outside the request/scan scope. Fan-out files do not widen intent.
+        from core.library2 import ADMIN_PROFILE_ID
+        owner_tracks: Dict[int, set[int]] = {}
+        subject_files = links.get("direct_files") or links["files"]
+        if subject_files:
+            for row in conn.execute(
+                f"SELECT track_id, owner_profile_id FROM lib2_track_files "
+                f"WHERE id IN ({_marks(subject_files)}) AND track_id IS NOT NULL",
+                subject_files,
+            ):
+                owner_tracks.setdefault(int(row[1] or ADMIN_PROFILE_ID), set()).add(int(row[0]))
+        else:
+            from core.library_scope import current_library_scope
+            scope = current_library_scope()
+            owner_tracks[int(scope) if isinstance(scope, int) else ADMIN_PROFILE_ID] = set(links["tracks"])
+
         changed_fields: set[str] = set(effects - {"observe", "none"})
         if native_quality_review and action == "queued_upgrade":
             changed_fields.update({"quality", "wanted"})
@@ -683,17 +700,16 @@ def sync_repair_change(
             from core.library2.monitor_rules import PROVENANCE_USER, record_rule
 
             wanted = repair_intent == "redownload"
-            marks = _marks(links["tracks"])
-            conn.execute(
-                f"UPDATE lib2_tracks SET monitored=?, updated_at=CURRENT_TIMESTAMP "
-                f"WHERE id IN ({marks})",
-                [1 if wanted else 0, *links["tracks"]],
-            )
-            for track_id in links["tracks"]:
-                record_rule(
-                    conn, "track", track_id, wanted, PROVENANCE_USER,
-                    profile_id=ADMIN_PROFILE_ID,
-                )
+            for profile_id, track_ids in owner_tracks.items():
+                if profile_id == ADMIN_PROFILE_ID and track_ids:
+                    conn.execute(
+                        f"UPDATE lib2_tracks SET monitored=?, updated_at=CURRENT_TIMESTAMP "
+                        f"WHERE id IN ({_marks(sorted(track_ids))})",
+                        [1 if wanted else 0, *sorted(track_ids)],
+                    )
+                for track_id in track_ids:
+                    record_rule(conn, "track", track_id, wanted, PROVENANCE_USER,
+                                profile_id=profile_id)
             changed_fields.add("repair_intent")
         new_file_id = _link_new_output_file(conn, links, result)
         if new_file_id is not None:
@@ -747,23 +763,15 @@ def sync_repair_change(
             # The global rebuild stays as the fallback for a change with no
             # resolved track subject, which is the only case that can be
             # library-wide.
-            recompute_wanted(
-                conn.cursor(),
-                profile_id=ADMIN_PROFILE_ID,
-                track_ids=links["tracks"] or None,
-            )
-            conn.commit()
-            changed_fields.add("wanted")
-            if links["tracks"]:
-                from core.library2.wishlist_mirror import (
-                    mirror_projected_tracks_wishlist,
-                )
-                mirrored = mirror_projected_tracks_wishlist(
-                    database,
-                    conn,
-                    links["tracks"],
-                    profile_id=ADMIN_PROFILE_ID,
-                )
+            for profile_id, track_ids in owner_tracks.items():
+                recompute_wanted(conn.cursor(), profile_id=profile_id,
+                                 track_ids=sorted(track_ids) or None)
+                conn.commit()
+                changed_fields.add("wanted")
+                if track_ids:
+                    from core.library2.wishlist_mirror import mirror_projected_tracks_wishlist
+                    mirrored += mirror_projected_tracks_wishlist(
+                        database, conn, sorted(track_ids), profile_id=profile_id)
 
     with closing(database._get_connection()) as conn:
         events = _record_events(

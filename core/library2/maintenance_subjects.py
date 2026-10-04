@@ -197,7 +197,14 @@ def active_album_subjects(
                           AND COALESCE(fx.file_state,'active')='active'{owner}
                         ORDER BY COALESCE(tx.disc_number,1),
                                  COALESCE(tx.track_number,2147483647), fx.id
-                        LIMIT 1) AS rep_path
+                        LIMIT 1) AS rep_path,
+                       (SELECT fx.owner_profile_id FROM lib2_tracks tx
+                         JOIN lib2_track_files fx ON fx.track_id=tx.id
+                        WHERE tx.album_id=al.id
+                          AND COALESCE(fx.file_state,'active')='active'{owner}
+                        ORDER BY COALESCE(tx.disc_number,1),
+                                 COALESCE(tx.track_number,2147483647), fx.id
+                        LIMIT 1) AS owner_profile_id
                   FROM lib2_albums al
              LEFT JOIN lib2_artists ar ON ar.id=al.primary_artist_id
                  WHERE al.title IS NOT NULL AND al.title<>'' {file_predicate}

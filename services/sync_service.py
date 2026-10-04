@@ -220,6 +220,7 @@ def reresolve_manual_match_live_plex(cache_db, media_client, m, *, profile_id,
                 source_album=m.get('source_album'),
                 server_source=server_source,
                 library_file_path=file_path or _plex_track_file(live),
+                library_track_id_kind='server',
             )
         except Exception as _heal_err:
             logger.debug("manual-match heal (save) failed: %s", _heal_err)
@@ -1029,7 +1030,8 @@ class PlaylistSyncService:
                         # the server's (Library v2 keeps the two apart)
                         from core.sync.match_overrides import manual_match_server_id
                         actual_track = _materialize(manual_match_server_id(
-                            cache_db, m.get('library_track_id'), active_server))
+                            cache_db, m.get('library_track_id'), active_server,
+                            m.get('library_track_id_kind')))
                         if not actual_track and m.get('library_file_path'):
                             new_id = cache_db.find_track_id_by_file_path(m['library_file_path'])
                             actual_track = _materialize(manual_match_server_id(

@@ -745,6 +745,7 @@ class MusicDatabase:
                     tags_json TEXT,  -- JSON array of tag strings
                     track_id INTEGER NOT NULL,
                     start_s REAL NOT NULL,
+                    track_id_kind TEXT NOT NULL DEFAULT 'lib2',
                     end_s REAL NOT NULL,
                     pitch_st REAL DEFAULT 0,
                     target_bpm REAL,
@@ -809,6 +810,8 @@ class MusicDatabase:
                     pass  # already there
 
             # Metadata table for storing system information like last refresh dates
+            from core.library2.user_references import ensure_reference_id_kinds
+            ensure_reference_id_kinds(conn)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS metadata (
                     key TEXT PRIMARY KEY,
@@ -7231,6 +7234,7 @@ class MusicDatabase:
                         source_context_json TEXT,
                         server_source TEXT DEFAULT '',
                         library_track_id INTEGER NOT NULL,
+                        library_track_id_kind TEXT NOT NULL DEFAULT 'lib2',
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(profile_id, source, source_track_id, server_source)
@@ -7252,6 +7256,8 @@ class MusicDatabase:
                 _mltm_cols = {r[1] for r in cursor.fetchall()}
                 if 'library_file_path' not in _mltm_cols:
                     cursor.execute("ALTER TABLE manual_library_track_matches ADD COLUMN library_file_path TEXT")
+                from core.library2.user_references import ensure_reference_id_kinds
+                ensure_reference_id_kinds(conn)
         except Exception as e:
             logger.error(f"Error creating manual_library_track_matches table: {e}")
 
@@ -7265,11 +7271,12 @@ class MusicDatabase:
                     INSERT INTO manual_library_track_matches
                         (profile_id, source, source_track_id, library_track_id,
                          source_title, source_artist, source_album,
-                         source_context_json, server_source, library_file_path, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                         source_context_json, server_source, library_file_path, library_track_id_kind, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(profile_id, source, source_track_id, server_source)
                     DO UPDATE SET
                         library_track_id = excluded.library_track_id,
+                        library_track_id_kind = excluded.library_track_id_kind,
                         source_title = excluded.source_title,
                         source_artist = excluded.source_artist,
                         source_album = excluded.source_album,
@@ -7281,6 +7288,7 @@ class MusicDatabase:
                     meta.get('source_title'), meta.get('source_artist'),
                     meta.get('source_album'), meta.get('source_context_json'),
                     meta.get('server_source', ''), meta.get('library_file_path'),
+                    meta.get('library_track_id_kind', 'lib2'),
                 ))
                 return True
         except Exception as e:

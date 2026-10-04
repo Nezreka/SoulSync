@@ -1374,6 +1374,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         resume = None
     with closing(database._get_connection()) as conn:
         ensure_library_v2_schema(conn)
+        from core.library2.user_references import ensure_reference_id_kinds
+        ensure_reference_id_kinds(conn)
         cursor = conn.cursor()
         run_id = resume.run_id if resume else uuid.uuid4().hex
 
@@ -1927,6 +1929,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "play_count", "last_played", "file_path", "quality_profile_id",
                 "artist_id", "track_artist", "file_size", "bitrate",
                 "sample_rate", "bit_depth", "verification_status",
+                "acquired_quality_json", "retention_json",
                 "server_source", "created_at",
                 # only an install upgrading from upstream has it; optional, so
                 # one that never did simply projects nothing here (#1199)
@@ -2169,10 +2172,12 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     cursor.execute(
                         "INSERT INTO lib2_track_files(track_id, path, size, bitrate, sample_rate, "
                         "bit_depth, format, verification_status, import_status, owner_profile_id, "
-                        "legacy_track_id, legacy_import_run_id) VALUES(?,?,?,?,?,?,?,?, 'imported',?,?,?)",
+                        "legacy_track_id, legacy_import_run_id, acquired_quality_json, retention_json) "
+                        "VALUES(?,?,?,?,?,?,?,?, 'imported',?,?,?,?,?)",
                         (track_id, file_path, _pick(row, "file_size"), _pick(row, "bitrate"),
                          _pick(row, "sample_rate"), _pick(row, "bit_depth"), fmt,
-                         _pick(row, "verification_status"), owner, row["id"], run_id),
+                         _pick(row, "verification_status"), owner, row["id"], run_id,
+                         _pick(row, "acquired_quality_json"), _pick(row, "retention_json")),
                     )
                     existing_files[file_key] = int(cursor.lastrowid)
                     stats["files"] += 1
@@ -2183,13 +2188,17 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                         """UPDATE lib2_track_files
                               SET size=?, bitrate=?, sample_rate=?, bit_depth=?, format=?,
                                   verification_status=?,
+                                  acquired_quality_json=COALESCE(acquired_quality_json, ?),
+                                  retention_json=COALESCE(retention_json, ?),
                                   owner_profile_id=COALESCE(?, owner_profile_id),
                                   legacy_track_id=?,
                                   legacy_import_run_id=?, updated_at=CURRENT_TIMESTAMP
                             WHERE id=?""",
                         (_pick(row, "file_size"), _pick(row, "bitrate"),
                          _pick(row, "sample_rate"), _pick(row, "bit_depth"), fmt,
-                         _pick(row, "verification_status"), owner, row["id"], run_id, file_id),
+                         _pick(row, "verification_status"),
+                         _pick(row, "acquired_quality_json"), _pick(row, "retention_json"),
+                         owner, row["id"], run_id, file_id),
                     )
             if copied_tracks.get(album_id) is not None:
                 entry = next((t for t in copied_tracks[album_id] if t["id"] == track_id), None)
@@ -2299,6 +2308,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         stats["media_server_mappings"] = backfill_legacy_mappings(
             cursor, connection=conn, batch_size=IMPORT_BATCH_SIZE,
             on_batch=wal_checkpointer.batch_committed)
+        from core.library2.user_references import migrate_legacy_track_references
+        migrate_legacy_track_references(conn)
         conn.commit()
         checkpoint(FINALIZE_STAGE, 4, _FINALIZE_STEPS)
         # Mint provider-less stable ids for everything this run inserted
