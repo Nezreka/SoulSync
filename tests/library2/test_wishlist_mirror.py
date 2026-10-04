@@ -109,6 +109,27 @@ def test_payload_carries_app_wide_profile_id(imported_conn):
     assert payload["_source_info"]["quality_profile_id"] == profile_id
 
 
+def test_payload_represents_missing_duration_as_unknown_without_changing_catalogue(imported_conn):
+    track_id = _seed(imported_conn, policy="acceptable", with_file=False)
+
+    payload = track_wishlist_payload(imported_conn, track_id)
+
+    assert payload["duration_ms"] == 0
+    assert payload["_should_queue"] is True
+    assert imported_conn.execute(
+        "SELECT duration FROM lib2_tracks WHERE id=?", (track_id,),
+    ).fetchone()["duration"] is None
+
+
+def test_payload_preserves_known_duration(imported_conn):
+    track_id = _seed(imported_conn, policy="acceptable", with_file=False)
+    imported_conn.execute(
+        "UPDATE lib2_tracks SET duration=255000 WHERE id=?", (track_id,),
+    )
+
+    assert track_wishlist_payload(imported_conn, track_id)["duration_ms"] == 255_000
+
+
 def test_unknown_quality_queues_existing_file_for_shared_probe_pipeline(imported_conn):
     track_id = _seed(imported_conn, policy="until_cutoff")
     imported_conn.execute(

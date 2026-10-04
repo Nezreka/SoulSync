@@ -156,7 +156,7 @@ def _filter_youtube_by_quality(candidates, profile_id=None, why=None):
 
 
 def _torrent_usenet_artist_is_fallback(result):
-    """True when a release result has no parsed artist, only indexer filler."""
+    """True when a release result has no parsed artist, only a placeholder."""
     if getattr(result, 'username', None) not in ('torrent', 'usenet'):
         return False
     artist = (getattr(result, 'artist', None) or '').strip()
@@ -164,7 +164,7 @@ def _torrent_usenet_artist_is_fallback(result):
         return True
     metadata = getattr(result, '_source_metadata', None) or {}
     indexer = str(metadata.get('indexer') or '').strip()
-    if artist.lower() in ('torrent', 'usenet'):
+    if artist.lower() in ('torrent', 'usenet', 'unknown artist'):
         return True
     return bool(indexer and artist.lower() == indexer.lower())
 

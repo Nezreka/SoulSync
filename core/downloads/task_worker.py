@@ -558,7 +558,7 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
             name=track_data.get('name', ''),
             artists=processed_artists,
             album=album_name,
-            duration_ms=track_data.get('duration_ms', 0),
+            duration_ms=track_data.get('duration_ms') or 0,
             popularity=track_data.get('popularity', 0),
         )
         logger.info(f"[Modal Worker] Starting download task for: {track.name} by {track.artists[0] if track.artists else 'Unknown'}")

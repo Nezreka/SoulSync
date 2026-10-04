@@ -159,6 +159,41 @@ def _seed_task(task_id='t1', status='pending', track_info=None, **extra):
 # Early-return guards
 # ---------------------------------------------------------------------------
 
+def test_existing_wishlist_track_without_duration_can_start_hifi_download(monkeypatch):
+    from core.downloads import validation
+    from core.download_plugins.types import TrackResult
+    from core.matching_engine import MusicMatchingEngine
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    _seed_task(track_info={
+        'id': 'sp-1', 'name': 'West Coast', 'artists': ['Lana Del Rey'],
+        'album': 'Ultraviolence', 'duration_ms': None,
+    })
+    candidate = TrackResult(
+        username='hifi', filename='1||Lana Del Rey - West Coast',
+        size=0, bitrate=1411, duration=255_000, quality='flac',
+        free_upload_slots=999, upload_speed=999999, queue_length=0,
+        artist='Lana Del Rey', title='West Coast',
+    )
+    attempts = []
+
+    def attempt(task_id, candidates, track, batch_id, **kwargs):
+        attempts.append((candidates, track.duration_ms))
+        return True
+
+    deps, _ = _build_deps(
+        soulseek=_FakeClient(results=[candidate], mode='hifi'),
+        matching=_FakeMatchEngine(queries=['lana del rey west coast']),
+        get_valid_candidates=validation.get_valid_candidates,
+        attempt_download_with_candidates=attempt,
+    )
+
+    tw.download_track_worker('t1', None, deps)
+
+    assert attempts == [([candidate], 0)]
+    assert download_tasks['t1']['track_info']['duration_ms'] is None
+
+
 def test_missing_task_frees_batch_slot():
     # A worker dispatched for a task that was deleted before it ran (cleanup /
     # dedup / atomic cancel) must FREE the reserved batch slot via

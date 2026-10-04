@@ -179,7 +179,7 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
         },
         "track_number": t["track_number"],
         "disc_number": t["disc_number"],
-        "duration_ms": t["duration"],
+        "duration_ms": t["duration"] or 0,
         "quality_profile_id": profile_info["id"],
         "quality_profile": profile_info,
         "_album_type": t["album_type"],
