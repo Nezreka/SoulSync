@@ -471,7 +471,13 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
 
     if pp["release_mbid"] and release_detail:
         from core.metadata.musicbrainz_tags import release_tags, credit_tags
-        pp["id_tags"].update(release_tags(release_detail))
+        # #1510: ALBUMARTISTSORT names the sort names of the album artist(s)
+        # the primary source settled on (album_artist, plus the full list when
+        # the album context names more than one) — or is left out entirely
+        # when no credit matches, instead of sorting under the whole credit.
+        album_names = [n for n in dict.fromkeys(
+            [metadata.get("album_artist")] + list(metadata.get("_album_artists_list") or [])) if n]
+        pp["id_tags"].update(release_tags(release_detail, album_artist_names=album_names or None))
         # Recording details must correspond to the final release recording,
         # not the earlier name-search result (which can be a different version).
         if pp["recording_mbid"]:
@@ -482,7 +488,12 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
             pp["isrc"] = (final_recording.get("isrcs") or [None])[0]
             pp["mb_isrcs"] = final_recording.get("isrcs") or []
             pp["mb_genres"] = [g["name"] for g in sorted(final_recording.get("genres", []), key=lambda g: g.get("count", 0), reverse=True)]
-            pp["id_tags"].update(credit_tags(final_recording.get("artist-credit")))
+            # #1510: ARTISTSORT keeps only the sort names of the credited
+            # artists that match the primary source's artist list — or is
+            # left out entirely when nothing matches — so the sort tag names
+            # the same artists ARTIST/ARTISTS do (#1425 did ARTISTS).
+            pp["id_tags"].update(credit_tags(final_recording.get("artist-credit"),
+                                             expected_names=metadata.get("_artists_list")))
 
     # Genre fallback chain: most MusicBrainz recordings don't carry genres at
     # the track level, but releases and artists usually do. If the recording
