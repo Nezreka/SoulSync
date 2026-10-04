@@ -2,6 +2,7 @@ import { Tooltip } from '@base-ui/react/tooltip';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { getRouteApi, useNavigate as useRouterNavigate } from '@tanstack/react-router';
 import {
+  type InputHTMLAttributes,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   createContext,
@@ -102,6 +103,7 @@ import {
   type LibraryV2ArtistTrackFile,
   type LibraryV2HistoryCategory,
   type LibraryV2MatchRelease,
+  type LibraryV2MetadataEntity,
   type LibraryV2MatchSearchResult,
 } from '../-library-v2.api';
 import { useLibraryChanged, useMaintenanceChanged } from '../-library-v2.live';
@@ -121,6 +123,7 @@ import {
   type LibraryV2JobState,
   type LibraryV2ManualSkip,
   type LibraryV2MatchService,
+  type LibraryV2Pagination,
   type LibraryV2QualityProfileSource,
   type LibraryV2QueueStatusAlbum,
   type LibraryV2QueueStatusEntry,
@@ -1092,31 +1095,27 @@ function MatchArtistReleaseContext({
   return <MatchReleaseStrip albums={query.data.albums} />;
 }
 
+/** The metadata providers this page names, in display order: the chip
+ *  abbreviation, the Enrich menu icon and the enrichment ring colour. */
+const PROVIDERS: { key: string; label: string; abbr?: string; icon: string; color?: string }[] = [
+  { key: 'spotify', label: 'Spotify', abbr: 'SP', icon: '🟢', color: '#1db954' },
+  { key: 'musicbrainz', label: 'MusicBrainz', abbr: 'MB', icon: '🟠', color: '#ba55d3' },
+  { key: 'deezer', label: 'Deezer', abbr: 'Dz', icon: '🟣', color: '#a238ff' },
+  { key: 'itunes', label: 'iTunes', abbr: 'iT', icon: '🔴', color: '#fc3c44' },
+  { key: 'audiodb', label: 'AudioDB', abbr: 'ADB', icon: '🔵', color: '#1a9fff' },
+  { key: 'discogs', label: 'Discogs', icon: '🟤', color: '#D4A574' },
+  { key: 'lastfm', label: 'Last.fm', abbr: 'LFM', icon: '⚪', color: '#d51007' },
+  { key: 'genius', label: 'Genius', abbr: 'Gen', icon: '🟡', color: '#ffff64' },
+  { key: 'tidal', label: 'Tidal', icon: '⬛', color: '#00ffff' },
+  { key: 'qobuz', label: 'Qobuz', icon: '🔷', color: '#4285f4' },
+  { key: 'amazon', label: 'Amazon', abbr: 'Amz', icon: '🛒' },
+  { key: 'jiosaavn', label: 'JioSaavn', abbr: 'JS', icon: '🎵' },
+  { key: 'bandcamp', label: 'Bandcamp', abbr: 'BC', icon: '🔹', color: '#1da0c3' },
+];
+const PROVIDER_BY_KEY = new Map(PROVIDERS.map((p) => [p.key, p]));
+
 function getServiceAbbreviation(service: string): string {
-  switch (service.toLowerCase()) {
-    case 'spotify':
-      return 'SP';
-    case 'musicbrainz':
-      return 'MB';
-    case 'deezer':
-      return 'Dz';
-    case 'jiosaavn':
-      return 'JS';
-    case 'audiodb':
-      return 'ADB';
-    case 'itunes':
-      return 'iT';
-    case 'lastfm':
-      return 'LFM';
-    case 'genius':
-      return 'Gen';
-    case 'bandcamp':
-      return 'BC';
-    case 'amazon':
-      return 'Amz';
-    default:
-      return service.substring(0, 3);
-  }
+  return PROVIDER_BY_KEY.get(service.toLowerCase())?.abbr ?? service.substring(0, 3);
 }
 
 /** A row of provider match chips. Clicking a chip opens the manual-match modal
@@ -1574,53 +1573,11 @@ function ManualMatchModal({
  *  ``core.library2.match_status.SERVICES``' per-entity-type column map
  *  (Genius has no album column, Discogs has no track column, Bandcamp has
  *  no artist column), which the backend re-validates regardless. */
-const ENRICH_SERVICES: Record<
-  'artists' | 'albums' | 'tracks',
-  { value: string; label: string; icon: string }[]
-> = {
-  artists: [
-    { value: 'spotify', label: 'Spotify', icon: '🟢' },
-    { value: 'musicbrainz', label: 'MusicBrainz', icon: '🟠' },
-    { value: 'deezer', label: 'Deezer', icon: '🟣' },
-    { value: 'itunes', label: 'iTunes', icon: '🔴' },
-    { value: 'audiodb', label: 'AudioDB', icon: '🔵' },
-    { value: 'discogs', label: 'Discogs', icon: '🟤' },
-    { value: 'lastfm', label: 'Last.fm', icon: '⚪' },
-    { value: 'genius', label: 'Genius', icon: '🟡' },
-    { value: 'tidal', label: 'Tidal', icon: '⬛' },
-    { value: 'qobuz', label: 'Qobuz', icon: '🔷' },
-    { value: 'amazon', label: 'Amazon', icon: '🛒' },
-    { value: 'jiosaavn', label: 'JioSaavn', icon: '🎵' },
-  ],
-  albums: [
-    { value: 'spotify', label: 'Spotify', icon: '🟢' },
-    { value: 'musicbrainz', label: 'MusicBrainz', icon: '🟠' },
-    { value: 'deezer', label: 'Deezer', icon: '🟣' },
-    { value: 'itunes', label: 'iTunes', icon: '🔴' },
-    { value: 'audiodb', label: 'AudioDB', icon: '🔵' },
-    { value: 'discogs', label: 'Discogs', icon: '🟤' },
-    { value: 'lastfm', label: 'Last.fm', icon: '⚪' },
-    { value: 'tidal', label: 'Tidal', icon: '⬛' },
-    { value: 'qobuz', label: 'Qobuz', icon: '🔷' },
-    { value: 'amazon', label: 'Amazon', icon: '🛒' },
-    { value: 'jiosaavn', label: 'JioSaavn', icon: '🎵' },
-    { value: 'bandcamp', label: 'Bandcamp', icon: '🔹' },
-  ],
-  tracks: [
-    { value: 'spotify', label: 'Spotify', icon: '🟢' },
-    { value: 'musicbrainz', label: 'MusicBrainz', icon: '🟠' },
-    { value: 'deezer', label: 'Deezer', icon: '🟣' },
-    { value: 'itunes', label: 'iTunes', icon: '🔴' },
-    { value: 'audiodb', label: 'AudioDB', icon: '🔵' },
-    { value: 'lastfm', label: 'Last.fm', icon: '⚪' },
-    { value: 'genius', label: 'Genius', icon: '🟡' },
-    { value: 'tidal', label: 'Tidal', icon: '⬛' },
-    { value: 'qobuz', label: 'Qobuz', icon: '🔷' },
-    { value: 'amazon', label: 'Amazon', icon: '🛒' },
-    { value: 'jiosaavn', label: 'JioSaavn', icon: '🎵' },
-    { value: 'bandcamp', label: 'Bandcamp', icon: '🔹' },
-  ],
-};
+const ENRICH_UNSUPPORTED = { artists: 'bandcamp', albums: 'genius', tracks: 'discogs' };
+
+function enrichServices(entity: 'artists' | 'albums' | 'tracks') {
+  return PROVIDERS.filter((p) => p.key !== ENRICH_UNSUPPORTED[entity]);
+}
 
 /** Legacy Enrich-dropdown parity (docs §44): pick one provider, re-query it
  *  for this single entity. Delegates to the same worker the legacy Enhanced
@@ -1649,15 +1606,15 @@ function EnrichDropdown({
     mutationFn: async (service: string) => {
       if (!canWrite) throw new Error('Library changes require the admin profile');
       if (service === 'all') {
-        const services = ENRICH_SERVICES[entity];
+        const services = enrichServices(entity);
         window.showToast?.(`Enriching ${entityName} from all services...`, 'info');
         let resynced = false;
         for (const s of services) {
           try {
-            const res = await enrichLibraryV2Entity(entity, entityId, s.value);
+            const res = await enrichLibraryV2Entity(entity, entityId, s.key);
             if (res.resynced) resynced = true;
           } catch (e) {
-            console.error(`Bulk enrich failed for ${s.value}:`, e);
+            console.error(`Bulk enrich failed for ${s.key}:`, e);
           }
         }
         return { resynced };
@@ -1709,16 +1666,16 @@ function EnrichDropdown({
         <span className={styles.enrichDropdownLabel}>Enrich with all</span>
       </button>
       <div className={styles.enrichDivider} />
-      {ENRICH_SERVICES[entity].map((s) => (
+      {enrichServices(entity).map((s) => (
         <button
-          key={s.value}
+          key={s.key}
           type="button"
           className={styles.enrichDropdownItem}
           data-requires-write=""
           disabled={mutation.isPending || !canWrite}
           onClick={(e) => {
             e.stopPropagation();
-            mutation.mutate(s.value);
+            mutation.mutate(s.key);
             onClose();
           }}
         >
@@ -2747,6 +2704,87 @@ function AlbumDetailModal({ album, onClose }: { album: AlbumDetailTarget; onClos
   );
 }
 
+/** Save or clear user overrides on one row, then refresh the page. */
+function useOverrideSave(
+  kind: LibraryV2MetadataEntity,
+  id: number | null | undefined,
+  onSaved: () => void,
+) {
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function save(values: Record<string, unknown>, clear: string[] = []) {
+    if (!id) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await updateLibraryV2MetadataOverrides(kind, id, values, clear);
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      onSaved();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Edit failed');
+      setBusy(false);
+    }
+  }
+  return { busy, error, save };
+}
+
+/** A labelled text field of the metadata edit forms. */
+function EditInput({
+  id,
+  label,
+  width,
+  onChange,
+  ...input
+}: Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'width'> & {
+  id: string;
+  label: string;
+  width?: 'half' | 'full';
+  onChange: (value: string) => void;
+}) {
+  const size = width === 'half' ? styles.editHalf : width === 'full' ? styles.editFull : null;
+  return (
+    <div className={size ? `${styles.editRow} ${size}` : styles.editRow}>
+      <label htmlFor={id}>{label}</label>
+      <input
+        id={id}
+        className={styles.searchInput}
+        onChange={(event) => onChange(event.target.value)}
+        {...input}
+      />
+    </div>
+  );
+}
+
+function ExplicitSelect({
+  id,
+  value,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  value: '' | 'yes' | 'no';
+  disabled: boolean;
+  onChange: (value: '' | 'yes' | 'no') => void;
+}) {
+  return (
+    <div className={styles.editRow}>
+      <label htmlFor={id}>Explicit</label>
+      <select
+        id={id}
+        className={styles.select}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value as '' | 'yes' | 'no')}
+      >
+        <option value="">Unknown</option>
+        <option value="yes">Explicit</option>
+        <option value="no">Clean</option>
+      </select>
+    </div>
+  );
+}
+
 function AlbumMetadataForm({
   album,
   onSaved,
@@ -2754,7 +2792,7 @@ function AlbumMetadataForm({
   album: EditableAlbumMetadata;
   onSaved: () => void;
 }) {
-  const queryClient = useQueryClient();
+  const { busy, error, save } = useOverrideSave('release_group', album.id, onSaved);
   const [title, setTitle] = useState(album.title);
   const [year, setYear] = useState(album.year === null ? '' : String(album.year));
   const [releaseDate, setReleaseDate] = useState(album.release_date ?? '');
@@ -2769,8 +2807,6 @@ function AlbumMetadataForm({
   const [label, setLabel] = useState(album.label ?? '');
   const [style, setStyle] = useState(album.style ?? '');
   const [mood, setMood] = useState(album.mood ?? '');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const normalizedTitle = title.trim();
   const normalizedYear = year.trim() === '' ? null : Number(year);
   const normalizedReleaseDate = releaseDate.trim();
@@ -2801,66 +2837,43 @@ function AlbumMetadataForm({
     'mood',
   ].filter((field) => field in album.user_overrides);
 
-  async function save(valuesToSet: Record<string, unknown>, clear: string[] = []) {
-    setBusy(true);
-    setError(null);
-    try {
-      await updateLibraryV2MetadataOverrides('release_group', album.id, valuesToSet, clear);
-      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
-      onSaved();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Edit failed');
-      setBusy(false);
-    }
-  }
-
   return (
     <div className={styles.metadataEditGrid}>
-      <div className={`${styles.editRow} ${styles.editHalf}`}>
-        <label htmlFor="lib2-album-title">Title</label>
-        <input
-          id="lib2-album-title"
-          className={styles.searchInput}
-          value={title}
-          disabled={busy}
-          onChange={(event) => setTitle(event.target.value)}
-        />
-      </div>
-      <div className={`${styles.editRow} ${styles.editHalf}`}>
-        <label htmlFor="lib2-album-label">Label</label>
-        <input
-          id="lib2-album-label"
-          className={styles.searchInput}
-          value={label}
-          disabled={busy}
-          onChange={(event) => setLabel(event.target.value)}
-        />
-      </div>
-      <div className={styles.editRow}>
-        <label htmlFor="lib2-album-year">Year</label>
-        <input
-          id="lib2-album-year"
-          className={styles.searchInput}
-          type="number"
-          min={0}
-          max={9999}
-          value={year}
-          disabled={busy}
-          onChange={(event) => setYear(event.target.value)}
-        />
-      </div>
-      <div className={styles.editRow}>
-        <label htmlFor="lib2-album-release-date">Release date</label>
-        <input
-          id="lib2-album-release-date"
-          className={styles.searchInput}
-          type="text"
-          placeholder="YYYY-MM-DD"
-          value={releaseDate}
-          disabled={busy}
-          onChange={(event) => setReleaseDate(event.target.value)}
-        />
-      </div>
+      <EditInput
+        id="lib2-album-title"
+        label="Title"
+        width="half"
+        value={title}
+        disabled={busy}
+        onChange={setTitle}
+      />
+      <EditInput
+        id="lib2-album-label"
+        label="Label"
+        width="half"
+        value={label}
+        disabled={busy}
+        onChange={setLabel}
+      />
+      <EditInput
+        id="lib2-album-year"
+        label="Year"
+        type="number"
+        min={0}
+        max={9999}
+        value={year}
+        disabled={busy}
+        onChange={setYear}
+      />
+      <EditInput
+        id="lib2-album-release-date"
+        label="Release date"
+        type="text"
+        placeholder="YYYY-MM-DD"
+        value={releaseDate}
+        disabled={busy}
+        onChange={setReleaseDate}
+      />
       <div className={styles.editRow}>
         <label htmlFor="lib2-album-type">Release type</label>
         <select
@@ -2877,40 +2890,28 @@ function AlbumMetadataForm({
           ))}
         </select>
       </div>
-      <div className={styles.editRow}>
-        <label htmlFor="lib2-album-explicit">Explicit</label>
-        <select
-          id="lib2-album-explicit"
-          className={styles.select}
-          value={explicitFlag}
-          disabled={busy}
-          onChange={(e) => setExplicitFlag(e.target.value as '' | 'yes' | 'no')}
-        >
-          <option value="">Unknown</option>
-          <option value="yes">Explicit</option>
-          <option value="no">Clean</option>
-        </select>
-      </div>
-      <div className={`${styles.editRow} ${styles.editHalf}`}>
-        <label htmlFor="lib2-album-style">Style</label>
-        <input
-          id="lib2-album-style"
-          className={styles.searchInput}
-          value={style}
-          disabled={busy}
-          onChange={(event) => setStyle(event.target.value)}
-        />
-      </div>
-      <div className={`${styles.editRow} ${styles.editHalf}`}>
-        <label htmlFor="lib2-album-mood">Mood</label>
-        <input
-          id="lib2-album-mood"
-          className={styles.searchInput}
-          value={mood}
-          disabled={busy}
-          onChange={(event) => setMood(event.target.value)}
-        />
-      </div>
+      <ExplicitSelect
+        id="lib2-album-explicit"
+        value={explicitFlag}
+        disabled={busy}
+        onChange={setExplicitFlag}
+      />
+      <EditInput
+        id="lib2-album-style"
+        label="Style"
+        width="half"
+        value={style}
+        disabled={busy}
+        onChange={setStyle}
+      />
+      <EditInput
+        id="lib2-album-mood"
+        label="Mood"
+        width="half"
+        value={mood}
+        disabled={busy}
+        onChange={setMood}
+      />
       {error ? (
         <div className={styles.searchError} role="alert">
           {error}
@@ -3240,15 +3241,13 @@ function EditArtistModal({
   artist: LibraryV2ArtistDetail;
   onClose: () => void;
 }) {
-  const queryClient = useQueryClient();
+  const { busy, error, save } = useOverrideSave('artist', artist.id, onClose);
   const [name, setName] = useState(artist.name);
   const [genres, setGenres] = useState(artist.genres.join(', '));
   const [summary, setSummary] = useState(artist.summary ?? '');
   const [style, setStyle] = useState(artist.style ?? '');
   const [mood, setMood] = useState(artist.mood ?? '');
   const [label, setLabel] = useState(artist.label ?? '');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const normalizedName = name.trim();
   const normalizedSummary = summary.trim();
   const normalizedStyle = style.trim();
@@ -3271,42 +3270,23 @@ function EditArtistModal({
     (field) => field in artist.user_overrides,
   );
 
-  async function save(valuesToSet: Record<string, unknown>, clear: string[] = []) {
-    setBusy(true);
-    setError(null);
-    try {
-      await updateLibraryV2MetadataOverrides('artist', artist.id, valuesToSet, clear);
-      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
-      onClose();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Edit failed');
-      setBusy(false);
-    }
-  }
-
   return (
     <ModalShell title={`Edit Metadata — ${artist.name}`} settings onClose={onClose}>
-      <div className={styles.editRow}>
-        <label htmlFor="lib2-artist-name">Artist name</label>
-        <input
-          id="lib2-artist-name"
-          className={styles.searchInput}
-          value={name}
-          disabled={busy}
-          onChange={(event) => setName(event.target.value)}
-        />
-      </div>
-      <div className={styles.editRow}>
-        <label htmlFor="lib2-artist-genres">Genres</label>
-        <input
-          id="lib2-artist-genres"
-          className={styles.searchInput}
-          value={genres}
-          disabled={busy}
-          placeholder="Pop, Soul"
-          onChange={(event) => setGenres(event.target.value)}
-        />
-      </div>
+      <EditInput
+        id="lib2-artist-name"
+        label="Artist name"
+        value={name}
+        disabled={busy}
+        onChange={setName}
+      />
+      <EditInput
+        id="lib2-artist-genres"
+        label="Genres"
+        value={genres}
+        disabled={busy}
+        placeholder="Pop, Soul"
+        onChange={setGenres}
+      />
       <div className={styles.editRow}>
         <label htmlFor="lib2-artist-summary">Biography</label>
         <textarea
@@ -3319,36 +3299,27 @@ function EditArtistModal({
           onChange={(event) => setSummary(event.target.value)}
         />
       </div>
-      <div className={styles.editRow}>
-        <label htmlFor="lib2-artist-style">Style</label>
-        <input
-          id="lib2-artist-style"
-          className={styles.searchInput}
-          value={style}
-          disabled={busy}
-          onChange={(event) => setStyle(event.target.value)}
-        />
-      </div>
-      <div className={styles.editRow}>
-        <label htmlFor="lib2-artist-mood">Mood</label>
-        <input
-          id="lib2-artist-mood"
-          className={styles.searchInput}
-          value={mood}
-          disabled={busy}
-          onChange={(event) => setMood(event.target.value)}
-        />
-      </div>
-      <div className={styles.editRow}>
-        <label htmlFor="lib2-artist-label">Label</label>
-        <input
-          id="lib2-artist-label"
-          className={styles.searchInput}
-          value={label}
-          disabled={busy}
-          onChange={(event) => setLabel(event.target.value)}
-        />
-      </div>
+      <EditInput
+        id="lib2-artist-style"
+        label="Style"
+        value={style}
+        disabled={busy}
+        onChange={setStyle}
+      />
+      <EditInput
+        id="lib2-artist-mood"
+        label="Mood"
+        value={mood}
+        disabled={busy}
+        onChange={setMood}
+      />
+      <EditInput
+        id="lib2-artist-label"
+        label="Label"
+        value={label}
+        disabled={busy}
+        onChange={setLabel}
+      />
       {error ? <div className={styles.searchError}>{error}</div> : null}
       <div className={styles.modalActions}>
         {resettable.length > 0 ? (
@@ -4758,27 +4729,37 @@ function ArtistIndexView() {
         <ArtistCards artists={artists} />
       )}
 
-      {pagination && pagination.total_pages > 1 ? (
-        <div className={styles.pagination} id="library-pagination">
-          <button
-            type="button"
-            disabled={!pagination.has_prev}
-            onClick={() => void navigate({ search: (p) => ({ ...p, page: p.page - 1 }) })}
-          >
-            ←
-          </button>
-          <span>
-            Page {pagination.page} of {pagination.total_pages}
-          </span>
-          <button
-            type="button"
-            disabled={!pagination.has_next}
-            onClick={() => void navigate({ search: (p) => ({ ...p, page: p.page + 1 }) })}
-          >
-            →
-          </button>
-        </div>
-      ) : null}
+      <PageNav
+        pagination={pagination}
+        id="library-pagination"
+        onStep={(step) => void navigate({ search: (p) => ({ ...p, page: p.page + step }) })}
+      />
+    </div>
+  );
+}
+
+/** ← Page n of m → under a paged list; nothing for a single page. */
+function PageNav({
+  pagination,
+  id,
+  onStep,
+}: {
+  pagination: LibraryV2Pagination | null | undefined;
+  id?: string;
+  onStep: (step: 1 | -1) => void;
+}) {
+  if (!pagination || pagination.total_pages <= 1) return null;
+  return (
+    <div className={styles.pagination} id={id}>
+      <button type="button" disabled={!pagination.has_prev} onClick={() => onStep(-1)}>
+        ←
+      </button>
+      <span>
+        Page {pagination.page} of {pagination.total_pages}
+      </span>
+      <button type="button" disabled={!pagination.has_next} onClick={() => onStep(1)}>
+        →
+      </button>
     </div>
   );
 }
@@ -5046,27 +5027,10 @@ function WantedIndexView() {
         </div>
       )}
 
-      {pagination && pagination.total_pages > 1 ? (
-        <div className={styles.pagination}>
-          <button
-            type="button"
-            disabled={!pagination.has_prev}
-            onClick={() => void navigate({ search: (p) => ({ ...p, page: p.page - 1 }) })}
-          >
-            ←
-          </button>
-          <span>
-            Page {pagination.page} of {pagination.total_pages}
-          </span>
-          <button
-            type="button"
-            disabled={!pagination.has_next}
-            onClick={() => void navigate({ search: (p) => ({ ...p, page: p.page + 1 }) })}
-          >
-            →
-          </button>
-        </div>
-      ) : null}
+      <PageNav
+        pagination={pagination}
+        onStep={(step) => void navigate({ search: (p) => ({ ...p, page: p.page + step }) })}
+      />
     </div>
   );
 }
@@ -6162,31 +6126,14 @@ function TopTracksSidebar({
   );
 }
 
-/** ldp-05: the legacy hero, kept to its original vertical footprint. Used for
- *  both a catalogue artist (`header=rich`) and a discovery artist, which is
- *  the whole point — the two must be indistinguishable to a user arriving
- *  from search. */
 /** ldp-05: the legacy hero's enrichment rings — per provider, the share of
  *  this artist's tracks that actually carry that provider's id. Ported from
  *  `renderArtistEnrichmentCoverage` (`library.js:1188`) including its class
  *  names and SVG geometry, so `style.css` renders it identically. */
-const ENRICH_SERVICES_COVERAGE: Array<{
-  name: string;
-  key: string;
-  color: string;
-}> = [
-  { name: 'Spotify', key: 'spotify', color: '#1db954' },
-  { name: 'MusicBrainz', key: 'musicbrainz', color: '#ba55d3' },
-  { name: 'Deezer', key: 'deezer', color: '#a238ff' },
-  { name: 'Last.fm', key: 'lastfm', color: '#d51007' },
-  { name: 'iTunes', key: 'itunes', color: '#fc3c44' },
-  { name: 'AudioDB', key: 'audiodb', color: '#1a9fff' },
-  { name: 'Discogs', key: 'discogs', color: '#D4A574' },
-  { name: 'Genius', key: 'genius', color: '#ffff64' },
-  { name: 'Tidal', key: 'tidal', color: '#00ffff' },
-  { name: 'Qobuz', key: 'qobuz', color: '#4285f4' },
-  { name: 'Bandcamp', key: 'bandcamp', color: '#1da0c3' },
-];
+const ENRICH_SERVICES_COVERAGE =
+  'spotify musicbrainz deezer lastfm itunes audiodb discogs genius tidal qobuz bandcamp'
+    .split(' ')
+    .flatMap((key) => PROVIDER_BY_KEY.get(key) ?? []);
 
 const RING_RADIUS = 20;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
@@ -6217,7 +6164,7 @@ function EnrichmentCoverage({ coverage }: { coverage: Record<string, number> }) 
                 </svg>
                 <span className="ring-pct">{Math.round(pct)}</span>
               </div>
-              <span className="artist-enrich-label">{service.name}</span>
+              <span className="artist-enrich-label">{service.label}</span>
             </div>
           );
         })}
@@ -6229,6 +6176,8 @@ function EnrichmentCoverage({ coverage }: { coverage: Record<string, number> }) 
 /** ldp-05: the legacy hero, structurally identical to
  *  `index.html:4565-4655` — image column, info column, top-tracks column —
  *  because that is what `style.css` lays out. Only the plumbing differs.
+ *  A catalogue artist (`header=rich`) and a discovery artist share it, so the
+ *  two look the same to a user arriving from search.
  *
  *  The image is deliberately NOT the plain 160px `.artist-image`: legacy
  *  overrode that with `#artist-hero-section #artist-detail-image { width:100% }`
@@ -8336,22 +8285,6 @@ function TrackTableOptionsMenu({
   const qualityShowResolution = prefsQuery.data?.track_table.quality_show_resolution ?? true;
   const qualityShowBitrate = prefsQuery.data?.track_table.quality_show_bitrate ?? true;
 
-  const MATCH_PROVIDERS = [
-    { key: 'spotify', label: 'Spotify' },
-    { key: 'musicbrainz', label: 'MusicBrainz' },
-    { key: 'deezer', label: 'Deezer' },
-    { key: 'itunes', label: 'iTunes' },
-    { key: 'audiodb', label: 'AudioDB' },
-    { key: 'discogs', label: 'Discogs' },
-    { key: 'lastfm', label: 'Last.fm' },
-    { key: 'genius', label: 'Genius' },
-    { key: 'tidal', label: 'Tidal' },
-    { key: 'qobuz', label: 'Qobuz' },
-    { key: 'amazon', label: 'Amazon' },
-    { key: 'jiosaavn', label: 'JioSaavn' },
-    { key: 'bandcamp', label: 'Bandcamp' },
-  ];
-
   return (
     <ColumnsOptionsMenu
       title="Table options — columns & match providers"
@@ -8433,7 +8366,7 @@ function TrackTableOptionsMenu({
               Show every provider
             </label>
             <div className={styles.tableOptionsProviderGrid}>
-              {MATCH_PROVIDERS.filter(
+              {PROVIDERS.filter(
                 (provider) => !availableProviders || availableProviders.has(provider.key),
               ).map((provider) => {
                 const isVisible = visibleProviders[provider.key] ?? true;
@@ -10653,7 +10586,7 @@ function TrackDetailModal({
 }
 
 function TrackMetadataForm({ track, onSaved }: { track: LibraryV2Track; onSaved: () => void }) {
-  const queryClient = useQueryClient();
+  const { busy, error, save } = useOverrideSave('track', track.id, onSaved);
   const [title, setTitle] = useState(track.title ?? '');
   const [trackNumber, setTrackNumber] = useState(
     track.track_number === null ? '' : String(track.track_number),
@@ -10667,8 +10600,6 @@ function TrackMetadataForm({ track, onSaved }: { track: LibraryV2Track; onSaved:
   );
   const [style, setStyle] = useState(track.style ?? '');
   const [mood, setMood] = useState(track.mood ?? '');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const { values, valid } = computeTrackEditValues(
     {
@@ -10693,103 +10624,66 @@ function TrackMetadataForm({ track, onSaved }: { track: LibraryV2Track; onSaved:
     'mood',
   ].filter((field) => field in overrides);
 
-  async function save(valuesToSet: Record<string, unknown>, clear: string[] = []) {
-    if (!track.id) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await updateLibraryV2MetadataOverrides('track', track.id, valuesToSet, clear);
-      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
-      onSaved();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Edit failed');
-      setBusy(false);
-    }
-  }
-
   return (
     <div className={styles.metadataEditGrid}>
-      <div className={`${styles.editRow} ${styles.editFull}`}>
-        <label htmlFor="lib2-track-title">Title</label>
-        <input
-          id="lib2-track-title"
-          className={styles.searchInput}
-          value={title}
-          disabled={busy}
-          onChange={(event) => setTitle(event.target.value)}
-        />
-      </div>
-      <div className={styles.editRow}>
-        <label htmlFor="lib2-track-number">Track number</label>
-        <input
-          id="lib2-track-number"
-          className={styles.searchInput}
-          type="number"
-          min={0}
-          value={trackNumber}
-          disabled={busy}
-          onChange={(event) => setTrackNumber(event.target.value)}
-        />
-      </div>
-      <div className={styles.editRow}>
-        <label htmlFor="lib2-track-disc">Disc number</label>
-        <input
-          id="lib2-track-disc"
-          className={styles.searchInput}
-          type="number"
-          min={0}
-          value={discNumber}
-          disabled={busy}
-          onChange={(event) => setDiscNumber(event.target.value)}
-        />
-      </div>
-      <div className={styles.editRow}>
-        <label htmlFor="lib2-track-bpm">BPM</label>
-        <input
-          id="lib2-track-bpm"
-          className={styles.searchInput}
-          type="number"
-          min={0}
-          step="0.1"
-          value={bpm}
-          disabled={busy}
-          onChange={(event) => setBpm(event.target.value)}
-        />
-      </div>
-      <div className={styles.editRow}>
-        <label htmlFor="lib2-track-explicit">Explicit</label>
-        <select
-          id="lib2-track-explicit"
-          className={styles.select}
-          value={explicitFlag}
-          disabled={busy}
-          onChange={(e) => setExplicitFlag(e.target.value as '' | 'yes' | 'no')}
-        >
-          <option value="">Unknown</option>
-          <option value="yes">Explicit</option>
-          <option value="no">Clean</option>
-        </select>
-      </div>
-      <div className={`${styles.editRow} ${styles.editHalf}`}>
-        <label htmlFor="lib2-track-style">Style</label>
-        <input
-          id="lib2-track-style"
-          className={styles.searchInput}
-          value={style}
-          disabled={busy}
-          onChange={(event) => setStyle(event.target.value)}
-        />
-      </div>
-      <div className={`${styles.editRow} ${styles.editHalf}`}>
-        <label htmlFor="lib2-track-mood">Mood</label>
-        <input
-          id="lib2-track-mood"
-          className={styles.searchInput}
-          value={mood}
-          disabled={busy}
-          onChange={(event) => setMood(event.target.value)}
-        />
-      </div>
+      <EditInput
+        id="lib2-track-title"
+        label="Title"
+        width="full"
+        value={title}
+        disabled={busy}
+        onChange={setTitle}
+      />
+      <EditInput
+        id="lib2-track-number"
+        label="Track number"
+        type="number"
+        min={0}
+        value={trackNumber}
+        disabled={busy}
+        onChange={setTrackNumber}
+      />
+      <EditInput
+        id="lib2-track-disc"
+        label="Disc number"
+        type="number"
+        min={0}
+        value={discNumber}
+        disabled={busy}
+        onChange={setDiscNumber}
+      />
+      <EditInput
+        id="lib2-track-bpm"
+        label="BPM"
+        type="number"
+        min={0}
+        step="0.1"
+        value={bpm}
+        disabled={busy}
+        onChange={setBpm}
+      />
+      <ExplicitSelect
+        id="lib2-track-explicit"
+        value={explicitFlag}
+        disabled={busy}
+        onChange={setExplicitFlag}
+      />
+      <EditInput
+        id="lib2-track-style"
+        label="Style"
+        width="half"
+        value={style}
+        disabled={busy}
+        onChange={setStyle}
+      />
+      <EditInput
+        id="lib2-track-mood"
+        label="Mood"
+        width="half"
+        value={mood}
+        disabled={busy}
+        onChange={setMood}
+      />
       {error ? <div className={styles.searchError}>{error}</div> : null}
       <div className={styles.modalActions}>
         {resettable.length > 0 ? (
