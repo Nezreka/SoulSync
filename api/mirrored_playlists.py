@@ -1203,7 +1203,10 @@ def prepare_mirrored_discovery(playlist_id):
             'phase': 'discovered' if has_cached else 'fresh',
             'discovery_results': pre_discovered_results if has_cached else [],
             'discovery_progress': 100 if has_cached else 0,
-            'spotify_matches': pre_discovered_count if has_cached else 0,
+            # Start at 0 — the worker counts every track exactly once (cache
+            # hits and fresh matches both increment), so pre-seeding with the
+            # cached count would double-count (e.g. "365 out of 364").
+            'spotify_matches': 0,
             'spotify_total': len(tracks),
             'status': 'complete' if has_cached else 'parsed',
             'url': playlist_data['url'],
