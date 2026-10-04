@@ -353,7 +353,9 @@ export async function _mlmSaveMatch(): Promise<void> {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              // a catalogue id: the server translates it to its own id
               track_id: String(_mlmSelectedLibrary.id),
+              catalogue_track_id: String(_mlmSelectedLibrary.id),
               playlist_name: _plName,
               source_track_id: String(_mlmSelectedSource.source_track_id || ''),
               source_title: _mlmSelectedSource.title || '',
