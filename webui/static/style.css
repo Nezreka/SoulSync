@@ -11233,14 +11233,16 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     }
 
     /* Dashboard enrichment service buttons: worker-orbs is disabled on mobile,
-       so these render as real buttons. Spread the 44px icon buttons across the
-       full width in an even auto-fit grid (no ragged centered rows), and give
-       the wider "Manage Workers" pill its own full-width row. Scoped to the
-       dashboard so other pages' .header-actions (e.g. Settings) are untouched. */
+       so these render as real buttons. Fixed 5-column grid so the 15 orbs
+       always form 3 even rows: auto-fit sized the column count from the
+       container width, which left a ragged left-aligned final row whenever
+       15 wasn't a multiple of it. The wider "Manage Workers" pill keeps its
+       own full-width row. Scoped to the dashboard so other pages'
+       .header-actions (e.g. Settings) are untouched. */
     #dashboard-page .header-actions {
         width: 100%;
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         justify-items: center;
         align-items: center;
         gap: 12px 10px;
