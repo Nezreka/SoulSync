@@ -108,7 +108,16 @@ def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False
     for tp in track_plans or []:
         fp = tp.get('file_path')
         db_data = tp.get('db_data') or {}
-        if not fp or not _os.path.isfile(fp):
+        # Skip only when there's truly nothing to do for this track:
+        # no tags to write, no cover to embed, no lyrics to fetch,
+        # and no full-depth enrichment to run.
+        has_work = (
+            bool(db_data)
+            or bool(embed_cover)
+            or bool(_lyrics_client)
+            or bool(full and tp.get('full_meta'))
+        )
+        if not fp or not _os.path.isfile(fp) or not has_work:
             result['skipped'] += 1
             continue
         try:
