@@ -4450,15 +4450,17 @@ class RepairWorker:
                 if track_id:
                     try:
                         ro_conn = self.db._get_connection()
-                        ro_cols = {c[1] for c in ro_conn.execute("PRAGMA table_info(tracks)")}
-                        if 'owner_profile_id' in ro_cols:
-                            ro_row = ro_conn.execute(
-                                "SELECT owner_profile_id FROM tracks WHERE id = ?",
-                                (track_id,),
-                            ).fetchone()
-                            if ro_row and ro_row[0]:
-                                relocate_owner_pid = int(ro_row[0])
-                        ro_conn.close()
+                        try:
+                            ro_cols = {c[1] for c in ro_conn.execute("PRAGMA table_info(tracks)")}
+                            if 'owner_profile_id' in ro_cols:
+                                ro_row = ro_conn.execute(
+                                    "SELECT owner_profile_id FROM tracks WHERE id = ?",
+                                    (track_id,),
+                                ).fetchone()
+                                if ro_row and ro_row[0]:
+                                    relocate_owner_pid = int(ro_row[0])
+                        finally:
+                            ro_conn.close()
                     except Exception as exc:
                         logger.debug("relocate owner lookup failed: %s", exc)
                 dest = relocate_mismatch_to_staging(
