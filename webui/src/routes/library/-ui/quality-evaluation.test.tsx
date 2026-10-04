@@ -3,44 +3,11 @@ import { describe, expect, it } from 'vitest';
 
 import type { LibraryV2Track } from '../-library-v2.types';
 
+import { lib2Track } from '../-library-v2.test-fixtures';
 import { TrackQualityProfileBadge } from './library-v2-page';
 
 function track(overrides: Partial<LibraryV2Track> = {}): LibraryV2Track {
-  return {
-    id: 1,
-    title: 'Track',
-    track_number: 1,
-    disc_number: 1,
-    duration: null,
-    bpm: null,
-    explicit: null,
-    style: null,
-    mood: null,
-    isrc: null,
-    monitored: true,
-    quality_profile_id: 1,
-    canonical_track_id: null,
-    artists: [],
-    file: {
-      file_id: 1,
-      path: '/music/track.flac',
-      size: null,
-      bitrate: null,
-      sample_rate: null,
-      bit_depth: null,
-      format: null,
-      quality_tier: 'unknown',
-      verification_status: null,
-      import_status: null,
-      source: null,
-      file_state: null,
-    },
-    file_status: 'present',
-    metadata_gaps: [],
-    meets_profile: null,
-    upgrade_candidate: null,
-    ...overrides,
-  };
+  return lib2Track({ id: 1, ...overrides });
 }
 
 describe('Library v2 quality evaluation state', () => {

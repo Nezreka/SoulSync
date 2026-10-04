@@ -7,46 +7,16 @@ import { createShellBridge } from '@/test/shell-bridge';
 
 import type { LibraryV2Track } from '../-library-v2.types';
 
+import { lib2Track, lib2TrackFile } from '../-library-v2.test-fixtures';
 import { TrackPlayButton } from './library-v2-page';
 
 function track(overrides: Partial<LibraryV2Track> = {}): LibraryV2Track {
-  return {
-    id: 7,
+  return lib2Track({
     title: 'Track Title',
-    track_number: 1,
-    disc_number: 1,
-    duration: null,
-    bpm: null,
-    explicit: null,
-    style: null,
-    mood: null,
-    isrc: null,
-    monitored: true,
-    quality_profile_id: 1,
-    canonical_track_id: null,
     artists: [{ id: 3, name: 'Some Artist', role: 'primary' }],
-    file: {
-      file_id: 1,
-      path: '/music/track.flac',
-      size: null,
-      bitrate: 1234,
-      sample_rate: null,
-      bit_depth: null,
-      format: null,
-      quality_tier: 'unknown',
-      verification_status: null,
-      import_status: null,
-      source: null,
-      file_state: null,
-      has_replaygain: false,
-      has_lyrics: false,
-    },
-    file_status: 'present',
-    metadata_gaps: [],
-    meets_profile: null,
-    upgrade_candidate: null,
+    file: lib2TrackFile({ bitrate: 1234 }),
     ...overrides,
-  };
+  });
 }
 
 function renderWithClient(node: React.ReactElement) {

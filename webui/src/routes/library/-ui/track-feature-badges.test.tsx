@@ -7,6 +7,7 @@ import { createTestQueryClient } from '@/test/query-client';
 
 import type { LibraryV2Track } from '../-library-v2.types';
 
+import { lib2Track } from '../-library-v2.test-fixtures';
 import {
   LibraryV2CanWriteContext,
   TrackLyricsBadge,
@@ -14,45 +15,7 @@ import {
   TrackReplayGainBadge,
 } from './library-v2-page';
 
-function track(overrides: Partial<LibraryV2Track> = {}): LibraryV2Track {
-  return {
-    id: 7,
-    title: 'Track',
-    track_number: 1,
-    disc_number: 1,
-    duration: null,
-    bpm: null,
-    explicit: null,
-    style: null,
-    mood: null,
-    isrc: null,
-    monitored: true,
-    quality_profile_id: 1,
-    canonical_track_id: null,
-    artists: [],
-    file: {
-      file_id: 1,
-      path: '/music/track.flac',
-      size: null,
-      bitrate: null,
-      sample_rate: null,
-      bit_depth: null,
-      format: null,
-      quality_tier: 'unknown',
-      verification_status: null,
-      import_status: null,
-      source: null,
-      file_state: null,
-      has_replaygain: false,
-      has_lyrics: false,
-    },
-    file_status: 'present',
-    metadata_gaps: [],
-    meets_profile: null,
-    upgrade_candidate: null,
-    ...overrides,
-  };
-}
+const track = lib2Track;
 
 function renderWithClient(node: React.ReactElement) {
   const queryClient = createTestQueryClient();
