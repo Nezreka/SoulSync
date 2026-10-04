@@ -204,3 +204,75 @@ def test_idless_enqueue_records_nothing():
     assert token == 'a\\song.flac'
     # fail closed: nothing recorded, so scoped cleanup leaves it alone
     assert c._own_downloads.get('peerA', set()) == set() or 'peerA' not in c._own_downloads
+
+
+# slskd 0.25.1 and 0.26.0 (TransfersController.EnqueueAsync) answer
+# POST transfers/downloads/{user} with 201 {"enqueued": [Transfer], "failed": []}
+# and no top-level id.
+def _enqueue_reply(*pairs):
+    return {'enqueued': [{'id': i, 'username': 'peerA', 'filename': f,
+                          'state': 'Requested'} for i, f in pairs],
+            'failed': []}
+
+
+def test_extract_transfer_id_reads_real_enqueue_shape():
+    reply = _enqueue_reply(('11111111-aaaa', 'a\\song.flac'))
+    assert SoulseekClient._extract_transfer_id(reply, 'a\\song.flac') == '11111111-aaaa'
+
+
+def test_extract_transfer_id_matches_filename_among_several():
+    reply = _enqueue_reply(('id-1', 'a\\one.flac'), ('id-2', 'a\\two.flac'))
+    assert SoulseekClient._extract_transfer_id(reply, 'a\\two.flac') == 'id-2'
+    # no match and more than one entry: do not guess
+    assert SoulseekClient._extract_transfer_id(reply, 'a\\three.flac') is None
+
+
+def test_extract_transfer_id_single_entry_with_renamed_file():
+    reply = _enqueue_reply(('id-1', 'a\\One.flac'))
+    assert SoulseekClient._extract_transfer_id(reply, 'a\\one.flac') == 'id-1'
+
+
+def test_extract_transfer_id_empty_or_failed_enqueue():
+    assert SoulseekClient._extract_transfer_id(
+        {'enqueued': [], 'failed': ['a\\song.flac']}, 'a\\song.flac') is None
+    assert SoulseekClient._extract_transfer_id({}, 'x') is None
+
+
+def test_extract_transfer_id_keeps_legacy_shapes():
+    assert SoulseekClient._extract_transfer_id({'id': 'x1'}, 'f') == 'x1'
+    assert SoulseekClient._extract_transfer_id([{'id': 'x2'}], 'f') == 'x2'
+
+
+def test_download_with_real_reply_registers_id_and_scoped_clear_works():
+    c = _client()
+    calls = []
+
+    async def fake(method, endpoint, **kwargs):
+        calls.append((method, endpoint))
+        if method == 'POST':
+            return _enqueue_reply(('real-1', 'a\\song.flac'))
+        if method == 'GET' and endpoint == 'transfers/downloads':
+            return [{'username': 'peerA', 'directories': [{'files': [
+                {'id': 'real-1', 'filename': 'a\\song.flac', 'state': 'Completed, Succeeded'},
+                {'id': 'other-1', 'filename': 'a\\song.flac', 'state': 'Completed, Succeeded'},
+            ]}]}]
+        return {}
+
+    c._make_request = fake
+    c.download_path = '/tmp/dl'
+    token = asyncio.run(c.download('peerA', 'a\\song.flac', 123))
+    assert token == 'real-1'
+    assert c._own_downloads['peerA'] == {'real-1'}
+
+    assert asyncio.run(c.clear_all_completed_downloads()) is True
+    deletes = [e for m, e in calls if m == 'DELETE']
+    assert deletes == ['transfers/downloads/peerA/real-1?remove=true']
+    assert c._own_downloads['peerA'] == set()
+
+
+def test_cancel_all_forgets_the_ids_it_removed():
+    c = _client()
+    c._own_downloads = {'peerA': {'own-1', 'own-3'}}
+    _rig(c, transfers=_transfers())
+    assert asyncio.run(c.cancel_all_downloads()) is True
+    assert c._own_downloads['peerA'] == set()
