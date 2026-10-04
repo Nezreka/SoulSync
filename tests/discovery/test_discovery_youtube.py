@@ -319,7 +319,7 @@ def test_activity_feed_logged_on_completion():
     assert len(deps._activity_log) == 1
     args, _ = deps._activity_log[0]
     title, msg = args[1], args[2]
-    assert 'YouTube Discovery Complete' in title
+    assert 'YouTube Identification Complete' in title
     assert 'Test Playlist' in msg
 
 

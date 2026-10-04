@@ -41,7 +41,8 @@ def test_candidate_with_no_history_is_waiting_and_carries_file_facts():
     assert len(rows) == 1
     r = rows[0]
     assert r['status'] == 'waiting' and r['key'] == 'h1' and r['kind'] == 'album'
-    assert r['name'] == 'Alb' and r['artist'] == 'Art'
+    # #1289: the row carries the folder name; the tag guess is a subtitle.
+    assert r['name'] == 'Artist - Album' and r['guessed_name'] == 'Alb' and r['artist'] == 'Art'
     assert r['rel_path'] == 'Artist - Album'
     assert r['formats'] == ['FLAC', 'MP3']
     assert r['total_duration_ms'] == 400000 and r['total_size'] == 60000000
@@ -58,7 +59,7 @@ def test_history_joins_by_hash_and_falls_back_to_path():
     rows = build_inbox([c], [_rec(c.audio_files[0])], hist, [], '/Staging')
     r = rows[0]
     assert r['status'] == 'needs_review' and r['history_id'] == 7
-    assert r['name'] == 'Real Name' and r['artist'] == 'Real Artist' and r['image_url'] == 'a.jpg'
+    assert r['name'] == 'X' and r['guessed_name'] == 'Real Name' and r['artist'] == 'Real Artist' and r['image_url'] == 'a.jpg'
     assert r['confidence'] == 0.82
     assert r['match']['source'] is None
     assert r['match']['matches'][0] == {'track_name': 'One', 'track_number': None,
@@ -70,9 +71,11 @@ def test_history_joins_by_hash_and_falls_back_to_path():
 
 def test_a_partial_import_with_files_left_in_staging_did_not_finish():
     # #1289: partial mapped to "imported" while most of the album sat in staging,
-    # and the auto-import dedup never looks at it again, so it hid forever
+    # and the auto-import dedup never looks at it again, so it hid forever.
+    # Now partial is a first-class status: failed when files remain in staging
+    # (retryable), partial when they don't (honest record of what happened).
     assert derive_status('partial', None, True) == 'failed'
-    assert derive_status('partial', None, False) == 'imported'
+    assert derive_status('partial', None, False) == 'partial'
     c = _cand('/Staging/AHDN', ['/Staging/AHDN/02.flac', '/Staging/AHDN/03.flac'], 'h-left')
     hist = [{'id': 9, 'folder_hash': 'h-orig', 'folder_path': '/Staging/AHDN', 'status': 'partial',
              'error_message': '11 of 12 tracks failed'}]
@@ -93,7 +96,7 @@ def test_live_import_overrides_history_and_carries_progress():
 def test_history_without_files_keeps_only_records_worth_keeping():
     hist = [
         {'id': 1, 'folder_hash': 'a', 'folder_path': '/Staging/A', 'status': 'completed',
-         'album_name': 'Done', 'total_files': 12},
+         'album_name': 'Done', 'folder_name': 'A', 'total_files': 12},
         {'id': 2, 'folder_hash': 'b', 'folder_path': '/Staging/B', 'status': 'needs_identification',
          'album_name': 'Gone'},
         {'id': 3, 'folder_hash': 'c', 'folder_path': '/Staging/C', 'status': 'failed',
@@ -103,12 +106,16 @@ def test_history_without_files_keeps_only_records_worth_keeping():
     assert [(r['status'], r['in_staging']) for r in rows] == [('imported', False), ('failed', False)]
     assert rows[0]['kind'] == 'album' and rows[1]['kind'] == 'single'
     assert rows[1]['error_message'] == 'boom'
+    # #1289: history-only rows are named by folder too; the album guess is a subtitle.
+    assert rows[0]['name'] == 'A' and rows[0]['guessed_name'] == 'Done'
+    # no folder_name and no album_name: name falls back to '', guess is None.
+    assert rows[1]['name'] == '' and rows[1]['guessed_name'] is None
 
 
-def test_single_uses_its_title_as_the_name():
+def test_single_uses_its_filename_as_the_name():
     c = _cand('/Staging/loose.flac', ['/Staging/loose.flac'], 's1', single=True)
     r = build_inbox([c], [_rec('/Staging/loose.flac', title='Song', album='')], [], [], '/Staging')[0]
-    assert r['kind'] == 'single' and r['name'] == 'Song'
+    assert r['kind'] == 'single' and r['name'] == 'loose.flac' and r['guessed_name'] == 'Song'
 
 
 def test_summary_counts_only_what_is_in_staging():
@@ -166,7 +173,8 @@ def test_endpoint_without_a_worker_still_lists_staging(tmp_path):
                                  'current_status': 'idle', 'last_scan_time': None, 'stats': {}}
     assert len(payload['items']) == 1
     item = payload['items'][0]
-    assert item['status'] == 'waiting' and item['file_count'] == 2 and item['name'] == 'Alb'
+    assert item['status'] == 'waiting' and item['file_count'] == 2
+    assert item['name'] == 'Artist - Album' and item['guessed_name'] == 'Alb'
     assert item['files'][0]['bitrate'] == 320000
     assert payload['summary']['items'] == 1
 
@@ -194,5 +202,6 @@ def test_endpoint_joins_the_worker(tmp_path):
     assert status == 200
     assert payload['worker']['running'] is True and payload['worker']['stats'] == {'scanned': 1}
     item = payload['items'][0]
-    assert item['status'] == 'needs_review' and item['name'] == 'Named' and item['history_id'] == 3
+    assert item['status'] == 'needs_review' and item['history_id'] == 3
+    assert item['name'] == 'Artist - Album' and item['guessed_name'] == 'Named'
     assert payload['summary']['attention'] == 1

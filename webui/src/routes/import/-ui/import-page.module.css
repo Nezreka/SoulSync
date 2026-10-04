@@ -326,6 +326,15 @@
   white-space: nowrap;
 }
 
+.rowGuessed {
+  font-size: 12px;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.45);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .rowMeta {
   display: flex;
   flex-wrap: wrap;

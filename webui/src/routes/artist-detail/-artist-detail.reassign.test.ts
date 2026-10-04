@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { albumBits, describeMapping, describeMatch } from './-artist-detail.reassign';
+import { albumBits, cssUrl, describeMapping, describeMatch } from './-artist-detail.reassign';
 
 /**
  * The pure helpers behind the reassign modal. These are what the user reads
@@ -69,5 +69,17 @@ describe('albumBits', () => {
   it('skips blanks instead of leaving empty separators', () => {
     expect(albumBits({ id: '1', name: 'X' })).toBe('');
     expect(albumBits({ id: '1', name: 'X', album_type: 'single' })).toBe('single');
+  });
+});
+
+describe('cssUrl', () => {
+  it('keeps a quote in a provider URL inside the CSS string', () => {
+    expect(cssUrl("https://img.example/o'brien.jpg")).toBe(
+      "url('https://img.example/o\\'brien.jpg')",
+    );
+  });
+
+  it('escapes a backslash and drops line breaks', () => {
+    expect(cssUrl('https://img.example/a\\b\n.jpg')).toBe("url('https://img.example/a\\\\b.jpg')");
   });
 });

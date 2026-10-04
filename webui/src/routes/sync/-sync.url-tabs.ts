@@ -219,7 +219,7 @@ export function itunesLinkTypeBadge(playlist: UrlTabPlaylist): CardTypeBadge {
 /**
  * YouTube's card runs its OWN 7-case button map (updateYouTubeCardPhase
  * 8982-9037), drifting from the shared getActionButtonText: fresh 'Start
- * Discovery' (not 'Discover'), discovered AND sync_complete 'View Details'
+ * Identifying' (not 'Identify'), discovered AND sync_complete 'View Details'
  * (not 'View Results'/'Download'), download_complete 'View Results' (not
  * 'Complete'). Transcribed as-is. (The vanilla's RESTORED cards briefly
  * used the shared map until their first phase update,
@@ -229,7 +229,7 @@ export function itunesLinkTypeBadge(playlist: UrlTabPlaylist): CardTypeBadge {
 export function ytActionButtonText(phase: string): string {
   switch (phase) {
     case 'fresh':
-      return 'Start Discovery';
+      return 'Start Identifying';
     case 'discovering':
     case 'syncing':
       return 'View Progress';

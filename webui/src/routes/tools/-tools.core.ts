@@ -331,6 +331,7 @@ export const FINDING_ACTION_LABELS: Record<string, string> = {
   deleted_expired: 'Deleted',
   removed_duplicates: 'Duplicates Removed',
   genres_applied: 'Genres Applied',
+  ignored: 'Ignored',
 };
 
 /** The badge shown on a non-pending finding: the user action if we have a label

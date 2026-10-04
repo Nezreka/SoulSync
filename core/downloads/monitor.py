@@ -874,9 +874,9 @@ class WebUIDownloadMonitor:
                         )
                     except Exception as e:
                         logger.debug("get_all_downloads failed: %s", e)
-                        # A failed engine poll is unknown inventory, just like
-                        # a failed slskd poll. Treating it as empty restarts
-                        # healthy streaming downloads and blacklists peers.
+                        # a failed engine poll is unknown inventory, like a
+                        # failed slskd poll. read as empty, every streaming
+                        # download looks gone and is restarted
                         return _LIVE_TRANSFERS_FETCH_FAILED
                 for download in all_downloads:
                     key = _make_context_key(download.username, download.filename)

@@ -363,7 +363,7 @@ export function mirroredHash(id: number | string): string {
 
 /**
  * is there a discovery worth reopening? needs a non-fresh phase AND the
- * playlist behind it. a pipeline run after "clear discovery" paints a phase
+ * playlist behind it. a pipeline run after "clear identification" paints a phase
  * onto an empty state, and opening that showed a 0 track discovery modal with
  * nothing to do (#1405).
  */

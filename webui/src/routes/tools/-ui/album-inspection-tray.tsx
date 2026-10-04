@@ -134,6 +134,7 @@ export function AlbumInspectionTray({
 
   const handleFixAllOnAlbum = async () => {
     if (!findings || findings.length === 0) return;
+    // only what has a fix: the rest would be marked resolved without one
     const fixable = findings.filter(
       (f) => f.status === 'pending' && Boolean(findingFixLabel(f.finding_type)),
     );

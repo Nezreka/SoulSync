@@ -83,6 +83,7 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
       'Cleans up featured artists, commas, Romanized non-Latin titles, and inconsistent album release metadata.',
     jobIds: [
       'album_tag_consistency',
+      'album_release_year_repair',
       'comma_artist_splitter',
       'genre_cleanup',
       'suspect_album_tag_detector',
@@ -91,6 +92,7 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     ],
     findingTypes: [
       'album_tag_inconsistency',
+      'album_release_year_mismatch',
       'comma_artist_split',
       'genre_cleanup',
       'suspect_album_tag',
@@ -199,6 +201,7 @@ export function OperationsStudio({
   const [bulkStatus, setBulkStatus] = useState<BulkFixStatus | null>(null);
   const [selectedAlbum, setSelectedAlbum] = useState<FindingAlbumGroup | null>(null);
   const [redownloadFinding, setRedownloadFinding] = useState<RepairFinding | null>(null);
+  const redownloadTrackId = redownloadFinding ? findingRedownloadTrackId(redownloadFinding) : null;
   const bulkTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const loadData = useCallback(async () => {
@@ -846,11 +849,13 @@ export function OperationsStudio({
       </div>
 
       {/* ── Redownload Modal ──────────────────────────────────────────────── */}
-      {redownloadFinding ? (
+      {/* a finding with no track behind it (a fake-lossless FILE finding) has no
+          id to search for; its finding id is not a track id */}
+      {redownloadFinding && redownloadTrackId ? (
         <RedownloadModal
           track={{
-            id: findingRedownloadTrackId(redownloadFinding) || String(redownloadFinding.id),
-            track_id: findingRedownloadTrackId(redownloadFinding) || String(redownloadFinding.id),
+            id: redownloadTrackId,
+            track_id: redownloadTrackId,
             title: String(
               (redownloadFinding.details as Record<string, any>)?.track_title ||
                 redownloadFinding.title ||
@@ -875,9 +880,8 @@ export function OperationsStudio({
               '',
             tracks: [
               {
-                id: findingRedownloadTrackId(redownloadFinding) || String(redownloadFinding.id),
-                track_id:
-                  findingRedownloadTrackId(redownloadFinding) || String(redownloadFinding.id),
+                id: redownloadTrackId,
+                track_id: redownloadTrackId,
                 title: String(
                   (redownloadFinding.details as Record<string, any>)?.track_title ||
                     redownloadFinding.title ||

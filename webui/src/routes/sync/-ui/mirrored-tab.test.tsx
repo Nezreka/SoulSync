@@ -146,10 +146,10 @@ describe('MirroredTab — load and card', () => {
     const ring = document.querySelector('.pl-ring')!;
     expect(ring.getAttribute('data-pct')).toBe('36%');
     expect(ring.className).toContain('pl-ring--short');
-    // Clear discovery is offered now that there IS a discovery to clear.
+    // Clear identification is offered now that there IS an identification to clear.
     fireEvent.click(document.querySelector('.pl-card-more') as HTMLElement);
     expect([...document.querySelectorAll('.pl-menu-item')].map((b) => b.textContent)).toContain(
-      'Clear discovery',
+      'Clear identification',
     );
   });
 
@@ -250,15 +250,18 @@ describe('MirroredTab — the three actions', () => {
     window.showToast = toast as typeof window.showToast;
     await loaded({ ...ROW, discovered_count: 4 });
 
-    runCardAction('Clear discovery');
+    runCardAction('Clear identification');
     await waitFor(() => expect(toast).toHaveBeenCalled());
     expect(confirm).toHaveBeenCalledWith({
-      title: 'Clear Discovery Data',
+      title: 'Clear Identification Data',
       message:
-        'Clear discovery data for "Road Trip"? You can re-discover afterwards to get updated cover art.',
+        'Clear identification data for "Road Trip"? You can re-identify afterwards to get updated cover art.',
     });
     expect(calls.some((c) => c.url === '/api/mirrored-playlists/3/clear-discovery')).toBe(true);
-    expect(toast).toHaveBeenCalledWith('Cleared discovery for Road Trip (12 tracks)', 'success');
+    expect(toast).toHaveBeenCalledWith(
+      'Cleared identification for Road Trip (12 tracks)',
+      'success',
+    );
     // 1187: the entry is DELETED, not left at 'cancelled' — otherwise the
     // next card click reads it as non-fresh and opens an empty modal.
     expect(screen.getByTestId('phase')).toHaveTextContent('unseeded');
@@ -280,7 +283,7 @@ describe('MirroredTab — the three actions', () => {
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
     const before = calls.filter((c) => c.url === '/api/mirrored-playlists').length;
-    runCardAction('Clear discovery');
+    runCardAction('Clear identification');
     await waitFor(() => expect(toast).toHaveBeenCalledWith('busy', 'error'));
     expect(calls.filter((c) => c.url === '/api/mirrored-playlists').length).toBe(before);
   });
@@ -305,11 +308,11 @@ describe('MirroredTab — the three actions', () => {
               ? { success: true, cleared: 4 }
               : { states: [] };
     fireEvent.click(screen.getByText('Road Trip'));
-    await waitFor(() => expect(screen.getByText('Discover')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Discover'));
+    await waitFor(() => expect(screen.getByText('Identify')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Identify'));
     await waitFor(() => expect(screen.getByTestId('seeded')).toHaveTextContent('Road Trip'));
 
-    runCardAction('Clear discovery');
+    runCardAction('Clear identification');
     await waitFor(() => expect(toast).toHaveBeenCalled());
     // The vanilla deletes the entry; leaving it at 'cancelled' would make the
     // next card click take the non-fresh branch and open an empty modal.
@@ -322,7 +325,7 @@ describe('MirroredTab — the three actions', () => {
     window.showToast = vi.fn() as typeof window.showToast;
     await loaded({ ...ROW, discovered_count: 4 });
     const before = calls.length;
-    runCardAction('Clear discovery');
+    runCardAction('Clear identification');
     await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());
     expect(calls.length).toBe(before);
   });
@@ -438,7 +441,7 @@ describe('MirroredTab — the three actions', () => {
     window.showConfirmDialog = vi.fn(async () => false) as typeof window.showConfirmDialog;
     window.showToast = vi.fn() as typeof window.showToast;
     await loaded({ ...ROW, discovered_count: 4 });
-    runCardAction('Clear discovery');
+    runCardAction('Clear identification');
     await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());
     expect(screen.getByTestId('open-id')).toHaveTextContent('none');
   });
@@ -509,8 +512,8 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Road Trip'));
-    await waitFor(() => expect(screen.getByText('Discover')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Discover'));
+    await waitFor(() => expect(screen.getByText('Identify')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Identify'));
 
     await waitFor(() => expect(screen.getByTestId('open-id')).toHaveTextContent('mirrored_3'));
     const prep = calls.find((c) => c.url.includes('prepare-discovery'));
@@ -547,8 +550,8 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Road Trip'));
-    await waitFor(() => expect(screen.getByText('Discover')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Discover'));
+    await waitFor(() => expect(screen.getByText('Identify')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Identify'));
     await waitFor(() => expect(screen.getByTestId('open-id')).toHaveTextContent('mirrored_3'));
     expect(screen.getByTestId('phase')).toHaveTextContent('discovered');
     const prepares = () => calls.filter((c) => c.url.includes('prepare-discovery')).length;
@@ -560,7 +563,7 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     await waitFor(() => expect(document.querySelector('#mirrored-track-modal')).not.toBeNull());
     expect(screen.getByText('Delete Mirror')).toBeInTheDocument();
     expect(screen.getByText('Edit Source')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('View discovery'));
+    fireEvent.click(screen.getByText('View identification'));
     expect(screen.getByTestId('open-id')).toHaveTextContent('mirrored_3');
     // reopened the existing one, no second prepare
     expect(prepares()).toBe(1);
@@ -588,10 +591,10 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     fireEvent.click(screen.getByText('Road Trip'));
     await waitFor(() => expect(document.querySelector('#mirrored-track-modal')).not.toBeNull());
     expect(screen.getByTestId('open-id')).toHaveTextContent('none');
-    expect(screen.getByText('Discover')).toBeInTheDocument();
+    expect(screen.getByText('Identify')).toBeInTheDocument();
   });
 
-  it('Refresh from source runs the pipeline with refresh_only, nothing pushed (#1413)', async () => {
+  it('Refresh from source runs the pipeline with refresh_only, nothing pushed (#1413, #1289)', async () => {
     // radoslav-orlov #1413: added a song on youtube, wanted to pull it in
     // without a server push or downloads, and keep the discovery
     stubFetch();
@@ -609,7 +612,8 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Road Trip'));
     await waitFor(() => expect(document.querySelector('#mirrored-track-modal')).not.toBeNull());
-    fireEvent.click(screen.getByText('Refresh from source'));
+    // #1289: the label now names the source ("Refresh from YouTube")
+    fireEvent.click(screen.getByText('Refresh from YouTube'));
     await waitFor(() =>
       expect(calls.find((c) => c.url.endsWith('/pipeline/run'))).toMatchObject({
         method: 'POST',
@@ -897,7 +901,7 @@ describe('MirroredTab — it hands its reload to the controller owner', () => {
 /*
  * The pool buttons moved OUT of this tab and into the page header — both are
  * app-level overlays reviewing tracks across everything, not one tab's
- * controls, and the Tools page opens the Discovery Pool through the same seam.
+ * controls, and the Tools page opens the Match Review through the same seam.
  * Their wiring is covered by sync-shell.test.tsx now; what this tab must prove
  * is that it no longer renders them itself.
  */
@@ -907,7 +911,7 @@ describe('MirroredTab — the pools live in the page header now', () => {
     responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    expect(screen.queryByText('Discovery Pool')).toBeNull();
+    expect(screen.queryByText('Match Review')).toBeNull();
     expect(screen.queryByText('Wing It Pool')).toBeNull();
   });
 });

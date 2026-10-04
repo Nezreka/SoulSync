@@ -8,6 +8,7 @@ items" report this method exists to fix.
 """
 
 from database.music_database import MusicDatabase
+from tests import lib2_seed
 
 
 def _db(tmp_path):
@@ -22,6 +23,14 @@ def _land(db, title, artist, album, thumb='', quality='flac', source='soulseek',
             " quality, thumb_url, download_source, file_path, created_at)"
             " VALUES ('download', ?, ?, ?, ?, ?, ?, ?, ?)",
             (title, artist, album, quality, thumb, source, file_path, created))
+        # #1453: get_recently_added_albums drops cards whose play target has
+        # no matching catalogue file (a rebuild wipes the catalogue but keeps
+        # library_history), so the helper lands a file row for every history
+        # row it inserts. The fixture artist/album names are deliberately
+        # unlike any test artist/album so the art-backfill lookups can never
+        # match them.
+        lib2_seed.track(conn, 'Recently Added Fixture Artist',
+                        'Recently Added Fixture Album', title, path=file_path)
         conn.commit()
 
 
@@ -99,3 +108,35 @@ def test_art_falls_back_to_the_artist_thumb_when_no_album_row_matches(tmp_path):
     _land(db, 'Loose Single', 'Ado', 'Not In Library', thumb='')
     cards = db.get_recently_added_albums(limit=20)
     assert cards[0]['thumb_url'] == 'artist.jpg'
+
+
+def test_rebuild_wiped_tracks_produces_no_stale_cards(tmp_path):
+    """#1453: a Full Refresh wipes the catalogue but KEEPS library_history
+    (the Expired Download Cleaner grandfathers pre-rebuild downloads off it).
+    The rail must not surface cards whose play target no longer exists in the
+    catalogue — here it has no files at all."""
+    db = _db(tmp_path)
+    with db._get_connection() as conn:
+        conn.execute(
+            "INSERT INTO library_history (event_type, title, artist_name, album_name,"
+            " quality, thumb_url, download_source, file_path, created_at)"
+            " VALUES ('download', 'Ghost Track', 'Ghost Artist', 'Ghost Album',"
+            " 'flac', '', 'soulseek', '/gone/ghost/ghost.flac', '2026-08-10 12:00:00')")
+        conn.commit()
+    assert db.get_recently_added_albums(limit=20) == []
+
+
+def test_mixed_live_and_stale_rows_keep_only_the_live_card(tmp_path):
+    """#1453: one history row still has its track in the library, another
+    was wiped by a rebuild — only the surviving card is shown."""
+    db = _db(tmp_path)
+    _land(db, 'Live Track', 'Live Artist', 'Live Album', file_path='/m/live.flac')
+    with db._get_connection() as conn:
+        conn.execute(
+            "INSERT INTO library_history (event_type, title, artist_name, album_name,"
+            " quality, thumb_url, download_source, file_path, created_at)"
+            " VALUES ('download', 'Stale Track', 'Stale Artist', 'Stale Album',"
+            " 'flac', '', 'soulseek', '/gone/stale/stale.flac', '2026-08-10 12:00:00')")
+        conn.commit()
+    cards = db.get_recently_added_albums(limit=20)
+    assert [c['album_name'] for c in cards] == ['Live Album']

@@ -405,8 +405,8 @@ describe('the hero', () => {
     expect(dots).toContain('left: 0');
     expect(dots).toContain('right: 0');
     const dot = /\.vdsc-dot \{([^}]*)\}/.exec(CSS)![1];
-    expect(dot).toMatch(/height: 40px/);
-    expect(dot).toMatch(/min-height: 40px/);
+    expect(dot).toMatch(/height: 28px/);
+    expect(dot).toMatch(/min-height: 28px/);
     // The visible dot is a pseudo-element, so the button's size is the target
     // and nothing can stretch the dot itself.
     expect(CSS).toContain('.vdsc-dot::before');

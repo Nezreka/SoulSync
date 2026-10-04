@@ -153,7 +153,10 @@ export function DbUpdaterCard() {
 
   if (running) {
     phase = state?.phase || 'Processing...';
-    details = `${processed} / ${total} artists (${percent.toFixed(1)}%)`;
+    // The unit comes from the backend: "artists" while the scan walks the
+    // library, "tracks" while the post-scan reconcile reads file tags.
+    const unit = state?.unit || 'artists';
+    details = `${processed} / ${total} ${unit} (${percent.toFixed(1)}%)`;
     barPercent = percent;
   } else if (state?.status === 'error') {
     phase = `Error: ${state.error_message}`;

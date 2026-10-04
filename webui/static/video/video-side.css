@@ -3744,7 +3744,7 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     pointer-events: none;
 }
 .vdsc-dot {
-    position: relative; width: 34px; height: 40px; min-height: 40px;
+    position: relative; width: 34px; height: 28px; min-height: 28px;
     background: none; border: none; padding: 0; cursor: pointer; pointer-events: auto;
     border-radius: 8px;
 }

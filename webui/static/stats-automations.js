@@ -600,8 +600,8 @@ function renderMirroredCard(p, container) {
         ${typeof playlistQualityProfileSelectHtml === 'function'
             ? playlistQualityProfileSelectHtml(p.source_playlist_id, p.source, true)
             : ''}
-        ${disc > 0 ? `<button class="mirrored-card-clear" onclick="event.stopPropagation(); clearMirroredDiscovery(${p.id}, '${_escJs(p.name)}')" title="Clear discovery data">↺</button>` : ''}
-        <button class="mirrored-card-pipeline" onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${p.id}, '${_escJs(p.name)}')" title="Refresh, discover, sync, and queue missing tracks">Auto-Sync</button>
+        ${disc > 0 ? `<button class="mirrored-card-clear" onclick="event.stopPropagation(); clearMirroredDiscovery(${p.id}, '${_escJs(p.name)}')" title="Clear identification data">↺</button>` : ''}
+        <button class="mirrored-card-pipeline" onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${p.id}, '${_escJs(p.name)}')" title="Refresh, identify, sync, and queue missing tracks">Auto-Sync</button>
         <button class="mirrored-card-rename" onclick="event.stopPropagation(); editMirroredCustomName(${p.id}, '${_escJs(p.name)}', '${_escJs(p.custom_name || '')}')" title="Rename (changes the name shown here and used when syncing)">✏️</button>
         <button class="mirrored-card-link" onclick="event.stopPropagation(); editMirroredSourceRef(${p.id}, '${_escJs(p.name)}', '${_escJs(p.source)}', '${_escJs(sourceRef)}')" title="Edit original playlist link">🔗</button>
         <button class="mirrored-card-export" onclick="event.stopPropagation(); exportMirroredPlaylist(${p.id}, '${_escJs(p.display_name || p.name)}')" title="Export to ListenBrainz / JSPF">📤</button>
@@ -1173,12 +1173,12 @@ function closeMirroredModal() {
  * Delete a mirrored playlist after confirmation.
  */
 async function clearMirroredDiscovery(playlistId, name) {
-    if (!await showConfirmDialog({ title: 'Clear Discovery Data', message: `Clear discovery data for "${name}"? You can re-discover afterwards to get updated cover art.` })) return;
+    if (!await showConfirmDialog({ title: 'Clear Identification Data', message: `Clear identification data for "${name}"? You can re-identify afterwards to get updated cover art.` })) return;
     try {
         const res = await fetch(`/api/mirrored-playlists/${playlistId}/clear-discovery`, { method: 'POST' });
         const data = await res.json();
         if (data.success) {
-            showToast(`Cleared discovery for ${name} (${data.cleared} tracks)`, 'success');
+            showToast(`Cleared identification for ${name} (${data.cleared} tracks)`, 'success');
             // Signal cancellation to any running worker, then clear state
             const hash = `mirrored_${playlistId}`;
             if (youtubePlaylistStates[hash]) {
@@ -1189,7 +1189,7 @@ async function clearMirroredDiscovery(playlistId, name) {
             if (staleModal) staleModal.remove();
             loadMirroredPlaylists();
         } else {
-            showToast(data.error || 'Failed to clear discovery', 'error');
+            showToast(data.error || 'Failed to clear identification', 'error');
         }
     } catch (err) {
         showToast(`Error: ${err.message}`, 'error');
@@ -1202,6 +1202,7 @@ let _discoveryPoolOverlay = null;
 let _discoveryPoolData = null;
 let _discoveryPoolView = 'categories'; // 'categories' | 'failed' | 'matched'
 let _discoveryPoolPlaylistFilter = null;
+let _discoveryPoolSort = 'recent'; // 'recent' | 'confidence_desc' | 'confidence_asc' (#1452)
 
 async function loadDiscoveryPoolStats() {
     try {
@@ -1225,7 +1226,7 @@ async function openDiscoveryPoolModal(playlistId = null) {
         const res = await fetch(url);
         _discoveryPoolData = await res.json();
     } catch (err) {
-        showToast('Failed to load discovery pool', 'error');
+        showToast('Failed to load Match Review', 'error');
         return;
     }
 
@@ -1248,7 +1249,7 @@ async function openDiscoveryPoolModal(playlistId = null) {
         <div class="modal-container playlist-modal">
             <div class="playlist-modal-header">
                 <div class="playlist-header-content">
-                    <h2>Discovery Pool</h2>
+                    <h2>Match Review</h2>
                     <div class="playlist-quick-info">
                         <span class="playlist-track-count" id="pool-header-matched">${matchedCount} Matched</span>
                         <span class="playlist-owner ${failedCount > 0 ? 'pool-header-failed-highlight' : ''}" id="pool-header-failed">${failedCount} Failed</span>
@@ -1257,6 +1258,7 @@ async function openDiscoveryPoolModal(playlistId = null) {
                             ${playlistOptions}
                         </select>
                     </div>
+                    <div class="pool-direction-note" style="font-size:12px;opacity:0.7;margin-top:6px;">Links source tracks to catalogue metadata &mdash; nothing is downloaded or changed here.</div>
                 </div>
                 <span class="playlist-modal-close" onclick="closeDiscoveryPoolModal()">&times;</span>
             </div>
@@ -1290,13 +1292,19 @@ async function openDiscoveryPoolModal(playlistId = null) {
                         <button class="pool-back-btn" onclick="showPoolCategories()">&larr; Back</button>
                         <span class="pool-list-title" id="pool-list-title"></span>
                         <input type="text" class="pool-list-search" id="pool-list-search" placeholder="Filter tracks..." oninput="renderPoolList()">
+                        <select id="pool-sort-select" class="pool-sort-select" style="display: none;" onchange="_discoveryPoolSort = this.value; renderPoolList();" title="Sort matched tracks">
+                            <option value="recent">Most recent</option>
+                            <option value="confidence_desc">Highest match %</option>
+                            <option value="confidence_asc">Lowest match %</option>
+                        </select>
+                        <button id="pool-clear-btn" class="playlist-modal-btn playlist-modal-btn-secondary" style="display: none;" onclick="clearPoolCache()" title="Clear cached matches">Clear</button>
                     </div>
                     <div class="pool-list-content" id="pool-list-content"></div>
                 </div>
             </div>
 
             <div class="playlist-modal-footer">
-                <div class="playlist-modal-footer-left"></div>
+                <div class="playlist-modal-footer-left"><span class="pool-persist-note" style="font-size:12px;opacity:0.7;">Saved as: match data on your playlist tracks. Affects next sync: yes.</span></div>
                 <div class="playlist-modal-footer-right">
                     <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closeDiscoveryPoolModal()">Close</button>
                 </div>
@@ -1408,6 +1416,7 @@ async function openWingItPoolModal(playlistId = null) {
                             ${playlistOptions}
                         </select>
                     </div>
+                    <div class="pool-direction-note" style="font-size:12px;opacity:0.7;margin-top:6px;">Best-effort guesses linking source tracks to catalogue metadata &mdash; verify them before they stick.</div>
                 </div>
                 <span class="playlist-modal-close" onclick="closeWingItPoolModal()">&times;</span>
             </div>
@@ -1447,7 +1456,7 @@ async function openWingItPoolModal(playlistId = null) {
             </div>
 
             <div class="playlist-modal-footer">
-                <div class="playlist-modal-footer-left"></div>
+                <div class="playlist-modal-footer-left"><span class="pool-persist-note" style="font-size:12px;opacity:0.7;">Saved as: match data, flagged as a guess until you confirm. Affects next sync: yes.</span></div>
                 <div class="playlist-modal-footer-right">
                     <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closeWingItPoolModal()">Close</button>
                 </div>
@@ -1606,9 +1615,15 @@ function showPoolList(category) {
     const titleEl = document.getElementById('pool-list-title');
     if (titleEl) titleEl.textContent = category === 'failed' ? 'Failed Tracks' : 'Matched Tracks';
 
-    // Clear search filter when switching views
+    // Clear search filter when switching views (sort choice persists)
     const searchEl = document.getElementById('pool-list-search');
     if (searchEl) searchEl.value = '';
+
+    // Sort + Clear controls only make sense on the matched view (#1452)
+    const sortEl = document.getElementById('pool-sort-select');
+    if (sortEl) sortEl.style.display = category === 'matched' ? '' : 'none';
+    const clearEl = document.getElementById('pool-clear-btn');
+    if (clearEl) clearEl.style.display = category === 'matched' ? '' : 'none';
 
     renderPoolList();
 }
@@ -1632,7 +1647,7 @@ async function filterDiscoveryPool(playlistId) {
             renderPoolList();
         }
     } catch (err) {
-        showToast('Failed to filter discovery pool', 'error');
+        showToast('Failed to filter Match Review', 'error');
     }
 }
 
@@ -1694,6 +1709,13 @@ function renderPoolList() {
                     (e.original_artist || '').toLowerCase().includes(query) ||
                     matchedName.toLowerCase().includes(query);
             });
+        }
+        // Match-% sort, applied after the search filter (#1452). slice() keeps
+        // the backend's recency order intact when switching back to 'recent'.
+        if (_discoveryPoolSort === 'confidence_desc') {
+            entries = entries.slice().sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+        } else if (_discoveryPoolSort === 'confidence_asc') {
+            entries = entries.slice().sort((a, b) => (a.confidence || 0) - (b.confidence || 0));
         }
         if (entries.length === 0) {
             container.innerHTML = query
@@ -1810,7 +1832,7 @@ function openPoolRematchModal(cacheId, trackName, artistName) {
 }
 
 async function removePoolCacheEntry(entryId) {
-    if (!await showConfirmDialog({ title: 'Remove Cache Entry', message: 'Remove this cached match? The track will be re-discovered fresh next time.' })) return;
+    if (!await showConfirmDialog({ title: 'Remove Cache Entry', message: 'Remove this cached match? The track will be re-identified fresh next time.' })) return;
     try {
         const res = await fetch(`/api/discovery-pool/cache/${entryId}`, { method: 'DELETE' });
         const data = await res.json();
@@ -1819,6 +1841,30 @@ async function removePoolCacheEntry(entryId) {
             filterDiscoveryPool(_discoveryPoolPlaylistFilter || '');
         } else {
             showToast(data.error || 'Failed to remove', 'error');
+        }
+    } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+    }
+}
+
+async function clearPoolCache() {
+    // Bulk-clear cached matches, scoped to the playlist filter when one is set (#1452).
+    const count = (_discoveryPoolData && _discoveryPoolData.stats && _discoveryPoolData.stats.matched) || 0;
+    const playlistId = _discoveryPoolPlaylistFilter;
+    const scopeMsg = playlistId
+        ? `Clear ${count} cached matches for this playlist?`
+        : `Clear all ${count} cached matches?`;
+    if (!await showConfirmDialog({ title: 'Clear Cached Matches', message: `${scopeMsg} Tracks will be re-identified on the next discovery or sync.`, confirmText: 'Clear', destructive: true })) return;
+    try {
+        let url = '/api/discovery-pool/cache';
+        if (playlistId) url += `?playlist_id=${playlistId}`;
+        const res = await fetch(url, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Cleared ${data.cleared} cached matches`, 'success');
+            filterDiscoveryPool(_discoveryPoolPlaylistFilter || '');
+        } else {
+            showToast(data.error || 'Failed to clear', 'error');
         }
     } catch (err) {
         showToast(`Error: ${err.message}`, 'error');
@@ -2113,7 +2159,7 @@ async function discoverMirroredPlaylist(playlistId) {
 
             const cached = prepData.cached_matches || 0;
             const total = prepData.total_tracks || tracks.length;
-            showToast(`Loaded ${cached}/${total} cached discovery results`, 'success');
+            showToast(`Loaded ${cached}/${total} cached identification results`, 'success');
         } else {
             // No cached data — fresh state
             youtubePlaylistStates[tempHash] = {
@@ -2189,7 +2235,7 @@ async function retryFailedMirroredDiscovery(urlHash) {
 
         showToast(`Retrying ${data.retry_count} failed tracks...`, 'info');
     } catch (err) {
-        showToast(`Error retrying discovery: ${err.message}`, 'error');
+        showToast(`Error retrying identification: ${err.message}`, 'error');
     }
 }
 
@@ -2593,7 +2639,7 @@ const _autoIcons = {
 const AUTO_HUB_GROUPS = [
     {
         id: 'playlist-pipeline', icon: '🚀', name: 'Playlist Pipeline (All-in-One)',
-        desc: 'Single automation that runs the full playlist lifecycle: refresh → discover → sync → download missing. No signal wiring needed.',
+        desc: 'Single automation that runs the full playlist lifecycle: refresh → identify → sync → download missing. No signal wiring needed.',
         category: 'Sync', badge: '1 automation', color: '#8b5cf6',
         steps: [
             { label: 'Refresh', icon: '🔄', type: 'action' },
@@ -2736,9 +2782,9 @@ const AUTO_HUB_RECIPES = [
         category: 'Sync', difficulty: 'beginner', when: { type: 'schedule', config: { interval: 6, unit: 'hours' } }, do: { type: 'refresh_mirrored', config: {} }, then: []
     },
     {
-        id: 'release-radar-pipeline', icon: '\uD83D\uDCE1', name: 'Release Radar Pipeline', desc: 'Every Friday, refresh mirrored playlists, discover new tracks, then sync. Chain 3 automations for a full pipeline.',
+        id: 'release-radar-pipeline', icon: '\uD83D\uDCE1', name: 'Release Radar Pipeline', desc: 'Every Friday, refresh mirrored playlists, identify new tracks, then sync. Chain 3 automations for a full pipeline.',
         category: 'Sync', difficulty: 'intermediate', when: { type: 'weekly_time', config: { days: ['friday'], time: '18:00' } }, do: { type: 'refresh_mirrored', config: {} }, then: [],
-        chain: ['Refresh Mirrored', 'Discover Playlist', 'Sync Playlist'], note: 'Create 3 separate automations and chain them with signals for the full pipeline.'
+        chain: ['Refresh Mirrored', 'Identify Playlist Tracks', 'Sync Playlist'], note: 'Create 3 separate automations and chain them with signals for the full pipeline.'
     },
     {
         id: 'discover-weekly-grab', icon: '\uD83C\uDFB5', name: 'Discover Weekly Grab', desc: 'Every Monday, refresh your mirrored Discover Weekly to capture the new playlist before Spotify replaces it.',
@@ -2749,7 +2795,7 @@ const AUTO_HUB_RECIPES = [
         category: 'Sync', difficulty: 'beginner', when: { type: 'playlist_changed', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'discord_webhook', config: {} }]
     },
     {
-        id: 'new-mirror-discovery', icon: '\uD83D\uDD0D', name: 'New Mirror Auto-Discovery', desc: 'Automatically discover tracks when you mirror a new playlist.',
+        id: 'new-mirror-discovery', icon: '\uD83D\uDD0D', name: 'New Mirror Auto-Identify', desc: 'Automatically identify tracks when you mirror a new playlist.',
         category: 'Sync', difficulty: 'beginner', when: { type: 'mirrored_playlist_created', config: {} }, do: { type: 'discover_playlist', config: {} }, then: []
     },
     // New Music Discovery
@@ -2924,7 +2970,7 @@ const AUTO_HUB_REFERENCE = {
                 { type: 'playlist_synced', label: 'Playlist Synced', desc: 'Fires when a playlist sync operation completes' },
                 { type: 'playlist_changed', label: 'Playlist Changed', desc: 'Fires when a tracked playlist has changes detected' },
                 { type: 'mirrored_playlist_created', label: 'Playlist Mirrored', desc: 'Fires when a new mirrored playlist is created' },
-                { type: 'discovery_completed', label: 'Discovery Complete', desc: 'Fires when playlist discovery finishes' },
+                { type: 'discovery_completed', label: 'Identification Complete', desc: 'Fires when playlist identification finishes' },
             ]
         },
         {
@@ -2946,11 +2992,11 @@ const AUTO_HUB_REFERENCE = {
     actions: [
         {
             group: 'Downloads & Sync', items: [
-                { type: 'playlist_pipeline', label: 'Playlist Pipeline', desc: 'Full lifecycle: refresh → discover → sync → download missing' },
+                { type: 'playlist_pipeline', label: 'Playlist Pipeline', desc: 'Full lifecycle: refresh → identify → sync → download missing' },
                 { type: 'process_wishlist', label: 'Process Wishlist', desc: 'Download all pending wishlist items' },
                 { type: 'refresh_mirrored', label: 'Refresh Mirrored', desc: 'Refresh all mirrored playlists from their sources' },
                 { type: 'sync_playlist', label: 'Sync Playlist', desc: 'Sync a specific playlist to your library' },
-                { type: 'discover_playlist', label: 'Discover Playlist', desc: 'Run track discovery on mirrored playlists' },
+                { type: 'discover_playlist', label: 'Identify Playlist Tracks', desc: 'Run track identification on mirrored playlists' },
                 { type: 'scan_watchlist', label: 'Scan Watchlist', desc: 'Check watched artists for new releases' },
                 { type: 'update_discovery_pool', label: 'Update Discovery', desc: 'Refresh the discovery pool with new recommendations' },
             ]
@@ -4177,7 +4223,7 @@ function _autoFormatTrigger(type, config) {
     const labels = {
         app_started: 'App Started', track_downloaded: 'Track Downloaded', batch_complete: 'Batch Complete',
         watchlist_new_release: 'New Release Found', playlist_synced: 'Playlist Synced',
-        playlist_changed: 'Playlist Changed', discovery_completed: 'Discovery Complete',
+        playlist_changed: 'Playlist Changed', discovery_completed: 'Identification Complete',
         wishlist_processing_completed: 'Wishlist Processed', watchlist_scan_completed: 'Watchlist Scan Done',
         database_update_completed: 'Database Updated', download_failed: 'Download Failed',
         download_quarantined: 'File Quarantined', wishlist_item_added: 'Wishlist Item Added',
@@ -4207,7 +4253,7 @@ function _autoFormatAction(type) {
         audiobook_scan_library: 'Scan Audiobook Library',
         audiobook_purge_recycle: 'Empty Audiobook Recycle Bin',
         scan_library: 'Scan Library', refresh_mirrored: 'Refresh Mirrored',
-        sync_playlist: 'Sync Playlist', discover_playlist: 'Discover Playlist',
+        sync_playlist: 'Sync Playlist', discover_playlist: 'Identify Playlist Tracks',
         notify_only: 'Notify Only',
         start_database_update: 'Update Database', start_database_update_hourly: 'Update Database (Hourly)',
         run_duplicate_cleaner: 'Run Duplicate Cleaner',
@@ -5201,7 +5247,7 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
             </select>
         </div>
         <div class="config-row">
-            <label><input type="checkbox" id="cfg-${slotKey}-all"${allChecked} onchange="_autoTogglePlaylistSelect('${slotKey}')"> Discover all mirrored playlists</label>
+            <label><input type="checkbox" id="cfg-${slotKey}-all"${allChecked} onchange="_autoTogglePlaylistSelect('${slotKey}')"> Identify all mirrored playlists</label>
         </div>`;
     }
     if (blockType === 'playlist_pipeline') {

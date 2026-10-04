@@ -170,7 +170,7 @@ def plan_align_rewrite(current_ids, matched_ids, keep_extras: bool = False):
 VALID_SYNC_MODES = ("replace", "append", "reconcile")
 
 
-def normalize_sync_mode(requested, configured, default: str = "replace") -> str:
+def normalize_sync_mode(requested, configured, default: str = "reconcile") -> str:
     """Resolve the effective playlist sync mode.
 
     An explicit per-request value wins; otherwise the configured default
@@ -178,6 +178,9 @@ def normalize_sync_mode(requested, configured, default: str = "replace") -> str:
     ``default``. Keeping ``reconcile`` in ``VALID_SYNC_MODES`` is load-bearing —
     a validation list that omits it silently downgrades reconcile to replace,
     which is exactly the #792 regression this helper exists to prevent.
+
+    #1289: default is reconcile (safer — preserves server edits) rather than
+    replace (wipes them). Existing saved settings are untouched.
     """
     mode = (requested or "") or (configured or "") or default
     return mode if mode in VALID_SYNC_MODES else default

@@ -384,9 +384,15 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
                     if persisted:
                         release_mbid = persisted
                     else:
-                        rc_result = _call_source_lookup("MusicBrainz release", mb_service.match_release, album_name_for_mb, artist_name)
-                        if rc_result and rc_result.get("mbid"):
-                            release_mbid = rc_result["mbid"]
+                        barcode_for_mb = metadata.get("barcode") or metadata.get("upc")
+                        if barcode_for_mb and hasattr(mb_service.mb_client, "search_release_by_barcode"):
+                            b_res = _call_source_lookup("MusicBrainz barcode", mb_service.mb_client.search_release_by_barcode, barcode_for_mb)
+                            if b_res and b_res[0].get("id"):
+                                release_mbid = b_res[0]["id"]
+                        if not release_mbid:
+                            rc_result = _call_source_lookup("MusicBrainz release", mb_service.match_release, album_name_for_mb, artist_name)
+                            if rc_result and rc_result.get("mbid"):
+                                release_mbid = rc_result["mbid"]
 
                     if release_mbid:
                         _bounded_cache_set(mb_release_cache, rc_key_norm, release_mbid, _MB_RELEASE_CACHE_MAX_ENTRIES)
@@ -892,6 +898,26 @@ def _process_source_enrichment(source_name: str, pp: dict, metadata: dict, cfg, 
         _process_bandcamp_source(pp, metadata, cfg, runtime, track_title, artist_name)
 
 
+def _more_precise_date(existing: Any, new: Any) -> str:
+    """Pick the better of two dates for the DATE tag (#1451).
+
+    When both dates share a year, the MORE precise one wins — so a full
+    source date like ``1991-08-12`` is never downgraded to a year-only
+    MusicBrainz edition date like ``1991``. When the years differ the new
+    value wins (a genuine correction, not a precision loss).
+    """
+    existing_str = str(existing or "").strip()
+    new_str = str(new or "").strip()
+    if (
+        existing_str
+        and new_str
+        and len(existing_str) > len(new_str)
+        and existing_str[:4] == new_str[:4]
+    ):
+        return existing_str
+    return new_str
+
+
 def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols):
     filtered_tags: Dict[str, str] = {}
     for tag_name, value in pp["id_tags"].items():
@@ -904,6 +930,29 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
     # ("Mammoth WVH"), so servers reading ARTISTS split the band in two (#1425)
     if filtered_tags.get("ARTISTS") and metadata.get("_artists_list"):
         filtered_tags["ARTISTS"] = list(metadata["_artists_list"])
+    # #1451: optional beets-style "original date as DATE". When enabled and
+    # MusicBrainz gave us a release-group first-release-date, it becomes the
+    # DATE candidate instead of the downloaded edition's date. Falls back to
+    # the normal DATE when there is no original date. This is opt-in
+    # (default off).
+    if cfg.get("musicbrainz.use_original_date_for_date", False):
+        original_date = _normalize_release_date_tag(pp["id_tags"].get("ORIGINALDATE"))
+        if original_date:
+            if filtered_tags.get("DATE"):
+                # The independent precision rule also governs the option:
+                # a vaguer original (year-only first-release-date is common
+                # on MusicBrainz) must not replace a more precise
+                # same-year edition date.
+                filtered_tags["DATE"] = _more_precise_date(
+                    filtered_tags["DATE"], original_date)
+            else:
+                filtered_tags["DATE"] = original_date
+    # #1451, independent of the option: never replace a more precise
+    # same-year date with a vaguer one (e.g. source "1991-08-12" must not
+    # become MusicBrainz edition "1991"). metadata["date"] still holds the
+    # source date here; the overwrite below hasn't run yet.
+    if filtered_tags.get("DATE"):
+        filtered_tags["DATE"] = _more_precise_date(metadata.get("date"), filtered_tags["DATE"])
 
     written = []
     release_year = pp["release_year"]

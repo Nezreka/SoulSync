@@ -48,7 +48,7 @@ def _final_progress(deps):
 
 def test_worker_exception_is_recorded_not_swallowed():
     """M14: a discovery worker that raises must be reported as failed —
-    never as 'Discovery complete' with log_type='success'."""
+    never as 'Identification complete'. with log_type='success'."""
     def boom(playlists, automation_id=None):
         raise RuntimeError('provider exploded')
 
@@ -104,7 +104,7 @@ def test_timeout_marks_phase_timed_out_not_complete(monkeypatch):
     assert 'timed out' in final['phase'].lower()
     assert final['log_type'] == 'error'
     assert not any(
-        c.get('phase') == 'Phase 2/4: Discovery complete'
+        c.get('phase') == 'Phase 2/4: Identification complete'
         for c in deps.progress_calls
     )
 
@@ -149,5 +149,5 @@ def test_successful_worker_still_reports_completed():
     assert result is not None
     assert result['status'] == 'completed'
     final = _final_progress(deps)
-    assert final['phase'] == 'Phase 2/4: Discovery complete'
+    assert final['phase'] == 'Phase 2/4: Identification complete'
     assert final['log_type'] == 'success'

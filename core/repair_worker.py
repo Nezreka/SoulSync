@@ -95,6 +95,7 @@ FINDING_TYPE_META = {
     'empty_folder':             {'label': 'Empty Folders', 'verb': 'Delete Folder'},
     'expired_download':         {'label': 'Expired Downloads', 'verb': 'Delete'},
     'metadata_gap':             {'label': 'Metadata Gaps', 'verb': 'Auto-Fill'},
+    'bpm_backfill':             {'label': 'Missing BPM', 'verb': 'Apply BPM'},
     'duplicate_tracks':         {'label': 'Duplicate Tracks', 'verb': 'Keep Best'},
     'single_album_redundant':   {'label': 'Redundant Singles', 'verb': 'Remove Single'},
     'mbid_mismatch':            {'label': 'MBID Mismatch', 'verb': 'Apply Tags'},
@@ -128,6 +129,7 @@ FINDING_TYPE_META = {
     # Emitted, but no handler exists — the UI must show review-only, never a
     # button that can only fail.
     'album_needs_enrichment':   {'label': 'Needs Enrichment', 'verb': None},
+    'album_release_year_mismatch': {'label': 'Album Release Year Mismatch', 'verb': 'Fix Release Year'},
 }
 
 
@@ -182,6 +184,9 @@ JOB_CATEGORIES = {
     'suspect_album_tag_detector': 'Tags & metadata',
     'metadata_gap_filler': 'Tags & metadata',
     'native_enrichment_sweep': 'Tags & metadata',
+    'bpm_backfill': 'Tags & metadata',
+    'artist_nfo_backfill': 'Tags & metadata',
+    'album_release_year_repair': 'Tags & metadata',
     'missing_cover_art': 'Artwork & lyrics',
     'missing_lyrics': 'Artwork & lyrics',
     # Filling gaps in what you own, rather than repairing what you have.
@@ -339,6 +344,8 @@ def _lib2_id(entity_id) -> Optional[int]:
 # names a directory and ``expired_download`` a download.
 NATIVE_SUBJECT_FINDING_TYPES = frozenset({
     'acoustid_mismatch',
+    'album_release_year_mismatch',
+    'bpm_backfill',
     'comma_artist_split',
     'corrupt_audio',
     'dead_file',
@@ -723,6 +730,16 @@ class RepairWorker:
         """Enable or disable a specific job."""
         if self._config_manager:
             self._config_manager.set(f'repair.jobs.{job_id}.enabled', enabled)
+        # #1289 item 12: bridge to the system automation row so the engine's
+        # scheduler honors the toggle. The row's enabled flag is the source of
+        # truth for scheduling; the legacy config remains for the worker's
+        # respect_enabled check on manual/Run Now paths.
+        try:
+            auto_id = self._get_job_automation_id(job_id)
+            if auto_id:
+                self.db.update_automation(auto_id, enabled=1 if enabled else 0)
+        except Exception as e:
+            logger.debug("Could not bridge job toggle to automation for %s: %s", job_id, e)
         # Turning a job OFF must also stop it if it's mid-run — otherwise the toggle
         # only affects the NEXT scheduled run and the current scan keeps going (#970).
         if not enabled:
@@ -768,16 +785,31 @@ class RepairWorker:
         # job instead of N round trips.
         pending_by_job = self._get_pending_count_by_job()
 
+        # #1289 item 12: single scan of system automations for all jobs
+        # (not N+1). Maps job_id -> (automation_id, interval_hours, next_run).
+        auto_by_job = self._get_system_automations_by_job()
+
         jobs_info = []
         for job_id, job in self._jobs.items():
             config = self.get_job_config(job_id)
             last_run = self._get_last_run(job_id)
-            next_run = None
-            if last_run and config['enabled']:
-                last_dt = datetime.fromisoformat(last_run['finished_at']) if last_run.get('finished_at') else None
-                if last_dt:
-                    next_dt = last_dt + timedelta(hours=config['interval_hours'])
-                    next_run = next_dt.isoformat()
+
+            # Prefer the automation's schedule; fall back to legacy config
+            # if the migration hasn't run yet.
+            auto = auto_by_job.get(job_id)
+            if auto:
+                interval_hours = auto["interval_hours"]
+                automation_id = auto["automation_id"]
+                next_run = auto["next_run"]
+            else:
+                interval_hours = config['interval_hours']
+                automation_id = None
+                next_run = None
+                if last_run and config['enabled']:
+                    last_dt = datetime.fromisoformat(last_run['finished_at']) if last_run.get('finished_at') else None
+                    if last_dt:
+                        next_dt = last_dt + timedelta(hours=config['interval_hours'])
+                        next_run = next_dt.isoformat()
 
             jobs_info.append({
                 'job_id': job_id,
@@ -792,18 +824,77 @@ class RepairWorker:
                 'category': job_category(job_id),
                 'auto_fix': job.auto_fix,
                 'enabled': config['enabled'],
-                'interval_hours': config['interval_hours'],
+                'interval_hours': interval_hours,
                 'settings': config['settings'],
                 'default_settings': job.default_settings.copy(),
                 # Per-setting choice lists so the UI can render a dropdown
                 # instead of a free-text box (e.g. canonical source_selection).
                 'setting_options': dict(getattr(job, 'setting_options', {}) or {}),
+                # Whether this job MOVES or REWRITES real library files when it
+                # runs live (dry_run off). The UI shows its strongest dry-run
+                # warning on exactly these jobs — finding-only jobs get a
+                # lighter note.
+                'writes_library_files': bool(getattr(job, 'writes_library_files', False)),
                 'last_run': last_run,
                 'next_run': next_run,
                 'is_running': self._current_job_id == job_id,
                 'pending_findings_count': pending_by_job.get(job_id, 0),
+                # #1289 item 12: the system automation row driving this job's
+                # schedule (if the migration has run). The Tools UI edits the
+                # automation's trigger instead of the legacy interval_hours.
+                'automation_id': automation_id,
             })
         return jobs_info
+
+    def _get_system_automations_by_job(self) -> dict:
+        """Single scan of system automations, keyed by job_id.
+
+        Returns {job_id: {'automation_id': int, 'interval_hours': float,
+        'next_run': str|None}}. Used by get_all_job_info to avoid N+1 queries.
+        """
+        result = {}
+        try:
+            from core.automation.migrate_repair_jobs import _SYSTEM_OWNER
+            import json
+            automations = self.db.get_automations(1)
+            for a in automations or []:
+                if a.get("owned_by") != _SYSTEM_OWNER:
+                    continue
+                if a.get("action_type") != "run_repair_job":
+                    continue
+                try:
+                    cfg = a.get("action_config") or "{}"
+                    if isinstance(cfg, str):
+                        cfg = json.loads(cfg)
+                    job_id = cfg.get("job_id")
+                    if not job_id or job_id in result:
+                        continue  # Skip duplicates; migration logs them.
+                    # Extract interval from trigger_config if it's a schedule trigger.
+                    interval_hours = None
+                    if a.get("trigger_type") == "schedule":
+                        tcfg = a.get("trigger_config") or "{}"
+                        if isinstance(tcfg, str):
+                            tcfg = json.loads(tcfg)
+                        interval_hours = tcfg.get("interval")
+                    result[job_id] = {
+                        "automation_id": a.get("id"),
+                        "interval_hours": interval_hours,
+                        "next_run": a.get("next_run"),
+                    }
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.debug("Could not scan system automations: %s", e)
+        return result
+
+    def _get_job_automation_id(self, job_id: str) -> Optional[int]:
+        """Return the system automation ID for a repair job, if seeded.
+
+        Deprecated: use _get_system_automations_by_job() for batch lookups.
+        Kept for backward compatibility.
+        """
+        auto = self._get_system_automations_by_job().get(job_id)
+        return auto["automation_id"] if auto else None
 
     def _get_pending_count_by_job(self) -> dict:
         """Return ``{job_id: pending_count}`` for every job that has
@@ -917,9 +1008,7 @@ class RepairWorker:
 
     def toggle(self) -> bool:
         """Toggle master enabled state. Returns new state."""
-        self.enabled = not self.enabled
-        if self._config_manager:
-            self._config_manager.set('repair.master_enabled', self.enabled)
+        self.set_enabled(not self.enabled)
         logger.info("Repair worker %s", "enabled" if self.enabled else "disabled")
         return self.enabled
 
@@ -928,6 +1017,13 @@ class RepairWorker:
         self.enabled = enabled
         if self._config_manager:
             self._config_manager.set('repair.master_enabled', enabled)
+        # #1289 item 12: bridge to the automation engine's metadata so
+        # pause()/resume() (which call this) keep stopping scheduled jobs.
+        try:
+            self.db.set_metadata('automation_master_music_enabled',
+                                 '1' if enabled else '0')
+        except Exception as e:
+            logger.debug("Could not bridge master toggle to engine metadata: %s", e)
 
     # Backward compatibility
     def pause(self):
@@ -1023,6 +1119,10 @@ class RepairWorker:
     # Main loop
     # ------------------------------------------------------------------
     def _run(self):
+        # #1289 item 12: the worker no longer picks jobs by staleness —
+        # scheduling lives in the automation engine now. This loop is a pure
+        # executor: it drains the force-run queue (Run Now clicks + automation
+        # triggers) and sleeps otherwise.
         logger.info("Repair worker thread started")
         self._ensure_jobs_loaded()
 
@@ -1040,28 +1140,11 @@ class RepairWorker:
                         break
                     continue
 
-                if not self.enabled:
-                    self._current_job_id = None
-                    self._current_job_name = None
-                    if self._sleep_or_stop(2):
-                        break
-                    continue
-
-                # Find the next job to run based on staleness
-                next_job = self._pick_next_job()
-
-                if not next_job:
-                    # Nothing due — sleep and re-check
-                    self._current_job_id = None
-                    self._current_job_name = None
-                    if self._sleep_or_stop(10):
-                        break
-                    continue
-
-                # Run the selected job
-                self._run_job(next_job)
-
-                # Brief pause between jobs
+                # Nothing queued — sleep until the next check or a wakeup.
+                # Automation timers queue jobs via run_job_now(); there is no
+                # staleness picker anymore.
+                self._current_job_id = None
+                self._current_job_name = None
                 if self._sleep_or_stop(5):
                     break
 
@@ -1073,66 +1156,6 @@ class RepairWorker:
                     break
 
         logger.info("Repair worker thread finished")
-
-    @staticmethod
-    def _hours_since(finished_at_iso: str, now_utc: datetime) -> float:
-        """Hours between a stored ``finished_at`` and ``now_utc``, both in UTC.
-
-        ``finished_at`` is written by SQLite's CURRENT_TIMESTAMP, which is ALWAYS
-        UTC (and naive). #885: the scheduler compared it against ``datetime.now()``
-        (naive LOCAL), so the local↔UTC offset leaked into the elapsed time. For a
-        zone AHEAD of UTC (Australia/Sydney = +11) every job looked ~11h stale and
-        fired every poll; behind UTC (the Americas) it just waited too long. Parse
-        the naive timestamp AS UTC and subtract a UTC ``now`` so scheduling is
-        timezone-independent."""
-        dt = datetime.fromisoformat(finished_at_iso)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return (now_utc - dt).total_seconds() / 3600
-
-    def _pick_next_job(self) -> Optional[str]:
-        """Pick the next job to run based on staleness priority.
-
-        Returns job_id of the stalest job whose interval has elapsed,
-        or None if nothing is due.
-        """
-        now = datetime.now(timezone.utc)
-        best_job_id = None
-        best_staleness = -1
-
-        for job_id, _job in self._jobs.items():
-            config = self.get_job_config(job_id)
-            if not config['enabled']:
-                continue
-
-            interval_hours = config['interval_hours']
-            if not interval_hours or interval_hours <= 0:
-                continue  # Skip jobs with invalid interval
-
-            last_run = self._get_last_run(job_id)
-
-            if not last_run or not last_run.get('finished_at'):
-                # Never run — highest staleness
-                best_job_id = job_id
-                best_staleness = float('inf')
-                continue
-
-            try:
-                elapsed_hours = self._hours_since(last_run['finished_at'], now)
-
-                if elapsed_hours < interval_hours:
-                    continue  # Not due yet
-
-                staleness = elapsed_hours / interval_hours
-                if staleness > best_staleness:
-                    best_staleness = staleness
-                    best_job_id = job_id
-            except (ValueError, TypeError):
-                # Malformed timestamp — treat as never run
-                best_job_id = job_id
-                best_staleness = float('inf')
-
-        return best_job_id
 
     def _run_job(self, job_id: str, forced: bool = False):
         """Execute a single job and record the run.
@@ -2567,6 +2590,8 @@ class RepairWorker:
             'comma_artist_split': self._fix_comma_artist_split,
             'stale_index_path': self._fix_stale_index_path,
             'suspect_album_tag': self._fix_suspect_album_tag,
+            'bpm_backfill': self._fix_metadata_gap,
+            'album_release_year_mismatch': self._fix_album_release_year_mismatch,
         }
 
     def _execute_fix(self, finding_type: str, entity_type: str, entity_id: str,
@@ -4890,7 +4915,11 @@ class RepairWorker:
             os.makedirs(staging, exist_ok=True)
             updates = {'title': details.get('acoustid_title') or ''}
             if details.get('acoustid_artist'):
-                updates['artist_name'] = details['acoustid_artist']
+                # track_artist, not artist_name: the writer puts artist_name
+                # into album artist, and the file lands in staging with its
+                # album tag intact — a compilation track would split off its
+                # album (#1289).
+                updates['track_artist'] = details['acoustid_artist']
                 updates['artists_list'] = _split_acoustid_credit(
                     details['acoustid_artist'])
             try:
@@ -5071,6 +5100,55 @@ class RepairWorker:
             return {'success': False, 'error': f'Failed to fix {errors} file(s)'}
         else:
             return {'success': True, 'action': 'already_consistent', 'message': 'All tags already consistent'}
+
+    def _fix_album_release_year_mismatch(self, entity_type, entity_id, file_path, details):
+        """Align album and track release years to canonical release dates and rename folder."""
+        from core.repair_jobs.album_release_year_repair import apply_album_year_fix
+
+        # The album is the finding's subject. An upstream finding names a
+        # legacy album id, which would be some other row in lib2_albums.
+        stale = _stale_legacy_subject(entity_id)
+        if stale:
+            return stale
+        album_id = _lib2_id(entity_id)
+        canonical_year = details.get('canonical_year')
+        canonical_date = details.get('canonical_date')
+        tracks = details.get('tracks', [])
+        folder_path = details.get('folder_path')
+        new_folder_name = details.get('new_folder_name')
+
+        if not album_id or not canonical_year:
+            return {'success': False, 'error': 'Missing album_id or canonical_year in finding details'}
+
+        # The job keeps its options in its settings dict, like every job.
+        cfg = self._config_manager
+        settings = (cfg.get('repair.jobs.album_release_year_repair.settings', {}) if cfg else {}) or {}
+        rename_folders = settings.get('rename_folders', True)
+        update_date_tag = settings.get('update_date_tag', True)
+
+        res = apply_album_year_fix(
+            db=self.db,
+            album_id=int(album_id),
+            canonical_year=str(canonical_year),
+            canonical_date=canonical_date,
+            tracks=tracks,
+            transfer_folder=self.transfer_folder,
+            config_manager=self._config_manager,
+            rename_folders=rename_folders,
+            update_date_tag=update_date_tag,
+            folder_path=folder_path,
+            new_folder_name=new_folder_name,
+        )
+
+        if res.get('success'):
+            return {
+                'success': True,
+                'action': 'aligned_release_year',
+                'fixed_files': res.get('fixed_files', 0),
+                'renamed_folder': res.get('renamed_folder'),
+                'message': '; '.join(res.get('changes', [])) or f'Aligned year to {canonical_year}',
+            }
+        return {'success': False, 'error': res.get('error') or 'Failed to align album release year'}
 
     # --- Album Completeness Auto-Fill ---
 

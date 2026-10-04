@@ -863,7 +863,7 @@ def test_update_match_state_not_found():
     gj, kw, _ = _update_kwargs(json_data={
         'identifier': 'p', 'track_index': 0, 'spotify_track': {'id': 'x'}})
     body, code = update_discovery_match({}, gj, **kw)
-    assert code == 404 and body == {'error': 'Discovery state not found'}
+    assert code == 404 and body == {'error': 'Identification state not found'}
 
 
 def test_update_match_invalid_index():
@@ -1171,5 +1171,5 @@ def test_update_match_no_state_and_no_originals_still_404():
     gj, kw, _ = _update_kwargs(json_data={
         'identifier': 'gone', 'track_index': 0, 'spotify_track': {'id': 'x'}})
     body, code = update_discovery_match({}, gj, **kw)
-    assert code == 404 and body == {'error': 'Discovery state not found'}
+    assert code == 404 and body == {'error': 'Identification state not found'}
 

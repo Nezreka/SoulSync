@@ -141,12 +141,12 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
     if not tracks_json:
         deps.update_progress(
             auto_id,
-            log_line=f'No discovered tracks — {skipped_count} need discovery first',
+            log_line=f'No identified tracks — {skipped_count} need identification first',
             log_type='skip',
         )
         return {
             'status': 'skipped',
-            'reason': f'No discovered tracks to sync ({skipped_count} tracks need discovery first)',
+            'reason': f'No identified tracks to sync ({skipped_count} tracks need identification first)',
             'skipped_tracks': str(skipped_count),
         }
 
@@ -290,7 +290,7 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
         auto_id,
         progress=50,
         phase=f'Syncing "{sync_name}"',
-        log_line=f'{len(tracks_json)} discovered, {skipped_count} skipped',
+        log_line=f'{len(tracks_json)} identified, {skipped_count} skipped',
         log_type='info',
     )
 

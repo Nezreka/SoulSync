@@ -309,6 +309,8 @@ class Album:
     image_url: Optional[str] = None
     external_urls: Optional[Dict[str, str]] = None
     explicit: Optional[bool] = None
+    upc: Optional[str] = None
+    barcode: Optional[str] = None
 
     @classmethod
     def from_deezer_album(cls, album_data: Dict[str, Any]) -> 'Album':
@@ -332,6 +334,9 @@ class Album:
         else:
             album_type = 'album'
 
+        raw_upc = album_data.get('upc')
+        upc_str = str(raw_upc).strip() if raw_upc else None
+
         return cls(
             id=str(album_data.get('id', '')),
             name=album_data.get('title', ''),
@@ -342,6 +347,8 @@ class Album:
             image_url=image_url,
             external_urls=external_urls if external_urls else None,
             explicit=bool(album_data.get('explicit_lyrics', False)),
+            upc=upc_str,
+            barcode=upc_str,
         )
 
 

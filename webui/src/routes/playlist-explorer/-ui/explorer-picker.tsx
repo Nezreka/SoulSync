@@ -17,7 +17,7 @@ import { explorerCardView, groupPlaylistsBySource, type ExplorerCardView } from 
 export type DiscoverButtonState = 'idle' | 'starting' | 'open';
 
 const DISCOVER_LABEL: Record<DiscoverButtonState, string> = {
-  idle: 'Discover',
+  idle: 'Identify',
   starting: 'Starting...',
   open: 'Open',
 };
@@ -55,9 +55,29 @@ function PickerCard({
     .join(' ');
 
   return (
-    // A card below the readiness gate had NO click handler in the vanilla, not
-    // a disabled one: clicking it does nothing at all (explorerRenderPickerCards :156).
-    <div className={classes} data-id={playlist.id} onClick={view.isReady ? onSelect : undefined}>
+    // #1289: the 50% readiness gate is gone as a click block — every card opens.
+    // isReady survives as the "thin discovery" warning signal (badge, meta
+    // styling, Discover button), not a lock.
+    <div
+      className={classes}
+      data-id={playlist.id}
+      onClick={onSelect}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        // ignore keys bubbling up from nested controls (e.g. the Discover button)
+        if (event.target !== event.currentTarget) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
+      title={
+        view.isReady
+          ? undefined
+          : `Only ${view.pct}% identified — results may be thin. Explore anyway.`
+      }
+    >
       <div className="explorer-picker-card-art">
         {image ? (
           <img src={image} alt="" loading="lazy" />
@@ -110,13 +130,15 @@ function PickerCard({
           <span style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
         </div>
         <div className="explorer-picker-card-footer">
-          <span>{view.discovered.toLocaleString()} discovered</span>
+          <span>{view.discovered.toLocaleString()} identified</span>
           {view.showDiscoverButton ? (
             <button
               type="button"
               className="explorer-picker-discover-btn"
               disabled={discoverState === 'starting'}
-              title={discoverState === 'open' ? 'Reopen discovery modal' : 'Start discovery'}
+              title={
+                discoverState === 'open' ? 'Reopen identification modal' : 'Start identification'
+              }
               onClick={(event) => {
                 event.stopPropagation();
                 onDiscover();
@@ -185,7 +207,7 @@ export function ExplorerPicker({
     <div className="explorer-playlist-picker" id="explorer-playlist-picker">
       <div className="explorer-picker-command">
         <div className="explorer-picker-command-copy">
-          <span className="explorer-kicker">Discovery map</span>
+          <span className="explorer-kicker">Identification map</span>
           <h3>Turn a synced playlist into a release graph.</h3>
         </div>
         <div className="explorer-picker-stats" aria-label="Explorer playlist summary">
@@ -193,7 +215,7 @@ export function ExplorerPicker({
             <strong>{playlists.length.toLocaleString()}</strong> playlists
           </span>
           <span>
-            <strong>{stats.ready.toLocaleString()}</strong> ready
+            <strong>{stats.ready.toLocaleString()}</strong> well identified
           </span>
           <span>
             <strong>{stats.explored.toLocaleString()}</strong> explored

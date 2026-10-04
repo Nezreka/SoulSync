@@ -46,6 +46,60 @@ def _get_single_track_import_context(*args, **kwargs):
     return get_single_track_import_context(*args, **kwargs)
 
 
+def _backfill_stale_history(worker, candidates, history):
+    """Attach history rows older than the 200-row window to their candidates.
+
+    #1289: `get_results(limit=200)` only returns the newest rows. A folder
+    with a stale terminal row (e.g. 'partial') older than the window gets no
+    history attached in `build_inbox`, so `derive_status` returns 'waiting'
+    — invisible under "Needs attention" with no retry path — instead of the
+    retryable 'failed' the row would produce. For each candidate the window
+    missed, do a direct DB lookup by folder_hash (fallback folder_path),
+    mirroring `_is_already_processed`'s lookups.
+    """
+    import os
+    seen_hashes = {r.get('folder_hash') for r in history if r.get('folder_hash')}
+    seen_paths = {os.path.normpath(r.get('folder_path')) for r in history if r.get('folder_path')}
+    missing = [c for c in candidates
+               if getattr(c, 'folder_hash', None) not in seen_hashes
+               and os.path.normpath(getattr(c, 'path', None) or '') not in seen_paths]
+    if not missing:
+        return history
+    try:
+        conn = worker.database._get_connection()
+        try:
+            cursor = conn.cursor()
+            extra = []
+            for cand in missing:
+                row = None
+                h = getattr(cand, 'folder_hash', None)
+                if h:
+                    cursor.execute(
+                        "SELECT * FROM auto_import_history WHERE folder_hash = ?"
+                        " ORDER BY created_at DESC LIMIT 1",
+                        (h,),
+                    )
+                    row = cursor.fetchone()
+                if row is None:
+                    p = getattr(cand, 'path', None) or ''
+                    for q in (p, os.path.normpath(p)):
+                        cursor.execute(
+                            "SELECT * FROM auto_import_history WHERE folder_path = ?"
+                            " ORDER BY created_at DESC LIMIT 1",
+                            (q,),
+                        )
+                        row = cursor.fetchone()
+                        if row is not None:
+                            break
+                if row is not None:
+                    extra.append(dict(row))
+        finally:
+            conn.close()
+    except Exception:
+        return history
+    return history + extra
+
+
 def _is_active_media_server_ready() -> tuple[bool, str]:
     from core.imports.side_effects import is_active_media_server_ready
 
@@ -404,6 +458,12 @@ def inbox(runtime: ImportRouteRuntime, worker: Any) -> tuple[Dict[str, Any], int
             problems.extend(p for p in walk_problems if (p["path"], p["error"]) not in seen)
             history = worker.get_results(limit=200)
             status = worker.get_status()
+            # #1289: a stale terminal row (e.g. 'partial') older than the
+            # 200-row window never attaches to its candidate, so the folder
+            # shows as 'waiting' (invisible under "Needs attention") instead
+            # of retryable 'failed'. Backfill per-candidate lookups for any
+            # candidate the window missed.
+            history = _backfill_stale_history(worker, candidates, history)
         else:
             from core.auto_import_worker import AutoImportWorker
             bare = AutoImportWorker.__new__(AutoImportWorker)

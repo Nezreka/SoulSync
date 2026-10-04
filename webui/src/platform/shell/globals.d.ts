@@ -372,6 +372,12 @@ declare global {
      * file is untouched by the sync flip (index.html header button, 2239).
      */
     openManualLibraryMatchTool?: () => void;
+    /**
+     * #1289: the sync page exposes the mirrored tab's refetch here so the
+     * vanilla manual-match tool can invalidate the card counts after a
+     * save/delete. Set on sync page mount, removed on unmount.
+     */
+    reloadMirroredTab?: () => void;
     /** wishlist-tools.js — the Sync History modal (index.html 2240). */
     openSyncHistoryModal?: () => void;
     /**

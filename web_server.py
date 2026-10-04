@@ -1452,6 +1452,7 @@ db_update_state = {
     "processed": 0,
     "total": 0,
     "error_message": "",
+    "unit": "artists",  # what processed/total count; "tracks" during post-scan tag reconcile
     "removed_artists": 0,
     "removed_albums": 0,
     "removed_tracks": 0,
@@ -1795,6 +1796,29 @@ def _register_automation_handlers():
         listenbrainz_import_workers=listenbrainz_import_workers,
     )
     _register_extracted_handlers(_automation_deps)
+
+    # #1289 item 12: seed one system automation per repair job so the
+    # automation engine (not the worker's staleness queue) drives scheduling.
+    # Idempotent — existing rows are never clobbered.
+    if automation_engine is not None:
+        try:
+            from core.automation.migrate_repair_jobs import ensure_repair_job_automations
+            try:
+                from api.video import get_video_db
+                _video_db = get_video_db()
+            except Exception:
+                _video_db = None
+            _mig = ensure_repair_job_automations(
+                automation_engine, get_database(), config_manager,
+                video_db=_video_db)
+            if _mig.get("created"):
+                logger.info("Seeded %d repair-job automations", _mig["created"])
+        except Exception:
+            logger.exception("Could not seed repair-job automations")
+    else:
+        logger.warning(
+            "Automation engine not initialized; repair-job scheduling is disabled. "
+            "The repair workers are drain-only and will not run scheduled jobs.")
 
     # Bridge the isolated video download monitor's batch-complete signal into the
     # automation engine (core/video can't import the engine). Mirrors how the music
@@ -9866,7 +9890,8 @@ def _reconcile_after_scan(worker):
         def _on_progress(totals, title):
             try:
                 pct = (totals.processed / totals.total * 100) if totals.total else 100
-                _db_update_progress_callback(title, totals.processed, totals.total, pct)
+                _db_update_progress_callback(title, totals.processed, totals.total, pct,
+                                             unit="tracks")
             except Exception:  # noqa: S110 — best-effort UI progress tick
                 pass
 
@@ -12198,14 +12223,14 @@ def _is_explicit_blocked(track_data):
     return sp_data.get('explicit', False)
 
 
-def _preflight_mb_release(album_name, artist_name, track_count):
+def _preflight_mb_release(album_name, artist_name, track_count, barcode=None):
     """Pre-populate the MusicBrainz release cache so every track of an album
     download resolves to the same release."""
     try:
         mb_svc = mb_worker.mb_service if mb_worker else None
         if mb_svc and album_name and artist_name:
             from core.album_consistency import _find_best_release
-            _pf_release = _find_best_release(album_name, artist_name, track_count, mb_svc)
+            _pf_release = _find_best_release(album_name, artist_name, track_count, mb_svc, barcode=barcode)
             if _pf_release and _pf_release.get('id'):
                 _pf_mbid = _pf_release['id']
                 _pf_artist_key = artist_name.lower().strip()
@@ -12235,7 +12260,8 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
 
     # PREFLIGHT: Pre-populate MusicBrainz release cache so all tracks get the same release
     _preflight_mb_release(spotify_album.get('name'), spotify_artist.get('name'),
-                          len(enhanced_tracks) + len(unmatched_tracks))
+                          len(enhanced_tracks) + len(unmatched_tracks),
+                          barcode=spotify_album.get('upc') or spotify_album.get('barcode'))
 
     # Process matched tracks with full Spotify metadata
     for matched_item in enhanced_tracks:
@@ -12697,7 +12723,8 @@ def _enriched_start_album(data, source, files):
     if not picked:
         return jsonify({"success": False, "error": "No files are assigned to a track."}), 400
 
-    _preflight_mb_release(album.get('name'), album_artist, len(picked))
+    _preflight_mb_release(album.get('name'), album_artist, len(picked),
+                          barcode=album.get('upc') or album.get('barcode'))
     artist_ctx = {'name': album_artist, 'id': '', 'genres': [], 'source': source}
 
     if all(_pinned_batch.is_pinnable(f.get('username')) for f, _t in picked):
@@ -17716,6 +17743,66 @@ def server_playlist_add_track(playlist_id):
             return jsonify({"success": False, "error": "playlist_name required"}), 400
 
         active_server = config_manager.get_active_media_server()
+        # #1289 item 7: the track_id must be a server-side track ID (ratingKey),
+        # not a SoulSync DB auto-increment integer. A local download's DB id
+        # would resolve to an unrelated server item — reject it with a clear
+        # 400 instead of corrupting the playlist. The frontend gates the
+        # checkbox on server_source, this is defense in depth.
+        try:
+            db = get_database()
+            track_rows = db.api_get_tracks_by_ids([track_id])
+            track_source = (track_rows[0].get('server_source') or '') if track_rows else ''
+            if track_source and track_source.lower() != active_server.lower():
+                return jsonify({
+                    "success": False,
+                    "error": f"Track is from {track_source}, not the active {active_server} server"
+                }), 400
+            # A track with no server_source is a local download — its DB id
+            # is not a valid server ratingKey.
+            if not track_source:
+                # Allow it only if the track_id looks like a server ID (not a
+                # bare integer). Plex ratingKeys are integers, but a DB
+                # auto-increment would also be an integer — we can't distinguish
+                # here, so require the DB lookup to have found a server track.
+                # If the DB has no record, fall through to the server's own
+                # lookup (Find & Add path uses server IDs directly).
+                if track_rows:
+                    return jsonify({
+                        "success": False,
+                        "error": "Track is a local download, not on the media server"
+                    }), 400
+        except Exception as e:
+            logger.debug(f"add-track track validation failed: {e}")
+        # #1289 item 7 + item 6: the frontend sends playlist_id=0 and a name.
+        # If this name matches a mirrored playlist with a stored server link,
+        # follow the stored server ID (survives server-side renames) instead
+        # of the potentially stale name.
+        if str(playlist_id) == '0' and playlist_name:
+            try:
+                from core.sync.mirrored_server_link import resolve_sync_server_playlist_id
+                db = get_database()
+                profile_id = get_current_profile_id()
+                mirrors = db.get_mirrored_playlists(profile_id)
+                mirror = next(
+                    (m for m in mirrors
+                     if str(m.get('name', '')).lower() == playlist_name.lower()),
+                    None)
+                if mirror:
+                    # Build a minimal client for the link resolution.
+                    _link_client = None
+                    if active_server == 'navidrome':
+                        from core.navidrome_client import NavidromeClient
+                        _link_client = NavidromeClient()
+                    stored_id = resolve_sync_server_playlist_id(
+                        playlist_id=mirror.get('id', ''),
+                        playlist_name=playlist_name,
+                        server_type=active_server,
+                        media_client=_link_client,
+                        profile_id=profile_id)
+                    if stored_id:
+                        playlist_id = stored_id
+            except Exception as e:
+                logger.debug(f"add-track server-link resolution failed: {e}")
         # #1414: a profile reaches only its own playlists, through its own
         # server user when it has one, and acts on the playlist it was checked for
         _sp_client, playlist_id, playlist_name, _sp_refusal = _server_playlist_guard(
@@ -18082,6 +18169,20 @@ def mlm_list():
         return jsonify({"success": True, "matches": mlm.list_matches(db, profile_id)})
     except Exception as e:
         logger.error(f"mlm_list error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/manual-library-matches/unmatched', methods=['GET'])
+def mlm_unmatched():
+    """Pre-populated worklist of wanted-but-unmatched tracks (#1289)."""
+    try:
+        from core.library import manual_library_match as mlm
+        limit = min(int(request.args.get('limit', 200)), 500)
+        db = get_database()
+        profile_id = get_current_profile_id()
+        return jsonify({"success": True, "tracks": mlm.list_unmatched_wanted_tracks(db, profile_id, limit)})
+    except Exception as e:
+        logger.error(f"mlm_unmatched error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 

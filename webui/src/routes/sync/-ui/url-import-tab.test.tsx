@@ -123,7 +123,7 @@ describe('DeezerLinkTab', () => {
     await waitFor(() => expect(cardName('Dz Mix')).toBeDefined());
     expect(screen.getByText('2 tracks')).toBeInTheDocument();
     // The state hydration painted the discovered phase + check-note spans.
-    await waitFor(() => expect(screen.getByText('Discovery Complete')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Identification Complete')).toBeInTheDocument());
     expect(screen.getByText('1 / 2')).toBeInTheDocument();
     // check-note sources print no percentage — unifying the markup must not
     // have invented one.
@@ -516,7 +516,7 @@ describe('YouTubeTab', () => {
     releaseParse(undefined);
     await waitFor(() => expect(cardName('Fresh YT')).toBeDefined());
     expect(screen.queryByText('Parsing YouTube playlist...')).not.toBeInTheDocument();
-    expect(screen.getByText('Start Discovery')).toBeInTheDocument();
+    expect(screen.getByText('Start Identifying')).toBeInTheDocument();
 
     const mirror = calls.find((c) => c.url === '/api/mirror-playlist');
     expect(mirror!.body).toMatchObject({ source: 'youtube', source_playlist_id: 'newhash' });

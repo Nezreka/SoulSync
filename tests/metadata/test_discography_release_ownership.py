@@ -148,3 +148,62 @@ def test_without_a_section_nothing_is_locked(run):
     db, _lines = run(["rel-single"])
     assert db.albums[0]["album_type"] == "single"
     assert db.albums[0]["album_type_locked"] is False
+
+
+
+# ── #1289: the downloader's ownership check agrees with the artist page ──
+
+
+def _yellowcard_library(tmp_path):
+    """A scanned library owning Ocean Avenue (filed 2003), with no stored
+    Deezer ids — the SeadogsBooty shape."""
+    from database.music_database import MusicDatabase
+    from tests import lib2_seed
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    with db._get_connection() as conn:
+        album_cols = {"year": 2003, "track_count": 2, "server_source": "test"}
+        lib2_seed.track(conn, "Yellowcard", "Ocean Avenue", "Ocean Avenue", track_number=1,
+                        path="/m/t1.flac", album_cols=album_cols)
+        lib2_seed.track(conn, "Yellowcard", "Ocean Avenue", "Breathing", track_number=2,
+                        path="/m/t2.flac")
+        conn.commit()
+    return db
+
+
+def test_owned_release_tracks_deezer_reissue_date_exempt(tmp_path):
+    """#1289: owned_release_tracks applies the same Deezer exemption as the
+    artist page — a Deezer card dated 2006-05-31 for the owned 2003 album
+    returns its tracks instead of []."""
+    db = _yellowcard_library(tmp_path)
+    candidates = db.get_candidate_albums_for_artist('Yellowcard', server_source='test')
+    tracks = df.owned_release_tracks(
+        db, 'Ocean Avenue', 'Yellowcard', 2, '2006-05-31', 'test',
+        candidate_albums=candidates,
+        metadata_source='deezer', card_source_id='DZ-375062')
+    assert tracks is not None and len(tracks) == 2
+
+
+def test_owned_release_tracks_default_still_year_gated(tmp_path):
+    """Without metadata_source the old gate holds — the same card returns []."""
+    db = _yellowcard_library(tmp_path)
+    candidates = db.get_candidate_albums_for_artist('Yellowcard', server_source='test')
+    tracks = df.owned_release_tracks(
+        db, 'Ocean Avenue', 'Yellowcard', 2, '2006-05-31', 'test',
+        candidate_albums=candidates)
+    assert tracks == []
+
+
+def test_owned_release_tracks_deezer_conflicting_id_still_missing(tmp_path):
+    """#1289 tighter rule: a Deezer card whose id conflicts with the
+    candidate's stored id is a different release — the exemption does not
+    fire and the downloader's check agrees with the page ([])."""
+    db = _yellowcard_library(tmp_path)
+    with db._get_connection() as conn:
+        conn.execute("""UPDATE lib2_albums SET external_ids = '{"deezer": "DZ-9"}'""")
+        conn.commit()
+    candidates = db.get_candidate_albums_for_artist('Yellowcard', server_source='test')
+    tracks = df.owned_release_tracks(
+        db, 'Ocean Avenue', 'Yellowcard', 2, '2006-05-31', 'test',
+        candidate_albums=candidates,
+        metadata_source='deezer', card_source_id='DZ-375062')
+    assert tracks == []

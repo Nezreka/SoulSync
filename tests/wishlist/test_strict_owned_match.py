@@ -317,3 +317,49 @@ def test_album_fallback_searches_the_base_name_without_losing_punctuation(editio
 def test_artist_check_keeps_existing_leading_the_equivalence(requested, owned):
     assert find_owned_match(_db('Song', 'Album', artist=owned), 'Song', [requested], 'Album',
                             'navidrome', strict_identity=True) is not None
+
+
+# ---------------------------------------------------------------------------
+# wishlist_row_requires_album (#1447)
+# ---------------------------------------------------------------------------
+
+from core.wishlist.library_match import ALBUM_SCOPED_SOURCE_TYPES, wishlist_row_requires_album
+
+
+@pytest.mark.parametrize('source_type', ['album', 'discography', 'watchlist', 'watchlist_label'])
+def test_wishlist_row_requires_album_for_album_scoped_source_types(source_type):
+    assert wishlist_row_requires_album({
+        'source_type': source_type,
+        'album': {'name': 'Requested Album'},
+    }) is True
+
+
+def test_wishlist_row_requires_album_also_accepts_bare_album_string():
+    assert wishlist_row_requires_album({
+        'source_type': 'watchlist',
+        'album': 'Requested Album',
+    }) is True
+
+
+@pytest.mark.parametrize('source_type', ['discography', 'watchlist', 'watchlist_label'])
+@pytest.mark.parametrize('album', [None, {}, {'name': ''}, ''])
+def test_wishlist_row_without_an_album_name_keeps_old_behavior(source_type, album):
+    # Album-less rows must never get stuck: they keep the old behavior.
+    assert wishlist_row_requires_album({'source_type': source_type, 'album': album}) is False
+
+
+@pytest.mark.parametrize('source_type', ['playlist', 'unknown', 'manual', 'enhance', None, ''])
+def test_wishlist_row_requires_album_false_for_track_scoped_rows(source_type):
+    assert wishlist_row_requires_album({
+        'source_type': source_type,
+        'album': {'name': 'Some Album'},
+    }) is False
+
+
+def test_wishlist_row_requires_album_tolerates_missing_track():
+    assert wishlist_row_requires_album(None) is False
+    assert wishlist_row_requires_album({}) is False
+
+
+def test_album_scoped_source_types_inventory():
+    assert ALBUM_SCOPED_SOURCE_TYPES == frozenset({'album', 'discography', 'watchlist', 'watchlist_label'})

@@ -254,7 +254,7 @@ def test_completion_marks_phase_discovered():
 
 
 def test_activity_feed_logged():
-    """Completion logs activity feed entry with 'Spotify Link Discovery Complete'."""
+    """Completion logs activity feed entry with 'Spotify Link Identification Complete'."""
     states = {}
     _seed_state('h8', states, tracks=[_track()])
     deps = _build_deps(states=states, search_result=None)
@@ -263,7 +263,7 @@ def test_activity_feed_logged():
 
     args, _ = deps._activity_log[0]
     title = args[1]
-    assert 'Spotify Link Discovery Complete' in title
+    assert 'Spotify Link Identification Complete' in title
 
 
 # ---------------------------------------------------------------------------

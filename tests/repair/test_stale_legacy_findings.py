@@ -51,6 +51,8 @@ STALE_SUBJECT_CASES = {
     'library_retag': {},
     'unwanted_content': {},
     'metadata_gap': {'found_fields': {'isrc': 'DEZZZ0000001'}},
+    'bpm_backfill': {'found_fields': {'bpm': 120.0}},
+    'album_release_year_mismatch': {'album_id': 1, 'canonical_year': '1978', 'tracks': []},
     'acoustid_mismatch': {'_fix_action': 'delete'},
     'missing_cover_art': {'found_artwork_url': 'https://cdn/art.jpg'},
     'genre_cleanup': {'kept_genres': ['Rock'], 'removed_genres': ['seen live']},
@@ -69,6 +71,7 @@ STALE_SUBJECT_ENTITY_TYPES = {
     'genre_cleanup': 'artist',
     'genre_enrichment': 'artist',
     'fake_lossless': 'file',
+    'album_release_year_mismatch': 'album',
 }
 
 

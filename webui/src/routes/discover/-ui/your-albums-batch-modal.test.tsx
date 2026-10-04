@@ -135,11 +135,17 @@ describe('Your Albums batch modal — running and done', () => {
     });
   };
 
-  it('swaps grid+filter bar for the progress list, processing line, no submit', () => {
+  it('swaps grid+filter bar for the progress list, processing line, submit held in place', () => {
     const { container } = render(<YourAlbumsBatchModal {...runningProps()} />);
     expect(container.querySelector('.discog-grid')).toBeNull();
     expect(container.querySelector('.discog-filter-bar')).toBeNull();
-    expect(container.querySelector('#your-albums-batch-submit-btn')).toBeNull();
+    // Static home: the submit button stays mounted (disabled) mid-run so
+    // Cancel never jumps.
+    const submit = container.querySelector(
+      '#your-albums-batch-submit-btn',
+    ) as HTMLButtonElement | null;
+    expect(submit).toBeTruthy();
+    expect(submit).toBeDisabled();
     expect(container.querySelector('.discog-footer-info')!.textContent).toBe(
       'Processing... this may take a moment',
     );

@@ -72,7 +72,7 @@ function openDiscoveryFixModal(platform, identifier, trackIndex) {
     const discoveryModal = document.getElementById(`youtube-discovery-modal-${identifier}`);
     if (!discoveryModal) {
         console.error('❌ Discovery modal not found:', identifier);
-        showToast('Discovery modal not found', 'error');
+        showToast('Identification modal not found', 'error');
         return;
     }
 
@@ -4677,17 +4677,17 @@ const TOOL_HELP_CONTENT = {
 
             <h4>Good for</h4>
             <ul>
-                <li>Auto-discovering new tracks after a playlist updates</li>
+                <li>Auto-identifying new tracks after a playlist updates</li>
                 <li>Auto-syncing the playlist to your media server</li>
                 <li>Getting notified when your followed playlists change</li>
             </ul>
         `
     },
     'auto-discovery_completed': {
-        title: 'Discovery Complete',
+        title: 'Identification Complete',
         content: `
             <h4>What is this trigger?</h4>
-            <p>Fires when Spotify/iTunes metadata discovery finishes for a mirrored playlist. Discovery is the process of matching playlist tracks to official Spotify or iTunes metadata.</p>
+            <p>Fires when Spotify/iTunes metadata identification finishes for a mirrored playlist. Identification is the process of matching playlist tracks to official Spotify or iTunes metadata.</p>
 
             <h4>Conditions</h4>
             <ul>
@@ -4699,8 +4699,8 @@ const TOOL_HELP_CONTENT = {
 
             <h4>Good for</h4>
             <ul>
-                <li>Auto-syncing a playlist after discovery completes</li>
-                <li>Getting notified about discovery results (how many matched vs failed)</li>
+                <li>Auto-syncing a playlist after identification completes</li>
+                <li>Getting notified about identification results (how many matched vs failed)</li>
             </ul>
         `
     },
@@ -4998,22 +4998,22 @@ const TOOL_HELP_CONTENT = {
         `
     },
     'auto-discover_playlist': {
-        title: 'Discover Playlist',
+        title: 'Identify Playlist Tracks',
         content: `
             <h4>What does this action do?</h4>
             <p>Finds official Spotify or iTunes metadata for tracks in a mirrored playlist. This is required before syncing — it matches each track to a known release so it can be found in your library.</p>
 
             <h4>Configuration</h4>
             <ul>
-                <li><strong>Playlist:</strong> Select a specific playlist, or check "Discover all" to process all mirrored playlists</li>
+                <li><strong>Playlist:</strong> Select a specific playlist, or check "Identify all" to process all mirrored playlists</li>
             </ul>
 
             <h4>How it works</h4>
             <ol>
                 <li>Takes each track name and artist from the mirror</li>
                 <li>Searches Spotify (or iTunes as fallback) for a match</li>
-                <li>Stores the best match with confidence score in the discovery cache</li>
-                <li>Already-discovered tracks are skipped for efficiency</li>
+                <li>Stores the best match with confidence score in the identification cache</li>
+                <li>Already-identified tracks are skipped for efficiency</li>
             </ol>
         `
     },
@@ -5024,7 +5024,7 @@ const TOOL_HELP_CONTENT = {
             <p>Runs the full playlist lifecycle in one automation — no signal wiring needed. Executes four phases sequentially:</p>
             <ol>
                 <li><strong>Refresh</strong> — Re-fetches playlist tracks from the source platform (Spotify, Tidal, YouTube, Deezer)</li>
-                <li><strong>Discover</strong> — Matches each track to official metadata (Spotify/iTunes/Deezer IDs)</li>
+                <li><strong>Identify</strong> — Matches each track to official metadata (Spotify/iTunes/Deezer IDs)</li>
                 <li><strong>Sync</strong> — Pushes the playlist to your media server (Plex, Jellyfin, Navidrome)</li>
                 <li><strong>Download Missing</strong> — Queues unmatched tracks to the wishlist for automatic download</li>
             </ol>
@@ -5039,7 +5039,7 @@ const TOOL_HELP_CONTENT = {
             <p>Set this on a schedule (e.g., every 6 hours). Between runs, the wishlist processor downloads missing tracks in the background. On the next pipeline run, those newly downloaded tracks will match during the sync phase — so your server playlist gets more complete with each cycle until fully synced.</p>
 
             <h4>Replaces</h4>
-            <p>This single automation replaces the 4-automation signal chain pattern (Refresh → signal → Discover → signal → Sync → signal → Download). No signals, no chaining, no room for misconfiguration.</p>
+            <p>This single automation replaces the 4-automation signal chain pattern (Refresh → signal → Identify → signal → Sync → signal → Download). No signals, no chaining, no room for misconfiguration.</p>
         `
     },
     'auto-notify_only': {

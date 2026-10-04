@@ -1015,7 +1015,10 @@ function autoSyncWeeklyCardHtml(playlist, schedule) {
                 </div>
             </div>
             <div class="auto-sync-scheduled-actions">
-                <button class="run" onclick="event.stopPropagation(); runAutoSyncScheduledPlaylist(${playlist.id})" title="Run the playlist pipeline now" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Running' : 'Run now'}</button>
+                ${playlist._personalized
+                    ? `<button class="run" onclick="event.stopPropagation(); runAutoSyncScheduledPlaylist(${playlist.id})" title="Run the playlist pipeline now" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Running' : 'Run now'}</button>`
+                    : `<button class="run" onclick="event.stopPropagation(); runAutoSyncScheduledPlaylist(${playlist.id}, true)" title="Sync now — updates the playlist without adding missing tracks to the wishlist" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Running' : 'Sync'}</button>
+                <button class="run" onclick="event.stopPropagation(); runAutoSyncScheduledPlaylist(${playlist.id}, false)" title="Sync now and download missing tracks" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Running' : 'Sync + download'}</button>`}
                 <button onclick="event.stopPropagation(); unscheduleAutoSyncWeekly(${playlist.id})" title="Remove this weekly schedule">&times;</button>
             </div>
         </div>
@@ -1533,7 +1536,7 @@ function createAutoSyncHistoryEntryElement(entry, index = 0) {
     autoSyncAppendFlowArrow(flow);
     autoSyncAppendFlowChip(flow, 'Refresh', 'flow-action');
     autoSyncAppendFlowArrow(flow);
-    autoSyncAppendFlowChip(flow, 'Discover', 'flow-action');
+    autoSyncAppendFlowChip(flow, 'Identify', 'flow-action');
     autoSyncAppendFlowArrow(flow);
     autoSyncAppendFlowChip(flow, 'Sync + wishlist', 'flow-notify');
 
@@ -1760,12 +1763,29 @@ function autoSyncHistoryDetailHtml(entry, before, after, result, deltas) {
     const logsHtml = autoSyncHistoryLogsCompactHtml(entry.log_lines);
     const playlistId = entry.playlist_id || after.playlist_id || before.playlist_id || '';
     const playlistName = entry.playlist_name || after.name || before.name || '';
+    // #1455: history entries outlive their mirrors — a deleted mirror's button
+    // would POST /pipeline/run and just 404. Disable it (not hidden) so the
+    // audit entry still reads naturally.
+    const mirrorStillExists = !!playlistId
+        && Array.isArray(_autoSyncScheduleState.playlists)
+        && _autoSyncScheduleState.playlists.some(p => parseInt(p.id, 10) === parseInt(playlistId, 10));
     const runAgainHtml = playlistId
         ? `<div class="auto-sync-history-detail-actions">
+              ${mirrorStillExists ? `
               <button type="button" class="auto-sync-history-run-again"
-                  onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${parseInt(playlistId, 10)}, '${_escAttr(playlistName)}')">
-                  Run pipeline again
+                  onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${parseInt(playlistId, 10)}, '${_escAttr(playlistName)}', true)"
+                  title="Sync now — updates the playlist without adding missing tracks to the wishlist">
+                  Sync
               </button>
+              <button type="button" class="auto-sync-history-run-again"
+                  onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${parseInt(playlistId, 10)}, '${_escAttr(playlistName)}', false)"
+                  title="Sync now and download missing tracks">
+                  Sync + download
+              </button>` : `
+              <button type="button" class="auto-sync-history-run-again"
+                  disabled title="Playlist no longer exists">
+                  Run pipeline again
+              </button>`}
            </div>`
         : '';
     return `
@@ -1984,7 +2004,10 @@ function autoSyncScheduledCardHtml(playlist, schedule) {
                 </div>
             </div>
             <div class="auto-sync-scheduled-actions">
-                <button class="run" onclick="event.stopPropagation(); runAutoSyncScheduledPlaylist(${playlist.id})" title="Run the playlist pipeline now" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Running' : 'Run now'}</button>
+                ${playlist._personalized
+                    ? `<button class="run" onclick="event.stopPropagation(); runAutoSyncScheduledPlaylist(${playlist.id})" title="Run the playlist pipeline now" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Running' : 'Run now'}</button>`
+                    : `<button class="run" onclick="event.stopPropagation(); runAutoSyncScheduledPlaylist(${playlist.id}, true)" title="Sync now — updates the playlist without adding missing tracks to the wishlist" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Running' : 'Sync'}</button>
+                <button class="run" onclick="event.stopPropagation(); runAutoSyncScheduledPlaylist(${playlist.id}, false)" title="Sync now and download missing tracks" ${isRunning ? 'disabled' : ''}>${isRunning ? 'Running' : 'Sync + download'}</button>`}
                 <button onclick="event.stopPropagation(); unscheduleAutoSyncPlaylist(${playlist.id})" title="Remove this Auto-Sync schedule">&times;</button>
             </div>
         </div>
@@ -2319,7 +2342,7 @@ async function unscheduleAutoSyncWeekly(playlistId) {
 }
 
 
-async function runAutoSyncScheduledPlaylist(playlistId) {
+async function runAutoSyncScheduledPlaylist(playlistId, skipWishlist) {
     const playlist = _autoSyncScheduleState.playlists.find(p => parseInt(p.id, 10) === parseInt(playlistId, 10));
     if (!playlist) return;
     if (playlist._personalized) {
@@ -2341,7 +2364,7 @@ async function runAutoSyncScheduledPlaylist(playlistId) {
         }
         return;
     }
-    await runMirroredPlaylistPipeline(playlistId, playlist.name || `Playlist #${playlistId}`);
+    await runMirroredPlaylistPipeline(playlistId, playlist.name || `Playlist #${playlistId}`, skipWishlist);
     await refreshAutoSyncScheduleModal();
 }
 
@@ -2478,12 +2501,14 @@ function applyMirroredPipelineState(playlistId, state) {
     updateMirroredCardPhase(hash, phase);
 }
 
-async function runMirroredPlaylistPipeline(playlistId, name) {
+async function runMirroredPlaylistPipeline(playlistId, name, skipWishlist) {
     try {
         const res = await fetch(`/api/mirrored-playlists/${playlistId}/pipeline/run`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({})
+            // #1455: explicit per-click choice — true = sync only,
+            // false = sync and queue missing tracks for download.
+            body: JSON.stringify({ skip_wishlist: !!skipWishlist })
         });
         const data = await parseMirroredPipelineResponse(res, 'Failed to start Auto-Sync');
         applyMirroredPipelineState(playlistId, data.state || { status: 'running', progress: 0, phase: 'Starting pipeline...' });

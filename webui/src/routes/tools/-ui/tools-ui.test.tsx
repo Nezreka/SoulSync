@@ -166,7 +166,7 @@ describe('launcher cards call the vanilla modals', () => {
       'discovery pool',
       <DiscoveryPoolCard key="d" />,
       'openDiscoveryPoolModal',
-      'Open Discovery Pool',
+      'Open Match Review',
     ],
     [
       'manual library match',

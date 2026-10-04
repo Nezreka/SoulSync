@@ -19,6 +19,7 @@ function item(over: Partial<ImportInboxItem> & { status: ImportInboxStatus }): I
     key: over.status,
     kind: 'album',
     name: 'Album',
+    guessed_name: null,
     artist: 'Artist',
     folder_name: 'Artist - Album',
     folder_path: '/Staging/Artist - Album',
@@ -147,5 +148,23 @@ describe('time', () => {
     expect(secondsToNextScan('2026-09-16T11:59:30Z', 60, now)).toBe(30);
     expect(secondsToNextScan('2026-09-16T11:00:00Z', 60, now)).toBe(0);
     expect(secondsToNextScan(null, 60, now)).toBeNull();
+  });
+});
+
+describe('partial status (Bug 3)', () => {
+  it('has a warning-presented inbox meta entry', async () => {
+    const { INBOX_STATUS_META } = await import('./-import.inbox');
+    const meta = INBOX_STATUS_META['partial'];
+    expect(meta).toBeDefined();
+    expect(meta.label).toMatch(/partial/i);
+    expect(meta.tone).toBe('warning');
+  });
+
+  it('is not an attention status', async () => {
+    const { isAttention } = await import('./-import.inbox');
+    // partial+staging is mapped to failed by the backend; a bare partial
+    // row is history, never attention.
+    expect(isAttention('partial', true)).toBe(false);
+    expect(isAttention('partial', false)).toBe(false);
   });
 });

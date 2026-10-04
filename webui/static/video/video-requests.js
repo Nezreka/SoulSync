@@ -95,7 +95,7 @@
     // when cancelled. monitor is null for movies, quality 0 means default.
     function pickRequest(opts) {
         opts = opts || {};
-        var show = opts.kind !== 'movie';
+        var show = opts.kind === 'show';
         var current = opts.current || 'all';
         var choices = show ? MONITOR_CHOICES.map(function (c) {
             return '<button type="button" class="vreq-choice' + (c.id === current ? ' is-on' : '') +
@@ -236,17 +236,33 @@
         return '';
     }
 
-    // what a card should say for this profile's asks, keyed kind:tmdb_id.
+    // what a card should say for this profile's asks, keyed by title identity.
     // 'available' beats 'requested'; declined asks say nothing.
     function cardStates(rows) {
         var out = {};
         (rows || []).forEach(function (r) {
-            if (!r || !r.tmdb_id || r.status === 'denied') return;
-            var key = r.kind + ':' + r.tmdb_id;
+            if (!r || r.status === 'denied' || !rowKey(r)) return;
+            var key = rowKey(r);
             var st = (r.status === 'approved' && bucketOf(r) === 'available') ? 'available' : 'requested';
             if (out[key] !== 'available') out[key] = st;
         });
         return out;
+    }
+
+    // one identity per title: episodes scope to the season/episode, youtube
+    // to the video id (two episodes of a show are different titles)
+    function reqKey(kind, tmdb_id, season, episode, youtube_id) {
+        if (kind === 'episode') return 'episode:' + tmdb_id + ':' + season + ':' + episode;
+        if (kind === 'youtube') return 'youtube:' + youtube_id;
+        return kind + ':' + tmdb_id;
+    }
+    function rowKey(r) {
+        return reqKey(r.kind, r.tmdb_id, r.season_number, r.episode_number, r.youtube_id);
+    }
+
+    function kindLabel(kind) {
+        return kind === 'movie' ? 'Movie' : kind === 'show' ? 'Show'
+            : kind === 'episode' ? 'Episode' : kind === 'youtube' ? 'YouTube' : 'Show';
     }
 
     function quotaSpent(q) {
@@ -258,12 +274,15 @@
         var byKey = {}, order = [];
         rows.forEach(function (r) {
             var bucket = bucketOf(r);
-            var key = bucket + ':' + r.kind + ':' + r.tmdb_id;
+            var key = bucket + ':' + rowKey(r);
             var g = byKey[key];
             if (!g) {
                 g = byKey[key] = { key: key, bucket: bucket, kind: r.kind, tmdb_id: r.tmdb_id,
                     title: r.title, year: r.year, poster_url: r.poster_url, monitor: r.monitor,
                     quality_profile_id: r.quality_profile_id || null,
+                    season_number: r.season_number, episode_number: r.episode_number,
+                    youtube_id: r.youtube_id, channel_youtube_id: r.channel_youtube_id,
+                    channel_title: r.channel_title,
                     admin_response: r.admin_response, lead: r, rows: [] };
                 order.push(g);
             }
@@ -322,7 +341,7 @@
     function row(g) {
         var poster = g.poster_url
             ? '<img class="vreq-poster" src="' + esc(g.poster_url) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
-            : '<div class="vreq-poster vreq-poster--ph">' + (g.kind === 'movie' ? '🎬' : '📺') + '</div>';
+            : '<div class="vreq-poster vreq-poster--ph">' + (g.kind === 'movie' ? '🎬' : g.kind === 'youtube' ? '▶️' : '📺') + '</div>';
         var sub = [g.year];
         if (g.kind === 'show' && MONITOR_LABELS[g.monitor]) sub.push(MONITOR_LABELS[g.monitor]);
         sub.push(qualityName(profilesCache.list, g.quality_profile_id));
@@ -343,7 +362,7 @@
         return '<div class="vreq-row" data-vreq-row="' + esc(g.key) + '">' + poster +
             '<div class="vreq-main">' +
                 '<div class="vreq-title"><span class="vreq-title-t">' + esc(g.title) + '</span>' +
-                    '<span class="vreq-kind">' + (g.kind === 'movie' ? 'Movie' : 'Show') + '</span></div>' +
+                    '<span class="vreq-kind">' + esc(kindLabel(g.kind)) + '</span></div>' +
                 (sub ? '<div class="vreq-sub">' + esc(sub) + '</div>' : '') +
                 bar +
                 '<div class="vreq-who">' + esc(whoAsked(g)) + '</div>' +
@@ -603,12 +622,16 @@
         var named = (profilesCache.list || []).length > 1;
         if (g.bucket === 'pending' && admin) {
             if (g.kind === 'show') items.push({ id: 'seasons', label: named ? 'Approve with seasons and quality…' : 'Approve with seasons…' });
-            else if (named) items.push({ id: 'seasons', label: 'Approve with quality…' });
+            else if (g.kind !== 'youtube' && named) items.push({ id: 'seasons', label: 'Approve with quality…' });
             items.push({ id: 'decline', label: 'Decline…', danger: true });
         }
         if (admin && canSearchAgain(g.lead)) items.push({ id: 'retry', label: 'Search again' });
         if (g.bucket === 'pending' && !admin) items.push({ id: 'withdraw', label: 'Withdraw', danger: true });
-        items.push({ id: 'open', label: g.kind === 'movie' ? 'Open movie' : 'Open show' });
+        if (g.kind === 'youtube') {
+            items.push({ id: 'ytopen', label: 'Open on YouTube' });
+        } else {
+            items.push({ id: 'open', label: g.kind === 'movie' ? 'Open movie' : 'Open show' });
+        }
         if (g.bucket !== 'pending') items.push({ id: 'remove', label: 'Remove from history' });
 
         menuEl = document.createElement('div');
@@ -617,8 +640,14 @@
         menuEl._key = g.key;
         menuEl.innerHTML = items.map(function (it) {
             if (it.id === 'open') {
-                return '<a class="vreq-menu-item" role="menuitem" href="/video-detail/tmdb/' + esc(g.kind) + '/' +
+                // episodes open their show (there is no episode detail page)
+                var openKind = g.kind === 'episode' ? 'show' : g.kind;
+                return '<a class="vreq-menu-item" role="menuitem" href="/video-detail/tmdb/' + esc(openKind) + '/' +
                     esc(g.tmdb_id) + '" data-vreq-menu="open">' + esc(it.label) + '</a>';
+            }
+            if (it.id === 'ytopen') {
+                return '<a class="vreq-menu-item" role="menuitem" target="_blank" rel="noopener" href="https://www.youtube.com/watch?v=' +
+                    encodeURIComponent(g.youtube_id) + '" data-vreq-menu="open">' + esc(it.label) + '</a>';
             }
             return '<button type="button" class="vreq-menu-item' + (it.danger ? ' vreq-menu-item--danger' : '') +
                 '" role="menuitem" data-vreq-menu="' + it.id + '">' + esc(it.label) + '</button>';
@@ -738,12 +767,18 @@
         document.dispatchEvent(new CustomEvent('soulsync:video-requests-changed'));
     }
 
-    // item: {kind, tmdb_id, title, year?, poster_url?}. checks the quota
-    // first, then the seasons/quality sheet, then posts. resolves
-    // {ok, already, in_library} or null when nothing was sent. toasts itself.
+    // item: {kind, tmdb_id, title, year?, poster_url?} for movie/show;
+    // {kind:'episode', tmdb_id (show), season, episode, title} for episodes;
+    // {kind:'youtube', youtube_id, title, channel?} for YouTube videos.
+    // checks the quota first, then the seasons/quality sheet, then posts.
+    // resolves {ok, already, in_library} or null when nothing was sent.
     function requestTitle(item) {
-        if (!item || !item.tmdb_id || (item.kind !== 'movie' && item.kind !== 'show')) return Promise.resolve(null);
-        var key = item.kind + ':' + item.tmdb_id;
+        if (!item) return Promise.resolve(null);
+        var key = reqKey(item.kind, item.tmdb_id, item.season, item.episode, item.youtube_id);
+        if (item.kind === 'episode' && (!item.tmdb_id || !item.season || !item.episode)) return Promise.resolve(null);
+        if (item.kind === 'youtube' && !item.youtube_id) return Promise.resolve(null);
+        if (item.kind !== 'episode' && item.kind !== 'youtube' &&
+            (!item.tmdb_id || (item.kind !== 'movie' && item.kind !== 'show'))) return Promise.resolve(null);
         return Promise.all([mine(true), loadProfiles()]).then(function (res) {
             var m = res[0], profiles = res[1];
             if (m && m.states[key] === 'requested') {
@@ -755,13 +790,21 @@
                 return null;
             }
             var named = profiles.length > 1;
-            var pick = (item.kind === 'show' || named)
+            // youtube has no quality profiles and no seasons: no sheet
+            var pick = (item.kind === 'show' || (named && item.kind !== 'youtube'))
                 ? pickRequest({ kind: item.kind, title: item.title || '', current: 'all', profiles: profiles })
                 : Promise.resolve({ monitor: null, quality_profile_id: 0 });
             return pick.then(function (choice) {
                 if (!choice) return null;
-                var body = { kind: item.kind, tmdb_id: item.tmdb_id, title: item.title, year: item.year,
+                var body = { kind: item.kind, title: item.title, year: item.year,
                     poster_url: item.poster_url || null };
+                if (item.kind === 'youtube') {
+                    body.youtube_id = item.youtube_id;
+                    if (item.channel) body.channel = item.channel;
+                } else {
+                    body.tmdb_id = item.tmdb_id;
+                    if (item.kind === 'episode') { body.season = item.season; body.episode = item.episode; }
+                }
                 if (choice.monitor) body.monitor = choice.monitor;
                 if (choice.quality_profile_id > 0) body.quality_profile_id = choice.quality_profile_id;
                 return fetch('/api/video/requests', {
@@ -798,9 +841,22 @@
 
     // the card's quick action for a profile that can't download
     function cardButton(o) {
-        if (!o || !o.tmdbId || (o.kind !== 'movie' && o.kind !== 'show')) return '';
-        return '<button type="button" class="vreq-card-btn" data-vreq-card' +
-            ' data-kind="' + esc(o.kind) + '" data-tmdb="' + esc(o.tmdbId) + '"' +
+        if (!o) return '';
+        var attrs = '';
+        if (o.kind === 'youtube') {
+            if (!o.youtubeId) return '';
+            attrs = ' data-kind="youtube" data-youtube="' + esc(o.youtubeId) + '"' +
+                (o.channel ? ' data-channel="' + esc(JSON.stringify({
+                    youtube_id: o.channel.youtube_id || '', title: o.channel.title || '' })) + '"' : '');
+        } else if (o.kind === 'episode') {
+            if (!o.tmdbId || !o.season || !o.episode) return '';
+            attrs = ' data-kind="episode" data-tmdb="' + esc(o.tmdbId) + '"' +
+                ' data-season="' + esc(o.season) + '" data-episode="' + esc(o.episode) + '"';
+        } else {
+            if (!o.tmdbId || (o.kind !== 'movie' && o.kind !== 'show')) return '';
+            attrs = ' data-kind="' + esc(o.kind) + '" data-tmdb="' + esc(o.tmdbId) + '"';
+        }
+        return '<button type="button" class="vreq-card-btn" data-vreq-card' + attrs +
             ' data-title="' + esc(o.title || '') + '" data-year="' + esc(o.year || '') + '"' +
             ' data-poster="' + esc(o.poster || '') + '"' +
             ' title="Request" aria-label="Request ' + esc(o.title || 'this') + '">' +
@@ -818,7 +874,9 @@
         var btns = root.querySelectorAll('[data-vreq-card]');
         for (var i = 0; i < btns.length; i++) {
             var b = btns[i];
-            var st = states[b.getAttribute('data-kind') + ':' + b.getAttribute('data-tmdb')] || '';
+            var st = states[reqKey(b.getAttribute('data-kind'), b.getAttribute('data-tmdb'),
+                b.getAttribute('data-season'), b.getAttribute('data-episode'),
+                b.getAttribute('data-youtube'))] || '';
             b.hidden = !!st;
             var card = b.closest('.vsr-card, .vd-sim-card, .vwlp-card') || b.parentNode;
             var ribbon = card && card.querySelector(RIBBON_SEL);
@@ -846,10 +904,20 @@
         e.stopPropagation();
         if (b.disabled) return;
         b.disabled = true;
-        requestTitle({ kind: b.getAttribute('data-kind'), tmdb_id: Number(b.getAttribute('data-tmdb')),
+        var item = { kind: b.getAttribute('data-kind'),
             title: b.getAttribute('data-title') || '', year: Number(b.getAttribute('data-year')) || null,
-            poster_url: b.getAttribute('data-poster') || null })
-            .then(function () { b.disabled = false; });
+            poster_url: b.getAttribute('data-poster') || null };
+        if (item.kind === 'youtube') {
+            item.youtube_id = b.getAttribute('data-youtube') || '';
+            try { item.channel = JSON.parse(b.getAttribute('data-channel') || 'null'); } catch (err) { item.channel = null; }
+        } else {
+            item.tmdb_id = Number(b.getAttribute('data-tmdb'));
+            if (item.kind === 'episode') {
+                item.season = Number(b.getAttribute('data-season'));
+                item.episode = Number(b.getAttribute('data-episode'));
+            }
+        }
+        requestTitle(item).then(function () { b.disabled = false; });
     }, true);
 
     var repaintT;

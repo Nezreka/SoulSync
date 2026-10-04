@@ -424,6 +424,13 @@ _COLUMN_MIGRATIONS = [
     # the quality profile a request asked for (NULL = the default); applied to
     # the title's wishlist rows on approve
     ("video_requests", "quality_profile_id", "INTEGER"),
+    # episode requests: which season/episode (NULL for other kinds)
+    ("video_requests", "season_number", "INTEGER"),
+    ("video_requests", "episode_number", "INTEGER"),
+    # youtube requests: the video + channel ids (NULL for other kinds)
+    ("video_requests", "youtube_id", "TEXT"),
+    ("video_requests", "channel_youtube_id", "TEXT"),
+    ("video_requests", "channel_title", "TEXT"),
 ]
 
 
@@ -7594,22 +7601,46 @@ class VideoDatabase:
     # ── requests (in-app Overseerr; arr-parity P4) ────────────────────────────
     def add_video_request(self, *, profile_id, requester_name, kind, tmdb_id, title,
                           year=None, poster_url=None, note=None, monitor="future",
-                          quality_profile_id=None):
-        """File a request. One PENDING request per (profile, kind, tmdb) —
-        re-asking returns the existing id ('already'). Returns (id, created)."""
+                          quality_profile_id=None, season_number=None,
+                          episode_number=None, youtube_id=None,
+                          channel_youtube_id=None, channel_title=None):
+        """File a request. One PENDING request per identity — (profile, kind,
+        tmdb) for movies/shows, (profile, kind, tmdb, season, episode) for
+        episodes, (profile, kind, youtube_id) for youtube. Re-asking returns
+        the existing id ('already'). Returns (id, created)."""
         conn = self._get_connection()
         try:
-            row = conn.execute(
-                "SELECT id FROM video_requests WHERE profile_id=? AND kind=? AND tmdb_id=? "
-                "AND status='pending'", (int(profile_id), kind, int(tmdb_id))).fetchone()
+            if kind == "episode":
+                row = conn.execute(
+                    "SELECT id FROM video_requests WHERE profile_id=? AND kind='episode' "
+                    "AND tmdb_id=? AND season_number=? AND episode_number=? "
+                    "AND status='pending'",
+                    (int(profile_id), int(tmdb_id), int(season_number),
+                     int(episode_number))).fetchone()
+            elif kind == "youtube":
+                row = conn.execute(
+                    "SELECT id FROM video_requests WHERE profile_id=? AND kind='youtube' "
+                    "AND youtube_id=? AND status='pending'",
+                    (int(profile_id), str(youtube_id))).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT id FROM video_requests WHERE profile_id=? AND kind=? AND tmdb_id=? "
+                    "AND status='pending'", (int(profile_id), kind, int(tmdb_id))).fetchone()
             if row:
                 return row["id"], False
             cur = conn.execute(
                 "INSERT INTO video_requests (profile_id, requester_name, kind, tmdb_id, title, "
-                "year, poster_url, note, monitor, quality_profile_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "year, poster_url, note, monitor, quality_profile_id, season_number, "
+                "episode_number, youtube_id, channel_youtube_id, channel_title) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (int(profile_id), requester_name, kind, int(tmdb_id), title, year,
                  poster_url, note, monitor or "future",
-                 int(quality_profile_id) if quality_profile_id else None))
+                 int(quality_profile_id) if quality_profile_id else None,
+                 int(season_number) if season_number is not None else None,
+                 int(episode_number) if episode_number is not None else None,
+                 str(youtube_id) if youtube_id else None,
+                 str(channel_youtube_id) if channel_youtube_id else None,
+                 str(channel_title) if channel_title else None))
             conn.commit()
             return cur.lastrowid, True
         except sqlite3.Error:
@@ -7781,12 +7812,18 @@ class VideoDatabase:
     def annotate_requests_in_library(self, rows) -> None:
         """Stamp each request dict with ``in_library`` — whether a library row
         (movies/shows) exists for its tmdb id. This is what lets an approved
-        request show 'In library' instead of sitting ambiguously forever."""
+        request show 'In library' instead of sitting ambiguously forever.
+        Episodes check the exact episode; youtube checks the download ledger."""
         wanted = {"movie": set(), "show": set()}
+        want_episodes, want_youtube = [], set()
         for r in rows:
             kind, tid = r.get("kind"), r.get("tmdb_id")
             if kind in wanted and tid:
                 wanted[kind].add(int(tid))
+            elif kind == "episode" and tid:
+                want_episodes.append(r)
+            elif kind == "youtube" and r.get("youtube_id"):
+                want_youtube.add(str(r["youtube_id"]))
         owned = {"movie": set(), "show": set()}
         conn = self._get_connection()
         try:
@@ -7801,23 +7838,46 @@ class VideoDatabase:
             logger.exception("annotate_requests_in_library failed")
         finally:
             conn.close()
+        owned_yt = set()
+        if want_youtube:
+            try:
+                owned_yt = set(self.owned_youtube_video_ids()) & want_youtube
+            except Exception:  # noqa: BLE001 - annotation is best-effort
+                owned_yt = set()
         for r in rows:
-            r["in_library"] = bool(r.get("tmdb_id")) and \
-                int(r["tmdb_id"]) in owned.get(r.get("kind"), set())
+            kind = r.get("kind")
+            if kind == "episode":
+                r["in_library"] = self.episode_in_library(
+                    r.get("tmdb_id"), r.get("season_number"), r.get("episode_number"))
+            elif kind == "youtube":
+                r["in_library"] = str(r.get("youtube_id") or "") in owned_yt
+            else:
+                r["in_library"] = bool(r.get("tmdb_id")) and \
+                    int(r["tmdb_id"]) in owned.get(kind, set())
 
     def claim_video_requests(self, kind, tmdb_id, *, resolved_by, admin_response=None,
-                             status="approved") -> list:
+                             status="approved", season_number=None,
+                             episode_number=None, youtube_id=None) -> list:
         """take every PENDING request for one title (several people may have
         asked) to ``status`` in one statement, and return the rows taken.
         claiming before acquiring is what keeps a deny that lands mid-approve
-        from leaving a wishlisted title that reads "denied"."""
+        from leaving a wishlisted title that reads "denied". Episodes scope
+        to the season/episode, youtube to the video id — two different
+        episodes (or videos) are different titles."""
         if status not in ("approved", "denied"):
             return []
         conn = self._get_connection()
         try:
+            where = "kind=? AND tmdb_id=? AND status='pending'"
+            args: list = [kind, int(tmdb_id)]
+            if kind == "episode":
+                where += " AND season_number=? AND episode_number=?"
+                args += [int(season_number), int(episode_number)]
+            elif kind == "youtube":
+                where += " AND youtube_id=?"
+                args += [str(youtube_id)]
             rows = [dict(r) for r in conn.execute(
-                "SELECT * FROM video_requests WHERE kind=? AND tmdb_id=? AND status='pending'",
-                (kind, int(tmdb_id))).fetchall()]
+                f"SELECT * FROM video_requests WHERE {where}", args).fetchall()]
             if not rows:
                 return []
             ids = [r["id"] for r in rows]
@@ -7859,15 +7919,23 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def set_wishlist_quality_for_tmdb(self, tmdb_id, quality_profile_id) -> int:
+    def set_wishlist_quality_for_tmdb(self, tmdb_id, quality_profile_id,
+                                      season_number=None, episode_number=None) -> int:
         """stamp every wishlist row of one title (the movie, or a show's
-        episodes) with a quality profile. returns rows touched."""
+        episodes) with a quality profile. With season/episode, only that one
+        episode row. returns rows touched."""
         if not quality_profile_id:
             return 0
         conn = self._get_connection()
         try:
-            cur = conn.execute("UPDATE video_wishlist SET quality_profile_id=? WHERE tmdb_id=? "
-                               "AND kind IN ('movie','episode')", (int(quality_profile_id), int(tmdb_id)))
+            if season_number is not None and episode_number is not None:
+                cur = conn.execute("UPDATE video_wishlist SET quality_profile_id=? WHERE tmdb_id=? "
+                                   "AND kind='episode' AND season_number=? AND episode_number=?",
+                                   (int(quality_profile_id), int(tmdb_id),
+                                    int(season_number), int(episode_number)))
+            else:
+                cur = conn.execute("UPDATE video_wishlist SET quality_profile_id=? WHERE tmdb_id=? "
+                                   "AND kind IN ('movie','episode')", (int(quality_profile_id), int(tmdb_id)))
             conn.commit()
             return cur.rowcount
         except (sqlite3.Error, TypeError, ValueError):
@@ -7880,7 +7948,8 @@ class VideoDatabase:
         """stamp approved request rows with where the acquisition stands:
         ``progress`` = {wanted, failed, owned, total} from the wishlist and the
         library, and ``state`` = available | partial | failed | on_the_way.
-        movies: their wishlist row's status; shows: episode counts."""
+        movies: their wishlist row's status; shows: episode counts; a single
+        episode request: just that episode."""
         want = [r for r in rows if r.get("status") == "approved" and r.get("tmdb_id")]
         if not want:
             return
@@ -7893,6 +7962,18 @@ class VideoDatabase:
                                      (tid,)).fetchone()
                     owned = conn.execute("SELECT COUNT(*) FROM movies WHERE tmdb_id=? AND has_file=1",
                                          (tid,)).fetchone()[0]
+                    failed = 1 if (w and w["status"] == "failed") else 0
+                    wanted = 1 if (w and w["status"] not in ("downloaded", "failed")) else 0
+                    total = 1
+                elif r.get("kind") == "episode":
+                    sn, en = r.get("season_number"), r.get("episode_number")
+                    w = conn.execute("SELECT status FROM video_wishlist WHERE kind='episode' AND tmdb_id=? "
+                                     "AND season_number=? AND episode_number=?",
+                                     (tid, sn, en)).fetchone()
+                    owned = conn.execute(
+                        "SELECT COUNT(*) FROM episodes e JOIN shows s ON s.id=e.show_id "
+                        "WHERE s.tmdb_id=? AND e.season_number=? AND e.episode_number=? AND e.has_file=1",
+                        (tid, sn, en)).fetchone()[0]
                     failed = 1 if (w and w["status"] == "failed") else 0
                     wanted = 1 if (w and w["status"] not in ("downloaded", "failed")) else 0
                     total = 1

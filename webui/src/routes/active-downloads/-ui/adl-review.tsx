@@ -182,28 +182,34 @@ export function AdlUnverifiedRow({
         </div>
       </div>
       <div className="verif-actions" onClick={(event) => event.stopPropagation()}>
-        {badge ? (
-          <span className={badge.className} title={badge.title}>
-            {badge.label}
-          </span>
-        ) : null}
-        {dl.quality ? (
-          <span className="adl-quality-chip" title={qualityChipTitle()}>
-            {dl.quality}
-          </span>
-        ) : null}
-        {ago ? <span className="verif-time">{ago}</span> : null}
+        {/* Static homes: the chips vary per row, so the buttons live in a
+            right-anchored slot that never moves. */}
+        <span className="verif-chips">
+          {badge ? (
+            <span className={badge.className} title={badge.title}>
+              {badge.label}
+            </span>
+          ) : null}
+          {dl.quality ? (
+            <span className="adl-quality-chip" title={qualityChipTitle()}>
+              {dl.quality}
+            </span>
+          ) : null}
+          {ago ? <span className="verif-time">{ago}</span> : null}
+        </span>
         {/* No history id means no endpoint to act on — the row is display-only. */}
         {handlers ? (
-          <ReviewButtons
-            handlers={handlers}
-            approveGlyph="✔"
-            approveTitle={APPROVE_TITLE}
-            playTitle={PLAY_TITLE}
-            compareTitle={COMPARE_TITLE}
-            auditTitle={AUDIT_TITLE}
-            deleteTitle={DELETE_TITLE}
-          />
+          <span className="verif-btns">
+            <ReviewButtons
+              handlers={handlers}
+              approveGlyph="✔"
+              approveTitle={APPROVE_TITLE}
+              playTitle={PLAY_TITLE}
+              compareTitle={COMPARE_TITLE}
+              auditTitle={AUDIT_TITLE}
+              deleteTitle={DELETE_TITLE}
+            />
+          </span>
         ) : null}
       </div>
     </div>
@@ -286,33 +292,39 @@ export function AdlQuarantineRow({
         </div>
       </div>
       <div className="verif-actions" onClick={(event) => event.stopPropagation()}>
-        <span className={`verif-reason-badge ${triggerClass}`} title={entry.reason || ''}>
-          {triggerLabel}
-        </span>
-        {entry.quality ? (
-          <span
-            className="adl-quality-chip"
-            title="Audio quality of the quarantined file (read from the file itself)"
-          >
-            {entry.quality}
+        {/* Static homes: the chips vary per row, so the buttons live in a
+            right-anchored slot that never moves. */}
+        <span className="verif-chips">
+          <span className={`verif-reason-badge ${triggerClass}`} title={entry.reason || ''}>
+            {triggerLabel}
           </span>
-        ) : null}
-        {ago ? <span className="verif-time">{ago}</span> : null}
-        <ReviewButtons
-          handlers={handlers}
-          // A legacy sidecar has no embedded context to re-import from, so its
-          // only route back is Recover-to-Staging.
-          approveGlyph={entry.has_full_context ? '✔' : '⤴'}
-          approveTitle={
-            entry.has_full_context
-              ? 'Approve: re-import this exact file into the library, marked human-verified'
-              : 'Recover to Staging for a manual import (legacy entry without embedded context)'
-          }
-          playTitle="Play the quarantined file in the media player"
-          compareTitle="Find the expected track on Soulseek/streaming sources and play it in the media player — compare against the quarantined file"
-          auditTitle="Open the audit trail for this quarantined file (details, embedded tags, lyrics)"
-          deleteTitle="Delete the quarantined file permanently"
-        />
+          {entry.quality ? (
+            <span
+              className="adl-quality-chip"
+              title="Audio quality of the quarantined file (read from the file itself)"
+            >
+              {entry.quality}
+            </span>
+          ) : null}
+          {ago ? <span className="verif-time">{ago}</span> : null}
+        </span>
+        <span className="verif-btns">
+          <ReviewButtons
+            handlers={handlers}
+            // A legacy sidecar has no embedded context to re-import from, so its
+            // only route back is Recover-to-Staging.
+            approveGlyph={entry.has_full_context ? '✔' : '⤴'}
+            approveTitle={
+              entry.has_full_context
+                ? 'Approve: re-import this exact file into the library, marked human-verified'
+                : 'Recover to Staging for a manual import (legacy entry without embedded context)'
+            }
+            playTitle="Play the quarantined file in the media player"
+            compareTitle="Find the expected track on Soulseek/streaming sources and play it in the media player — compare against the quarantined file"
+            auditTitle="Open the audit trail for this quarantined file (details, embedded tags, lyrics)"
+            deleteTitle="Delete the quarantined file permanently"
+          />
+        </span>
       </div>
       <div className="verif-quar-alt-slot" onClick={(event) => event.stopPropagation()}>
         {altSlot}
@@ -740,37 +752,46 @@ export function AdlDeletedRow({
         </div>
       </div>
       <div className="verif-actions">
-        {sourceLabel ? <span className="adl-quality-chip">{sourceLabel}</span> : null}
-        <span className="adl-quality-chip" title="File size">
-          {formatBytes(entry.size) || '—'}
+        {/* Static homes: the chips vary per row, so the buttons live in a
+            right-anchored slot that never moves. */}
+        <span className="verif-chips">
+          {sourceLabel ? <span className="adl-quality-chip">{sourceLabel}</span> : null}
+          <span className="adl-quality-chip" title="File size">
+            {formatBytes(entry.size) || '—'}
+          </span>
+          <span
+            className="verif-time"
+            title={entry.deleted_at ?? 'deleted before tracking existed'}
+          >
+            {ago}
+          </span>
         </span>
-        <span className="verif-time" title={entry.deleted_at ?? 'deleted before tracking existed'}>
-          {ago}
+        <span className="verif-btns">
+          <button
+            type="button"
+            className="verif-act verif-act-ok"
+            title="Restore this file to where it was removed from"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              handlers.onRestore();
+            }}
+          >
+            ↩
+          </button>
+          <button
+            type="button"
+            className="verif-act verif-act-del"
+            title="Delete this file permanently"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              handlers.onPurge();
+            }}
+          >
+            🗑
+          </button>
         </span>
-        <button
-          type="button"
-          className="verif-act verif-act-ok"
-          title="Restore this file to where it was removed from"
-          disabled={busy}
-          onClick={() => {
-            setBusy(true);
-            handlers.onRestore();
-          }}
-        >
-          ↩
-        </button>
-        <button
-          type="button"
-          className="verif-act verif-act-del"
-          title="Delete this file permanently"
-          disabled={busy}
-          onClick={() => {
-            setBusy(true);
-            handlers.onPurge();
-          }}
-        >
-          🗑
-        </button>
       </div>
     </div>
   );

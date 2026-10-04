@@ -264,9 +264,12 @@ describe('ExplorerWishlistModal', () => {
 
     expect(onFinished).toHaveBeenCalledWith(20);
     expect(window.showToast).toHaveBeenCalledWith('Added 20 tracks to wishlist', 'success');
-    // The grid and the submit are gone; Cancel has become Close.
+    // The grid is gone; Cancel has become Close. The submit button keeps its
+    // static home — still mounted, but disabled now the run is over.
     expect(document.querySelector('#explorer-wishlist-grid')).toBeNull();
-    expect(document.querySelector('#explorer-wishlist-submit')).toBeNull();
+    const submit = document.querySelector('#explorer-wishlist-submit') as HTMLButtonElement | null;
+    expect(submit).toBeTruthy();
+    expect(submit!.disabled).toBe(true);
     expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy();
   });
 

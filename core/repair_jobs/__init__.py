@@ -48,6 +48,9 @@ JOB_DATA_BASIS: dict[str, str] = {
     # albums/artists/tracks tables this branch removed.
     'library_retag': 'lib2',
     'suspect_album_tag_detector': 'lib2',
+    'bpm_backfill': 'lib2',
+    'artist_nfo_backfill': 'lib2',
+    'album_release_year_repair': 'lib2',
 }
 
 # Exhaustive Library-v2 interoperability contract.  ``JOB_DATA_BASIS`` says
@@ -117,6 +120,14 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     # Findings only; the fix is the Re-identify modal, which re-imports the
     # file through the normal pipeline.
     'suspect_album_tag_detector': frozenset({'observe'}),
+    # Findings only; applying writes lib2_tracks.bpm. No file is touched.
+    'bpm_backfill': frozenset({'observe', 'metadata'}),
+    # Writes a new artist.nfo sidecar next to the music; no audio file or
+    # catalogue row changes.
+    'artist_nfo_backfill': frozenset({'new_file'}),
+    # Writes the year tags, the album's catalogue year, and may rename the
+    # album folder (repointing its file rows).
+    'album_release_year_repair': frozenset({'observe', 'metadata', 'tags', 'path'}),
 }
 
 # Jobs deliberately retired after their function moved to a native Library-v2
@@ -249,6 +260,9 @@ _JOB_MODULES = [
     'core.repair_jobs.library_retag',
     'core.repair_jobs.path_drift_reconcile',
     'core.repair_jobs.suspect_album_tag',
+    'core.repair_jobs.bpm_backfill',
+    'core.repair_jobs.artist_nfo_backfill',
+    'core.repair_jobs.album_release_year_repair',
 ]
 
 

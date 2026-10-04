@@ -582,13 +582,13 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
 
             if (result.error) {
                 console.error('❌ Error starting Tidal discovery:', result.error);
-                showToast(`Error starting discovery: ${result.error}`, 'error');
-                if (_descEl) _descEl.textContent = 'Could not start discovery.';
+                showToast(`Error starting identification: ${result.error}`, 'error');
+                if (_descEl) _descEl.textContent = 'Could not start identification.';
                 return;
             }
 
             console.log('✅ Tidal discovery started, beginning polling...');
-            if (_descEl) _descEl.textContent = 'Discovering tracks…';
+            if (_descEl) _descEl.textContent = 'Identifying tracks…';
 
             // Update phase to discovering now that backend discovery is actually started
             tidalPlaylistStates[playlistId].phase = 'discovering';
@@ -602,8 +602,8 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
 
         } catch (error) {
             console.error('❌ Error starting Tidal discovery:', error);
-            showToast(`Error starting discovery: ${error.message}`, 'error');
-            if (_descEl) _descEl.textContent = 'Could not start discovery.';
+            showToast(`Error starting identification: ${error.message}`, 'error');
+            if (_descEl) _descEl.textContent = 'Could not start identification.';
         }
         return;
     } else if (isCurrentlyDiscovering) {
@@ -1277,7 +1277,7 @@ async function startTidalDownloadMissing(urlHash) {
         const discoveryResults = state.discoveryResults || state.discovery_results;
 
         if (!discoveryResults) {
-            showToast('No discovery results available for download', 'error');
+            showToast('No identification results available for download', 'error');
             return;
         }
 
@@ -1909,7 +1909,7 @@ async function openQobuzDiscoveryModal(playlistId, playlistData) {
             const response = await fetch(`/api/qobuz/discovery/start/${playlistId}`, { method: 'POST' });
             const result = await response.json();
             if (result.error) {
-                showToast(`Error starting discovery: ${result.error}`, 'error');
+                showToast(`Error starting identification: ${result.error}`, 'error');
                 return;
             }
             qobuzPlaylistStates[playlistId].phase = 'discovering';
@@ -1917,7 +1917,7 @@ async function openQobuzDiscoveryModal(playlistId, playlistData) {
             youtubePlaylistStates[fakeUrlHash].phase = 'discovering';
             startQobuzDiscoveryPolling(fakeUrlHash, playlistId);
         } catch (error) {
-            showToast(`Error starting discovery: ${error.message}`, 'error');
+            showToast(`Error starting identification: ${error.message}`, 'error');
         }
     } else if (isCurrentlyDiscovering) {
         startQobuzDiscoveryPolling(fakeUrlHash, playlistId);
@@ -2433,7 +2433,7 @@ async function startQobuzDownloadMissing(urlHash) {
 
         const discoveryResults = state.discoveryResults || state.discovery_results;
         if (!discoveryResults) {
-            showToast('No discovery results available for download', 'error');
+            showToast('No identification results available for download', 'error');
             return;
         }
 
@@ -3064,7 +3064,7 @@ async function openDeezerDiscoveryModal(playlistId, playlistData) {
 
             if (result.error) {
                 console.error('Error starting Deezer discovery:', result.error);
-                showToast(`Error starting discovery: ${result.error}`, 'error');
+                showToast(`Error starting identification: ${result.error}`, 'error');
                 return;
             }
 
@@ -3078,7 +3078,7 @@ async function openDeezerDiscoveryModal(playlistId, playlistData) {
 
         } catch (error) {
             console.error('Error starting Deezer discovery:', error);
-            showToast(`Error starting discovery: ${error.message}`, 'error');
+            showToast(`Error starting identification: ${error.message}`, 'error');
         }
     } else if (isCurrentlyDiscovering) {
         console.log(`🔄 Resuming Deezer discovery polling for: ${playlistData.name}`);
@@ -3708,7 +3708,7 @@ async function startDeezerDownloadMissing(urlHash) {
         const discoveryResults = state.discoveryResults || state.discovery_results;
 
         if (!discoveryResults) {
-            showToast('No discovery results available for download', 'error');
+            showToast('No identification results available for download', 'error');
             return;
         }
 
@@ -4385,7 +4385,7 @@ async function clearBeatportPlaylists() {
 
     if (activeCharts.length > 0) {
         const activeNames = activeCharts.map(state => state.chart?.name || 'Unknown').join(', ');
-        showToast(`Cannot clear: ${activeCharts.length} chart(s) are currently discovering, syncing, or downloading: ${activeNames}`, 'warning');
+        showToast(`Cannot clear: ${activeCharts.length} chart(s) are currently identifying, syncing, or downloading: ${activeNames}`, 'warning');
         return;
     }
 
@@ -4791,13 +4791,13 @@ async function openBeatportDiscoveryModal(chartHash, chartData) {
             console.log(`✅ Started Beatport discovery for: ${chartData.name}`);
         } else {
             console.error('❌ Error starting Beatport discovery:', result.error);
-            showToast(`Error starting discovery: ${result.error}`, 'error');
+            showToast(`Error starting identification: ${result.error}`, 'error');
             // Revert card phase on error
             updateBeatportCardPhase(chartHash, 'fresh');
         }
     } catch (error) {
         console.error('❌ Error starting Beatport discovery:', error);
-        showToast(`Error starting discovery: ${error.message}`, 'error');
+        showToast(`Error starting identification: ${error.message}`, 'error');
         // Revert card phase on error
         updateBeatportCardPhase(chartHash, 'fresh');
     }
@@ -5695,7 +5695,7 @@ async function startBeatportDownloadMissing(urlHash) {
         const discoveryResults = state?.discoveryResults || state?.discovery_results;
 
         if (!state || !discoveryResults) {
-            showToast('No discovery results available for download', 'error');
+            showToast('No identification results available for download', 'error');
             return;
         }
 
@@ -7032,7 +7032,7 @@ async function openSpotifyPublicDiscoveryModal(urlHash, playlistData) {
 
             if (result.error) {
                 console.error('Error starting Spotify public discovery:', result.error);
-                showToast(`Error starting discovery: ${result.error}`, 'error');
+                showToast(`Error starting identification: ${result.error}`, 'error');
                 return;
             }
 
@@ -7046,7 +7046,7 @@ async function openSpotifyPublicDiscoveryModal(urlHash, playlistData) {
 
         } catch (error) {
             console.error('Error starting Spotify public discovery:', error);
-            showToast(`Error starting discovery: ${error.message}`, 'error');
+            showToast(`Error starting identification: ${error.message}`, 'error');
         }
     } else if (isCurrentlyDiscovering) {
         console.log(`🔄 Resuming Spotify public discovery polling for: ${playlistData.name}`);
@@ -7660,7 +7660,7 @@ async function startSpotifyPublicDownloadMissing(urlHash, forcePlaylistFolder = 
         const discoveryResults = state.discoveryResults || state.discovery_results;
 
         if (!discoveryResults) {
-            showToast('No discovery results available for download', 'error');
+            showToast('No identification results available for download', 'error');
             return;
         }
 
@@ -8058,7 +8058,7 @@ async function openITunesLinkDiscoveryModal(urlHash, playlistData) {
 
             if (result.error) {
                 console.error('Error starting iTunes Link discovery:', result.error);
-                showToast(`Error starting discovery: ${result.error}`, 'error');
+                showToast(`Error starting identification: ${result.error}`, 'error');
                 return;
             }
 
@@ -8072,7 +8072,7 @@ async function openITunesLinkDiscoveryModal(urlHash, playlistData) {
 
         } catch (error) {
             console.error('Error starting iTunes Link discovery:', error);
-            showToast(`Error starting discovery: ${error.message}`, 'error');
+            showToast(`Error starting identification: ${error.message}`, 'error');
         }
     } else if (isCurrentlyDiscovering) {
         console.log(`🔄 Resuming iTunes Link discovery polling for: ${playlistData.name}`);
@@ -8686,7 +8686,7 @@ async function startITunesLinkDownloadMissing(urlHash) {
         const discoveryResults = state.discoveryResults || state.discovery_results;
 
         if (!discoveryResults) {
-            showToast('No discovery results available for download', 'error');
+            showToast('No identification results available for download', 'error');
             return;
         }
 
@@ -9078,15 +9078,15 @@ function updateYouTubeCardPhase(urlHash, phase) {
 
     switch (phase) {
         case 'fresh':
-            phaseTextElement.textContent = 'Ready to discover';
+            phaseTextElement.textContent = 'Ready to identify';
             phaseTextElement.style.color = '#999';
-            actionBtn.textContent = 'Start Discovery';
+            actionBtn.textContent = 'Start Identifying';
             actionBtn.disabled = false;
             progressElement.classList.add('hidden');
             break;
 
         case 'discovering':
-            phaseTextElement.textContent = 'Discovering...';
+            phaseTextElement.textContent = 'Identifying...';
             phaseTextElement.style.color = '#ffa500'; // Orange
             actionBtn.textContent = 'View Progress';
             actionBtn.disabled = false;
@@ -9094,7 +9094,7 @@ function updateYouTubeCardPhase(urlHash, phase) {
             break;
 
         case 'discovered':
-            phaseTextElement.textContent = 'Discovery Complete';
+            phaseTextElement.textContent = 'Identification Complete';
             phaseTextElement.style.color = 'rgb(var(--accent-rgb))'; // Green
             actionBtn.textContent = 'View Details';
             actionBtn.disabled = false;
@@ -9184,7 +9184,7 @@ function handleYouTubeCardClick(urlHash) {
                                 openDownloadMissingModalForYouTube(spotifyPlaylistId, playlistName, spotifyTracks);
                             } else {
                                 console.error('❌ No discovery results found for downloads');
-                                showToast('Unable to open download modal - no discovery data', 'error');
+                                showToast('Unable to open download modal - no identification data', 'error');
                             }
                         })
                         .catch(error => {
@@ -9258,7 +9258,7 @@ async function startYouTubeDiscovery(urlHash) {
         const result = await response.json();
 
         if (result.error) {
-            showToast(`Error starting discovery: ${result.error}`, 'error');
+            showToast(`Error starting identification: ${result.error}`, 'error');
             return;
         }
 
@@ -9279,7 +9279,7 @@ async function startYouTubeDiscovery(urlHash) {
 
     } catch (error) {
         console.error('❌ Error starting YouTube discovery:', error);
-        showToast(`Error starting discovery: ${error.message}`, 'error');
+        showToast(`Error starting identification: ${error.message}`, 'error');
     }
 }
 
@@ -9298,7 +9298,7 @@ function _discoveryCompleteToast(urlHash) {
         showToast(msg, found > 0 ? 'success' : 'info');
         return;
     }
-    showToast('Discovery complete!', 'success');
+    showToast('Identification complete!', 'success');
 }
 
 function startYouTubeDiscoveryPolling(urlHash) {
@@ -9450,16 +9450,16 @@ function openYouTubeDiscoveryModal(urlHash) {
         const isListenBrainz = state.is_listenbrainz_playlist;
         const isMirrored = state.is_mirrored_playlist;
         const isLastfmRadio = typeof urlHash === 'string' && urlHash.startsWith('lastfm_radio_');
-        const modalTitle = isMirrored ? '🎵 Mirrored Playlist Discovery' :
-            isSpotifyPublic ? '🎵 Spotify Playlist Discovery' :
+        const modalTitle = isMirrored ? '🎵 Mirrored Playlist Identification' :
+            isSpotifyPublic ? '🎵 Spotify Playlist Identification' :
                 isITunesLink ? '🎵 iTunes Link Discovery' :
-                    isDeezer ? '🎵 Deezer Playlist Discovery' :
-                    isTidal ? '🎵 Tidal Playlist Discovery' :
-                        isQobuz ? '🎵 Qobuz Playlist Discovery' :
-                            isBeatport ? '🎵 Beatport Chart Discovery' :
-                                isLastfmRadio ? '📻 Last.fm Radio Discovery' :
-                                    isListenBrainz ? '🎵 ListenBrainz Playlist Discovery' :
-                                        '🎵 YouTube Playlist Discovery';
+                    isDeezer ? '🎵 Deezer Playlist Identification' :
+                    isTidal ? '🎵 Tidal Playlist Identification' :
+                        isQobuz ? '🎵 Qobuz Playlist Identification' :
+                            isBeatport ? '🎵 Beatport Chart Identification' :
+                                isLastfmRadio ? '📻 Last.fm Radio Identification' :
+                                    isListenBrainz ? '🎵 ListenBrainz Playlist Identification' :
+                                        '🎵 YouTube Playlist Identification';
         const sourceLabel = isMirrored ? (state.mirrored_source ? state.mirrored_source.charAt(0).toUpperCase() + state.mirrored_source.slice(1) : 'Source') :
             isSpotifyPublic ? 'Spotify' :
                 isITunesLink ? 'iTunes' :
@@ -10028,30 +10028,30 @@ function getModalDescription(phase, isTidal = false, isBeatport = false, isListe
     const source = isMirrored ? 'mirrored' : (isSpotifyPublic ? 'Spotify' : (isITunesLink ? 'iTunes' : (isDeezer ? 'Deezer' : (isLastfmRadio ? 'Last.fm Radio' : (isListenBrainz ? 'ListenBrainz' : (isBeatport ? 'Beatport' : (isQobuz ? 'Qobuz' : (isTidal ? 'Tidal' : 'YouTube'))))))));
     switch (phase) {
         case 'fresh':
-            return `Ready to discover clean ${currentMusicSourceName} metadata for ${source} tracks...`;
+            return `Ready to identify ${source} tracks with clean ${currentMusicSourceName} metadata...`;
         case 'discovering':
-            return `Discovering clean ${currentMusicSourceName} metadata for ${source} tracks...`;
+            return `Identifying clean ${currentMusicSourceName} metadata for ${source} tracks...`;
         case 'discovered':
         case 'downloading':
         case 'download_complete':
-            return 'Discovery complete! View the results below.';
+            return 'Identification complete! View the results below.';
         default:
-            return `Discovering clean ${currentMusicSourceName} metadata for ${source} tracks...`;
+            return `Identifying clean ${currentMusicSourceName} metadata for ${source} tracks...`;
     }
 }
 
 function getInitialProgressText(phase, isTidal = false, isBeatport = false, isListenBrainz = false) {
     switch (phase) {
         case 'fresh':
-            return 'Click Start Discovery to begin...';
+            return 'Click Start Identifying to begin...';
         case 'discovering':
-            return 'Starting discovery...';
+            return 'Starting identification...';
         case 'discovered':
         case 'downloading':
         case 'download_complete':
-            return 'Discovery completed!';
+            return 'Identification complete!';
         default:
-            return 'Starting discovery...';
+            return 'Starting identification...';
     }
 }
 
@@ -10288,7 +10288,7 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
             setDiscoveryModalFooterActions(urlHash, 'discovered', state);
             console.log(`✨ Updated action buttons for completed discovery: ${urlHash}`);
             const descEl = document.querySelector(`#youtube-discovery-modal-${urlHash} .modal-description`);
-            if (descEl) descEl.textContent = 'Discovery complete! View the results below.';
+            if (descEl) descEl.textContent = 'Identification complete! View the results below.';
         } else if (state && state.phase === 'discovered') {
             // Already discovered — ensure buttons are correct (e.g. after rehydration)
             const actionButtonsContainer = document.querySelector(
@@ -10810,7 +10810,7 @@ async function startYouTubeDownloadMissing(urlHash) {
         const discoveryResults = state?.discoveryResults || state?.discovery_results;
 
         if (!state || !discoveryResults) {
-            showToast('No discovery results available for download', 'error');
+            showToast('No identification results available for download', 'error');
             return;
         }
 
@@ -11162,7 +11162,7 @@ function startListenBrainzDiscoveryPolling(playlistMbid) {
                 if (listenbrainzPlaylistStates[playlistMbid]) listenbrainzPlaylistStates[playlistMbid].phase = 'discovered';
                 updateYouTubeModalButtons(playlistMbid, 'discovered');
                 const _descElWs = document.querySelector(`#youtube-discovery-modal-${playlistMbid} .modal-description`);
-                if (_descElWs) _descElWs.textContent = 'Discovery complete! View the results below.';
+                if (_descElWs) _descElWs.textContent = 'Identification complete! View the results below.';
                 const playlistIdEl = `discover-lb-playlist-${playlistMbid}`;
                 const syncBtn = document.getElementById(`${playlistIdEl}-sync-btn`);
                 if (syncBtn) syncBtn.style.display = 'inline-block';
@@ -11170,7 +11170,7 @@ function startListenBrainzDiscoveryPolling(playlistMbid) {
                 // playlist participates in Auto-Sync schedules just like
                 // Tidal / Qobuz / Spotify mirrors do.
                 _mirrorListenBrainzAfterDiscovery(playlistMbid);
-                showToast('ListenBrainz discovery complete!', 'success');
+                showToast('ListenBrainz identification complete!', 'success');
             }
         };
     }
@@ -11251,7 +11251,7 @@ function startListenBrainzDiscoveryPolling(playlistMbid) {
 
                 // Update modal description to "Discovery complete!"
                 const descEl = document.querySelector(`#youtube-discovery-modal-${playlistMbid} .modal-description`);
-                if (descEl) descEl.textContent = 'Discovery complete! View the results below.';
+                if (descEl) descEl.textContent = 'Identification complete! View the results below.';
 
                 // Show sync button in playlist listing (hidden by default until discovered)
                 const playlistId = `discover-lb-playlist-${playlistMbid}`;
@@ -11265,7 +11265,7 @@ function startListenBrainzDiscoveryPolling(playlistMbid) {
                 // Mirror matched tracks → mirrored_playlists table so
                 // the playlist participates in Auto-Sync schedules.
                 _mirrorListenBrainzAfterDiscovery(playlistMbid);
-                showToast('ListenBrainz discovery complete!', 'success');
+                showToast('ListenBrainz identification complete!', 'success');
             }
 
         } catch (error) {
@@ -11395,7 +11395,7 @@ async function startListenBrainzDiscovery(playlistMbid) {
             results: []
         });
 
-        showToast('Starting ListenBrainz discovery...', 'info');
+        showToast('Starting ListenBrainz identification...', 'info');
 
     } catch (error) {
         console.error('❌ Error starting ListenBrainz discovery:', error);

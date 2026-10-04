@@ -262,3 +262,26 @@ def test_monitor_missing_counts_the_files_of_her_library(world):
         time.sleep(0.01)
     assert status["error"] is None
     assert status["result"]["albums"] == 1
+
+
+def test_the_public_artists_api_reads_the_profiles_library(world, monkeypatch):
+    """A06: /api/v1/library/artists sets the profile's scope (c01058dc3); the
+    catalogue reader has to honour it, counts included."""
+    import api.library as v1_library
+    monkeypatch.setattr(v1_library, "require_api_key", lambda view: view)
+    monkeypatch.setattr(v1_library, "get_database", lambda: world.db)
+    bp = flask.Blueprint("v1_library_test", __name__)
+    v1_library.register_routes(bp)
+    app = flask.Flask("v1")
+    app.register_blueprint(bp, url_prefix="/api/v1")
+    client = app.test_client()
+
+    def artists(pid):
+        body = client.get(f"/api/v1/library/artists?profile_id={pid}").get_json()
+        return {a["name"]: a for a in body["data"]["artists"]}
+
+    shared, kims = artists(1), artists(world.kim)
+    assert set(shared) == {"House Band"}
+    assert set(kims) == {"Kims Band"}
+    assert set(artists(world.sam)) == {"House Band"}
+    assert kims["Kims Band"]["track_count"] == 1

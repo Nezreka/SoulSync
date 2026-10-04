@@ -271,6 +271,21 @@ export function autoSyncCanSchedulePlaylist(playlist: MirroredRow | null | undef
   return !['file', 'beatport', 'lastfm'].includes(src);
 }
 
+/**
+ * Whether an all-playlists pipeline actually processes this playlist.
+ * Mirrors the backend filter (pipeline.py:325, refresh_mirrored.py:78):
+ * file/beatport sources are skipped. NOTE: lastfm is NOT excluded here —
+ * the backend processes it, even though autoSyncCanSchedulePlaylist won't
+ * let you schedule it directly.
+ */
+export function autoSyncPipelineCoversPlaylist(
+  playlist: { source?: string | null } | null | undefined,
+): boolean {
+  if (!playlist) return false;
+  const src = playlist.source || '';
+  return !['file', 'beatport'].includes(src);
+}
+
 /* ── Automation linkage (auto-sync.js 218-241) ────────────────────────────── */
 
 export function autoSyncIsPipelineAutomation(auto: AutomationRow | null | undefined): boolean {
@@ -549,8 +564,8 @@ export interface AutoSyncScheduleState {
  * 487. Tri-state, NOT truthiness: the row is enabled unless it is explicitly
  * `false` or `0`, so an absent flag counts as enabled.
  */
-function autoSyncEnabledFlag(auto: AutomationRow): boolean {
-  const enabled = (auto as { enabled?: unknown }).enabled;
+export function autoSyncEnabledFlag(auto: AutomationRow | null | undefined): boolean {
+  const enabled = (auto as { enabled?: unknown } | null)?.enabled;
   return enabled !== false && enabled !== 0;
 }
 
@@ -1007,7 +1022,7 @@ const TRIGGER_LABELS: Record<string, string> = {
   watchlist_new_release: 'New Release Found',
   playlist_synced: 'Playlist Synced',
   playlist_changed: 'Playlist Changed',
-  discovery_completed: 'Discovery Complete',
+  discovery_completed: 'Identification Complete',
   wishlist_processing_completed: 'Wishlist Processed',
   watchlist_scan_completed: 'Watchlist Scan Done',
   database_update_completed: 'Database Updated',

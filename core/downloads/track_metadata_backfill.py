@@ -81,7 +81,7 @@ def _backfill_album_context(
     if not isinstance(dt_album, dict) or not isinstance(album_context, dict):
         return
 
-    for key in ('release_date', 'album_type', 'total_tracks', 'id'):
+    for key in ('release_date', 'album_type', 'total_tracks', 'id', 'upc', 'barcode'):
         if not album_context.get(key) and dt_album.get(key):
             album_context[key] = dt_album[key]
 

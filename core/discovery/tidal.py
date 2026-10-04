@@ -258,7 +258,7 @@ def run_tidal_discovery_worker(playlist_id, deps: TidalDiscoveryDeps):
 
         # Add activity for discovery completion
         source_label = discovery_source.upper()
-        deps.add_activity_item("", f"Tidal Discovery Complete ({source_label})", f"'{playlist.name}' - {successful_discoveries}/{len(playlist.tracks)} tracks found", "Now")
+        deps.add_activity_item("", f"Tidal Identification Complete ({source_label})", f"'{playlist.name}' - {successful_discoveries}/{len(playlist.tracks)} tracks found", "Now")
 
         logger.info(f"Tidal discovery complete ({source_label}): {successful_discoveries}/{len(playlist.tracks)} tracks found")
 

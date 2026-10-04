@@ -4,6 +4,7 @@ import type { ReassignAlbum, ReassignArtist, ReassignPreview } from '../-artist-
 
 import {
   albumBits,
+  cssUrl,
   applyReassign,
   describeMapping,
   describeMatch,
@@ -182,7 +183,7 @@ export function ReassignModal({
           <div className="reid-hero-decor">
             <div
               className="reid-hero-bg"
-              style={imageUrl ? { backgroundImage: `url('${imageUrl}')` } : undefined}
+              style={imageUrl ? { backgroundImage: cssUrl(imageUrl) } : undefined}
             />
             <div className="reid-hero-overlay" />
           </div>
@@ -192,7 +193,7 @@ export function ReassignModal({
           <div className="reid-hero-content">
             <div
               className={`reid-hero-art${imageUrl ? '' : ' empty'}`}
-              style={imageUrl ? { backgroundImage: `url('${imageUrl}')` } : undefined}
+              style={imageUrl ? { backgroundImage: cssUrl(imageUrl) } : undefined}
             />
             <div className="reid-hero-meta">
               <div className="reid-hero-eyebrow">Reassign album</div>
@@ -289,9 +290,7 @@ export function ReassignModal({
                 <div key={row.id} className="reid-result" onClick={() => void pickArtist(row)}>
                   <div
                     className={`reid-result-art${row.image_url ? '' : ' empty'}`}
-                    style={
-                      row.image_url ? { backgroundImage: `url('${row.image_url}')` } : undefined
-                    }
+                    style={row.image_url ? { backgroundImage: cssUrl(row.image_url) } : undefined}
                   />
                   <div className="reid-result-info">
                     <div className="reid-result-title">{row.name}</div>
@@ -322,9 +321,7 @@ export function ReassignModal({
                 <div key={row.id} className="reid-result" onClick={() => void pickAlbum(row)}>
                   <div
                     className={`reid-result-art${row.image_url ? '' : ' empty'}`}
-                    style={
-                      row.image_url ? { backgroundImage: `url('${row.image_url}')` } : undefined
-                    }
+                    style={row.image_url ? { backgroundImage: cssUrl(row.image_url) } : undefined}
                   />
                   <div className="reid-result-info">
                     <div className="reid-result-title">{row.name}</div>

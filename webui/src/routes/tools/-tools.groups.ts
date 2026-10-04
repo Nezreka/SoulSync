@@ -72,6 +72,7 @@ export const FINDING_TYPE_BLURBS: Record<string, string> = {
   empty_folder: 'Folders left behind with no audio inside.',
   expired_download: 'Finished downloads older than your retention window.',
   metadata_gap: 'Missing genres, years or IDs that enrichment can fill in.',
+  bpm_backfill: 'Tracks missing BPM that Deezer or local analysis can fill in.',
   duplicate_tracks: 'The same track stored more than once.',
   single_album_redundant: 'Singles you also own inside the full album.',
   mbid_mismatch: 'Track MusicBrainz IDs disagree with the tags on disk.',
@@ -97,6 +98,7 @@ export const FINDING_TYPE_BLURBS: Record<string, string> = {
   suspect_album_tag: 'Tracks probably filed under the wrong album due to bad tags.',
   fake_lossless: 'FLAC upscaled from a lossy source; applying re-downloads it.',
   album_needs_enrichment: 'Albums still waiting on a metadata enrichment pass.',
+  album_release_year_mismatch: 'Album and track release years disagree with the original release.',
 };
 
 export function findingTypeBlurb(findingType: string): string {

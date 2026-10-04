@@ -593,6 +593,9 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
         data = request.get_json(silent=True) or {}
         # refresh from source (#1413): pull + discover the new tracks only
         refresh_only = bool(data.get('refresh_only', False))
+        # #1455: per-click skip_wishlist wins; otherwise the global toggle.
+        from core.playlists.pipeline import resolve_pipeline_skip_wishlist
+        skip_wishlist = resolve_pipeline_skip_wishlist(data, config_manager)
         state = _replace_playlist_pipeline_state(playlist_id, {
             'run_id': _playlist_pipeline_state_key(playlist_id, profile_id),
             'playlist_id': int(playlist_id),
@@ -614,7 +617,7 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
 
         threading.Thread(
             target=_run_mirrored_playlist_pipeline_for_ui,
-            args=(playlist_id, bool(data.get('skip_wishlist', False)), int(profile_id), refresh_only),
+            args=(playlist_id, skip_wishlist, int(profile_id), refresh_only),
             daemon=True,
             name=f"playlist-pipeline-{playlist_id}",
         ).start()
@@ -821,9 +824,9 @@ def get_discovery_pool():
         profile_id = get_current_profile_id()
         playlist_id = request.args.get('playlist_id', type=int)
 
-        matched = database.get_discovery_pool_matched()
+        matched = database.get_discovery_pool_matched(profile_id=profile_id, playlist_id=playlist_id)
         failed = database.get_discovery_pool_failed(profile_id=profile_id, playlist_id=playlist_id)
-        stats = database.get_discovery_pool_stats(profile_id=profile_id)
+        stats = database.get_discovery_pool_stats(profile_id=profile_id, playlist_id=playlist_id)
 
         # Playlist list for the filter dropdown
         playlists = database.get_mirrored_playlists(profile_id=profile_id)
@@ -855,7 +858,7 @@ def get_wing_it_pool():
 
         tracks = database.get_wing_it_pool(profile_id=profile_id, playlist_id=playlist_id)
         matched = database.get_wing_it_pool(profile_id=profile_id, playlist_id=playlist_id, resolved=True)
-        stats = database.get_wing_it_pool_stats(profile_id=profile_id)
+        stats = database.get_wing_it_pool_stats(profile_id=profile_id, playlist_id=playlist_id)
 
         playlists = database.get_mirrored_playlists(profile_id=profile_id)
         playlist_options = [{'id': p['id'], 'name': p['name']} for p in playlists]
@@ -943,6 +946,27 @@ def fix_discovery_pool_track():
         return jsonify({"success": True})
     except Exception as e:
         logger.error(f"Error fixing discovery pool track: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@bp.route('/api/discovery-pool/cache', methods=['DELETE'])
+def clear_discovery_pool_cache():
+    """Clear cached discovery matches, optionally scoped to one playlist (?playlist_id=)."""
+    try:
+        database = get_database()
+        profile_id = get_current_profile_id()
+        # Validate explicitly: a malformed ?playlist_id= must 400, never
+        # silently escalate to a global wipe (request.args.get(type=int)
+        # swallows parse failures into None).
+        raw_playlist_id = request.args.get('playlist_id')
+        playlist_id = None
+        if raw_playlist_id is not None and raw_playlist_id != '':
+            playlist_id = parse_strict_int(raw_playlist_id)
+            if playlist_id is None or playlist_id <= 0:
+                return jsonify({"error": "Invalid playlist_id"}), 400
+        cleared = database.clear_discovery_cache(playlist_id=playlist_id, profile_id=profile_id)
+        return jsonify({"success": True, "cleared": cleared})
+    except Exception as e:
+        logger.error(f"Error clearing discovery cache: {e}")
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/discovery-pool/cache/<int:entry_id>', methods=['DELETE'])

@@ -76,8 +76,20 @@ def new_books_for(
     return found
 
 
-def scan_author(row: Dict[str, Any], db: Any = None, client: Any = None) -> Dict[str, Any]:
+def scan_author(
+    row: Dict[str, Any],
+    db: Any = None,
+    client: Any = None,
+    marketplace: Optional[str] = None,
+) -> Dict[str, Any]:
     """Check one followed author and wishlist anything new.
+
+    ``marketplace`` is the Audible storefront code, passed through as a
+    parameter because this module runs both inside a Flask request context
+    (the manual "check now" button) and in the automation worker, where
+    ``current_app`` may not exist. Callers resolve it from the
+    ``audiobooks.marketplace`` setting. Unknown codes fall back to US inside
+    the client, so a stale or mistyped value degrades rather than breaks.
 
     Returns ``{name, found, wishlisted, error}``. Never raises: one author whose
     lookup fails must not stop the rest of the pass.
@@ -104,10 +116,15 @@ def scan_author(row: Dict[str, Any], db: Any = None, client: Any = None) -> Dict
             client = get_audiobook_client()
         # Newest first, so a short lookback still sees everything published
         # since the last scan.
+        marketplace_code = (marketplace or "").strip().lower() or "us"
         if role == "narrator":
-            books = client.get_by_narrator(name, limit=DEFAULT_LOOKBACK, sort="newest")
+            books = client.get_by_narrator(
+                name, limit=DEFAULT_LOOKBACK, sort="newest",
+                marketplace=marketplace_code)
         else:
-            books = client.get_by_author(name, limit=DEFAULT_LOOKBACK, sort="newest")
+            books = client.get_by_author(
+                name, limit=DEFAULT_LOOKBACK, sort="newest",
+                marketplace=marketplace_code)
     except Exception as exc:                                # noqa: BLE001
         logger.warning("Could not check %s for new releases: %s", name, exc)
         outcome["error"] = str(exc)
@@ -148,8 +165,15 @@ def scan_author(row: Dict[str, Any], db: Any = None, client: Any = None) -> Dict
     return outcome
 
 
-def run_scan(db: Any = None, limit: Optional[int] = None) -> Dict[str, int]:
+def run_scan(
+    db: Any = None,
+    limit: Optional[int] = None,
+    marketplace: Optional[str] = None,
+) -> Dict[str, int]:
     """One pass over the authors due a look.
+
+    ``marketplace`` is passed through to :func:`scan_author` (see its docstring
+    for why it arrives as a parameter rather than being read from config here).
 
     Safe to call by hand — the "Check now" button runs exactly this, so the
     manual and scheduled paths cannot drift apart.
@@ -178,7 +202,7 @@ def run_scan(db: Any = None, limit: Optional[int] = None) -> Dict[str, int]:
         return summary
 
     for row in due:
-        result = scan_author(row, db=database)
+        result = scan_author(row, db=database, marketplace=marketplace)
         summary["authors"] += 1
         summary["found"] += result["found"]
         summary["wishlisted"] += result["wishlisted"]

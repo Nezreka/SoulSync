@@ -737,6 +737,16 @@ class AutoImportWorker:
                     error_message='; '.join(process_errors) or None,
                     match_data=match_result,
                 )
+                # #1289: a partial import leaves files in staging with no
+                # warning — the user had no idea 11 of 12 tracks were left
+                # behind. Emit needs_attention so the inbox surfaces it.
+                # Note: this fires an automation event (supplementary); the
+                # primary visible warning is the "Partially imported" inbox
+                # row from the Bug 3 fix.
+                if status == 'partial':
+                    msg = self._partial_import_message(match_result, process_errors)
+                    self._emit_needs_attention(
+                        candidate, 'partial', identification, msg, confidence)
             elif confidence >= 0.7:
                 status = 'pending_review'
                 self._bump_stat('pending_review')
@@ -776,6 +786,22 @@ class AutoImportWorker:
             # No stale "processing track 3/14" because the entry is
             # gone — the UI's polling read returns an empty array.
             self._unregister_active(candidate.folder_hash)
+
+    def _partial_import_message(self, match_result: Dict,
+                                process_errors: List[str]) -> str:
+        """#1289: build the needs-attention message for a partial import.
+
+        Two cases: (a) files never matched → stranded in Staging (file counts);
+        (b) all matched but some failed post-processing → report the error,
+        never "0 file(s) left in Staging".
+        """
+        matched = match_result.get('matched_count', 0)
+        unmatched = len(match_result.get('unmatched_files', []))
+        if unmatched:
+            return (f"Only {matched} of {matched + unmatched} files matched; "
+                    f"{unmatched} file(s) left in Staging")
+        first_err = process_errors[0] if process_errors else 'unknown error'
+        return f"Import partially failed: {first_err}"
 
     def _emit_needs_attention(self, candidate: 'FolderCandidate', status: str,
                               identification: Optional[Dict], reason: str,

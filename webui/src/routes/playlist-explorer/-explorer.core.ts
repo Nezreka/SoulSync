@@ -2,9 +2,9 @@
  * Playlist Explorer — the pure core (pages-extra.js:1-1134).
  *
  * Everything here is derivation the vanilla did inline inside a template
- * literal or a DOM walk: badge precedence, the readiness gate, the tree's row
- * shape, the bezier geometry, the zoom clamp. Extracted so the port can be
- * proven against the original without a DOM.
+ * literal or a DOM walk: badge precedence, the 50% thin-discovery signal, the
+ * tree's row shape, the bezier geometry, the zoom clamp. Extracted so the port
+ * can be proven against the original without a DOM.
  *
  * Line references are to the pre-port `webui/static/pages-extra.js`.
  */
@@ -88,7 +88,8 @@ export interface ExplorerCardView {
   total: number;
   discovered: number;
   pct: number;
-  /** Below 50% the card is inert — no click handler at all (explorerRenderPickerCards :156). */
+  /** Below 50% the card warns (needs-discovery badge, Discover button) but still
+   * opens — the old click gate is gone (#1289). */
   isReady: boolean;
   isFullyDiscovered: boolean;
   wasExplored: boolean;

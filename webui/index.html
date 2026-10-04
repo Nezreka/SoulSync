@@ -7508,6 +7508,30 @@
                                                     Downloads use the same torrent, usenet and Soulseek clients as music
                                                     &mdash; set those under Downloads.</small>
 
+                                                <div class="form-group">
+                                                    <label>Audible Marketplace:</label>
+                                                    <select id="audiobook-marketplace" class="form-select">
+                                                        <option value="us">United States (audible.com)</option>
+                                                        <option value="uk">United Kingdom (audible.co.uk)</option>
+                                                        <option value="de">Germany (audible.de)</option>
+                                                        <option value="fr">France (audible.fr)</option>
+                                                        <option value="ca">Canada (audible.ca)</option>
+                                                        <option value="au">Australia (audible.com.au)</option>
+                                                        <option value="it">Italy (audible.it)</option>
+                                                        <option value="es">Spain (audible.es)</option>
+                                                        <option value="in">India (audible.in)</option>
+                                                        <option value="jp">Japan (audible.co.jp)</option>
+                                                    </select>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Which Audible
+                                                        storefront the audiobook catalogue pages, author scans and
+                                                        follow checks query. Some titles are exclusive to one country's
+                                                        store, so picking the store you buy from finds books the US
+                                                        store never lists. Default: <code>us</code></small>
+                                                </div>
+
                                                 <!-- Same story as the music one: the Audiobooks tab of the chain
                                      widget (Settings -> Downloads) IS this setting. Kept as the
                                      transport saveSettings reads, hidden as a control. -->
@@ -7803,6 +7827,22 @@
                                                 </div>
 
                                                 <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="wishlist-wing-it-guesses">
+                                                        <span>Search Wing It guesses as wishlist tracks</span>
+                                                    </label>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Wing It
+                                                        means a track couldn't be matched in the metadata catalogue
+                                                        — these are unmatched guesses, not tracks missing from your
+                                                        library. Off by default: guesses stay in the Wing It Pool for
+                                                        manual review. Turn this on to let guesses be searched like
+                                                        any other wishlist track.</small>
+                                                </div>
+
+                                                <div class="form-group">
                                                     <label for="wishlist-ignore-ttl">Removed-track re-try window
                                                         (days)</label>
                                                     <input type="number" id="wishlist-ignore-ttl" min="1" max="365"
@@ -7848,6 +7888,18 @@
                                                     album year, and a genuinely single-disc album's numbering are all
                                                     left alone —
                                                     no needless renames. Turn off to match the metadata source exactly.
+                                                </div>
+                                                <label class="toggle-row" style="margin-top: 10px;">
+                                                    <input type="checkbox" id="write-artist-nfo">
+                                                    <span>Write artist.nfo (Jellyfin / Kodi / Emby)</span>
+                                                </label>
+                                                <div class="help-text" style="margin-top: 6px;">
+                                                    When an import creates an artist folder, also write a Kodi-format
+                                                    <em>artist.nfo</em> containing the artist's name and MusicBrainz
+                                                    artist ID, so Jellyfin / Kodi / Emby identify the artist instead
+                                                    of guessing by name. An existing <em>artist.nfo</em> with a
+                                                    different ID is never overwritten. To backfill folders you
+                                                    already have, run the <em>Artist NFO Backfill</em> repair job.
                                                 </div>
                                             </div>
 
@@ -8347,6 +8399,19 @@
                                                         </div>
                                                     </div>
 
+                                                    <label class="toggle-row" style="margin: 8px 0 2px;">
+                                                        <input type="checkbox" id="mb-use-original-date-for-date">
+                                                        <span>Use original release date for DATE</span>
+                                                    </label>
+                                                    <div class="help-text" style="margin-top: 6px;">
+                                                        Beets-style: write the MusicBrainz release-group's
+                                                        first-release-date as the DATE tag instead of the downloaded
+                                                        edition's date (a 2016 reissue of a 2010 album gets 2010).
+                                                        The original date is still kept in ORIGINALDATE either way,
+                                                        and a more precise same-year date is never replaced by a
+                                                        vaguer one.
+                                                    </div>
+
                                                     <!-- Deezer -->
                                                     <div class="tag-service-group">
                                                         <div class="tag-service-header" onclick="toggleTagGroup(this)">
@@ -8598,18 +8663,19 @@
                                                 <div class="setting-row">
                                                     <label class="checkbox-label">
                                                         <input type="checkbox" id="import-transfer-permanent">
-                                                        Transfer is my permanent library — never move files out
+                                                        Music Library is my permanent library — never move files out
                                                     </label>
                                                     <span class="info-icon" role="button" tabindex="0"
                                                         title="What's this?" onclick="toggleSettingHelp(this)"
                                                         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                                 </div>
                                                 <div class="help-text setting-help-body" hidden>
-                                                    Off by default. Turn this <strong>on</strong> if your Transfer
-                                                    folder is your
-                                                    real, permanent library (served by Navidrome/Plex/etc.) rather than
-                                                    a scratch
-                                                    drop area. A Deep Scan then never relocates files it doesn't
+                                                    On by default for new installs. Turn this <strong>off</strong> if
+                                                    your Music Library
+                                                    folder is just a scratch
+                                                    drop area rather than your real, permanent library (served by
+                                                    Navidrome/Plex/etc.). A Deep Scan then never relocates files it
+                                                    doesn't
                                                     recognize out to
                                                     Staging — it leaves them in place and just reports them. Even with
                                                     this off, a
@@ -8789,13 +8855,13 @@
                                             <div class="form-group">
                                                 <label>Whole-library M3U output folder:</label>
                                                 <input type="text" id="library-m3u-path" class="form-input"
-                                                    placeholder="leave empty for the Transfer folder">
+                                                    placeholder="leave empty for the Music Library folder">
                                                 <span class="info-icon" role="button" tabindex="0" title="What's this?"
                                                     onclick="toggleSettingHelp(this)"
                                                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                                 <div class="help-text setting-help-body" hidden>
                                                     Where the whole-library M3U is written. Leave empty to use your
-                                                    Transfer folder.
+                                                    Music Library folder.
                                                 </div>
                                             </div>
 
@@ -8803,9 +8869,9 @@
                                                 <label>Sync mode:</label>
                                                 <select id="playlist-sync-mode" class="form-select">
                                                     <option value="replace">Replace — recreate the playlist each sync
-                                                        (default)</option>
-                                                    <option value="reconcile">Reconcile — edit in place, keep image
-                                                        &amp; description</option>
+                                                    </option>
+                                                    <option value="reconcile" selected>Reconcile — edit in place, keep image
+                                                        &amp; description (default)</option>
                                                     <option value="append">Append — only add new tracks, never remove
                                                     </option>
                                                 </select>
@@ -8818,6 +8884,25 @@
                                                     same playlist in place (adds new tracks, removes ones no longer in
                                                     the source) so your custom image and description survive. "Append"
                                                     only ever adds.
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label class="checkbox-label">
+                                                    <input type="checkbox" id="playlist-sync-wishlist-missing" checked>
+                                                    Add missing tracks to the wishlist during sync
+                                                </label>
+                                                <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                                    onclick="toggleSettingHelp(this)"
+                                                    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                <div class="help-text setting-help-body" hidden>
+                                                    When on, syncing a playlist adds tracks missing from your
+                                                    library to the wishlist (which queues them for download).
+                                                    Turn it off and syncs skip the wishlist step — missing tracks
+                                                    are never added to the wishlist. (A playlist's own
+                                                    organize/folder-download setting is separate and still
+                                                    applies.) The Sync / Sync + download buttons always choose
+                                                    per click, regardless of this setting.
                                                 </div>
                                             </div>
 

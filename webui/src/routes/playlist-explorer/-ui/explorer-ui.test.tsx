@@ -93,7 +93,7 @@ describe('ExplorerPicker', () => {
     expect(onSelectSource).toHaveBeenCalledWith('spotify');
   });
 
-  it('leaves an under-discovered card unclickable and gives it a Discover button', () => {
+  it('lets an under-discovered card open, and keeps its Discover button', () => {
     const onSelectPlaylist = vi.fn();
     const onStartDiscovery = vi.fn();
     const { container } = render(
@@ -109,14 +109,40 @@ describe('ExplorerPicker', () => {
     );
     const card = container.querySelector('.explorer-picker-card') as HTMLElement;
     expect(card.className).toContain('not-ready');
+    // #1289: the 50% click gate is gone — a thin card still opens.
     fireEvent.click(card);
-    expect(onSelectPlaylist).not.toHaveBeenCalled();
+    expect(onSelectPlaylist).toHaveBeenCalledWith(7);
 
-    const discover = screen.getByRole('button', { name: 'Discover' });
+    const discover = screen.getByRole('button', { name: 'Identify' });
     fireEvent.click(discover);
     expect(onStartDiscovery).toHaveBeenCalledWith(7);
     // The click must not also select the card behind it.
-    expect(onSelectPlaylist).not.toHaveBeenCalled();
+    expect(onSelectPlaylist).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens an under-discovered card from the keyboard, but not via its Discover button', () => {
+    const onSelectPlaylist = vi.fn();
+    const onStartDiscovery = vi.fn();
+    const { container } = render(
+      <ExplorerPicker
+        {...pickerProps({
+          onSelectPlaylist,
+          onStartDiscovery,
+          playlists: [
+            { id: 7, name: 'Half', source: 'spotify', total_count: 10, discovered_count: 2 },
+          ],
+        })}
+      />,
+    );
+    const card = container.querySelector('.explorer-picker-card') as HTMLElement;
+    // Enter on the card itself selects it.
+    fireEvent.keyDown(card, { key: 'Enter' });
+    expect(onSelectPlaylist).toHaveBeenCalledWith(7);
+
+    // Enter on the nested Discover button must not bubble up into a card select.
+    const discover = screen.getByRole('button', { name: 'Identify' });
+    fireEvent.keyDown(discover, { key: 'Enter' });
+    expect(onSelectPlaylist).toHaveBeenCalledTimes(1);
   });
 
   it('selects a ready card and renders no Discover button on it', () => {
@@ -133,7 +159,7 @@ describe('ExplorerPicker', () => {
     );
     fireEvent.click(container.querySelector('.explorer-picker-card') as HTMLElement);
     expect(onSelectPlaylist).toHaveBeenCalledWith(3);
-    expect(screen.queryByRole('button', { name: 'Discover' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Identify' })).toBeNull();
   });
 
   it('shows the badge and the meta line the card view derives', () => {
@@ -196,7 +222,7 @@ describe('ExplorerPicker', () => {
     );
     const open = screen.getByRole('button', { name: 'Open' }) as HTMLButtonElement;
     expect(open.disabled).toBe(false);
-    expect(open.getAttribute('title')).toBe('Reopen discovery modal');
+    expect(open.getAttribute('title')).toBe('Reopen identification modal');
   });
 
   it('names the selected playlist in the build hint', () => {

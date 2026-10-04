@@ -1393,7 +1393,7 @@ function createYouTubeCardFromBackendState(playlistInfo) {
 
 function getActionButtonText(phase) {
     switch (phase) {
-        case 'fresh': return 'Discover';
+        case 'fresh': return 'Identify';
         case 'discovering': return 'View Progress';
         case 'discovered': return 'View Results';
         case 'syncing': return 'View Sync';
@@ -1406,9 +1406,9 @@ function getActionButtonText(phase) {
 
 function getPhaseText(phase) {
     switch (phase) {
-        case 'fresh': return 'Ready to discover';
-        case 'discovering': return 'Discovering...';
-        case 'discovered': return 'Discovery Complete';
+        case 'fresh': return 'Ready to identify';
+        case 'discovering': return 'Identifying...';
+        case 'discovered': return 'Identification Complete';
         case 'syncing': return 'Syncing...';
         case 'sync_complete': return 'Sync Complete';
         case 'downloading': return 'Downloading...';

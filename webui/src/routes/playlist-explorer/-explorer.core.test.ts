@@ -45,8 +45,10 @@ function playlist(overrides: Partial<MirroredPlaylist> = {}): MirroredPlaylist {
   return { id: 1, name: 'Mix', source: 'spotify', ...overrides };
 }
 
-describe('explorerCardView — the readiness gate', () => {
-  it('rounds the discovered percentage and gates clicks at 50%', () => {
+describe('explorerCardView — the 50% thin-discovery signal', () => {
+  // #1289: the 50% threshold is a warning signal now, not a click gate —
+  // every card opens; below 50% just warns (badge, Discover button).
+  it('rounds the discovered percentage and flags thin discovery at 50%', () => {
     expect(explorerCardView(playlist({ total_count: 100, discovered_count: 49 })).pct).toBe(49);
     expect(explorerCardView(playlist({ total_count: 100, discovered_count: 49 })).isReady).toBe(
       false,
@@ -54,8 +56,8 @@ describe('explorerCardView — the readiness gate', () => {
     expect(explorerCardView(playlist({ total_count: 100, discovered_count: 50 })).isReady).toBe(
       true,
     );
-    // 49.5% rounds to 50 and therefore passes the gate — the vanilla compared
-    // the ROUNDED value, not the raw ratio.
+    // 49.5% rounds to 50 and therefore counts as well-discovered — the vanilla
+    // compared the ROUNDED value, not the raw ratio.
     expect(explorerCardView(playlist({ total_count: 200, discovered_count: 99 })).pct).toBe(50);
     expect(explorerCardView(playlist({ total_count: 200, discovered_count: 99 })).isReady).toBe(
       true,
@@ -139,7 +141,7 @@ describe('explorerCardView — badge precedence', () => {
     expect(view.badge).toEqual({ kind: 'wishlisted', title: 'Tracks wishlisted', text: '♥' });
   });
 
-  it('stars a fully discovered playlist and shows the percentage below the gate', () => {
+  it('stars a fully discovered playlist and shows the percentage when thin', () => {
     expect(explorerCardView(playlist({ total_count: 10, discovered_count: 10 })).badge).toEqual({
       kind: 'ready',
       title: 'Ready to explore',

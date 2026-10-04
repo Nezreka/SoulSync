@@ -12,7 +12,7 @@
  */
 
 import { cleanup, fireEvent, render } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 import type { SyncBandRow } from '../-dash.syncband';
 
@@ -68,7 +68,7 @@ describe('clicking a sync-band row', () => {
         busy={false}
         fading={false}
         live={null}
-        onRun={vi.fn()}
+        onRun={vi.fn(() => {})}
         onSyncAgain={vi.fn()}
         onListen={vi.fn()}
         onRemove={vi.fn()}
@@ -93,7 +93,7 @@ describe('clicking a sync-band row', () => {
         busy={false}
         fading={false}
         live={null}
-        onRun={vi.fn()}
+        onRun={vi.fn(() => {})}
         onSyncAgain={vi.fn()}
         onListen={vi.fn()}
         onRemove={vi.fn()}
@@ -112,7 +112,7 @@ describe('clicking a sync-band row', () => {
         busy={false}
         fading={false}
         live={null}
-        onRun={vi.fn()}
+        onRun={vi.fn(() => {})}
         onSyncAgain={vi.fn()}
         onListen={vi.fn()}
         onRemove={vi.fn()}
@@ -134,7 +134,7 @@ describe('clicking a sync-band row', () => {
           progress: 42,
           updatedAt: Date.now(),
         }}
-        onRun={vi.fn()}
+        onRun={vi.fn(() => {})}
         onSyncAgain={vi.fn()}
         onListen={vi.fn()}
         onRemove={vi.fn()}
@@ -143,5 +143,42 @@ describe('clicking a sync-band row', () => {
     expect(container.querySelector('.syncband-row--live')).not.toBeNull();
     expect(getByText('Matching · Track 4')).toBeTruthy();
     expect(getByText('42%')).toBeTruthy();
+  });
+});
+
+describe('the split sync buttons (#1455)', () => {
+  function scheduledRow() {
+    return (
+      <Row
+        row={row()}
+        busy={false}
+        fading={false}
+        live={null}
+        onRun={onRun}
+        onSyncAgain={vi.fn()}
+        onListen={vi.fn()}
+        onRemove={vi.fn()}
+      />
+    );
+  }
+
+  let onRun!: Mock<(row: SyncBandRow, skipWishlist: boolean) => void>;
+
+  beforeEach(() => {
+    onRun = vi.fn();
+  });
+
+  it('"Sync" runs the pipeline with skip_wishlist=true', () => {
+    const { getByTitle } = render(scheduledRow());
+    fireEvent.click(getByTitle(/without adding missing tracks to the wishlist/));
+    expect(onRun).toHaveBeenCalledTimes(1);
+    expect(onRun.mock.calls[0][1]).toBe(true);
+  });
+
+  it('"Sync + download" runs the pipeline with skip_wishlist=false', () => {
+    const { getByTitle } = render(scheduledRow());
+    fireEvent.click(getByTitle(/download missing tracks$/));
+    expect(onRun).toHaveBeenCalledTimes(1);
+    expect(onRun.mock.calls[0][1]).toBe(false);
   });
 });

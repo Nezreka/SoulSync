@@ -33,7 +33,10 @@ def auto_scan_audiobook_watchlist(config: Dict[str, Any], deps: AutomationDeps) 
         from core.audiobook_watchlist import run_scan
 
         limit = config.get("batch_size")
-        summary = run_scan(limit=int(limit) if limit else None)
+        marketplace = (deps.config_manager.get("audiobooks.marketplace", "us")
+                       or "us").strip().lower() or "us"
+        summary = run_scan(limit=int(limit) if limit else None,
+                           marketplace=marketplace)
         return {
             "status": "completed",
             "authors_checked": summary.get("authors", 0),

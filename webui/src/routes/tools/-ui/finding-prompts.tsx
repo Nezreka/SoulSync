@@ -65,7 +65,11 @@ const BODY: CSSProperties = {
   marginBottom: '20px',
 };
 
-const ROW: CSSProperties = { display: 'flex', gap: '10px', justifyContent: 'center' };
+const ROW: CSSProperties = {
+  display: 'flex',
+  gap: '10px',
+  justifyContent: 'center',
+};
 const ROW_WRAP: CSSProperties = { ...ROW, flexWrap: 'wrap' };
 
 const HINT: CSSProperties = {
@@ -200,9 +204,11 @@ function DeadFilePrompt({ resolve }: { resolve: (value: DeadFileFixAction | null
 
 function AcoustidPrompt({
   candidates,
+  count,
   resolve,
 }: {
   candidates?: string[];
+  count?: number;
   resolve: (value: string | null) => void;
 }) {
   // An ambiguous fingerprint names several possible recordings. The finding
@@ -210,68 +216,124 @@ function AcoustidPrompt({
   // choice ('retag:<n>') instead of refusing and pointing at manual tools.
   const ambiguous = (candidates?.length ?? 0) > 1;
   const [picked, setPicked] = useState(0);
-  const act = (base: 'retag' | 'relocate') => resolve(ambiguous ? `${base}:${picked}` : base);
+  // #1289: Relocate is destructive (moves the file out of the library), so it
+  // gets a second confirmation step. Retag/Re-download/Delete act immediately.
+  const [confirmRelocate, setConfirmRelocate] = useState(false);
+  const act = (base: 'retag' | 'relocate') => {
+    if (base === 'relocate' && !confirmRelocate) {
+      setConfirmRelocate(true);
+      return;
+    }
+    resolve(ambiguous ? `${base}:${picked}` : base);
+  };
   return (
     <PromptOverlay
       maxWidth={460}
-      title="AcoustID Mismatch"
+      title={confirmRelocate ? 'Confirm Relocate' : 'AcoustID Mismatch'}
       body={
-        ambiguous
-          ? 'The fingerprint matches several recordings. Pick the one this file really is, then choose how to fix it.'
-          : "The audio fingerprint doesn't match the expected track. Choose how to fix it."
+        confirmRelocate
+          ? count && count > 1
+            ? `This will move ${count} files out of your library into Staging for re-import, and remove their library entries. Continue?`
+            : 'This will move the file out of your library into Staging for re-import, and remove its library entry. Continue?'
+          : ambiguous
+            ? 'The fingerprint matches several recordings. Pick the one this file really is, then choose how to fix it.'
+            : "The audio fingerprint doesn't match the expected track. Choose how to fix it."
       }
       cancelId="_acid-cancel"
       onCancel={() => resolve(null)}
     >
-      {ambiguous ? (
-        <div style={{ display: 'grid', gap: 6, margin: '0 0 12px', textAlign: 'left' }}>
-          {candidates!.map((label, i) => (
-            <label
-              key={i}
+      {confirmRelocate ? (
+        <div style={ROW_WRAP}>
+          <button
+            id="_acid-relocate-confirm"
+            type="button"
+            style={AMBER}
+            onClick={() => act('relocate')}
+          >
+            {count && count > 1 ? `Yes, relocate ${count} files` : 'Yes, relocate it'}
+          </button>
+          <button
+            id="_acid-relocate-back"
+            type="button"
+            style={INDIGO}
+            onClick={() => setConfirmRelocate(false)}
+          >
+            Back
+          </button>
+        </div>
+      ) : (
+        <>
+          <div
+            style={{
+              fontSize: 12,
+              opacity: 0.7,
+              margin: '0 0 12px',
+              textAlign: 'left',
+            }}
+          >
+            Picks which catalogue recording this file really is — nothing is re-downloaded.
+            <br />
+            Saved as: library row + file tags (relocate also moves the file). Affects next sync:
+            indirectly.
+          </div>
+          {ambiguous ? (
+            <div
               style={{
-                display: 'flex',
-                gap: 8,
-                alignItems: 'baseline',
-                cursor: 'pointer',
-                fontSize: 13,
+                display: 'grid',
+                gap: 6,
+                margin: '0 0 12px',
+                textAlign: 'left',
               }}
             >
-              <input
-                type="radio"
-                name="_acid-candidate"
-                checked={picked === i}
-                onChange={() => setPicked(i)}
-                data-acid-candidate={i}
-              />
-              <span>{label}</span>
-            </label>
-          ))}
-        </div>
-      ) : null}
-      <div style={ROW_WRAP}>
-        <button id="_acid-retag" type="button" style={INDIGO} onClick={() => act('retag')}>
-          Retag
-        </button>
-        <button id="_acid-relocate" type="button" style={AMBER} onClick={() => act('relocate')}>
-          Relocate
-        </button>
-        <button
-          id="_acid-redownload"
-          type="button"
-          style={GREEN}
-          onClick={() => resolve('redownload')}
-        >
-          Re-download
-        </button>
-        <button id="_acid-delete" type="button" style={RED} onClick={() => resolve('delete')}>
-          Delete
-        </button>
-      </div>
-      <div style={HINT}>
-        Retag = update metadata in place &bull; Relocate = retag + move to Staging so it&apos;s
-        re-imported into the correct artist/album &bull; Re-download = add correct track to wishlist
-        &amp; delete wrong file &bull; Delete = remove file and DB entry
-      </div>
+              {candidates!.map((label, i) => (
+                <label
+                  key={i}
+                  style={{
+                    display: 'flex',
+                    gap: 8,
+                    alignItems: 'baseline',
+                    cursor: 'pointer',
+                    fontSize: 13,
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="_acid-candidate"
+                    checked={picked === i}
+                    onChange={() => setPicked(i)}
+                    data-acid-candidate={i}
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          ) : null}
+          <div style={ROW_WRAP}>
+            <button id="_acid-retag" type="button" style={INDIGO} onClick={() => act('retag')}>
+              Retag
+            </button>
+            <button id="_acid-relocate" type="button" style={AMBER} onClick={() => act('relocate')}>
+              Relocate
+            </button>
+            <button
+              id="_acid-redownload"
+              type="button"
+              style={GREEN}
+              onClick={() => resolve('redownload')}
+            >
+              Re-download
+            </button>
+            <button id="_acid-delete" type="button" style={RED} onClick={() => resolve('delete')}>
+              Delete
+            </button>
+          </div>
+          <div style={HINT}>
+            Retag = update metadata in place &bull; Relocate = retag + move to Staging so it&apos;s
+            re-imported into the correct artist/album &bull; Re-download = add correct track to
+            wishlist &amp; delete wrong file &bull; Delete = remove file and DB entry
+          </div>
+        </>
+      )}
     </PromptOverlay>
   );
 }
@@ -547,7 +609,12 @@ function WitnessMeDialog({
 type PendingPrompt =
   | { kind: 'orphan'; resolve: (value: OrphanFixAction | null) => void }
   | { kind: 'dead'; resolve: (value: DeadFileFixAction | null) => void }
-  | { kind: 'acoustid'; candidates?: string[]; resolve: (value: string | null) => void }
+  | {
+      kind: 'acoustid';
+      candidates?: string[];
+      count?: number;
+      resolve: (value: string | null) => void;
+    }
   | { kind: 'quality'; resolve: (value: QualityFixAction | null) => void }
   | { kind: 'backfill'; count: number; resolve: (value: BackfillFixAction | null) => void }
   | {
@@ -561,7 +628,7 @@ type PendingPrompt =
 export interface FindingPrompts {
   promptOrphan: () => Promise<OrphanFixAction | null>;
   promptDeadFile: () => Promise<DeadFileFixAction | null>;
-  promptAcoustid: (candidates?: string[]) => Promise<string | null>;
+  promptAcoustid: (candidates?: string[], count?: number) => Promise<string | null>;
   promptQuality: () => Promise<QualityFixAction | null>;
   promptBackfill: (count: number) => Promise<BackfillFixAction | null>;
   promptRetag: (count: number, manualCount: number) => Promise<RetagFixAction | null>;
@@ -594,9 +661,9 @@ export function useFindingPrompts(): FindingPrompts {
     [],
   );
   const promptAcoustid = useCallback(
-    (candidates?: string[]) =>
+    (candidates?: string[], count?: number) =>
       new Promise<string | null>((resolve) => {
-        setPending({ kind: 'acoustid', candidates, resolve });
+        setPending({ kind: 'acoustid', candidates, count, resolve });
       }),
     [],
   );
@@ -638,6 +705,7 @@ export function useFindingPrompts(): FindingPrompts {
     promptNode = (
       <AcoustidPrompt
         candidates={pending.candidates}
+        count={pending.count}
         resolve={(v) => settle(pending.resolve as never, v)}
       />
     );

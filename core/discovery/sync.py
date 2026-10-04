@@ -320,7 +320,7 @@ def run_sync_task(
     profile_id=1,
     playlist_image_url='',
     deps: SyncDeps = None,
-    sync_mode: str = 'replace',
+    sync_mode: str = 'reconcile',  # #1289: safer default (preserves server edits)
     skip_wishlist_add: bool = False,
 ):
     """The actual sync function that runs in the background thread."""

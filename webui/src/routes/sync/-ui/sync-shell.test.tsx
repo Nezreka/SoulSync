@@ -52,7 +52,7 @@ describe('the header (2229-2243)', () => {
     );
     expect(btns.map((b) => b.textContent)).toEqual([
       'Bulk schedule',
-      'Discovery Pool',
+      'Match Review',
       'Wing It Pool',
       'Library Match',
       'Activity',
@@ -97,7 +97,7 @@ describe('the header (2229-2243)', () => {
     // scheduled-run history, and the vanilla modal knows only the first.
     click('Activity');
     expect(props.onActivity).toHaveBeenCalledTimes(1);
-    click('Discovery Pool');
+    click('Match Review');
     expect(window.openDiscoveryPoolModal).toHaveBeenCalledTimes(1);
     click('Wing It Pool');
     expect(window.openWingItPoolModal).toHaveBeenCalledTimes(1);

@@ -1064,6 +1064,22 @@ def _record_completed_import_side_effects(
     emit_track_downloaded(context, automation_engine)
     record_library_history_download(context)
     return True
+def _maybe_write_artist_nfo(context: dict, final_path: str, config_manager) -> None:
+    """#1449: optional artist.nfo (Jellyfin/Kodi/Emby) in the artist folder.
+
+    Idempotent (skips when the nfo exists) and never raises — a sidecar
+    must not break the import. Called on every path where a file actually
+    lands in the library (normal post-processing, another-thread-won, and
+    stream-processor-variant paths).
+    """
+    try:
+        from core.library.artist_nfo import ensure_artist_nfo_for_track
+        _nfo_ok, _nfo_detail = ensure_artist_nfo_for_track(
+            context.get('_final_processed_path', final_path), config_manager)
+        if _nfo_ok:
+            logger.info(f"artist.nfo written: {_nfo_detail}")
+    except Exception as _nfo_err:  # noqa: BLE001 — best effort sidecar
+        logger.debug(f"artist.nfo write skipped: {_nfo_err}")
 
 
 def _apply_profile_output_transforms(final_path: str, context: dict,
@@ -2366,6 +2382,7 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                 generate_lrc_file(final_path, context, artist_context, album_info)
                 _confirm_existing_file_bookkeeping(
                     context, artist_context, album_info)
+                _maybe_write_artist_nfo(context, final_path, config_manager)
                 return
             expected_dir = os.path.dirname(final_path)
             expected_stem = os.path.splitext(os.path.basename(final_path))[0]
@@ -2392,6 +2409,7 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                 generate_lrc_file(found_variant, context, artist_context, album_info)
                 _confirm_existing_file_bookkeeping(
                     context, artist_context, album_info)
+                _maybe_write_artist_nfo(context, found_variant, config_manager)
                 return
             logger.warning(f"[Pre-Move] Source file gone and no matching file in destination: {os.path.basename(file_path)}")
             raise FileNotFoundError(f"Source file vanished before move and destination does not exist: {file_path}")
@@ -2495,6 +2513,8 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
             _persist_verification_status(context, final_path)
 
         _attach_manual_skip_path(context_key, final_path)
+
+        _maybe_write_artist_nfo(context, final_path, config_manager)
 
         downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
         cleanup_empty_directories(downloads_path, file_path)

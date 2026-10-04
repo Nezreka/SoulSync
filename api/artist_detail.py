@@ -1922,6 +1922,8 @@ def download_discography(artist_id):
                         db, album_name, hint_artist, len(tracks), release_date,
                         active_server, candidate_albums=cand_albums or None,
                         candidate_tracks=owned_candidate_tracks,
+                        metadata_source=resolved_source,
+                        card_source_id=resolved_album_id,
                     )
                     ownership_candidates = (owned_candidate_tracks if release_tracks is None
                                             else release_tracks)

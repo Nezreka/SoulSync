@@ -18,6 +18,13 @@ from core.playlists.pipeline import run_mirrored_playlist_pipeline
 
 def auto_playlist_pipeline(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
     """Run REFRESH -> DISCOVER -> SYNC -> WISHLIST for mirrored playlists."""
+    config = dict(config)
+    # Global kill-switch (#1455): when playlist_sync.wishlist_missing_tracks
+    # is OFF, scheduled runs never wishlist, regardless of the per-automation
+    # "Skip wishlist processing" checkbox. When ON (default), the automation's
+    # own checkbox decides — today's behavior.
+    if not deps.config_manager.get('playlist_sync.wishlist_missing_tracks', True):
+        config['skip_wishlist'] = True
     return run_mirrored_playlist_pipeline(
         config,
         deps,

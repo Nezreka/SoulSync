@@ -122,7 +122,7 @@ describe('the header actions', () => {
     // controls.
     expect(SYNC_HEADER_ACTIONS.map((a) => a.label)).toEqual([
       'Bulk schedule',
-      'Discovery Pool',
+      'Match Review',
       'Wing It Pool',
       'Library Match',
       'Activity',

@@ -3213,6 +3213,9 @@ async function loadSettingsData() {
         document.getElementById('embed-itunes').checked = settings.itunes?.embed_tags !== false;
         loadMusicBrainzServerSettings(settings);
         document.getElementById('embed-musicbrainz').checked = settings.musicbrainz?.embed_tags !== false;
+        // #1451: beets-style original-date-as-DATE (default off)
+        const _mbDateEl = document.getElementById('mb-use-original-date-for-date');
+        if (_mbDateEl) _mbDateEl.checked = settings.musicbrainz?.use_original_date_for_date === true;
         document.getElementById('embed-deezer').checked = settings.deezer?.embed_tags !== false;
         document.getElementById('embed-audiodb').checked = settings.audiodb?.embed_tags !== false;
         document.getElementById('embed-tidal').checked = settings.tidal?.embed_tags !== false;
@@ -3268,6 +3271,10 @@ async function loadSettingsData() {
         const abSource = ab.download_source || {};
         const abVal = (el, value) => { if (el) el.value = value; };
         const abChecked = (el, value) => { if (el) el.checked = value !== false; };
+        // Which Audible storefront the catalogue pages query. No deep merge
+        // of new defaults into an existing config row, so older installs come
+        // back undefined and read as the US store, same as before.
+        abVal(document.getElementById('audiobook-marketplace'), ab.marketplace || 'us');
         abVal(document.getElementById('audiobook-download-mode'), abSource.mode || 'hybrid');
         _audiobookHybrid = (abSource.hybrid_order || [])
             .filter(src => AUDIOBOOK_SOURCES.includes(src));
@@ -3326,11 +3333,17 @@ async function loadSettingsData() {
         document.getElementById('allow-duplicate-tracks').checked = settings.wishlist?.allow_duplicate_tracks !== false;
         const _wlTtl = document.getElementById('wishlist-ignore-ttl');
         if (_wlTtl) _wlTtl.value = settings.wishlist?.ignore_ttl_days ?? 30;
+        const _wlWingIt = document.getElementById('wishlist-wing-it-guesses');
+        if (_wlWingIt) _wlWingIt.checked = settings.wishlist?.wing_it_guesses === true;
 
         // Populate Playlist Sync settings
         document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup === true;
         const _syncModeEl = document.getElementById('playlist-sync-mode');
-        if (_syncModeEl) _syncModeEl.value = settings.playlist_sync?.mode || 'replace';
+        if (_syncModeEl) _syncModeEl.value = settings.playlist_sync?.mode || 'reconcile';
+        // #1455: default ON — older installs come back undefined and read as
+        // today's behavior (wishlist missing tracks during sync).
+        document.getElementById('playlist-sync-wishlist-missing').checked =
+            settings.playlist_sync?.wishlist_missing_tracks !== false;
 
         // Populate Post-Download Conversion settings
         document.getElementById('downsample-hires').checked = settings.lossy_copy?.downsample_hires === true;
@@ -3374,6 +3387,10 @@ async function loadSettingsData() {
         const _pcEl = document.getElementById('reorganize-preserve-casing');
         if (_pcEl) _pcEl.checked = settings.library?.reorganize_preserve_casing !== false;
 
+        // #1449: write artist.nfo into new artist folders (default off)
+        const _nfoEl = document.getElementById('write-artist-nfo');
+        if (_nfoEl) _nfoEl.checked = settings.library?.write_artist_nfo === true;
+
         // Populate Content Filter settings
         document.getElementById('allow-explicit').checked = settings.content_filter?.allow_explicit !== false;
         document.getElementById('prefer-explicit').checked = settings.content_filter?.prefer_explicit === true;
@@ -3400,7 +3417,7 @@ async function loadSettingsData() {
         const _folderArtistEl = document.getElementById('import-folder-artist-override');
         if (_folderArtistEl) _folderArtistEl.checked = settings.import?.folder_artist_override !== false;
         const _transferPermEl = document.getElementById('import-transfer-permanent');
-        if (_transferPermEl) _transferPermEl.checked = settings.import?.transfer_is_permanent === true;
+        if (_transferPermEl) _transferPermEl.checked = settings.import?.transfer_is_permanent !== false;
 
         // Populate M3U Export settings
         document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;
@@ -6346,6 +6363,7 @@ async function saveSettings(quiet = false) {
         musicbrainz: {
             ...musicBrainzServerSettings,
             embed_tags: document.getElementById('embed-musicbrainz').checked,
+            use_original_date_for_date: _cfgBool('mb-use-original-date-for-date'),
             tags: _collectServiceTags('musicbrainz')
         },
         deezer: {
@@ -6382,10 +6400,12 @@ async function saveSettings(quiet = false) {
             allow_duplicate_tracks: document.getElementById('allow-duplicate-tracks').checked,
             ignore_ttl_days: Math.max(1, Math.min(365,
                 _cfgInt('wishlist-ignore-ttl', 30))),
+            wing_it_guesses: document.getElementById('wishlist-wing-it-guesses').checked,
         },
         playlist_sync: {
             create_backup: document.getElementById('create-backup').checked,
-            mode: _cfgStr('playlist-sync-mode', { fallback: 'replace' })
+            mode: _cfgStr('playlist-sync-mode', { fallback: 'reconcile' }),
+            wishlist_missing_tracks: document.getElementById('playlist-sync-wishlist-missing').checked
         },
         content_filter: {
             allow_explicit: document.getElementById('allow-explicit').checked,
@@ -6412,13 +6432,15 @@ async function saveSettings(quiet = false) {
             music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos',
             podcasts_path: _cfgStr('podcasts-path', { fallback: './podcasts' }),
             audiobooks_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),
-            reorganize_preserve_casing: _cfgBool('reorganize-preserve-casing')
+            reorganize_preserve_casing: _cfgBool('reorganize-preserve-casing'),
+            write_artist_nfo: _cfgBool('write-artist-nfo')
         },
         podcasts: {
             download_path: _cfgStr('podcasts-path', { fallback: './podcasts' }),
             media_format: _cfgStr('podcast-media-format', { fallback: 'audio' }),
         },
         audiobooks: {
+            marketplace: _cfgStr('audiobook-marketplace', { fallback: 'us' }),
             download_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),
             download_source: {
                 mode: _cfgStr('audiobook-download-mode', { fallback: 'hybrid' }),

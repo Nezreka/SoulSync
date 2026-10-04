@@ -1960,7 +1960,7 @@ def _submit_sync_task(sync_playlist_id, playlist_name, spotify_tracks, playlist_
     selector, so honor the configured default (Settings > Playlist sync mode) —
     otherwise they always ran 'replace' regardless of the setting (#792)."""
     from core.sync.playlist_edit import normalize_sync_mode
-    _mode = normalize_sync_mode(None, config_manager.get('playlist_sync.mode', 'replace'))
+    _mode = normalize_sync_mode(None, config_manager.get('playlist_sync.mode', 'reconcile'))
     return sync_executor.submit(
         _run_sync_task, sync_playlist_id, playlist_name, spotify_tracks,
         None, get_current_profile_id(), playlist_image_url, _mode,
@@ -5245,12 +5245,12 @@ def _run_sync_task(
     # configured global "Playlist sync mode" instead of hardcoding 'replace'.
     # Hardcoding replace meant every AUTOMATED sync recreated the server
     # playlist, wiping its custom image + description even when the user chose
-    # Append/Reconcile (#823 carlosjfcasero). The global default is still
-    # 'replace', so default users are unaffected; only users who set
-    # Append/Reconcile get the change. (Mirrors _submit_sync_task.)
+    # Append/Reconcile (#823 carlosjfcasero). The global default is now
+    # 'reconcile' (#1289), so default users get the safer behavior; only users
+    # who explicitly set a mode get something different. (Mirrors _submit_sync_task.)
     if sync_mode is None:
         from core.sync.playlist_edit import normalize_sync_mode
-        sync_mode = normalize_sync_mode(None, config_manager.get('playlist_sync.mode', 'replace'))
+        sync_mode = normalize_sync_mode(None, config_manager.get('playlist_sync.mode', 'reconcile'))
     tracks_json, _quality_profile_id = _tracks_with_mirrored_quality_profile(
         playlist_id,
         playlist_name,
@@ -5307,18 +5307,14 @@ def start_playlist_sync_from_payload(data):
     # implement append via native add APIs (Plex addItems, Jellyfin POST
     # /Playlists/<id>/Items, Navidrome updatePlaylist?songIdToAdd=...).
     # Per-request sync_mode wins; otherwise use the configured default
-    # (Settings > Playlist sync mode). Default 'replace' keeps today's behavior.
+    # (Settings > Playlist sync mode). Default 'reconcile' (#1289) preserves
+    # server edits.
     from core.sync.playlist_edit import normalize_sync_mode
     sync_mode = normalize_sync_mode(data.get('sync_mode'),
-                                    config_manager.get('playlist_sync.mode', 'replace'))
+                                    config_manager.get('playlist_sync.mode', 'reconcile'))
 
     if not all([playlist_id, playlist_name, tracks_json]):
         return jsonify({"success": False, "error": "Missing playlist_id, name, or tracks."}), 400
-
-    # Add activity for sync start
-    # every source comes through here (history re-sync, dashboard, account
-    # tabs), not just spotify, so don't name one (#1404)
-    add_activity_item("", "Sync Started", f"'{playlist_name}' - {len(tracks_json)} tracks ({sync_mode})", "Now")
 
     logger.info(f"Starting playlist sync for '{playlist_name}' with {len(tracks_json)} tracks (mode: {sync_mode})")
     logger.debug(f"Request parsed at {time.strftime('%H:%M:%S')} (took {(time.time()-request_start_time)*1000:.1f}ms)")
@@ -5326,6 +5322,12 @@ def start_playlist_sync_from_payload(data):
     with sync_lock:
         if playlist_id in active_sync_workers and not active_sync_workers[playlist_id].done():
             return jsonify({"success": False, "error": "Sync is already in progress for this playlist."}), 409
+
+        # Add activity for sync start (#1455): after the in-progress guard, so
+        # rejected duplicate clicks don't log a "Sync Started" that never ran.
+        # Every source comes through here (history re-sync, dashboard, account
+        # tabs), not just spotify, so don't name one (#1404)
+        add_activity_item("", "Sync Started", f"'{playlist_name}' - {len(tracks_json)} tracks ({sync_mode})", "Now")
 
         # Initial state
         sync_states[playlist_id] = {
