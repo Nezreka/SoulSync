@@ -10,7 +10,7 @@ from mutagen._vorbis import VCommentDict
 
 from core.metadata import source as ms
 from core.metadata.common import get_mutagen_symbols
-from core.metadata.musicbrainz_tags import release_tags, write_tag, selected_release_id
+from core.metadata.musicbrainz_tags import release_tags, credit_tags, write_tag, selected_release_id
 
 
 class Config:
@@ -256,3 +256,92 @@ def test_recording_details_outage_keeps_release_tags(monkeypatch):
     assert state["id_tags"]["MUSICBRAINZ_RELEASETRACKID"] == "chosen-track"
     assert state["isrc"] is None
     assert state["mb_isrcs"] == []
+
+
+# ── #1510: ARTISTSORT / ALBUMARTISTSORT name the primary source's artists ──
+
+def _two_credits():
+    return [
+        {"name": "Duquesa", "joinphrase": " & ",
+         "artist": {"id": "a1", "name": "Duquesa", "sort-name": "Duquesa"}},
+        {"name": "Jovem Dex", "joinphrase": "",
+         "artist": {"id": "a2", "name": "Jovem Dex", "sort-name": "Dex, Jovem"}},
+    ]
+
+
+def test_artistsort_unfiltered_without_expected_names():
+    tags = credit_tags(_two_credits())
+    assert tags["ARTISTSORT"] == "Duquesa & Dex, Jovem"
+    assert tags["ARTISTS"] == ["Duquesa", "Jovem Dex"]
+
+
+def test_artistsort_keeps_only_matched_sort_names():
+    tags = credit_tags(_two_credits(), expected_names=["Duquesa"])
+    assert tags["ARTISTSORT"] == "Duquesa"  # no dangling join phrase on a single match
+    assert credit_tags(_two_credits(), expected_names=["Duquesa", "Jovem Dex"])["ARTISTSORT"] == "Duquesa & Dex, Jovem"
+    # the rest of the credit is untouched; ARTISTS is overridden at write time (#1425)
+    assert tags["ARTISTS"] == ["Duquesa", "Jovem Dex"]
+    assert tags["MUSICBRAINZ_ARTIST_ID"] == ["a1", "a2"]
+
+
+def test_artistsort_dropped_when_nothing_matches():
+    tags = credit_tags(_two_credits(), expected_names=["Mammoth"])
+    assert "ARTISTSORT" not in tags
+    assert tags["ARTISTS"] == ["Duquesa", "Jovem Dex"]
+
+
+def test_artistsort_matches_folded_names():
+    tags = credit_tags(_two_credits(), expected_names=["jovem DEX"])
+    assert tags["ARTISTSORT"] == "Dex, Jovem"
+
+
+def test_album_artistsort_filtered_by_album_artist():
+    rel = release()
+    rel["artist-credit"] = _two_credits()
+    assert release_tags(rel, album_artist_names=["Duquesa"])["ALBUMARTISTSORT"] == "Duquesa"
+    assert "ALBUMARTISTSORT" not in release_tags(rel, album_artist_names=["Mammoth"])
+    # no expected names -> old behavior (whole credit)
+    assert release_tags(rel)["ALBUMARTISTSORT"] == "Duquesa & Dex, Jovem"
+
+
+def _process_with_credits(runtime, credits, artist, album_artist):
+    rel = release("chosen")
+    rel["artist-credit"] = credits
+    client = runtime.mb_worker.mb_service.mb_client
+    client.get_release.side_effect = None
+    client.get_release.return_value = rel
+    client.get_recording.return_value = {"isrcs": [], "artist-credit": credits}
+    metadata = {"musicbrainz_release_id": "chosen", "title": "Hung Up", "album": "Y",
+                "artist": artist, "album_artist": album_artist,
+                "_artists_list": [artist], "date": "2005-01-01",
+                "track_number": 1, "disc_number": 1}
+    state = ms._blank_post_process_state()
+    ms._process_musicbrainz_source(state, metadata, Config(), runtime, "Hung Up", artist)
+    return state
+
+
+def test_process_source_filters_sort_tags_to_primary_artists(runtime):
+    state = _process_with_credits(runtime, _two_credits(), "Duquesa", "Duquesa")
+    assert state["id_tags"]["ARTISTSORT"] == "Duquesa"
+    assert state["id_tags"]["ALBUMARTISTSORT"] == "Duquesa"
+
+
+def test_process_source_drops_sort_tags_when_nothing_matches(runtime):
+    state = _process_with_credits(runtime, _two_credits(), "Someone Else", "Someone Else")
+    assert "ARTISTSORT" not in state["id_tags"]
+    assert "ALBUMARTISTSORT" not in state["id_tags"]
+
+
+def test_process_source_keeps_whole_credit_when_primary_has_no_list(runtime):
+    rel = release("chosen")
+    rel["artist-credit"] = _two_credits()
+    client = runtime.mb_worker.mb_service.mb_client
+    client.get_release.side_effect = None
+    client.get_release.return_value = rel
+    client.get_recording.return_value = {"isrcs": [], "artist-credit": _two_credits()}
+    metadata = {"musicbrainz_release_id": "chosen", "title": "Hung Up", "album": "Y",
+                "artist": "Duquesa", "date": "2005-01-01", "track_number": 1, "disc_number": 1}
+    state = ms._blank_post_process_state()
+    ms._process_musicbrainz_source(state, metadata, Config(), runtime, "Hung Up", "Duquesa")
+    assert state["id_tags"]["ARTISTSORT"] == "Duquesa & Dex, Jovem"
+    assert state["id_tags"]["ALBUMARTISTSORT"] == "Duquesa & Dex, Jovem"
