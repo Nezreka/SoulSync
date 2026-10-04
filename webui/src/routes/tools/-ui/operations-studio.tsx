@@ -72,8 +72,8 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     jobIds: [
       'audio_corruption_detector',
       'fake_lossless_detector',
-      'quality_upgrade_detector',
-      'short_preview_detector',
+      'quality_upgrade_scanner',
+      'short_preview_track',
     ],
     findingTypes: ['corrupt_audio', 'fake_lossless', 'quality_upgrade', 'short_preview_track'],
   },
@@ -90,10 +90,10 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
       'album_tag_consistency',
       'album_release_year_repair',
       'comma_artist_splitter',
-      'genre_tag_cleaner',
+      'genre_cleanup',
       'suspect_album_tag_detector',
-      'track_number_fixer',
-      'mbid_resolver',
+      'track_number_repair',
+      'mbid_mismatch_detector',
     ],
     findingTypes: [
       'album_tag_inconsistency',
@@ -113,7 +113,7 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     tagline: 'Fetch synchronized lyrics, maximum-resolution covers, and loudness tags',
     description:
       'Locates synchronized time-coded lyrics, downloads high-resolution album art sleeves, and applies ReplayGain normalization.',
-    jobIds: ['lyrics_fetcher', 'artwork_fetcher', 'replaygain_filler'],
+    jobIds: ['missing_lyrics', 'missing_cover_art', 'replaygain_filler'],
     findingTypes: ['missing_lyrics', 'missing_cover_art', 'missing_replaygain', 'replaygain_retag'],
   },
   {
@@ -126,10 +126,10 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     description:
       'Detects duplicate recordings, cleans up unlinked orphan tracks, and moves files into organized directory structures.',
     jobIds: [
-      'duplicate_finder',
+      'duplicate_detector',
       'orphan_file_detector',
       'dead_file_cleaner',
-      'empty_folder_remover',
+      'empty_folder_cleaner',
     ],
     findingTypes: ['duplicate_tracks', 'orphan_file', 'dead_file', 'empty_folder'],
   },
@@ -152,9 +152,9 @@ export const PLAYBOOK_PRESETS: readonly PlaybookPreset[] = [
     jobIds: [
       'audio_corruption_detector',
       'album_tag_consistency',
-      'lyrics_fetcher',
-      'artwork_fetcher',
-      'duplicate_finder',
+      'missing_lyrics',
+      'missing_cover_art',
+      'duplicate_detector',
     ],
   },
   {
@@ -162,7 +162,7 @@ export const PLAYBOOK_PRESETS: readonly PlaybookPreset[] = [
     title: 'Audio Fidelity Sweep',
     subtitle: 'Audit FLAC integrity, detect fake transcodes, and check low bitrates',
     icon: '🎵',
-    jobIds: ['audio_corruption_detector', 'fake_lossless_detector', 'quality_upgrade_detector'],
+    jobIds: ['audio_corruption_detector', 'fake_lossless_detector', 'quality_upgrade_scanner'],
   },
   {
     id: 'metadata_polish',
@@ -172,8 +172,8 @@ export const PLAYBOOK_PRESETS: readonly PlaybookPreset[] = [
     jobIds: [
       'album_tag_consistency',
       'comma_artist_splitter',
-      'genre_tag_cleaner',
-      'track_number_fixer',
+      'genre_cleanup',
+      'track_number_repair',
     ],
   },
   {
@@ -181,7 +181,7 @@ export const PLAYBOOK_PRESETS: readonly PlaybookPreset[] = [
     title: 'Media Enrichment',
     subtitle: 'Download missing synced lyrics, high-res vinyl covers, and loudness tags',
     icon: '🎨',
-    jobIds: ['lyrics_fetcher', 'artwork_fetcher', 'replaygain_filler'],
+    jobIds: ['missing_lyrics', 'missing_cover_art', 'replaygain_filler'],
   },
 ] as const;
 
