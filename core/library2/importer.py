@@ -2406,39 +2406,81 @@ def link_single_album_duplicates(cursor) -> int:
     both a ``single``-type album track and a non-single album track, the single's
     ``canonical_track_id`` is pointed at the album track so the dedup UI can offer
     keep-single / keep-album / move / remove. Returns the number of links made.
+
+    A shared title is not a shared recording: the album cut must also pass
+    :func:`~core.library2.duplicate_relationship.same_recording` (compatible
+    duration, no conflicting ISRC/MBID), or a live version would be filed as
+    the studio single and hidden from Missing (feature-parity A02). A link that
+    no longer passes is removed.
     """
+    from core.library2.duplicate_relationship import same_recording
+
     cursor.execute(
         """
         SELECT t.id AS track_id, t.title AS title, al.album_type AS album_type,
-               ar.name AS artist_name
+               ar.name AS artist_name, t.duration, t.isrc, t.musicbrainz_id
         FROM lib2_tracks t
         JOIN lib2_albums al ON al.id = t.album_id
         JOIN lib2_artists ar ON ar.id = al.primary_artist_id
         """
     )
-    groups: Dict[Tuple[str, str], List[Tuple[int, str]]] = {}
+    groups: Dict[Tuple[str, str], List[Any]] = {}
     for row in cursor.fetchall():
         key = (normalize_name(row["artist_name"]), dedup_title_key(row["title"]))
-        groups.setdefault(key, []).append((row["track_id"], row["album_type"]))
+        groups.setdefault(key, []).append(row)
 
     linked = 0
     for members in groups.values():
         if len(members) < 2:
             continue
-        album_tracks = [tid for tid, typ in members if typ != "single"]
-        single_tracks = [tid for tid, typ in members if typ == "single"]
+        album_tracks = [r for r in members if r["album_type"] != "single"]
+        single_tracks = [r for r in members if r["album_type"] == "single"]
         if not album_tracks or not single_tracks:
             continue
-        canonical = album_tracks[0]
-        for single_id in single_tracks:
+        for single in single_tracks:
+            canonical = next((r for r in album_tracks if same_recording(single, r)), None)
+            if canonical is None:
+                continue
             cursor.execute(
                 "UPDATE lib2_tracks SET canonical_track_id=? WHERE id=? AND "
                 "(canonical_track_id IS NULL OR canonical_track_id<>?)",
-                (canonical, single_id, canonical),
+                (canonical["track_id"], single["track_id"], canonical["track_id"]),
             )
             if cursor.rowcount:
                 linked += 1
+
+    prune_unverified_single_links(cursor)
     return linked
+
+
+def prune_unverified_single_links(cursor) -> int:
+    """Drop single→album links whose two tracks are different recordings.
+
+    Links made before the recording check (A02), or whose duration or ISRC/MBID
+    were corrected since. Only the single→album shape the linker writes is
+    touched. Returns how many links were removed. Does not commit.
+    """
+    from core.library2.duplicate_relationship import same_recording
+
+    rows = cursor.execute(
+        """SELECT s.id AS track_id, s.duration, s.isrc, s.musicbrainz_id,
+                  c.duration AS c_duration, c.isrc AS c_isrc,
+                  c.musicbrainz_id AS c_musicbrainz_id
+             FROM lib2_tracks s
+             JOIN lib2_albums sal ON sal.id = s.album_id AND sal.album_type = 'single'
+             JOIN lib2_tracks c ON c.id = s.canonical_track_id
+             JOIN lib2_albums cal ON cal.id = c.album_id
+                                 AND COALESCE(cal.album_type, '') <> 'single'"""
+    ).fetchall()
+    removed = 0
+    for row in rows:
+        target = {"duration": row["c_duration"], "isrc": row["c_isrc"],
+                  "musicbrainz_id": row["c_musicbrainz_id"]}
+        if not same_recording(row, target):
+            cursor.execute("UPDATE lib2_tracks SET canonical_track_id=NULL WHERE id=?",
+                           (row["track_id"],))
+            removed += 1
+    return removed
 
 
 def _first_image_url(images: Any) -> Optional[str]:
@@ -3191,6 +3233,7 @@ def apply_monitoring_from_watchlist_wishlist(cursor, profile_id: Optional[int] =
 __all__ = [
     "import_legacy_library",
     "link_single_album_duplicates",
+    "prune_unverified_single_links",
     "apply_monitoring_from_watchlist_wishlist",
     "reconcile_import_monitoring",
     "split_artist_credits",

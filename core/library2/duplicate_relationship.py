@@ -50,6 +50,43 @@ def _artist_ids(conn, track_id: int, primary_artist_id: int) -> set[int]:
     return ids
 
 
+# The release-independent recording identifiers. A Spotify track id is NOT
+# one: a single and its album cut carry different Spotify ids for the same
+# recording, which is why the automatic link leaves it out.
+RECORDING_IDS = (
+    ("isrc", "ISRC"),
+    ("musicbrainz_id", "MusicBrainz recording ID"),
+)
+
+
+def durations_compatible(source_ms: Any, target_ms: Any) -> bool:
+    """Within 3% (at least 5 s) of each other, or one side unknown."""
+    if source_ms is None or target_ms is None:
+        return True
+    source_ms, target_ms = int(source_ms), int(target_ms)
+    tolerance = max(5_000, round(max(source_ms, target_ms) * 0.03))
+    return abs(source_ms - target_ms) <= tolerance
+
+
+def conflicting_recording_id(source: Any, target: Any,
+                             namespaces=RECORDING_IDS) -> str | None:
+    """The label of the first identifier both sides carry and disagree on."""
+    for column, label in namespaces:
+        source_id = str(source[column] or "").strip()
+        target_id = str(target[column] or "").strip()
+        if source_id and target_id and source_id.casefold() != target_id.casefold():
+            return label
+    return None
+
+
+def same_recording(source: Any, target: Any) -> bool:
+    """Whether an automatic single↔album link may treat two rows as one
+    recording: compatible durations and no conflicting ISRC/MBID
+    (feature-parity A02). Title and artist are the caller's grouping."""
+    return (durations_compatible(source["duration"], target["duration"])
+            and conflicting_recording_id(source, target) is None)
+
+
 def validate_duplicate_pair(
     conn,
     from_track_id: int,
@@ -116,22 +153,13 @@ def validate_duplicate_pair(
     if _normalized_title(source["title"]) != _normalized_title(target["title"]):
         raise DuplicateRelationshipError("Track titles do not match")
 
-    if source["duration"] is not None and target["duration"] is not None:
-        source_duration = int(source["duration"])
-        target_duration = int(target["duration"])
-        tolerance = max(5_000, round(max(source_duration, target_duration) * 0.03))
-        if abs(source_duration - target_duration) > tolerance:
-            raise DuplicateRelationshipError("Track durations differ too much")
+    if not durations_compatible(source["duration"], target["duration"]):
+        raise DuplicateRelationshipError("Track durations differ too much")
 
-    for column, label in (
-        ("isrc", "ISRC"),
-        ("musicbrainz_id", "MusicBrainz recording ID"),
-        ("spotify_id", "Spotify track ID"),
-    ):
-        source_id = str(source[column] or "").strip()
-        target_id = str(target[column] or "").strip()
-        if source_id and target_id and source_id.casefold() != target_id.casefold():
-            raise DuplicateRelationshipError(f"Tracks have conflicting {label}s")
+    conflict = conflicting_recording_id(
+        source, target, (*RECORDING_IDS, ("spotify_id", "Spotify track ID")))
+    if conflict:
+        raise DuplicateRelationshipError(f"Tracks have conflicting {conflict}s")
 
     return {
         "source": dict(source),
@@ -140,4 +168,5 @@ def validate_duplicate_pair(
     }
 
 
-__all__ = ["DuplicateRelationshipError", "validate_duplicate_pair"]
+__all__ = ["DuplicateRelationshipError", "conflicting_recording_id",
+           "durations_compatible", "same_recording", "validate_duplicate_pair"]

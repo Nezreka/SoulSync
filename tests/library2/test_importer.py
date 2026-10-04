@@ -2521,3 +2521,67 @@ def test_reimport_rebuilds_credits_on_the_album_a_fold_moved_a_track_to(legacy_d
         assert conn.execute(
             "SELECT COUNT(*) FROM lib2_album_artists WHERE album_id=? AND artist_id=?",
             (moved_to, artist)).fetchone()[0] == 1
+
+
+def _single_and_album_cut(conn, *, single=None, album=None):
+    """Artist A's single "Song" and the album cut of the same title."""
+    from tests import lib2_seed
+    single_id = lib2_seed.track(conn, "A", "Song", "Song",
+                                album_cols={"album_type": "single"}, **(single or {}))
+    album_id = lib2_seed.track(conn, "A", "LP", "Song",
+                               album_cols={"album_type": "album"}, **(album or {}))
+    return single_id, album_id
+
+
+@pytest.mark.parametrize("single, album", [
+    ({"duration": 180_000}, {"duration": 300_000}),            # a live take
+    ({"isrc": "USAAA0000001"}, {"isrc": "USAAA0000002"}),     # another recording
+    ({"musicbrainz_id": "rec-1"}, {"musicbrainz_id": "rec-2"}),
+])
+def test_a_shared_title_alone_does_not_link_two_recordings(tmp_path, single, album):
+    """A02: the automatic link hides the single from Missing, so it needs the
+    same recording, not the same title."""
+    from core.library2.importer import link_single_album_duplicates
+    from core.library2.schema import ensure_library_v2_schema
+
+    conn = row_conn(str(tmp_path / "lib2.db"))
+    ensure_library_v2_schema(conn)
+    single_id, _album_id = _single_and_album_cut(conn, single=single, album=album)
+
+    assert link_single_album_duplicates(conn.cursor()) == 0
+    assert conn.execute("SELECT canonical_track_id FROM lib2_tracks WHERE id=?",
+                        (single_id,)).fetchone()[0] is None
+
+
+def test_the_same_recording_links_despite_different_spotify_ids(tmp_path):
+    """A Spotify track id names a position on a release: the single and its
+    album cut always differ there."""
+    from core.library2.importer import link_single_album_duplicates
+    from core.library2.schema import ensure_library_v2_schema
+
+    conn = row_conn(str(tmp_path / "lib2.db"))
+    ensure_library_v2_schema(conn)
+    single_id, album_id = _single_and_album_cut(
+        conn,
+        single={"duration": 200_000, "isrc": "USAAA0000001", "spotify_id": "sp-single"},
+        album={"duration": 201_000, "isrc": "USAAA0000001", "spotify_id": "sp-album"})
+
+    assert link_single_album_duplicates(conn.cursor()) == 1
+    assert conn.execute("SELECT canonical_track_id FROM lib2_tracks WHERE id=?",
+                        (single_id,)).fetchone()[0] == album_id
+
+
+def test_an_existing_link_between_different_recordings_is_removed(tmp_path):
+    from core.library2.importer import prune_unverified_single_links
+    from core.library2.schema import ensure_library_v2_schema
+
+    conn = row_conn(str(tmp_path / "lib2.db"))
+    ensure_library_v2_schema(conn)
+    single_id, album_id = _single_and_album_cut(
+        conn, single={"duration": 180_000}, album={"duration": 300_000})
+    conn.execute("UPDATE lib2_tracks SET canonical_track_id=? WHERE id=?",
+                 (album_id, single_id))
+
+    assert prune_unverified_single_links(conn.cursor()) == 1
+    assert conn.execute("SELECT canonical_track_id FROM lib2_tracks WHERE id=?",
+                        (single_id,)).fetchone()[0] is None

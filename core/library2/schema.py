@@ -1392,6 +1392,16 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
             logger.error("edition/recording backfill failed (will retry next start): %s", e)
 
     if not _stopped():
+        # A02: single→album links the importer made before it checked the
+        # recording. Cheap: only linked singles are read.
+        try:
+            from core.library2.importer import prune_unverified_single_links
+            stats["unverified_single_links"] = prune_unverified_single_links(cursor)
+            _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("single-link prune failed (will retry next start): %s", e)
+
+    if not _stopped():
         # docs §49.11: a song that also appears on an album belongs to the
         # album. Runs after the edition backfill on purpose — it needs the
         # recordings that pass has just materialized.
