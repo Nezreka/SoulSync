@@ -7809,21 +7809,6 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def episode_in_library(self, show_tmdb_id, season_number, episode_number) -> bool:
-        """Whether this exact episode is on disk (has_file=1)."""
-        conn = self._get_connection()
-        try:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM episodes e JOIN shows s ON s.id=e.show_id "
-                "WHERE s.tmdb_id=? AND e.season_number=? AND e.episode_number=? "
-                "AND e.has_file=1",
-                (int(show_tmdb_id), int(season_number), int(episode_number))).fetchone()
-            return bool(row and row[0])
-        except (sqlite3.Error, TypeError, ValueError):
-            return False
-        finally:
-            conn.close()
-
     def annotate_requests_in_library(self, rows) -> None:
         """Stamp each request dict with ``in_library`` — whether a library row
         (movies/shows) exists for its tmdb id. This is what lets an approved
