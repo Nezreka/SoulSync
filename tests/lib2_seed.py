@@ -25,7 +25,7 @@ class RowDb:
     """MusicDatabase stand-in: ``_get_connection`` opens ``path`` via ``row_conn``."""
 
     def __init__(self, path: str):
-        self.path = path
+        self.path = self.database_path = path
 
     def _get_connection(self) -> sqlite3.Connection:
         return row_conn(self.path)

@@ -7,7 +7,6 @@ grab, not degrade to a context-free download.
 
 from __future__ import annotations
 
-import sqlite3
 
 import pytest
 
@@ -18,16 +17,7 @@ from core.library2.grab_context import (
     resolve_lib2_grab_context,
 )
 from core.library2.schema import ensure_library_v2_schema
-from tests.lib2_seed import row_conn
-
-
-class _Shim:
-    def __init__(self, path: str):
-        self.path = path
-
-    def _get_connection(self) -> sqlite3.Connection:
-        conn = row_conn(self.path)
-        return conn
+from tests.lib2_seed import row_conn, RowDb as _Shim
 
 
 @pytest.fixture

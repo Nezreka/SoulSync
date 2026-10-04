@@ -9,24 +9,14 @@ level) and writes it straight into the artwork cache.
 
 from __future__ import annotations
 
-import sqlite3
 import time
 from io import BytesIO
 
 import pytest
 from PIL import Image
-from tests.lib2_seed import row_conn
+from tests.lib2_seed import row_conn, RowDb as FakeDB
 
 flask = pytest.importorskip("flask")
-
-
-class FakeDB:
-    def __init__(self, path: str):
-        self.database_path = path
-
-    def _get_connection(self) -> sqlite3.Connection:
-        conn = row_conn(self.database_path)
-        return conn
 
 
 def _png_bytes(color=(1, 2, 3)) -> bytes:

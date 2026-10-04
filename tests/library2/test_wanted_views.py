@@ -11,7 +11,7 @@ import sqlite3
 import pytest
 
 from core.library2.wanted_views import list_cutoff_unmet, list_missing
-from tests.lib2_seed import row_conn
+from tests.lib2_seed import row_conn, RowDb as FakeDB
 
 flask = pytest.importorskip("flask")
 
@@ -285,15 +285,6 @@ class TestListCutoffUnmet:
         rows, total = list_cutoff_unmet(conn, page=1, limit=2)
         assert total == 3
         assert len(rows) == 2
-
-
-class FakeDB:
-    def __init__(self, path: str):
-        self.database_path = path
-
-    def _get_connection(self) -> sqlite3.Connection:
-        conn = row_conn(self.database_path)
-        return conn
 
 
 def _build_api(tmp_path):

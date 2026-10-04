@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 
 import pytest
 
@@ -15,7 +14,7 @@ from core.runtime_state import (
     matched_downloads_context,
     processed_download_ids,
 )
-from tests.lib2_seed import row_conn
+from tests.lib2_seed import row_conn, RowDb as FakeDB
 
 flask = pytest.importorskip("flask")
 
@@ -344,15 +343,6 @@ class TestGetQueueStatus:
         result = get_queue_status([10], **_deps())
 
         assert result == {"tracks": {}, "albums": {}}
-
-
-class FakeDB:
-    def __init__(self, path: str):
-        self.database_path = path
-
-    def _get_connection(self) -> sqlite3.Connection:
-        conn = row_conn(self.database_path)
-        return conn
 
 
 def _build_api(tmp_path, *, with_deps=True):

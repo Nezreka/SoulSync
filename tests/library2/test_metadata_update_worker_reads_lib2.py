@@ -17,18 +17,7 @@ import json
 import pytest
 
 from core.library2.schema import ensure_library_v2_schema
-from tests.lib2_seed import row_conn
-
-
-class _Db:
-    """Stands in for ``MusicDatabase``, offering only what the worker may use."""
-
-    def __init__(self, path):
-        self.path = path
-
-    def _get_connection(self):
-        conn = row_conn(self.path)
-        return conn
+from tests.lib2_seed import row_conn, RowDb as _Db
 
 
 @pytest.fixture

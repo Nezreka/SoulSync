@@ -2,22 +2,12 @@
 
 from __future__ import annotations
 
-import sqlite3
 import threading
 
 import pytest
-from tests.lib2_seed import row_conn
+from tests.lib2_seed import row_conn, RowDb as FakeDB
 
 flask = pytest.importorskip("flask")
-
-
-class FakeDB:
-    def __init__(self, path: str):
-        self.database_path = path
-
-    def _get_connection(self) -> sqlite3.Connection:
-        conn = row_conn(self.database_path)
-        return conn
 
 
 @pytest.fixture
