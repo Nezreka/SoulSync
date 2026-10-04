@@ -9,16 +9,53 @@ import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  SYNC_DEFAULT_MODE,
   SYNC_DEFAULT_TAB,
   SYNC_HEADER_ACTIONS,
   SYNC_PRIMARY_TAB_IDS,
   SYNC_TABS,
+  normalizeSyncMode,
   normalizeSyncTab,
   readRememberedRoutedTabs,
+  readSyncMode,
   rememberRoutedTab,
   syncStripTabs,
   forgetRoutedTab,
+  writeSyncMode,
 } from './-sync.shell';
+
+describe('the page mode (Standard / Advanced)', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('defaults to Standard', () => {
+    expect(SYNC_DEFAULT_MODE).toBe('standard');
+    expect(readSyncMode()).toBe('standard');
+  });
+
+  it('passes both real mode ids through, and nothing else', () => {
+    expect(normalizeSyncMode('standard')).toBe('standard');
+    expect(normalizeSyncMode('advanced')).toBe('advanced');
+    expect(normalizeSyncMode('fancy')).toBe('standard');
+    expect(normalizeSyncMode('')).toBe('standard');
+    expect(normalizeSyncMode(null)).toBe('standard');
+    expect(normalizeSyncMode(undefined)).toBe('standard');
+  });
+
+  it('remembers the choice across reads', () => {
+    writeSyncMode('advanced');
+    expect(readSyncMode()).toBe('advanced');
+    writeSyncMode('standard');
+    expect(readSyncMode()).toBe('standard');
+  });
+
+  it('never persists a bogus value', () => {
+    writeSyncMode('fancy' as 'standard');
+    expect(window.localStorage.getItem('soulsync.sync.mode')).toBe('standard');
+    expect(readSyncMode()).toBe('standard');
+  });
+});
 
 describe('normalizeSyncTab', () => {
   it('passes every real tab id through', () => {

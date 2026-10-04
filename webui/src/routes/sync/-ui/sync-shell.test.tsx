@@ -1,11 +1,15 @@
 /**
- * Tests for the sync page's shell — the three-view IA (Overview / Library /
- * Discover). The old fifteen-tab strip and six-button header are gone; the
- * contract below is what replaced them.
+ * Tests for the sync page's shell — the Standard/Advanced page mode.
  *
- * What survived unchanged: the title block, + Add playlist, Bulk schedule,
+ * Standard is the three-view IA (Overview / Library / Discover): the title
+ * block, + Add playlist, Bulk schedule, and the routed-tab machinery. Advanced
+ * is the page as it was before the overhaul — the six-button header and the
+ * full tab strip, unreskinned — and it is never the default.
+ *
+ * What survived unchanged across both modes: the title block, + Add playlist,
  * the routed-tab machinery (open/remember/hide), the one-shot panel mounting,
- * the sidebar slot, and every vanilla seam — they just live in new places.
+ * the sidebar slot, and every vanilla seam — they just live in new places in
+ * Standard.
  */
 
 import { act, fireEvent, render } from '@testing-library/react';
@@ -64,10 +68,11 @@ describe('the header', () => {
   it('keeps only the two actions that CHANGE something: Add playlist and Bulk schedule', () => {
     // Match Review, Wing It Pool and Library Match moved to the Discover
     // view's pipeline; Activity and Download Origins moved to the Overview.
-    // The header keeps the page's two verbs.
+    // The header keeps the page's two verbs. (The mode switch is not an
+    // action — it chooses the page's composition.)
     const { container } = renderShell({ onAddPlaylist: vi.fn() });
     const labels = [...container.querySelectorAll('.sync-header-actions button')]
-      .filter((b) => !b.closest('.pl-view-switch'))
+      .filter((b) => !b.closest('.pl-view-switch') && !b.closest('.pl-mode-switch'))
       .map((b) => b.textContent);
     expect(labels).toContain('+ Add playlist');
     expect(labels).toContain('Bulk schedule');
@@ -193,11 +198,163 @@ describe('the view switcher', () => {
   it('exposes the selection to assistive tech', () => {
     const { container } = renderShell();
     const aria = (label: string) =>
-      [...container.querySelectorAll('.pl-view-switch button')].find(
-        (b) => b.textContent === label,
-      )?.getAttribute('aria-selected');
+      [...container.querySelectorAll('.pl-view-switch button')]
+        .find((b) => b.textContent === label)
+        ?.getAttribute('aria-selected');
     expect(aria('Overview')).toBe('true');
     expect(aria('Library')).toBe('false');
+  });
+});
+
+describe('the Standard/Advanced mode switch', () => {
+  const modeLabels = (container: HTMLElement) =>
+    [...container.querySelectorAll('.pl-mode-switch button')].map((b) => b.textContent);
+
+  const clickMode = (container: HTMLElement, label: string) => {
+    const btn = [...container.querySelectorAll('.pl-mode-switch button')].find(
+      (b) => b.textContent === label,
+    ) as HTMLElement;
+    fireEvent.click(btn);
+  };
+
+  const actionLabels = (container: HTMLElement) =>
+    [...container.querySelectorAll('.sync-header-actions button')]
+      .filter((b) => !b.closest('.pl-view-switch') && !b.closest('.pl-mode-switch'))
+      .map((b) => b.textContent);
+
+  it('offers Standard and Advanced, in order, with Standard selected', () => {
+    const { container } = renderShell();
+    expect(modeLabels(container)).toEqual(['Standard', 'Advanced']);
+    expect(
+      container.querySelector('.pl-mode-switch button[aria-selected="true"]')?.textContent,
+    ).toBe('Standard');
+    expect(container.querySelector('.pl-mode-switch')?.getAttribute('aria-label')).toBe(
+      'Playlists page mode',
+    );
+  });
+
+  it('Standard is the default: the view switcher shows, the classic header does not', () => {
+    const { container } = renderShell({ onAddPlaylist: vi.fn() });
+    expect(container.querySelector('.pl-view-switch')).not.toBeNull();
+    expect(actionLabels(container)).toEqual(['+ Add playlist', 'Bulk schedule']);
+    expect(container.firstElementChild?.className).toBe('page-shell pl-overhaul');
+  });
+
+  it('Advanced restores the classic page: every header button, the full strip, no reskin', () => {
+    const { container } = renderShell({
+      onAddPlaylist: vi.fn(),
+      overview: <div data-testid="overview-node" />,
+      discover: <div data-testid="discover-node" />,
+    });
+    clickMode(container, 'Advanced');
+
+    // the view switcher is gone; all six header actions are back, divider included
+    expect(container.querySelector('.pl-view-switch')).toBeNull();
+    expect(actionLabels(container)).toEqual([
+      '+ Add playlist',
+      'Bulk schedule',
+      'Match Review',
+      'Wing It Pool',
+      'Library Match',
+      'Activity',
+      'Download Origins',
+    ]);
+    expect(container.querySelector('.sync-header-divider')).not.toBeNull();
+    // the strip renders immediately — no Library view to open first — bare,
+    // with none of the reskin's wrappers, and the overview/discover nodes
+    // are not mounted anywhere
+    expect(container.querySelector('.sync-tabs')).not.toBeNull();
+    expect(container.querySelector('.pl-library')).toBeNull();
+    expect(container.querySelector('[data-testid="overview-node"]')).toBeNull();
+    expect(container.querySelector('[data-testid="discover-node"]')).toBeNull();
+    expect(container.firstElementChild?.className).toBe('page-shell');
+  });
+
+  it('switching back to Standard restores the overhaul', () => {
+    const { container } = renderShell({
+      onAddPlaylist: vi.fn(),
+      overview: <div data-testid="overview-node" />,
+    });
+    clickMode(container, 'Advanced');
+    expect(container.querySelector('.pl-view-switch')).toBeNull();
+
+    clickMode(container, 'Standard');
+    expect(container.querySelector('.pl-view-switch')).not.toBeNull();
+    expect(actionLabels(container)).toEqual(['+ Add playlist', 'Bulk schedule']);
+    expect(container.querySelector('[data-testid="overview-node"]')).not.toBeNull();
+    expect(container.firstElementChild?.className).toBe('page-shell pl-overhaul');
+  });
+
+  it('remembers the choice across reloads', () => {
+    const { container, unmount } = renderShell();
+    clickMode(container, 'Advanced');
+    expect(window.localStorage.getItem('soulsync.sync.mode')).toBe('advanced');
+    unmount();
+
+    const again = renderShell();
+    expect(
+      again.container.querySelector('.pl-mode-switch button[aria-selected="true"]')?.textContent,
+    ).toBe('Advanced');
+    expect(again.container.querySelector('.pl-view-switch')).toBeNull();
+  });
+
+  it('an unknown stored value falls back to Standard', () => {
+    window.localStorage.setItem('soulsync.sync.mode', 'fancy');
+    const { container } = renderShell();
+    expect(
+      container.querySelector('.pl-mode-switch button[aria-selected="true"]')?.textContent,
+    ).toBe('Standard');
+    expect(container.querySelector('.pl-view-switch')).not.toBeNull();
+  });
+
+  it("in Advanced, open('beatport') opens the tab — nothing routes to Discover", () => {
+    let open!: (tab: string) => void;
+    const { container } = renderShell({
+      panels: { beatport: <div data-testid="beatport-panel" /> },
+      registerOpenTab: (fn) => {
+        open = fn as (tab: string) => void;
+      },
+    });
+    clickMode(container, 'Advanced');
+    act(() => {
+      open('beatport');
+    });
+    // the beatport chip sits in the strip and goes active; there is no
+    // Discover view to land in
+    expect(container.querySelector('.pl-view-switch')).toBeNull();
+    expect(container.querySelector('[data-tab="beatport"]')?.className).toContain('active');
+    expect(container.querySelector('[data-testid="beatport-panel"]')).not.toBeNull();
+  });
+
+  it('in Advanced, opening a routed source tab keeps it in the strip with no view hop', () => {
+    let open!: (tab: string) => void;
+    const { container } = renderShell({
+      registerOpenTab: (fn) => {
+        open = fn as (tab: string) => void;
+      },
+    });
+    clickMode(container, 'Advanced');
+    act(() => {
+      open('spotify');
+    });
+    const chips = Array.from(container.querySelectorAll('.sync-tab-button')).map((b) =>
+      b.getAttribute('data-tab'),
+    );
+    // beatport is a permanent primary chip in the classic strip — exactly as
+    // before the overhaul — with the routed source appended after it
+    expect(chips).toEqual(['mirrored', 'server', 'beatport', 'spotify']);
+    expect(container.querySelector('[data-tab="spotify"]')?.className).toContain('active');
+  });
+
+  it('does not throw when a classic header seam is missing', () => {
+    const { container } = renderShell();
+    clickMode(container, 'Advanced');
+    const btns = [...container.querySelectorAll('.sync-header-actions button')].filter(
+      (b) => !b.closest('.pl-mode-switch'),
+    );
+    expect(() => {
+      for (const btn of btns) fireEvent.click(btn as HTMLElement);
+    }).not.toThrow();
   });
 });
 

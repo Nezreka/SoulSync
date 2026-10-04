@@ -4,6 +4,45 @@
  * tab handler at sync-services.js 3694-3811.
  */
 
+/**
+ * The page's two modes.
+ *
+ *   standard  the overhaul — Overview / Library / Discover, the default.
+ *   advanced  the page as it was before the overhaul: the full tab strip and
+ *             the six-button header, unreskinned.
+ *
+ * The mode is the user's choice and it persists; standard is the default.
+ */
+export type SyncModeId = 'standard' | 'advanced';
+
+export const SYNC_DEFAULT_MODE: SyncModeId = 'standard';
+
+const SYNC_MODE_STORAGE_KEY = 'soulsync.sync.mode';
+
+const MODE_IDS = new Set<string>(['standard', 'advanced']);
+
+/** Unknown values fall back to the default rather than rendering nothing. */
+export function normalizeSyncMode(mode: string | null | undefined): SyncModeId {
+  return MODE_IDS.has(mode as string) ? (mode as SyncModeId) : SYNC_DEFAULT_MODE;
+}
+
+/** The remembered mode; the default when storage is empty or unreadable. */
+export function readSyncMode(): SyncModeId {
+  try {
+    return normalizeSyncMode(window.localStorage.getItem(SYNC_MODE_STORAGE_KEY));
+  } catch {
+    return SYNC_DEFAULT_MODE;
+  }
+}
+
+export function writeSyncMode(mode: SyncModeId): void {
+  try {
+    window.localStorage.setItem(SYNC_MODE_STORAGE_KEY, normalizeSyncMode(mode));
+  } catch {
+    // storage unavailable - the choice still lives for this session
+  }
+}
+
 export type SyncTabId =
   | 'server'
   | 'spotify'
