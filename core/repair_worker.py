@@ -3672,10 +3672,13 @@ class RepairWorker:
                 plan['lyrics_meta'] = t['lyrics_meta']   # read-only lyrics query metadata
             resolved_plans.append(plan)
 
-        from core.repair_jobs.library_retag import apply_track_plans
+        from core.repair_jobs.library_retag import apply_track_plans, build_retag_enrichment_runtime
+        full = (details.get('depth') == 'full')
         res = apply_track_plans(resolved_plans, details.get('cover_action'), details.get('cover_url'),
-                                full=(details.get('depth') == 'full'),
-                                lyrics_action=details.get('lyrics_action', False))
+                                full=full,
+                                lyrics_action=details.get('lyrics_action', False),
+                                enrich_runtime=build_retag_enrichment_runtime(
+                                    self._config_manager, self.db) if full else None)
 
         if res['written'] == 0 and not res['cover_written'] and not res.get('lyrics_written'):
             return {'success': False,
