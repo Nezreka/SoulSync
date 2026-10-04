@@ -636,11 +636,17 @@ def _migrate_lib2_profiles_to_app_wide(cursor: Any) -> None:
             cursor.execute(f"PRAGMA table_info({table})")
             if "quality_profile_id" not in {r[1] for r in cursor.fetchall()}:
                 continue
-            for old_id, new_id in remap.items():
-                if old_id != new_id:
-                    cursor.execute(
-                        f"UPDATE {table} SET quality_profile_id=? WHERE quality_profile_id=?",
-                        (new_id, old_id))
+            # one statement: every row is read with its original id. A loop of
+            # UPDATEs re-remapped rows an earlier step had already moved
+            # whenever one profile's new id was another's old one (1→2, 2→1).
+            moves = [(old_id, new_id) for old_id, new_id in remap.items() if old_id != new_id]
+            if moves:
+                cases = " ".join("WHEN ? THEN ?" for _ in moves)
+                cursor.execute(
+                    f"UPDATE {table} SET quality_profile_id = CASE quality_profile_id {cases} "
+                    f"ELSE quality_profile_id END "
+                    f"WHERE quality_profile_id IN ({', '.join('?' * len(moves))})",
+                    [value for move in moves for value in move] + [old for old, _ in moves])
             # Anything left pointing at a nonexistent profile → default.
             cursor.execute(
                 f"UPDATE {table} SET quality_profile_id=? WHERE quality_profile_id NOT IN "

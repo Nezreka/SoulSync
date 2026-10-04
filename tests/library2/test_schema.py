@@ -166,6 +166,32 @@ def test_migrates_parallel_profile_table_to_app_wide():
     ensure_library_v2_schema(conn)
 
 
+def test_profile_remap_reads_every_row_with_its_original_id():
+    """Two profiles whose ids swap (old Balanced=1 is app-wide 2 and the other
+    way round): a loop of UPDATEs moved A 1→2 and then, as a row now holding 2,
+    on to 1 — both artists ended on one profile and the old table was gone."""
+    conn = row_conn(":memory:")
+    ensure_library_v2_schema(conn)
+    conn.execute("UPDATE quality_profiles SET name='Temporary' WHERE id=1")
+    conn.execute("UPDATE quality_profiles SET name='Balanced' WHERE id=2")
+    conn.execute("UPDATE quality_profiles SET name='Upgrade until top quality' WHERE id=1")
+    conn.executescript("""
+        CREATE TABLE lib2_quality_profiles(id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);
+        INSERT INTO lib2_quality_profiles VALUES(1, 'Balanced'), (2, 'Upgrade until top quality');
+        INSERT INTO lib2_artists(name, quality_profile_id, quality_profile_explicit)
+            VALUES('A', 1, 1), ('B', 2, 1);
+    """)
+    conn.commit()
+
+    ensure_library_v2_schema(conn)
+
+    names = dict(conn.execute(
+        "SELECT a.name, q.name FROM lib2_artists a JOIN quality_profiles q ON q.id = a.quality_profile_id"))
+    assert names == {"A": "Balanced", "B": "Upgrade until top quality"}
+    ensure_library_v2_schema(conn)  # the second start is a no-op
+    assert dict(conn.execute("SELECT name, quality_profile_id FROM lib2_artists")) == {"A": 2, "B": 1}
+
+
 def test_foreign_keys_and_inserts():
     conn = sqlite3.connect(":memory:")
     conn.execute("PRAGMA foreign_keys = ON")
