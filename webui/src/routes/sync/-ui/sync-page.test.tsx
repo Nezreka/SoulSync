@@ -201,6 +201,8 @@ describe('the panel map', () => {
     // belongs with the server tab's own tests, not here.)
     render(<SyncPage />);
     expect(document.querySelector('#sync-page')).toBeTruthy();
+    // The strip lives in the Library view now — the default is Overview.
+    fireEvent.click(screen.getByText('Library'));
     expect(screen.getByText('Server Playlists')).toBeTruthy();
   });
 
@@ -257,7 +259,9 @@ describe('the panel map', () => {
     // you which. So this asserts the pane by its ID, which the component has
     // always had.
     render(<SyncPage />);
-    fireEvent.click(screen.getByText('Beatport'));
+    // Beatport moved to the Discover view — its chip is no longer in the
+    // library's strip. The pane still exists and still mounts by its ID.
+    fireEvent.click(screen.getByText('Discover'));
     expect(document.getElementById('beatport-rebuild-content')).not.toBeNull();
   });
 });

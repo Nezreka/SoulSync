@@ -1,0 +1,88 @@
+/**
+ * Playlists page visual overhaul — shared design tokens.
+ *
+ * The Apple-grade, content-first language: deep black, artwork-forward,
+ * status as ambient captions, actions contextual. All three views
+ * (Overview / Library / Discover) build on these tokens so the page reads
+ * as one design, not three.
+ */
+
+:root {
+  --pl-bg: #000000;
+  --pl-surface: #0d0d12;
+  --pl-surface-2: #14141b;
+  --pl-surface-3: #1c1c24;
+  --pl-border: rgba(255, 255, 255, 0.08);
+  --pl-border-strong: rgba(255, 255, 255, 0.14);
+  --pl-text: #f5f5f7;
+  --pl-text-dim: rgba(245, 245, 247, 0.6);
+  --pl-text-faint: rgba(245, 245, 247, 0.38);
+  --pl-accent: #a855f7;
+  --pl-accent-soft: rgba(168, 85, 247, 0.16);
+  --pl-amber: #f5a623;
+  --pl-amber-soft: rgba(245, 166, 35, 0.14);
+  --pl-green: #34d399;
+  --pl-timeline: #5eead4;
+  --pl-radius: 16px;
+  --pl-radius-sm: 10px;
+  --pl-font: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;
+}
+
+.pl-overhaul {
+  font-family: var(--pl-font);
+  color: var(--pl-text);
+  background: var(--pl-bg);
+}
+
+/* The view switcher — one control, three intents. */
+.pl-view-switch {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  background: var(--pl-surface-2);
+  border: 1px solid var(--pl-border);
+  border-radius: 999px;
+}
+
+.pl-view-switch button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--pl-text-dim);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 7px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.pl-view-switch button:hover {
+  color: var(--pl-text);
+}
+
+.pl-view-switch button[aria-selected='true'] {
+  background: var(--pl-surface-3);
+  color: var(--pl-text);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* Quiet section headers — the page whispers its structure. */
+.pl-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--pl-text);
+  margin: 0;
+}
+
+.pl-caption {
+  font-size: 12.5px;
+  color: var(--pl-text-dim);
+}
+
+.pl-caption-faint {
+  font-size: 12.5px;
+  color: var(--pl-text-faint);
+}

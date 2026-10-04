@@ -1,0 +1,568 @@
+/**
+ * Playlists page visual overhaul — the Library view.
+ *
+ * The Library IS the existing page core (mirrored/server tabs, filters,
+ * search, sort, select mode, PlaylistCard), so this file is a pure reskin:
+ * zero behavior changes, every control works exactly as before. All rules
+ * are scoped under `.pl-library` (the wrapper sync-shell.tsx renders around
+ * the tab strip + panels when the Library view is active), which also gives
+ * every override higher specificity than the single-class originals in
+ * webui/static/style.css — the originals are never edited and never lose
+ * except where this file intends it.
+ *
+ * Design language: the Apple-grade tokens from sync-overhaul.css — deep
+ * black, surfaces that recede, artwork-forward cards, status as ambient
+ * captions, actions contextual. The two filter rows read as one quiet
+ * control group; cards get soft shadows and generous radius; type tightens
+ * up everywhere.
+ */
+
+.pl-library {
+  padding: 6px 6px 28px;
+}
+
+/* ── Tab strip: mirrored / server / source chips ─────────────────────────── */
+
+.pl-library .sync-tabs {
+  background: var(--pl-surface);
+  border: 1px solid var(--pl-border);
+  border-radius: var(--pl-radius);
+  padding: 8px;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+
+.pl-library .sync-tab-button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--pl-text-dim);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 8px 15px;
+}
+
+.pl-library .sync-tab-button:hover:not(.active) {
+  background: var(--pl-surface-3);
+  color: var(--pl-text);
+}
+
+.pl-library .sync-tab-button.active {
+  background: var(--pl-accent-soft);
+  border-color: rgba(168, 85, 247, 0.45);
+  color: var(--pl-text);
+  box-shadow: none;
+}
+
+/* Brand actives are intentional signals — re-declared under the scope so
+   they survive the generic active rule regardless of cascade order. */
+.pl-library .sync-tab-button[data-tab='tidal'].active {
+  background: #ff6600;
+  border-color: #ff6600;
+  color: #fff;
+  box-shadow: 0 4px 15px rgba(255, 102, 0, 0.3);
+}
+
+.pl-library .sync-tab-button[data-tab='deezer'].active {
+  background: #a238ff;
+  border-color: #a238ff;
+  color: #fff;
+  box-shadow: 0 0 12px rgba(162, 56, 255, 0.4);
+}
+
+.pl-library .sync-tab-button[data-tab='youtube'].active {
+  background: #ff0000;
+  border-color: #ff0000;
+  color: #fff;
+  box-shadow: 0 4px 15px rgba(255, 0, 0, 0.3);
+}
+
+.pl-library .sync-tab-button[data-tab='spotify-public'].active {
+  background: #1db954;
+  border-color: #1db954;
+  color: #fff;
+  box-shadow: 0 4px 15px rgba(29, 185, 84, 0.3);
+}
+
+.pl-library .sync-tab-button[data-tab='itunes-link'].active {
+  background: #fa586a;
+  border-color: #fa586a;
+  color: #fff;
+  box-shadow: 0 4px 15px rgba(250, 88, 106, 0.3);
+}
+
+.pl-library .sync-tab-close {
+  background: var(--pl-surface-3);
+  border-color: var(--pl-border-strong);
+  color: var(--pl-text-dim);
+}
+
+.pl-library .sync-tab-close:hover {
+  background: rgba(239, 68, 68, 0.85);
+  border-color: rgba(239, 68, 68, 0.9);
+  color: #fff;
+}
+
+.pl-library .sync-tab-divider {
+  background: var(--pl-border);
+}
+
+/* ── Header: "Your playlists" + search + Select + Update list ─────────────── */
+
+.pl-library .playlist-header {
+  padding: 6px 8px 16px;
+  gap: 12px;
+}
+
+.pl-library .library-heading h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--pl-text);
+}
+
+.pl-library .library-summary {
+  color: var(--pl-text-faint);
+}
+
+.pl-library .library-search .library-search-input {
+  background: var(--pl-surface-2);
+  border: 1px solid var(--pl-border);
+  color: var(--pl-text);
+  font-size: 12.5px;
+  padding: 8px 32px 8px 14px;
+}
+
+.pl-library .library-search .library-search-input::placeholder {
+  color: var(--pl-text-faint);
+}
+
+.pl-library .library-search .library-search-input:focus {
+  background: var(--pl-surface-3);
+  border-color: var(--pl-accent);
+  box-shadow: 0 0 0 3px var(--pl-accent-soft);
+}
+
+.pl-library .library-search-clear {
+  color: var(--pl-text-faint);
+}
+
+.pl-library .library-search-clear:hover {
+  color: var(--pl-text);
+}
+
+.pl-library .library-select-toggle {
+  background: var(--pl-surface-2);
+  border: 1px solid var(--pl-border);
+  color: var(--pl-text-dim);
+  border-radius: 999px;
+  padding: 7px 15px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pl-library .library-select-toggle:hover {
+  color: var(--pl-text);
+  border-color: var(--pl-border-strong);
+}
+
+.pl-library .library-select-toggle.active {
+  background: var(--pl-accent-soft);
+  border-color: rgba(168, 85, 247, 0.5);
+  color: var(--pl-text);
+}
+
+/* Update list — the one primary button in the header. */
+.pl-library .refresh-button.mirrored {
+  background: var(--pl-accent);
+  color: #fff;
+  border-radius: 999px;
+  padding: 8px 18px;
+  font-size: 12px;
+  font-weight: 650;
+  box-shadow: 0 4px 14px rgba(168, 85, 247, 0.35);
+}
+
+.pl-library .refresh-button.mirrored:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(168, 85, 247, 0.45);
+}
+
+.pl-library .refresh-button.mirrored:active {
+  transform: translateY(0);
+}
+
+/* ── Select-mode toolbar ──────────────────────────────────────────────────── */
+
+.pl-library .library-selection {
+  background: var(--pl-accent-soft);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  border-radius: var(--pl-radius-sm);
+  margin: 0 8px 14px;
+  padding: 9px 14px;
+}
+
+.pl-library .library-selection-count {
+  color: var(--pl-text);
+}
+
+.pl-library .library-selection .library-source-clear {
+  color: var(--pl-text-dim);
+}
+
+.pl-library .library-selection .library-source-clear:hover {
+  color: var(--pl-text);
+}
+
+.pl-library .library-selection-delete {
+  border-radius: var(--pl-radius-sm);
+}
+
+/* ── Filters: the two rows as one quiet control group ───────────────────────
+   State tabs stay background-less text tabs (a deliberate earlier choice);
+   the source pills quiet down to match. One container, one rhythm. */
+
+.pl-library .library-filters {
+  background: var(--pl-surface);
+  border: 1px solid var(--pl-border);
+  border-radius: var(--pl-radius);
+  padding: 10px 16px;
+  margin: 0 8px 16px;
+  gap: 10px 18px;
+}
+
+.pl-library .library-tabs {
+  gap: 18px;
+}
+
+.pl-library .library-tab {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pl-text-dim);
+  padding-bottom: 5px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.pl-library .library-tab:hover {
+  color: var(--pl-text);
+}
+
+.pl-library .library-tab.active {
+  color: var(--pl-text);
+  border-bottom-color: var(--pl-accent);
+}
+
+.pl-library .library-tab-count {
+  color: var(--pl-text-faint);
+}
+
+.pl-library .library-sort {
+  color: var(--pl-text-faint);
+  font-size: 12px;
+}
+
+.pl-library .library-sort select {
+  background: var(--pl-surface-3);
+  border: 1px solid var(--pl-border);
+  color: var(--pl-text-dim);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.pl-library .library-sort select:hover {
+  border-color: var(--pl-border-strong);
+  color: var(--pl-text);
+}
+
+.pl-library .library-sort select:focus {
+  outline: none;
+  border-color: var(--pl-accent);
+}
+
+.pl-library .library-sources {
+  gap: 6px;
+}
+
+.pl-library .library-source {
+  background: var(--pl-surface-3);
+  border: 1px solid var(--pl-border);
+  color: var(--pl-text-dim);
+  font-size: 11.5px;
+  padding: 5px 12px;
+}
+
+.pl-library .library-source:hover {
+  color: var(--pl-text);
+  border-color: var(--pl-border-strong);
+}
+
+.pl-library .library-source.active {
+  background: var(--pl-accent-soft);
+  border-color: rgba(168, 85, 247, 0.5);
+  color: var(--pl-text);
+}
+
+.pl-library .library-source-clear {
+  color: var(--pl-text-faint);
+}
+
+.pl-library .library-source-clear:hover {
+  color: var(--pl-text);
+}
+
+/* ── Grid + empty state ───────────────────────────────────────────────────── */
+
+.pl-library .pl-grid {
+  gap: 14px;
+  padding: 2px 8px 12px;
+}
+
+.pl-library .playlist-placeholder {
+  color: var(--pl-text-faint);
+  font-size: 13.5px;
+  padding: 56px 20px;
+}
+
+/* ── Cards: the existing refined design, lifted onto the tokens ──────────────
+   The card's own logic (ring, veil, quiet pill) is untouched — this is
+   surface, shadow and type only. */
+
+.pl-library .pl-card {
+  background: var(--pl-surface);
+  border: 1px solid var(--pl-border);
+  border-radius: var(--pl-radius);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
+  padding: 12px;
+  gap: 14px;
+}
+
+.pl-library .pl-card:hover,
+.pl-library .pl-card:focus-visible {
+  background: var(--pl-surface-2);
+  border-color: var(--pl-border-strong);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+  transform: translateY(-2px);
+}
+
+.pl-library .pl-card-art-img {
+  border-radius: 12px;
+  border: 1px solid var(--pl-border);
+}
+
+.pl-library .pl-card-name b {
+  color: var(--pl-text);
+}
+
+.pl-library .pl-card-meta {
+  color: var(--pl-text-faint);
+}
+
+.pl-library .pl-card-syncs-as {
+  color: var(--pl-text-dim);
+}
+
+.pl-library .pl-card-pill {
+  border: 1px solid var(--pl-border);
+  background: var(--pl-surface-3);
+  color: var(--pl-text-dim);
+  font-size: 11px;
+  padding: 4px 10px;
+}
+
+/* A set cadence is information, so it gets the accent whisper. Unscheduled
+   pills keep their quiet (opacity-driven) behavior from the originals. */
+.pl-library .pl-card-pill--action:not(.pl-card-pill--quiet) {
+  border-color: rgba(168, 85, 247, 0.4);
+  background: var(--pl-accent-soft);
+  color: var(--pl-text);
+}
+
+.pl-library .pl-card-pill--action:hover {
+  border-color: var(--pl-accent);
+  color: var(--pl-text);
+}
+
+.pl-library .pl-card-fix {
+  background: var(--pl-accent);
+  border-color: var(--pl-accent);
+  color: #fff;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-weight: 650;
+  box-shadow: 0 4px 14px rgba(168, 85, 247, 0.4);
+}
+
+.pl-library .pl-card-fix:hover {
+  background: #b06bf8;
+  border-color: #b06bf8;
+}
+
+.pl-library .pl-card-fix--danger {
+  background: rgba(224, 85, 78, 0.2);
+  border-color: rgba(224, 85, 78, 0.5);
+  color: #f0928c;
+  box-shadow: none;
+}
+
+.pl-library .pl-card-fix--danger:hover {
+  background: rgba(224, 85, 78, 0.32);
+  border-color: rgba(224, 85, 78, 0.6);
+  color: #f6a5a0;
+}
+
+.pl-library .pl-card-more {
+  background: var(--pl-surface-3);
+  border: 1px solid var(--pl-border);
+  color: var(--pl-text-dim);
+  border-radius: 10px;
+}
+
+.pl-library .pl-card-more:hover {
+  color: var(--pl-text);
+  border-color: var(--pl-border-strong);
+  background: var(--pl-surface-3);
+}
+
+.pl-library .pl-card--selected {
+  border-color: var(--pl-accent);
+  background: var(--pl-accent-soft);
+  box-shadow:
+    0 0 0 1px var(--pl-accent),
+    0 10px 28px rgba(0, 0, 0, 0.38);
+}
+
+.pl-library .pl-card-check {
+  background: var(--pl-surface-3);
+  border: 1px solid var(--pl-border-strong);
+  color: var(--pl-text-dim);
+}
+
+.pl-library .pl-card--selected .pl-card-check {
+  background: var(--pl-accent);
+  border-color: var(--pl-accent);
+  color: #fff;
+}
+
+.pl-library .pl-card--renaming .mirrored-rename-input {
+  background: var(--pl-surface-3);
+  border: 1px solid var(--pl-accent);
+  color: var(--pl-text);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.pl-library .pl-card--renaming .mirrored-rename-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--pl-accent-soft);
+}
+
+/* ── Overflow menu ──────────────────────────────────────────────────────────
+   Rendered inline in the mirrored tab tree (not a portal), so the scope
+   reaches it. Every item stays exactly where it was. */
+
+.pl-library .pl-menu {
+  background: var(--pl-surface-2);
+  border: 1px solid var(--pl-border-strong);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
+  padding: 6px;
+  min-width: 200px;
+}
+
+.pl-library .pl-menu-item {
+  color: var(--pl-text-dim);
+  border-radius: 9px;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+
+.pl-library .pl-menu-item:hover {
+  background: var(--pl-surface-3);
+  color: var(--pl-text);
+}
+
+.pl-library .pl-menu-item--danger {
+  color: #f0928c;
+}
+
+.pl-library .pl-menu-item--danger:hover {
+  background: rgba(224, 85, 78, 0.14);
+  color: #f6a5a0;
+}
+
+.pl-library .pl-menu-item--on {
+  color: var(--pl-text);
+}
+
+.pl-library .pl-menu-heading {
+  color: var(--pl-text-faint);
+}
+
+.pl-library .pl-menu-sep {
+  background: var(--pl-border);
+}
+
+.pl-library .pl-menu-profile select {
+  background: var(--pl-surface-3);
+  border: 1px solid var(--pl-border);
+  color: var(--pl-text-dim);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  width: 100%;
+}
+
+/* ── Server Playlists tab: same language, lighter touch ───────────────────── */
+
+.pl-library .server-pl-grid {
+  gap: 14px;
+  padding: 4px 8px 12px;
+}
+
+.pl-library .server-pl-card {
+  background: var(--pl-surface);
+  border: 1px solid var(--pl-border);
+  border-radius: var(--pl-radius);
+}
+
+.pl-library .server-pl-card:hover {
+  border-color: var(--pl-border-strong);
+}
+
+.pl-library .server-pl-section-title {
+  color: var(--pl-text);
+}
+
+.pl-library .server-pl-card-name {
+  color: var(--pl-text);
+}
+
+.pl-library .server-pl-card-meta {
+  color: var(--pl-text-dim);
+}
+
+.pl-library .server-pl-card-action {
+  color: var(--pl-text-dim);
+}
+
+.pl-library .server-pl-card:hover .server-pl-card-action {
+  color: var(--pl-text);
+}
+
+/* ── Keyboard: visible focus everywhere a mouse gets a hover ───────────────── */
+
+.pl-library .sync-tab-button:focus-visible,
+.pl-library .library-tab:focus-visible,
+.pl-library .library-source:focus-visible,
+.pl-library .library-select-toggle:focus-visible,
+.pl-library .refresh-button:focus-visible {
+  outline: 2px solid var(--pl-accent);
+  outline-offset: 2px;
+}

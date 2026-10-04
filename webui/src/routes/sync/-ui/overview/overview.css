@@ -1,0 +1,536 @@
+/**
+ * The Playlists Overview — mission control, not a management console.
+ *
+ * Deep black, thin elegant type, artwork-forward, calm. One screen: the 48h
+ * sync timeline on the left, Now Syncing + Needs Attention on the right, and
+ * a quiet activity strip along the bottom.
+ */
+
+.ov {
+  background: #000;
+  color: #f5f5f7;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, 'Segoe UI', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  padding: 32px 40px 0;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+.ov-main {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+  gap: 56px;
+  max-width: 1560px;
+  margin: 0 auto;
+}
+
+.ov-section {
+  margin-bottom: 40px;
+}
+
+/* Thin, elegant section headers. */
+.ov-h {
+  font-size: 22px;
+  font-weight: 300;
+  letter-spacing: -0.01em;
+  color: #f5f5f7;
+  margin: 0 0 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ov-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f5a623;
+  background: rgba(245, 166, 35, 0.12);
+  border: 1px solid rgba(245, 166, 35, 0.3);
+  border-radius: 999px;
+  padding: 2px 9px;
+  letter-spacing: 0;
+}
+
+.ov-quiet {
+  color: #86868b;
+  font-size: 13px;
+  font-weight: 400;
+  margin: 12px 0 0;
+}
+
+.ov-error {
+  color: #86868b;
+  font-size: 14px;
+  padding: 48px 0;
+  text-align: center;
+}
+
+.ov-link {
+  background: none;
+  border: none;
+  color: #5eead4;
+  font-size: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ---------- Timeline ---------- */
+
+.ov-tl-track {
+  position: relative;
+  height: 300px;
+  margin-top: 4px;
+  border-radius: 16px;
+  transition: background 0.2s ease;
+}
+
+.ov-tl-track--over {
+  background: rgba(94, 234, 212, 0.05);
+  outline: 1px dashed rgba(94, 234, 212, 0.45);
+  outline-offset: -1px;
+}
+
+.ov-tl-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 26px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(
+    90deg,
+    rgba(94, 234, 212, 0.9),
+    rgba(94, 234, 212, 0.35) 55%,
+    rgba(94, 234, 212, 0.12)
+  );
+  box-shadow: 0 0 14px rgba(94, 234, 212, 0.45);
+}
+
+.ov-tl-marker {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.ov-tl-tick {
+  width: 2px;
+  height: 9px;
+  margin-top: 22px;
+  background: rgba(245, 245, 247, 0.35);
+  border-radius: 1px;
+}
+
+.ov-tl-marker-label {
+  position: absolute;
+  top: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: #86868b;
+  white-space: nowrap;
+}
+
+.ov-tl-node-wrap {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+}
+
+.ov-tl-dot {
+  position: absolute;
+  top: 22px;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #5eead4;
+  box-shadow: 0 0 10px rgba(94, 234, 212, 0.9);
+  transform: translate(-50%, 0);
+}
+
+.ov-tl-node {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 128px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  color: inherit;
+  font: inherit;
+}
+
+.ov-tl-node--lane0 {
+  top: 46px;
+}
+
+.ov-tl-node--lane1 {
+  top: 172px;
+}
+
+.ov-tl-node:hover .ov-tl-art,
+.ov-tl-node:focus-visible .ov-tl-art {
+  outline: 1px solid rgba(94, 234, 212, 0.6);
+  outline-offset: 3px;
+}
+
+.ov-tl-art {
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #1c1c1f;
+  display: block;
+}
+
+.ov-tl-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ov-tl-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #f5f5f7;
+  max-width: 128px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-tl-when {
+  font-size: 11px;
+  font-weight: 400;
+  color: #5eead4;
+}
+
+/* The dashed "drop here" affordance at the end of the axis. */
+.ov-tl-drop {
+  position: absolute;
+  right: 0;
+  top: 46px;
+  border: 1px dashed rgba(245, 245, 247, 0.28);
+  border-radius: 12px;
+  color: #86868b;
+  font-size: 12px;
+  padding: 22px 18px;
+  pointer-events: none;
+}
+
+/* ---------- Unscheduled tray ---------- */
+
+.ov-tl-tray {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ov-tl-tray-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #86868b;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ov-tl-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ov-tl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(245, 245, 247, 0.14);
+  background: #0b0b0d;
+  border-radius: 999px;
+  padding: 4px 14px 4px 4px;
+  font-size: 13px;
+  color: #f5f5f7;
+  cursor: grab;
+  user-select: none;
+}
+
+.ov-tl-chip:active {
+  cursor: grabbing;
+}
+
+.ov-tl-chip-art {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #1c1c1f;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ov-tl-chip-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* ---------- Now Syncing ---------- */
+
+.ov-syncing {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  background: #0a0a0c;
+  border: 1px solid rgba(245, 245, 247, 0.08);
+  border-radius: 18px;
+  padding: 18px;
+}
+
+.ov-syncing-art {
+  width: 60px;
+  height: 60px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #1c1c1f;
+  flex-shrink: 0;
+  display: block;
+}
+
+.ov-syncing-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ov-syncing-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.ov-syncing-name {
+  font-size: 15px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-syncing-bar {
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(245, 245, 247, 0.1);
+  overflow: hidden;
+}
+
+.ov-syncing-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: #5eead4;
+  box-shadow: 0 0 8px rgba(94, 234, 212, 0.7);
+  transition: width 0.4s ease;
+}
+
+.ov-syncing-sub {
+  font-size: 12px;
+  color: #86868b;
+}
+
+/* ---------- Needs Attention ---------- */
+
+.ov-attn-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ov-attn-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 2px;
+  border-bottom: 1px solid rgba(245, 245, 247, 0.07);
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.ov-attn-row:last-child {
+  border-bottom: none;
+}
+
+.ov-attn-row:hover {
+  background: rgba(245, 245, 247, 0.03);
+}
+
+.ov-attn-row:focus-visible {
+  outline: 1px solid rgba(94, 234, 212, 0.6);
+  outline-offset: 2px;
+}
+
+.ov-attn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f5a623;
+  box-shadow: 0 0 8px rgba(245, 166, 35, 0.8);
+  flex-shrink: 0;
+}
+
+.ov-attn-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.ov-attn-name {
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-attn-reason {
+  font-size: 12px;
+  color: #86868b;
+}
+
+.ov-attn-sync {
+  background: none;
+  border: 1px solid rgba(245, 245, 247, 0.22);
+  color: #f5f5f7;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 7px 18px;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-family: inherit;
+}
+
+.ov-attn-sync:hover {
+  border-color: #5eead4;
+  color: #5eead4;
+}
+
+/* ---------- Bottom strip ---------- */
+
+.ov-strip {
+  max-width: 1560px;
+  margin: 8px auto 0;
+  padding: 18px 0 26px;
+  border-top: 1px solid rgba(245, 245, 247, 0.07);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ov-strip-summary {
+  font-size: 12.5px;
+  color: #636366;
+}
+
+.ov-strip-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.ov-strip-btn {
+  background: none;
+  border: none;
+  color: #86868b;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-family: inherit;
+}
+
+.ov-strip-btn:hover {
+  color: #f5f5f7;
+  background: rgba(245, 245, 247, 0.06);
+}
+
+/* ---------- Loading skeleton ---------- */
+
+.ov-skel {
+  border-radius: 14px;
+  background: linear-gradient(
+    100deg,
+    rgba(245, 245, 247, 0.04) 40%,
+    rgba(245, 245, 247, 0.09) 50%,
+    rgba(245, 245, 247, 0.04) 60%
+  );
+  background-size: 200% 100%;
+  animation: ov-skel-pulse 1.6s ease-in-out infinite;
+}
+
+.ov-skel--h {
+  height: 28px;
+  width: 180px;
+  margin-bottom: 18px;
+}
+
+.ov-skel--timeline {
+  height: 300px;
+}
+
+.ov-skel--card {
+  height: 108px;
+  margin-bottom: 40px;
+}
+
+.ov-skel--rows {
+  height: 180px;
+}
+
+@keyframes ov-skel-pulse {
+  0% {
+    background-position: 180% 0;
+  }
+  100% {
+    background-position: -20% 0;
+  }
+}
+
+@media (max-width: 960px) {
+  .ov {
+    padding: 24px 20px 0;
+  }
+
+  .ov-main {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}

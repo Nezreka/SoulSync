@@ -18,7 +18,7 @@
  * `ServerCompareEditor` had no mount site anywhere before this file.
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import type { MirroredMatch, ServerPlaylist } from '../-sync.server';
 import type { SyncTabId } from '../-sync.shell';
@@ -34,10 +34,12 @@ import { ActivityModal, type ActivityTab } from './activity-modal';
 import { AddPlaylistSheet } from './add-playlist-sheet';
 import { AutoSyncModal } from './autosync-modal';
 import { BeatportTab } from './beatport-tab';
+import { DiscoverView } from './discover-view';
 import { ImportFileTab } from './import-file-tab';
 import { LastfmSyncTab } from './lastfm-sync-tab';
 import { ListenBrainzSyncTab, useLbCardOpen } from './lb-sync-tab';
 import { MirroredTab } from './mirrored-tab';
+import { OverviewView } from './overview/overview-view';
 import { ServerCompareEditor } from './server-compare-editor';
 import { ServerPlaylistList } from './server-playlist-list';
 import { SoulsyncDiscoveryTab } from './soulsync-discovery-tab';
@@ -112,14 +114,30 @@ export function SyncPage() {
    * left alive because other PAGES still call it.
    */
   const openMirroredDetail = useRef<((playlistId: number) => void) | undefined>(undefined);
+  /**
+   * Detail opens requested before the library mounted (the Overview is the
+   * default view now, so the library — and its opener registration — may not
+   * exist yet). A real queue, not a single slot: two rapid opens before the
+   * mount must not drop the first. Opening the library mounts MirroredTab,
+   * whose registration effect then drains this in order.
+   */
+  const pendingDetail = useRef<number[]>([]);
   const registerOpenDetail = useCallback((open: (playlistId: number) => void) => {
     openMirroredDetail.current = open;
+    const queued = pendingDetail.current;
+    pendingDetail.current = [];
+    for (const id of queued) open(id);
   }, []);
   const showMirroredDetail = useCallback((playlistId: number) => {
-    // Mirrored is the default tab, so the opener is registered before anything
-    // can ask for it. The fallback covers a future where it is not.
+    // The opener registers when the library mounts. The Overview is the
+    // default view now, so a detail open can arrive first — queue it and go
+    // to the library; the registration drains the queue. The legacy fallback
+    // covers only the case where even the tab opener is missing.
     if (openMirroredDetail.current) openMirroredDetail.current(playlistId);
-    else void window.openMirroredPlaylistModal?.(playlistId);
+    else if (openTab.current) {
+      pendingDetail.current.push(playlistId);
+      openTab.current('mirrored');
+    } else void window.openMirroredPlaylistModal?.(playlistId);
   }, []);
   /** The pending url, but only for the tab it was meant for. */
   const pendingFor = useCallback(
@@ -300,6 +318,22 @@ export function SyncPage() {
       )}
       <SyncShell
         panels={panels}
+        overview={
+          <OverviewView
+            onActivity={() => setActivityOpen(true)}
+            onOpenAutoSync={() => setAutoSyncOpen(true)}
+            onRunPlaylist={(playlistId, name) => void page.pipeline.run(playlistId, name)}
+            onOpenPlaylist={showMirroredDetail}
+          />
+        }
+        discover={
+          <DiscoverView
+            beatport={panels.beatport}
+            discovery={panels['soulsync-discovery-sync']}
+            onOpenAutoSync={() => setAutoSyncOpen(true)}
+            onActivity={() => setActivityOpen(true)}
+          />
+        }
         // Toggles: pressing the button again closes the sheet.
         onAddPlaylist={(next) => setAddAnchor((prev) => (prev ? null : next))}
         onAutoSync={() => setAutoSyncOpen(true)}

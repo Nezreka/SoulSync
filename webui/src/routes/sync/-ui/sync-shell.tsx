@@ -37,10 +37,23 @@ import {
   normalizeSyncTab,
   type SyncTabId,
 } from '../-sync.shell';
+import { SYNC_VIEWS, normalizeSyncView, type SyncViewId } from '../-sync.views';
+
+import './sync-overhaul.css';
+// The Library view's stylesheet. Loaded by the shell, which owns the
+// `.pl-library` wrapper — every rule is scoped under it, so nothing leaks
+// onto other views. (It used to ride on PlaylistCard, but an empty mirrored
+// list renders zero cards and the Server tab uses its own card, leaving the
+// library chrome unstyled in both cases.)
+import './sync-overhaul-library.css';
 
 export interface SyncShellProps {
   /** One node per tab id. A tab with no entry renders an empty panel. */
   panels: Partial<Record<SyncTabId, ReactNode>>;
+  /** The Overview view — mission control. Mounted only when active. */
+  overview?: ReactNode;
+  /** The Discover view — the curation pipeline. Mounted only when active. */
+  discover?: ReactNode;
   onAutoSync: () => void;
   onActivity: () => void;
   /** The right-hand sidebar (S2). Rendered as the second grid column. */
@@ -84,6 +97,29 @@ export interface SyncShellProps {
   registerOpenTab?: (open: (tab: SyncTabId) => void) => void;
 }
 
+/** 2237-2241. The rest are vanilla seams; see -sync.shell.ts.
+ *
+ * Exported so the Discover view's stage cards and the Overview's action rows
+ * can reach the same actions the old header buttons ran — one implementation,
+ * not three copies.
+ */
+export function runSyncHeaderAction(
+  key: string,
+  onAutoSync: () => void,
+  onActivity: () => void,
+) {
+  runHeaderAction(key, onAutoSync, onActivity);
+}
+
+/** The header actions that keep a button in the new header: the two actions
+ *  that CHANGE what the page will do. Everything else moved to the view
+ *  where it belongs — see the view map in the plan. */
+const HEADER_BUTTON_KEYS: readonly string[] = ['auto-sync'];
+
+function headerButtons() {
+  return SYNC_HEADER_ACTIONS.filter((a) => HEADER_BUTTON_KEYS.includes(a.key));
+}
+
 /** 2237-2241. The rest are vanilla seams; see -sync.shell.ts. */
 function runHeaderAction(key: string, onAutoSync: () => void, onActivity: () => void) {
   if (key === 'discovery-pool') {
@@ -116,6 +152,8 @@ function runHeaderAction(key: string, onAutoSync: () => void, onActivity: () => 
 
 export function SyncShell({
   panels,
+  overview,
+  discover,
   onAddPlaylist,
   onAutoSync,
   onActivity,
@@ -124,6 +162,21 @@ export function SyncShell({
   onTabChange,
   registerOpenTab,
 }: SyncShellProps) {
+  const [view, setView] = useState<SyncViewId>('overview');
+  /**
+   * The library's panels keep the port's one-shot mounting ACROSS views, not
+   * just across tabs: once the library has been opened, its subtree stays
+   * mounted and is only hidden, so leaving for Overview or Discover does not
+   * throw away what the tabs loaded. Overview and Discover are new views
+   * designed fetch-on-mount — mission control should be fresh each visit —
+   * so only the library gets the keep-alive treatment.
+   */
+  const [librarySeen, setLibrarySeen] = useState(false);
+  const goView = useCallback((next: SyncViewId) => {
+    const v = normalizeSyncView(next);
+    if (v === 'library') setLibrarySeen(true);
+    setView(v);
+  }, []);
   const [tab, setTab] = useState<SyncTabId>(SYNC_DEFAULT_TAB);
   // Which panels have ever been opened. See the header note: the vanilla's
   // one-shot load flags mean a tab keeps what it loaded after you leave it.
@@ -147,6 +200,17 @@ export function SyncShell({
   const open = useCallback((next: SyncTabId) => {
     const id = normalizeSyncTab(next);
     onTabChangeRef.current?.();
+    // Beatport and SoulSync Discovery live in the Discover view now; every
+    // other tab is library. Routing through the view keeps one navigation
+    // model: Add playlist can still land you on a source tab from any view.
+    // (Discovery must route here, not to the library strip — DiscoverView
+    // already mounts that panel, and a second mount in the hidden library
+    // div would double-fetch and diverge.)
+    if (id === 'beatport' || id === 'soulsync-discovery-sync') {
+      goView('discover');
+      return;
+    }
+    goView('library');
     setTab(id);
     setOpened((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
     setHidden((prev) => {
@@ -156,7 +220,7 @@ export function SyncShell({
       return nextHidden;
     });
     rememberRoutedTab(id);
-  }, []);
+  }, [goView]);
 
   useEffect(() => {
     registerOpenTabRef.current?.(open);
@@ -183,7 +247,7 @@ export function SyncShell({
     // inside `<div class="page" id="sync-page">`; the React roots collapse the
     // two and keep the id, which is how the legacy chrome still resolves a
     // page by `${pageId}-page`.
-    <div className="page-shell" id="sync-page">
+    <div className="page-shell pl-overhaul" id="sync-page">
       <div className="sync-header">
         <div className="sync-header-row">
           <div>
@@ -199,8 +263,23 @@ export function SyncShell({
               because the port does not emit inline styles; the rule is a 1:1
               transcription of those three declarations. */}
           <div className="sync-header-actions">
-            {/* Primary, and first: adding a playlist is what this page is FOR.
-                The four buttons beside it are all "what happened" surfaces. */}
+            {/* The view switcher: one control, three intents. It sits with the
+                primary actions because switching views IS the page's primary
+                navigation now. */}
+            <div className="pl-view-switch" role="tablist" aria-label="Playlists views">
+              {SYNC_VIEWS.map((v) => (
+                <button
+                  key={v.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === v.id}
+                  onClick={() => goView(v.id)}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
+            {/* Primary, and first: adding a playlist is what this page is FOR. */}
             {onAddPlaylist && (
               <button
                 type="button"
@@ -217,24 +296,26 @@ export function SyncShell({
                 + Add playlist
               </button>
             )}
-            {SYNC_HEADER_ACTIONS.map((action, index) => (
-              <Fragment key={action.key}>
-                {/* Divides the two actions that CHANGE something from the four
-                    that only report what already happened. */}
-                {index === 1 && <span className="sync-header-divider" />}
-                <button
-                  type="button"
-                  className={`btn btn--sm btn--secondary sync-history-btn${
-                    action.key === 'auto-sync' ? ' auto-sync-manager-btn' : ''
-                  }`}
-                  title={action.title}
-                  onClick={() => {
-                    runHeaderAction(action.key, onAutoSync, onActivity);
-                  }}
-                >
-                  {action.label}
-                </button>
-              </Fragment>
+            {/* Bulk schedule is the only header action left: the two actions
+                that CHANGE what the page will do. Match Review, Wing It Pool
+                and Library Match moved to the Discover view's pipeline;
+                Activity and Download Origins moved to the Overview. The
+                vanilla seams are untouched — runSyncHeaderAction is exported
+                so those views call the same implementation. */}
+            {headerButtons().map((action) => (
+              <button
+                key={action.key}
+                type="button"
+                className={`btn btn--sm btn--secondary sync-history-btn${
+                  action.key === 'auto-sync' ? ' auto-sync-manager-btn' : ''
+                }`}
+                title={action.title}
+                onClick={() => {
+                  runHeaderAction(action.key, onAutoSync, onActivity);
+                }}
+              >
+                {action.label}
+              </button>
             ))}
           </div>
         </div>
@@ -244,11 +325,23 @@ export function SyncShell({
         className={`sync-content-area${sidebarVisible ? ' sync-content-area--with-sidebar' : ''}`}
       >
         <div className="sync-main-panel">
-          <div className="sync-tabs" role="tablist">
-            {syncStripTabs(
-              tab,
-              [...opened].filter((id) => !hidden.has(id)),
-            ).map((t) => (
+          {view === 'overview' && overview}
+          {view === 'discover' && discover}
+          {librarySeen && (
+            <div
+              className="pl-library"
+              style={view === 'library' ? undefined : { display: 'none' }}
+            >
+              <div className="sync-tabs" role="tablist">
+                {syncStripTabs(
+                  tab,
+                  [...opened].filter((id) => !hidden.has(id)),
+                )
+                  // Beatport and SoulSync Discovery moved to the Discover view;
+                  // their chips no longer belong in the library's strip. The
+                  // panels still exist and `open(...)` routes to Discover.
+                  .filter((t) => t.id !== 'beatport' && t.id !== 'soulsync-discovery-sync')
+                  .map((t) => (
               <Fragment key={t.id}>
                 <button
                   type="button"
@@ -295,6 +388,8 @@ export function SyncShell({
               {opened.has(t.id) ? panels[t.id] : null}
             </div>
           ))}
+          </div>
+        )}
         </div>
         {sidebar}
       </div>

@@ -1,6 +1,11 @@
 /**
- * Differential tests for the sync page's shell — index.html 2226-2295 and the
- * tab handler at sync-services.js 3694-3811.
+ * Tests for the sync page's shell — the three-view IA (Overview / Library /
+ * Discover). The old fifteen-tab strip and six-button header are gone; the
+ * contract below is what replaced them.
+ *
+ * What survived unchanged: the title block, + Add playlist, Bulk schedule,
+ * the routed-tab machinery (open/remember/hide), the one-shot panel mounting,
+ * the sidebar slot, and every vanilla seam — they just live in new places.
  */
 
 import { act, fireEvent, render } from '@testing-library/react';
@@ -9,8 +14,9 @@ import { resolve } from 'node:path';
 import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { SYNC_PRIMARY_TAB_IDS, SYNC_TABS } from '../-sync.shell';
-import { SyncShell } from './sync-shell';
+import { SYNC_TABS } from '../-sync.shell';
+import { SYNC_VIEWS } from '../-sync.views';
+import { SyncShell, runSyncHeaderAction } from './sync-shell';
 
 function renderShell(over: Partial<React.ComponentProps<typeof SyncShell>> = {}) {
   const props: React.ComponentProps<typeof SyncShell> = {
@@ -22,16 +28,26 @@ function renderShell(over: Partial<React.ComponentProps<typeof SyncShell>> = {})
   return { props, ...render(<SyncShell {...props} />) };
 }
 
+/** The tab strip only exists inside the Library view now. */
+function openLibrary(container: HTMLElement) {
+  const btn = [...container.querySelectorAll('.pl-view-switch button')].find(
+    (b) => b.textContent === 'Library',
+  ) as HTMLElement;
+  fireEvent.click(btn);
+}
+
 afterEach(() => {
   delete window.openManualLibraryMatchTool;
   delete window.openSyncHistoryModal;
   delete window.openDownloadOriginsModal;
+  delete window.openDiscoveryPoolModal;
+  delete window.openWingItPoolModal;
   // routed tabs are remembered in localStorage now - without this, one
   // test's opened tab leaks into the next one's initial strip
   window.localStorage.clear();
 });
 
-describe('the header (2229-2243)', () => {
+describe('the header', () => {
   it('renders the title, icon and subtitle', () => {
     const { container } = renderShell();
     expect(container.querySelector('.sync-title span')?.textContent).toBe('Playlists');
@@ -45,65 +61,37 @@ describe('the header (2229-2243)', () => {
     );
   });
 
-  it('renders the action buttons in order, with their tooltips', () => {
-    const { container } = renderShell();
-    const btns = Array.from(container.querySelectorAll('.sync-header-actions button')).filter(
-      (b) => b.textContent !== '+ Add playlist',
-    );
-    expect(btns.map((b) => b.textContent)).toEqual([
-      'Bulk schedule',
-      'Match Review',
-      'Wing It Pool',
-      'Library Match',
-      'Activity',
-      'Download Origins',
-    ]);
-    expect(btns[0].getAttribute('title')).toBe(
+  it('keeps only the two actions that CHANGE something: Add playlist and Bulk schedule', () => {
+    // Match Review, Wing It Pool and Library Match moved to the Discover
+    // view's pipeline; Activity and Download Origins moved to the Overview.
+    // The header keeps the page's two verbs.
+    const { container } = renderShell({ onAddPlaylist: vi.fn() });
+    const labels = [...container.querySelectorAll('.sync-header-actions button')]
+      .filter((b) => !b.closest('.pl-view-switch'))
+      .map((b) => b.textContent);
+    expect(labels).toContain('+ Add playlist');
+    expect(labels).toContain('Bulk schedule');
+    expect(labels).not.toContain('Match Review');
+    expect(labels).not.toContain('Wing It Pool');
+    expect(labels).not.toContain('Library Match');
+    expect(labels).not.toContain('Activity');
+    expect(labels).not.toContain('Download Origins');
+  });
+
+  it('Bulk schedule still opens the Auto-Sync modal', () => {
+    const { container, props } = renderShell();
+    const btn = [...container.querySelectorAll('.sync-header-actions button')].find(
+      (b) => b.textContent === 'Bulk schedule',
+    ) as HTMLElement;
+    expect(btn.getAttribute('title')).toBe(
       'Schedule many mirrored playlists at once, and review the pipeline',
     );
-    expect(btns[5].getAttribute('title')).toBe('See every track your playlist syncs downloaded');
     // Only the bulk-schedule button carries the extra hook class the vanilla
     // gives it; the CLASS keeps its auto-sync name because vanilla CSS and the
     // dashboard tile both still select on it. Only the LABEL changed.
-    const byLabel = (label: string) =>
-      [...container.querySelectorAll('.sync-header-actions button')].find(
-        (b) => b.textContent === label,
-      ) as HTMLElement;
-    expect(byLabel('Bulk schedule').className).toContain('auto-sync-manager-btn');
-    expect(byLabel('Library Match').className).not.toContain('auto-sync-manager-btn');
-  });
-
-  it('routes each button to its own seam, Bulk schedule and Activity to React', () => {
-    // Selected by LABEL, not index: the row gained two buttons when the pool
-    // modals moved up from the Mirrored tab, and index-based assertions all
-    // silently pointed at the wrong control.
-    window.openManualLibraryMatchTool = vi.fn();
-    window.openDownloadOriginsModal = vi.fn();
-    window.openDiscoveryPoolModal = vi.fn();
-    window.openWingItPoolModal = vi.fn();
-    const { container, props } = renderShell();
-    const click = (label: string) => {
-      const btn = [...container.querySelectorAll('.sync-header-actions button')].find(
-        (b) => b.textContent === label,
-      ) as HTMLElement;
-      fireEvent.click(btn);
-    };
-
-    click('Bulk schedule');
+    expect(btn.className).toContain('auto-sync-manager-btn');
+    fireEvent.click(btn);
     expect(props.onAutoSync).toHaveBeenCalledTimes(1);
-    click('Library Match');
-    expect(window.openManualLibraryMatchTool).toHaveBeenCalledTimes(1);
-    // Activity is React, not a window seam: it holds the sync history AND the
-    // scheduled-run history, and the vanilla modal knows only the first.
-    click('Activity');
-    expect(props.onActivity).toHaveBeenCalledTimes(1);
-    click('Match Review');
-    expect(window.openDiscoveryPoolModal).toHaveBeenCalledTimes(1);
-    click('Wing It Pool');
-    expect(window.openWingItPoolModal).toHaveBeenCalledTimes(1);
-    click('Download Origins');
-    // 2241: the shared modal is scoped by this literal.
-    expect(window.openDownloadOriginsModal).toHaveBeenCalledWith('playlist');
   });
 
   it('does not throw when a vanilla seam is missing', () => {
@@ -115,31 +103,125 @@ describe('the header (2229-2243)', () => {
   });
 });
 
+describe('the moved header actions', () => {
+  // The five buttons left the header, but their seams did not move:
+  // runSyncHeaderAction is the one implementation the views call.
+  it('routes each moved action to its own seam, Activity to React', () => {
+    window.openManualLibraryMatchTool = vi.fn();
+    window.openDownloadOriginsModal = vi.fn();
+    window.openDiscoveryPoolModal = vi.fn();
+    window.openWingItPoolModal = vi.fn();
+    const onAutoSync = vi.fn();
+    const onActivity = vi.fn();
+
+    runSyncHeaderAction('library-match', onAutoSync, onActivity);
+    expect(window.openManualLibraryMatchTool).toHaveBeenCalledTimes(1);
+    runSyncHeaderAction('discovery-pool', onAutoSync, onActivity);
+    expect(window.openDiscoveryPoolModal).toHaveBeenCalledTimes(1);
+    runSyncHeaderAction('wing-it-pool', onAutoSync, onActivity);
+    expect(window.openWingItPoolModal).toHaveBeenCalledTimes(1);
+    runSyncHeaderAction('download-origins', onAutoSync, onActivity);
+    // the shared modal is scoped by this literal.
+    expect(window.openDownloadOriginsModal).toHaveBeenCalledWith('playlist');
+    // Activity is React, not a window seam: it holds the sync history AND the
+    // scheduled-run history, and the vanilla modal knows only the first.
+    runSyncHeaderAction('activity', onAutoSync, onActivity);
+    expect(onActivity).toHaveBeenCalledTimes(1);
+    runSyncHeaderAction('auto-sync', onAutoSync, onActivity);
+    expect(onAutoSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not throw when a vanilla seam is missing', () => {
+    const onAutoSync = vi.fn();
+    const onActivity = vi.fn();
+    expect(() => {
+      for (const key of [
+        'discovery-pool',
+        'wing-it-pool',
+        'library-match',
+        'activity',
+        'download-origins',
+      ]) {
+        runSyncHeaderAction(key, onAutoSync, onActivity);
+      }
+    }).not.toThrow();
+  });
+});
+
+describe('the view switcher', () => {
+  it('offers the three views, in order', () => {
+    const { container } = renderShell();
+    const labels = [...container.querySelectorAll('.pl-view-switch button')].map(
+      (b) => b.textContent,
+    );
+    expect(labels).toEqual(SYNC_VIEWS.map((v) => v.label));
+    expect(labels).toEqual(['Overview', 'Library', 'Discover']);
+  });
+
+  it('lands on Overview — mission control, not the tab strip', () => {
+    const { container } = renderShell({
+      overview: <div data-testid="overview-node" />,
+    });
+    const selected = container.querySelector('.pl-view-switch button[aria-selected="true"]');
+    expect(selected?.textContent).toBe('Overview');
+    expect(container.querySelector('[data-testid="overview-node"]')).not.toBeNull();
+    // the library's tab strip is not on screen until you go there
+    expect(container.querySelector('.sync-tabs')).toBeNull();
+  });
+
+  it('switching views swaps the mounted node', () => {
+    const { container } = renderShell({
+      overview: <div data-testid="overview-node" />,
+      discover: <div data-testid="discover-node" />,
+    });
+    const click = (label: string) => {
+      const btn = [...container.querySelectorAll('.pl-view-switch button')].find(
+        (b) => b.textContent === label,
+      ) as HTMLElement;
+      fireEvent.click(btn);
+    };
+    click('Discover');
+    expect(container.querySelector('[data-testid="discover-node"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="overview-node"]')).toBeNull();
+    expect(
+      container.querySelector('.pl-view-switch button[aria-selected="true"]')?.textContent,
+    ).toBe('Discover');
+    click('Library');
+    expect(container.querySelector('.sync-tabs')).not.toBeNull();
+  });
+
+  it('exposes the selection to assistive tech', () => {
+    const { container } = renderShell();
+    const aria = (label: string) =>
+      [...container.querySelectorAll('.pl-view-switch button')].find(
+        (b) => b.textContent === label,
+      )?.getAttribute('aria-selected');
+    expect(aria('Overview')).toBe('true');
+    expect(aria('Library')).toBe('false');
+  });
+});
+
 describe('the page root', () => {
-  it('carries page-shell and the page id, as every flipped route does', () => {
+  it('carries page-shell, the overhaul class, and the page id', () => {
     const { container } = renderShell();
     const root = container.firstElementChild as HTMLElement;
-    expect(root.className).toBe('page-shell');
+    expect(root.className).toBe('page-shell pl-overhaul');
     // The vanilla nests page-shell inside `<div class="page" id="sync-page">`;
     // the React roots collapse the two and keep the id.
     expect(root.id).toBe('sync-page');
   });
 });
 
-describe('the tab strip', () => {
-  it('renders THREE permanent chips, not fifteen', () => {
-    // Six of the fifteen were duplicates of one another and the four
-    // paste-a-URL tabs differed at the input step not at all. They are reached
-    // through Add playlist now, which detects the service from the link.
+describe('the library tab strip', () => {
+  it('renders TWO permanent chips — mirrored and server, not beatport', () => {
+    // Beatport moved to the Discover view; it is a chart browser, not library.
     const { container } = renderShell();
+    openLibrary(container);
     const btns = Array.from(container.querySelectorAll('.sync-tab-button'));
-    expect(btns.map((b) => b.getAttribute('data-tab'))).toEqual(['mirrored', 'server', 'beatport']);
+    expect(btns.map((b) => b.getAttribute('data-tab'))).toEqual(['mirrored', 'server']);
   });
 
   it('opens YouTube Music as a routed tab, same as the other sources', () => {
-    // ytmusic has no permanent chip (like spotify-public, tidal, etc.) — it
-    // is reached through Add playlist / the account-listing flow, which
-    // opens it by id exactly like the other routed sources.
     let open!: (tab: string) => void;
     const { container } = renderShell({
       registerOpenTab: (fn) => {
@@ -149,24 +231,25 @@ describe('the tab strip', () => {
     act(() => {
       open('ytmusic');
     });
+    // routing a source tab lands in the library view, where its chip lives
+    expect(
+      container.querySelector('.pl-view-switch button[aria-selected="true"]')?.textContent,
+    ).toBe('Library');
     const withRouted = Array.from(container.querySelectorAll('.sync-tab-button')).map((b) =>
       b.getAttribute('data-tab'),
     );
-    expect(withRouted).toEqual(['mirrored', 'server', 'beatport', 'ytmusic']);
+    expect(withRouted).toEqual(['mirrored', 'server', 'ytmusic']);
     expect(container.querySelector('[data-tab="ytmusic"]')?.className).toContain('active');
   });
 
-  it('opens on Mirrored — the library, not a source directory', () => {
+  it('opens the library on Mirrored — the library, not a source directory', () => {
     const { container } = renderShell();
+    openLibrary(container);
     expect(container.querySelector('[data-tab="mirrored"]')?.className).toContain('active');
     expect(container.querySelector('#mirrored-tab-content')?.className).toContain('active');
   });
 
   it('shows a routed tab once opened, and KEEPS it after leaving', () => {
-    // A panel with no chip is a room with no door - and the first cut
-    // re-bricked the door the moment you stepped out: the loaded playlists
-    // survived in localStorage while the only way back vanished ("the
-    // Spotify Link button only shows if I paste a link again", aug 25).
     let open!: (tab: string) => void;
     const { container } = renderShell({
       registerOpenTab: (fn) => {
@@ -179,22 +262,20 @@ describe('the tab strip', () => {
     const withRouted = Array.from(container.querySelectorAll('.sync-tab-button')).map((b) =>
       b.getAttribute('data-tab'),
     );
-    expect(withRouted).toEqual(['mirrored', 'server', 'beatport', 'spotify-public']);
+    expect(withRouted).toEqual(['mirrored', 'server', 'spotify-public']);
     expect(container.querySelector('[data-tab="spotify-public"]')?.className).toContain('active');
 
     act(() => {
       open('server');
     });
     // the chip stays; only the highlight moves
-    expect(container.querySelectorAll('.sync-tab-button')).toHaveLength(4);
+    expect(container.querySelectorAll('.sync-tab-button')).toHaveLength(3);
     expect(container.querySelector('[data-tab="spotify-public"]')?.className).not.toContain(
       'active',
     );
   });
 
   it('hides a routed chip with its ×, for good, and Add playlist brings it back (#1402)', () => {
-    // cremonies #1402: sources you never use pile up in the strip with no
-    // way to clear them. the three permanent chips have no ×.
     let open!: (tab: string) => void;
     const view = renderShell({
       panels: { deezer: <div id="probe" /> },
@@ -212,11 +293,11 @@ describe('the tab strip', () => {
       Array.from(view.container.querySelectorAll('.sync-tab-button')).map((b) =>
         b.getAttribute('data-tab'),
       );
-    expect(chips()).toEqual(['mirrored', 'server', 'beatport', 'spotify', 'deezer']);
+    expect(chips()).toEqual(['mirrored', 'server', 'spotify', 'deezer']);
     expect(view.container.querySelectorAll('.sync-tab-close')).toHaveLength(2);
 
     fireEvent.click(view.getByLabelText('Hide Deezer tab'));
-    expect(chips()).toEqual(['mirrored', 'server', 'beatport', 'spotify']);
+    expect(chips()).toEqual(['mirrored', 'server', 'spotify']);
     // it was the active one, so we land back on the library
     expect(view.container.querySelector('[data-tab="mirrored"]')?.className).toContain('active');
     // chip gone, panel kept
@@ -229,11 +310,12 @@ describe('the tab strip', () => {
         open = fn as (tab: string) => void;
       },
     });
+    openLibrary(again.container as unknown as HTMLElement);
     const chipsAgain = () =>
       Array.from(again.container.querySelectorAll('.sync-tab-button')).map((b) =>
         b.getAttribute('data-tab'),
       );
-    expect(chipsAgain()).toEqual(['mirrored', 'server', 'beatport', 'spotify']);
+    expect(chipsAgain()).toEqual(['mirrored', 'server', 'spotify']);
 
     // opening the source again brings it back
     act(() => {
@@ -243,8 +325,6 @@ describe('the tab strip', () => {
   });
 
   it('keeps a routed panel MOUNTED after its chip disappears', () => {
-    // The chip is navigation; the panel is state. Losing the panel when the
-    // chip goes would throw away a playlist the user just loaded.
     let open!: (tab: string) => void;
     const { container } = renderShell({
       panels: { 'spotify-public': <div id="probe" /> },
@@ -264,18 +344,20 @@ describe('the tab strip', () => {
 
   it('gives each rendered chip its sprite class and its own title', () => {
     const { container } = renderShell();
+    openLibrary(container);
     const icon = (tab: string) =>
       container.querySelector(`[data-tab="${tab}"] .tab-icon`)?.className;
     expect(icon('mirrored')).toBe('tab-icon mirrored-icon');
     expect(icon('server')).toBe('tab-icon server-icon');
-    expect(icon('beatport')).toBe('tab-icon beatport-icon');
-    for (const t of SYNC_TABS.filter((x) => SYNC_PRIMARY_TAB_IDS.includes(x.id))) {
+    for (const id of ['mirrored', 'server'] as const) {
+      const t = SYNC_TABS.find((x) => x.id === id)!;
       expect(container.querySelector(`[data-tab="${t.id}"]`)?.getAttribute('title')).toBe(t.label);
     }
   });
 
   it('gives the server tab its own extra class', () => {
     const { container } = renderShell();
+    openLibrary(container);
     expect(container.querySelector('[data-tab="server"]')?.className).toContain('sync-tab-server');
     expect(container.querySelector('[data-tab="mirrored"]')?.className).not.toContain(
       'sync-tab-server',
@@ -284,62 +366,87 @@ describe('the tab strip', () => {
 
   it('renders a panel for EVERY tab, strip or not — routing depends on it', () => {
     const { container } = renderShell();
+    openLibrary(container);
     for (const t of SYNC_TABS) {
       expect(container.querySelector(`#${t.id}-tab-content`)).not.toBeNull();
     }
   });
 
   it('no longer renders the fifteen-tab divider', () => {
-    // It marked the boundary after Server Playlists in a crowded strip; with
-    // three chips it separates nothing.
     const { container } = renderShell();
+    openLibrary(container);
     expect(container.querySelectorAll('.sync-tab-divider')).toHaveLength(0);
   });
 });
 
-describe('switching tabs (3702-3715)', () => {
-  it('opens on Mirrored', () => {
-    const { container } = renderShell();
-    expect(container.querySelector('[data-tab="mirrored"]')?.className).toContain('active');
-    expect(container.querySelector('#mirrored-tab-content')?.className).toContain('active');
+describe('opening a tab routes to its view', () => {
+  it("open('beatport') lands in Discover, where its panel lives now", () => {
+    let open!: (tab: string) => void;
+    const { container } = renderShell({
+      discover: <div data-testid="discover-node" />,
+      registerOpenTab: (fn) => {
+        open = fn as (tab: string) => void;
+      },
+    });
+    act(() => {
+      open('beatport');
+    });
+    expect(
+      container.querySelector('.pl-view-switch button[aria-selected="true"]')?.textContent,
+    ).toBe('Discover');
+    expect(container.querySelector('[data-testid="discover-node"]')).not.toBeNull();
   });
 
+  it("open('mirrored') lands in the library — the import tab's post-write target", () => {
+    // importFileSubmit's tail clicked the mirrored tab button and reloaded the
+    // list; the opener is that click now.
+    let open!: (tab: string) => void;
+    const { container } = renderShell({
+      registerOpenTab: (fn) => {
+        open = fn as (tab: string) => void;
+      },
+    });
+    act(() => {
+      open('mirrored');
+    });
+    expect(
+      container.querySelector('.pl-view-switch button[aria-selected="true"]')?.textContent,
+    ).toBe('Library');
+    expect(container.querySelector('[data-tab="mirrored"]')?.className).toContain('active');
+  });
+});
+
+describe('switching tabs inside the library', () => {
   it('moves the active class on both the button and the panel', () => {
     const { container } = renderShell();
-    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
+    openLibrary(container);
+    fireEvent.click(container.querySelector('[data-tab="server"]') as HTMLElement);
 
-    expect(container.querySelector('[data-tab="beatport"]')?.className).toContain('active');
-    expect(container.querySelector('[data-tab="server"]')?.className).not.toContain('active');
-    expect(container.querySelector('#beatport-tab-content')?.className).toContain('active');
-    expect(container.querySelector('#server-tab-content')?.className).not.toContain('active');
+    expect(container.querySelector('[data-tab="server"]')?.className).toContain('active');
+    expect(container.querySelector('[data-tab="mirrored"]')?.className).not.toContain('active');
+    expect(container.querySelector('#server-tab-content')?.className).toContain('active');
+    expect(container.querySelector('#mirrored-tab-content')?.className).not.toContain('active');
   });
 
   it('marks exactly ONE tab active at a time', () => {
     const { container } = renderShell();
-    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
+    openLibrary(container);
+    fireEvent.click(container.querySelector('[data-tab="server"]') as HTMLElement);
     expect(container.querySelectorAll('.sync-tab-button.active')).toHaveLength(1);
     expect(container.querySelectorAll('.sync-tab-content.active')).toHaveLength(1);
   });
 
-  it('renders a panel for every tab, so the ids resolve like the vanilla ones', () => {
-    // 3714 does an unguarded getElementById(`${tabId}-tab-content`); every id
-    // must exist or the vanilla would throw mid-handler.
-    const { container } = renderShell();
-    for (const t of SYNC_TABS) {
-      expect(container.querySelector(`#${t.id}-tab-content`)).not.toBeNull();
-    }
-  });
-
   it('exposes the selection to assistive tech', () => {
     const { container } = renderShell();
+    openLibrary(container);
     const aria = (tab: string) =>
       container.querySelector(`[data-tab="${tab}"]`)?.getAttribute('aria-selected');
     expect(aria('mirrored')).toBe('true');
-    expect(aria('beatport')).toBe('false');
+    expect(aria('server')).toBe('false');
 
-    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
+    fireEvent.click(container.querySelector('[data-tab="server"]') as HTMLElement);
     expect(aria('mirrored')).toBe('false');
-    expect(aria('beatport')).toBe('true');
+    expect(aria('server')).toBe('true');
   });
 });
 
@@ -347,9 +454,11 @@ describe('the tab-change signal', () => {
   it('fires on every switch, with the tab already updated', () => {
     const onTabChange = vi.fn();
     const { container } = renderShell({ onTabChange });
-    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
-    expect(onTabChange).toHaveBeenCalledTimes(1);
+    openLibrary(container);
     fireEvent.click(container.querySelector('[data-tab="server"]') as HTMLElement);
+    expect(onTabChange).toHaveBeenCalledTimes(1);
+    // switching VIEWS is not a tab switch — the signal stays about tabs
+    fireEvent.click(container.querySelector('[data-tab="mirrored"]') as HTMLElement);
     expect(onTabChange).toHaveBeenCalledTimes(2);
   });
 
@@ -359,6 +468,7 @@ describe('the tab-change signal', () => {
     // off. Filtering same-tab clicks would change that behaviour.
     const onTabChange = vi.fn();
     const { container } = renderShell({ onTabChange });
+    openLibrary(container);
     const active = container.querySelector('[data-tab="mirrored"]') as HTMLElement;
     fireEvent.click(active);
     fireEvent.click(active);
@@ -367,10 +477,11 @@ describe('the tab-change signal', () => {
 
   it('is optional — the shell works without it', () => {
     const { container } = renderShell();
+    openLibrary(container);
     expect(() => {
-      fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
+      fireEvent.click(container.querySelector('[data-tab="server"]') as HTMLElement);
     }).not.toThrow();
-    expect(container.querySelector('#beatport-tab-content')?.className).toContain('active');
+    expect(container.querySelector('#server-tab-content')?.className).toContain('active');
   });
 });
 
@@ -378,19 +489,24 @@ describe('panel mounting — the one-shot load flags (3724-3803)', () => {
   const panels = {
     mirrored: <div data-testid="p-mirrored">mirrored</div>,
     server: <div data-testid="p-server">server</div>,
-    beatport: <div data-testid="p-beatport">beatport</div>,
   };
 
-  it('mounts only the default panel to begin with', () => {
-    const { container } = renderShell({ panels });
-    expect(container.querySelector('[data-testid="p-mirrored"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="p-beatport"]')).toBeNull();
+  it('mounts the overview node on landing, not the library panels', () => {
+    // The old default mounted Mirrored; the new default is mission control.
+    // Library panels keep their one-shot semantics — they just start
+    // unopened now.
+    const { container } = renderShell({
+      panels,
+      overview: <div data-testid="p-overview">overview</div>,
+    });
+    expect(container.querySelector('[data-testid="p-overview"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="p-mirrored"]')).toBeNull();
   });
 
-  it('mounts a panel the first time its tab is opened', () => {
+  it('mounts a library panel the first time its view opens', () => {
     const { container } = renderShell({ panels });
-    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
-    expect(container.querySelector('[data-testid="p-beatport"]')).not.toBeNull();
+    openLibrary(container);
+    expect(container.querySelector('[data-testid="p-mirrored"]')).not.toBeNull();
   });
 
   it('KEEPS a panel mounted after leaving it — the one-shot flags never reset', () => {
@@ -398,20 +514,19 @@ describe('panel mounting — the one-shot load flags (3724-3803)', () => {
     // clears it, so returning to a tab shows what it already loaded rather
     // than re-fetching. Unmounting on leave would re-fetch every visit.
     const { container } = renderShell({ panels });
-    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
+    openLibrary(container);
     fireEvent.click(container.querySelector('[data-tab="server"]') as HTMLElement);
-    expect(container.querySelector('[data-testid="p-beatport"]')).not.toBeNull();
+    // leaving the library for another view keeps the panels too
+    fireEvent.click(
+      [...container.querySelectorAll('.pl-view-switch button')].find(
+        (b) => b.textContent === 'Overview',
+      ) as HTMLElement,
+    );
     expect(container.querySelector('[data-testid="p-server"]')).not.toBeNull();
-    // ...and only the current one is visible.
-    expect(container.querySelector('#beatport-tab-content')?.className).not.toContain('active');
-    expect(container.querySelector('#server-tab-content')?.className).toContain('active');
+    expect(container.querySelector('[data-testid="p-mirrored"]')).not.toBeNull();
   });
 
   it('mounts each panel only ONCE across repeated visits', () => {
-    // Counted in an EFFECT, not the render body: a panel that stays mounted
-    // still re-renders when the shell's state changes, so a render counter
-    // would tick without a remount and prove nothing. What matters is that the
-    // fetch-on-mount never runs a second time.
     let mounts = 0;
     function Counted() {
       useEffect(() => {
@@ -419,24 +534,24 @@ describe('panel mounting — the one-shot load flags (3724-3803)', () => {
       }, []);
       return <div data-testid="counted" />;
     }
-    const { container } = renderShell({ panels: { beatport: <Counted /> } });
-    const tidal = container.querySelector('[data-tab="beatport"]') as HTMLElement;
+    const { container } = renderShell({ panels: { server: <Counted /> } });
+    openLibrary(container);
     const server = container.querySelector('[data-tab="server"]') as HTMLElement;
+    const mirrored = container.querySelector('[data-tab="mirrored"]') as HTMLElement;
 
     expect(mounts).toBe(0);
-    fireEvent.click(tidal);
+    fireEvent.click(server);
     expect(mounts).toBe(1);
+    fireEvent.click(mirrored);
     fireEvent.click(server);
-    fireEvent.click(tidal);
-    fireEvent.click(server);
-    fireEvent.click(tidal);
     expect(mounts).toBe(1);
   });
 
   it('renders an empty panel for a tab with no content supplied', () => {
     const { container } = renderShell({ panels: { mirrored: panels.mirrored } });
-    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
-    expect(container.querySelector('#beatport-tab-content')?.textContent).toBe('');
+    openLibrary(container);
+    fireEvent.click(container.querySelector('[data-tab="server"]') as HTMLElement);
+    expect(container.querySelector('#server-tab-content')?.textContent).toBe('');
   });
 });
 
@@ -498,11 +613,12 @@ describe('the sidebar slot', () => {
   });
 });
 
-describe('the three tabs are named, not just drawn', () => {
+describe('the library chips are named, not just drawn', () => {
   const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
 
   it('the label is rendered in the markup at all', () => {
     const { container } = renderShell();
+    openLibrary(container);
     const labels = [...container.querySelectorAll('.sync-tab-label')].map((n) => n.textContent);
     expect(labels.length).toBeGreaterThan(0);
     expect(labels).toContain('Mirrored');
@@ -510,7 +626,7 @@ describe('the three tabs are named, not just drawn', () => {
 
   it('and the stylesheet lets it OPEN above the icon-only breakpoint', () => {
     // The strip collapsed every label back when it held fifteen chips. It holds
-    // three, and three unlabelled icons whose meaning lives in a tooltip is the
+    // two, and two unlabelled icons whose meaning lives in a tooltip is the
     // thing the card redesign removed. The chip also has to stop being a fixed
     // 40x40 with overflow:hidden, or the label has nowhere to appear however
     // wide you let the label itself be — measured, it stayed 10px.
