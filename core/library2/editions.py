@@ -245,27 +245,224 @@ def default_edition_id(cursor: Any, album_id: int) -> Optional[int]:
     return int(row[0]) if row else None
 
 
+# What the default edition is derived from: the album row's provider ids and
+# its canonical pin.
+_EDITION_ALBUM_COLUMNS = (
+    "id, title, spotify_id, musicbrainz_id, external_ids, release_date, "
+    "track_count, expected_track_count, canonical_source, canonical_album_id, "
+    "canonical_track_count"
+)
+
+
+def _row_value(row: Any, key: str) -> Any:
+    try:
+        return row[key]
+    except (IndexError, KeyError):
+        return None
+
+
+def _album_own_ids(album_row: Any) -> Dict[str, str]:
+    from core.library2.provider_ids import parse_external_ids
+
+    ids = parse_external_ids(_row_value(album_row, "external_ids"))
+    for column, source in (("spotify_id", "spotify"), ("musicbrainz_id", "musicbrainz")):
+        value = str(_row_value(album_row, column) or "").strip()
+        if value:
+            ids[source] = value
+    return ids
+
+
+def _canonical_pin(album_row: Any) -> Optional[tuple]:
+    source = str(_row_value(album_row, "canonical_source") or "").strip().lower()
+    pinned = str(_row_value(album_row, "canonical_album_id") or "").strip()
+    return (source, pinned) if source and pinned else None
+
+
+def album_release_ids(album_row: Any) -> Dict[str, str]:
+    """The provider release ids the album stands for, keyed by source.
+
+    The canonical pin wins for its source (#758/#765): the release a user
+    picked, or the resolver fitted to the files, is the release the match
+    chip, the tracklist, completeness and track-number repair all mean. Before
+    this they disagreed -- the chip showed the manual REGULAR while the
+    default edition still fetched the DELUXE tracklist (feature-parity A01).
+    """
+    ids = _album_own_ids(album_row)
+    pin = _canonical_pin(album_row)
+    if pin:
+        ids[pin[0]] = pin[1]
+    return ids
+
+
+def _edition_ids_json(ids: Dict[str, str]) -> str:
+    import json
+
+    rest = {k: v for k, v in ids.items() if k not in ("spotify", "musicbrainz") and v}
+    return json.dumps(rest, sort_keys=True, separators=(",", ":"))
+
+
+def _pinned_track_count(album_row: Any) -> Optional[int]:
+    """The track count known for the pinned release, or None when unknown."""
+    return _row_value(album_row, "canonical_track_count") if _canonical_pin(album_row) else None
+
+
+def _edition_track_count(album_row: Any) -> Optional[int]:
+    """The album's own counts describe its own release; a pin naming another
+    release only has the count fetched for it (None until then)."""
+    pin = _canonical_pin(album_row)
+    if pin and _album_own_ids(album_row).get(pin[0]) != pin[1]:
+        return _pinned_track_count(album_row)
+    return (_pinned_track_count(album_row)
+            or _row_value(album_row, "expected_track_count")
+            or _row_value(album_row, "track_count"))
+
+
 def _ensure_default_edition(cursor: Any, album_row: Any) -> int:
     """The album's default edition id, creating it from the group's provider
     facts when missing (the additive §14.2-Schritt-3 backfill)."""
     existing = default_edition_id(cursor, album_row["id"])
     if existing is not None:
         return existing
-    signature = edition_signature(album_row["spotify_id"],
-                                  album_row["musicbrainz_id"],
-                                  album_row["title"],
-                                  album_row["expected_track_count"]
-                                  or album_row["track_count"])
+    ids = album_release_ids(album_row)
+    track_count = _edition_track_count(album_row)
+    signature = edition_signature(ids.get("spotify"), ids.get("musicbrainz"),
+                                  album_row["title"], track_count)
     cursor.execute(
         """INSERT INTO lib2_release_editions(
                release_group_id, is_default, spotify_id, musicbrainz_id,
-               release_date, track_count, status, signature)
-           VALUES(?,?,?,?,?,?, 'official', ?)""",
-        (album_row["id"], 1, album_row["spotify_id"], album_row["musicbrainz_id"],
-         album_row["release_date"],
-         album_row["expected_track_count"] or album_row["track_count"],
+               external_ids, release_date, track_count, status, signature)
+           VALUES(?,?,?,?,?,?,?, 'official', ?)""",
+        (album_row["id"], 1, ids.get("spotify"), ids.get("musicbrainz"),
+         _edition_ids_json(ids),
+         _row_value(album_row, "release_date"),
+         track_count,
          signature))
     return int(cursor.lastrowid)
+
+
+def sync_default_edition(cursor: Any, album_id: int) -> bool:
+    """Make the default edition name the release the album row stands for.
+
+    Called wherever an album's provider id or canonical pin changes -- a manual
+    match, an enrichment match, a canonical pin -- so every edition consumer
+    reads the release the user sees. When a release id is replaced (not merely
+    added), the stored release facts described the old release and are
+    dropped; the next tracklist fetch supplies the new ones. Returns whether
+    anything changed. Does not commit.
+    """
+    import json
+
+    if hasattr(cursor, "cursor") and not hasattr(cursor, "lastrowid"):
+        cursor = cursor.cursor()
+    album = cursor.execute(
+        f"SELECT {_EDITION_ALBUM_COLUMNS} FROM lib2_albums WHERE id=?",
+        (int(album_id),)).fetchone()
+    if album is None:
+        return False
+    edition = cursor.execute(
+        "SELECT id, spotify_id, musicbrainz_id, external_ids, track_count "
+        "FROM lib2_release_editions WHERE release_group_id=? AND is_default=1",
+        (int(album_id),)).fetchone()
+    if edition is None:
+        _ensure_default_edition(cursor, album)
+        return True
+    from core.library2.provider_ids import parse_external_ids
+
+    current = parse_external_ids(edition["external_ids"])
+    for column, source in (("spotify_id", "spotify"), ("musicbrainz_id", "musicbrainz")):
+        value = str(edition[column] or "").strip()
+        if value:
+            current[source] = value
+    wanted = album_release_ids(album)
+    if wanted == current:
+        return False
+    replaced = any(current[k] != wanted.get(k) for k in current)
+    track_count = edition["track_count"]
+    sets = ["spotify_id=?", "musicbrainz_id=?", "external_ids=?",
+            "updated_at=CURRENT_TIMESTAMP"]
+    params: list = [wanted.get("spotify"), wanted.get("musicbrainz"), _edition_ids_json(wanted)]
+    if replaced:
+        track_count = _edition_track_count(album)
+        sets += ["release_date=NULL", "track_count=?", "disc_count=NULL", "barcode=NULL"]
+        params.append(track_count)
+    sets.append("signature=?")
+    params.append(edition_signature(wanted.get("spotify"), wanted.get("musicbrainz"),
+                                    album["title"], track_count))
+    cursor.execute(
+        f"UPDATE lib2_release_editions SET {', '.join(sets)} WHERE id=?",
+        (*params, int(edition["id"])))
+    # An alternative edition recorded for one of these ids is the default now;
+    # keep it only while release tracks hang off it.
+    for row in cursor.execute(
+            "SELECT id, spotify_id, musicbrainz_id, external_ids FROM lib2_release_editions"
+            " WHERE release_group_id=? AND is_default=0", (int(album_id),)).fetchall():
+        alt = parse_external_ids(row["external_ids"])
+        if row["spotify_id"]:
+            alt["spotify"] = str(row["spotify_id"])
+        if row["musicbrainz_id"]:
+            alt["musicbrainz"] = str(row["musicbrainz_id"])
+        if alt and all(wanted.get(k) == v for k, v in alt.items()):
+            cursor.execute(
+                "DELETE FROM lib2_release_editions WHERE id=? AND NOT EXISTS ("
+                " SELECT 1 FROM lib2_release_tracks WHERE release_edition_id=?)",
+                (int(row["id"]), int(row["id"])))
+    logger.debug("default edition of album %s now %s", album_id, json.dumps(wanted))
+    return True
+
+
+def pin_album_release(cursor: Any, album_id: int, source: str,
+                      provider_id: Optional[str]) -> None:
+    """A manual album match pins (and locks) that release as canonical (#758).
+
+    ``provider_id=None`` lifts a pin naming ``source`` -- the user cleared the
+    match it came from. The default edition follows either way. Does not
+    commit.
+    """
+    source = str(source or "").strip().lower()
+    if provider_id:
+        cursor.execute(
+            "UPDATE lib2_albums SET canonical_source=?, canonical_album_id=?,"
+            " canonical_score=1.0, canonical_locked=1,"
+            " canonical_resolved_at=CURRENT_TIMESTAMP, canonical_track_count=NULL,"
+            " updated_at=CURRENT_TIMESTAMP"
+            " WHERE id=? AND NOT (COALESCE(canonical_source,'')=? AND"
+            "                     COALESCE(canonical_album_id,'')=? AND"
+            "                     COALESCE(canonical_locked,0)=1)",
+            (source, str(provider_id), int(album_id), source, str(provider_id)))
+    else:
+        cursor.execute(
+            "UPDATE lib2_albums SET canonical_source=NULL, canonical_album_id=NULL,"
+            " canonical_score=NULL, canonical_locked=NULL, canonical_resolved_at=NULL,"
+            " canonical_track_count=NULL, updated_at=CURRENT_TIMESTAMP"
+            " WHERE id=? AND LOWER(COALESCE(canonical_source,''))=?",
+            (int(album_id), source))
+    sync_default_edition(cursor, int(album_id))
+
+
+def reconcile_pinned_editions(cursor: Any) -> int:
+    """Default editions that do not name their album's canonical pin.
+
+    Covers editions created before the pin was honoured, and a pin written
+    outside :func:`sync_default_edition`. Only albums with a pin are read, so
+    it stays cheap on every start. Returns how many editions changed.
+    """
+    rows = cursor.execute(
+        """SELECT al.id FROM lib2_albums al
+             JOIN lib2_release_editions ed
+               ON ed.release_group_id = al.id AND ed.is_default = 1
+            WHERE COALESCE(al.canonical_source, '') <> ''
+              AND COALESCE(al.canonical_album_id, '') <> ''
+              AND NOT (
+                  (LOWER(al.canonical_source) = 'spotify'
+                   AND COALESCE(ed.spotify_id, '') = al.canonical_album_id)
+               OR (LOWER(al.canonical_source) = 'musicbrainz'
+                   AND COALESCE(ed.musicbrainz_id, '') = al.canonical_album_id)
+               OR COALESCE(CAST(json_extract(
+                       CASE WHEN json_valid(ed.external_ids) THEN ed.external_ids
+                            ELSE '{}' END,
+                       '$.' || LOWER(al.canonical_source))
+                                AS TEXT), '') = al.canonical_album_id)""").fetchall()
+    return sum(1 for row in rows if sync_default_edition(cursor, int(row[0])))
 
 
 def _find_recording_by_hard_ids(cursor: Any, isrc: Optional[str],
@@ -454,9 +651,7 @@ def attach_track_to_edition(
         edition_id = default_edition_id(cursor, track_row["album_id"])
     if edition_id is None:
         album_row = cursor.execute(
-            """SELECT id, title, spotify_id, musicbrainz_id, release_date,
-                      expected_track_count, track_count
-                 FROM lib2_albums WHERE id=?""",
+            f"SELECT {_EDITION_ALBUM_COLUMNS} FROM lib2_albums WHERE id=?",
             (track_row["album_id"],),
         ).fetchone()
         if album_row is None:
@@ -565,8 +760,7 @@ def backfill_editions(cursor: Any, *, connection: Any = None,
     after_id = 0
     while not _stopped():
         albums = cursor.execute(
-            """SELECT al.id, al.title, al.spotify_id, al.musicbrainz_id,
-                      al.release_date, al.track_count, al.expected_track_count
+            f"""SELECT {', '.join('al.' + c.strip() for c in _EDITION_ALBUM_COLUMNS.split(','))}
                  FROM lib2_albums al
                 WHERE al.id > ?
                   AND NOT EXISTS (SELECT 1 FROM lib2_release_editions e
@@ -619,6 +813,9 @@ def backfill_editions(cursor: Any, *, connection: Any = None,
 
     stats["review_findings"] = _review_unverified_canonical_links(cursor)
     _commit()
+    # Editions created before the canonical pin was honoured (A01).
+    stats["pinned_editions"] = reconcile_pinned_editions(cursor)
+    _commit()
     # Ids a track has learned since its release track was materialized (docs
     # §49.11). Runs last: the walk above may have just created the recording
     # this pass merges into.
@@ -630,11 +827,15 @@ def backfill_editions(cursor: Any, *, connection: Any = None,
 
 
 __all__ = [
+    "album_release_ids",
     "attach_track_to_edition",
     "backfill_editions",
+    "pin_album_release",
     "default_edition_id",
     "edition_signature",
     "ensure_editions_schema",
     "ensure_release_track",
     "prune_orphaned_edition_rows",
+    "reconcile_pinned_editions",
+    "sync_default_edition",
 ]

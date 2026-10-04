@@ -2215,6 +2215,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 actor=f"profile:{_profile()}",
                 steal=True,
             )
+            # #758: a manual ALBUM match also pins and locks that release, so
+            # the resolver and every tool reading the pin keep the user's
+            # edition; clearing the match lifts a pin it made.
+            from core.metadata.canonical_version import should_pin_manual_canonical
+            if should_pin_manual_canonical(
+                    "album" if entity_type in ("album", "albums") else entity_type, service):
+                from core.library2.editions import pin_album_release
+                pin_album_release(
+                    conn, entity_id, service,
+                    service_id if request.method == "PUT" else None)
 
             # Artist settings deliberately reuse the legacy Watchlist.  Keep a
             # supplied, identity-checked row in sync just like the legacy match

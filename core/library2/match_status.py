@@ -409,6 +409,16 @@ def set_library_v2_match(
     # transaction as the id, so the two can never be half-applied.
     _sync_attempt_ledger(conn, canonical, int(entity_id), service, value)
 
+    # The default edition names the release the album row stands for, or the
+    # chip says one release while completeness and track-number repair read
+    # another (feature-parity A01). Same transaction as the id.
+    if canonical == "album":
+        try:
+            from core.library2.editions import sync_default_edition
+            sync_default_edition(conn, int(entity_id))
+        except Exception as exc:  # noqa: BLE001 - a schema without editions
+            logger.debug("default edition sync skipped for album %s: %s", entity_id, exc)
+
     provenance_type = f"lib2_{canonical}"
     if value:
         try:

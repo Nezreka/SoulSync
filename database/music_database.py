@@ -2295,8 +2295,13 @@ class MusicDatabase:
                 f"WHERE id = ?{guard}",
                 (source, str(canonical_album_id), float(score), 1 if locked else 0, album_id),
             )
+            updated = cursor.rowcount > 0
+            if updated:
+                # the pin is the release the default edition names (A01)
+                from core.library2.editions import sync_default_edition
+                sync_default_edition(cursor, album_id)
             conn.commit()
-            return cursor.rowcount > 0
+            return updated
         except Exception as e:
             logger.error("Error setting album canonical for %s: %s", album_id, e)
             return False

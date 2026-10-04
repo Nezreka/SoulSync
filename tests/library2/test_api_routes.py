@@ -4179,3 +4179,36 @@ def test_a_forced_import_still_runs_over_a_converged_library(api, monkeypatch):
         if not client.get("/api/library/v2/import/status").get_json()["running"]:
             break
         time.sleep(0.01)
+
+
+def test_a_manual_album_match_pins_and_locks_that_release(api):
+    """#758 on the native route: the album the user matched is the canonical
+    release every tool reads, and the default edition names it (A01)."""
+    client, db, ids = api
+
+    response = client.put(
+        f"/api/library/v2/albums/{ids['views']}/manual-match",
+        json={"service": "spotify", "service_id": "sp-views-regular"},
+    )
+    assert response.status_code == 200
+
+    conn = _conn(db)
+    pin = conn.execute(
+        "SELECT canonical_source, canonical_album_id, canonical_locked FROM lib2_albums "
+        "WHERE id=?", (ids["views"],)).fetchone()
+    edition = conn.execute(
+        "SELECT spotify_id FROM lib2_release_editions WHERE release_group_id=? "
+        "AND is_default=1", (ids["views"],)).fetchone()
+    conn.close()
+    assert tuple(pin) == ("spotify", "sp-views-regular", 1)
+    assert edition["spotify_id"] == "sp-views-regular"
+
+    assert client.delete(
+        f"/api/library/v2/albums/{ids['views']}/manual-match",
+        json={"service": "spotify"},
+    ).status_code == 200
+    conn = _conn(db)
+    pin = conn.execute("SELECT canonical_album_id FROM lib2_albums WHERE id=?",
+                       (ids["views"],)).fetchone()
+    conn.close()
+    assert pin[0] is None
