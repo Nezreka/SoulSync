@@ -407,6 +407,51 @@ def _correlate_grab(
     return {"download_id": download_id, "request_id": request.id}
 
 
+def _manual_grab(conn: Any, *, batch_id: Optional[str], **grab: Any) -> Optional[Dict[str, str]]:
+    """An Interactive-Search grab: the person's pick overrides the gate."""
+    download_id = "manual-" + str(uuid.uuid4())
+    return _correlate_grab(
+        conn,
+        trigger="manual",
+        download_id=download_id,
+        idempotency_key=MANUAL_GRAB_KEY_PREFIX + download_id,
+        shadow_source="legacy_interactive",
+        dispatch_options={"manual_batch_id": str(batch_id)} if batch_id else {},
+        grab_context_extra={
+            "manual_pick": True,
+            "manual_batch_id": str(batch_id) if batch_id else None,
+        },
+        history_event="manual_grab_correlated",
+        rejection_reason_code="gate_rejections_overridden_by_manual_pick",
+        **grab,
+    )
+
+
+def _scheduled_grab(conn: Any, *, task_id: str, batch_id: Optional[str],
+                    **grab: Any) -> Optional[Dict[str, str]]:
+    """A wishlist-worker grab: the gate result is only observed."""
+    download_id = "scheduled-" + str(uuid.uuid4())
+    dispatch_options: Dict[str, Any] = {"legacy_task_id": str(task_id)}
+    if batch_id:
+        dispatch_options["legacy_batch_id"] = str(batch_id)
+    return _correlate_grab(
+        conn,
+        trigger="scheduled",
+        download_id=download_id,
+        idempotency_key=SCHEDULED_GRAB_KEY_PREFIX + download_id,
+        shadow_source="legacy_wishlist_worker",
+        dispatch_options=dispatch_options,
+        grab_context_extra={
+            "manual_pick": False,
+            "legacy_task_id": str(task_id),
+            "legacy_batch_id": str(batch_id) if batch_id else None,
+        },
+        history_event="scheduled_grab_correlated",
+        rejection_reason_code="gate_rejections_observed_not_enforced",
+        **grab,
+    )
+
+
 def correlate_manual_grab(
     conn: Any,
     *,
@@ -420,31 +465,10 @@ def correlate_manual_grab(
     now: Optional[float] = None,
 ) -> Optional[Dict[str, str]]:
     """Correlate one dispatched Interactive-Search grab (trigger=manual)."""
-    download_id = "manual-" + str(uuid.uuid4())
-    dispatch_options: Dict[str, Any] = {}
-    if batch_id:
-        dispatch_options["manual_batch_id"] = str(batch_id)
-    return _correlate_grab(
-        conn,
-        lib2_context=lib2_context,
-        target_context=target_context,
-        search_result=search_result,
-        source=source,
-        trigger="manual",
-        download_id=download_id,
-        idempotency_key=MANUAL_GRAB_KEY_PREFIX + download_id,
-        shadow_source="legacy_interactive",
-        dispatch_options=dispatch_options,
-        legacy_download_id=legacy_download_id,
-        grab_context_extra={
-            "manual_pick": True,
-            "manual_batch_id": str(batch_id) if batch_id else None,
-        },
-        history_event="manual_grab_correlated",
-        rejection_reason_code="gate_rejections_overridden_by_manual_pick",
-        grab_status="downloading",
-        config_get=config_get,
-        now=now,
+    return _manual_grab(
+        conn, batch_id=batch_id, legacy_download_id=legacy_download_id,
+        grab_status="downloading", lib2_context=lib2_context, target_context=target_context,
+        search_result=search_result, source=source, config_get=config_get, now=now,
     )
 
 
@@ -460,31 +484,10 @@ def prepare_manual_grab(
     now: Optional[float] = None,
 ) -> Optional[Dict[str, str]]:
     """Persist a manual correlation before the external client dispatch."""
-    download_id = "manual-" + str(uuid.uuid4())
-    dispatch_options: Dict[str, Any] = {}
-    if batch_id:
-        dispatch_options["manual_batch_id"] = str(batch_id)
-    return _correlate_grab(
-        conn,
-        lib2_context=lib2_context,
-        target_context=target_context,
-        search_result=search_result,
-        source=source,
-        trigger="manual",
-        download_id=download_id,
-        idempotency_key=MANUAL_GRAB_KEY_PREFIX + download_id,
-        shadow_source="legacy_interactive",
-        dispatch_options=dispatch_options,
-        legacy_download_id=None,
-        grab_context_extra={
-            "manual_pick": True,
-            "manual_batch_id": str(batch_id) if batch_id else None,
-        },
-        history_event="manual_grab_correlated",
-        rejection_reason_code="gate_rejections_overridden_by_manual_pick",
-        grab_status="submitting",
-        config_get=config_get,
-        now=now,
+    return _manual_grab(
+        conn, batch_id=batch_id, legacy_download_id=None,
+        grab_status="submitting", lib2_context=lib2_context, target_context=target_context,
+        search_result=search_result, source=source, config_get=config_get, now=now,
     )
 
 
@@ -509,32 +512,10 @@ def correlate_scheduled_grab(
     its own request — ``legacy_task_id`` in the search options ties them
     together, and the stale sweep closes rows the pipeline never resolved.
     """
-    download_id = "scheduled-" + str(uuid.uuid4())
-    dispatch_options: Dict[str, Any] = {"legacy_task_id": str(task_id)}
-    if batch_id:
-        dispatch_options["legacy_batch_id"] = str(batch_id)
-    return _correlate_grab(
-        conn,
-        lib2_context=lib2_context,
-        target_context=target_context,
-        search_result=search_result,
-        source=source,
-        trigger="scheduled",
-        download_id=download_id,
-        idempotency_key=SCHEDULED_GRAB_KEY_PREFIX + download_id,
-        shadow_source="legacy_wishlist_worker",
-        dispatch_options=dispatch_options,
-        legacy_download_id=legacy_download_id,
-        grab_context_extra={
-            "manual_pick": False,
-            "legacy_task_id": str(task_id),
-            "legacy_batch_id": str(batch_id) if batch_id else None,
-        },
-        history_event="scheduled_grab_correlated",
-        rejection_reason_code="gate_rejections_observed_not_enforced",
-        grab_status="downloading",
-        config_get=config_get,
-        now=now,
+    return _scheduled_grab(
+        conn, task_id=task_id, batch_id=batch_id, legacy_download_id=legacy_download_id,
+        grab_status="downloading", lib2_context=lib2_context, target_context=target_context,
+        search_result=search_result, source=source, config_get=config_get, now=now,
     )
 
 
@@ -551,32 +532,10 @@ def prepare_scheduled_grab(
     now: Optional[float] = None,
 ) -> Optional[Dict[str, str]]:
     """Persist a scheduled correlation before the external dispatch."""
-    download_id = "scheduled-" + str(uuid.uuid4())
-    dispatch_options: Dict[str, Any] = {"legacy_task_id": str(task_id)}
-    if batch_id:
-        dispatch_options["legacy_batch_id"] = str(batch_id)
-    return _correlate_grab(
-        conn,
-        lib2_context=lib2_context,
-        target_context=target_context,
-        search_result=search_result,
-        source=source,
-        trigger="scheduled",
-        download_id=download_id,
-        idempotency_key=SCHEDULED_GRAB_KEY_PREFIX + download_id,
-        shadow_source="legacy_wishlist_worker",
-        dispatch_options=dispatch_options,
-        legacy_download_id=None,
-        grab_context_extra={
-            "manual_pick": False,
-            "legacy_task_id": str(task_id),
-            "legacy_batch_id": str(batch_id) if batch_id else None,
-        },
-        history_event="scheduled_grab_correlated",
-        rejection_reason_code="gate_rejections_observed_not_enforced",
-        grab_status="submitting",
-        config_get=config_get,
-        now=now,
+    return _scheduled_grab(
+        conn, task_id=task_id, batch_id=batch_id, legacy_download_id=None,
+        grab_status="submitting", lib2_context=lib2_context, target_context=target_context,
+        search_result=search_result, source=source, config_get=config_get, now=now,
     )
 
 
