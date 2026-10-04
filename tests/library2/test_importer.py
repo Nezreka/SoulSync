@@ -19,6 +19,14 @@ from core.library2 import queries as Q
 from tests.lib2_seed import row_conn
 
 
+def _on_legacy(path, *statements):
+    """Run SQL (a string, or ``(sql, params)``) against the legacy DB and commit."""
+    with closing(sqlite3.connect(path)) as conn:
+        for statement in statements:
+            conn.execute(*((statement,) if isinstance(statement, str) else statement))
+        conn.commit()
+
+
 # --- credit splitter ---------------------------------------------------------
 
 @pytest.mark.parametrize("raw,expected", [
@@ -342,14 +350,10 @@ def test_import_captures_all_provider_ids_into_external_ids(legacy_db):
     Spotify — otherwise a Deezer-primary user loses all provider identity in
     lib2 and disambiguation / tracklist fetches can't use it."""
     import json
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute("ALTER TABLE artists ADD COLUMN deezer_artist_id TEXT")
-    conn.execute("ALTER TABLE artists ADD COLUMN musicbrainz_artist_id TEXT")
-    conn.execute(
-        "UPDATE artists SET deezer_artist_id='dz_drake', "
-        "musicbrainz_artist_id='mb_drake' WHERE id=1")
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "ALTER TABLE artists ADD COLUMN deezer_artist_id TEXT",
+                               "ALTER TABLE artists ADD COLUMN musicbrainz_artist_id TEXT",
+                               "UPDATE artists SET deezer_artist_id='dz_drake', "
+                               "musicbrainz_artist_id='mb_drake' WHERE id=1")
 
     import_legacy_library(legacy_db, reset=True)
 
@@ -369,14 +373,10 @@ def test_import_captures_album_provider_ids_into_external_ids(legacy_db):
     into external_ids so completeness.resolve_tracklist can fetch the EXACT
     provider release (Deezer users, §16.3(b)) instead of only a name search."""
     import json
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute("ALTER TABLE albums ADD COLUMN deezer_album_id TEXT")
-    conn.execute("ALTER TABLE albums ADD COLUMN spotify_album_id TEXT")
-    conn.execute(
-        "UPDATE albums SET deezer_album_id='dz_views', spotify_album_id='sp_views' "
-        "WHERE id=10")
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "ALTER TABLE albums ADD COLUMN deezer_album_id TEXT",
+                               "ALTER TABLE albums ADD COLUMN spotify_album_id TEXT",
+                               "UPDATE albums SET deezer_album_id='dz_views', spotify_album_id='sp_views' "
+                               "WHERE id=10")
 
     import_legacy_library(legacy_db, reset=True)
 
@@ -460,12 +460,9 @@ def test_import_captures_track_provider_ids_into_external_ids(legacy_db):
 def test_import_captures_track_bpm_and_explicit(legacy_db):
     """§17.7 step 2: ``bpm``/``explicit`` exist on the legacy ``tracks`` row but
     had no lib2 destination column, so they were permanently lost on import."""
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute("ALTER TABLE tracks ADD COLUMN bpm REAL")
-    conn.execute("ALTER TABLE tracks ADD COLUMN explicit INTEGER")
-    conn.execute("UPDATE tracks SET bpm=104.5, explicit=1 WHERE id=100")
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "ALTER TABLE tracks ADD COLUMN bpm REAL",
+                               "ALTER TABLE tracks ADD COLUMN explicit INTEGER",
+                               "UPDATE tracks SET bpm=104.5, explicit=1 WHERE id=100")
 
     import_legacy_library(legacy_db, reset=True)
 
@@ -481,12 +478,9 @@ def test_import_captures_track_bpm_and_explicit(legacy_db):
 def test_import_captures_track_style_mood(legacy_db):
     """§48: ``style``/``mood`` exist on the legacy ``tracks`` row (like
     bpm/explicit already handled) but had no lib2 destination column."""
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute("ALTER TABLE tracks ADD COLUMN style TEXT")
-    conn.execute("ALTER TABLE tracks ADD COLUMN mood TEXT")
-    conn.execute("UPDATE tracks SET style='Pop Rap', mood='Chill' WHERE id=100")
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "ALTER TABLE tracks ADD COLUMN style TEXT",
+                               "ALTER TABLE tracks ADD COLUMN mood TEXT",
+                               "UPDATE tracks SET style='Pop Rap', mood='Chill' WHERE id=100")
 
     import_legacy_library(legacy_db, reset=True)
 
@@ -502,15 +496,11 @@ def test_import_captures_track_style_mood(legacy_db):
 def test_import_captures_album_explicit_label_upc(legacy_db):
     """§17.7 step 2: ``explicit``/``label``/``upc`` (barcode) exist on the
     legacy ``albums`` row but had no lib2 destination column."""
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute("ALTER TABLE albums ADD COLUMN explicit INTEGER")
-    conn.execute("ALTER TABLE albums ADD COLUMN label TEXT")
-    conn.execute("ALTER TABLE albums ADD COLUMN upc TEXT")
-    conn.execute(
-        "UPDATE albums SET explicit=1, label='OVO Sound', upc='00602557546317' "
-        "WHERE id=10")
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "ALTER TABLE albums ADD COLUMN explicit INTEGER",
+                               "ALTER TABLE albums ADD COLUMN label TEXT",
+                               "ALTER TABLE albums ADD COLUMN upc TEXT",
+                               "UPDATE albums SET explicit=1, label='OVO Sound', upc='00602557546317' "
+                               "WHERE id=10")
 
     import_legacy_library(legacy_db, reset=True)
 
@@ -526,12 +516,9 @@ def test_import_captures_album_explicit_label_upc(legacy_db):
 def test_import_captures_album_style_mood(legacy_db):
     """§48: ``style``/``mood`` exist on the legacy ``albums`` row (like the
     artist row already handled) but had no lib2 destination column."""
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute("ALTER TABLE albums ADD COLUMN style TEXT")
-    conn.execute("ALTER TABLE albums ADD COLUMN mood TEXT")
-    conn.execute("UPDATE albums SET style='Hip Hop', mood='Moody' WHERE id=10")
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "ALTER TABLE albums ADD COLUMN style TEXT",
+                               "ALTER TABLE albums ADD COLUMN mood TEXT",
+                               "UPDATE albums SET style='Hip Hop', mood='Moody' WHERE id=10")
 
     import_legacy_library(legacy_db, reset=True)
 
@@ -547,18 +534,14 @@ def test_import_captures_artist_style_mood_label_aliases_banner(legacy_db):
     """§17.7 remainder: AudioDB-sourced style/mood/label/banner_url and the
     MusicBrainz aliases list existed on the legacy artist row but had no lib2
     destination column."""
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute("ALTER TABLE artists ADD COLUMN style TEXT")
-    conn.execute("ALTER TABLE artists ADD COLUMN mood TEXT")
-    conn.execute("ALTER TABLE artists ADD COLUMN label TEXT")
-    conn.execute("ALTER TABLE artists ADD COLUMN aliases TEXT")
-    conn.execute("ALTER TABLE artists ADD COLUMN banner_url TEXT")
-    conn.execute(
-        "UPDATE artists SET style='Hip Hop', mood='Energetic', label='OVO Sound', "
-        "aliases='[\"Drizzy\", \"Champagne Papi\"]', "
-        "banner_url='http://img/banner.jpg' WHERE id=1")
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "ALTER TABLE artists ADD COLUMN style TEXT",
+                               "ALTER TABLE artists ADD COLUMN mood TEXT",
+                               "ALTER TABLE artists ADD COLUMN label TEXT",
+                               "ALTER TABLE artists ADD COLUMN aliases TEXT",
+                               "ALTER TABLE artists ADD COLUMN banner_url TEXT",
+                               "UPDATE artists SET style='Hip Hop', mood='Energetic', label='OVO Sound', "
+                               "aliases='[\"Drizzy\", \"Champagne Papi\"]', "
+                               "banner_url='http://img/banner.jpg' WHERE id=1")
 
     import_legacy_library(legacy_db, reset=True)
 
@@ -578,19 +561,13 @@ def test_import_reimport_keeps_artist_flat_fields_when_legacy_column_missing(leg
     """A re-import from a legacy DB copy that lacks the style/mood/label/
     banner_url migration columns entirely must not null out values a prior
     import already captured — same COALESCE-on-UPDATE contract as bpm/explicit."""
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute("ALTER TABLE artists ADD COLUMN style TEXT")
-    conn.execute("UPDATE artists SET style='Hip Hop' WHERE id=1")
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "ALTER TABLE artists ADD COLUMN style TEXT",
+                               "UPDATE artists SET style='Hip Hop' WHERE id=1")
     import_legacy_library(legacy_db, reset=True)
 
     # Second import run against the SAME db (style column still present, but
     # simulate a legacy row where the field went blank/unset again).
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute("UPDATE artists SET style=NULL WHERE id=1")
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "UPDATE artists SET style=NULL WHERE id=1")
     import_legacy_library(legacy_db, reset=False)
 
     with closing(legacy_db._get_connection()) as conn:
@@ -641,17 +618,11 @@ def test_import_enrichment_merge_never_overwrites_richer_existing_data(legacy_db
     """Re-importing from a source with a thinner (or missing) bio must not
     erase a bio a previous import already captured — same never-overwrite
     contract as ``_merge_external_ids``."""
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute("ALTER TABLE artists ADD COLUMN lastfm_bio TEXT")
-    conn.execute("UPDATE artists SET lastfm_bio='A rapper from Toronto.' WHERE id=1")
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "ALTER TABLE artists ADD COLUMN lastfm_bio TEXT",
+                               "UPDATE artists SET lastfm_bio='A rapper from Toronto.' WHERE id=1")
     import_legacy_library(legacy_db, reset=True)
 
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute("UPDATE artists SET lastfm_bio='' WHERE id=1")
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "UPDATE artists SET lastfm_bio='' WHERE id=1")
     import_legacy_library(legacy_db, reset=False)
 
     with closing(legacy_db._get_connection()) as conn:
@@ -665,18 +636,13 @@ def test_import_enrichment_merge_never_overwrites_richer_existing_data(legacy_db
 def test_import_captures_track_genius_lyrics_copyright_play_count_last_played(legacy_db):
     """§17.7 remainder: genius_lyrics/copyright/play_count/last_played exist
     on the legacy tracks row but had no lib2 destination column."""
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute("ALTER TABLE tracks ADD COLUMN genius_lyrics TEXT")
-    conn.execute("ALTER TABLE tracks ADD COLUMN copyright TEXT")
-    conn.execute("ALTER TABLE tracks ADD COLUMN play_count INTEGER")
-    conn.execute("ALTER TABLE tracks ADD COLUMN last_played TIMESTAMP")
-    conn.execute(
-        "UPDATE tracks SET genius_lyrics=?, "
-        "copyright='(C) 2016 OVO Sound', play_count=42, "
-        "last_played='2026-07-01 12:00:00' WHERE id=100",
-        ("[Verse 1]\nlyrics here",))
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "ALTER TABLE tracks ADD COLUMN genius_lyrics TEXT",
+                               "ALTER TABLE tracks ADD COLUMN copyright TEXT",
+                               "ALTER TABLE tracks ADD COLUMN play_count INTEGER",
+                               "ALTER TABLE tracks ADD COLUMN last_played TIMESTAMP",
+                               ("UPDATE tracks SET genius_lyrics=?, "
+                                "copyright='(C) 2016 OVO Sound', play_count=42, "
+                                "last_played='2026-07-01 12:00:00' WHERE id=100", ("[Verse 1]\nlyrics here",)))
 
     import_legacy_library(legacy_db, reset=True)
 
@@ -709,15 +675,11 @@ def test_import_track_play_count_defaults_to_zero_without_legacy_column(legacy_d
 def test_import_new_track_uses_legacy_quality_profile_id_when_valid(legacy_db):
     """§17.7 remainder: a legacy track's own quality_profile_id was never
     read; new tracks always got the run-wide default profile instead."""
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute(
-        "CREATE TABLE quality_profiles(id INTEGER PRIMARY KEY, is_default INTEGER)")
-    conn.execute("INSERT INTO quality_profiles VALUES(1, 1)")
-    conn.execute("INSERT INTO quality_profiles VALUES(7, 0)")
-    conn.execute("ALTER TABLE tracks ADD COLUMN quality_profile_id INTEGER")
-    conn.execute("UPDATE tracks SET quality_profile_id=7 WHERE id=100")
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "CREATE TABLE quality_profiles(id INTEGER PRIMARY KEY, is_default INTEGER)",
+                               "INSERT INTO quality_profiles VALUES(1, 1)",
+                               "INSERT INTO quality_profiles VALUES(7, 0)",
+                               "ALTER TABLE tracks ADD COLUMN quality_profile_id INTEGER",
+                               "UPDATE tracks SET quality_profile_id=7 WHERE id=100")
 
     import_legacy_library(legacy_db, reset=True)
 
@@ -738,14 +700,10 @@ def test_import_new_track_falls_back_to_default_for_dangling_legacy_profile_id(l
     """A legacy quality_profile_id pointing at a profile that no longer
     exists (deleted since) must not be copied verbatim — falls back to the
     run-wide default instead of leaving a dangling reference."""
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute(
-        "CREATE TABLE quality_profiles(id INTEGER PRIMARY KEY, is_default INTEGER)")
-    conn.execute("INSERT INTO quality_profiles VALUES(1, 1)")
-    conn.execute("ALTER TABLE tracks ADD COLUMN quality_profile_id INTEGER")
-    conn.execute("UPDATE tracks SET quality_profile_id=999 WHERE id=100")
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "CREATE TABLE quality_profiles(id INTEGER PRIMARY KEY, is_default INTEGER)",
+                               "INSERT INTO quality_profiles VALUES(1, 1)",
+                               "ALTER TABLE tracks ADD COLUMN quality_profile_id INTEGER",
+                               "UPDATE tracks SET quality_profile_id=999 WHERE id=100")
 
     import_legacy_library(legacy_db, reset=True)
 
@@ -1014,11 +972,8 @@ def test_import_captures_real_schema_album_provider_ids(legacy_db):
 
 
 def test_import_prefers_explicit_album_type_over_one_track_heuristic(legacy_db):
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute("ALTER TABLE albums ADD COLUMN album_type TEXT")
-    conn.execute("UPDATE albums SET album_type='album' WHERE id=11")
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "ALTER TABLE albums ADD COLUMN album_type TEXT",
+                               "UPDATE albums SET album_type='album' WHERE id=11")
 
     import_legacy_library(legacy_db, reset=True)
 
@@ -1054,16 +1009,9 @@ def test_multi_artist_split(imported_conn):
 
 def test_reimport_rebuilds_album_artist_credits_after_metadata_changes(legacy_db):
     import_legacy_library(legacy_db, reset=True)
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute(
-        "INSERT INTO artists VALUES(2, 'New Primary', NULL, NULL, NULL, NULL, NULL)"
-    )
-    conn.execute("UPDATE albums SET artist_id=2 WHERE id=10")
-    conn.execute(
-        "UPDATE tracks SET artist_id=2, track_artist=NULL WHERE album_id=10"
-    )
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "INSERT INTO artists VALUES(2, 'New Primary', NULL, NULL, NULL, NULL, NULL)",
+                               "UPDATE albums SET artist_id=2 WHERE id=10",
+                               "UPDATE tracks SET artist_id=2, track_artist=NULL WHERE album_id=10")
 
     import_legacy_library(legacy_db, reset=False)
 
@@ -1094,11 +1042,7 @@ def test_single_album_linkage_survives_feat_suffix_on_album_cut(legacy_db):
     spells out the guests in its title (``(feat. …)``) and the single does not.
     Otherwise ``link_single_album_duplicates`` groups them apart and the Manage
     Tracks modal wrongly reports "No duplicates found"."""
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute(
-        "UPDATE tracks SET title='One Dance (feat. Wizkid & Kyla)' WHERE id=100")
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "UPDATE tracks SET title='One Dance (feat. Wizkid & Kyla)' WHERE id=100")
 
     import_legacy_library(legacy_db, reset=True)
 
@@ -1114,11 +1058,7 @@ def test_single_album_linkage_survives_feat_suffix_on_album_cut(legacy_db):
 
 def test_single_album_linkage_survives_feat_suffix_on_single(legacy_db):
     """Mirror of the above: the annotation may sit on the single instead."""
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute(
-        "UPDATE tracks SET title='One Dance (feat. Wizkid & Kyla)' WHERE id=102")
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "UPDATE tracks SET title='One Dance (feat. Wizkid & Kyla)' WHERE id=102")
 
     import_legacy_library(legacy_db, reset=True)
 
@@ -1665,16 +1605,10 @@ def test_wishlist_seed_does_not_clamp_discography_expected_count(legacy_db):
 def test_full_band_name_credit_is_not_split_into_ghost_artists(legacy_db):
     """'Simon & Garfunkel' as a track credit must reuse the existing artist row,
     not be split at '&' into two invented artists."""
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute(
-        "INSERT INTO artists VALUES(2,'Simon & Garfunkel',NULL,NULL,NULL,NULL,NULL)")
-    conn.execute(
-        "INSERT INTO albums VALUES(20,2,'Bookends',1968,NULL,NULL,1,NULL)")
-    conn.execute(
-        "INSERT INTO tracks VALUES(200,20,2,'Mrs. Robinson',1,240000,'/m/mrs.flac',900,4000,"
-        "'Simon & Garfunkel')")
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "INSERT INTO artists VALUES(2,'Simon & Garfunkel',NULL,NULL,NULL,NULL,NULL)",
+                               "INSERT INTO albums VALUES(20,2,'Bookends',1968,NULL,NULL,1,NULL)",
+                               "INSERT INTO tracks VALUES(200,20,2,'Mrs. Robinson',1,240000,'/m/mrs.flac',900,4000,"
+                               "'Simon & Garfunkel')")
 
     import_legacy_library(legacy_db, reset=True)
 
@@ -1704,10 +1638,7 @@ def test_unknown_full_band_credit_is_preserved_without_ghost_artists(
     artist row.  Guest bands can appear solely in ``track_artist``; preserve
     that raw credit as one artist instead of inventing several identities.
     """
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute("UPDATE tracks SET track_artist=? WHERE id=101", (credit,))
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, ("UPDATE tracks SET track_artist=? WHERE id=101", (credit,)))
 
     import_legacy_library(legacy_db, reset=True)
 
@@ -1733,13 +1664,7 @@ def test_unknown_full_band_credit_is_preserved_without_ghost_artists(
 def test_unknown_band_in_title_feature_credit_is_preserved(legacy_db):
     """The same P2-24 guard applies to credits extracted from a title."""
     credit = "Earth, Wind & Fire"
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute(
-        "UPDATE tracks SET title=?, track_artist=NULL WHERE id=101",
-        (f"September (feat. {credit})",),
-    )
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, ("UPDATE tracks SET title=?, track_artist=NULL WHERE id=101", (f"September (feat. {credit})",)))
 
     import_legacy_library(legacy_db, reset=True)
 
@@ -1752,13 +1677,8 @@ def test_unknown_band_in_title_feature_credit_is_preserved(legacy_db):
 
 def test_ambiguous_credit_splits_when_every_artist_is_already_known(legacy_db):
     """Conservative P2-24 parsing must not discard corroborated junctions."""
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute(
-        "INSERT INTO artists VALUES(2,'Rihanna',NULL,NULL,NULL,NULL,NULL)"
-    )
-    conn.execute("UPDATE tracks SET track_artist='Drake & Rihanna' WHERE id=101")
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, "INSERT INTO artists VALUES(2,'Rihanna',NULL,NULL,NULL,NULL,NULL)",
+                               "UPDATE tracks SET track_artist='Drake & Rihanna' WHERE id=101")
 
     import_legacy_library(legacy_db, reset=True)
 
@@ -1782,13 +1702,7 @@ def test_ambiguous_credit_splits_when_every_artist_is_already_known(legacy_db):
 def test_title_feature_list_splits_when_track_credit_supplies_a_known_anchor(legacy_db):
     """P2-24 stays multi-artist aware when the flat legacy fields corroborate
     one member of an otherwise ambiguous title-credit list."""
-    conn = sqlite3.connect(legacy_db.path)
-    conn.execute(
-        "UPDATE tracks SET title=?, track_artist=? WHERE id=100",
-        ("One Dance (feat. Wizkid & Kyla)", "Drake feat. Wizkid"),
-    )
-    conn.commit()
-    conn.close()
+    _on_legacy(legacy_db.path, ("UPDATE tracks SET title=?, track_artist=? WHERE id=100", ("One Dance (feat. Wizkid & Kyla)", "Drake feat. Wizkid")))
 
     import_legacy_library(legacy_db, reset=True)
 
@@ -2255,12 +2169,9 @@ def test_media_server_mappings_are_written_by_the_import_itself(migrated_legacy_
     therefore still empty, and mapping-only consumers (native
     ``media_server_sources`` chips, the Navidrome lookup by lib2_track_id) had
     nothing until the next restart."""
-    conn = sqlite3.connect(migrated_legacy_db.path)
-    conn.execute("UPDATE artists SET server_source='plex'")
-    conn.execute("UPDATE albums SET server_source='plex'")
-    conn.execute("UPDATE tracks SET server_source='plex'")
-    conn.commit()
-    conn.close()
+    _on_legacy(migrated_legacy_db.path, "UPDATE artists SET server_source='plex'",
+                                        "UPDATE albums SET server_source='plex'",
+                                        "UPDATE tracks SET server_source='plex'")
 
     import_legacy_library(migrated_legacy_db, reset=True)
 
@@ -2275,10 +2186,7 @@ def test_media_server_mappings_are_written_by_the_import_itself(migrated_legacy_
 
 
 def test_the_mapping_backfill_is_idempotent_across_imports(migrated_legacy_db):
-    conn = sqlite3.connect(migrated_legacy_db.path)
-    conn.execute("UPDATE artists SET server_source='plex'")
-    conn.commit()
-    conn.close()
+    _on_legacy(migrated_legacy_db.path, "UPDATE artists SET server_source='plex'")
 
     import_legacy_library(migrated_legacy_db, reset=True)
     import_legacy_library(migrated_legacy_db)
