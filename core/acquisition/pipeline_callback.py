@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Mapping, Optional
 
+from core.acquisition import open_connection
 from utils.logging_config import get_logger
 
 
@@ -101,12 +102,7 @@ def notify_pipeline_import_started(
 
         if not _context_value(context, GRAB_MARKER):
             return False
-    if connection_factory is None:
-        from database.music_database import get_database
-
-        connection_factory = get_database()._get_connection
-
-    conn = connection_factory()
+    conn = open_connection(connection_factory)
     try:
         correlation = _pipeline_correlation(conn, context)
         if correlation is None:
@@ -174,12 +170,7 @@ def notify_pipeline_check_result(
 
         if not _context_value(context, GRAB_MARKER):
             return False
-    if connection_factory is None:
-        from database.music_database import get_database
-
-        connection_factory = get_database()._get_connection
-
-    conn = connection_factory()
+    conn = open_connection(connection_factory)
     try:
         correlation = _pipeline_correlation(conn, context)
         if correlation is None:
@@ -243,11 +234,7 @@ def notify_pipeline_import_success(
         )
         return False
 
-    if connection_factory is None:
-        from database.music_database import get_database
-        connection_factory = get_database()._get_connection
-
-    conn = connection_factory()
+    conn = open_connection(connection_factory)
     try:
         from core.acquisition.imports import record_pipeline_file_completed
         record_pipeline_file_completed(
@@ -294,11 +281,7 @@ def notify_pipeline_import_quarantined(
             "Acquisition quarantine callback missing context for %s", import_id)
         return False
 
-    if connection_factory is None:
-        from database.music_database import get_database
-        connection_factory = get_database()._get_connection
-
-    conn = connection_factory()
+    conn = open_connection(connection_factory)
     try:
         from core.acquisition.imports import record_pipeline_file_quarantined
         record_pipeline_file_quarantined(
@@ -351,11 +334,7 @@ def notify_force_quarantine_auto_approved(
     if len(code) > 100:
         return False
 
-    if connection_factory is None:
-        from database.music_database import get_database
-        connection_factory = get_database()._get_connection
-
-    conn = connection_factory()
+    conn = open_connection(connection_factory)
     try:
         row = conn.execute(
             """SELECT ai.request_id, ai.candidate_id, ai.download_id
@@ -434,11 +413,7 @@ def notify_pipeline_retry_exhausted(
     import_id = _context_value(context, "_acquisition_import_id")
     if not import_id:
         return False
-    if connection_factory is None:
-        from database.music_database import get_database
-        connection_factory = get_database()._get_connection
-
-    conn = connection_factory()
+    conn = open_connection(connection_factory)
     try:
         from core.acquisition.imports import record_import_failure
         record_import_failure(
@@ -475,11 +450,7 @@ def _close_retry_journal(
     track_id = _context_value(context, "_acquisition_track_id")
     if not import_id or not track_id:
         return False
-    if connection_factory is None:
-        from database.music_database import get_database
-        connection_factory = get_database()._get_connection
-
-    conn = connection_factory()
+    conn = open_connection(connection_factory)
     try:
         from core.acquisition.retry_state import close_retry_state
         closed = close_retry_state(
@@ -521,11 +492,7 @@ def notify_manual_grab_import_success(
         return False
     final_path = context.get("_final_processed_path") or context.get("_final_path")
 
-    if connection_factory is None:
-        from database.music_database import get_database
-        connection_factory = get_database()._get_connection
-
-    conn = connection_factory()
+    conn = open_connection(connection_factory)
     try:
         from core.acquisition.grabs import get_grab
         from core.acquisition.history import record_history_event
@@ -596,11 +563,7 @@ def notify_manual_grab_quarantined(
     if not download_id:
         return False
 
-    if connection_factory is None:
-        from database.music_database import get_database
-        connection_factory = get_database()._get_connection
-
-    conn = connection_factory()
+    conn = open_connection(connection_factory)
     try:
         from core.acquisition.grabs import get_grab
         from core.acquisition.history import record_history_event
@@ -641,11 +604,7 @@ def notify_correlated_grab_cancelled(
     transfer_id = str(legacy_download_id or "").strip()
     if not transfer_id:
         return False
-    if connection_factory is None:
-        from database.music_database import get_database
-        connection_factory = get_database()._get_connection
-
-    conn = connection_factory()
+    conn = open_connection(connection_factory)
     try:
         rows = conn.execute(
             """SELECT g.download_id, g.context_json
@@ -741,12 +700,7 @@ def notify_previous_file_replaced(
 
         if not _context_value(context, GRAB_MARKER):
             return False
-    if connection_factory is None:
-        from database.music_database import get_database
-
-        connection_factory = get_database()._get_connection
-
-    conn = connection_factory()
+    conn = open_connection(connection_factory)
     try:
         correlation = _pipeline_correlation(conn, context)
         if correlation is None:
@@ -839,12 +793,7 @@ def persist_history_correlation(
 
         if not _context_value(context, GRAB_MARKER):
             return False
-    if connection_factory is None:
-        from database.music_database import get_database
-
-        connection_factory = get_database()._get_connection
-
-    conn = connection_factory()
+    conn = open_connection(connection_factory)
     try:
         correlation = _pipeline_correlation(conn, context)
         if correlation is None:
@@ -893,12 +842,7 @@ def notify_verification_decision(
         history_id = int(history_id)
     except (TypeError, ValueError):
         return False
-    if connection_factory is None:
-        from database.music_database import get_database
-
-        connection_factory = get_database()._get_connection
-
-    conn = connection_factory()
+    conn = open_connection(connection_factory)
     try:
         if not ensure_library_history_correlation_columns(conn):
             return False

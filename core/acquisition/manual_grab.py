@@ -34,6 +34,7 @@ import time
 import uuid
 from typing import Any, Callable, Dict, Mapping, Optional
 
+from core.acquisition import open_connection
 from utils.logging_config import get_logger
 
 
@@ -551,10 +552,7 @@ def _try_correlate(
     if not lib2_context and not target_context and not kwargs.get("search_result"):
         return None
     try:
-        if connection_factory is None:
-            from database.music_database import get_database
-            connection_factory = get_database()._get_connection
-        conn = connection_factory()
+        conn = open_connection(connection_factory)
         try:
             markers = correlate(
                 conn,
@@ -686,10 +684,7 @@ def bind_correlated_grab_transfer(
     if not download_id or not transfer_id:
         return False
     try:
-        if connection_factory is None:
-            from database.music_database import get_database
-            connection_factory = get_database()._get_connection
-        conn = connection_factory()
+        conn = open_connection(connection_factory)
         try:
             from core.acquisition.grabs import (
                 get_grab,
@@ -745,10 +740,7 @@ def fail_prepared_correlated_grab(
     if not download_id:
         return False
     try:
-        if connection_factory is None:
-            from database.music_database import get_database
-            connection_factory = get_database()._get_connection
-        conn = connection_factory()
+        conn = open_connection(connection_factory)
         try:
             from core.acquisition.workflow import record_grab_outcome
             record_grab_outcome(

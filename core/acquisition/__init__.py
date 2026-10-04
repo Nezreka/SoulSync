@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable, Optional
 
 
 def ensure_acquisition_schema(conn: Any) -> None:
@@ -30,4 +30,13 @@ def ensure_acquisition_schema(conn: Any) -> None:
     ensure_correlation_coverage_schema(conn)
 
 
-__all__ = ["ensure_acquisition_schema"]
+def open_connection(connection_factory: Optional[Callable[[], Any]] = None) -> Any:
+    """A connection from ``connection_factory``, or the app database's."""
+    if connection_factory is None:
+        from database.music_database import get_database
+
+        connection_factory = get_database()._get_connection
+    return connection_factory()
+
+
+__all__ = ["ensure_acquisition_schema", "open_connection"]

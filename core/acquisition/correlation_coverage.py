@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any, Callable, Dict, Optional
 
+from core.acquisition import open_connection
 from utils.logging_config import get_logger
 
 logger = get_logger("acquisition.correlation_coverage")
@@ -72,10 +73,7 @@ def record_correlation_outcome_fail_open(
 ) -> bool:
     """Best-effort caller hook; coverage must never alter dispatch behavior."""
     try:
-        if connection_factory is None:
-            from database.music_database import get_database
-            connection_factory = get_database()._get_connection
-        conn = connection_factory()
+        conn = open_connection(connection_factory)
         try:
             record_correlation_outcome(conn, consumer, outcome)
             conn.commit()
