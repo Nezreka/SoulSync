@@ -1143,67 +1143,73 @@ describe('library v2 artist track files api (C2 — Manage Track Files)', () => 
   });
 });
 
+const MATCH_PROVIDER_KEYS = [
+  'spotify',
+  'musicbrainz',
+  'deezer',
+  'itunes',
+  'audiodb',
+  'discogs',
+  'lastfm',
+  'genius',
+  'tidal',
+  'qobuz',
+  'amazon',
+  'jiosaavn',
+  'bandcamp',
+];
+
+/** The stored preferences the server answers with: defaults plus the given columns. */
+function uiPreferences(
+  columns: { track?: Record<string, boolean>; artist?: Record<string, boolean> } = {},
+) {
+  return {
+    track_table: {
+      columns: {
+        bpm: true,
+        file_path: false,
+        disc: false,
+        artists: true,
+        duration: true,
+        match: true,
+        quality: true,
+        features: true,
+        metadata: true,
+        play: false,
+        ...columns.track,
+      },
+      column_order: [
+        'play',
+        'disc',
+        'artists',
+        'duration',
+        'bpm',
+        'match',
+        'quality',
+        'features',
+        'metadata',
+        'file_path',
+      ],
+      show_all_match_providers: false,
+      visible_match_providers: Object.fromEntries(MATCH_PROVIDER_KEYS.map((key) => [key, true])),
+      quality_show_format: true,
+      quality_show_resolution: true,
+      quality_show_bitrate: true,
+    },
+    artist_table: {
+      columns: { quality_profile: false, genres: false, added: false, ...columns.artist },
+      column_order: ['quality_profile', 'genres', 'added'],
+    },
+  };
+}
+
 describe('library v2 ui preferences api (B5)', () => {
   it('fetches the stored/default preferences', async () => {
     server.use(
       http.get('/api/library/v2/ui-preferences', () =>
         HttpResponse.json({
           success: true,
-          preferences: {
-            track_table: {
-              columns: {
-                disc: false,
-                artists: true,
-                duration: true,
-                bpm: true,
-                match: true,
-                quality: true,
-                features: true,
-                metadata: true,
-                file_path: false,
-                play: false,
-              },
-              column_order: [
-                'play',
-                'disc',
-                'artists',
-                'duration',
-                'bpm',
-                'match',
-                'quality',
-                'features',
-                'metadata',
-                'file_path',
-              ],
-              show_all_match_providers: false,
-              visible_match_providers: {
-                spotify: true,
-                musicbrainz: true,
-                deezer: true,
-                itunes: true,
-                audiodb: true,
-                discogs: true,
-                lastfm: true,
-                genius: true,
-                tidal: true,
-                qobuz: true,
-                amazon: true,
-                jiosaavn: true,
-                bandcamp: true,
-              },
-              quality_show_format: true,
-              quality_show_resolution: true,
-              quality_show_bitrate: true,
-            },
-            artist_table: {
-              columns: {
-                quality_profile: false,
-                genres: false,
-                added: false,
-              },
-              column_order: ['quality_profile', 'genres', 'added'],
-            },
-          },
+          preferences: uiPreferences(),
         }),
       ),
     );
@@ -1221,61 +1227,7 @@ describe('library v2 ui preferences api (B5)', () => {
         });
         return HttpResponse.json({
           success: true,
-          preferences: {
-            track_table: {
-              columns: {
-                bpm: true,
-                file_path: true,
-                disc: false,
-                artists: true,
-                duration: true,
-                match: true,
-                quality: true,
-                features: true,
-                metadata: true,
-                play: false,
-              },
-              column_order: [
-                'play',
-                'disc',
-                'artists',
-                'duration',
-                'bpm',
-                'match',
-                'quality',
-                'features',
-                'metadata',
-                'file_path',
-              ],
-              show_all_match_providers: false,
-              visible_match_providers: {
-                spotify: true,
-                musicbrainz: true,
-                deezer: true,
-                itunes: true,
-                audiodb: true,
-                discogs: true,
-                lastfm: true,
-                genius: true,
-                tidal: true,
-                qobuz: true,
-                amazon: true,
-                jiosaavn: true,
-                bandcamp: true,
-              },
-              quality_show_format: true,
-              quality_show_resolution: true,
-              quality_show_bitrate: true,
-            },
-            artist_table: {
-              columns: {
-                quality_profile: false,
-                genres: false,
-                added: false,
-              },
-              column_order: ['quality_profile', 'genres', 'added'],
-            },
-          },
+          preferences: uiPreferences({ track: { file_path: true } }),
         });
       }),
     );
@@ -1308,57 +1260,7 @@ describe('library v2 ui preferences api (B5)', () => {
         });
         return HttpResponse.json({
           success: true,
-          preferences: {
-            track_table: {
-              columns: {
-                bpm: true,
-                file_path: false,
-                disc: false,
-                artists: true,
-                duration: true,
-                match: true,
-                quality: true,
-                features: true,
-                metadata: true,
-                play: false,
-              },
-              column_order: [
-                'play',
-                'disc',
-                'artists',
-                'duration',
-                'bpm',
-                'match',
-                'quality',
-                'features',
-                'metadata',
-                'file_path',
-              ],
-              show_all_match_providers: false,
-              visible_match_providers: {
-                spotify: true,
-                musicbrainz: true,
-                deezer: true,
-                itunes: true,
-                audiodb: true,
-                discogs: true,
-                lastfm: true,
-                genius: true,
-                tidal: true,
-                qobuz: true,
-                amazon: true,
-                jiosaavn: true,
-                bandcamp: true,
-              },
-              quality_show_format: true,
-              quality_show_resolution: true,
-              quality_show_bitrate: true,
-            },
-            artist_table: {
-              columns: { quality_profile: false, genres: true, added: false },
-              column_order: ['quality_profile', 'genres', 'added'],
-            },
-          },
+          preferences: uiPreferences({ artist: { genres: true } }),
         });
       }),
     );
