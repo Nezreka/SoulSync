@@ -773,6 +773,10 @@ class WebUIDownloadMonitor:
                         )
                     except Exception as e:
                         logger.debug("get_all_downloads failed: %s", e)
+                        # a failed engine poll is unknown inventory, like a
+                        # failed slskd poll. read as empty, every streaming
+                        # download looks gone and is restarted
+                        return _LIVE_TRANSFERS_FETCH_FAILED
                 for download in all_downloads:
                     key = _make_context_key(download.username, download.filename)
                     # Convert DownloadStatus to transfer dict format for monitor compatibility
@@ -793,6 +797,7 @@ class WebUIDownloadMonitor:
                         live_transfers[id_key] = transfer_row
             except Exception as yt_error:
                 logger.error(f"Monitor: Could not fetch streaming source downloads: {yt_error}")
+                return _LIVE_TRANSFERS_FETCH_FAILED
 
             return live_transfers
         except Exception as e:

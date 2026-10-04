@@ -8881,8 +8881,10 @@ def library_completion_stream():
             traceback.print_exc()
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
 
+    # the stream outlives the request: keep the caller's library (#1199)
+    from core.library_scope import scoped_stream
     return Response(
-        generate(),
+        scoped_stream(generate()),
         content_type='text/event-stream',
         headers={
             'Cache-Control': 'no-cache',
@@ -17342,8 +17344,13 @@ def _add_cancelled_task_to_wishlist(task):
         from core.wishlist_service import get_wishlist_service
         from core.wishlist.ignore import extract_display, REASON_CANCELLED
         wishlist_service = get_wishlist_service()
-        profile_id = get_current_profile_id()
         track_info = task.get('track_info', {}) or {}
+        # The wishlist the download was for, not the one of whoever pressed
+        # cancel: an admin stopping another profile's download has to stop
+        # THAT profile's row, or its auto-processor fetches it again.
+        batch = download_batches.get(task.get('batch_id')) or {}
+        profile_id = (batch.get('profile_id') or track_info.get('profile_id')
+                      or get_current_profile_id())
         track_id = track_info.get('id')
         name = track_info.get('name')
 

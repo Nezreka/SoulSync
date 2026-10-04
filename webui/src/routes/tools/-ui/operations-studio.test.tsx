@@ -60,7 +60,7 @@ const testJobs: RepairJob[] = [
     enabled: true,
   }),
   mockJob({
-    job_id: 'lyrics_fetcher',
+    job_id: 'missing_lyrics',
     display_name: 'Lyrics Fetcher',
     category: 'Artwork & lyrics',
     enabled: true,
@@ -81,7 +81,7 @@ const mockFindingGroups: FindingGroup[] = [
     dismissed: 0,
     total: 42,
     severity_max: 'info',
-    job_ids: ['lyrics_fetcher'],
+    job_ids: ['missing_lyrics'],
   },
   {
     finding_type: 'corrupt_audio',
@@ -110,7 +110,7 @@ const mockFindingTypes: FindingTypeInfo[] = [
     verb: 'Apply Lyrics',
     fixable: true,
     destructive: false,
-    job_ids: ['lyrics_fetcher'],
+    job_ids: ['missing_lyrics'],
   },
   {
     type: 'corrupt_audio',
@@ -324,6 +324,68 @@ describe('OperationsStudio (Simple Mode)', () => {
         expect.stringContaining('Audio Fidelity Sweep'),
         'info',
       );
+    });
+  });
+
+  it.each([
+    [
+      'Full Library Tune-Up',
+      [
+        'audio_corruption_detector',
+        'album_tag_consistency',
+        'missing_lyrics',
+        'missing_cover_art',
+        'duplicate_detector',
+      ],
+    ],
+    [
+      'Audio Fidelity Sweep',
+      ['audio_corruption_detector', 'fake_lossless_detector', 'quality_upgrade_scanner'],
+    ],
+    [
+      'Metadata Polish',
+      ['album_tag_consistency', 'comma_artist_splitter', 'genre_cleanup', 'track_number_repair'],
+    ],
+    ['Media Enrichment', ['missing_lyrics', 'missing_cover_art', 'replaygain_filler']],
+  ] as const)('queues every supported job in %s', async (title, expectedIds) => {
+    // These are the music repair registry's actual IDs, rather than the old
+    // UI's aliases. A missing alias silently dropped a playbook's work.
+    const catalogueIds = [
+      'audio_corruption_detector',
+      'fake_lossless_detector',
+      'quality_upgrade_scanner',
+      'short_preview_track',
+      'duplicate_detector',
+      'album_tag_consistency',
+      'comma_artist_splitter',
+      'genre_cleanup',
+      'suspect_album_tag_detector',
+      'track_number_repair',
+      'mbid_mismatch_detector',
+      'missing_lyrics',
+      'missing_cover_art',
+      'replaygain_filler',
+      'orphan_file_detector',
+      'dead_file_cleaner',
+      'empty_folder_cleaner',
+    ];
+    routes({ '/run': { success: true } });
+    render(
+      <OperationsStudio
+        jobs={catalogueIds.map((job_id) => mockJob({ job_id }))}
+        progress={{}}
+        runs={[]}
+        onChanged={vi.fn()}
+        onShowFindings={vi.fn()}
+        onSwitchToAdvanced={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByText(title).closest('button')!);
+    await waitFor(() => {
+      const runUrls = fetchMock.mock.calls
+        .map(([url]) => String(url))
+        .filter((url) => url.endsWith('/run'));
+      expect(runUrls).toEqual(expectedIds.map((id) => `/api/repair/jobs/${id}/run`));
     });
   });
 
