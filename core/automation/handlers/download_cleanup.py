@@ -93,9 +93,14 @@ def auto_clean_completed_downloads(config: Dict[str, Any], deps: AutomationDeps)
             )
             return {'status': 'completed'}
 
-        deps.run_async(deps.download_orchestrator.clear_all_completed_downloads())
+        ok = deps.run_async(deps.download_orchestrator.clear_all_completed_downloads())
         if not has_post_processing:
             deps.sweep_empty_download_directories()
+        # update_progress only reaches the automation's own run history; this
+        # handler fires every few minutes and used to leave no trace in the
+        # app log at all, which hid weeks of slskd-wide clears.
+        deps.logger.info("download cleanup ran (cleared=%s, empty-dir sweep %s)",
+                         ok, "skipped" if has_post_processing else "ran")
         deps.update_progress(
             automation_id, log_line='Download cleanup completed', log_type='success',
         )
@@ -150,7 +155,8 @@ def auto_full_cleanup(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str,
         )
     else:
         try:
-            deps.run_async(deps.download_orchestrator.clear_all_completed_downloads())
+            ok = deps.run_async(deps.download_orchestrator.clear_all_completed_downloads())
+            deps.logger.info("full cleanup: download queue clear ran (cleared=%s)", ok)
             steps.append('Download queue: cleared')
             deps.update_progress(
                 automation_id, log_line='Download queue: cleared', log_type='success',
