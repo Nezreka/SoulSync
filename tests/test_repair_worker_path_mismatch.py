@@ -105,3 +105,102 @@ def test_legacy_finding_under_transfer_still_works(tmp_path):
     res = w._fix_path_mismatch('track', '12', src, details)
     assert res['success'] is True, res
     assert os.path.isfile(dst) and not os.path.exists(src)
+
+
+# ── #1504: the fixer must never move a file from one library into another ────
+
+def test_refuses_own_library_file_to_shared_folder(tmp_path, monkeypatch):
+    """The #1504 case: a stale finding (written before reorganize learned
+    own-library routing) names a shared-folder destination for a file that
+    lives in profile 2's own library. The file must NOT move."""
+    db, w = _worker(tmp_path)
+    src = tmp_path / "lib" / "u2" / "Artist" / "Old" / "s.flac"
+    os.makedirs(src.parent, exist_ok=True)
+    src.write_text("audio")
+    monkeypatch.setattr(
+        "core.imports.paths.owning_profile_for_path",
+        lambda p, _roots=None: 2 if os.path.normpath(str(p)).startswith(
+            os.path.normpath(str(tmp_path / "lib" / "u2")) + os.sep) else None)
+    dst = os.path.join(w.transfer_folder, "Artist", "Album", "01 - s.flac")
+    _insert_track(db, 30, str(src))
+    details = {'from': 'x', 'to': 'y',
+               'from_abs': str(src), 'to_abs': dst}
+    res = w._fix_path_mismatch('track', '30', str(src), details)
+    assert res['success'] is False
+    assert 'library boundaries' in res['error']
+    assert src.is_file() and not os.path.exists(dst)
+    with db._get_connection() as conn:
+        assert conn.execute(
+            "SELECT file_path FROM tracks WHERE id=30").fetchone()[0] == str(src)
+
+
+def test_allows_move_within_same_own_library(tmp_path, monkeypatch):
+    """Same-owner moves (own→own) proceed exactly as before."""
+    own_root = os.path.normpath(str(tmp_path / "lib" / "u2"))
+    monkeypatch.setattr(
+        "core.imports.paths.owning_profile_for_path",
+        lambda p, _roots=None: 2 if os.path.normpath(str(p)).startswith(own_root + os.sep)
+        else None)
+    db, w = _worker(tmp_path)
+    src = tmp_path / "lib" / "u2" / "Artist" / "Old" / "s.flac"
+    dst = tmp_path / "lib" / "u2" / "Artist" / "Album" / "01 - s.flac"
+    os.makedirs(src.parent, exist_ok=True)
+    src.write_text("audio")
+    _insert_track(db, 31, str(src))
+    details = {'from': 'x', 'to': 'y',
+               'from_abs': str(src), 'to_abs': str(dst)}
+    res = w._fix_path_mismatch('track', '31', str(src), details)
+    assert res['success'] is True, res
+    assert dst.is_file() and not src.exists()
+
+
+def test_refuses_move_between_own_libraries(tmp_path, monkeypatch):
+    """A destination in a DIFFERENT profile's own library is also a
+    cross-library move — skipped, not moved."""
+    u2 = os.path.normpath(str(tmp_path / "lib" / "u2"))
+    u3 = os.path.normpath(str(tmp_path / "lib" / "u3"))
+
+    def _owner(path, _roots=None):
+        s = os.path.normpath(str(path))
+        if s == u2 or s.startswith(u2 + os.sep):
+            return 2
+        if s == u3 or s.startswith(u3 + os.sep):
+            return 3
+        return None
+    monkeypatch.setattr(
+        "core.imports.paths.owning_profile_for_path", _owner)
+    db, w = _worker(tmp_path)
+    src = tmp_path / "lib" / "u2" / "Artist" / "Old" / "s.flac"
+    dst = tmp_path / "lib" / "u3" / "Artist" / "Album" / "01 - s.flac"
+    os.makedirs(src.parent, exist_ok=True)
+    src.write_text("audio")
+    _insert_track(db, 32, str(src))
+    details = {'from': 'x', 'to': 'y',
+               'from_abs': str(src), 'to_abs': str(dst)}
+    res = w._fix_path_mismatch('track', '32', str(src), details)
+    assert res['success'] is False
+    assert 'library boundaries' in res['error']
+    assert src.is_file() and not dst.exists()
+
+
+def test_refuses_shared_file_into_own_library(tmp_path, monkeypatch):
+    """The reverse direction: a shared-folder file must not be moved into a
+    profile's own library either."""
+    own_root = os.path.normpath(str(tmp_path / "lib" / "u2"))
+    monkeypatch.setattr(
+        "core.imports.paths.owning_profile_for_path",
+        lambda p, _roots=None: 2 if os.path.normpath(str(p)).startswith(own_root + os.sep)
+        else None)
+    db, w = _worker(tmp_path)
+    src = os.path.join(w.transfer_folder, "Artist", "Old", "s.flac")
+    dst = tmp_path / "lib" / "u2" / "Artist" / "Album" / "01 - s.flac"
+    os.makedirs(os.path.dirname(src), exist_ok=True)
+    with open(src, "w") as f:
+        f.write("x")
+    _insert_track(db, 33, src)
+    details = {'from': 'x', 'to': 'y',
+               'from_abs': src, 'to_abs': str(dst)}
+    res = w._fix_path_mismatch('track', '33', src, details)
+    assert res['success'] is False
+    assert 'library boundaries' in res['error']
+    assert os.path.isfile(src) and not dst.exists()

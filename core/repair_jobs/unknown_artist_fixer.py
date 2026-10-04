@@ -500,6 +500,32 @@ class UnknownArtistFixerJob(RepairJob):
             'confidence': confidence,
         }
 
+    @staticmethod
+    def _destination_root(resolved_path: str, transfer: str) -> str:
+        """The library root a reorganized file belongs under (#1504).
+
+        Derived from the file's real on-disk path — the path is ground truth
+        for which library the file lives in. The DB row's ``owner_profile_id``
+        is NOT consulted: it is NULL for SoulSync-downloaded rows and can be
+        stale, and trusting it would reintroduce the exact cross-library move
+        this fixer is fixing (a shared-folder file with a stale owner row
+        migrating into an own library, or a NULL-owner row in an own library
+        migrating out to shared).
+
+        Shared-library files (no own root contains the path) and any lookup
+        failure resolve to the shared transfer folder — exactly today's
+        behavior.
+        """
+        try:
+            from core.imports.paths import library_root_for_profile, owning_profile_for_path
+            owner_pid = owning_profile_for_path(resolved_path)
+            if owner_pid:
+                return library_root_for_profile(owner_pid, announce=False) or transfer
+        except Exception as e:  # noqa: BLE001 - fail-open: shared folder
+            logger.debug("own-library destination lookup failed for %s: %s",
+                         resolved_path, e)
+        return transfer
+
     def _apply_fix(self, context, track, corrected, resolved_path,
                    expected_rel, transfer, fix_tags, reorganize_files):
         """Apply the fix: re-tag file, move to correct path, update DB."""
@@ -532,7 +558,13 @@ class UnknownArtistFixerJob(RepairJob):
         # Step 2: Move file to correct location
         final_path = resolved_path
         if reorganize_files and expected_rel:
-            expected_abs = os.path.normpath(os.path.join(transfer, expected_rel))
+            # #1504: a track that lives in an own-library folder must stay in
+            # that library — joining onto the shared transfer folder silently
+            # migrates it across libraries. The root comes from the same
+            # per-profile routing the import pipeline uses; any lookup failure
+            # falls back to the shared folder (today's behavior).
+            dest_root = self._destination_root(resolved_path, transfer)
+            expected_abs = os.path.normpath(os.path.join(dest_root, expected_rel))
             current_norm = os.path.normpath(resolved_path)
 
             if current_norm.lower() != expected_abs.lower():
@@ -584,6 +616,9 @@ class UnknownArtistFixerJob(RepairJob):
                     parent = os.path.dirname(current_norm)
                     transfer_norm = os.path.normpath(transfer)
                     protected.add(transfer_norm)
+                    # #1504: never climb past the own-library root either —
+                    # rmdir'ing it would orphan the whole profile's library.
+                    protected.add(os.path.normpath(dest_root))
                     for _ in range(5):
                         if (parent and os.path.isdir(parent)
                                 and os.path.normpath(parent) not in protected

@@ -5,7 +5,9 @@ import os
 import subprocess
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob, walk_library
+from core.repair_jobs.base import (
+    JobContext, JobResult, RepairJob, maintenance_roots, walk_library,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.fake_lossless")
@@ -56,15 +58,17 @@ class FakeLosslessDetectorJob(RepairJob):
         if not os.path.isdir(transfer):
             return result
 
-        # Collect lossless files
+        # Collect lossless files from the shared transfer folder and every
+        # active own-library root (#1504).
         lossless_files = []
-        for root, _dirs, files in walk_library(transfer):
-            if context.check_stop():
-                return result
-            for fname in files:
-                ext = os.path.splitext(fname)[1].lower()
-                if ext in LOSSLESS_EXTENSIONS:
-                    lossless_files.append(os.path.join(root, fname))
+        for walk_root in maintenance_roots(transfer):
+            for root, _dirs, files in walk_library(walk_root):
+                if context.check_stop():
+                    return result
+                for fname in files:
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext in LOSSLESS_EXTENSIONS:
+                        lossless_files.append(os.path.join(root, fname))
 
         total = len(lossless_files)
         if context.update_progress:
@@ -166,10 +170,11 @@ class FakeLosslessDetectorJob(RepairJob):
         if not os.path.isdir(transfer):
             return 0
         count = 0
-        for _root, _dirs, files in walk_library(transfer):
-            for fname in files:
-                if os.path.splitext(fname)[1].lower() in LOSSLESS_EXTENSIONS:
-                    count += 1
+        for walk_root in maintenance_roots(transfer):
+            for _root, _dirs, files in walk_library(walk_root):
+                for fname in files:
+                    if os.path.splitext(fname)[1].lower() in LOSSLESS_EXTENSIONS:
+                        count += 1
         return count
 
 

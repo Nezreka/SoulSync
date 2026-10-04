@@ -5,7 +5,9 @@ import re
 import time
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob, walk_library
+from core.repair_jobs.base import (
+    JobContext, JobResult, RepairJob, maintenance_roots, walk_library,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.orphan_files")
@@ -97,15 +99,18 @@ class OrphanFileDetectorJob(RepairJob):
             if conn:
                 conn.close()
 
-        # Walk transfer folder and find orphans
+        # Walk the shared transfer folder plus every active own-library
+        # root (#1504). Nested roots are dropped by maintenance_roots, so no
+        # tree is scanned twice.
         audio_files = []
-        for root, _dirs, files in walk_library(transfer):
-            if context.check_stop():
-                return result
-            for fname in files:
-                ext = os.path.splitext(fname)[1].lower()
-                if ext in AUDIO_EXTENSIONS:
-                    audio_files.append(os.path.join(root, fname))
+        for walk_root in maintenance_roots(transfer):
+            for root, _dirs, files in walk_library(walk_root):
+                if context.check_stop():
+                    return result
+                for fname in files:
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext in AUDIO_EXTENSIONS:
+                        audio_files.append(os.path.join(root, fname))
 
         total = len(audio_files)
         if context.update_progress:
@@ -295,8 +300,9 @@ class OrphanFileDetectorJob(RepairJob):
         if not os.path.isdir(transfer):
             return 0
         count = 0
-        for _root, _dirs, files in walk_library(transfer):
-            for fname in files:
-                if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
-                    count += 1
+        for walk_root in maintenance_roots(transfer):
+            for _root, _dirs, files in walk_library(walk_root):
+                for fname in files:
+                    if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
+                        count += 1
         return count

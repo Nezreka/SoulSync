@@ -120,6 +120,50 @@ def walk_library(root: str):
         yield dirpath, dirnames, [f for f in filenames if not is_appledouble(f)]
 
 
+def maintenance_roots(transfer_folder: str) -> List[str]:
+    """every library tree the maintenance jobs should walk: the shared transfer
+    folder first, then every active own-library root (#1504).
+
+    the result is deduped, and any root nested under another walked root is
+    dropped — an own root that contains the transfer folder covers it, so no
+    job double-scans or double-counts. shared-folder-first ordering is kept
+    wherever the shared folder survives.
+
+    fail-open: anything that can't be resolved is simply not walked — every
+    job behaves exactly as before on shared-library installs."""
+    try:
+        from core.imports.paths import own_library_roots
+        extra = [root for _, root in own_library_roots()]
+    except Exception:  # noqa: BLE001 - paths helper unavailable → shared only
+        extra = []
+    seen: set = set()
+    candidates: List[str] = []
+    for raw in [transfer_folder, *extra]:
+        if not raw:
+            continue
+        try:
+            # realpath (not abspath): a symlinked own root must dedupe and
+            # nest-check against the same canonical form owning_profile_for_path
+            # matches on — otherwise one tree gets walked twice.
+            norm = os.path.normpath(os.path.realpath(str(raw)))
+        except (OSError, ValueError):
+            continue
+        if norm not in seen:
+            seen.add(norm)
+            candidates.append(norm)
+    if not candidates:
+        return []
+
+    def _is_under(child: str, parent: str) -> bool:
+        return child == parent or child.startswith(parent + os.sep)
+
+    # drop any root nested under another one (an own root that contains the
+    # transfer folder covers it — no double-scan, no double-count), keep the
+    # rest in order with the shared folder first
+    return [c for c in candidates
+            if not any(c != o and _is_under(c, o) for o in candidates)]
+
+
 # hand-tagged releases ("tag it yourself"): the user typed every tag for a
 # bootleg or live recording no service knows. jobs that would match it to a
 # service, renumber it, or offer to delete it must leave it alone.

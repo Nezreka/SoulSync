@@ -2495,11 +2495,17 @@ class RepairWorker:
         if not track_data:
             return {'success': False, 'error': 'No track data in finding'}
         try:
+            # Route the re-download to the profile that owns the artist: new
+            # findings carry owner_profile_id from the scan; old findings
+            # predate that field and fall back to an artist-name lookup.
+            owner = details.get('owner_profile_id') or self._owner_profile_for_artist_name(
+                details.get('artist_name'))
             success = self.db.add_to_wishlist(
                 spotify_track_data=track_data,
                 failure_reason='Discography backfill — missing from library',
                 source_type='repair',
-                source_info={'job': 'discography_backfill', 'artist': details.get('artist_name', '')}
+                source_info={'job': 'discography_backfill', 'artist': details.get('artist_name', '')},
+                profile_id=self._wishlist_profile_for_owner(owner),
             )
             track_name = track_data.get('name', '?')
             if success:
@@ -2596,7 +2602,22 @@ class RepairWorker:
             if album_thumb:
                 album_images = [{'url': album_thumb}]
 
-            return {
+            # The owning user profile for this repair re-download. Its own
+            # nested try/except so a DB predating the owner_profile_id column
+            # (or any lookup error) can never break identity resolution —
+            # owner just stays None and the caller falls back to profile 1.
+            owner_profile_id = None
+            try:
+                cursor.execute(
+                    "SELECT owner_profile_id FROM tracks WHERE id = ?", (entity_id,))
+                _owner_row = cursor.fetchone()
+                if _owner_row is not None:
+                    owner_profile_id = (_owner_row['owner_profile_id']
+                                        if isinstance(_owner_row, dict) else _owner_row[0])
+            except Exception:
+                owner_profile_id = None
+
+            identity = {
                 'id': wishlist_id,
                 'name': track_name,
                 'artists': [{'name': artist_name}],
@@ -2619,13 +2640,108 @@ class RepairWorker:
                 'uri': (f"spotify:track:{_from('spotify_track_id')}"
                         if _from('spotify_track_id') else ''),
                 'is_local': False,
+                # Private key: callers pop it before handing the dict to the
+                # wishlist (add_to_wishlist stores the dict verbatim as JSON,
+                # so it must not leak into stored rows). None when the DB row
+                # is gone (orphaned finding) or the owner is otherwise
+                # unknown — the caller then falls back to profile 1.
+                '_owner_profile_id': owner_profile_id,
             }
+            return identity
         except Exception as e:
             logger.warning("Track identity lookup failed for track %s: %s", entity_id, e)
             return None
         finally:
             if conn:
                 conn.close()
+
+    def _owner_profile_for_track(self, track_id) -> Optional[int]:
+        """Owning user profile for a library track row, or None when unknown.
+
+        Fail-open by design — never raises. A NULL owner (legacy rows), a
+        missing row (orphaned finding after a DB refresh), a DB predating the
+        owner_profile_id column, or any lookup error all return None, and the
+        caller falls back to profile 1 (today's behavior)."""
+        if track_id is None:
+            return None
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT owner_profile_id FROM tracks WHERE id = ?", (track_id,))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            return row['owner_profile_id'] if isinstance(row, dict) else row[0]
+        except Exception:
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    def _owner_profile_for_album(self, album_id) -> Optional[int]:
+        """Owning user profile for a library album row, or None when unknown.
+
+        Same fail-open contract as _owner_profile_for_track."""
+        if album_id is None:
+            return None
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT owner_profile_id FROM albums WHERE id = ?", (album_id,))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            return row['owner_profile_id'] if isinstance(row, dict) else row[0]
+        except Exception:
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    def _owner_profile_for_artist_name(self, artist_name) -> Optional[int]:
+        """Fix-time fallback owner lookup for old discography-backfill findings
+        that predate the scan-time owner field (details carry only the artist
+        name). Name matching can collide across artists, so prefer a row with
+        a known owner. Fail-open: returns None when unknown."""
+        if not artist_name:
+            return None
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT owner_profile_id FROM artists WHERE name = ?
+                   ORDER BY (owner_profile_id IS NULL), id LIMIT 1""",
+                (artist_name,))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            return row['owner_profile_id'] if isinstance(row, dict) else row[0]
+        except Exception:
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    @staticmethod
+    def _wishlist_profile_for_owner(owner_profile_id) -> int:
+        """Fail-open owner → wishlist profile_id.
+
+        A determinable owner routes the re-download to that profile's
+        wishlist; anything unknown (NULL owner, orphaned finding, old
+        discography finding) falls back to profile 1 — byte-for-byte today's
+        behavior: the re-download still happens, just to the default profile."""
+        try:
+            owner = int(owner_profile_id) if owner_profile_id is not None else None
+        except (TypeError, ValueError):
+            owner = None
+        if owner:
+            return owner
+        logger.debug(
+            "Repair re-download: owning profile unknown — wishlisting to profile 1 (today's behavior)")
+        return 1
 
     def _fix_quality_upgrade(self, entity_type, entity_id, file_path, details):
         """Apply a Quality Upgrade finding (user-approved; the old Quality
@@ -2696,6 +2812,14 @@ class RepairWorker:
             track_data = self._track_identity_for_redownload(entity_id, details)
         if not track_data:
             return {'success': False, 'error': 'No matched track in finding'}
+        # Route the re-download to the owning profile. The identity resolver
+        # surfaces the track row's owner as a private key (popped here so it
+        # never reaches the wishlist's stored JSON); pre-matched finding data
+        # carries no owner, so look it up from the entity row. entity_id is
+        # None for unmatched files — owner stays unknown → profile 1.
+        owner_profile_id = track_data.pop('_owner_profile_id', None)
+        if not owner_profile_id:
+            owner_profile_id = self._owner_profile_for_track(entity_id)
         try:
             success = self.db.add_to_wishlist(
                 spotify_track_data=track_data,
@@ -2713,6 +2837,7 @@ class RepairWorker:
                     'provider': details.get('provider'),
                 },
                 quality_profile_id=details.get('quality_profile_id'),
+                profile_id=self._wishlist_profile_for_owner(owner_profile_id),
             )
             track_name = track_data.get('name', '?')
             if success:
@@ -2766,12 +2891,17 @@ class RepairWorker:
             'reason': 'dead_file_redownload',
         }
 
+        # The dead DB row is deleted below, so resolve the owning profile
+        # BEFORE it is gone. The identity resolver surfaced it as a private
+        # key; pop it so it never reaches the wishlist's stored JSON.
+        owner_profile_id = track_data.pop('_owner_profile_id', None)
         try:
             added = self.db.add_to_wishlist(
                 track_data,
                 failure_reason='Dead file — re-download requested',
                 source_type='redownload',
                 source_info=source_info,
+                profile_id=self._wishlist_profile_for_owner(owner_profile_id),
             )
 
             # Remove dead track entry from DB regardless of whether wishlist already had it
@@ -2835,12 +2965,18 @@ class RepairWorker:
             'reason': 'preview_clip_redownload',
         }
 
+        # Route the re-download to the owning profile (identity resolver
+        # surfaced it as a private key — popped so it never reaches the
+        # wishlist's stored JSON). The preview DB row is dropped below, so
+        # resolve the owner before it is gone.
+        owner_profile_id = track_data.pop('_owner_profile_id', None)
         try:
             added = self.db.add_to_wishlist(
                 track_data,
                 failure_reason='Preview clip — re-downloading full track',
                 source_type='redownload',
                 source_info=source_info,
+                profile_id=self._wishlist_profile_for_owner(owner_profile_id),
             )
 
             # Delete the preview file (path resolved like the other delete tools).
@@ -2929,12 +3065,18 @@ class RepairWorker:
             'reason': 'corrupt_file_redownload',
         }
 
+        # Route the re-download to the owning profile (identity resolver
+        # surfaced it as a private key — popped so it never reaches the
+        # wishlist's stored JSON). The corrupt DB row is dropped below, so
+        # resolve the owner before it is gone.
+        owner_profile_id = track_data.pop('_owner_profile_id', None)
         try:
             added = self.db.add_to_wishlist(
                 track_data,
                 failure_reason='Corrupt file — re-downloading',
                 source_type='redownload',
                 source_info=source_info,
+                profile_id=self._wishlist_profile_for_owner(owner_profile_id),
             )
 
             # Quarantine the corrupt file (path resolved like the other delete tools).
@@ -3052,12 +3194,17 @@ class RepairWorker:
             'reason': 'fake_lossless_redownload',
         }
 
+        # Route the re-download to the owning profile (identity resolver
+        # surfaced it as a private key — popped so it never reaches the
+        # wishlist's stored JSON).
+        owner_profile_id = track_data.pop('_owner_profile_id', None)
         try:
             added = self.db.add_to_wishlist(
                 track_data,
                 failure_reason=f"Fake lossless detected — spectral cutoff at ~{details.get('detected_cutoff_khz', '?')} kHz",
                 source_type='repair',
                 source_info=source_info,
+                profile_id=self._wishlist_profile_for_owner(owner_profile_id),
             )
             if added:
                 return {'success': True, 'action': 'added_to_wishlist',
@@ -3113,6 +3260,20 @@ class RepairWorker:
                         counter += 1
 
                 import shutil
+                # #1504: an own-library orphan must re-import into the same own
+                # library — carry the owner across the staging hop in a
+                # fingerprinted sidecar (written BEFORE the move, so a poll
+                # can never import the file without its profile). None →
+                # no sidecar → shared-folder re-import, today's behavior.
+                try:
+                    from core.imports.paths import owning_profile_for_path
+                    from core.repair_jobs.relocate import write_profile_sidecar
+                    _orphan_owner = owning_profile_for_path(resolved)
+                    if _orphan_owner:
+                        write_profile_sidecar(dest, _orphan_owner, resolved)
+                except Exception as e:  # noqa: BLE001 - fail-open: shared re-import
+                    logger.debug("orphan staging sidecar write failed for %s: %s",
+                                 resolved, e)
                 shutil.move(resolved, dest)
 
                 # Clean up empty parent directories
@@ -3164,6 +3325,17 @@ class RepairWorker:
         except Exception:
             roots = set()
         roots.add(os.path.normpath(self.transfer_folder))
+        # #1504: a profile's own-library root must never be auto-removed —
+        # repair fixes now operate inside own libraries too (orphan delete,
+        # fake-lossless delete, AcoustID relocate), and an emptied own root
+        # would otherwise be rmdir'd, breaking the media-server mapping.
+        try:
+            from core.imports.paths import own_library_roots
+            for _pid, _root in own_library_roots():
+                if _root:
+                    roots.add(os.path.normpath(_root))
+        except Exception as e:  # noqa: BLE001 - fail-open: transfer/staging stay protected
+            logger.debug("own-library roots unavailable for protected dirs: %s", e)
         return roots
 
     def _trigger_auto_import_scan(self):
@@ -3189,15 +3361,18 @@ class RepairWorker:
     def _cleanup_empty_parents(self, file_path):
         """Remove empty parent directories up to 3 levels.
 
-        Never removes the transfer folder or any configured root (staging /
-        download / transfer) — even when nested and empty.
+        Never removes the transfer folder, any configured root (staging /
+        download / transfer), or any profile's own-library root — even when
+        nested and empty. Comparisons are realpath-based so a symlinked
+        library root is protected under every spelling.
         """
         try:
-            protected = self._protected_root_dirs()
+            protected = {os.path.normpath(os.path.realpath(p))
+                         for p in self._protected_root_dirs()}
             parent = os.path.dirname(file_path)
             for _ in range(3):
                 if (parent and os.path.isdir(parent)
-                        and os.path.normpath(parent) not in protected
+                        and os.path.normpath(os.path.realpath(parent)) not in protected
                         and not os.listdir(parent)):
                     os.rmdir(parent)
                     parent = os.path.dirname(parent)
@@ -3622,7 +3797,9 @@ class RepairWorker:
             junk_files=details.get('junk_files') or [],
             remove_junk=bool(details.get('remove_junk', True)),
             remove_disposable=bool(details.get('remove_disposable', False)),
-            root=self.transfer_folder,
+            # #1504: refuse the library root the folder was scanned under —
+            # an own-library root is never a removal candidate either.
+            root=details.get('library_root') or self.transfer_folder,
             listdir=os.listdir, isdir=os.path.isdir, islink=os.path.islink,
             remove_file=os.remove, rmdir=os.rmdir,
         )
@@ -4321,10 +4498,15 @@ class RepairWorker:
                         'artists': [{'name': expected_artist}],
                         'album': {'name': album_title} if album_title else {'name': expected_title},
                     }
+                    # Route the re-download to the profile that owns the wrong
+                    # file's track row. The row is deleted below, so look the
+                    # owner up before the add.
                     self.db.add_to_wishlist(
                         spotify_track_data=track_data,
                         failure_reason='AcoustID mismatch — re-downloading correct track',
                         source_type='repair',
+                        profile_id=self._wishlist_profile_for_owner(
+                            self._owner_profile_for_track(track_id)),
                     )
                     logger.info("Added '%s' by '%s' to wishlist for re-download",
                                 expected_title, expected_artist)
@@ -4392,6 +4574,19 @@ class RepairWorker:
                 finally:
                     conn.close()
 
+            # #1504: carry the owning profile across the staging hop — the file
+            # must re-import into the same own library it came from. The owner
+            # is derived from the file's real path (ground truth for which
+            # library it lives in; the DB row's owner_profile_id is NULL for
+            # SoulSync-downloaded rows and can be stale). None → no sidecar →
+            # the file re-imports into the shared folder, today's behavior.
+            try:
+                from core.imports.paths import owning_profile_for_path
+                relocate_owner_pid = owning_profile_for_path(resolved)
+            except Exception as e:  # noqa: BLE001 - fail-open to shared re-import
+                logger.debug("relocate owner lookup failed for %s: %s", resolved, e)
+                relocate_owner_pid = None
+
             from core.repair_jobs.relocate import relocate_mismatch_to_staging
             from core.tag_writer import write_tags_to_file
             from core.imports.file_ops import safe_move_file
@@ -4399,7 +4594,8 @@ class RepairWorker:
                 dest = relocate_mismatch_to_staging(
                     resolved, staging_path, tag_updates,
                     write_tags=write_tags_to_file, move_file=safe_move_file,
-                    drop_db_row=_drop_row, exists=os.path.exists)
+                    drop_db_row=_drop_row, exists=os.path.exists,
+                    profile_id=relocate_owner_pid)
             except Exception as e:
                 return {'success': False, 'error': f'Relocate failed: {e}'}
             self._cleanup_empty_parents(resolved)   # remove the now-empty wrong folder
@@ -5017,11 +5213,16 @@ class RepairWorker:
                         'is_album': True,
                         'reason': 'album_completeness_auto_fill',
                     }
+                    # Route the re-download to the profile that owns the album —
+                    # otherwise the replacement lands in profile 1's library
+                    # and never joins the album folder.
                     self.db.add_to_wishlist(
                         wishlist_data,
                         failure_reason='Missing from incomplete album',
                         source_type='album',
                         source_info=source_info,
+                        profile_id=self._wishlist_profile_for_owner(
+                            self._owner_profile_for_album(album_id)),
                     )
                     wishlisted_count += 1
                     track_details.append({
@@ -5469,6 +5670,33 @@ class RepairWorker:
         if os.path.exists(dst) and not os.path.samefile(src, dst):
             logger.warning("Path mismatch fix: destination already exists (different file): %s", dst)
             return {'success': False, 'error': 'Destination already exists (different file)'}
+
+        # #1504: never move a file from one library into another. A stale
+        # finding (written before reorganize learned own-library routing, or
+        # by a scan that assumed the shared folder) can name a shared-folder
+        # destination for a file that lives in a profile's own library —
+        # moving it would yank the file out of that library. Same-owner
+        # moves (own→own, shared→shared, unknown→unknown) proceed exactly
+        # as before; anything asymmetric is skipped with a warning so a
+        # re-scan can write a correct finding instead of this one relocating
+        # the file somewhere it doesn't belong. (There is no profile in a
+        # context to set here — the fixer moves from_abs→to_abs directly —
+        # so the guard, not re-routing, is the correct shape.)
+        try:
+            from core.imports.paths import own_library_roots, owning_profile_for_path
+            _lib_roots = own_library_roots()
+            src_owner = owning_profile_for_path(src, _roots=_lib_roots)
+            dst_owner = owning_profile_for_path(dst, _roots=_lib_roots)
+        except Exception:  # noqa: BLE001 - lookup unavailable → both owners
+            # unknown → the guard below passes → today's behavior exactly.
+            src_owner = dst_owner = None
+        if src_owner != dst_owner:
+            logger.warning(
+                "Path mismatch fix: refusing to move %s across libraries "
+                "(source owner=%s, destination owner=%s) — re-scan the "
+                "library to refresh this finding", src, src_owner, dst_owner)
+            return {'success': False,
+                    'error': 'Move crosses library boundaries — skipped for safety (re-scan to refresh)'}
 
         try:
             os.makedirs(os.path.dirname(dst), exist_ok=True)

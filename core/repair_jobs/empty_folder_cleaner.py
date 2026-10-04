@@ -24,7 +24,10 @@ from typing import Iterable, List
 
 from core.library.residual_files import JUNK_FILES, is_disposable, is_junk, is_release_junk  # noqa: F401 — JUNK_FILES/is_junk re-exported
 from core.repair_jobs import register_job
-from core.repair_jobs.base import is_internal_transfer_dir, JobContext, JobResult, RepairJob, walk_library
+from core.repair_jobs.base import (
+    JobContext, JobResult, RepairJob,
+    is_internal_transfer_dir, maintenance_roots, walk_library,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.empty_folder_cleaner")
@@ -85,11 +88,10 @@ class EmptyFolderCleanerJob(RepairJob):
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
 
-        root = context.transfer_folder
-        if not root or not os.path.isdir(root):
+        transfer = context.transfer_folder
+        if not transfer or not os.path.isdir(transfer):
             logger.info("[Empty Folder Cleaner] library root not available — skipping")
             return result
-        root = os.path.realpath(root)
 
         ignore_junk = True
         ignore_disposable = False
@@ -112,10 +114,36 @@ class EmptyFolderCleanerJob(RepairJob):
 
         flagged = set()   # dir paths we'd remove → a parent sees them as "gone"
 
+        # #1504: walk the shared transfer folder plus every active own-library
+        # root. maintenance_roots drops nested roots, so no tree is scanned or
+        # double-flagged. The never-remove-the-root and internal-dir guards
+        # below are evaluated per walked root, so an own-library root is never
+        # a removal candidate either.
+        for walk_root in maintenance_roots(transfer):
+            root = os.path.realpath(walk_root)
+            if not os.path.isdir(root):
+                continue
+            if self._scan_root(context, result, root,
+                               ignore_junk=ignore_junk,
+                               ignore_disposable=ignore_disposable,
+                               flagged=flagged):
+                return result  # stop requested mid-walk
+
+        logger.info("[Empty Folder Cleaner] %d folders scanned, %d empty flagged",
+                    result.scanned, result.findings_created)
+        return result
+
+    def _scan_root(self, context: JobContext, result: JobResult, root: str,
+                   *, ignore_junk: bool, ignore_disposable: bool,
+                   flagged: set) -> bool:
+        """Bottom-up empty-folder walk of a single library root.
+
+        Returns True when the scan was stop-requested mid-walk.
+        """
         # topdown=False ⇒ deepest first, so children are decided before parents.
         for dirpath, dirnames, filenames in os.walk(root, topdown=False):
             if context.check_stop():
-                return result
+                return True
             real = os.path.realpath(dirpath)
             if real == root:
                 continue                      # never the library root itself
@@ -169,6 +197,9 @@ class EmptyFolderCleanerJob(RepairJob):
                         description=(f'"{rel}" holds no music' + extra + ' — safe to remove.'),
                         details={
                             'folder_path': dirpath,
+                            # The library root this folder was scanned under —
+                            # the apply handler refuses to remove it (#1504).
+                            'library_root': root,
                             'junk_files': junk,
                             'purgeable_files': purgeable,
                             'remove_junk': ignore_junk,
@@ -181,18 +212,18 @@ class EmptyFolderCleanerJob(RepairJob):
                 except Exception as e:
                     logger.debug("[Empty Folder Cleaner] create finding failed for %s: %s", dirpath, e)
                     result.errors += 1
-
-        logger.info("[Empty Folder Cleaner] %d folders scanned, %d empty flagged",
-                    result.scanned, result.findings_created)
-        return result
+        return False
 
     def estimate_scope(self, context: JobContext) -> int:
-        root = context.transfer_folder
-        if not root or not os.path.isdir(root):
+        transfer = context.transfer_folder
+        if not transfer or not os.path.isdir(transfer):
             return 0
         total = 0
-        for _dp, dirnames, _f in walk_library(root):
-            total += len(dirnames)
+        for walk_root in maintenance_roots(transfer):
+            if not os.path.isdir(walk_root):
+                continue
+            for _dp, dirnames, _f in walk_library(walk_root):
+                total += len(dirnames)
         return total
 
 

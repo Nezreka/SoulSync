@@ -335,6 +335,11 @@ class DiscographyBackfillJob(RepairJob):
                             details={
                                 'track_data': track_data,
                                 'artist_name': artist_name,
+                                # Recorded at scan time so the fix handler can
+                                # wishlist the re-download to the owning
+                                # profile (#1504). Old findings lack it and
+                                # fall back to an artist-name lookup.
+                                'owner_profile_id': artist.get('owner_profile_id'),
                                 'album_name': release_name,
                                 'album_image_url': release_image,
                                 'source': source,
@@ -353,6 +358,10 @@ class DiscographyBackfillJob(RepairJob):
                         # wishlist or already auto-added in a prior scan).
                         if auto_add and inserted:
                             try:
+                                # Route the auto-add to the profile that owns
+                                # the artist (#1504); unknown → profile 1,
+                                # which is today's behavior.
+                                _owner = artist.get('owner_profile_id')
                                 context.db.add_to_wishlist(
                                     spotify_track_data=track_data,
                                     failure_reason='Discography backfill — missing from library (auto-added)',
@@ -362,6 +371,7 @@ class DiscographyBackfillJob(RepairJob):
                                         'artist': artist_name,
                                         'auto_added': True,
                                     },
+                                    profile_id=int(_owner) if _owner else 1,
                                 )
                             except Exception as wl_err:
                                 logger.debug("Auto-add to wishlist failed for '%s': %s", track_name, wl_err)
@@ -431,6 +441,10 @@ class DiscographyBackfillJob(RepairJob):
                 select.append("itunes_artist_id")
             if 'deezer_id' in columns:
                 select.append("deezer_id")
+            if 'owner_profile_id' in columns:
+                # Needed so repair re-downloads of missing discography tracks
+                # wishlist to the profile that owns the artist (#1504).
+                select.append("owner_profile_id")
 
             # Only artists actually IN the library — those you own at least one track
             # or album by. The `artists` table also carries bare rows for featured/

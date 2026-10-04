@@ -6,7 +6,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, List, Optional, Tuple
 
 from utils.logging_config import get_logger
 
@@ -267,6 +267,74 @@ def transfer_root_for_context(context) -> str:
     """where this download/import's files go: the profile's own folder when
     it has one, the configured transfer folder otherwise."""
     return library_root_for_profile(import_profile_id(context)) or shared_transfer_root()
+
+
+# ── which profile owns a path on disk (#1504) ──────────────────────────────────
+#
+# library maintenance tools (reorganize, repair jobs, fixers) act on files that
+# already live somewhere. for own-library profiles "which library is this in"
+# is answered by the path itself: whatever profile's library root contains the
+# file owns it. everything else — shared-library files, unknown paths, any
+# lookup failure — falls back to the shared folder, which is today's behavior.
+
+def own_library_roots() -> List[Tuple[int, str]]:
+    """(profile_id, docker-resolved root) for every profile with an ACTIVE own
+    library. empty when the db can't answer, the media server doesn't support
+    own libraries, or nobody has one configured.
+
+    ``library_root_for_profile`` already applies all of that gating, so this is
+    just the enumeration over the profiles that claim an own library.
+
+    Roots are ``realpath``-resolved: a symlinked library root must match the
+    same way as the direct path, everywhere this list is consumed."""
+    try:
+        from database.music_database import get_database
+        profiles = get_database().get_own_library_profiles() or []
+    except Exception:  # noqa: BLE001 - no db / no schema → no own libraries
+        return []
+    roots: List[Tuple[int, str]] = []
+    for profile in profiles:
+        try:
+            pid = int(profile["id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        root = library_root_for_profile(pid, announce=False)
+        if root:
+            roots.append((pid, os.path.normpath(os.path.realpath(str(root)))))
+    return roots
+
+
+def _path_is_under(child: str, parent: str) -> bool:
+    """True when ``child`` is ``parent`` itself or nested inside it (path-boundary
+    aware: '/x/lib2' is NOT under '/x/lib')."""
+    return child == parent or child.startswith(parent + os.sep)
+
+
+def owning_profile_for_path(path, _roots=None) -> Optional[int]:
+    """the own-library profile whose library root contains ``path``.
+
+    longest root wins when roots nest; None for shared-library files, unknown
+    paths, and any failure. this reproduces the #1199 wishlist ownership logic
+    (``core/wishlist/resolution.py::_profiles_owning_path``) as a single best
+    profile.
+
+    ``_roots`` is an escape hatch for hot loops: pass ``own_library_roots()``
+    once instead of re-querying the db per path. both sides are
+    ``realpath``-resolved so symlinked library roots match."""
+    if not path:
+        return None
+    try:
+        path_n = os.path.normpath(os.path.realpath(str(path)))
+    except (OSError, ValueError):
+        return None
+    if _roots is None:
+        _roots = own_library_roots()
+    best_pid: Optional[int] = None
+    best_len = -1
+    for pid, root in _roots:
+        if _path_is_under(path_n, root) and len(root) > best_len:
+            best_pid, best_len = pid, len(root)
+    return best_pid
 
 
 def build_simple_download_destination(context, file_path: str):

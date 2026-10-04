@@ -11,8 +11,9 @@ the path the media server scanned isn't the path SoulSync reads.
 The resolver tries the raw path first (cheap happy-path), then walks
 progressively shorter suffixes against every configured base directory:
 the transfer folder, the slskd download folder, every configured Plex
-library location, and every entry in the user's `library.music_paths`
-config. The first existing match wins.
+library location, every entry in the user's `library.music_paths`
+config, and every active own-library root (#1504). The first existing
+match wins.
 
 This module replaces four duplicated copies of the same function (each
 with the same incomplete logic) that lived in
@@ -95,49 +96,78 @@ def _collect_base_dirs(
     download_folder: Optional[str],
     config_manager: Any,
     plex_client: Any,
+    *,
+    library_root: Optional[str] = None,
 ) -> list[str]:
-    """Build the ordered list of base directories to probe."""
+    """Build the ordered list of base directories to probe.
+
+    When ``library_root`` is pinned, only that one library is searched —
+    never the shared transfer folder or any other configured root.
+    """
     candidates: list[Optional[str]] = []
 
-    if transfer_folder:
-        candidates.append(_docker_resolve_path(transfer_folder))
-    if download_folder:
-        candidates.append(_docker_resolve_path(download_folder))
+    if library_root:
+        # Pinned to one library: resolve inside it only. The shared transfer
+        # folder, configured music paths, Plex locations, and own-library
+        # roots below never apply to a pinned resolution.
+        candidates.append(_docker_resolve_path(library_root))
+    else:
+        if transfer_folder:
+            candidates.append(_docker_resolve_path(transfer_folder))
+        if download_folder:
+            candidates.append(_docker_resolve_path(download_folder))
 
-    if config_manager is not None:
-        try:
-            transfer_cfg = config_manager.get("soulseek.transfer_path", "") or ""
-            download_cfg = config_manager.get("soulseek.download_path", "") or ""
-            if transfer_cfg:
-                candidates.append(_docker_resolve_path(transfer_cfg))
-            if download_cfg:
-                candidates.append(_docker_resolve_path(download_cfg))
-        except Exception as e:
-            logger.debug("soulseek paths read failed: %s", e)
+        if config_manager is not None:
+            try:
+                transfer_cfg = config_manager.get("soulseek.transfer_path", "") or ""
+                download_cfg = config_manager.get("soulseek.download_path", "") or ""
+                if transfer_cfg:
+                    candidates.append(_docker_resolve_path(transfer_cfg))
+                if download_cfg:
+                    candidates.append(_docker_resolve_path(download_cfg))
+            except Exception as e:
+                logger.debug("soulseek paths read failed: %s", e)
 
-    # Plex-reported library locations (handles "Plex scanned at /music but
-    # SoulSync mounts at /library" cases).
-    if plex_client is not None:
-        try:
-            server = getattr(plex_client, "server", None)
-            music_library = getattr(plex_client, "music_library", None)
-            if server is not None and music_library is not None:
-                for loc in getattr(music_library, "locations", []) or []:
-                    if loc:
-                        candidates.append(loc)
-        except Exception as e:
-            logger.debug("plex locations read failed: %s", e)
+        # Plex-reported library locations (handles "Plex scanned at /music but
+        # SoulSync mounts at /library" cases).
+        if plex_client is not None:
+            try:
+                server = getattr(plex_client, "server", None)
+                music_library = getattr(plex_client, "music_library", None)
+                if server is not None and music_library is not None:
+                    for loc in getattr(music_library, "locations", []) or []:
+                        if loc:
+                            candidates.append(loc)
+            except Exception as e:
+                logger.debug("plex locations read failed: %s", e)
 
-    # User-configured library music paths (Settings → Library → Music Paths).
-    if config_manager is not None:
+        # User-configured library music paths (Settings → Library → Music Paths).
+        if config_manager is not None:
+            try:
+                music_paths = config_manager.get("library.music_paths", []) or []
+                if isinstance(music_paths, Iterable):
+                    for p in music_paths:
+                        if isinstance(p, str) and p.strip():
+                            candidates.append(_docker_resolve_path(p.strip()))
+            except Exception as e:
+                logger.debug("music paths read failed: %s", e)
+
+        # Own-library roots (#1504): profiles with their own library folder.
+        # Own files resolve without the user duplicating the path under
+        # Additional Music Libraries. Gated on own_library_supported() — an
+        # own library is inactive on unsupported media servers, and those
+        # files route to the shared folder (which is already a candidate).
+        # Lazy imports: this module is consumed early in job startup, and
+        # core.imports.paths must not be a module-level dependency.
         try:
-            music_paths = config_manager.get("library.music_paths", []) or []
-            if isinstance(music_paths, Iterable):
-                for p in music_paths:
-                    if isinstance(p, str) and p.strip():
-                        candidates.append(_docker_resolve_path(p.strip()))
+            from core.library_scope import own_library_supported
+            from core.imports.paths import own_library_roots
+            if own_library_supported():
+                for _pid, _own_root in own_library_roots():
+                    if _own_root:
+                        candidates.append(_own_root)
         except Exception as e:
-            logger.debug("music paths read failed: %s", e)
+            logger.debug("own library roots read failed: %s", e)
 
     # Normalize to absolute forms so resolution does NOT depend on the calling
     # thread's CWD. A relative config like "./Transfer" otherwise only resolves
@@ -240,8 +270,10 @@ def resolve_library_file_path_with_diagnostic(
         return file_path, attempt
 
     path_parts = file_path.replace("\\", "/").split("/")
-    base_dirs = (_collect_base_dirs(library_root, None, None, None) if library_root else
-                 _collect_base_dirs(transfer_folder, download_folder, config_manager, plex_client))
+    base_dirs = _collect_base_dirs(
+        transfer_folder, download_folder, config_manager, plex_client,
+        library_root=library_root,
+    )
     attempt.base_dirs_tried = list(base_dirs)
     if not base_dirs:
         return None, attempt

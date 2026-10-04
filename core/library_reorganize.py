@@ -1272,6 +1272,7 @@ def _build_post_process_context(
     record_type: Optional[str] = None,
     type_source: Optional[str] = None,
     album_artist: Optional[str] = None,
+    profile_id: Optional[int] = None,
 ) -> dict:
     """Build the same shape `import_album_process` builds so post-process
     treats this exactly like a fresh download with full Spotify-style
@@ -1279,7 +1280,13 @@ def _build_post_process_context(
 
     ``local_title`` is the user's own current track title — used only to
     carry a featured-artist credit forward when feat_in_title is on and the
-    API doesn't supply one (#1078)."""
+    API doesn't supply one (#1078).
+
+    ``profile_id`` is the own-library profile that owns the file being
+    reorganized (resolved per track from its on-disk path via
+    ``owning_profile_for_path``). ``transfer_root_for_context`` routes the
+    destination into that profile's own library folder instead of the
+    shared transfer folder. ``None`` = shared library = today's behavior."""
     track_number = int(api_track.get('track_number') or 1)
     disc_number = int(api_track.get('disc_number') or 1)
     track_artists = api_track.get('artists')
@@ -1440,6 +1447,13 @@ def _build_post_process_context(
         'is_album_download': True,
         'has_clean_spotify_data': True,
         'has_full_spotify_metadata': True,
+        # #1504: the own-library profile that owns this file (or None for the
+        # shared library). import_profile_id() picks this up and
+        # transfer_root_for_context() routes the destination into the
+        # profile's own folder instead of the shared transfer folder —
+        # without it, reorganizing an own-library album moved its files
+        # into the shared folder. None keeps today's behavior exactly.
+        'profile_id': profile_id,
         # A reorganize processes the user's OWN library files, not slskd
         # transfers — same as the Import page (#804). Skips the integrity
         # check's duration-agreement leg: the re-resolved API tracklist can
@@ -1570,6 +1584,21 @@ def preview_album_reorganize(
     api_album = plan['api_album'] or {}
     preview_tracks = []
 
+    # #1504: per-track own-library ownership. Resolved from each file's real
+    # on-disk path (never the session profile — an admin may be reorganizing
+    # another profile's album). The roots list is hoisted out of the loop:
+    # owning_profile_for_path() hits the db per call, and a 20-track album
+    # must not issue 100+ queries per preview.
+    try:
+        from core.imports.paths import own_library_roots, owning_profile_for_path
+        _lib_roots = own_library_roots()
+        _root_by_pid = {pid: root for pid, root in _lib_roots}
+    except Exception:  # noqa: BLE001 - lookup unavailable → every track keeps
+        # today's transfer-folder routing and display.
+        _lib_roots = []
+        _root_by_pid = {}
+        owning_profile_for_path = None
+
     for plan_item in plan['items']:
         track = plan_item['track']
         title = track.get('title', '')
@@ -1577,11 +1606,18 @@ def preview_album_reorganize(
         resolved = resolve_file_path_fn(db_path) if db_path else None
         file_ext = os.path.splitext(resolved or db_path or '.flac')[1] or '.flac'
 
+        # None for shared-library files / unknown paths / lookup failure —
+        # those keep today's transfer-folder routing and display.
+        profile_id = owning_profile_for_path(resolved, _roots=_lib_roots) \
+            if owning_profile_for_path else None
+        profile_root = _root_by_pid.get(profile_id)
+
         item = {
             'track_id': track.get('id'),
             'title': title,
             'track_number': track.get('track_number', 0),
-            'current_path': _trim_to_transfer(db_path, resolved, transfer_dir),
+            'current_path': _trim_to_transfer(db_path, resolved, transfer_dir,
+                                              anchor_root=profile_root),
             'new_path': '',
             # Absolute on-disk paths (additive). `current_path`/`new_path` above are
             # display-trimmed; these carry the real paths so the rename-only executor
@@ -1627,6 +1663,7 @@ def preview_album_reorganize(
             record_type=plan.get('record_type') or album_data.get('record_type'),
             album_artist=artist_name,
             type_source=plan.get('source'),
+            profile_id=profile_id,
         )
         # `_build_final_path_for_track` switches between ALBUM and SINGLE
         # modes based on `album_info.get('is_album')` — must be passed,
@@ -1642,7 +1679,10 @@ def preview_album_reorganize(
                 context, spotify_artist, album_info, file_ext, create_dirs=False
             )
             item['new_path_abs'] = new_full or ''
-            item['new_path'] = _display_relative_to_root(new_full, transfer_dir)
+            # #1504: anchor the display trim to the owning profile's root so
+            # own-library previews show a tidy relative path, not a raw
+            # absolute one. Shared tracks fall back to the transfer dir.
+            item['new_path'] = _display_relative_to_root(new_full, profile_root or transfer_dir)
             if resolved and new_full and os.path.normpath(resolved) == os.path.normpath(new_full):
                 item['unchanged'] = True
         except Exception as e:
@@ -1651,12 +1691,17 @@ def preview_album_reorganize(
         preview_tracks.append(item)
 
     # Collision detection: multiple matched tracks mapping to the same
-    # destination would overwrite each other on apply.
+    # destination would overwrite each other on apply. Compared on the
+    # ABSOLUTE path, not the display-trimmed one: the display anchor is now
+    # per-track (#1504), so two tracks in different libraries could trim to
+    # the same relative string while landing in different folders. Within a
+    # single root the trim is injective, so single-library results are
+    # unchanged.
     seen = {}
     for it in preview_tracks:
-        if not it['matched'] or it['unchanged'] or not it['new_path']:
+        if not it['matched'] or it['unchanged'] or not it['new_path_abs']:
             continue
-        norm = os.path.normpath(it['new_path'])
+        norm = os.path.normpath(it['new_path_abs'])
         if norm in seen:
             it['collision'] = True
             seen[norm]['collision'] = True
@@ -1722,25 +1767,39 @@ def _display_relative_to_root(path, root):
     path from the resolver (absolute, symlinks resolved). With a relative root
     configured the two never shared a prefix, so the preview trimmed one column
     and printed the raw stored value in the other, for the very same file.
+
+    Both sides are ``realpath``-canonicalized first (#1504): an own-library
+    root configured as ``/lib/u2`` (a symlink to ``/usr/lib/u2``) must trim
+    the same as its canonical spelling, or own-library previews show raw
+    absolute paths. On systems without symlinks this is byte-identical to
+    the old comparison.
     """
     if not path or not root:
         return path or ''
-    p = os.path.normpath(str(path))
-    r = os.path.normpath(str(root))
+    try:
+        p = os.path.normpath(os.path.realpath(str(path)))
+        r = os.path.normpath(os.path.realpath(str(root)))
+    except (OSError, ValueError):
+        return path
     if p == r:
         return ''
-    if p.startswith(r + os.sep) or (os.altsep and p.startswith(r + os.altsep)):
+    if p.startswith(r + os.sep):
         return p[len(r):].lstrip(os.sep).lstrip('/')
     return path
 
 
-def _trim_to_transfer(db_path, resolved, transfer_dir):
+def _trim_to_transfer(db_path, resolved, transfer_dir, anchor_root=None):
     """Compose the user-facing 'current path' string — relative to the
-    transfer dir if the file lives there, else the raw DB value."""
-    if resolved and transfer_dir:
-        trimmed = _display_relative_to_root(resolved, transfer_dir)
-        if trimmed != resolved:
-            return trimmed
+    owning profile's library root when the file lives in one (#1504),
+    else relative to the transfer dir when the file lives there, else
+    the raw DB value.
+
+    ``anchor_root`` None keeps today's behavior byte-for-byte."""
+    for root in (anchor_root, transfer_dir):
+        if resolved and root:
+            trimmed = _display_relative_to_root(resolved, root)
+            if trimmed != resolved:
+                return trimmed
     return db_path or 'No file'
 
 
@@ -1898,7 +1957,7 @@ def _stage_track(ctx: _RunContext, track_id, title, resolved_src) -> Optional[st
     return staging_file
 
 
-def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, staging_file, *, per_item_api_album=None) -> Optional[str]:
+def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, staging_file, *, per_item_api_album=None, profile_id: Optional[int] = None) -> Optional[str]:
     """Build the per-track context, hand it to post-processing, and
     return the final on-disk path it produced. Returns None on any
     failure (exception, AcoustID rejection, internal skip); the caller
@@ -1906,7 +1965,12 @@ def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, st
 
     ``per_item_api_album`` overrides ``ctx.api_album`` for this track —
     used in tag-mode reorganize where each file may carry its own
-    embedded album metadata."""
+    embedded album metadata.
+
+    ``profile_id`` is the own-library profile that owns this track's file
+    (#1504); it is stamped into the context so the path builder routes
+    the destination into that profile's own folder. None = shared
+    library = today's behavior."""
     api_album = per_item_api_album if per_item_api_album else ctx.api_album
     context = _build_post_process_context(
         api_album, api_track, ctx.artist_name, ctx.album_title, ctx.total_discs,
@@ -1914,6 +1978,7 @@ def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, st
         record_type=ctx.record_type,
         album_artist=ctx.artist_name,
         type_source=ctx.source,
+        profile_id=profile_id,
     )
     context_key = f"reorganize_{ctx.album_id}_{track_id}_{uuid.uuid4().hex[:8]}"
     try:
@@ -2020,9 +2085,20 @@ def _process_one_track(ctx: _RunContext, plan_item: dict) -> None:
     if staging_file is None:
         return
 
+    # #1504: resolve the profile that owns THIS file's library from its real
+    # on-disk path (never the session profile — an admin may be reorganizing
+    # another profile's album). Stamped into the post-process context so the
+    # path builder routes the destination into the owning profile's own
+    # folder instead of the shared transfer folder. None = today's behavior.
+    try:
+        from core.imports.paths import owning_profile_for_path
+        _owner_pid = owning_profile_for_path(resolved_src)
+    except Exception:  # noqa: BLE001 - lookup unavailable → today's behavior
+        _owner_pid = None
     new_path = _run_post_process_for_track(
         ctx, track_id, title, plan_item['api_track'], staging_file,
         per_item_api_album=plan_item.get('api_album'),
+        profile_id=_owner_pid,
     )
     if new_path is None:
         return

@@ -80,6 +80,63 @@ def _compute_folder_hash(audio_files: List[str]) -> str:
     return hashlib.md5('|'.join(items).encode()).hexdigest()
 
 
+def _read_profile_sidecar(file_path: str) -> Optional[int]:
+    """Owner profile id the AcoustID relocate job stashed beside a staged file
+    (#1504), or None when there is no sidecar.
+
+    The sidecar carries a size+mtime fingerprint of the staged file: a stale
+    sidecar (staged file deleted by hand, a different file later landing at
+    the same name) would otherwise silently route an unrelated file into the
+    wrong profile's library, so a fingerprint mismatch is treated exactly
+    like no sidecar. A sidecar without fingerprint keys (older write) is
+    still trusted.
+
+    Read-only: the sidecar is deleted only after a successful import, so a
+    failed import keeps its routing for the retry. Never raises — a broken
+    sidecar is indistinguishable from no sidecar (shared-folder import).
+    """
+    try:
+        from core.repair_jobs.relocate import profile_sidecar_path
+        sidecar = profile_sidecar_path(file_path)
+        if not os.path.isfile(sidecar):
+            return None
+        with open(sidecar, 'r', encoding='utf-8') as f:
+            data = json.load(f) or {}
+        pid = int(data.get('profile_id') or 0)
+        if not pid:
+            return None
+        if 'size' in data or 'mtime' in data:
+            try:
+                st = os.stat(file_path)
+            except OSError:
+                return None
+            if 'size' in data and data['size'] != st.st_size:
+                logger.debug("stale profile sidecar for %s (size changed) — ignoring",
+                             file_path)
+                return None
+            if 'mtime' in data and data['mtime'] != st.st_mtime:
+                logger.debug("stale profile sidecar for %s (mtime changed) — ignoring",
+                             file_path)
+                return None
+        return pid
+    except Exception as e:  # noqa: BLE001 - fail-open to shared-folder import
+        logger.debug("profile sidecar read failed for %s: %s", file_path, e)
+        return None
+
+
+def _delete_profile_sidecar(file_path: str) -> None:
+    """Remove a consumed relocate sidecar. Best-effort — the import already
+    succeeded, so a leftover sidecar is only untidy, never incorrect (the
+    staged file it belonged to is gone from staging)."""
+    try:
+        from core.repair_jobs.relocate import profile_sidecar_path
+        sidecar = profile_sidecar_path(file_path)
+        if os.path.isfile(sidecar):
+            os.remove(sidecar)
+    except Exception as e:  # noqa: BLE001 - cleanup must not fail an import
+        logger.debug("profile sidecar cleanup failed for %s: %s", file_path, e)
+
+
 # Statuses that end a folder's automatic lifecycle. Anything else ('scanning',
 # 'processing', 'approved') is in flight and must stay re-pickable.
 _TERMINAL_IMPORT_STATUSES = (
@@ -2253,6 +2310,15 @@ class AutoImportWorker:
                 if auto_import_profile_id:
                     context['track_info']['quality_profile_id'] = auto_import_profile_id
 
+                # #1504: a file the AcoustID relocate job staged carries its
+                # owning profile in a sidecar next to it — thread it into the
+                # import context so transfer_root_for_context routes the file
+                # back into the same own library instead of the shared folder.
+                # Absent/broken sidecar → no profile_id → shared, as before.
+                relocate_owner_pid = _read_profile_sidecar(file_path)
+                if relocate_owner_pid:
+                    context['profile_id'] = relocate_owner_pid
+
                 self._process_callback(context_key, context, file_path)
                 rejection = import_rejection_reason(context)
                 final_path = context.get('_final_processed_path') or context.get('_final_path')
@@ -2265,6 +2331,9 @@ class AutoImportWorker:
 
                 processed += 1
                 match['import_status'] = 'completed'
+                # The file is home in its (own or shared) library — the routing
+                # sidecar has served its purpose and must not linger in staging.
+                _delete_profile_sidecar(file_path)
                 # Capture where the pipeline actually landed the file (#889 same-home
                 # guard) — the pipeline writes it back into the mutable context.
                 _landed = final_path

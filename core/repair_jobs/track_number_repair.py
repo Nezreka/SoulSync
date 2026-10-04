@@ -24,6 +24,7 @@ from core.repair_jobs.base import (
     RepairJob,
     hand_tagged_path_keys,
     is_hand_tagged_path,
+    maintenance_roots,
     walk_library,
 )
 from utils.logging_config import get_logger
@@ -94,15 +95,20 @@ class TrackNumberRepairJob(RepairJob):
             logger.warning("Transfer folder does not exist: %s", transfer)
             return result
 
-        # Collect album folders (directories containing audio files)
+        # Collect album folders (directories containing audio files) from the
+        # shared transfer folder and every active own-library root (#1504).
+        # Renames are strictly in-place within each album folder
+        # (_rename_to_basename joins onto the file's own parent dir), so
+        # widening the walk can never move a file between libraries.
         album_folders: Dict[str, List[str]] = {}
-        for root, _dirs, files in walk_library(transfer):
-            if context.check_stop():
-                return result
-            for fname in files:
-                ext = os.path.splitext(fname)[1].lower()
-                if ext in AUDIO_EXTENSIONS:
-                    album_folders.setdefault(root, []).append(fname)
+        for walk_root in maintenance_roots(transfer):
+            for root, _dirs, files in walk_library(walk_root):
+                if context.check_stop():
+                    return result
+                for fname in files:
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext in AUDIO_EXTENSIONS:
+                        album_folders.setdefault(root, []).append(fname)
 
         total = sum(len(fnames) for fnames in album_folders.values())
         if context.update_progress:
@@ -167,10 +173,11 @@ class TrackNumberRepairJob(RepairJob):
         if not os.path.isdir(transfer):
             return 0
         count = 0
-        for _root, _dirs, files in walk_library(transfer):
-            for fname in files:
-                if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
-                    count += 1
+        for walk_root in maintenance_roots(transfer):
+            for _root, _dirs, files in walk_library(walk_root):
+                for fname in files:
+                    if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
+                        count += 1
         return count
 
     def _get_settings(self, context: JobContext) -> dict:
