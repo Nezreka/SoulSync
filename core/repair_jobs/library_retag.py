@@ -190,41 +190,49 @@ def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False
     for tp in track_plans or []:
         fp = tp.get('file_path')
         db_data = tp.get('db_data') or {}
-        # A track needs the tag writer when it has tag payload or cover art to
-        # embed (the writer embeds art even with empty db_data). An
-        # enrichment-only plan (full depth, nothing to write) skips the writer
-        # and goes straight to the enrichment — the old gate dropped these
-        # tracks entirely for sources whose ids aren't stamped (deezer),
-        # silently skipping the #1511.3 fix and misreporting failures.
-        needs_write = bool(db_data) or embed_cover
         full_meta = tp.get('full_meta') if full else None
-        if not fp or not _os.path.isfile(fp) or (not needs_write and not _lyrics_client
-                                                and not full_meta):
+        # needs_write: is there tag/cover work for the writer? (db_data or
+        # a successfully downloaded cover to embed)
+        needs_write = bool(db_data) or embed_cover
+        # has_work: should this track be processed at all? Separate from
+        # needs_write — an enrichment-only or lyrics-only plan has work
+        # but nothing for the tag writer. The old gate dropped enrichment
+        # plans entirely for sources whose ids aren't stamped (deezer).
+        has_work = needs_write or bool(_lyrics_client) or bool(full_meta)
+        if not fp or not _os.path.isfile(fp) or not has_work:
             result['skipped'] += 1
             continue
-        try:
-            # Always invoke the writer (even with empty db_data) so the
-            # lyrics-meta-no-leak test sees the call. Empty payloads are
-            # a no-op in the writer.
-            res = write_tags_to_file(fp, db_data, embed_cover=embed_cover, cover_data=cover_data)
-            wrote = False
-            if res.get('success'):
-                wrote = True
-                result['written'] += 1
-                last_dir = _os.path.dirname(fp)
-            else:
+        # Tag write: only when there's something to write. Enrichment-only
+        # and lyrics-only plans skip the writer entirely.
+        write_ok = False
+        if needs_write:
+            try:
+                res = write_tags_to_file(fp, db_data, embed_cover=embed_cover,
+                                         cover_data=cover_data)
+                if res.get('success'):
+                    write_ok = True
+                    result['written'] += 1
+                    last_dir = _os.path.dirname(fp)
+                else:
+                    result['failed'] += 1
+            except Exception as e:
+                logger.warning("retag write failed for %s: %s", fp, e)
                 result['failed'] += 1
-            if full_meta and (wrote or not needs_write):
+        # Full-depth enrichment: independent of the tag write. Runs when the
+        # write succeeded, or when there was no write to do (enrichment-only).
+        # An enrichment-only plan counts here, not in the writer block.
+        if full_meta and (write_ok or not needs_write):
+            try:
                 if _run_full_enrich(fp, full_meta, runtime=enrich_runtime):
                     if not needs_write:
-                        # Enrichment-only plan: count the enriched track as
-                        # written so auto-apply/fix results reflect the work.
                         result['written'] += 1
+                        last_dir = _os.path.dirname(fp)
                 elif not needs_write:
                     result['failed'] += 1
-        except Exception as e:
-            logger.warning("retag write failed for %s: %s", fp, e)
-            result['failed'] += 1
+            except Exception as e:
+                logger.warning("retag enrich failed for %s: %s", fp, e)
+                if not needs_write:
+                    result['failed'] += 1
 
         # Lyrics: fetch/refresh the .lrc for this track (independent of tag write
         # success — a track with no tag changes may still be missing lyrics).

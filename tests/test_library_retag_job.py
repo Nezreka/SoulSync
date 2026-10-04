@@ -344,6 +344,10 @@ def test_apply_enrichment_only_plan_runs_enrich(tmp_path, monkeypatch):
     enriched = []
     monkeypatch.setattr(lr, '_run_full_enrich',
                         lambda fp, meta, **k: enriched.append((fp, meta)) or True)
+    # Mock the writer so the 0-byte test file doesn't cause a real write
+    # failure — enrichment-only plans skip the writer entirely.
+    monkeypatch.setattr("core.tag_writer.write_tags_to_file",
+                        lambda fp, db_data, **k: {"success": True})
     plans = [{'file_path': str(track), 'db_data': {},
               'full_meta': {'title': 'T', 'artist': 'A'}}]
 
@@ -359,6 +363,10 @@ def test_apply_enrichment_only_plan_counts_enrich_failure(tmp_path, monkeypatch)
     """The mirror: enrichment-only plan whose enrichment fails counts failed."""
     track = tmp_path / 'track.flac'; track.write_bytes(b'')
     monkeypatch.setattr(lr, '_run_full_enrich', lambda fp, meta, **k: False)
+    # Mock the writer so the 0-byte test file doesn't cause a real write
+    # failure — enrichment-only plans skip the writer entirely.
+    monkeypatch.setattr("core.tag_writer.write_tags_to_file",
+                        lambda fp, db_data, **k: {"success": True})
     plans = [{'file_path': str(track), 'db_data': {},
               'full_meta': {'title': 'T', 'artist': 'A'}}]
 
