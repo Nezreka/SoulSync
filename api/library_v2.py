@@ -1514,6 +1514,35 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             },
         })
 
+    @_route("/api/library/v2/albums")
+    def lib2_list_albums():
+        """The library by release (A07): search, sort, monitored filter, paging."""
+        from core.library2 import queries as Q
+        try:
+            page = int(request.args.get("page", 1))
+            limit = int(request.args.get("limit", 75))
+        except (TypeError, ValueError):
+            return _fail("page/limit must be integers")
+        if page < 1 or not 1 <= limit <= 500:
+            return _fail("page must be positive and limit must be between 1 and 500")
+        with closing(_conn()) as conn:
+            albums, total = Q.list_albums(
+                conn, search=request.args.get("search", ""),
+                sort=request.args.get("sort", "title"),
+                monitored=request.args.get("monitored", "all"), page=page, limit=limit)
+        for album in albums:
+            _apply_artwork_urls(album, "album")
+        total_pages = (total + limit - 1) // limit
+        return jsonify({
+            "success": True,
+            "albums": albums,
+            "pagination": {
+                "page": page, "limit": limit, "total_count": total,
+                "total_pages": total_pages,
+                "has_prev": page > 1, "has_next": page < total_pages,
+            },
+        })
+
     @_route("/api/library/v2/artists")
     def lib2_list_artists():
         from core.library2 import queries as Q

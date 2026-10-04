@@ -61,6 +61,7 @@ import {
   libraryV2ArtistAliasesQueryOptions,
   libraryV2ArtistMatchStatusQueryOptions,
   libraryV2ArtistQueryOptions,
+  libraryV2AlbumsQueryOptions,
   libraryV2ArtistsQueryOptions,
   libraryV2EnabledQueryOptions,
   libraryV2ImportStatusQueryOptions,
@@ -112,6 +113,8 @@ import { getServiceUrl } from '../-library-v2.service-links';
 import {
   LIBRARY_V2_WANTED_KINDS,
   type LibraryV2AlbumDetail,
+  type LibraryV2AlbumListItem,
+  type LibraryV2AlbumSort,
   type LibraryV2AlbumSummary,
   type LibraryV2ArtistDetail,
   type LibraryV2ArtistSettings,
@@ -4392,6 +4395,8 @@ export function LibraryV2Page() {
           <ArtistDetailView artistId={search.artist} />
         ) : search.section === 'wanted' ? (
           <WantedIndexView />
+        ) : search.section === 'albums' ? (
+          <AlbumIndexView />
         ) : (
           <ArtistIndexView />
         )}
@@ -4739,6 +4744,177 @@ function ArtistIndexView() {
   );
 }
 
+const ALBUM_SORT_LABELS: Record<LibraryV2AlbumSort, string> = {
+  title: 'Title',
+  year_desc: 'Newest',
+  year_asc: 'Oldest',
+  added: 'Recently added',
+};
+
+/** The library by release (upstream's album browse, A07). A card opens the
+ *  album; its artist name opens the artist. */
+function AlbumIndexView() {
+  const search = Route.useSearch();
+  const navigate = useNavigate();
+  const albumFilter = useUrlSyncedFilter(
+    search.q,
+    (value) => void navigate({ search: (prev) => ({ ...prev, q: value, page: 1 }) }),
+  );
+  const albumsQuery = useQuery(
+    libraryV2AlbumsQueryOptions({
+      q: search.q,
+      albumSort: search.albumSort,
+      page: search.page,
+      monitored: search.monitored,
+    }),
+  );
+  const albums = albumsQuery.data?.albums ?? [];
+  const pagination = albumsQuery.data?.pagination;
+  const filtered = Boolean(search.q.trim()) || search.monitored !== 'all';
+
+  return (
+    <div className={styles.page}>
+      <header className={`${styles.header} library-header`}>
+        <div>
+          <h1 className={styles.title}>Library</h1>
+          <p className={styles.subtitle}>
+            {pagination ? `${pagination.total_count} ${filtered ? 'matches' : 'albums'}` : ''}
+          </p>
+        </div>
+      </header>
+
+      <div className={styles.toolbar}>
+        <LibraryScopePicker />
+        <LibrarySectionTabs />
+        <input
+          aria-label="Filter albums"
+          className={styles.searchInput}
+          type="text"
+          placeholder="Filter albums or artists…"
+          value={albumFilter.value}
+          onChange={(e) => albumFilter.onChange(e.target.value)}
+        />
+        <select
+          aria-label="Filter monitoring"
+          className={styles.select}
+          value={search.monitored}
+          onChange={(e) =>
+            void navigate({
+              search: (p) => ({ ...p, monitored: e.target.value as typeof p.monitored, page: 1 }),
+            })
+          }
+        >
+          <option value="all">All</option>
+          <option value="monitored">Monitored</option>
+          <option value="unmonitored">Unmonitored</option>
+        </select>
+        <select
+          aria-label="Sort albums"
+          className={styles.select}
+          value={search.albumSort}
+          onChange={(e) =>
+            void navigate({
+              search: (p) => ({ ...p, albumSort: e.target.value as LibraryV2AlbumSort, page: 1 }),
+            })
+          }
+        >
+          {(Object.keys(ALBUM_SORT_LABELS) as LibraryV2AlbumSort[]).map((value) => (
+            <option key={value} value={value}>
+              {ALBUM_SORT_LABELS[value]}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {albumsQuery.isLoading ? (
+        <div className={styles.loading}>Loading albums…</div>
+      ) : albumsQuery.isError ? (
+        <div className={styles.emptyState}>
+          <h2>Could not load your albums</h2>
+          <p>{mutationErrorMessage(albumsQuery.error, 'The album list failed to load.')}</p>
+          <button type="button" onClick={() => void albumsQuery.refetch()}>
+            Try again
+          </button>
+        </div>
+      ) : albums.length === 0 ? (
+        <div className={styles.emptyState}>
+          <h2>{filtered ? 'No albums match this view' : 'No albums yet'}</h2>
+        </div>
+      ) : (
+        <div className={styles.cardGrid} id="library-albums-grid">
+          {albums.map((album) => (
+            <AlbumListCard
+              key={album.id}
+              album={album}
+              onOpen={() => void navigate({ search: (p) => ({ ...p, album: album.id }) })}
+              onOpenArtist={(artistId) =>
+                void navigate({ search: (p) => openArtistSearch(p, artistId) })
+              }
+            />
+          ))}
+        </div>
+      )}
+
+      <PageNav
+        pagination={pagination}
+        onStep={(step) => void navigate({ search: (p) => ({ ...p, page: p.page + step }) })}
+      />
+    </div>
+  );
+}
+
+function AlbumListCard({
+  album,
+  onOpen,
+  onOpenArtist,
+}: {
+  album: LibraryV2AlbumListItem;
+  onOpen: () => void;
+  onOpenArtist: (artistId: number) => void;
+}) {
+  return (
+    <article className={styles.artistCard}>
+      <button
+        type="button"
+        className={styles.artistCardLink}
+        aria-label={`Open ${album.title}`}
+        onClick={onOpen}
+      >
+        <Artwork
+          src={album.image_url ?? ''}
+          remote={album.remote_image_url}
+          alt={album.title}
+          className={styles.artistThumb}
+          thumb
+        />
+        <span className={styles.artistInfo}>
+          <span className={styles.artistName} title={album.title}>
+            {album.title}
+          </span>
+          <span className={styles.artistMeta}>
+            {[album.year, album.album_type].filter(Boolean).join(' · ')}
+          </span>
+          <span className={styles.artistMeta}>
+            <TrackPresence present={album.tracks_present} total={album.track_count} /> tracks
+          </span>
+        </span>
+      </button>
+      {album.artist_id && album.artist_name ? (
+        <button
+          type="button"
+          className={styles.btnGhost}
+          onClick={() => album.artist_id && onOpenArtist(album.artist_id)}
+        >
+          {album.artist_name}
+        </button>
+      ) : null}
+      <span className={styles.cardMonitor}>
+        <MonitorToggle entity="albums" id={album.id} monitored={album.monitored} />
+      </span>
+    </article>
+  );
+}
+
 /** ← Page n of m → under a paged list; nothing for a single page. */
 function PageNav({
   pagination,
@@ -4778,7 +4954,7 @@ function PageNav({
  */
 export function librarySectionSearch<T extends Record<string, unknown>>(
   previous: T,
-  section: 'artists' | 'wanted',
+  section: 'artists' | 'albums' | 'wanted',
 ): T & { section: string; q: string; artist: undefined; album: undefined; page: number } {
   return {
     ...previous,
@@ -4823,6 +4999,17 @@ function LibrarySectionTabs() {
         }
       >
         Artists
+      </button>
+      <button
+        type="button"
+        className={search.section === 'albums' ? styles.viewActive : ''}
+        onClick={() =>
+          void navigate({
+            search: (previous) => librarySectionSearch(previous, 'albums'),
+          })
+        }
+      >
+        Albums
       </button>
       <button
         type="button"

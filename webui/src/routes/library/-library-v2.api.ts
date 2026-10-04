@@ -9,6 +9,7 @@ import type {
   LibraryV2ArtistAliasMember,
   LibraryV2ArtistDetail,
   LibraryV2ArtistSettings,
+  LibraryV2AlbumListItem,
   LibraryV2ArtistSummary,
   LibraryV2FileTags,
   LibraryV2ImportState,
@@ -105,6 +106,26 @@ export async function fetchLibraryV2Artists(
   return lib2Json<ArtistsResponse>(
     apiClient.get('library/v2/artists', { searchParams: params }),
     'Failed to load library',
+  );
+}
+
+interface AlbumsResponse extends Ok {
+  albums: LibraryV2AlbumListItem[];
+  pagination: LibraryV2Pagination;
+}
+
+/** The library by release (A07). */
+export async function fetchLibraryV2Albums(
+  search: Pick<LibraryV2Search, 'q' | 'albumSort' | 'page' | 'monitored'>,
+): Promise<AlbumsResponse> {
+  const params = new URLSearchParams();
+  if (search.q) params.set('search', search.q);
+  params.set('sort', search.albumSort);
+  params.set('monitored', search.monitored);
+  params.set('page', String(search.page));
+  return lib2Json<AlbumsResponse>(
+    apiClient.get('library/v2/albums', { searchParams: params }),
+    'Failed to load albums',
   );
 }
 
@@ -1919,6 +1940,22 @@ export function libraryV2ArtistsQueryOptions(
       Boolean(search.includeSize),
     ],
     queryFn: () => fetchLibraryV2Artists(search),
+  });
+}
+
+export function libraryV2AlbumsQueryOptions(
+  search: Pick<LibraryV2Search, 'q' | 'albumSort' | 'page' | 'monitored'>,
+) {
+  return queryOptions({
+    queryKey: [
+      ...LIBRARY_V2_QUERY_KEY,
+      'albums',
+      search.q,
+      search.albumSort,
+      search.monitored,
+      search.page,
+    ],
+    queryFn: () => fetchLibraryV2Albums(search),
   });
 }
 

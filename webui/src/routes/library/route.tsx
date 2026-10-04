@@ -4,6 +4,7 @@ import { guardPageAccess } from '@/platform/shell/route-guard';
 
 import {
   libraryV2AlbumQueryOptions,
+  libraryV2AlbumsQueryOptions,
   libraryV2ArtistQueryOptions,
   libraryV2ArtistsQueryOptions,
   libraryV2EnabledQueryOptions,
@@ -34,6 +35,7 @@ export const Route = createFileRoute('/library')({
   loaderDeps: ({ search }) => ({
     q: search.q,
     sort: search.sort,
+    albumSort: search.albumSort,
     page: search.page,
     monitored: search.monitored,
     album: search.album,
@@ -52,6 +54,8 @@ export const Route = createFileRoute('/library')({
       void context.queryClient.prefetchQuery(
         libraryV2WantedQueryOptions({ q: deps.q, page: deps.page, wantedKind: deps.wantedKind }),
       );
+    } else if (deps.section === 'albums' && !deps.album && !deps.artist) {
+      void context.queryClient.prefetchQuery(libraryV2AlbumsQueryOptions(deps));
     } else if (deps.album) {
       void context.queryClient.prefetchQuery(libraryV2AlbumQueryOptions(deps.album));
     } else if (deps.artist) {

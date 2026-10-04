@@ -748,6 +748,93 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
     return artists, total
 
 
+_ALBUM_SORTS = {
+    "title": _alpha_key("al.title") + ", al.title COLLATE NOCASE",
+    "year_desc": "COALESCE(al.year, 0) = 0, al.year DESC, al.title COLLATE NOCASE",
+    "year_asc": "COALESCE(al.year, 0) = 0, al.year ASC, al.title COLLATE NOCASE",
+    "added": "al.added_at DESC",
+}
+
+
+def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str = "all",
+                page: int = 1, limit: int = 75) -> Tuple[List[Dict[str, Any]], int]:
+    """The whole library by release (upstream's album browse, A07).
+
+    The releases the artist list counts -- a library row, or one this library
+    monitors -- in the caller's library, newest-first or by title or year.
+    Unknown years sort last either way.
+    """
+    page = max(1, int(page))
+    limit = max(1, min(int(limit), 500))
+    album_monitored = monitored_sql("album", "al")
+    clauses = [f"(al.origin='library' OR {album_monitored}=1)"]
+    visible = scope_visibility_sql("album", "al")
+    if visible:
+        clauses.append(visible)
+    params: Dict[str, Any] = {}
+    if search:
+        escaped = (str(search).replace("\\", "\\\\")
+                   .replace("%", "\\%").replace("_", "\\_"))
+        params["like"] = f"%{escaped}%"
+        clauses.append("(al.title LIKE :like ESCAPE '\\'"
+                       " OR ar.name LIKE :like ESCAPE '\\')")
+    if monitored == "monitored":
+        clauses.append(f"{album_monitored} = 1")
+    elif monitored == "unmonitored":
+        clauses.append(f"{album_monitored} = 0")
+    where = " AND ".join(clauses)
+    base = ("FROM lib2_albums al LEFT JOIN lib2_artists ar"
+            " ON ar.id = al.primary_artist_id WHERE " + where)
+    total = conn.execute(f"SELECT COUNT(*) {base}", params).fetchone()[0]
+    track_monitored = monitored_sql("track", "t")
+    tf_owner = owner_clause(column="tf.owner_profile_id")
+    rows = conn.execute(
+        f"""
+        WITH page_albums AS MATERIALIZED (
+            SELECT al.id, al.title, al.album_type, al.year, al.image_url, al.added_at,
+                   {album_monitored} AS monitored,
+                   COALESCE(ar.canonical_artist_id, ar.id) AS artist_id,
+                   ar.name AS artist_name
+              {base}
+             ORDER BY {_ALBUM_SORTS.get(sort, _ALBUM_SORTS["title"])}, al.id
+             LIMIT :limit OFFSET :offset
+        ),
+        stats AS (
+            SELECT t.album_id,
+                   COUNT(DISTINCT CASE
+                       WHEN COALESCE(w.wanted, {track_monitored})=1 OR tf.id IS NOT NULL
+                       THEN t.id END) AS track_count,
+                   COUNT(DISTINCT CASE
+                       WHEN tf.id IS NOT NULL
+                        AND COALESCE(tf.file_state, 'active')
+                            NOT IN ('missing_confirmed','deleted')
+                       THEN t.id END) AS tracks_present
+              FROM page_albums pa
+              CROSS JOIN lib2_tracks t ON t.album_id = pa.id
+              LEFT JOIN lib2_wanted_tracks w
+                     ON w.track_id = t.id AND w.profile_id = {intent_profile_id()}
+              LEFT JOIN lib2_track_files tf ON tf.track_id = t.id{tf_owner}
+             GROUP BY t.album_id
+        )
+        SELECT pa.*, COALESCE(s.track_count, 0) AS track_count,
+               COALESCE(s.tracks_present, 0) AS tracks_present
+          FROM page_albums pa LEFT JOIN stats s ON s.album_id = pa.id
+        """,
+        {**params, "limit": limit, "offset": (page - 1) * limit},
+    ).fetchall()
+    albums = []
+    for r in rows:
+        count, present = int(r["track_count"] or 0), int(r["tracks_present"] or 0)
+        albums.append({
+            "id": r["id"], "title": r["title"], "album_type": r["album_type"],
+            "year": r["year"], "image_url": r["image_url"], "added_at": r["added_at"],
+            "monitored": bool(r["monitored"]), "artist_id": r["artist_id"],
+            "artist_name": r["artist_name"], "track_count": count,
+            "tracks_present": present, "tracks_missing": max(0, count - present),
+        })
+    return albums, int(total)
+
+
 def list_artist_track_files(conn, artist_id: int, *, search: str = "",
                             page: int = 1, limit: int = 100
                             ) -> Tuple[List[Dict[str, Any]], int]:

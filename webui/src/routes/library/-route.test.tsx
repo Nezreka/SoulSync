@@ -47,6 +47,34 @@ describe('library route (live)', () => {
         let body: unknown = {};
         if (url.includes('library/v2/enabled')) {
           body = { success: true, enabled: true, can_write: canWrite };
+        } else if (url.includes('library/v2/albums')) {
+          body = {
+            success: true,
+            albums: [
+              {
+                id: 7,
+                title: 'Selected Ambient Works',
+                album_type: 'album',
+                year: 1992,
+                image_url: null,
+                added_at: null,
+                monitored: false,
+                artist_id: 1,
+                artist_name: 'Aphex Twin',
+                track_count: 13,
+                tracks_present: 13,
+                tracks_missing: 0,
+              },
+            ],
+            pagination: {
+              page: 1,
+              limit: 75,
+              total_count: 1,
+              total_pages: 1,
+              has_prev: false,
+              has_next: false,
+            },
+          };
         } else if (url.includes('library/v2/artists')) {
           body = {
             success: true,
@@ -72,6 +100,15 @@ describe('library route (live)', () => {
     vi.unstubAllGlobals();
     delete window.SoulSyncWebShellBridge;
     delete window.showLibraryDownloadsSection;
+  });
+
+  it('browses the library by album and opens one (A07)', async () => {
+    const { router } = renderRoute(['/library?section=albums&albumSort=year_desc']);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Selected Ambient Works' }));
+    expect(
+      requested.some((u) => u.includes('library/v2/albums') && u.includes('sort=year_desc')),
+    ).toBe(true);
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ album: 7 }));
   });
 
   it('is owned by React', () => {

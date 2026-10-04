@@ -4212,3 +4212,23 @@ def test_a_manual_album_match_pins_and_locks_that_release(api):
                        (ids["views"],)).fetchone()
     conn.close()
     assert pin[0] is None
+
+
+def test_the_library_can_be_browsed_by_album(api):
+    """A07: upstream's album browse on the native catalogue."""
+    client, db, ids = api
+    conn = _conn(db)
+    conn.execute("UPDATE lib2_albums SET origin='library', year=2016 WHERE id=?", (ids["views"],))
+    conn.execute("UPDATE lib2_albums SET origin='library', year=2015 WHERE id=?", (ids["ep"],))
+    conn.execute("UPDATE lib2_albums SET origin='discography' WHERE id=?", (ids["single"],))
+    conn.commit()
+    conn.close()
+
+    body = client.get("/api/library/v2/albums?sort=year_desc").get_json()
+    assert [a["title"] for a in body["albums"]] == ["Views", "Best EP"]
+    views = body["albums"][0]
+    assert views["artist_name"] == "Drake" and views["tracks_present"] == 1
+
+    assert [a["title"] for a in client.get(
+        "/api/library/v2/albums?sort=title&search=ep").get_json()["albums"]] == ["Best EP"]
+    assert client.get("/api/library/v2/albums?limit=0").status_code == 400

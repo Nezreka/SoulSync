@@ -9,6 +9,10 @@ import { z } from 'zod';
 export const LIBRARY_V2_SORTS = ['name', 'added', 'albums', 'tracks'] as const;
 export type LibraryV2Sort = (typeof LIBRARY_V2_SORTS)[number];
 
+/** The album browse's orders (upstream's album view, A07). */
+export const LIBRARY_V2_ALBUM_SORTS = ['title', 'year_desc', 'year_asc', 'added'] as const;
+export type LibraryV2AlbumSort = (typeof LIBRARY_V2_ALBUM_SORTS)[number];
+
 export const LIBRARY_V2_MONITOR_FILTERS = ['all', 'monitored', 'unmonitored'] as const;
 export type LibraryV2MonitorFilter = (typeof LIBRARY_V2_MONITOR_FILTERS)[number];
 
@@ -26,13 +30,14 @@ const coercedString = z.preprocess(
 );
 
 export const libraryV2SearchSchema = z.object({
-  section: z.enum(['artists', 'wanted']).default('artists').catch('artists'),
+  section: z.enum(['artists', 'albums', 'wanted']).default('artists').catch('artists'),
   // Same trap as `discover`/`discoverName` below, and it bit here too: a filter
   // of "123" or "702" arrives as a NUMBER, a bare z.string() rejects it and
   // `.catch('')` silently swallows the filter — the URL said one thing and the
   // list showed everything.
   q: coercedString.default('').catch(''),
   sort: z.enum(LIBRARY_V2_SORTS).default('name').catch('name'),
+  albumSort: z.enum(LIBRARY_V2_ALBUM_SORTS).default('title').catch('title'),
   view: z.enum(['table', 'cards']).default('cards').catch('cards'),
   monitored: z.enum(LIBRARY_V2_MONITOR_FILTERS).default('all').catch('all'),
   page: z.coerce.number().int().positive().default(1).catch(1),
@@ -125,6 +130,23 @@ export interface LibraryV2ArtistSummary {
   /** Media servers that positively mapped this imported catalogue artist. */
   media_server_sources?: string[];
   user_overrides: Record<string, unknown>;
+}
+
+/** One row of the album browse (`GET /api/library/v2/albums`). */
+export interface LibraryV2AlbumListItem {
+  id: number;
+  title: string;
+  album_type: string | null;
+  year: number | null;
+  image_url: string | null;
+  remote_image_url?: string | null;
+  added_at: string | null;
+  monitored: boolean;
+  artist_id: number | null;
+  artist_name: string | null;
+  track_count: number;
+  tracks_present: number;
+  tracks_missing: number;
 }
 
 export interface LibraryV2AlbumSummary {
