@@ -2460,7 +2460,8 @@ def test_artist_history_rejects_invalid_limits(api, limit):
     assert response.status_code == 400
 
 
-def test_album_history_surfaces_manual_skip(api):
+@pytest.mark.parametrize("entity, key", [("albums", "views"), ("tracks", "album_track")])
+def test_history_surfaces_manual_skip(api, entity, key):
     client, db, ids = api
     with _conn(db) as conn:
         conn.execute(
@@ -2469,7 +2470,7 @@ def test_album_history_surfaces_manual_skip(api):
         )
         conn.commit()
 
-    response = client.get(f"/api/library/v2/albums/{ids['views']}/history")
+    response = client.get(f"/api/library/v2/{entity}/{ids[key]}/history")
 
     assert response.status_code == 200
     payload = response.get_json()
@@ -2508,25 +2509,6 @@ def test_album_history_rejects_invalid_limits(api, limit):
     )
 
     assert response.status_code == 400
-
-
-def test_track_history_surfaces_manual_skip(api):
-    client, db, ids = api
-    with _conn(db) as conn:
-        conn.execute(
-            """INSERT INTO lib2_manual_skips(file_path, skipped_checks, profile_id)
-               VALUES('/m/one-dance.flac', '["acoustid"]', 1)"""
-        )
-        conn.commit()
-
-    response = client.get(
-        f"/api/library/v2/tracks/{ids['album_track']}/history"
-    )
-
-    assert response.status_code == 200
-    payload = response.get_json()
-    assert payload["success"] is True
-    assert any(e["event_type"] == "manual_skip" for e in payload["history"])
 
 
 def test_track_history_404_for_unknown_track(api):
@@ -3396,22 +3378,28 @@ def test_discovery_track_status_is_silent_for_an_unknown_artist(api):
     assert body["statuses"] == {}
 
 
-def test_album_resolve_fills_a_partially_materialized_tracklist(api, monkeypatch):
-    """Bookmarking one top track materializes exactly that recording. The old
-    "has ANY track row" guard then saw a track and never resolved, so the
-    release stayed a one-track album — the user could see their wanted track
-    but none of the record it came from."""
+@pytest.mark.parametrize("key, expected, status", [
+    # Bookmarking one top track materializes exactly that recording. The old
+    # "has ANY track row" guard then saw a track and never resolved, so the
+    # release stayed a one-track album.
+    ("views", 12, "ready"),
+    # `have=1, expected=0` looks like a genuine one-track single by counting
+    # alone; `tracklist_status` is the honest signal: never fetched means never
+    # complete.
+    ("single", 0, "idle"),
+])
+def test_album_resolve_runs_for_a_bookmarked_release(api, monkeypatch, key, expected, status):
     client, db, ids = api
     conn = _conn(db)
-    conn.execute("UPDATE lib2_albums SET expected_track_count=12, tracklist_status='ready' "
-                 "WHERE id=?", (ids["views"],))
+    conn.execute("UPDATE lib2_albums SET expected_track_count=?, tracklist_status=? WHERE id=?",
+                 (expected, status, ids[key]))
     conn.commit()
     conn.close()
     resolved = _record_tracklist_resolves(monkeypatch)
 
-    client.get(f"/api/library/v2/albums/{ids['views']}?resolve=1")
+    client.get(f"/api/library/v2/albums/{ids[key]}?resolve=1")
 
-    assert _drain(resolved) == [ids["views"]]
+    assert _drain(resolved) == [ids[key]]
 
 
 def test_album_resolve_leaves_a_complete_tracklist_alone(api, monkeypatch):
@@ -3554,24 +3542,6 @@ def test_discovery_track_resolves_new_rows_against_every_provider(api, monkeypat
     assert scheduled[0] == [("album", first["album_id"]), ("track", first["track_id"])]
     assert len(scheduled) == 1, "an already-known release must not be re-enriched"
     assert first["album_id"] != ids["views"]
-
-
-def test_album_resolve_runs_for_a_release_whose_tracklist_was_never_fetched(api, monkeypatch):
-    """A bookmark materializes exactly one recording, leaving `have=1` and
-    `expected=0` — indistinguishable from a genuine one-track single by
-    counting alone. `tracklist_status` is the honest signal: never fetched
-    means never complete."""
-    client, db, ids = api
-    conn = _conn(db)
-    conn.execute("UPDATE lib2_albums SET expected_track_count=0, tracklist_status='idle' "
-                 "WHERE id=?", (ids["single"],))
-    conn.commit()
-    conn.close()
-    resolved = _record_tracklist_resolves(monkeypatch)
-
-    client.get(f"/api/library/v2/albums/{ids['single']}?resolve=1")
-
-    assert _drain(resolved) == [ids["single"]]
 
 
 def test_discovery_track_marks_a_new_release_as_provider_only(api, monkeypatch):

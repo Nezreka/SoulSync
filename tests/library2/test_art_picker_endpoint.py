@@ -147,28 +147,30 @@ def test_apply_art_404_for_missing_album(monkeypatch, api):
     assert resp.status_code == 404
 
 
-def test_apply_art_pins_the_choice_and_serves_it_locally(monkeypatch, api):
+@pytest.mark.parametrize("entity, key, url, colour", [
+    ("albums", "album", "https://example.com/cover.jpg", (9, 8, 7)),
+    ("artists", "artist", "https://example.com/photo.jpg", (5, 6, 7)),
+])
+def test_apply_art_pins_the_choice_and_serves_it_locally(monkeypatch, api, entity, key, url, colour):
     client, _db, ids = api
-    chosen = _png_bytes((9, 8, 7))
+    chosen = _png_bytes(colour)
     monkeypatch.setattr(
         "core.library2.artwork._download_remote_artwork",
-        lambda url: chosen if url == "https://example.com/cover.jpg" else None,
+        lambda requested: chosen if requested == url else None,
     )
 
-    resp = client.post(
-        f"/api/library/v2/albums/{ids['album']}/art", json={"url": "https://example.com/cover.jpg"},
-    )
+    resp = client.post(f"/api/library/v2/{entity}/{ids[key]}/art", json={"url": url})
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["success"] is True
     # A2: cache-busted with the cache file's own mtime, so a fresh pick gets a
     # URL the browser hasn't already cached under the old, immutable response.
-    assert body["image_url"].startswith(f"/api/library/v2/artwork/album/{ids['album']}?v=")
+    assert body["image_url"].startswith(f"/api/library/v2/artwork/{key}/{ids[key]}?v=")
 
     served = client.get(body["image_url"])
     assert served.status_code == 200
     with Image.open(BytesIO(served.data)) as image:
-        assert image.getpixel((0, 0)) == pytest.approx((9, 8, 7), abs=2)
+        assert image.getpixel((0, 0)) == pytest.approx(colour, abs=2)
 
 
 def test_release_album_art_clears_override_and_lock(monkeypatch, api):
@@ -351,28 +353,6 @@ def test_apply_artist_art_404_for_missing_artist(monkeypatch, api):
         "/api/library/v2/artists/999999/art", json={"url": "https://example.com/photo.jpg"},
     )
     assert resp.status_code == 404
-
-
-def test_apply_artist_art_pins_the_choice_and_serves_it_locally(monkeypatch, api):
-    client, _db, ids = api
-    chosen = _png_bytes((5, 6, 7))
-    monkeypatch.setattr(
-        "core.library2.artwork._download_remote_artwork",
-        lambda url: chosen if url == "https://example.com/photo.jpg" else None,
-    )
-
-    resp = client.post(
-        f"/api/library/v2/artists/{ids['artist']}/art", json={"url": "https://example.com/photo.jpg"},
-    )
-    assert resp.status_code == 200
-    body = resp.get_json()
-    assert body["success"] is True
-    assert body["image_url"].startswith(f"/api/library/v2/artwork/artist/{ids['artist']}?v=")
-
-    served = client.get(body["image_url"])
-    assert served.status_code == 200
-    with Image.open(BytesIO(served.data)) as image:
-        assert image.getpixel((0, 0)) == pytest.approx((5, 6, 7), abs=2)
 
 
 def test_release_artist_art_clears_override_and_lock(monkeypatch, api):

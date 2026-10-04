@@ -1037,28 +1037,15 @@ def test_single_album_linkage(imported_conn):
     assert single["canonical_track_id"] == album_track["id"]
 
 
-def test_single_album_linkage_survives_feat_suffix_on_album_cut(legacy_db):
-    """#39: a genuine single↔album duplicate must still link when the album cut
-    spells out the guests in its title (``(feat. …)``) and the single does not.
+# 100 is the album cut, 102 the single; the annotation may sit on either.
+@pytest.mark.parametrize("annotated", [100, 102])
+def test_single_album_linkage_survives_feat_suffix(legacy_db, annotated):
+    """#39: a genuine single↔album duplicate must still link when one side
+    spells out the guests in its title (``(feat. …)``) and the other does not.
     Otherwise ``link_single_album_duplicates`` groups them apart and the Manage
     Tracks modal wrongly reports "No duplicates found"."""
-    _on_legacy(legacy_db.path, "UPDATE tracks SET title='One Dance (feat. Wizkid & Kyla)' WHERE id=100")
-
-    import_legacy_library(legacy_db, reset=True)
-
-    conn = row_conn(legacy_db.path)
-    single = conn.execute(
-        "SELECT id, canonical_track_id FROM lib2_tracks WHERE legacy_track_id=102"
-    ).fetchone()
-    album_track = conn.execute(
-        "SELECT id FROM lib2_tracks WHERE legacy_track_id=100").fetchone()
-    conn.close()
-    assert single["canonical_track_id"] == album_track["id"]
-
-
-def test_single_album_linkage_survives_feat_suffix_on_single(legacy_db):
-    """Mirror of the above: the annotation may sit on the single instead."""
-    _on_legacy(legacy_db.path, "UPDATE tracks SET title='One Dance (feat. Wizkid & Kyla)' WHERE id=102")
+    _on_legacy(legacy_db.path, ("UPDATE tracks SET title='One Dance (feat. Wizkid & Kyla)' WHERE id=?",
+                                (annotated,)))
 
     import_legacy_library(legacy_db, reset=True)
 
