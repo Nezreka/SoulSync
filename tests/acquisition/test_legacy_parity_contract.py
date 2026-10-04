@@ -7,7 +7,6 @@ retry seams instead of maintaining a second test-only implementation.
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass
 
 import pytest
@@ -39,6 +38,7 @@ from core.quality.model import AudioQuality, QualityTarget, rank_candidate
 from core.runtime_state import download_tasks
 from tests.acquisition.test_pipeline_callback import _importing_record
 from tests.acquisition.test_retry_resume import _seed_walk
+from tests.lib2_seed import row_conn
 
 
 TARGETS = (
@@ -66,8 +66,7 @@ class _LegacyCandidate:
 
 
 def _connection():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     conn.execute("PRAGMA foreign_keys=ON")
     ensure_acquisition_schema(conn)
     return conn

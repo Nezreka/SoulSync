@@ -10,7 +10,25 @@ live file row, which is what ``owned=True`` (the default) gives it.
 
 from __future__ import annotations
 
+import sqlite3
 from typing import Any, Dict, Optional
+
+
+def row_conn(path: str) -> sqlite3.Connection:
+    """A connection to ``path`` whose rows are ``sqlite3.Row``."""
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+class RowDb:
+    """MusicDatabase stand-in: ``_get_connection`` opens ``path`` via ``row_conn``."""
+
+    def __init__(self, path: str):
+        self.path = path
+
+    def _get_connection(self) -> sqlite3.Connection:
+        return row_conn(self.path)
 
 
 def artist(conn, name: str, **cols: Any) -> int:

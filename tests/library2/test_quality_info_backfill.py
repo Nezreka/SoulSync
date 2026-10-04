@@ -14,6 +14,7 @@ from core.repair_jobs.quality_info_backfill import (
     QualityInfoBackfillJob,
     _candidate_file_ids,
 )
+from tests.lib2_seed import row_conn
 
 
 class _DB:
@@ -21,8 +22,7 @@ class _DB:
         self.path = path
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(self.path)
         return conn
 
 

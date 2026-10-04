@@ -28,6 +28,7 @@ if "core.settings" not in sys.modules:
     sys.modules["core.settings"] = settings_mod
 
 from core.reorganize_runner import build_runner  # noqa: E402
+from tests.lib2_seed import row_conn
 
 
 class _EnabledConfig:
@@ -152,8 +153,7 @@ def test_update_track_path_without_lib2_schema_fails_closed(monkeypatch, tmp_pat
 
     class _Shim:
         def _get_connection(self):
-            c = sqlite3.connect(path)
-            c.row_factory = sqlite3.Row
+            c = row_conn(path)
             return c
 
     def fake_reorganize_album(*, update_track_path_fn, **kwargs):

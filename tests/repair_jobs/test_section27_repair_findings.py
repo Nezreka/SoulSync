@@ -21,6 +21,7 @@ from core.repair_jobs.track_number_repair import (
     _api_tracks_for_subject,
     _edition_tracklists,
 )
+from tests.lib2_seed import row_conn
 
 
 # --------------------------------------------------------------------------
@@ -73,8 +74,7 @@ def _album_with_two_editions(conn) -> tuple[int, dict]:
 
 @pytest.fixture
 def two_edition_conn():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     yield conn
     conn.close()
 
@@ -175,8 +175,7 @@ def journal_db(tmp_path):
     delete nobody recorded is the thing this work exists to remove.
     """
     path = str(tmp_path / "journal.db")
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(path)
     conn.execute(
         """CREATE TABLE lib2_track_files(
                id INTEGER PRIMARY KEY, track_id INT, path TEXT,
@@ -188,8 +187,7 @@ def journal_db(tmp_path):
 
     class _DB:
         def _get_connection(self):
-            c = sqlite3.connect(path)
-            c.row_factory = sqlite3.Row
+            c = row_conn(path)
             return c
 
     return _DB()
@@ -242,8 +240,7 @@ def test_unreachable_storage_is_reported_as_a_failure(tmp_path, journal_db):
 @pytest.fixture
 def files_db(tmp_path):
     path = str(tmp_path / "files.db")
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(path)
     conn.execute(
         """CREATE TABLE lib2_track_files(
                id INTEGER PRIMARY KEY, track_id INT, path TEXT,
@@ -254,8 +251,7 @@ def files_db(tmp_path):
 
     class _DB:
         def _get_connection(self):
-            c = sqlite3.connect(path)
-            c.row_factory = sqlite3.Row
+            c = row_conn(path)
             return c
 
     return _DB(), path

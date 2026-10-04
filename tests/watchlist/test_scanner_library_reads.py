@@ -11,19 +11,18 @@ whole feature with a silent "nothing" (§50.4.4.20).
 from __future__ import annotations
 
 import json
-import sqlite3
 
 import pytest
 
 from core import watchlist_scanner
 from core.library2.importer import normalize_name
 from core.library2.schema import ensure_library_v2_schema
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture()
 def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
+    connection = row_conn(":memory:")
     ensure_library_v2_schema(connection)
     connection.commit()
     yield connection

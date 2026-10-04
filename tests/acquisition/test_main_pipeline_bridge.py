@@ -1,5 +1,4 @@
 import shutil
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -17,11 +16,11 @@ from core.acquisition.main_pipeline_bridge import (
 )
 from core.runtime_state import download_tasks, tasks_lock
 from tests.acquisition.test_bundle_inventory import _pending_import
+from tests.lib2_seed import row_conn
 
 def _connection_factory(path: Path):
     def connect():
-        conn = sqlite3.connect(path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(path)
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
     return connect

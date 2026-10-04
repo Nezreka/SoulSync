@@ -14,6 +14,7 @@ import pytest
 
 from core.library2 import mirror_outbox as MO
 from core.library2.schema import ensure_library_v2_schema
+from tests.lib2_seed import row_conn
 
 
 class FlakyDB:
@@ -28,8 +29,7 @@ class FlakyDB:
         self.watchlist_removes = []
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(self.path)
         return conn
 
     def add_to_wishlist(self, payload, source_type="unknown", source_info=None,
@@ -68,8 +68,7 @@ class FlakyDB:
 @pytest.fixture
 def db(tmp_path):
     path = str(tmp_path / "lib2.db")
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(path)
     ensure_library_v2_schema(conn)
     cur = conn.cursor()
     cur.execute("INSERT INTO lib2_artists(name, spotify_id) VALUES('A','sp-a')")

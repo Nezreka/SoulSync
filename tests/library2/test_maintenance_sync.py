@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from core.repair_jobs.base import JobContext, JobResult
+from tests.lib2_seed import row_conn
 
 
 class _Config:
@@ -1618,8 +1619,7 @@ def _paths_db(tmp_path, paths):
     import sqlite3
     from core.library2.schema import ensure_library_v2_schema
 
-    conn = sqlite3.connect(str(tmp_path / "paths.db"))
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(str(tmp_path / "paths.db"))
     ensure_library_v2_schema(conn)
     artist = conn.execute("INSERT INTO lib2_artists(name) VALUES('A')").lastrowid
     album = conn.execute(

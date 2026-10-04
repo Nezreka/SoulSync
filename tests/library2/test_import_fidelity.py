@@ -15,6 +15,7 @@ import sqlite3
 import pytest
 
 from core.library2.importer import import_legacy_library
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture
@@ -22,8 +23,7 @@ def imported(migrated_legacy_db):
     """The synthetic legacy library after a full migration."""
     def _run():
         import_legacy_library(migrated_legacy_db)
-        conn = sqlite3.connect(migrated_legacy_db.path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(migrated_legacy_db.path)
         return conn
     return _run
 

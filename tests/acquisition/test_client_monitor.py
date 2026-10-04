@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 import threading
 
 import pytest
@@ -37,12 +36,12 @@ from core.acquisition.imports import (
 )
 from core.acquisition.requests import create_request, get_request, transition_request
 from core.usenet_clients.base import UsenetStatus
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture
 def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
+    connection = row_conn(":memory:")
     connection.execute("PRAGMA foreign_keys=ON")
     ensure_acquisition_schema(connection)
     yield connection
@@ -391,14 +390,12 @@ def test_record_download_completed_is_idempotent_but_rejects_path_change(conn):
 
 def _runtime_database(tmp_path):
     path = str(tmp_path / "acquisition-monitor.db")
-    seed = sqlite3.connect(path)
-    seed.row_factory = sqlite3.Row
+    seed = row_conn(path)
     seed.execute("PRAGMA foreign_keys=ON")
     ensure_acquisition_schema(seed)
 
     def factory():
-        connection = sqlite3.connect(path)
-        connection.row_factory = sqlite3.Row
+        connection = row_conn(path)
         connection.execute("PRAGMA foreign_keys=ON")
         return connection
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 from datetime import datetime, timezone
 
 import pytest
@@ -24,6 +23,7 @@ from core.download_plugins.candidate_store import (
     candidate_binding,
 )
 from core.prowlarr_client import ProwlarrSearchResult
+from tests.lib2_seed import row_conn
 
 
 def _criteria(**overrides):
@@ -91,8 +91,7 @@ def test_usenet_parser_tokens_url_and_extracts_release_facts():
 
 
 def test_persisted_prowlarr_payload_redacts_every_download_reference():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     ensure_acquisition_schema(conn)
     request, _ = create_request(
         conn,

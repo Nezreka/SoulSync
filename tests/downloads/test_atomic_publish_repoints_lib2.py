@@ -15,6 +15,7 @@ import sqlite3
 from pathlib import Path
 
 from core.library2.track_files import repoint_file_path
+from tests.lib2_seed import row_conn
 
 
 def _conn(tmp_path: Path, stored: str, *, legacy_schema=False) -> sqlite3.Connection:
@@ -24,8 +25,7 @@ def _conn(tmp_path: Path, stored: str, *, legacy_schema=False) -> sqlite3.Connec
         from database.music_database import MusicDatabase
 
         MusicDatabase(str(tmp_path / 'm.db'))
-    conn = sqlite3.connect(str(tmp_path / 'm.db'))
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(str(tmp_path / 'm.db'))
     ensure_library_v2_schema(conn)
     conn.execute("INSERT INTO lib2_artists (id, name, sort_name) VALUES (1, 'A', 'A')")
     conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES (1, 1, 'Alb')")

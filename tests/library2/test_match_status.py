@@ -9,11 +9,11 @@ so we can surface the exact same match data with no migration.
 
 from __future__ import annotations
 
-import sqlite3
 
 import pytest
 
 from core.library2 import match_status as MS
+from tests.lib2_seed import row_conn
 
 
 def _drake_lib2_id(conn) -> int:
@@ -226,8 +226,7 @@ def test_match_status_ignores_text_legacy_ids_and_provenance(tmp_path):
     """P3 never resolves provider state through opaque legacy identities."""
     album_legacy_id = "01MoTj8w4VkVtgdPOijUUE"
     track_legacy_id = "base62-track-key"
-    conn = sqlite3.connect(str(tmp_path / "text-match-ids.db"))
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(str(tmp_path / "text-match-ids.db"))
     from core.library2.schema import ensure_library_v2_schema
     ensure_library_v2_schema(conn)
     conn.executescript("""

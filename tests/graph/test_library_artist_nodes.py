@@ -9,19 +9,18 @@ point: the link goes through `/artist-detail/<source>/<id>`, which redirects
 from __future__ import annotations
 
 import json
-import sqlite3
 
 import pytest
 
 from core.graph.library_artists import load_library_artists
 from core.library2.importer import normalize_name
 from core.library2.schema import ensure_library_v2_schema
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture()
 def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
+    connection = row_conn(":memory:")
     ensure_library_v2_schema(connection)
     connection.commit()
     yield connection

@@ -8,13 +8,13 @@ touched.
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 import pytest
 
 from core.repair_jobs.base import JobContext
 from core.repair_jobs.path_drift_reconcile import PathDriftReconcileJob
+from tests.lib2_seed import row_conn
 
 
 class _EnabledConfig:
@@ -29,8 +29,7 @@ def drifted(tmp_path: Path):
     (music / "01 - Bunny Girl.flac").write_bytes(b"audio")
 
     db_path = str(tmp_path / "lib2.db")
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(db_path)
     from core.library2.schema import ensure_library_v2_schema
     ensure_library_v2_schema(conn)
     conn.execute("INSERT INTO lib2_artists(id, name) VALUES(1, '1nonly')")
@@ -47,8 +46,7 @@ def drifted(tmp_path: Path):
         database_path = db_path
 
         def _get_connection(self):
-            opened = sqlite3.connect(db_path)
-            opened.row_factory = sqlite3.Row
+            opened = row_conn(db_path)
             return opened
 
     return _DB(), music

@@ -18,10 +18,10 @@ lands on a genuinely different recording is new information, and still fails.
 from __future__ import annotations
 
 import json
-import sqlite3
 from types import SimpleNamespace
 
 from core.repair_jobs.acoustid_scanner import AcoustIDScannerJob
+from tests.lib2_seed import row_conn
 
 
 class _Config:
@@ -40,8 +40,7 @@ def _make_context(tmp_path, *, verification_status, pipeline_result, findings):
     path = tmp_path / "02 - Apetitan.flac"
     path.write_bytes(b"audio")
 
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(str(db_path))
     ensure_library_v2_schema(conn)
     conn.execute("INSERT INTO lib2_artists (id, name) VALUES (7, 'Sawano Hiroyuki')")
     conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) "
@@ -59,8 +58,7 @@ def _make_context(tmp_path, *, verification_status, pipeline_result, findings):
 
     class _DB:
         def _get_connection(self):
-            c = sqlite3.connect(str(db_path))
-            c.row_factory = sqlite3.Row
+            c = row_conn(str(db_path))
             return c
 
     def _create_finding(**kwargs):

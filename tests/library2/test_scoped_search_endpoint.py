@@ -12,6 +12,7 @@ import sqlite3
 import time
 
 import pytest
+from tests.lib2_seed import row_conn
 
 flask = pytest.importorskip("flask")
 
@@ -24,8 +25,7 @@ class FakeDB:
         self.wishlist_adds = []
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.database_path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(self.database_path)
         return conn
 
     def add_to_wishlist(self, payload, source_type="unknown", source_info=None,
@@ -47,8 +47,7 @@ class FakeDB:
 
 def _build_api(tmp_path, *, dispatcher=None, direct_dispatcher=None):
     db_path = str(tmp_path / "lib2.db")
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(db_path)
     from core.library2.schema import ensure_library_v2_schema
     ensure_library_v2_schema(conn)
 

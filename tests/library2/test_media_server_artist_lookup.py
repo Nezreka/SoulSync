@@ -17,18 +17,17 @@ a media-server scan may create lib2 rows.
 from __future__ import annotations
 
 import json
-import sqlite3
 
 import pytest
 
 from core.library2.queries import find_artists_by_name
 from core.library2.schema import ensure_library_v2_schema
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture
 def conn(tmp_path):
-    c = sqlite3.connect(str(tmp_path / "lib2.db"))
-    c.row_factory = sqlite3.Row
+    c = row_conn(str(tmp_path / "lib2.db"))
     ensure_library_v2_schema(c)
     yield c
     c.close()

@@ -13,7 +13,6 @@ native tables/files.
 from __future__ import annotations
 
 import json
-import sqlite3
 import struct
 from pathlib import Path
 
@@ -21,6 +20,7 @@ import pytest
 
 from core.repair_jobs import get_all_jobs
 from core.repair_jobs.base import JobContext
+from tests.lib2_seed import row_conn
 
 
 class _Cfg:
@@ -39,8 +39,7 @@ class _Cfg:
 
 def _make_db(tmp_path: Path):
     db_path = str(tmp_path / 'lib2.db')
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(db_path)
     from core.library2.schema import ensure_library_v2_schema
     ensure_library_v2_schema(conn)
 
@@ -63,8 +62,7 @@ def _make_db(tmp_path: Path):
         database_path = db_path
 
         def _get_connection(self):
-            opened = sqlite3.connect(db_path)
-            opened.row_factory = sqlite3.Row
+            opened = row_conn(db_path)
             return opened
 
     return _DB(), conn

@@ -7,6 +7,7 @@ import sqlite3
 import pytest
 
 from core.library2.schema import ensure_library_v2_schema
+from tests.lib2_seed import row_conn
 
 _EXPECTED_TABLES = {
     "lib2_artists", "lib2_albums", "lib2_album_artists",
@@ -40,8 +41,7 @@ def test_ensures_app_wide_quality_profiles():
     """lib2 depends on the app-wide quality_profiles table (the same rows the
     wishlist/download pipeline resolves) — ensuring the lib2 schema must make
     it available for standalone (test-harness) use."""
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     ensure_library_v2_schema(conn)
     rows = conn.execute(
         "SELECT name, upgrade_policy FROM quality_profiles ORDER BY id"
@@ -114,8 +114,7 @@ def test_migrates_parallel_profile_table_to_app_wide():
     """Old installs carried a parallel lib2_quality_profiles table whose ids
     never reached the pipeline. Ensure remaps assignments by profile name onto
     the app-wide table and drops the old one."""
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     cur = conn.cursor()
     # Simulate the old install: parallel table with a custom profile id 7.
     cur.execute("""CREATE TABLE lib2_quality_profiles(
@@ -252,8 +251,7 @@ def test_live_default_trigger_and_quality_reference_guards():
 
 
 def test_default_profile_change_reprojects_only_inherited_rows():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     conn.execute("PRAGMA foreign_keys = ON")
     ensure_library_v2_schema(conn)
     artist_id = conn.execute("INSERT INTO lib2_artists(name) VALUES('A')").lastrowid
@@ -289,8 +287,7 @@ def test_default_profile_change_reprojects_only_inherited_rows():
 
 
 def test_migrates_default_one_columns_without_losing_graph_data():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     conn.execute("PRAGMA foreign_keys = ON")
     ensure_library_v2_schema(conn)
     artist_id = conn.execute("INSERT INTO lib2_artists(name) VALUES('A')").lastrowid

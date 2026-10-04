@@ -9,17 +9,16 @@ origin and with nothing else.
 
 from __future__ import annotations
 
-import sqlite3
 
 import pytest
 
 from core.library2 import wishlist_art
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture()
 def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
+    connection = row_conn(":memory:")
     connection.executescript(
         """
         CREATE TABLE lib2_albums (id INTEGER PRIMARY KEY, title TEXT, image_url TEXT);

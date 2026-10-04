@@ -7,7 +7,6 @@ needs_review, never in a silent partial import.
 
 from __future__ import annotations
 
-import sqlite3
 
 import pytest
 
@@ -35,12 +34,12 @@ from core.acquisition.imports import (
 )
 
 from tests.acquisition.test_bundle_inventory import _pending_import  # noqa: F401
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture
 def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
+    connection = row_conn(":memory:")
     connection.execute("PRAGMA foreign_keys=ON")
     ensure_acquisition_schema(connection)
     yield connection
@@ -50,8 +49,7 @@ def conn():
 @pytest.fixture
 def catalog_conn():
     """Editions/recordings tables without FK parents (read-only queries)."""
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
+    connection = row_conn(":memory:")
     from core.library2.editions import (
         LIB2_RECORDINGS_DDL,
         LIB2_RELEASE_EDITIONS_DDL,

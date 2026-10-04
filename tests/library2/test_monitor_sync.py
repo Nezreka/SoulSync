@@ -27,6 +27,7 @@ from core.library2.monitor_sync import (
 )
 from core.library2.wanted import recompute_wanted
 from core.library2.wishlist_mirror import refresh_quality_profile_wishlist
+from tests.lib2_seed import row_conn
 
 
 class _FakeDB:
@@ -41,8 +42,7 @@ class _FakeDB:
         self.watchlist_added: list = []
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(self.path)
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
 

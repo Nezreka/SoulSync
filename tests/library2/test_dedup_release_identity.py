@@ -26,16 +26,15 @@ MusicBrainz, Deezer and Discogs).
 from __future__ import annotations
 
 import json
-import sqlite3
 
 import pytest
 
 from core.library2.dedup_repair import repair_duplicate_artists
+from tests.lib2_seed import row_conn
 
 
 def _conn(legacy_db):
-    conn = sqlite3.connect(legacy_db.path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(legacy_db.path)
     return conn
 
 

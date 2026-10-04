@@ -16,12 +16,12 @@ from core.acquisition.blocklist import (
 from core.acquisition.candidates import register_candidate
 from core.acquisition.history import list_history_events, record_history_event
 from core.acquisition.requests import create_request, transition_request
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture
 def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
+    connection = row_conn(":memory:")
     connection.execute("PRAGMA foreign_keys=ON")
     ensure_acquisition_schema(connection)
     yield connection

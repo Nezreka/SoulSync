@@ -7,7 +7,6 @@ queue are the last of their kind, and `_fix_quality_below_cutoff` is what still
 services them.
 """
 
-import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -16,6 +15,7 @@ from core.library2 import ADMIN_PROFILE_ID
 from core.library2.monitor_rules import PROVENANCE_LEGACY, record_rule
 from core.library2.schema import ensure_library_v2_schema
 from core.library2.wanted import recompute_wanted
+from tests.lib2_seed import row_conn
 
 
 class _Database:
@@ -23,8 +23,7 @@ class _Database:
         self.path = path
 
     def _get_connection(self):
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(self.path)
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 

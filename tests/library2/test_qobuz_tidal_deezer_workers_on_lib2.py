@@ -20,7 +20,6 @@ Two shared decisions worth pinning:
 from __future__ import annotations
 
 import json
-import sqlite3
 
 import pytest
 
@@ -29,22 +28,13 @@ from core.library2.provider_attempts import (
 )
 from core.library2.schema import ensure_library_v2_schema
 
+from tests.lib2_seed import row_conn, RowDb as _Db
+
 from .conftest import own_every_track
 
 
-class _Db:
-    def __init__(self, path):
-        self.path = path
-
-    def _get_connection(self):
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-
 def _seed(path):
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(path)
     ensure_library_v2_schema(conn)
     own_every_track(conn)
     ensure_provider_attempt_schema(conn.cursor())

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 
 import pytest
 
@@ -16,12 +15,12 @@ from core.acquisition.search_contract import (
     build_search_criteria,
     parse_candidate_batch,
 )
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture
 def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
+    connection = row_conn(":memory:")
     connection.execute("PRAGMA foreign_keys=ON")
     ensure_acquisition_schema(connection)
     yield connection

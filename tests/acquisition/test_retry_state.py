@@ -1,6 +1,5 @@
 """Retry-state journal: redaction, lifecycle, expiry (docs/library-v2.md §8)."""
 
-import sqlite3
 
 import pytest
 
@@ -16,12 +15,12 @@ from core.acquisition.retry_state import (
     restore_candidates,
     update_retry_progress,
 )
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture()
 def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
+    connection = row_conn(":memory:")
     yield connection
     connection.close()
 

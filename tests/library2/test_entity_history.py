@@ -13,6 +13,7 @@ from core.library2.entity_history import (
     record_entity_move,
 )
 from core.library2.track_file_move import move_track_file
+from tests.lib2_seed import row_conn
 
 
 class _NoWishlistDB:
@@ -37,8 +38,7 @@ def _pair(conn):
 
 
 def test_existing_canonical_link_gets_idempotent_baseline():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     conn.execute(
         """CREATE TABLE lib2_tracks(
                id INTEGER PRIMARY KEY, canonical_track_id INTEGER)"""

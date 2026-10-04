@@ -15,6 +15,7 @@ import time
 from io import BytesIO
 
 import pytest
+from tests.lib2_seed import row_conn
 
 flask = pytest.importorskip("flask")
 
@@ -30,8 +31,7 @@ class FakeDB:
         self.watchlist_removes = []
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.database_path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(self.database_path)
         return conn
 
     # -- wishlist/watchlist mirror surface (recorded, always succeeds) -------
@@ -71,8 +71,7 @@ class FakeDB:
 def api(tmp_path):
     """A test client over a seeded lib2 DB. Yields (client, FakeDB, ids)."""
     db_path = str(tmp_path / "lib2.db")
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(db_path)
     from core.library2.schema import ensure_library_v2_schema
     ensure_library_v2_schema(conn)
 
@@ -536,8 +535,7 @@ def test_match_status_routes_apply_the_configured_services_getter(tmp_path):
     for providers it excludes come back ``available: False`` — same real
     entity_match_status/album_match_bundle, no monkeypatching."""
     db_path = str(tmp_path / "lib2.db")
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(db_path)
     from core.library2.schema import ensure_library_v2_schema
     ensure_library_v2_schema(conn)
     cur = conn.cursor()

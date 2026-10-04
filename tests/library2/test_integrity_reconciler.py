@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 
 from core.acquisition import ensure_acquisition_schema
 from core.acquisition.candidates import register_candidate
@@ -11,6 +10,7 @@ from core.acquisition.grabs import record_grab
 from core.acquisition.requests import create_request, transition_request
 from core.library2.integrity_reconciler import build_integrity_report
 from core.library2.schema import ensure_library_v2_schema
+from tests.lib2_seed import row_conn
 
 
 class _Config:
@@ -22,8 +22,7 @@ class _Config:
 
 
 def _connection():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     ensure_library_v2_schema(conn)
     ensure_acquisition_schema(conn)
     conn.execute(

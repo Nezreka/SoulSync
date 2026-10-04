@@ -1,4 +1,3 @@
-import sqlite3
 
 from core.acquisition import ensure_acquisition_schema
 from core.acquisition.history import list_history_events
@@ -19,6 +18,7 @@ from core.acquisition.pipeline_callback import (
 from core.acquisition.requests import get_request
 from core.imports.quarantine import serialize_quarantine_context
 from tests.acquisition.test_bundle_inventory import _pending_import
+from tests.lib2_seed import row_conn
 
 
 def _importing_record(conn):
@@ -43,8 +43,7 @@ def _importing_record(conn):
 
 
 def test_main_pipeline_completes_import_only_after_every_match():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     conn.execute("PRAGMA foreign_keys=ON")
     ensure_acquisition_schema(conn)
     importing, request = _importing_record(conn)
@@ -83,8 +82,7 @@ def test_main_pipeline_completes_import_only_after_every_match():
 
 
 def test_pipeline_completion_rejects_a_file_outside_persisted_matches():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     conn.execute("PRAGMA foreign_keys=ON")
     ensure_acquisition_schema(conn)
     importing, _request = _importing_record(conn)
@@ -106,8 +104,7 @@ def test_pipeline_completion_rejects_a_file_outside_persisted_matches():
 
 
 def test_quarantine_is_persisted_and_cleared_by_later_success():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     conn.execute("PRAGMA foreign_keys=ON")
     ensure_acquisition_schema(conn)
     importing, request = _importing_record(conn)
@@ -148,8 +145,7 @@ def test_quarantine_callback_ignores_legacy_imports_and_uses_markers(tmp_path):
     database_path = tmp_path / "callback.sqlite"
 
     def factory():
-        conn = sqlite3.connect(database_path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(database_path)
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
@@ -186,8 +182,7 @@ def test_pipeline_checks_keep_native_import_correlation_and_structured_status(tm
     database_path = tmp_path / "checks.sqlite"
 
     def factory():
-        conn = sqlite3.connect(database_path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(database_path)
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
@@ -262,8 +257,7 @@ def test_previous_file_replaced_keeps_native_import_correlation(tmp_path):
     database_path = tmp_path / "replaced.sqlite"
 
     def factory():
-        conn = sqlite3.connect(database_path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(database_path)
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
@@ -315,8 +309,7 @@ def test_retry_exhaustion_fails_import_and_blocklists_release(tmp_path):
     database_path = tmp_path / "retry.sqlite"
 
     def factory():
-        conn = sqlite3.connect(database_path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(database_path)
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
@@ -386,8 +379,7 @@ def test_history_correlation_is_persisted_onto_the_library_history_row(tmp_path)
     database_path = tmp_path / "correlation.sqlite"
 
     def factory():
-        conn = sqlite3.connect(database_path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(database_path)
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
@@ -433,8 +425,7 @@ def test_verification_decision_journals_human_verified_and_rejected(tmp_path):
     database_path = tmp_path / "verification.sqlite"
 
     def factory():
-        conn = sqlite3.connect(database_path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(database_path)
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
@@ -476,8 +467,7 @@ def test_verification_decision_without_correlation_writes_nothing(tmp_path):
     database_path = tmp_path / "uncorrelated.sqlite"
 
     def factory():
-        conn = sqlite3.connect(database_path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(database_path)
         return conn
 
     conn = factory()

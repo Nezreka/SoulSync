@@ -13,7 +13,6 @@ them, and duplicating them per worker is how they would drift.
 
 from __future__ import annotations
 
-import sqlite3
 
 import pytest
 
@@ -22,12 +21,12 @@ from core.library2.provider_attempts import (
 )
 from core.library2.schema import ensure_library_v2_schema
 from core.library2.worker_queue import next_pending, pending_count, progress_breakdown
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture
 def conn(tmp_path):
-    c = sqlite3.connect(str(tmp_path / "lib2.db"))
-    c.row_factory = sqlite3.Row
+    c = row_conn(str(tmp_path / "lib2.db"))
     ensure_library_v2_schema(c)
     ensure_provider_attempt_schema(c.cursor())
     artist = c.execute(

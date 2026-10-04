@@ -53,6 +53,7 @@ from core.quality.schema import ensure_quality_profiles_schema
 from core.usenet_clients.nzbget import NZBGetAdapter
 from core.usenet_clients.sabnzbd import SABnzbdAdapter
 from utils.async_helpers import run_async
+from tests.lib2_seed import row_conn
 
 
 pytestmark = [
@@ -120,8 +121,7 @@ def _database_path() -> Path:
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(_database_path())
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(_database_path())
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 

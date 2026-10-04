@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -12,6 +11,7 @@ from core.repair_jobs.base import (
     get_scope_file_paths,
     JobContext,
 )
+from tests.lib2_seed import row_conn
 
 
 class _DB:
@@ -44,8 +44,7 @@ _SCOPE_DDL = """
 
 
 def _scope_db(script: str):
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     conn.executescript(_SCOPE_DDL + script)
     return _DB(_NonClosingConnection(conn))
 
@@ -140,8 +139,7 @@ def test_dedup_scopes_actionable_single_path_but_keeps_album_candidates_global()
 
 def _reorg_db(tmp_path):
     db_path = str(tmp_path / "scope.db")
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(db_path)
     from core.library2.schema import ensure_library_v2_schema
     ensure_library_v2_schema(conn)
     conn.execute("INSERT INTO lib2_artists(id, name) VALUES(1, 'Wanted'), (2, 'Other')")
@@ -159,8 +157,7 @@ def _reorg_db(tmp_path):
         database_path = db_path
 
         def _get_connection(self):
-            opened = sqlite3.connect(db_path)
-            opened.row_factory = sqlite3.Row
+            opened = row_conn(db_path)
             return opened
 
     return _Db()

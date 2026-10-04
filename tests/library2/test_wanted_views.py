@@ -11,14 +11,14 @@ import sqlite3
 import pytest
 
 from core.library2.wanted_views import list_cutoff_unmet, list_missing
+from tests.lib2_seed import row_conn
 
 flask = pytest.importorskip("flask")
 
 
 def _make_conn(tmp_path, name="lib2.db") -> sqlite3.Connection:
     db_path = str(tmp_path / name)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(db_path)
     from core.library2.schema import ensure_library_v2_schema
     ensure_library_v2_schema(conn)
     return conn
@@ -292,8 +292,7 @@ class FakeDB:
         self.database_path = path
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.database_path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(self.database_path)
         return conn
 
 

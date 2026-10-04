@@ -16,18 +16,17 @@ leaves the mirror in the same change that moves its worker.
 from __future__ import annotations
 
 import json
-import sqlite3
 
 import pytest
 
 from core.library2.provider_writes import write_provider_enrichment
 from core.library2.schema import ensure_library_v2_schema
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture
 def conn(tmp_path):
-    c = sqlite3.connect(str(tmp_path / "lib2.db"))
-    c.row_factory = sqlite3.Row
+    c = row_conn(str(tmp_path / "lib2.db"))
     ensure_library_v2_schema(c)
     c.execute("INSERT INTO lib2_artists(name, sort_name) VALUES('A','A')")
     c.execute(

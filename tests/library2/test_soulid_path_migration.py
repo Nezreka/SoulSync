@@ -21,16 +21,7 @@ import pytest
 
 from core.library2.schema import ensure_library_v2_schema
 from core.soulid_worker import SoulIDWorker, generate_soul_id
-
-
-class _DB:
-    def __init__(self, path):
-        self.path = path
-
-    def _get_connection(self):
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
-        return conn
+from tests.lib2_seed import RowDb as _DB
 
 
 @pytest.fixture

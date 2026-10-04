@@ -15,6 +15,7 @@ from core.library2.media_mappings import (
     ensure_media_mapping_schema, resolve_mapping, upsert_mapping,
 )
 from core.library2.schema import LIB2_TRACK_FILES_DDL, ensure_library_v2_schema
+from tests.lib2_seed import row_conn
 
 _OLD_MAPPINGS_DDL = """
 CREATE TABLE lib2_media_server_mappings (
@@ -46,8 +47,7 @@ def _ddl_without_the_owner_column():
 
 @pytest.fixture
 def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
+    connection = row_conn(":memory:")
     ensure_library_v2_schema(connection)
     yield connection
     connection.close()
@@ -71,8 +71,7 @@ class TestTheOwnerColumn:
             assert "owner_profile_id" not in _columns(conn, table)
 
     def test_an_install_that_predates_the_column_gains_it_and_keeps_its_rows(self):
-        connection = sqlite3.connect(":memory:")
-        connection.row_factory = sqlite3.Row
+        connection = row_conn(":memory:")
         connection.execute(_ddl_without_the_owner_column())
         connection.execute("INSERT INTO lib2_track_files(path) VALUES('/music/old.flac')")
         assert "owner_profile_id" not in _columns(connection, "lib2_track_files")
@@ -105,8 +104,7 @@ class TestTheMediaMappingRebuild:
         # A whole lib2 schema, then its mapping table put back the way it was:
         # the migration runs against the entity tables and triggers it will
         # actually find in production, not against a table on its own.
-        connection = sqlite3.connect(":memory:")
-        connection.row_factory = sqlite3.Row
+        connection = row_conn(":memory:")
         ensure_library_v2_schema(connection)
         connection.execute("DROP TABLE lib2_media_server_mappings")
         connection.execute(_OLD_MAPPINGS_DDL)
@@ -195,8 +193,7 @@ class TestTheUpgradePath:
 
     @staticmethod
     def _files(shim):
-        connection = sqlite3.connect(shim.path)
-        connection.row_factory = sqlite3.Row
+        connection = row_conn(shim.path)
         try:
             return {r["path"]: r["owner_profile_id"] for r in connection.execute(
                 "SELECT path, owner_profile_id FROM lib2_track_files")}

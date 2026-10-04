@@ -1,4 +1,3 @@
-import sqlite3
 
 from core.acquisition import ensure_acquisition_schema
 from core.acquisition.eligibility_gate import CandidateDecision, DecisionReason
@@ -8,12 +7,12 @@ from core.acquisition.pipeline_callback import (
     notify_force_quarantine_auto_approved,
 )
 from tests.acquisition.test_pipeline_callback import _importing_record
+from tests.lib2_seed import row_conn
 
 
 def _factory(path):
     def connect():
-        conn = sqlite3.connect(path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(path)
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 

@@ -15,6 +15,7 @@ from core.library2.importer import (
     split_artist_credits,
 )
 from core.library2 import queries as Q
+from tests.lib2_seed import row_conn
 
 
 # --- credit splitter ---------------------------------------------------------
@@ -75,8 +76,7 @@ def test_import_reports_start_and_completion_for_every_row_stage(legacy_db):
 
 
 def test_legacy_track_reader_projects_columns_and_uses_keyset_batches(tmp_path):
-    conn = sqlite3.connect(tmp_path / "streaming.sqlite")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(tmp_path / "streaming.sqlite")
     conn.execute(
         "CREATE TABLE tracks(id INTEGER PRIMARY KEY, album_id INTEGER, title TEXT, "
         "genius_lyrics TEXT, unused_enrichment TEXT)"
@@ -1001,8 +1001,7 @@ def test_import_accepts_base62_legacy_album_ids(tmp_path):
 
     class _Shim:
         def _get_connection(self):
-            db_conn = sqlite3.connect(path)
-            db_conn.row_factory = sqlite3.Row
+            db_conn = row_conn(path)
             db_conn.execute("PRAGMA foreign_keys=ON")
             return db_conn
 
@@ -1012,8 +1011,7 @@ def test_import_accepts_base62_legacy_album_ids(tmp_path):
     assert stats["albums"] == 1
     assert stats["tracks"] == 1
     assert stats["files"] == 1
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(path)
     imported = conn.execute(
         """SELECT al.id, al.legacy_album_id, al.spotify_id, al.external_ids,
                   al.monitored, t.legacy_track_id, f.path
@@ -1166,8 +1164,7 @@ def test_single_album_linkage_survives_feat_suffix_on_album_cut(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = sqlite3.connect(legacy_db.path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(legacy_db.path)
     single = conn.execute(
         "SELECT id, canonical_track_id FROM lib2_tracks WHERE legacy_track_id=102"
     ).fetchone()
@@ -1187,8 +1184,7 @@ def test_single_album_linkage_survives_feat_suffix_on_single(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = sqlite3.connect(legacy_db.path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(legacy_db.path)
     single = conn.execute(
         "SELECT id, canonical_track_id FROM lib2_tracks WHERE legacy_track_id=102"
     ).fetchone()
@@ -1446,8 +1442,7 @@ def test_wishlist_only_track_seeds_missing_monitored_library_rows(legacy_db):
 
     stats = import_legacy_library(legacy_db, reset=True)
 
-    conn = sqlite3.connect(legacy_db.path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(legacy_db.path)
     artist = conn.execute("SELECT * FROM lib2_artists WHERE name='Wishlist Artist'").fetchone()
     album = conn.execute("SELECT * FROM lib2_albums WHERE title='Wishlist Album'").fetchone()
     track = conn.execute("SELECT * FROM lib2_tracks WHERE title='Only Wanted Song'").fetchone()
@@ -1467,8 +1462,7 @@ def test_wishlist_only_track_seeds_missing_monitored_library_rows(legacy_db):
     assert track["monitored"] == 1
     assert file_count == 0
 
-    conn = sqlite3.connect(legacy_db.path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(legacy_db.path)
     detail = Q.get_album(conn, album["id"])
     conn.close()
 
@@ -1606,8 +1600,7 @@ def test_wishlist_seed_preserves_valid_track_profile_only(legacy_db, caplog):
     caplog.set_level("WARNING")
     import_legacy_library(legacy_db, reset=True)
 
-    conn = sqlite3.connect(legacy_db.path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(legacy_db.path)
     default_id = conn.execute(
         "SELECT id FROM quality_profiles WHERE is_default=1 ORDER BY id LIMIT 1"
     ).fetchone()[0]
@@ -1684,8 +1677,7 @@ def test_wishlist_seed_does_not_clamp_discography_expected_count(legacy_db):
     truncate the whole release to one track."""
     import_legacy_library(legacy_db)
 
-    conn = sqlite3.connect(legacy_db.path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(legacy_db.path)
     conn.execute(
         "INSERT INTO lib2_artists(name, sort_name, spotify_id) "
         "VALUES('Wishlist Artist','Wishlist Artist','sp_artist_1')")
@@ -1728,8 +1720,7 @@ def test_wishlist_seed_does_not_clamp_discography_expected_count(legacy_db):
 
     import_legacy_library(legacy_db)
 
-    conn = sqlite3.connect(legacy_db.path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(legacy_db.path)
     album = conn.execute("SELECT * FROM lib2_albums WHERE spotify_id='sp_album_1'").fetchone()
     conn.close()
     assert album["expected_track_count"] == 12
@@ -1752,8 +1743,7 @@ def test_full_band_name_credit_is_not_split_into_ghost_artists(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = sqlite3.connect(legacy_db.path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(legacy_db.path)
     names = {r["name"] for r in conn.execute("SELECT name FROM lib2_artists")}
     conn.close()
     assert "Simon & Garfunkel" in names
@@ -1786,8 +1776,7 @@ def test_unknown_full_band_credit_is_preserved_without_ghost_artists(
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = sqlite3.connect(legacy_db.path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(legacy_db.path)
     names = {r["name"] for r in conn.execute("SELECT name FROM lib2_artists")}
     credited = {
         r["name"]
@@ -1920,8 +1909,7 @@ def test_watchlist_artist_monitoring_is_independent_from_wishlist_tracks(legacy_
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = sqlite3.connect(legacy_db.path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(legacy_db.path)
     drake = conn.execute("SELECT monitored FROM lib2_artists WHERE name='Drake'").fetchone()
     wishlist_artist = conn.execute(
         "SELECT monitored FROM lib2_artists WHERE name='Other Wishlist Artist'"
@@ -1941,8 +1929,7 @@ def test_watchlist_artist_monitoring_is_independent_from_wishlist_tracks(legacy_
 # ---------------------------------------------------------------------------
 
 def _conn(legacy_db):
-    conn = sqlite3.connect(legacy_db.path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(legacy_db.path)
     return conn
 
 
@@ -1953,8 +1940,7 @@ def _pre_seed_artist(legacy_db, name, **cols):
     import sqlite3
     from core.library2.schema import ensure_library_v2_schema
 
-    conn = sqlite3.connect(legacy_db.path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(legacy_db.path)
     ensure_library_v2_schema(conn)
     keys = ", ".join(["name", "sort_name", *cols.keys()])
     marks = ", ".join("?" for _ in range(2 + len(cols)))
@@ -2139,8 +2125,7 @@ def test_deezer_wishlist_ids_do_not_land_in_spotify_columns(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = sqlite3.connect(legacy_db.path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(legacy_db.path)
     try:
         track = conn.execute(
             "SELECT * FROM lib2_tracks WHERE title='Deezer Song'").fetchone()
@@ -2165,8 +2150,7 @@ def test_the_provider_can_also_come_from_source_info(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = sqlite3.connect(legacy_db.path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(legacy_db.path)
     try:
         track = conn.execute(
             "SELECT * FROM lib2_tracks WHERE title='Deezer Song'").fetchone()
@@ -2202,8 +2186,7 @@ def test_a_spotify_wishlist_row_still_uses_the_spotify_column(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = sqlite3.connect(legacy_db.path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(legacy_db.path)
     try:
         assert conn.execute(
             "SELECT spotify_id FROM lib2_tracks WHERE title='Spotify Song'"

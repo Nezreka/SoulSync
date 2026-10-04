@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 
 import pytest
 
@@ -15,12 +14,12 @@ from core.acquisition.requests import (
     get_request,
     transition_request,
 )
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture
 def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
+    connection = row_conn(":memory:")
     ensure_acquisition_schema(connection)
     yield connection
     connection.close()

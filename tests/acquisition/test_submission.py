@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 from unittest.mock import patch
 
 import pytest
@@ -31,12 +30,12 @@ from core.acquisition.workflow import (
     prepare_candidate_grab,
 )
 from core.download_plugins.candidate_store import CandidateStore, candidate_binding
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture
 def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
+    connection = row_conn(":memory:")
     ensure_acquisition_schema(connection)
     yield connection
     connection.close()
@@ -199,8 +198,7 @@ def test_plugin_candidate_failure_updates_request_history_and_blocklist(tmp_path
     from core.download_plugins.usenet import UsenetDownloadPlugin
 
     path = str(tmp_path / "acquisition.db")
-    seed = sqlite3.connect(path)
-    seed.row_factory = sqlite3.Row
+    seed = row_conn(path)
     ensure_acquisition_schema(seed)
     store = CandidateStore()
     prepared = _prepared(seed, store)
@@ -215,8 +213,7 @@ def test_plugin_candidate_failure_updates_request_history_and_blocklist(tmp_path
     seed.close()
 
     def connect():
-        connection = sqlite3.connect(path)
-        connection.row_factory = sqlite3.Row
+        connection = row_conn(path)
         return connection
 
     plugin = UsenetDownloadPlugin()
@@ -239,8 +236,7 @@ def test_plugin_candidate_failure_updates_request_history_and_blocklist(tmp_path
 
 
 def test_history_schema_migrates_closed_event_enum_without_losing_rows():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     conn.executescript("""
         CREATE TABLE acquisition_history (
             id TEXT PRIMARY KEY,

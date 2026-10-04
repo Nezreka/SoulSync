@@ -18,6 +18,7 @@ from core.library2.grab_context import (
     resolve_lib2_grab_context,
 )
 from core.library2.schema import ensure_library_v2_schema
+from tests.lib2_seed import row_conn
 
 
 class _Shim:
@@ -25,16 +26,14 @@ class _Shim:
         self.path = path
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(self.path)
         return conn
 
 
 @pytest.fixture
 def db(tmp_path):
     path = str(tmp_path / "lib2.db")
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(path)
     ensure_library_v2_schema(conn)
     cur = conn.cursor()
     cur.executemany(

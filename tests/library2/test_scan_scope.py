@@ -14,12 +14,12 @@ import pytest
 
 from core.library2.scan import _file_rows_in_scope
 from core.library2.schema import ensure_library_v2_schema
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture
 def scoped_conn(tmp_path):
-    conn = sqlite3.connect(str(tmp_path / "lib2.db"))
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(str(tmp_path / "lib2.db"))
     ensure_library_v2_schema(conn)
     cur = conn.cursor()
     cur.execute("INSERT INTO lib2_artists(name) VALUES('A')")
@@ -82,8 +82,7 @@ def test_rescan_files_with_empty_scope_probes_nothing(scoped_conn, tmp_path):
             self.path = path
 
         def _get_connection(self):
-            conn = sqlite3.connect(self.path)
-            conn.row_factory = sqlite3.Row
+            conn = row_conn(self.path)
             return conn
 
     db_path = str(tmp_path / "lib2.db")
@@ -126,8 +125,7 @@ def test_rescan_refreshes_tag_and_gap_cache_independently_of_quality(
 
     class _Shim:
         def _get_connection(self):
-            opened = sqlite3.connect(db_path)
-            opened.row_factory = sqlite3.Row
+            opened = row_conn(db_path)
             return opened
 
     monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _path: str(file_path))
@@ -248,8 +246,7 @@ def test_healthy_consecutive_misses_confirm_and_recovery_resets_lifecycle(
 
     class _Shim:
         def _get_connection(self):
-            opened = sqlite3.connect(db_path)
-            opened.row_factory = sqlite3.Row
+            opened = row_conn(db_path)
             return opened
 
     monkeypatch.setattr("core.library2.paths.resolve_lib2_path",
@@ -306,8 +303,7 @@ def test_unhealthy_root_does_not_advance_missing_lifecycle(
 
     class _Shim:
         def _get_connection(self):
-            opened = sqlite3.connect(db_path)
-            opened.row_factory = sqlite3.Row
+            opened = row_conn(db_path)
             return opened
 
     monkeypatch.setattr("core.library2.paths.resolve_lib2_path",
@@ -378,8 +374,7 @@ def test_scan_heals_verification_status_from_the_file_tag(
 
     class _Shim:
         def _get_connection(self):
-            opened = sqlite3.connect(db_path)
-            opened.row_factory = sqlite3.Row
+            opened = row_conn(db_path)
             return opened
 
     monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _p: str(file_path))
@@ -412,8 +407,7 @@ def test_scan_never_downgrades_a_human_verification(
 
     class _Shim:
         def _get_connection(self):
-            opened = sqlite3.connect(db_path)
-            opened.row_factory = sqlite3.Row
+            opened = row_conn(db_path)
             return opened
 
     monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _p: str(file_path))
@@ -446,8 +440,7 @@ def test_scan_leaves_verification_alone_when_the_file_carries_no_tag(
 
     class _Shim:
         def _get_connection(self):
-            opened = sqlite3.connect(db_path)
-            opened.row_factory = sqlite3.Row
+            opened = row_conn(db_path)
             return opened
 
     monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _p: str(file_path))
@@ -471,8 +464,7 @@ def test_unknown_verification_tag_value_is_ignored(scoped_conn, tmp_path, monkey
 
     class _Shim:
         def _get_connection(self):
-            opened = sqlite3.connect(db_path)
-            opened.row_factory = sqlite3.Row
+            opened = row_conn(db_path)
             return opened
 
     monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _p: str(file_path))
@@ -561,8 +553,7 @@ def test_manual_refresh_confirms_a_credible_miss_on_the_first_pass(
 
     class _Shim:
         def _get_connection(self):
-            opened = sqlite3.connect(db_path)
-            opened.row_factory = sqlite3.Row
+            opened = row_conn(db_path)
             return opened
 
     monkeypatch.setattr("core.library2.paths.resolve_lib2_path",
@@ -592,8 +583,7 @@ def test_an_unattended_scan_keeps_the_two_pass_wait(scoped_conn, monkeypatch):
 
     class _Shim:
         def _get_connection(self):
-            opened = sqlite3.connect(db_path)
-            opened.row_factory = sqlite3.Row
+            opened = row_conn(db_path)
             return opened
 
     monkeypatch.setattr("core.library2.paths.resolve_lib2_path",
@@ -682,8 +672,7 @@ def test_the_scan_reports_which_tracks_changed_availability(
 
     class _Shim:
         def _get_connection(self):
-            opened = sqlite3.connect(db_path)
-            opened.row_factory = sqlite3.Row
+            opened = row_conn(db_path)
             return opened
 
     monkeypatch.setattr("core.library2.paths.resolve_lib2_path",
@@ -715,8 +704,7 @@ def test_a_failing_presence_consumer_cannot_fail_the_scan(
 
     class _Shim:
         def _get_connection(self):
-            opened = sqlite3.connect(db_path)
-            opened.row_factory = sqlite3.Row
+            opened = row_conn(db_path)
             return opened
 
     monkeypatch.setattr("core.library2.paths.resolve_lib2_path",

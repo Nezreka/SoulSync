@@ -10,6 +10,7 @@ from core.library2.identity_history import (
     ensure_external_id_history_schema,
     list_external_id_history,
 )
+from tests.lib2_seed import row_conn
 
 
 def _events(conn, entity_type, entity_id):
@@ -19,8 +20,7 @@ def _events(conn, entity_type, entity_id):
 
 
 def test_existing_install_gets_idempotent_schema_baseline():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     conn.execute(
         """CREATE TABLE lib2_artists(
                id INTEGER PRIMARY KEY,

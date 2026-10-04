@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 
 import pytest
 
@@ -25,12 +24,12 @@ from core.acquisition.workflow import (
     retry_acquisition_request,
 )
 from core.quality.model import QualityTarget
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture
 def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
+    connection = row_conn(":memory:")
     connection.execute("PRAGMA foreign_keys=ON")
     ensure_acquisition_schema(connection)
     yield connection

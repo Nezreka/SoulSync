@@ -14,13 +14,13 @@ scan's refusal to confirm a miss while such a candidate exists.
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 import pytest
 
 from core.library2 import path_drift as PD
 from core.library2.schema import ensure_library_v2_schema
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture
@@ -32,8 +32,7 @@ def drift_db(tmp_path):
     real.write_bytes(b"audio-bytes")
 
     db_path = str(tmp_path / "lib2.db")
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(db_path)
     ensure_library_v2_schema(conn)
     cur = conn.cursor()
     cur.execute("INSERT INTO lib2_artists(name) VALUES('1nonly')")
@@ -54,8 +53,7 @@ def drift_db(tmp_path):
         database_path = db_path
 
         def _get_connection(self):
-            opened = sqlite3.connect(db_path)
-            opened.row_factory = sqlite3.Row
+            opened = row_conn(db_path)
             return opened
 
     yield _DB(), conn, {"file_id": file_id, "track_id": track_id,

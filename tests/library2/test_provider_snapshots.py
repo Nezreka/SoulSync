@@ -13,11 +13,11 @@ from core.library2.provider_snapshots import (
     record_provider_snapshot,
 )
 from core.library2.schema import ensure_library_v2_schema
+from tests.lib2_seed import row_conn
 
 
 def _connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     ensure_library_v2_schema(conn)
     return conn
 

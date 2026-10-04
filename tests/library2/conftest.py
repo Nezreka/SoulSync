@@ -41,8 +41,7 @@ class LegacyDBShim:
         return self.path
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(self.path)
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
@@ -224,11 +223,11 @@ def imported_conn(legacy_db):
     """Run the importer, then yield an open connection to the resulting DB."""
     from core.library2.importer import import_legacy_library
     import_legacy_library(legacy_db)
-    conn = sqlite3.connect(legacy_db.path)
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(legacy_db.path)
     conn.execute("PRAGMA foreign_keys = ON")
     yield conn
     conn.close()
 
 
 from lib2_ownership import own_every_track  # noqa: E402,F401
+from tests.lib2_seed import row_conn

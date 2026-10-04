@@ -24,12 +24,12 @@ from core.library2.artist_rollup import (
     refresh_artist_rollup,
 )
 from core.library2.schema import ensure_library_v2_schema
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture
 def conn():
-    c = sqlite3.connect(":memory:")
-    c.row_factory = sqlite3.Row
+    c = row_conn(":memory:")
     ensure_library_v2_schema(c)
     yield c
     c.close()
@@ -191,8 +191,7 @@ def test_concurrent_requests_rebuild_once(tmp_path):
     import core.library2.artist_rollup as mod
 
     db_path = str(tmp_path / "rollup.db")
-    seed = sqlite3.connect(db_path)
-    seed.row_factory = sqlite3.Row
+    seed = row_conn(db_path)
     ensure_library_v2_schema(seed)
     _seed(seed)
     seed.close()

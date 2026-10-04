@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -28,12 +27,12 @@ from core.acquisition.imports import (
     record_inventory_result,
 )
 from core.acquisition.requests import create_request, get_request, transition_request
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture
 def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
+    connection = row_conn(":memory:")
     connection.execute("PRAGMA foreign_keys=ON")
     ensure_acquisition_schema(connection)
     yield connection
@@ -376,8 +375,7 @@ def test_import_failure_requires_known_kind(conn):
 
 
 def test_schema_upgrade_adds_new_columns_to_existing_table():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
+    connection = row_conn(":memory:")
     connection.execute("PRAGMA foreign_keys=ON")
     # Phase-4 layout without resolved_path/attempts.
     connection.execute("""

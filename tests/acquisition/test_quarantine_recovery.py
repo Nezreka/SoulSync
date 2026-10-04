@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import sqlite3
 
 from core.acquisition import ensure_acquisition_schema
 from core.acquisition.candidates import register_candidate
@@ -25,12 +24,12 @@ from core.acquisition.recovery import (
 )
 from core.acquisition.requests import create_request, transition_request
 from core.imports.quarantine import plan_recover_to_staging
+from tests.lib2_seed import row_conn
 
 
 def _factory(path):
     def _open():
-        conn = sqlite3.connect(path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(path)
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
@@ -312,8 +311,7 @@ def test_failed_reimport_with_staging_file_remains_retryable(tmp_path):
 
 
 def test_old_import_status_constraint_is_widened_without_data_loss():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     conn.executescript(
         """
         CREATE TABLE acquisition_imports (

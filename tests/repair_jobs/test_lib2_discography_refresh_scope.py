@@ -10,11 +10,11 @@ import sqlite3
 
 from core.library2.schema import ensure_library_v2_schema
 from core.repair_jobs.lib2_discography_refresh import Lib2DiscographyRefreshJob
+from tests.lib2_seed import row_conn
 
 
 def _conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     ensure_library_v2_schema(conn)
     conn.commit()
     return conn

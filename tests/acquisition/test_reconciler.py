@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 
 import pytest
 
@@ -12,12 +11,12 @@ from core.acquisition.candidates import register_candidate
 from core.acquisition.grabs import get_grab, record_grab, update_grab
 from core.acquisition.reconciler import reconcile_persistent_grabs
 from core.acquisition.requests import create_request, get_request, transition_request
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture
 def conn(tmp_path):
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
+    connection = row_conn(":memory:")
     ensure_acquisition_schema(connection)
     connection.executescript(
         """

@@ -16,18 +16,17 @@ and the other skips it.
 
 from __future__ import annotations
 
-import sqlite3
 
 import pytest
 
 from core.library2.native_enrich import backfill_missing_provider_ids
 from core.library2.schema import ensure_library_v2_schema
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture
 def conn(tmp_path):
-    c = sqlite3.connect(str(tmp_path / "backfill.db"))
-    c.row_factory = sqlite3.Row
+    c = row_conn(str(tmp_path / "backfill.db"))
     ensure_library_v2_schema(c)
     c.execute(
         "INSERT INTO lib2_artists (id, name, spotify_id, musicbrainz_id) "

@@ -26,12 +26,12 @@ from core.acquisition.grabs import (
     record_grab,
     update_grab,
 )
+from tests.lib2_seed import row_conn
 
 
 @pytest.fixture
 def conn():
-    c = sqlite3.connect(":memory:")
-    c.row_factory = sqlite3.Row
+    c = row_conn(":memory:")
     ensure_acquisition_grabs_schema(c)
     yield c
     c.close()
@@ -111,8 +111,7 @@ def grab_db(tmp_path):
     seed.close()
 
     def _connect():
-        c = sqlite3.connect(path)
-        c.row_factory = sqlite3.Row
+        c = row_conn(path)
         return c
 
     with patch("core.download_plugins.usenet._grabs_conn", side_effect=_connect):

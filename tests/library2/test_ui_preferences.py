@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 
 from core.library2.schema import ensure_library_v2_schema
 from core.library2.ui_preferences import (
@@ -10,11 +9,11 @@ from core.library2.ui_preferences import (
     get_ui_preferences,
     update_ui_preferences,
 )
+from tests.lib2_seed import row_conn
 
 
 def _conn():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     ensure_library_v2_schema(conn)
     conn.commit()
     return conn
@@ -102,8 +101,7 @@ def test_update_persists_across_connections(tmp_path):
     path = str(tmp_path / "lib2.db")
 
     def _file_conn():
-        conn = sqlite3.connect(path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(path)
         ensure_library_v2_schema(conn)
         conn.commit()
         return conn

@@ -16,20 +16,19 @@ profile, so it is pinned here from both sides — the filter and the reported
 from __future__ import annotations
 
 import json
-import sqlite3
 
 import pytest
 
 from core.library2.queries import legacy_api_artists_page
 from core.library2.schema import ensure_library_v2_schema
+from tests.lib2_seed import row_conn
 
 ADMIN, GUEST = 1, 2
 
 
 @pytest.fixture
 def conn(tmp_path):
-    c = sqlite3.connect(str(tmp_path / "lib2.db"))
-    c.row_factory = sqlite3.Row
+    c = row_conn(str(tmp_path / "lib2.db"))
     ensure_library_v2_schema(c)
     c.execute(
         """

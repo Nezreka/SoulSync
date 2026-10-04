@@ -3,7 +3,6 @@ persistent retry state in sync with the in-memory walk (docs/library-v2.md §8).
 
 from __future__ import annotations
 
-import sqlite3
 import types
 
 import pytest
@@ -22,6 +21,7 @@ from core.acquisition.retry_state import (
 from core.downloads import candidates as dc
 from core.runtime_state import download_tasks, matched_downloads_context
 from tests.acquisition.test_pipeline_callback import _importing_record
+from tests.lib2_seed import row_conn
 
 
 IMPORT_ID = "aim1-x"
@@ -51,8 +51,7 @@ def journal_db(tmp_path, monkeypatch):
     database_path = tmp_path / "journal.sqlite"
 
     def factory():
-        conn = sqlite3.connect(database_path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(database_path)
         return conn
 
     calls = []
@@ -216,8 +215,7 @@ def test_candidate_attempt_persists_used_sources(monkeypatch, journal_db):
 
 
 def test_pipeline_completion_closes_track_journal_row():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     conn.execute("PRAGMA foreign_keys=ON")
     ensure_acquisition_schema(conn)
     importing, _request = _importing_record(conn)
@@ -236,8 +234,7 @@ def test_pipeline_completion_closes_track_journal_row():
 
 
 def test_import_failure_closes_every_journal_row():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+    conn = row_conn(":memory:")
     conn.execute("PRAGMA foreign_keys=ON")
     ensure_acquisition_schema(conn)
     importing, _request = _importing_record(conn)
@@ -260,8 +257,7 @@ def _journal_with_context(tmp_path):
     database_path = tmp_path / "ctx.sqlite"
 
     def factory():
-        conn = sqlite3.connect(database_path)
-        conn.row_factory = sqlite3.Row
+        conn = row_conn(database_path)
         return conn
 
     conn = factory()
