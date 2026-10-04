@@ -28,6 +28,25 @@ def test_lists_explicit_follows_with_library_status(db):
     assert rows[200]["status"] == "Ended"              # owned → carries the status
 
 
+def test_server_scoped_library_id_resolution(db):
+    # a show owned ONLY on jellyfin (the non-default server), followed on the
+    # watchlist. the airing automation's calendar pass is plex-scoped, so the
+    # unowned-follow pass must resolve library_id for plex too — otherwise the
+    # show is skipped by BOTH passes and never wishlisted, silently.
+    conn = db._get_connection()
+    conn.execute("INSERT INTO shows (id, server_source, title, tmdb_id, status) "
+                 "VALUES (7, 'jellyfin', 'Jellyfin Only', 700, 'Returning Series')")
+    conn.commit(); conn.close()
+    db.add_to_watchlist("show", 700, "Jellyfin Only")
+
+    unscoped = {r["tmdb_id"]: r for r in db.followed_shows()}
+    assert unscoped[700]["library_id"] == 7          # old behavior preserved
+    jelly = {r["tmdb_id"]: r for r in db.followed_shows(server_source="jellyfin")}
+    assert jelly[700]["library_id"] == 7             # owned on jellyfin → claimed
+    plex = {r["tmdb_id"]: r for r in db.followed_shows(server_source="plex")}
+    assert plex[700]["library_id"] is None          # unowned for plex → TMDB pass
+
+
 def test_excludes_muted_and_people(db):
     db.add_to_watchlist("show", 1, "A")
     db.remove_from_watchlist("show", 1)                 # mute (tombstone)

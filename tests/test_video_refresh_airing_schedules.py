@@ -82,9 +82,52 @@ def test_watchlist_continuing_shows_skips_ended_tmdbonly_and_dupes(tmp_path, mon
         {"library_id": 1, "tmdb_id": 10, "title": "Dup", "status": "Returning Series"}, # dup lib → once
         {"library_id": 4, "tmdb_id": 40, "title": "Unknown", "status": None},           # unknown → keep
     ]
-    monkeypatch.setattr(db, "_effective_shows", lambda conn, ss: rows)
+    monkeypatch.setattr(db, "_effective_shows",
+                        lambda conn, ss, profile_id=1, loose_status=False: rows)
     out = db.watchlist_continuing_shows("plex")
     assert [s["library_id"] for s in out] == [1, 4]
+
+
+def test_continuing_shows_keeps_null_status_library_show(tmp_path):
+    # the calendar includes NULL-status airing shows (enrichment gap) and
+    # auto-wishlists them — the refresh scope must match, or their air dates
+    # go stale monotonically.
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    null_sid = db.upsert_show_tree("plex", {"server_id": "n1", "title": "Null Status",
+                                            "tmdb_id": 101,
+                                            "seasons": [{"season_number": 1, "episodes": [
+                                                {"episode_number": 1}]}]})
+    ok_sid = db.upsert_show_tree("plex", {"server_id": "o1", "title": "Known Airing",
+                                          "tmdb_id": 102, "status": "Returning Series",
+                                          "seasons": [{"season_number": 1, "episodes": [
+                                              {"episode_number": 1}]}]})
+    done_sid = db.upsert_show_tree("plex", {"server_id": "d1", "title": "Done",
+                                            "tmdb_id": 103, "status": "Ended",
+                                            "seasons": [{"season_number": 1, "episodes": [
+                                                {"episode_number": 1}]}]})
+    with db.connect() as c:
+        assert c.execute("SELECT status FROM shows WHERE id=?", (null_sid,)).fetchone()[0] is None
+    out = db.watchlist_continuing_shows("plex")
+    libs = {s["library_id"] for s in out}
+    assert null_sid in libs      # NULL status kept — matches the calendar
+    assert ok_sid in libs
+    assert done_sid not in libs  # terminal still skipped
+
+
+def test_zero_show_run_stamps_freshness(monkeypatch):
+    # nothing to refresh is trivially current — the stamp must be written,
+    # otherwise "empty watchlist" degrades into "stale" forever
+    from core.automation.handlers import video_refresh_airing_schedules as mod
+    stamped = []
+    monkeypatch.setattr(mod, '_stamp_refresh', lambda: stamped.append(True) or True)
+
+    class _Deps:
+        def update_progress(self, automation_id, **kw): pass
+
+    res = mod.auto_video_refresh_airing_schedules(
+        {"_automation_id": "a"}, _Deps(), fetch_shows=lambda: [])
+    assert res["status"] == "completed" and res["shows"] == 0
+    assert stamped == [True]
 
 
 # ── OMDb quota safety + season scoping ────────────────────────────────────────
@@ -108,9 +151,10 @@ def test_refresh_skips_omdb_and_scopes_to_recent_seasons(monkeypatch):
 
 def test_latest_seasons_picks_top_two_regular_seasons():
     from core.video.enrichment.engine import _latest_seasons
-    assert _latest_seasons([0, 1, 2, 3, 4]) == [4, 3]      # top 2, specials (0) excluded
+    # top 2 regular + specials (0) — newly announced specials must be picked up
+    assert _latest_seasons([0, 1, 2, 3, 4]) == [0, 4, 3]
     assert _latest_seasons([5, 1, 3, 2, 4]) == [5, 4]      # unsorted input → sorted desc
-    assert _latest_seasons([0, 1]) == [1]                  # only one regular season
+    assert _latest_seasons([0, 1]) == [0, 1]              # only one regular season + specials
     assert _latest_seasons([0]) == [0]                     # specials-only → fall back to full
     assert _latest_seasons([]) == []
     assert _latest_seasons([1, 2, 3], keep=1) == [3]
@@ -147,9 +191,9 @@ def test_refresh_show_art_recent_only_scopes_seasons_and_leaves_synced_flag():
     eng.db, eng.ratings_client = _DB(), None
     eng.workers = {"tmdb": _Worker()}
 
-    # nightly airing mode: latest 2 regular seasons only, synced flag untouched
+    # nightly airing mode: latest 2 regular seasons + specials, synced flag untouched
     assert eng.refresh_show_art(7, with_ratings=False, recent_seasons_only=True) == {"ok": True}
-    assert cap["nums"] == [3, 2] and cap["mark_synced"] is False
+    assert cap["nums"] == [0, 3, 2] and cap["mark_synced"] is False
 
     # default mode: every season, marks synced (unchanged behavior)
     assert eng.refresh_show_art(7) == {"ok": True}

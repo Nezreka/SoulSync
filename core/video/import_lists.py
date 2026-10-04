@@ -43,6 +43,17 @@ _running = False
 _lock = threading.Lock()
 
 
+def _owner_profile() -> int:
+    """The automation owner's profile: import lists read/write the owner's
+    watchlist/wishlist (the engine sets the background profile to the owner
+    before the run)."""
+    try:
+        from core.profile_context import get_current_profile_id
+        return int(get_current_profile_id() or 1)
+    except Exception:
+        return 1
+
+
 def is_running() -> bool:
     return _running
 
@@ -221,14 +232,17 @@ def _sync_inner(fetch, log) -> Dict[str, Any]:
                 continue                  # user removals never boomerang back
             if kind == "movie":
                 if db.add_movie_to_wishlist(m["tmdb_id"], m.get("title") or "?",
-                                            year=m.get("year"), poster_url=m.get("poster_url")):
+                                            year=m.get("year"), poster_url=m.get("poster_url"),
+                                            profile_id=_owner_profile()):
                     added_movies += 1
                     if entry.get("quality_profile_id"):
-                        _stamp_movie_profile(db, m["tmdb_id"], entry["quality_profile_id"])
+                        _stamp_movie_profile(db, m["tmdb_id"], entry["quality_profile_id"],
+                                             _owner_profile())
                     log("List '%s': wishlisted %s" % (entry["name"], m.get("title")))
             else:
                 if db.add_to_watchlist("show", m["tmdb_id"], m.get("title") or "?",
-                                       poster_url=m.get("poster_url")):
+                                       poster_url=m.get("poster_url"),
+                                       profile_id=_owner_profile()):
                     added_shows += 1
                     log("List '%s': following %s" % (entry["name"], m.get("title")))
                     if entry["monitor"] != "future" and expansions < _EXPANSION_CAP:
@@ -239,13 +253,14 @@ def _sync_inner(fetch, log) -> Dict[str, Any]:
             "added_movies": added_movies, "added_shows": added_shows}
 
 
-def _stamp_movie_profile(db, tmdb_id, qpid) -> None:
+def _stamp_movie_profile(db, tmdb_id, qpid, profile_id) -> None:
     try:
         conn = db._get_connection()
         try:
             conn.execute("UPDATE video_wishlist SET quality_profile_id=? "
-                         "WHERE kind='movie' AND tmdb_id=? AND quality_profile_id IS NULL",
-                         (int(qpid), int(tmdb_id)))
+                         "WHERE kind='movie' AND tmdb_id=? AND profile_id=? "
+                         "AND quality_profile_id IS NULL",
+                         (int(qpid), int(tmdb_id), int(profile_id)))
             conn.commit()
         finally:
             conn.close()
@@ -263,6 +278,7 @@ def _expand_policy(db, member, monitor) -> None:
                                   monitor, date.today().isoformat())
         if eps:
             db.add_episodes_to_wishlist(int(member["tmdb_id"]), member.get("title") or "?",
-                                        eps, poster_url=member.get("poster_url"))
+                                        eps, poster_url=member.get("poster_url"),
+                                        profile_id=_owner_profile())
     except Exception:   # noqa: BLE001 - expansion is best-effort
         logger.debug("policy expansion failed for %s", member.get("tmdb_id"), exc_info=True)

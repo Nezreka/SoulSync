@@ -640,7 +640,11 @@ def _owned_library_dir(db, dl):
 
 def _wishlist_failed(db, dl) -> None:
     """A download gave up for good — put the item back on the video wishlist so it's
-    not lost (mirrors the music side's failed-tracks-to-wishlist). Best-effort."""
+    not lost (mirrors the music side's failed-tracks-to-wishlist). Best-effort.
+
+    The wishlist is per-profile: re-add to every profile that still has this
+    media wishlisted (normally a no-op upsert — the rows survive the download
+    attempt), falling back to profile 1 only when no row remains."""
     try:
         kind, tmdb_id, sn, en, ctx = _wishlist_ids(db, dl)
         title = dl.get("title") or ctx.get("title") or ""
@@ -648,13 +652,72 @@ def _wishlist_failed(db, dl) -> None:
             return
         lib_id = None if str(dl.get("media_source") or "").lower() == "tmdb" else dl.get("media_id")
         poster, year = dl.get("poster_url"), dl.get("year")
-        if kind == "movie":
-            db.add_movie_to_wishlist(int(tmdb_id), title, year=year, poster_url=poster, library_id=lib_id)
-        elif sn is not None and en is not None:
-            db.add_episodes_to_wishlist(int(tmdb_id), title,
-                [{"season_number": sn, "episode_number": en}], poster_url=poster, library_id=lib_id)
+        try:
+            profiles = db.wishlist_profiles_for_media(
+                kind, int(tmdb_id), season_number=sn, episode_number=en)
+        except Exception:  # noqa: BLE001 - safety net must never fail
+            profiles = []
+        for pid in profiles or [1]:
+            if kind == "movie":
+                db.add_movie_to_wishlist(int(tmdb_id), title, year=year, poster_url=poster,
+                                         library_id=lib_id, profile_id=pid)
+            elif sn is not None and en is not None:
+                db.add_episodes_to_wishlist(int(tmdb_id), title,
+                    [{"season_number": sn, "episode_number": en}], poster_url=poster,
+                    library_id=lib_id, profile_id=pid)
     except Exception:
         logger.exception("video download %s: wishlist-on-fail failed", dl.get("id"))
+
+
+def _remove_satisfied_movie_wishes(db, tmdb_id: int, label: str, user_initiated: bool) -> None:
+    """Remove movie wishlist rows only for profiles whose cutoff the landed file meets."""
+    try:
+        from core.video.quality_eval import meets_cutoff, resolution_rank
+        from core.video.quality_profile import profile_by_id
+        if not resolution_rank(label):
+            # unparseable quality → classic remove-on-obtain; never wedge a row
+            # open on a label we can't judge (matches the old behavior)
+            db.remove_from_wishlist("movie", tmdb_id=tmdb_id, profile_id=None)
+            return
+        rows = db.get_movie_wishlist_profiles(tmdb_id)
+        for profile_id, quality_profile_id in rows:
+            profile = profile_by_id(db, quality_profile_id)
+            if user_initiated or meets_cutoff(label, profile):
+                db.remove_from_wishlist("movie", tmdb_id=tmdb_id, profile_id=profile_id)
+            else:
+                logger.info("movie %s: landed '%s' below profile %s cutoff - wish kept",
+                            tmdb_id, label, profile_id)
+    except Exception:   # noqa: BLE001 - judgment failure → classic remove-on-obtain
+        logger.debug("per-profile movie cutoff judgment failed; removing all", exc_info=True)
+        db.remove_from_wishlist("movie", tmdb_id=tmdb_id, profile_id=None)
+
+
+def _remove_satisfied_episode_wishes(db, tmdb_id: int, sn: int, en: int,
+                                     label: str, user_initiated: bool) -> None:
+    """Remove episode wishlist rows only for profiles whose cutoff the landed file meets."""
+    try:
+        from core.video.quality_eval import meets_cutoff, resolution_rank
+        from core.video.quality_profile import profile_by_id
+        if not resolution_rank(label):
+            # unparseable quality → classic remove-on-obtain; never wedge a row
+            # open on a label we can't judge (matches the old behavior)
+            db.remove_from_wishlist("episode", tmdb_id=tmdb_id,
+                                    season_number=sn, episode_number=en, profile_id=None)
+            return
+        rows = db.get_episode_wishlist_profiles(tmdb_id, sn, en)
+        for profile_id, quality_profile_id in rows:
+            profile = profile_by_id(db, quality_profile_id)
+            if user_initiated or meets_cutoff(label, profile):
+                db.remove_from_wishlist("episode", tmdb_id=tmdb_id,
+                                        season_number=sn, episode_number=en,
+                                        profile_id=profile_id)
+            else:
+                logger.info("episode %sx%s: landed '%s' below profile %s cutoff - wish kept",
+                            sn, en, label, profile_id)
+    except Exception:   # noqa: BLE001 - judgment failure → classic remove-on-obtain
+        logger.debug("per-profile episode cutoff judgment failed; removing all", exc_info=True)
+        db.remove_from_wishlist("episode", tmdb_id=tmdb_id,
+                                season_number=sn, episode_number=en, profile_id=None)
 
 
 def _wishlist_obtained(db, dl, upd=None) -> None:
@@ -688,12 +751,16 @@ def _wishlist_obtained(db, dl, upd=None) -> None:
                             dl.get("id"), label)
         except Exception:   # noqa: BLE001 - judgment failure → classic remove-on-obtain
             logger.debug("wishlist cutoff judgment failed; removing row", exc_info=True)
+        # Per-profile cutoff judgment: the shared library does NOT satisfy every
+        # profile's wish when cutoffs differ. A 1080p file meeting Profile A's
+        # cutoff must not clear Profile B's 4K wish. Remove only the profiles
+        # whose cutoff the landed file actually meets.
         if kind == "youtube":
-            db.remove_youtube_from_wishlist("video", str(tmdb_id))
+            db.remove_youtube_from_wishlist("video", str(tmdb_id), profile_id=None)
         elif kind == "movie":
-            db.remove_from_wishlist("movie", tmdb_id=int(tmdb_id))
+            _remove_satisfied_movie_wishes(db, int(tmdb_id), label, user_initiated)
         elif sn is not None and en is not None:
-            db.remove_from_wishlist("episode", tmdb_id=int(tmdb_id), season_number=sn, episode_number=en)
+            _remove_satisfied_episode_wishes(db, int(tmdb_id), sn, en, label, user_initiated)
     except Exception:
         logger.exception("video download %s: wishlist-on-obtain failed", dl.get("id"))
 

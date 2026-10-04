@@ -289,7 +289,8 @@ def register_routes(bp):
             if req["kind"] == "movie":
                 ok = db.add_movie_to_wishlist(req["tmdb_id"], req["title"],
                                               year=req.get("year"),
-                                              poster_url=req.get("poster_url"))
+                                              poster_url=req.get("poster_url"),
+                                              profile_id=int(req.get("profile_id") or 1))
             elif req["kind"] == "episode":
                 # the row title is "Show S02E07" (built by episode_request_title);
                 # the wishlist wants the bare show title
@@ -299,8 +300,14 @@ def register_routes(bp):
                     int(req["tmdb_id"]), show_title or req["title"], [{
                         "season_number": int(req["season_number"]),
                         "episode_number": int(req["episode_number"])}],
-                    poster_url=req.get("poster_url"))
-                ok = wished > 0
+                    poster_url=req.get("poster_url"),
+                    profile_id=int(req.get("profile_id") or 1))
+                # idempotent: 0 new rows means already wished — the wish exists,
+                # so the approval still lands (a DB failure leaves no row).
+                ok = wished > 0 or db.wishlist_has_episode(
+                    int(req["tmdb_id"]), int(req["season_number"]),
+                    int(req["episode_number"]),
+                    profile_id=int(req.get("profile_id") or 1))
             elif req["kind"] == "youtube":
                 # landed on disk between filing and approval: nothing to wish,
                 # the arrival sweep marks it available
@@ -316,10 +323,12 @@ def register_routes(bp):
                         channel, [{"youtube_id": req.get("youtube_id"),
                                    "title": req["title"],
                                    "thumbnail_url": req.get("poster_url")}],
-                        server_source=_server(), allow_downloaded=True) > 0
+                        server_source=_server(), allow_downloaded=True,
+                        profile_id=int(req.get("profile_id") or 1)) > 0
             else:
                 ok = db.add_to_watchlist("show", req["tmdb_id"], req["title"],
-                                         poster_url=req.get("poster_url"))
+                                         poster_url=req.get("poster_url"),
+                                         profile_id=int(req.get("profile_id") or 1))
                 monitor = (monitor_for_new_request("show", body.get("monitor")) if body.get("monitor")
                            else str(req.get("monitor") or "all").lower())
                 if ok and monitor != "future":
@@ -334,7 +343,8 @@ def register_routes(bp):
                         if eps:
                             wished = db.add_episodes_to_wishlist(
                                 int(req["tmdb_id"]), req["title"], eps,
-                                poster_url=req.get("poster_url"))
+                                poster_url=req.get("poster_url"),
+                                profile_id=int(req.get("profile_id") or 1))
                     except Exception:   # noqa: BLE001 - expansion is best-effort, approval still lands
                         logger.exception("request approve: policy expansion failed for %s", req["tmdb_id"])
         except Exception:  # noqa: BLE001 - the claim already landed; put it back
@@ -355,9 +365,11 @@ def register_routes(bp):
             if req["kind"] == "episode":
                 db.set_wishlist_quality_for_tmdb(req["tmdb_id"], qp,
                                                  season_number=req.get("season_number"),
-                                                 episode_number=req.get("episode_number"))
+                                                 episode_number=req.get("episode_number"),
+                                                 profile_id=req.get("profile_id"))
             else:
-                db.set_wishlist_quality_for_tmdb(req["tmdb_id"], qp)
+                db.set_wishlist_quality_for_tmdb(req["tmdb_id"], qp,
+                                                 profile_id=req.get("profile_id"))
         for r in claimed:
             _notify(r["profile_id"], f"{req['title']} was approved, it's on the way", "success")
         try:      # 'Request Approved' automation trigger

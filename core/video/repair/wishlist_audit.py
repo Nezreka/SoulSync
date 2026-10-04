@@ -96,7 +96,8 @@ class WishlistAuditJob(VideoRepairJob):
             return {"success": False, "error": "finding has no tmdb id"}
         n = context.db.remove_from_wishlist(
             d.get("kind") or "movie", tmdb_id=d["tmdb_id"],
-            season_number=d.get("season_number"), episode_number=d.get("episode_number"))
+            season_number=d.get("season_number"), episode_number=d.get("episode_number"),
+            profile_id=None)  # stale-because-owned is true for every profile (shared library)
         if not n:
             return {"success": False, "error": "row already gone"}
         return {"success": True, "action": "removed",

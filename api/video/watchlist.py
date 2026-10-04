@@ -26,6 +26,16 @@ def _server():
         return None
 
 
+def _profile() -> int:
+    """The requesting profile: the video watchlist/wishlist are per-profile
+    (like the music side) — a non-admin must never see the admin's lists."""
+    try:
+        from core.profile_context import get_current_profile_id
+        return int(get_current_profile_id() or 1)
+    except Exception:
+        return 1
+
+
 def register_routes(bp):
     @bp.route("/watchlist", methods=["GET"])
     def video_watchlist_list():
@@ -38,21 +48,21 @@ def register_routes(bp):
             db = get_video_db()
             server = _server()
             kind = request.args.get("kind")
-            counts = db.watchlist_counts(server_source=server)
+            counts = db.watchlist_counts(server_source=server, profile_id=_profile())
             if kind in _KINDS:
                 # Paged + searchable, like the library page.
                 res = db.query_watchlist(
                     kind, search=request.args.get("search", ""),
                     sort=request.args.get("sort", "default"),
                     page=request.args.get("page", 1), limit=request.args.get("limit", 60),
-                    server_source=server)
+                    server_source=server, profile_id=_profile())
                 from .kids import filter_tmdb_items, video_cap
                 cap = video_cap()
                 if cap is not None and kind == "show":
                     res = {**res, "items": filter_tmdb_items(db, res.get("items") or [], cap)}
                 return jsonify({"success": True, "kind": kind, "counts": counts, **res})
             # No kind → grouped (counts + first-glance lists).
-            rows = db.list_watchlist(server_source=server)
+            rows = db.list_watchlist(server_source=server, profile_id=_profile())
             from .kids import filter_tmdb_items, video_cap
             cap = video_cap()
             if cap is not None:
@@ -71,7 +81,8 @@ def register_routes(bp):
     def video_watchlist_counts():
         from . import get_video_db
         try:
-            return jsonify({"success": True, **get_video_db().watchlist_counts(server_source=_server())})
+            return jsonify({"success": True, **get_video_db().watchlist_counts(
+                server_source=_server(), profile_id=_profile())})
         except Exception:
             logger.exception("Failed to count video watchlist")
             return jsonify({"success": False, "error": "Failed"}), 500
@@ -97,7 +108,7 @@ def register_routes(bp):
                 kind, int(tmdb_id), title,
                 poster_url=body.get("poster_url") or None,
                 library_id=library_id,
-                server_source=server)
+                server_source=server, profile_id=_profile())
             if not ok:
                 return jsonify({"success": False, "error": "Could not add to watchlist"}), 400
             wished = 0
@@ -115,7 +126,7 @@ def register_routes(bp):
                         wished = db.add_episodes_to_wishlist(
                             int(tmdb_id), title, eps,
                             poster_url=body.get("poster_url") or None,
-                            library_id=library_id)
+                            library_id=library_id, profile_id=_profile())
                 except Exception:   # noqa: BLE001 - policy expansion must never sink the follow
                     logger.exception("monitor policy expansion failed for %s", tmdb_id)
             return jsonify({"success": True, "watched": True, "wished": wished})
@@ -133,7 +144,7 @@ def register_routes(bp):
         if kind not in _KINDS or not tmdb_id:
             return jsonify({"success": False, "error": "kind and tmdb_id are required"}), 400
         try:
-            removed = get_video_db().remove_from_watchlist(kind, int(tmdb_id))
+            removed = get_video_db().remove_from_watchlist(kind, int(tmdb_id), profile_id=_profile())
             return jsonify({"success": True, "watched": False, "removed": removed})
         except Exception:
             logger.exception("Failed to remove from video watchlist")
@@ -144,7 +155,7 @@ def register_routes(bp):
         """A followed person's back-catalog window {tmdb_id, title, date_added, lookback_years}
         (0=forward-only, N=years, -1=everything) — for the person settings modal."""
         from . import get_video_db
-        s = get_video_db().get_person_lookback(tmdb_id)
+        s = get_video_db().get_person_lookback(tmdb_id, profile_id=_profile())
         if not s:
             return jsonify({"success": False, "error": "not followed"}), 404
         return jsonify({"success": True, "settings": s})
@@ -155,17 +166,18 @@ def register_routes(bp):
         -1=everything). The next daily scan backfills any newly-included films."""
         from . import get_video_db
         body = request.get_json(silent=True) or {}
-        ok = get_video_db().set_person_lookback(tmdb_id, body.get("lookback_years"))
+        ok = get_video_db().set_person_lookback(tmdb_id, body.get("lookback_years"), profile_id=_profile())
         if not ok:
             return jsonify({"success": False, "error": "not followed or invalid value"}), 400
-        return jsonify({"success": True, "settings": get_video_db().get_person_lookback(tmdb_id)})
+        return jsonify({"success": True, "settings": get_video_db().get_person_lookback(
+            tmdb_id, profile_id=_profile())})
 
     @bp.route("/watchlist/studio/<int:tmdb_id>/settings", methods=["GET"])
     def video_watchlist_studio_settings(tmdb_id):
         """A followed studio's back-catalog window {tmdb_id, title, date_added, lookback_years}
         (0=forward-only, N=years, -1=everything) — for the studio settings modal."""
         from . import get_video_db
-        s = get_video_db().get_studio_lookback(tmdb_id)
+        s = get_video_db().get_studio_lookback(tmdb_id, profile_id=_profile())
         if not s:
             return jsonify({"success": False, "error": "not followed"}), 404
         return jsonify({"success": True, "settings": s})
@@ -176,10 +188,11 @@ def register_routes(bp):
         -1=everything). The next daily scan backfills any newly-included films."""
         from . import get_video_db
         body = request.get_json(silent=True) or {}
-        ok = get_video_db().set_studio_lookback(tmdb_id, body.get("lookback_years"))
+        ok = get_video_db().set_studio_lookback(tmdb_id, body.get("lookback_years"), profile_id=_profile())
         if not ok:
             return jsonify({"success": False, "error": "not followed or invalid value"}), 400
-        return jsonify({"success": True, "settings": get_video_db().get_studio_lookback(tmdb_id)})
+        return jsonify({"success": True, "settings": get_video_db().get_studio_lookback(
+            tmdb_id, profile_id=_profile())})
 
     @bp.route("/watchlist/check", methods=["POST"])
     def video_watchlist_check():
@@ -192,7 +205,7 @@ def register_routes(bp):
         if kind not in _KINDS:
             return jsonify({"success": False, "error": "kind is required"}), 400
         try:
-            state = get_video_db().watchlist_state(kind, ids, server_source=_server())
+            state = get_video_db().watchlist_state(kind, ids, server_source=_server(), profile_id=_profile())
             # JSON object keys must be strings.
             return jsonify({"success": True, "results": {str(k): True for k in state}})
         except Exception:

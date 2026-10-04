@@ -125,16 +125,16 @@ class _WlDB:
         self.eps = None
         self.movie = None
         self.removed = None
-    def add_episodes_to_wishlist(self, tmdb_id, title, episodes, *, poster_url=None, library_id=None, server_source=None):
+    def add_episodes_to_wishlist(self, tmdb_id, title, episodes, *, poster_url=None, library_id=None, server_source=None, profile_id=None):
         self.eps = (tmdb_id, title, episodes, library_id)
         return len(episodes)
-    def add_movie_to_wishlist(self, tmdb_id, title, *, year=None, poster_url=None, library_id=None, server_source=None):
+    def add_movie_to_wishlist(self, tmdb_id, title, *, year=None, poster_url=None, library_id=None, server_source=None, profile_id=None):
         self.movie = (tmdb_id, title, library_id)
         return True
-    def remove_from_wishlist(self, scope, *, tmdb_id, season_number=None, episode_number=None):
-        self.removed = (scope, tmdb_id, season_number, episode_number)
+    def remove_from_wishlist(self, scope, *, tmdb_id, season_number=None, episode_number=None, profile_id=None):
+        self.removed = (scope, tmdb_id, season_number, episode_number, profile_id)
         return 1
-    def remove_youtube_from_wishlist(self, scope, source_id):
+    def remove_youtube_from_wishlist(self, scope, source_id, profile_id=None):
         self.removed = (scope, source_id, None, None)
         return 1
     def show_tmdb_id(self, show_id):
@@ -150,7 +150,7 @@ def test_wishlist_obtained_removes_episode():
     db = _WlDB()
     _wishlist_obtained(db, {"id": 1, "kind": "show", "title": "T", "media_id": "123",
                             "media_source": "tmdb", "search_ctx": json.dumps({"season": 1, "episode": 3})})
-    assert db.removed == ("episode", 123, 1, 3)
+    assert db.removed == ("episode", 123, 1, 3, None)
 
 
 def test_wishlist_obtained_removes_movie_and_resolves_library_tmdb():
@@ -158,7 +158,7 @@ def test_wishlist_obtained_removes_movie_and_resolves_library_tmdb():
     db = _WlDB()
     _wishlist_obtained(db, {"id": 2, "kind": "movie", "title": "M", "media_id": "42",
                             "media_source": "library"})
-    assert db.removed == ("movie", 888, None, None)   # tmdb resolved from the library id
+    assert db.removed == ("movie", 888, None, None, None)   # tmdb resolved from the library id
 
 
 

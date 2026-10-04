@@ -1313,11 +1313,20 @@ def register_routes(bp):
             except Exception:   # noqa: BLE001 - one odd row must not blank the page
                 r["is_pack"] = False
 
-    def _annotate_upgrade_watches(db, rows) -> None:
+    def _request_profile() -> int:
+        """The requesting user's profile for per-profile wishlist reads."""
+        try:
+            from core.profile_context import get_current_profile_id
+            return int(get_current_profile_id() or 1)
+        except Exception:
+            return 1
+
+    def _annotate_upgrade_watches(db, rows, profile_id) -> None:
         """Mark COMPLETED movie/episode rows that still hold a wishlist row —
         the upgrade-until-cutoff watches. Without this, a below-cutoff grab
         looks identical to a final one on the Downloads page. Identity comes
-        from the same resolver the monitor uses; two set queries total."""
+        from the same resolver the monitor uses; two set queries total.
+        Scoped to the viewer's profile (the wishlist is per-profile)."""
         try:
             from core.video.download_monitor import _as_int, _wishlist_ids
             completed = [r for r in rows if r.get("status") == "completed"
@@ -1327,10 +1336,12 @@ def register_routes(bp):
             conn = db._get_connection()
             try:
                 movie_watches = {r[0] for r in conn.execute(
-                    "SELECT tmdb_id FROM video_wishlist WHERE kind='movie'")}
+                    "SELECT tmdb_id FROM video_wishlist WHERE kind='movie' AND profile_id=?",
+                    (int(profile_id),))}
                 ep_watches = {(r[0], r[1], r[2]) for r in conn.execute(
                     "SELECT tmdb_id, season_number, episode_number "
-                    "FROM video_wishlist WHERE kind='episode'")}
+                    "FROM video_wishlist WHERE kind='episode' AND profile_id=?",
+                    (int(profile_id),))}
             finally:
                 conn.close()
             for r in completed:
@@ -1351,7 +1362,7 @@ def register_routes(bp):
         db = get_video_db()
         ensure_started(get_video_db)   # also (re)start the monitor when the page is open
         rows = db.list_video_downloads()
-        _annotate_upgrade_watches(db, rows)
+        _annotate_upgrade_watches(db, rows, _request_profile())
         _annotate_packs(rows)
         return jsonify({"downloads": rows})
 

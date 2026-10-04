@@ -13,7 +13,7 @@ back-catalog part AT FOLLOW TIME:
 
 Unaired episodes are never wished here — the airing feeder owns the future, so
 the two paths can't double-add (add_episodes_to_wishlist is idempotent anyway).
-Season 0 (specials) is excluded from every policy. Pure logic + an injected
+Season 0 (specials) is excluded from every follow-time back-catalog policy. Pure logic + an injected
 engine; the API route owns the wiring.
 """
 
@@ -88,8 +88,11 @@ def _season_numbers(detail: Dict[str, Any]) -> List[int]:
 
 
 def latest_season_numbers(detail: Dict[str, Any], keep: int = 2) -> List[int]:
-    """The newest ``keep`` real seasons (>=1). A show that is airing right now is
-    airing its newest season, so there is no point pulling the whole history.
+    """The newest ``keep`` real seasons (>=1) plus season 0 (specials) if present.
+    A show that is airing right now is airing its newest season, so there is no
+    point pulling the whole history — but newly announced specials land in
+    season 0, and a tmdb-only follow's specials are never wishlisted if it is
+    excluded.
 
     A specials-only show (season 0 and nothing else) falls back to what it has,
     matching the engine's _latest_seasons. Returning [] there would mean shows
@@ -99,7 +102,10 @@ def latest_season_numbers(detail: Dict[str, Any], keep: int = 2) -> List[int]:
     regular = [n for n in nums if n >= 1]
     if not regular:
         return nums
-    return regular[-max(1, int(keep)):]
+    out = regular[-max(1, int(keep)):]
+    if 0 in nums and 0 not in out:
+        out = [0] + out
+    return out
 
 
 def episodes_airing_between(engine: Any, tmdb_id: int, start: str, end: str,

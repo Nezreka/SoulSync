@@ -4,7 +4,9 @@ DB or media server.
 
 Catch-up (Boulder's Sunday gap): each run covers (bookmark+1 .. today), capped at
 CATCHUP_MAX_DAYS, so days a slept-through 01:00 trigger skipped heal on the next
-run — while each day is only ever offered ONCE (removals never boomerang).
+run. Delivery is at-least-once: the wishlist upsert is idempotent, so re-covered
+windows never duplicate — but a bookmark write failure means the next run
+re-offers the window (a deliberately-deleted episode can boomerang in that case).
 """
 
 from __future__ import annotations
@@ -24,9 +26,10 @@ class _Deps:
         self.progress.append(kw)
 
 
-def _row(tid, title, s, e, owned=False):
+def _row(tid, title, s, e, owned=False, monitored=True):
     return {"show_tmdb_id": tid, "show_id": tid * 100, "show_title": title, "season_number": s,
-            "episode_number": e, "title": "Ep", "air_date": "2026-06-21", "has_file": owned}
+            "episode_number": e, "title": "Ep", "air_date": "2026-06-21", "has_file": owned,
+            "monitored": 1 if monitored else 0}
 
 
 def _run(config=None, deps=None, **overrides):
@@ -78,7 +81,7 @@ def test_uses_tmdb_season_metadata_like_a_manual_add():
     # the SAME TMDB source the manual 'add to wishlist' uses — absolute still + overview
     # + season poster — preferred over the patchy DB values.
     rows = [{"show_tmdb_id": 5, "show_title": "Y", "season_number": 2, "episode_number": 3,
-             "title": "Ep", "air_date": "2026-06-21", "has_file": False,
+             "title": "Ep", "air_date": "2026-06-21", "has_file": False, "monitored": 1,
              "overview": "db overview", "still_url": "/db/still"}]
 
     def season_meta(tid, sn):
@@ -103,7 +106,7 @@ def test_uses_tmdb_season_metadata_like_a_manual_add():
 def test_falls_back_to_db_values_when_tmdb_unavailable():
     # if the TMDB fetch returns nothing, still carry the calendar/DB overview + still
     rows = [{"show_tmdb_id": 1, "show_title": "X", "season_number": 1, "episode_number": 2,
-             "has_file": False, "overview": "db synopsis", "still_url": "/library/metadata/9/thumb/1"}]
+             "has_file": False, "monitored": 1, "overview": "db synopsis", "still_url": "/library/metadata/9/thumb/1"}]
     captured = {}
 
     def add(tid, title, eps, library_id=None, poster_url=None):
@@ -200,6 +203,7 @@ def test_failed_run_does_not_advance_bookmark():
 
 def test_bookmark_read_failure_degrades_to_today_only():
     seen = {}
+    marks = []
 
     def fetch(start, end):
         seen["window"] = (start, end)
@@ -208,17 +212,43 @@ def test_bookmark_read_failure_degrades_to_today_only():
     def bad_bookmark():
         raise RuntimeError("db hiccup")
 
-    res = _run(fetch_airing=fetch, get_bookmark=bad_bookmark)
+    res = _run(fetch_airing=fetch, get_bookmark=bad_bookmark, set_bookmark=marks.append)
     assert res["status"] == "completed"
     assert seen["window"] == ("2026-06-21", "2026-06-21")
+    assert marks == []     # a degraded run must NOT stamp the bookmark — the
+                           # un-covered catch-up days would be lost forever
 
 
-def test_bookmark_write_failure_does_not_fail_the_run():
+def test_bookmark_read_failure_next_run_recovers():
+    # the degraded run leaves the old bookmark alone, so the next healthy run
+    # re-covers the whole window instead of losing the missed days
+    seen = {}
+    marks = []
+
+    def fetch(start, end):
+        seen["window"] = (start, end)
+        return []
+
+    def bad_bookmark():
+        raise RuntimeError("db hiccup")
+
+    _run(fetch_airing=fetch, get_bookmark=bad_bookmark, set_bookmark=marks.append)
+    res = _run(fetch_airing=fetch, get_bookmark=lambda: "2026-06-17",
+               set_bookmark=marks.append)
+    assert res["status"] == "completed"
+    assert seen["window"] == ("2026-06-18", "2026-06-21")   # the missed days heal
+    assert marks == ["2026-06-21"]
+
+
+def test_bookmark_write_failure_fails_the_run():
+    # the wishlist writes landed but coverage was not committed — the run must
+    # report the failure so the next run re-covers the window (at-least-once)
     def bad_write(day):
         raise RuntimeError("db hiccup")
 
     res = _run(set_bookmark=bad_write)
-    assert res["status"] == "completed"
+    assert res["status"] == "error"
+    assert "bookmark" in res["error"].lower()
 
 
 # ── watchlist hygiene: prune ended/canceled follows ─────────────────────────
@@ -372,7 +402,7 @@ def test_airing_lookup_only_pulls_the_newest_seasons():
     from core.video.monitor_policy import episodes_airing_between
     eng = _Engine([0, 1, 2, 3, 4], {})
     episodes_airing_between(eng, 5, "2026-06-19", "2026-06-21")
-    assert eng.season_calls == [3, 4]          # specials excluded, newest two only
+    assert eng.season_calls == [0, 3, 4]       # newest two + specials (new specials must be picked up)
 
 
 def test_airing_lookup_filters_to_the_window():
@@ -401,9 +431,9 @@ def test_airing_lookup_degrades_when_tmdb_is_down():
 
 
 def test_a_specials_only_show_still_gets_looked_up():
-    """Season 0 is excluded from "newest seasons" — but a show whose episodes
-    are ALL specials (Critical Role) would then never be looked up at all. The
-    engine's _latest_seasons falls back for exactly this; so must we."""
+    """A show whose episodes are ALL specials (Critical Role) falls back to
+    season 0 — otherwise it would never be looked up at all. The engine's
+    _latest_seasons falls back for exactly this; so must we."""
     from core.video.monitor_policy import episodes_airing_between, latest_season_numbers
     assert latest_season_numbers({"seasons": [{"season_number": 0}]}) == [0]
     eng = _Engine([0], {0: [{"episode_number": 221, "air_date": "2026-06-20"}]})
@@ -429,3 +459,23 @@ def test_dedup_survives_a_renamed_show():
          add_episodes=lambda tid, t, eps, lib=None, p=None: added.append((tid, lib)) or len(eps))
     assert calls == []                       # not re-queried despite the different title
     assert added == [(1, 100)]               # one add, keeping the library id
+
+
+def test_unmonitored_episodes_are_not_wishlisted():
+    # unmonitored is a deliberate "stop hunting this" — the calendar treats it
+    # as a decision, not a gap. the airing run must not re-create the work.
+    rows = [
+        _row(1, "Widows Bay", 1, 1),
+        _row(1, "Widows Bay", 1, 2, monitored=False),   # user unmonitored → skipped
+        _row(1, "Widows Bay", 1, 3, monitored=False),   # user unmonitored → skipped
+    ]
+    added = []
+
+    def add(tid, title, eps, library_id=None, poster_url=None):
+        added.append((tid, len(eps)))
+        return len(eps)
+
+    res = _run(fetch_airing=lambda s, e: rows, add_episodes=add)
+    assert res["status"] == "completed"
+    assert res["episodes_added"] == 1
+    assert added == [(1, 1)]
