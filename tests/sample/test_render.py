@@ -3,7 +3,7 @@
 Synthesizes deterministic fixtures (no network, no library), then asserts:
 slice duration, pitch-shift accuracy (FFT fundamental check, same pattern as
 the Phase-1 spike), time-stretch ratio, preview length cap, engine fallback
-(no Rubber Band in this environment), format writing, stereo preservation.
+with and without Rubber Band, format writing, stereo preservation.
 """
 
 import os
@@ -47,11 +47,12 @@ def test_render_chop_slice_duration(tmp_path):
 def test_render_chop_pitch_shift_moves_fundamental(tmp_path):
     wav = _sine_track(tmp_path / "sine.wav", seconds=2.0, freq=220.0)
     out = tmp_path / "shifted.wav"
-    result = sample_render.render_chop(str(wav), 0, 2.0, pitch_st=12, out_path=str(out))
+    result = sample_render.render_chop(str(wav), 0, 2.0, pitch_st=12,
+                                       engine="preview", out_path=str(out))
     peak = _fft_peak(str(out))
     # +12 semitones: 220 Hz -> 440 Hz, allow 2% (phase-vocoder is exact-ish on sines)
     assert abs(peak - 440.0) / 440.0 < 0.02, f"fft peak={peak}"
-    assert result["engine"] == "librosa"  # no Rubber Band in this environment
+    assert result["engine"] == "librosa"
 
 
 def test_render_chop_time_stretch_halves_duration(tmp_path):
@@ -100,10 +101,30 @@ def test_render_chop_flac_and_stereo(tmp_path):
     assert abs(len(data) / SR - 1.0) < 0.02
 
 
-def test_select_engine_falls_back_without_rubberband():
-    # This environment has neither the CLI nor the package: everything
-    # resolves to librosa, and "auto" must never raise.
+def test_select_engine_falls_back_without_rubberband(monkeypatch):
+    monkeypatch.setattr(sample_render, "_rubberband_cli_available", lambda: False)
+    monkeypatch.setattr(sample_render, "_pyrubberband_available", lambda: False)
     assert sample_render.select_engine("auto") == "librosa"
     assert sample_render.select_engine("final") == "librosa"
     assert sample_render.select_engine("rubberband") == "librosa"
     assert sample_render.select_engine("preview") == "librosa"
+
+
+def test_select_engine_prefers_installed_rubberband(monkeypatch):
+    monkeypatch.setattr(sample_render, "_rubberband_cli_available", lambda: True)
+    assert sample_render.select_engine("final") == "rubberband"
+    assert sample_render.select_engine("preview") == "librosa"
+
+
+def test_rubberband_plain_slice_preserves_audio_without_cli_error(tmp_path, monkeypatch):
+    # The CLI rejects a render with no pitch/tempo options. An unchanged slice
+    # must keep its samples and avoid launching that invalid command.
+    audio = np.linspace(-0.5, 0.5, 1024, dtype=np.float32)[:, None]
+
+    def unexpected_command(*args, **kwargs):
+        pytest.fail("an unchanged slice must not invoke rubberband")
+
+    monkeypatch.setattr(sample_render.subprocess, "run", unexpected_command)
+    rendered, sr = sample_render._apply_rubberband_cli(audio, SR, 0, 1, str(tmp_path))
+    assert sr == SR
+    np.testing.assert_array_equal(rendered, audio)
