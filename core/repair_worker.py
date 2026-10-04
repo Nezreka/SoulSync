@@ -167,6 +167,7 @@ JOB_CATEGORIES = {
     'suspect_album_tag_detector': 'Tags & metadata',
     'metadata_gap_filler': 'Tags & metadata',
     'bpm_backfill': 'Tags & metadata',
+    'artist_nfo_backfill': 'Tags & metadata',
     'canonical_version_resolve': 'Tags & metadata',
     'missing_cover_art': 'Artwork & lyrics',
     'missing_lyrics': 'Artwork & lyrics',
