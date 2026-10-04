@@ -3833,10 +3833,10 @@
         // fire this event too — they must not collapse open episode panels).
         var _lastCanDl = null;
         function onProfileChanged() {
-            if (!data || !root()) return;
             var canDl = (typeof canDownload === 'function') ? canDownload() : true;
             if (_lastCanDl === canDl) return;
             _lastCanDl = canDl;
+            if (!data || !root()) return;
             renderActions(data);
             renderEpisodes();
         }

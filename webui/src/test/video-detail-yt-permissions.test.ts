@@ -160,4 +160,39 @@ describe('video detail profile timing', () => {
     // false -> false: unrelated edit skips
     expect(fourth).toEqual({ actions: 2, episodes: 2 });
   });
+
+  it('seeds permission state even when the first event fires before data loads', () => {
+    // Regression: on fresh page loads the profile event fires while data is
+    // null (listener registers on DOMContentLoaded, profile fetch resolves
+    // async). The old code seeded _lastCanDl only after the early return, so
+    // the next unrelated event (e.g. avatar edit) saw null !== canDl and
+    // spuriously re-rendered, collapsing open episode panels.
+    const handlerSrc = extractFunction('onProfileChanged', SRC);
+    const preamble = `
+    var _lastCanDl = null;
+    var data = null;
+    function root() { return document.createElement('div'); }
+    var actions = 0, episodes = 0;
+    function renderActions(d) { actions++; }
+    function renderEpisodes() { episodes++; }
+    var canDlValue = true;
+    function canDownload() { return canDlValue; }
+  `;
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const harness = new Function(
+      `${preamble}\n${handlerSrc}\n` +
+        `return { fire: function () { onProfileChanged(); }, setData: function (d) { data = d; }, counts: function () { return { actions, episodes }; } };`,
+    )() as {
+      fire: () => void;
+      setData: (d: unknown) => void;
+      counts: () => { actions: number; episodes: number };
+    };
+    // Event 1: profile lands before page data — seeds _lastCanDl, no render.
+    harness.fire();
+    expect(harness.counts()).toEqual({ actions: 0, episodes: 0 });
+    // Event 2: unrelated edit after data loads — permission unchanged, no render.
+    harness.setData({ kind: 'show' });
+    harness.fire();
+    expect(harness.counts()).toEqual({ actions: 0, episodes: 0 });
+  });
 });
