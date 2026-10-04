@@ -7607,7 +7607,8 @@ class VideoDatabase:
     def quality_profile_id_for(self, kind: str, *, tmdb_id=None, library_id=None):
         """The per-title quality-profile id for a movie/show (P2), or None for
         the Default. Library row wins; a wishlist row's assignment covers
-        titles not in the library yet."""
+        titles not in the library yet. Quality profiles are admin-only, so the
+        admin's (profile 1) wishlist row wins over any other profile's."""
         tbl = "movies" if kind == "movie" else "shows"
         conn = self._get_connection()
         try:
@@ -7623,7 +7624,8 @@ class VideoDatabase:
                     return row[0]
                 row = conn.execute(
                     "SELECT quality_profile_id FROM video_wishlist "
-                    "WHERE tmdb_id=? AND kind=? AND quality_profile_id IS NOT NULL LIMIT 1",
+                    "WHERE tmdb_id=? AND kind=? AND quality_profile_id IS NOT NULL "
+                    "ORDER BY CASE WHEN profile_id=1 THEN 0 ELSE 1 END LIMIT 1",
                     (int(tmdb_id), str(kind),)).fetchone()
                 if row and row[0]:
                     return row[0]
