@@ -259,6 +259,24 @@ class WishlistService:
             artist_name = "Unknown Artist"
         album_name = album.get("name", "") if isinstance(album, dict) else str(album) if album else ""
 
+        # The row's metadata source, flattened onto the flat track (#1508).
+        # Rows carry it under "provider", "source", or "_source" depending on
+        # which path created them (playlist extras vs discography/wishlist
+        # dicts). One precedence for both flat keys — provider, then source,
+        # then _source — so every consumer of the formatted track sees the
+        # same source value and they can never disagree about it. Without the
+        # flat "_source", get_import_source() (which reads only the flat
+        # source/_source keys) resolved a Deezer-sourced wishlist row to ''
+        # and the Deezer contributors upgrade in extract_source_metadata()
+        # never ran.
+        row_source = (
+            track_data.get("provider")
+            or track_data.get("source")
+            or track_data.get("_source")
+            if isinstance(track_data, dict)
+            else None
+        )
+
         formatted_track = {
             "wishlist_id": wishlist_track["id"],
             "track_id": track_id,
@@ -266,11 +284,8 @@ class WishlistService:
             "track_name": track_name,
             "artist_name": artist_name,
             "album_name": album_name,
-            "provider": (
-                track_data.get("provider") or track_data.get("source")
-                if isinstance(track_data, dict)
-                else None
-            ),
+            "provider": row_source,
+            "_source": row_source,
             "spotify_track_id": wishlist_track["spotify_track_id"],
             "spotify_data": track_data,
             "failure_reason": wishlist_track["failure_reason"],
