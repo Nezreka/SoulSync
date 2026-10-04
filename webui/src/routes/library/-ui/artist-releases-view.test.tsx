@@ -33,6 +33,35 @@ function album(patch: Partial<LibraryV2AlbumSummary> & { id: number; title: stri
   };
 }
 
+/** The artist the page loads: Portishead with the given releases. */
+function portishead(patch: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    name: 'Portishead',
+    image_url: '/api/library/v2/artwork/artist/1',
+    remote_image_url: null,
+    provider_ids: { spotify: 'sp-1' },
+    media_server_sources: [],
+    summary: null,
+    style: null,
+    mood: null,
+    label: null,
+    genres: ['trip hop'],
+    monitored: true,
+    monitor_new_items: 'all',
+    quality_profile: null,
+    albums: [],
+    eps: [],
+    singles: [],
+    album_count: 1,
+    single_count: 0,
+    discography_count: 1,
+    total_size_bytes: 0,
+    user_overrides: {},
+    ...patch,
+  };
+}
+
 function renderArtist(entry: string) {
   const queryClient = createTestQueryClient();
   const history = createMemoryHistory({ initialEntries: [entry] });
@@ -58,33 +87,17 @@ describe('Library V2 artist detail — All Releases views', () => {
       http.get('/api/library/v2/artists/1', () =>
         HttpResponse.json({
           success: true,
-          artist: {
-            id: 1,
-            name: 'Portishead',
-            image_url: '/api/library/v2/artwork/artist/1',
-            remote_image_url: null,
-            provider_ids: { spotify: 'sp-1' },
+          artist: portishead({
             media_server_sources: ['navidrome', 'plex'],
-            summary: null,
-            style: null,
-            mood: null,
-            label: null,
-            genres: ['trip hop'],
             monitored: false,
-            monitor_new_items: 'all',
-            quality_profile: null,
             albums: [
               album({ id: 1, title: 'Dummy' }),
               album({ id: 2, title: 'Roseland NYC Live' }),
             ],
-            eps: [],
-            singles: [],
             album_count: 2,
-            single_count: 0,
             discography_count: 2,
             total_size_bytes: 2048,
-            user_overrides: {},
-          },
+          }),
         }),
       ),
       http.get('/api/library/v2/artists/1/queue-status', () =>
@@ -319,21 +332,7 @@ describe('Library V2 artist detail — All Releases views', () => {
       http.get('/api/library/v2/artists/1', () =>
         HttpResponse.json({
           success: true,
-          artist: {
-            id: 1,
-            name: 'Portishead',
-            image_url: '/api/library/v2/artwork/artist/1',
-            remote_image_url: null,
-            provider_ids: { spotify: 'sp-1' },
-            media_server_sources: [],
-            summary: null,
-            style: null,
-            mood: null,
-            label: null,
-            genres: ['trip hop'],
-            monitored: true,
-            monitor_new_items: 'all',
-            quality_profile: null,
+          artist: portishead({
             albums: [
               album({
                 id: 1,
@@ -344,14 +343,7 @@ describe('Library V2 artist detail — All Releases views', () => {
                 track_count: 10,
               }),
             ],
-            eps: [],
-            singles: [],
-            album_count: 1,
-            single_count: 0,
-            discography_count: 1,
-            total_size_bytes: 0,
-            user_overrides: {},
-          },
+          }),
         }),
       ),
     );
@@ -368,21 +360,7 @@ describe('Library V2 artist detail — All Releases views', () => {
       http.get('/api/library/v2/artists/1', () =>
         HttpResponse.json({
           success: true,
-          artist: {
-            id: 1,
-            name: 'Portishead',
-            image_url: '/api/library/v2/artwork/artist/1',
-            remote_image_url: null,
-            provider_ids: { spotify: 'sp-1' },
-            media_server_sources: [],
-            summary: null,
-            style: null,
-            mood: null,
-            label: null,
-            genres: ['trip hop'],
-            monitored: true,
-            monitor_new_items: 'all',
-            quality_profile: null,
+          artist: portishead({
             albums: [
               album({
                 id: 1,
@@ -393,14 +371,8 @@ describe('Library V2 artist detail — All Releases views', () => {
                 track_count: 10,
               }),
             ],
-            eps: [],
-            singles: [],
-            album_count: 1,
-            single_count: 0,
-            discography_count: 1,
             total_size_bytes: 2048,
-            user_overrides: {},
-          },
+          }),
         }),
       ),
     );
