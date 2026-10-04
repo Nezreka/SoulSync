@@ -81,8 +81,11 @@ def test_bulk_lookup_agrees_with_per_row_resolver(db):
     valid = {"v1", "v2", "v3-new"}
     _cache(db, "hit", "v1")                                   # valid cache hit
     _cache(db, "stale-cache", "GONE")                          # stale cache…
-    db.save_manual_library_match(1, "spotify", "stale-cache", "v2",
-                                 server_source="navidrome")    # …durable saves it
+    # …durable saves it. A manual match stores the CATALOGUE id; the server
+    # knows that track as "v2".
+    durable = _seed_track(db, "v2", "/music/A/B/02.flac")
+    db.save_manual_library_match(1, "spotify", "stale-cache", str(durable),
+                                 server_source="navidrome")
     db.save_manual_library_match(1, "spotify", "heal", "v3-old",
                                  server_source="navidrome",
                                  library_file_path="/music/A/B/03.flac")
