@@ -74,6 +74,9 @@ def persist_tag_cache(conn, file_id: int, file_tags: Dict[str, Any]) -> bool:
             int(file_id),
         ),
     )
+    # a compilation track credited to "Various Artists" alone (A05)
+    from core.library2.compilation_credits import heal_compilation_credit
+    heal_compilation_credit(conn, int(file_id), file_tags)
     return True
 
 
