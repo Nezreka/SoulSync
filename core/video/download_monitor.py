@@ -607,7 +607,10 @@ def _wishlist_ids(db, dl):
         return "movie", (_as_int(media_id) if is_tmdb else db.movie_tmdb_id(media_id)), None, None, ctx
     if kind == "youtube":
         return "youtube", media_id, None, None, ctx
-    return ("show", (_as_int(media_id) if is_tmdb else db.show_tmdb_id(media_id)),
+    # Return "episode" (not "show") so wishlist_profiles_for_media matches
+    # rows stored with kind='episode'. Returning "show" caused the lookup
+    # to miss, falling back to profile 1 (data corruption).
+    return ("episode", (_as_int(media_id) if is_tmdb else db.show_tmdb_id(media_id)),
             ctx.get("season"), ctx.get("episode"), ctx)
 
 

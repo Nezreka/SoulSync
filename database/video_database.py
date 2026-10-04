@@ -7623,8 +7623,8 @@ class VideoDatabase:
                     return row[0]
                 row = conn.execute(
                     "SELECT quality_profile_id FROM video_wishlist "
-                    "WHERE tmdb_id=? AND quality_profile_id IS NOT NULL LIMIT 1",
-                    (int(tmdb_id),)).fetchone()
+                    "WHERE tmdb_id=? AND kind=? AND quality_profile_id IS NOT NULL LIMIT 1",
+                    (int(tmdb_id), str(kind),)).fetchone()
                 if row and row[0]:
                     return row[0]
             return None

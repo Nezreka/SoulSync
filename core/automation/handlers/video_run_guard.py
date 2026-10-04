@@ -8,6 +8,7 @@ with no args; True means "busy, skip this run".
 """
 from __future__ import annotations
 
+import threading
 import time
 
 
@@ -21,18 +22,22 @@ class VideoRunGuard:
     def __init__(self, timeout_seconds: int = 7200):
         self._started_at: float | None = None
         self._timeout = timeout_seconds
+        self._lock = threading.Lock()
 
     def __call__(self) -> bool:
-        if self._started_at is None:
-            return False
-        if time.time() - self._started_at > self._timeout:
-            return False  # stuck — allow a new run
-        return True
+        with self._lock:
+            if self._started_at is None:
+                return False
+            if time.time() - self._started_at > self._timeout:
+                return False  # stuck — allow a new run
+            return True
 
     def __enter__(self):
-        self._started_at = time.time()
+        with self._lock:
+            self._started_at = time.time()
         return self
 
     def __exit__(self, *args):
-        self._started_at = None
+        with self._lock:
+            self._started_at = None
         return False
