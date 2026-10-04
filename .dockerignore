@@ -95,3 +95,11 @@ requirements-dev.txt
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Not used at build or run time; COPY . . would bake them into the image, and
+# the same bytes land in the build context and the layer cache on every build.
+# webui/src stays included: the webui-builder stage builds from this context.
+tests/
+assets/
+docs/
+Support/
