@@ -1,17 +1,17 @@
 /**
  * Playlists page visual overhaul — shared design tokens.
  *
- * The Apple-grade, content-first language: deep black, artwork-forward,
- * status as ambient captions, actions contextual. All three views
- * (Overview / Library / Discover) build on these tokens so the page reads
- * as one design, not three.
+ * The Apple-grade, content-first language: soft near-black (never pure
+ * black), artwork-forward, status as ambient captions, actions contextual.
+ * All three views (Overview / Library / Discover) build on these tokens so
+ * the page reads as one design, not three.
  */
 
 :root {
-  --pl-bg: #000000;
-  --pl-surface: #0d0d12;
-  --pl-surface-2: #14141b;
-  --pl-surface-3: #1c1c24;
+  --pl-bg: #0e0e12;
+  --pl-surface: #1a1a21;
+  --pl-surface-2: #22222b;
+  --pl-surface-3: #2a2a36;
   --pl-border: rgba(255, 255, 255, 0.08);
   --pl-border-strong: rgba(255, 255, 255, 0.14);
   --pl-text: #f5f5f7;
@@ -31,7 +31,9 @@
 .pl-overhaul {
   font-family: var(--pl-font);
   color: var(--pl-text);
-  background: var(--pl-bg);
+  background:
+    radial-gradient(140% 100% at 50% 0%, rgba(255, 255, 255, 0.028) 0%, transparent 55%),
+    var(--pl-bg);
 }
 
 /* The view switcher — one control, three intents. */
