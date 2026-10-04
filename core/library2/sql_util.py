@@ -11,7 +11,7 @@ call site.
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable, Set
+from typing import Any, Dict, Iterable, Set
 
 # Well under SQLite's oldest documented SQLITE_MAX_VARIABLE_NUMBER (999), so a
 # single chunk's placeholder count is safe on every SQLite build we run on.
@@ -24,6 +24,11 @@ _CHUNK = 900
 # from deriving either from a variable and turning this into an injection
 # point. A valid identifier can't break out of the query, whatever it means.
 _VALID_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def pick(row: Any, *keys: str) -> Dict[str, Any]:
+    """``{key: row[key]}`` for each key, in order (sqlite3.Row or dict)."""
+    return {key: row[key] for key in keys}
 
 
 def select_existing_ids(

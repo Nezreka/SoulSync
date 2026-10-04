@@ -16,6 +16,7 @@ import json
 from contextlib import closing
 from typing import Any, Dict, List, Optional, Tuple
 
+from core.library2.sql_util import pick
 from utils.logging_config import get_logger
 
 logger = get_logger("library2.retag")
@@ -304,12 +305,8 @@ def tag_preview(contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for row in contexts:
         entry: Dict[str, Any] = {
             "track_id": row["id"],
-            "title": row["title"],
-            "track_number": row["track_number"],
-            "album_id": row["album_id"],
-            "album_title": row["album_title"],
-            "album_type": row["album_type"],
-            "file_path": row["file_path"],
+            **pick(row, "title", "track_number", "album_id", "album_title", "album_type",
+                   "file_path"),
         }
         if not row["file_path"]:
             entry.update(error="No file", has_changes=False, diff=[])

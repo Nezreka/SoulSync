@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 from .metadata_overrides import project_metadata, project_metadata_many
 from .paths import library_relative_path
 from .sql_util import (
-    intent_profile_id, monitored_sql, owner_clause, scoped_monitored, scope_visibility_sql,
+    intent_profile_id, monitored_sql, owner_clause, pick, scoped_monitored, scope_visibility_sql,
 )
 from .status import compute_metadata_gaps, file_status, metadata_scan_status, quality_tier
 from .track_files import primary_order
@@ -806,28 +806,14 @@ def list_artist_track_files(conn, artist_id: int, *, search: str = "",
 
     files = [
         {
-            "file_id": r["file_id"],
-            "track_id": r["track_id"],
-            "track_title": r["track_title"],
-            "track_number": r["track_number"],
-            "disc_number": r["disc_number"],
-            "album_id": r["album_id"],
-            "album_title": r["album_title"],
-            "path": r["path"],
-            "size": r["size"],
-            "format": r["format"],
-            "bitrate": r["bitrate"],
-            "sample_rate": r["sample_rate"],
-            "bit_depth": r["bit_depth"],
-            "quality_tier": r["quality_tier"],
-            "file_state": r["file_state"],
+            **pick(r, "file_id", "track_id", "track_title", "track_number", "disc_number",
+                   "album_id", "album_title", "path", "size", "format", "bitrate", "sample_rate",
+                   "bit_depth", "quality_tier", "file_state"),
             "is_primary": bool(r["is_primary"]),
             "primary_manual": bool(r["primary_manual"]),
             "file_role": r["file_role"] or "master",
-            "derived_from_file_id": r["derived_from_file_id"],
-            "acquired_quality_json": r["acquired_quality_json"],
-            "retention_json": r["retention_json"],
-            "added_at": r["added_at"],
+            **pick(r, "derived_from_file_id", "acquired_quality_json", "retention_json",
+                   "added_at"),
         }
         for r in rows
     ]
@@ -918,20 +904,9 @@ def list_artist_playback_files(conn, artist_id: int, *, page: int = 1,
 
     files = [
         {
-            "file_id": r["file_id"],
-            "track_id": r["track_id"],
-            "track_title": r["track_title"],
-            "track_number": r["track_number"],
-            "disc_number": r["disc_number"],
-            "duration": r["duration"],
-            "album_id": r["album_id"],
-            "album_title": r["album_title"],
-            "album_image_url": r["album_image_url"],
-            "artist_id": r["artist_id"],
-            "artist_name": r["artist_name"],
-            "path": r["path"],
-            "format": r["format"],
-            "bitrate": r["bitrate"],
+            **pick(r, "file_id", "track_id", "track_title", "track_number", "disc_number",
+                   "duration", "album_id", "album_title", "album_image_url", "artist_id",
+                   "artist_name", "path", "format", "bitrate"),
             # The client filters on these the same way it does for the Files
             # tab; both are already guaranteed by the query above.
             "file_state": "active",
@@ -1097,11 +1072,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                     r["track_count"] or 0, present)
         entry = {
             "id": r["id"],
-            "title": effective["title"],
-            "album_type": effective["album_type"],
-            "release_date": effective["release_date"],
-            "year": effective["year"],
-            "image_url": effective["image_url"],
+            **pick(effective, "title", "album_type", "release_date", "year", "image_url"),
             "monitored": bool(r["monitored"]),
             "quality_profile_id": r["quality_profile_id"],
             "quality_profile_source": album_profile["source"],
@@ -1140,12 +1111,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
 
     return {
         "id": a["id"],
-        "name": artist_effective["name"],
-        "image_url": artist_effective["image_url"],
-        "summary": artist_effective["summary"],
-        "style": artist_effective["style"],
-        "mood": artist_effective["mood"],
-        "label": artist_effective["label"],
+        **pick(artist_effective, "name", "image_url", "summary", "style", "mood", "label"),
         "genres": _json_list(artist_effective["genres"]),
         # ldp-05: the rich artist header asks the shared provider endpoints
         # (top tracks) for this artist — those key off a provider id, and a
@@ -1633,11 +1599,7 @@ def _serialize_track(
         # Legacy ids originate from the media-server-backed tracks table and
         # are therefore also the only safe server stream id available here.
         "server_track_id": t["legacy_track_id"] if "legacy_track_id" in keys else None,
-        "title": effective["title"],
-        "track_number": effective["track_number"],
-        "disc_number": effective["disc_number"],
-        "duration": effective["duration"],
-        "bpm": effective["bpm"],
+        **pick(effective, "title", "track_number", "disc_number", "duration", "bpm"),
         "explicit": (bool(effective["explicit"]) if effective["explicit"] is not None else None),
         "style": effective["style"],
         "mood": effective["mood"],
@@ -1932,11 +1894,7 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
 
     return {
         "id": al["id"],
-        "title": album_effective["title"],
-        "album_type": album_effective["album_type"],
-        "release_date": album_effective["release_date"],
-        "year": album_effective["year"],
-        "image_url": album_effective["image_url"],
+        **pick(album_effective, "title", "album_type", "release_date", "year", "image_url"),
         "genres": _json_list(album_effective["genres"]),
         "explicit": (
             bool(album_effective["explicit"]) if album_effective["explicit"] is not None else None

@@ -55,6 +55,7 @@ from typing import Any, Callable, Dict, Optional
 from core.library2 import ADMIN_PROFILE_ID
 from core.library2.importer import ResumePoint
 from core.library2.importer import import_legacy_library as _import_legacy_library
+from core.library2.sql_util import pick
 from utils.logging_config import get_logger
 
 logger = get_logger("library2.bootstrap")
@@ -295,12 +296,8 @@ def get_state(database: Any) -> Dict[str, Any]:
         "stage": row["stage"],
         "current": row["current_count"],
         "total": row["total_count"],
-        "last_error": row["last_error"],
-        "started_at": row["started_at"],
-        "finished_at": row["finished_at"],
-        "heartbeat_at": row["heartbeat_at"],
-        "source_watermark": row["source_watermark"],
-        "resume_stage": row["resume_stage"],
+        **pick(row, "last_error", "started_at", "finished_at", "heartbeat_at", "source_watermark",
+               "resume_stage"),
         "resume_rowid": int(row["resume_rowid"] or 0),
         "resume_run_id": row["resume_run_id"],
         "resume_watermark": row["resume_watermark"],
