@@ -6,6 +6,12 @@ on:
       - main
       - dev
 
+# A newer push to the same branch supersedes the running check; without this
+# every follow-up push stacks another 19-29 minute test job behind the first.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   sanity-check:
     runs-on: ubuntu-latest
