@@ -2935,6 +2935,7 @@ async function loadSettingsData() {
         document.getElementById('soulseek-min-observed-download-speed').value = settings.soulseek?.min_observed_download_speed_kbps ?? 250;
         document.getElementById('soulseek-download-timeout').value = Math.round((settings.soulseek?.download_timeout || 600) / 60);
         document.getElementById('soulseek-auto-clear-searches').checked = settings.soulseek?.auto_clear_searches !== false;
+        document.getElementById('soulseek-cleanup-scope').value = settings.soulseek?.cleanup_scope === 'all' ? 'all' : 'own';
 
         // Populate ListenBrainz settings
         document.getElementById('listenbrainz-base-url').value = settings.listenbrainz?.base_url || '';
@@ -6183,7 +6184,8 @@ async function saveSettings(quiet = false) {
             min_observed_download_speed_kbps: _cfgInt('soulseek-min-observed-download-speed', 250),
             preferred_version: _cfgStr('preferred-version'),
             download_timeout: (parseInt(document.getElementById('soulseek-download-timeout').value) || 10) * 60,
-            auto_clear_searches: document.getElementById('soulseek-auto-clear-searches').checked
+            auto_clear_searches: document.getElementById('soulseek-auto-clear-searches').checked,
+            cleanup_scope: document.getElementById('soulseek-cleanup-scope').value === 'all' ? 'all' : 'own'
         },
         listenbrainz: {
             base_url: document.getElementById('listenbrainz-base-url').value,
