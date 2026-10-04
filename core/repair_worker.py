@@ -184,6 +184,7 @@ JOB_CATEGORIES = {
     'suspect_album_tag_detector': 'Tags & metadata',
     'metadata_gap_filler': 'Tags & metadata',
     'native_enrichment_sweep': 'Tags & metadata',
+    'unknown_artist_fixer': 'Tags & metadata',
     'bpm_backfill': 'Tags & metadata',
     'artist_nfo_backfill': 'Tags & metadata',
     'album_release_year_repair': 'Tags & metadata',
@@ -358,6 +359,7 @@ NATIVE_SUBJECT_FINDING_TYPES = frozenset({
     'path_mismatch',
     'short_preview_track',
     'track_number_mismatch',
+    'unknown_artist',
     'unwanted_content',
 })
 
@@ -2592,6 +2594,7 @@ class RepairWorker:
             'suspect_album_tag': self._fix_suspect_album_tag,
             'bpm_backfill': self._fix_metadata_gap,
             'album_release_year_mismatch': self._fix_album_release_year_mismatch,
+            'unknown_artist': self._fix_unknown_artist,
         }
 
     def _execute_fix(self, finding_type: str, entity_type: str, entity_id: str,
@@ -5100,6 +5103,22 @@ class RepairWorker:
             return {'success': False, 'error': f'Failed to fix {errors} file(s)'}
         else:
             return {'success': True, 'action': 'already_consistent', 'message': 'All tags already consistent'}
+
+    def _fix_unknown_artist(self, entity_type, entity_id, file_path, details):
+        """File a placeholder track under the artist the finding identified (A03)."""
+        stale = _stale_legacy_subject(entity_id)
+        if stale:
+            return stale
+        track_id = _lib2_id(entity_id)
+        if track_id is None:
+            return {'success': False, 'error': 'No track in finding'}
+        from core.repair_jobs.unknown_artist_recovery import apply_unknown_artist_fix
+        settings = (self._config_manager.get('repair.jobs.unknown_artist_fixer.settings', {})
+                    if self._config_manager else {}) or {}
+        return apply_unknown_artist_fix(
+            self.db, track_id, details or {},
+            fix_tags=bool(settings.get('fix_tags', True)),
+            config_manager=self._config_manager)
 
     def _fix_album_release_year_mismatch(self, entity_type, entity_id, file_path, details):
         """Align album and track release years to canonical release dates and rename folder."""

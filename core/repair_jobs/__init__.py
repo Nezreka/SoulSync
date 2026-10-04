@@ -51,6 +51,8 @@ JOB_DATA_BASIS: dict[str, str] = {
     'bpm_backfill': 'lib2',
     'artist_nfo_backfill': 'lib2',
     'album_release_year_repair': 'lib2',
+    # Back on Library v2 (A03): identifies each placeholder track on its own.
+    'unknown_artist_fixer': 'lib2',
 }
 
 # Exhaustive Library-v2 interoperability contract.  ``JOB_DATA_BASIS`` says
@@ -128,6 +130,9 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     # Writes the year tags, the album's catalogue year, and may rename the
     # album folder (repointing its file rows).
     'album_release_year_repair': frozenset({'observe', 'metadata', 'tags', 'path'}),
+    # Re-files a track onto its artist/album rows and may correct its tags;
+    # the file itself is moved by Library Reorganize.
+    'unknown_artist_fixer': frozenset({'observe', 'metadata', 'tags', 'wanted'}),
 }
 
 # Jobs deliberately retired after their function moved to a native Library-v2
@@ -147,7 +152,6 @@ RETIRED_JOB_IDS = frozenset({
     # start silently deletes pending admin-review findings with no
     # replacement — see docs/library-overhaul-branch-review-2026-07-19.md A2.
     'single_album_dedup',
-    'unknown_artist_fixer',
     'canonical_version_resolve',
     'lib2_mirror_reconcile',
     'lib2_wishlist_reconcile',
@@ -263,6 +267,7 @@ _JOB_MODULES = [
     'core.repair_jobs.bpm_backfill',
     'core.repair_jobs.artist_nfo_backfill',
     'core.repair_jobs.album_release_year_repair',
+    'core.repair_jobs.unknown_artist_recovery',
 ]
 
 
