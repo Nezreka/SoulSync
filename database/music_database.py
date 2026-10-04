@@ -25992,6 +25992,179 @@ class MusicDatabase:
         cursor.execute("SELECT url, priority, enabled FROM hifi_instances WHERE enabled = 1 ORDER BY priority ASC, id ASC")
         return [dict(row) for row in cursor.fetchall()]
 
+
+    def _ensure_music_video_request_schema(self, cursor) -> None:
+        """idempotent: create music_video_requests table if not exists."""
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS music_video_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL,
+                requester_name TEXT,
+                video_id TEXT NOT NULL,
+                url TEXT NOT NULL,
+                title TEXT NOT NULL,
+                channel TEXT,
+                artist TEXT,
+                thumbnail_url TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                admin_response TEXT,
+                resolved_by INTEGER,
+                resolved_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                seen_at TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_mvr_profile ON music_video_requests(profile_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_mvr_status ON music_video_requests(status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_mvr_video ON music_video_requests(video_id)")
+
+    def add_music_video_request(self, *, profile_id: int, requester_name: str,
+                                video_id: str, url: str, title: str,
+                                channel: Optional[str] = None,
+                                artist: Optional[str] = None,
+                                thumbnail_url: Optional[str] = None) -> Optional[int]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_video_request_schema(cursor)
+                cursor.execute(
+                    "INSERT INTO music_video_requests (profile_id, requester_name, video_id, url, "
+                    "title, channel, artist, thumbnail_url, status) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (int(profile_id), requester_name, video_id, url, title,
+                     channel, artist, thumbnail_url, "pending"))
+                conn.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error("Error recording music video request: %s", e)
+            return None
+
+    def list_music_video_requests(self, profile_id: Optional[int] = None,
+                                  status: Optional[str] = None,
+                                  limit: int = 200) -> List[Dict[str, Any]]:
+        """video request history, newest first. profile_id None = everyone's."""
+        where, args = [], []
+        if profile_id is not None:
+            where.append("profile_id = ?")
+            args.append(int(profile_id))
+        if status:
+            where.append("status = ?")
+            args.append(status)
+        sql = ("SELECT * FROM music_video_requests" + (" WHERE " + " AND ".join(where) if where else "") +
+               " ORDER BY created_at DESC, id DESC LIMIT ?")
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_video_request_schema(cursor)
+                cursor.execute(sql, args + [max(1, int(limit))])
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error("Error listing music video requests: %s", e)
+            return []
+
+    def get_music_video_request(self, request_id: int) -> Optional[Dict[str, Any]]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_video_request_schema(cursor)
+                cursor.execute("SELECT * FROM music_video_requests WHERE id = ?", (int(request_id),))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error("Error getting music video request: %s", e)
+            return None
+
+    def delete_music_video_request(self, request_id: int) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_video_request_schema(cursor)
+                cursor.execute("DELETE FROM music_video_requests WHERE id = ?", (int(request_id),))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error deleting music video request: %s", e)
+            return False
+
+    def music_video_downloaded(self, video_id: str) -> bool:
+        """True if this video_id has landed in the library history."""
+        if not video_id:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT 1 FROM library_history WHERE source_track_id = ? LIMIT 1",
+                    (str(video_id),))
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.debug("Error checking music video downloaded: %s", e)
+            return False
+
+    def set_music_video_request_status(self, request_id: int, status: str,
+                                       resolved_by: Optional[int] = None,
+                                       admin_response: Optional[str] = None) -> bool:
+        """Set status; only succeeds if currently pending (prevents races)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_video_request_schema(cursor)
+                cursor.execute(
+                    "UPDATE music_video_requests SET status = ?, resolved_by = ?, "
+                    "admin_response = ?, resolved_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ? AND status = 'pending'",
+                    (status, resolved_by, admin_response, int(request_id)))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error setting music video request status: %s", e)
+            return False
+
+    def mark_music_video_request_available(self, request_id: int) -> bool:
+        """approved -> available, clearing seen_at so the requester's badge
+        lights up. mirrors set_music_request_status for track requests."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_video_request_schema(cursor)
+                cursor.execute(
+                    "UPDATE music_video_requests SET status = 'available', seen_at = NULL "
+                    "WHERE id = ? AND status = 'approved'",
+                    (int(request_id),))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error marking music video request available %s: %s", request_id, e)
+            return False
+
+    def mark_music_video_requests_seen(self, profile_id: int) -> int:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_video_request_schema(cursor)
+                cursor.execute("UPDATE music_video_requests SET seen_at = CURRENT_TIMESTAMP "
+                               "WHERE profile_id = ? AND seen_at IS NULL", (int(profile_id),))
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.debug("mark_music_video_requests_seen failed: %s", e)
+            return 0
+
+    def count_music_video_requests_since(self, profile_id: int, days: int) -> int:
+        """Count video requests filed by a profile in the last N days (for quota)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_video_request_schema(cursor)
+                cursor.execute(
+                    "SELECT COUNT(*) FROM music_video_requests "
+                    "WHERE profile_id = ? AND created_at >= datetime('now', ?)",
+                    (int(profile_id), f"-{int(days)} days"))
+                row = cursor.fetchone()
+                return int(row[0]) if row else 0
+        except Exception as e:
+            logger.error("Error counting music video requests: %s", e)
+            return 0
+
     def get_all_hifi_instances(self) -> List[Dict[str, Any]]:
         """Get all HiFi instances (including disabled) ordered by priority."""
         conn = self._get_connection()

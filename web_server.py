@@ -23353,9 +23353,42 @@ from core.sample.worker import configure as _cfg_sample
 _cfg_sample(config_manager_=config_manager,
             resolve_path_fn=_resolve_library_file_path, warm=False)
 
+def _start_music_video_request_download(data):
+    """Starter for approved music video requests: takes the request data dict,
+    validates the music videos path, and kicks off the download.
+    Returns a dict (with optional 'error'/'code') like the download route."""
+    video_id = str(data.get('video_id') or '')
+    url = str(data.get('url') or '')
+    if not video_id or not url:
+        return {"error": "Missing video_id or url", "code": 400}
+    if _music_video.is_in_flight(video_id):
+        return {"error": "Already downloading", "code": 409}
+    music_videos_path = config_manager.get('library.music_videos_path', '') or ''
+    if not music_videos_path.strip():
+        return {"error": "Music Videos directory not configured. Set it in Settings > Downloads.", "code": 400}
+    music_videos_path = config_root_path(music_videos_path)
+    try:
+        os.makedirs(music_videos_path, exist_ok=True)
+        test_file = os.path.join(music_videos_path, '.soulsync_write_test')
+        with open(test_file, 'w') as f:
+            f.write('test')
+        os.remove(test_file)
+    except (OSError, PermissionError) as e:
+        return {"error": f"Music Videos directory is not writable: {e}", "code": 400}
+    # Build the data dict the download pipeline expects
+    dl_data = {
+        "video_id": video_id,
+        "url": url,
+        "title": data.get("title") or "",
+        "channel": data.get("channel") or "",
+        "thumbnail": data.get("thumbnail") or data.get("thumbnail_url") or "",
+    }
+    result = _music_video.start(dl_data, music_videos_path, _music_video_deps())
+    return result or {}
+
 # music requests: what a profile without download rights asked for
 from api.music_requests import configure as _cfg_mr, create_blueprint as _bp_mr
-_cfg_mr(get_database=get_database)
+_cfg_mr(get_database=get_database, start_music_video=_start_music_video_request_download)
 app.register_blueprint(_bp_mr())
 
 # kids profiles: explicit music can't play and drops out of search/tracklists
