@@ -103,7 +103,10 @@ def create_blueprint():
 # == DATABASE UPDATER API      ==
 # ===============================
 
-def _db_update_progress_callback(current_item, processed, total, percentage):
+def _db_update_progress_callback(current_item, processed, total, percentage, unit="artists"):
+    # unit labels what processed/total count ("artists" for the scan phases,
+    # "tracks" for the post-scan tag reconcile) so the Tools page progress
+    # line reads "176 / 191 tracks" instead of "176 / 191 artists".
     logger.info(f"[DB Progress] {current_item} - {processed}/{total} ({percentage:.1f}%)")
     with db_update_lock:
         db_update_state.update({
@@ -111,6 +114,7 @@ def _db_update_progress_callback(current_item, processed, total, percentage):
             "processed": processed,
             "total": total,
             "progress": percentage,
+            "unit": unit,
             "last_progress_at": time.time(),  # heartbeat for the stall watchdog
         })
     _update_automation_progress(_db_update_automation_id,
@@ -966,6 +970,7 @@ def start_database_update():
             "status": "running",
             "phase": f"{scan_type}: Initializing...",
             "progress": 0, "current_item": "", "processed": 0, "total": 0, "error_message": "",
+            "unit": "artists",
             # H16: new run epoch — a stale worker from a watchdog-superseded
             # run must not overwrite this run's terminal state.
             "run_epoch": db_update_state.get("run_epoch", 0) + 1,

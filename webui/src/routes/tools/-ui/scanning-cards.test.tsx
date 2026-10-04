@@ -184,6 +184,25 @@ describe('DbUpdaterCard', () => {
     expect((container.querySelector('#db-progress-bar') as HTMLElement).style.width).toBe('50%');
   });
 
+  it('labels the progress as tracks during the post-scan tag reconcile', async () => {
+    routes({
+      '/api/database/update/status': {
+        status: 'running',
+        processed: 176,
+        total: 191,
+        progress: 92.1,
+        phase: 'Reading file tags for 191 new tracks…',
+        unit: 'tracks',
+      },
+    });
+    const { container } = render(<DbUpdaterCard />);
+    await waitFor(() =>
+      expect(container.querySelector('#db-progress-label')?.textContent).toBe(
+        '176 / 191 tracks (92.1%)',
+      ),
+    );
+  });
+
   it('leaves a FULL bar on finished and an EMPTY one on idle (#859 frozen bar)', async () => {
     routes({ '/api/database/update/status': { status: 'finished', phase: 'Complete' } });
     const { container } = render(<DbUpdaterCard />);
