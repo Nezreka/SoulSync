@@ -7,6 +7,9 @@ import {
   buildRequestItems,
   countForTab,
   filterRequestItems,
+  itemImage,
+  itemKey,
+  itemTitle,
   parseServerTime,
   quotaLine,
   relativeTime,
@@ -46,6 +49,8 @@ const list: MusicRequestList = {
     row(3, 'declined', '2026-09-21 10:00:00'),
     row(4, 'removed', '2026-09-19 10:00:00'),
   ],
+  pendingVideos: [],
+  videoHistory: [],
 };
 
 function row(id: number, status: 'approved' | 'available' | 'declined' | 'removed', at: string) {
@@ -69,13 +74,69 @@ const NOW = Date.parse('2026-09-25T12:00:00Z');
 describe('requests helpers', () => {
   it('puts waiting first, then history newest first', () => {
     const items = buildRequestItems(list);
-    expect(items.map((i) => (i.source === 'pending' ? i.group.key : i.row.id))).toEqual([
-      'album:blue',
-      2,
-      3,
-      1,
-      4,
+    expect(
+      items.map((i) =>
+        i.source === 'pending' ? i.group.key : i.source === 'history' ? i.row.id : i.video.id,
+      ),
+    ).toEqual(['album:blue', 2, 3, 1, 4]);
+  });
+
+  it('merges video requests into the same waiting/history blocks', () => {
+    const withVideos: MusicRequestList = {
+      ...list,
+      pendingVideos: [
+        {
+          id: 11,
+          profile_id: 3,
+          requester_name: 'Kim',
+          video_id: 'abc123',
+          url: 'https://www.youtube.com/watch?v=abc123',
+          title: 'Blue Video',
+          channel: 'Joni Mitchell',
+          thumbnail_url: 'https://i.ytimg.com/vi/abc123/hqdefault.jpg',
+          status: 'pending',
+          created_at: '2026-09-24 12:00:00',
+        },
+      ],
+      videoHistory: [
+        {
+          id: 12,
+          profile_id: 3,
+          requester_name: 'Kim',
+          video_id: 'def456',
+          url: 'https://www.youtube.com/watch?v=def456',
+          title: 'Old Video',
+          channel: 'Someone',
+          status: 'available',
+          resolved_at: '2026-09-23 10:00:00',
+        },
+      ],
+    };
+    const items = buildRequestItems(withVideos);
+    // waiting: track groups (server order), then video pendings newest-first;
+    // history: tracks and videos interleaved newest-first
+    expect(items.map(itemKey)).toEqual([
+      'p:3:album:blue',
+      'v:11',
+      'v:12',
+      'h:2',
+      'h:3',
+      'h:1',
+      'h:4',
     ]);
+    expect(countForTab(items, 'waiting')).toBe(2);
+    expect(countForTab(items, 'available')).toBe(2);
+    expect(filterRequestItems(items, 'on-the-way').map((i) => i.source)).toEqual(['history']);
+
+    const [videoPending, videoHistory] = [items[1]!, items[2]!];
+    expect(itemTitle(videoPending)).toBe('Blue Video');
+    expect(itemImage(videoPending)).toBe('https://i.ytimg.com/vi/abc123/hqdefault.jpg');
+    expect(subLine(videoPending)).toBe('Joni Mitchell · Music video');
+    expect(statusText(videoPending)).toBe('Waiting');
+    expect(whoAsked(videoPending, true, NOW)).toBe('Kim asked · 1 day ago');
+    expect(itemTitle(videoHistory)).toBe('Old Video');
+    expect(subLine(videoHistory)).toBe('Someone · Music video');
+    expect(statusText(videoHistory)).toBe('In your library');
   });
 
   it('filters and counts per tab', () => {

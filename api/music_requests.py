@@ -21,10 +21,14 @@ logger = get_logger("api.music_requests")
 bp = Blueprint("music_requests", __name__)
 
 get_database = None
+# injected by web_server via configure(): validates the music videos dir,
+# builds root + deps and starts the job, exactly like /api/music-video/download
+_start_music_video = None
 
 
-def configure(*, get_database):
+def configure(*, get_database, start_music_video=None):
     globals()["get_database"] = get_database
+    globals()["_start_music_video"] = start_music_video
 
 
 def create_blueprint():
@@ -90,7 +94,9 @@ def _in_library(db, profile_id):
 
 def sweep_fulfillment(db, only_pid=None) -> int:
     """move approved requests whose rows all left the wishlist to available
-    (and tell the requester) or removed. returns how many changed."""
+    (and tell the requester) or removed. approved video requests flip to
+    available when their download lands in the library history. returns how
+    many changed."""
     changed = 0
     for req in db.list_music_requests(profile_id=only_pid, status="approved"):
         pid = int(req["profile_id"])
@@ -102,7 +108,20 @@ def sweep_fulfillment(db, only_pid=None) -> int:
             if state == "available":
                 _notify(pid, f"{describe(req)} is in your library now", "success")
                 _event("music_request_available", req)
+    for req in db.list_music_video_requests(profile_id=only_pid, status="approved"):
+        if db.music_video_downloaded(req["video_id"]) \
+                and db.set_music_video_request_status(req["id"], "available"):
+            changed += 1
+            _notify(int(req["profile_id"]), f"{req.get('title') or 'The video'} is in your library now",
+                    "success")
+            _event("music_request_available", _video_group(req))
     return changed
+
+
+def _video_group(req):
+    """the shape _event wants for a video request: kind/title/artist/requester."""
+    return {"kind": "video", "title": req.get("title") or "",
+            "artist": req.get("artist") or "", "requester_name": req.get("requester_name") or ""}
 
 
 def _find_group(db, profile_id, key):
@@ -132,16 +151,29 @@ def list_music_requests():
         profile_id=scope, status=None if status == "all" else status)
     for h in history:
         h["track_count"] = len(h.get("tracks") or [])
-    counts = {"pending": len(pending) if status in ("pending", "all") else len(_pending_groups(db, only_pid=scope))}
+    video_rows = db.list_music_video_requests(profile_id=scope)
+    pending_videos = [r for r in video_rows if r["status"] == "pending"] \
+        if status in ("pending", "all") else []
+    if status == "pending":
+        video_history = []
+    elif status == "all":
+        video_history = [r for r in video_rows if r["status"] != "pending"]
+    else:
+        video_history = [r for r in video_rows if r["status"] == status]
+    counts = {"pending": len(pending) if status in ("pending", "all") else len(_pending_groups(db, only_pid=scope)),
+              "pending_videos": (len(pending_videos) if status in ("pending", "all")
+                                 else sum(1 for r in video_rows if r["status"] == "pending"))}
     for h in db.list_music_requests(profile_id=scope):
         counts[h["status"]] = counts.get(h["status"], 0) + 1
     me = db.get_profile(pid) or {}
     return jsonify({"success": True, "pending": pending, "history": history, "counts": counts,
+                    "pending_videos": pending_videos, "video_history": video_history,
                     "asks_first": not profile_can_download(me), "quota": _quota(db, me)})
 
 
 def _quota(db, profile):
-    """{limit, days, used, remaining} for a limited asking profile, else None."""
+    """{limit, days, used, remaining} for a limited asking profile, else None.
+    video asks count the same as track asks: an ask is an ask."""
     from core.requests.quota import quota_for, quota_state
     quota = quota_for(profile)
     if not quota or profile_can_download(profile):
@@ -152,6 +184,7 @@ def _quota(db, profile):
             used = len(db.music_request_asks_since(conn.cursor(), profile["id"], quota["days"]))
         finally:
             conn.close()
+        used += db.count_music_video_requests_since(profile["id"], quota["days"])
     except Exception:  # noqa: BLE001
         return None
     return quota_state(quota, used)
@@ -176,13 +209,18 @@ def music_request_counts():
     if pid is None:
         return jsonify({"success": False, "error": "profile_required"}), 401
     if is_admin_request():
-        return jsonify({"success": True, "pending": len(_pending_groups(db)), "updates": 0})
+        videos = len(db.list_music_video_requests(status="pending"))
+        return jsonify({"success": True, "pending": len(_pending_groups(db)) + videos, "updates": 0})
     try:
         sweep_fulfillment(db, only_pid=pid)
     except Exception:  # noqa: BLE001
         logger.exception("music request sweep failed")
     unseen = sum(1 for h in db.list_music_requests(profile_id=pid) if not h.get("seen_at"))
-    return jsonify({"success": True, "pending": len(_pending_groups(db, only_pid=pid)), "updates": unseen})
+    my_videos = db.list_music_video_requests(profile_id=pid)
+    pending_videos = sum(1 for r in my_videos if r["status"] == "pending")
+    unseen += sum(1 for r in my_videos if r["status"] != "pending" and not r.get("seen_at"))
+    return jsonify({"success": True, "pending": len(_pending_groups(db, only_pid=pid)) + pending_videos,
+                    "updates": unseen})
 
 
 @bp.route("/api/requests/music/seen", methods=["POST"])
@@ -190,7 +228,9 @@ def music_requests_seen():
     pid = get_current_profile_id()
     if pid is None:
         return jsonify({"success": False, "error": "profile_required"}), 401
-    return jsonify({"success": True, "marked": get_database().mark_music_requests_seen(pid)})
+    db = get_database()
+    marked = db.mark_music_requests_seen(pid) + db.mark_music_video_requests_seen(pid)
+    return jsonify({"success": True, "marked": marked})
 
 
 def _group_from_body(db):
@@ -247,6 +287,14 @@ def approve_all_music_requests():
                                  resolved_by=get_current_profile_id())
             _notify(group["profile_id"], f"{describe(group)} was approved, it's on the way", "success")
             _event("music_request_approved", group)
+            approved += 1
+    for req in db.list_music_video_requests(profile_id=only, status="pending"):
+        ok, _err, _code = _start_approved_video_download(db, req)
+        if ok and db.set_music_video_request_status(req["id"], "approved",
+                                                    resolved_by=get_current_profile_id()):
+            _notify(int(req["profile_id"]),
+                    f"{req.get('title') or 'The video'} was approved, it's on the way", "success")
+            _event("music_request_approved", _video_group(req))
             approved += 1
     return jsonify({"success": True, "approved": approved})
 
@@ -306,4 +354,136 @@ def delete_music_request_history(request_id):
     if pid is None:
         return jsonify({"success": False, "error": "profile_required"}), 401
     ok = get_database().delete_music_request(request_id, profile_id=None if is_admin_request() else pid)
+    return (jsonify({"success": True}) if ok else (jsonify({"success": False, "error": "Not found"}), 404))
+
+
+# ── music video requests ──────────────────────────────────────────────
+# same page, separate storage: videos have no wishlist rows to derive
+# pending state from, so the row is both the queue and the history.
+
+@bp.route("/api/requests/music/videos", methods=["POST"])
+def file_music_video_request():
+    """{video_id, url, title, channel?, thumbnail_url?}: a profile without
+    download rights asks for a music video. a profile that can download uses
+    /api/music-video/download directly."""
+    db = get_database()
+    pid = get_current_profile_id()
+    if pid is None:
+        return jsonify({"success": False, "error": "profile_required"}), 401
+    me = db.get_profile(pid) or {}
+    if profile_can_download(me):
+        return jsonify({"success": False,
+                        "error": "Downloads are enabled for this profile, use the download endpoint"}), 403
+    body = request.get_json(silent=True) or {}
+    video_id = str(body.get("video_id") or "").strip()
+    url = str(body.get("url") or "").strip()
+    title = str(body.get("title") or "").strip()
+    channel = str(body.get("channel") or "").strip() or None
+    thumbnail_url = str(body.get("thumbnail_url") or "").strip() or None
+    if not video_id or not url or not title:
+        return jsonify({"success": False, "error": "video_id, url and title are required"}), 400
+    if any(r["video_id"] == video_id
+           for r in db.list_music_video_requests(profile_id=pid, status="pending")):
+        return jsonify({"success": False, "already": True}), 200
+    if db.music_video_downloaded(video_id):
+        return jsonify({"success": False, "in_library": True}), 409
+    quota = _quota(db, me)
+    if quota and quota["remaining"] <= 0:
+        from core.requests.quota import quota_for, quota_message
+        return jsonify({"success": False, "error": quota_message(quota_for(me)),
+                        "quota": True}), 429
+    from core.downloads.music_video import parse_artist_title
+    artist, _parsed_title = parse_artist_title(title, channel or "")
+    rid = db.add_music_video_request(profile_id=pid, requester_name=me.get("name") or "",
+                                     video_id=video_id, url=url, title=title, channel=channel,
+                                     artist=artist or None, thumbnail_url=thumbnail_url)
+    if not rid:
+        # None means duplicate or a failed insert: tell them apart so a real
+        # error doesn't masquerade as "already requested"
+        if any(r["video_id"] == video_id
+               for r in db.list_music_video_requests(profile_id=pid, status="pending")):
+            return jsonify({"success": False, "already": True}), 200
+        logger.error("music video request insert failed for profile %s: %s", pid, title)
+        return jsonify({"success": False, "error": "Couldn't save the request"}), 500
+    logger.info("music video request %s filed by profile %s: %s", rid, pid, title)
+    return jsonify({"success": True, "id": rid})
+
+
+def _start_approved_video_download(db, req):
+    """kick off the download for one pending video request. returns
+    (True, None, None) when the video is on its way or already landed (the
+    sweep marks it available), else (False, error, code)."""
+    starter = globals().get("_start_music_video")
+    if starter is None:
+        return False, "Video downloads are unavailable", 500
+    video_id = str(req.get("video_id") or "")
+    if db.music_video_downloaded(video_id):
+        return True, None, None
+    result = starter({"video_id": video_id, "url": req.get("url") or "",
+                      "title": req.get("title") or "", "channel": req.get("channel") or "",
+                      "thumbnail": req.get("thumbnail_url") or ""})
+    if result.get("error"):
+        if result.get("code") == 409:
+            return True, None, None  # already downloading: the sweep catches the arrival
+        return False, result["error"], result.get("code", 400)
+    return True, None, None
+
+
+@bp.route("/api/requests/music/videos/<int:request_id>/approve", methods=["POST"])
+def approve_music_video_request(request_id):
+    """admin: a waiting video request starts downloading like a direct one."""
+    if not is_admin_request():
+        return jsonify({"success": False, "error": "Admin only"}), 403
+    db = get_database()
+    req = db.get_music_video_request(request_id)
+    if not req:
+        return jsonify({"success": False, "error": "Not found"}), 404
+    if req["status"] != "pending":
+        return jsonify({"success": False, "error": "That request isn't waiting any more"}), 409
+    ok, error, code = _start_approved_video_download(db, req)
+    if not ok:
+        return jsonify({"success": False, "error": error}), code or 502
+    if not db.set_music_video_request_status(request_id, "approved",
+                                             resolved_by=get_current_profile_id()):
+        return jsonify({"success": False, "error": "That request isn't waiting any more"}), 409
+    _notify(int(req["profile_id"]),
+            f"{req.get('title') or 'The video'} was approved, it's on the way", "success")
+    _event("music_request_approved", _video_group(req))
+    return jsonify({"success": True})
+
+
+@bp.route("/api/requests/music/videos/<int:request_id>/decline", methods=["POST"])
+def decline_music_video_request(request_id):
+    """admin: {response?} — the request ends, the requester hears why."""
+    if not is_admin_request():
+        return jsonify({"success": False, "error": "Admin only"}), 403
+    db = get_database()
+    req = db.get_music_video_request(request_id)
+    if not req:
+        return jsonify({"success": False, "error": "Not found"}), 404
+    reason = str((request.get_json(silent=True) or {}).get("response") or "").strip()[:500] or None
+    if not db.set_music_video_request_status(request_id, "declined",
+                                             resolved_by=get_current_profile_id(),
+                                             admin_response=reason):
+        return jsonify({"success": False, "error": "That request isn't waiting any more"}), 409
+    _notify(int(req["profile_id"]),
+            f"{req.get('title') or 'The video'} was declined" + (f": {reason}" if reason else ""),
+            "warning")
+    _event("music_request_declined", _video_group(req), reason=reason or "")
+    return jsonify({"success": True})
+
+
+@bp.route("/api/requests/music/videos/<int:request_id>/withdraw", methods=["POST"])
+def withdraw_music_video_request(request_id):
+    """a member takes back their own waiting video request (or an admin any)."""
+    pid = get_current_profile_id()
+    if pid is None:
+        return jsonify({"success": False, "error": "profile_required"}), 401
+    db = get_database()
+    req = db.get_music_video_request(request_id)
+    if not req or req["status"] != "pending":
+        return jsonify({"success": False, "error": "Not found"}), 404
+    if int(req["profile_id"]) != int(pid) and not is_admin_request():
+        return jsonify({"success": False, "error": "Not yours"}), 403
+    ok = db.delete_music_video_request(request_id)
     return (jsonify({"success": True}) if ok else (jsonify({"success": False, "error": "Not found"}), 404))

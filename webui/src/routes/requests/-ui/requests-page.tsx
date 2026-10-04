@@ -13,12 +13,15 @@ import type { RequestItem, RequestTab } from '../-requests.types';
 import {
   approveAllMusicRequests,
   approveMusicRequest,
+  approveMusicVideoRequest,
   declineMusicRequest,
+  declineMusicVideoRequest,
   deleteMusicRequest,
   invalidateMusicRequests,
   markMusicRequestsSeen,
   musicRequestsQueryOptions,
   withdrawMusicRequest,
+  withdrawMusicVideoRequest,
 } from '../-requests.api';
 import {
   REQUEST_TABS,
@@ -91,6 +94,9 @@ export function RequestsPage() {
 
   const approve = useMutation({
     mutationFn: (item: RequestItem) => {
+      if (item.source === 'video-pending') {
+        return approveMusicVideoRequest(profileId, item.video.id);
+      }
       if (item.source !== 'pending') throw new Error('That request isn’t waiting any more');
       return approveMusicRequest(profileId, {
         profile_id: item.group.profile_id,
@@ -98,7 +104,12 @@ export function RequestsPage() {
       });
     },
     onSuccess: (_data, item) => {
-      const name = item.source === 'pending' ? item.group.requester_name : '';
+      const name =
+        item.source === 'pending'
+          ? item.group.requester_name
+          : item.source === 'video-pending'
+            ? item.video.requester_name
+            : '';
       toast(name ? `Approved. ${name} will hear when it lands` : 'Approved');
       afterChange();
     },
@@ -110,6 +121,9 @@ export function RequestsPage() {
 
   const decline = useMutation({
     mutationFn: ({ item, response }: { item: RequestItem; response: string }) => {
+      if (item.source === 'video-pending') {
+        return declineMusicVideoRequest(profileId, item.video.id, response || undefined);
+      }
       if (item.source !== 'pending') throw new Error('That request isn’t waiting any more');
       return declineMusicRequest(profileId, {
         profile_id: item.group.profile_id,
@@ -129,6 +143,9 @@ export function RequestsPage() {
 
   const withdraw = useMutation({
     mutationFn: (item: RequestItem) => {
+      if (item.source === 'video-pending') {
+        return withdrawMusicVideoRequest(profileId, item.video.id);
+      }
       if (item.source !== 'pending') throw new Error('That request isn’t waiting any more');
       return withdrawMusicRequest(profileId, item.group.key);
     },
@@ -168,7 +185,8 @@ export function RequestsPage() {
     },
   });
 
-  const waitingCount = listQuery.data?.pending.length ?? 0;
+  const waitingCount =
+    (listQuery.data?.pending.length ?? 0) + (listQuery.data?.pendingVideos.length ?? 0);
 
   const confirmApproveAll = async () => {
     const noun = waitingCount === 1 ? 'request' : 'requests';
@@ -184,10 +202,13 @@ export function RequestsPage() {
   };
 
   const confirmWithdraw = async (item: RequestItem) => {
+    const isVideo = item.source === 'video-pending';
     const ok = window.showConfirmDialog
       ? await window.showConfirmDialog({
           title: 'Withdraw request',
-          message: `Take back your request for ${itemTitle(item)}? It comes off your wishlist too.`,
+          message: isVideo
+            ? `Take back your request for ${itemTitle(item)}?`
+            : `Take back your request for ${itemTitle(item)}? It comes off your wishlist too.`,
           confirmText: 'Withdraw',
           destructive: true,
         })
@@ -310,7 +331,12 @@ function RequestRow({
   const image = itemImage(item);
   const tracks = itemTracks(item);
   const pending = item.status === 'pending';
-  const reason = item.source === 'history' ? item.row.admin_response : null;
+  const reason =
+    item.source === 'history'
+      ? item.row.admin_response
+      : item.source === 'video-history'
+        ? item.video.admin_response
+        : null;
 
   return (
     <li className={styles.row} data-status={item.status}>
@@ -318,14 +344,18 @@ function RequestRow({
         {image && !imageFailed ? (
           <img src={image} alt="" loading="lazy" onError={() => setImageFailed(true)} />
         ) : (
-          <span className={styles.thumbGlyph}>{kind === 'album' ? '◎' : '♪'}</span>
+          <span className={styles.thumbGlyph}>
+            {kind === 'album' ? '◎' : kind === 'track' ? '♪' : '▶'}
+          </span>
         )}
       </div>
 
       <div className={styles.main}>
         <div className={styles.titleLine}>
           <span className={styles.rowTitle}>{itemTitle(item)}</span>
-          <span className={styles.kind}>{kind === 'album' ? 'Album' : 'Track'}</span>
+          <span className={styles.kind}>
+            {kind === 'album' ? 'Album' : kind === 'track' ? 'Track' : 'Music video'}
+          </span>
         </div>
         {subLine(item) ? <div className={styles.sub}>{subLine(item)}</div> : null}
         <div className={styles.who}>{whoAsked(item, isAdmin)}</div>
@@ -376,7 +406,7 @@ function RequestRow({
                     Withdraw
                   </Menu.Item>
                 ) : null}
-                {!pending ? (
+                {!pending && item.source === 'history' ? (
                   <Menu.Item className={styles.menuItem} onClick={onRemove}>
                     Remove from history
                   </Menu.Item>
@@ -407,7 +437,12 @@ function DeclineDialog({
     if (item) setReason('');
   }, [item]);
 
-  const who = item?.source === 'pending' ? item.group.requester_name : '';
+  const who =
+    item?.source === 'pending'
+      ? item.group.requester_name
+      : item?.source === 'video-pending'
+        ? item.video.requester_name
+        : '';
 
   return (
     <DialogFrame open={item != null} onOpenChange={(open) => (!open ? onClose() : undefined)}>

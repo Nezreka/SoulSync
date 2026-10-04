@@ -46,6 +46,31 @@ export interface MusicRequestRow {
   seen_at?: string | null;
 }
 
+export type MusicVideoRequestKind = 'video';
+export type MusicVideoRequestStatus = 'pending' | 'approved' | 'available' | 'declined';
+
+/**
+ * A music-video ask. Unlike tracks, videos have no wishlist to derive a
+ * pending queue from, so pending rows are stored (same table as history).
+ */
+export interface MusicVideoRequest {
+  id: number;
+  profile_id: number;
+  requester_name?: string | null;
+  video_id: string;
+  url: string;
+  title: string;
+  channel?: string | null;
+  artist?: string | null;
+  thumbnail_url?: string | null;
+  status: MusicVideoRequestStatus;
+  admin_response?: string | null;
+  resolved_at?: string | null;
+  available_at?: string | null;
+  seen_at?: string | null;
+  created_at?: string | null;
+}
+
 export interface MusicRequestCounts {
   pending: number;
   approved: number;
@@ -67,6 +92,8 @@ export interface MusicRequestListResponse {
   error?: string;
   pending: MusicRequestGroup[];
   history: MusicRequestRow[];
+  pending_videos: MusicVideoRequest[];
+  video_history: MusicVideoRequest[];
   counts: Partial<MusicRequestCounts>;
   asks_first: boolean;
   quota?: Partial<RequestQuota> | null;
@@ -75,6 +102,8 @@ export interface MusicRequestListResponse {
 export interface MusicRequestList {
   pending: MusicRequestGroup[];
   history: MusicRequestRow[];
+  pendingVideos: MusicVideoRequest[];
+  videoHistory: MusicVideoRequest[];
   counts: MusicRequestCounts;
   asksFirst: boolean;
   quota: RequestQuota | null;
@@ -100,7 +129,13 @@ export const requestSearchSchema = z.object({
 
 export type RequestsSearch = z.infer<typeof requestSearchSchema>;
 
-/** one row on the page, either a waiting group or a history row. */
+/** one row on the page: a waiting group, a history row, or a video ask. */
 export type RequestItem =
   | { source: 'pending'; status: 'pending'; group: MusicRequestGroup }
-  | { source: 'history'; status: MusicRequestHistoryStatus; row: MusicRequestRow };
+  | { source: 'history'; status: MusicRequestHistoryStatus; row: MusicRequestRow }
+  | { source: 'video-pending'; status: 'pending'; video: MusicVideoRequest }
+  | {
+      source: 'video-history';
+      status: MusicRequestHistoryStatus;
+      video: MusicVideoRequest;
+    };

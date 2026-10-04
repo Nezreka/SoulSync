@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { acquireVerb, profileAsksFirst } from '@/platform/shell/download-rights';
+
 import type { SearchVideo } from '../../search/-search.types';
 
 import {
@@ -68,11 +70,19 @@ function videoProgressState(video: SearchVideo, progress: DownloadProgress) {
   return { state: progress[id]?.state ?? 'idle', percent: progress[id]?.percent ?? 0 };
 }
 
-function downloadLabel(state: string, percent: number): string {
+/** the hook keys its requested set by raw video_id (see useVideoDownloads). */
+function wasRequested(video: SearchVideo, requested: Set<string>): boolean {
+  const id = String(video.video_id ?? '');
+  return id !== '' && requested.has(id);
+}
+
+function downloadLabel(state: string, percent: number, requested: boolean): string {
+  if (requested) return 'Requested';
   if (state === 'completed') return 'Saved';
   if (state === 'downloading') return `${Math.round(percent)}%`;
   if (state === 'errored') return 'Retry';
-  return 'Save';
+  // a profile without download rights asks instead of saving
+  return acquireVerb() === 'Request' ? 'Request' : 'Save';
 }
 
 function openOnYouTube(video: SearchVideo) {
@@ -98,15 +108,18 @@ function VideoMeta({ video, featured = false }: { video: SearchVideo; featured?:
 function ArtistVideoSpotlight({
   video,
   progress,
+  requested,
   onDownload,
   onPlay,
 }: {
   video: SearchVideo;
   progress: DownloadProgress;
+  requested: Set<string>;
   onDownload: (video: SearchVideo) => void;
   onPlay: (video: SearchVideo) => void;
 }) {
   const { state, percent } = videoProgressState(video, progress);
+  const isRequested = wasRequested(video, requested);
   const duration = formatVideoDuration(video.duration);
   return (
     <article className={`artist-video-card artist-video-spotlight featured ${state}`}>
@@ -156,10 +169,10 @@ function ArtistVideoSpotlight({
             type="button"
             className="artist-video-secondary"
             onClick={() => onDownload(video)}
-            disabled={state === 'downloading' || state === 'completed'}
+            disabled={state === 'downloading' || state === 'completed' || isRequested}
           >
             <span aria-hidden="true">↓</span>
-            {downloadLabel(state, percent)}
+            {downloadLabel(state, percent, isRequested)}
           </button>
           <button
             type="button"
@@ -181,6 +194,7 @@ function ArtistVideoPlayer({
   position,
   total,
   progress,
+  requested,
   autoplayNext,
   docked,
   hasPrevious,
@@ -199,6 +213,7 @@ function ArtistVideoPlayer({
   position: number;
   total: number;
   progress: DownloadProgress;
+  requested: Set<string>;
   autoplayNext: boolean;
   docked: boolean;
   hasPrevious: boolean;
@@ -214,7 +229,9 @@ function ArtistVideoPlayer({
   onReturn: () => void;
 }) {
   const { state, percent } = videoProgressState(video, progress);
+  const isRequested = wasRequested(video, requested);
   const title = video.title || 'Untitled video';
+  const label = downloadLabel(state, percent, isRequested);
   return (
     <article
       className={`artist-video-card artist-video-player${docked ? ' docked' : ''}`}
@@ -308,11 +325,15 @@ function ArtistVideoPlayer({
             type="button"
             className="artist-video-icon-btn"
             onClick={() => onDownload(video)}
-            disabled={state === 'downloading' || state === 'completed'}
-            aria-label={`${downloadLabel(state, percent)} ${title}`}
-            title={downloadLabel(state, percent)}
+            disabled={state === 'downloading' || state === 'completed' || isRequested}
+            aria-label={`${label} ${title}`}
+            title={label}
           >
-            {state === 'completed' ? '✓' : state === 'downloading' ? Math.round(percent) : '↓'}
+            {state === 'completed' || isRequested
+              ? '✓'
+              : state === 'downloading'
+                ? Math.round(percent)
+                : '↓'}
           </button>
           <button
             type="button"
@@ -354,6 +375,7 @@ function ArtistVideoRailItem({
   index,
   playing,
   progress,
+  requested,
   onDownload,
   onPlay,
 }: {
@@ -361,12 +383,15 @@ function ArtistVideoRailItem({
   index: number;
   playing: boolean;
   progress: DownloadProgress;
+  requested: Set<string>;
   onDownload: (video: SearchVideo) => void;
   onPlay: (video: SearchVideo) => void;
 }) {
   const { state, percent } = videoProgressState(video, progress);
+  const isRequested = wasRequested(video, requested);
   const duration = formatVideoDuration(video.duration);
   const itemRef = useRef<HTMLElement | null>(null);
+  const label = downloadLabel(state, percent, isRequested);
 
   // keep the playing item in view inside the rail's own scroll box. not
   // scrollIntoView: that would also scroll the page back to the stage, which
@@ -432,11 +457,15 @@ function ArtistVideoRailItem({
           type="button"
           className="artist-video-icon-btn"
           onClick={() => onDownload(video)}
-          disabled={state === 'downloading' || state === 'completed'}
-          aria-label={`${downloadLabel(state, percent)} ${video.title ?? 'video'}`}
-          title={downloadLabel(state, percent)}
+          disabled={state === 'downloading' || state === 'completed' || isRequested}
+          aria-label={`${label} ${video.title ?? 'video'}`}
+          title={label}
         >
-          {state === 'completed' ? '✓' : state === 'downloading' ? Math.round(percent) : '↓'}
+          {state === 'completed' || isRequested
+            ? '✓'
+            : state === 'downloading'
+              ? Math.round(percent)
+              : '↓'}
         </button>
       </div>
     </article>
@@ -455,11 +484,29 @@ export function ArtistVideosSection({ artistName }: { artistName?: string | null
   const [playbackError, setPlaybackError] = useState<number | null>(null);
   const [autoplayNext, setAutoplayNext] = useState(true);
   const [docked, setDocked] = useState(false);
-  const downloads = useVideoDownloads();
+  const {
+    progress: videoProgress,
+    download: downloadVideo,
+    request: requestVideo,
+    requested: requestedVideos,
+  } = useVideoDownloads();
   const query = artistVideoSearchQuery(artistName);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const slotRef = useRef<HTMLDivElement | null>(null);
   const moreControllerRef = useRef<AbortController | null>(null);
+
+  // a profile without download rights asks instead of downloading. read at
+  // click time, not render time: a profile switch changes the answer.
+  const acquire = useCallback(
+    (video: SearchVideo) => {
+      if (profileAsksFirst()) {
+        void requestVideo(video);
+      } else {
+        downloadVideo(video);
+      }
+    },
+    [downloadVideo, requestVideo],
+  );
 
   useEffect(() => {
     if (!query) {
@@ -700,13 +747,14 @@ export function ArtistVideosSection({ artistName }: { artistName?: string | null
                   video={playing}
                   position={shown.findIndex((video) => videoKey(video) === nowPlaying) + 1}
                   total={curated.length}
-                  progress={downloads.progress}
+                  progress={videoProgress}
+                  requested={requestedVideos}
                   autoplayNext={autoplayNext}
                   docked={docked}
                   hasPrevious={hasPrevious}
                   hasNext={hasNext}
                   playbackError={playbackError}
-                  onDownload={downloads.download}
+                  onDownload={acquire}
                   onPrevious={previous}
                   onNext={next}
                   onEnded={ended}
@@ -719,8 +767,9 @@ export function ArtistVideosSection({ artistName }: { artistName?: string | null
             ) : (
               <ArtistVideoSpotlight
                 video={featured}
-                progress={downloads.progress}
-                onDownload={downloads.download}
+                progress={videoProgress}
+                requested={requestedVideos}
+                onDownload={acquire}
                 onPlay={play}
               />
             )}
@@ -740,8 +789,9 @@ export function ArtistVideosSection({ artistName }: { artistName?: string | null
                       video={video}
                       index={index}
                       playing={Boolean(nowPlaying) && videoKey(video) === nowPlaying}
-                      progress={downloads.progress}
-                      onDownload={downloads.download}
+                      progress={videoProgress}
+                      requested={requestedVideos}
+                      onDownload={acquire}
                       onPlay={play}
                     />
                   ))}

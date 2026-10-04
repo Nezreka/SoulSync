@@ -358,6 +358,17 @@ def run(video_id: str, task_id: str, batch_id: str, url: str, raw_title: str,
             logger.info("[Music Video] Already have it: %s", already)
             _set_state(video_id, status='completed', progress=100, path=already)
             direct_download_state.mark_status(task_id, 'completed', file_path=already)
+            # record it like a fresh fetch: the file landed (by someone else's
+            # run) and the arrival sweep reads this row to close requests out
+            try:
+                deps.record_history(
+                    event_type='download', title=match.title, artist_name=match.artist,
+                    album_name='Music Video', file_path=already, thumb_url=thumbnail,
+                    download_source='YouTube', source_track_id=video_id,
+                    source_track_title=raw_title, source_artist=raw_channel,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[Music Video] history record failed: %s", exc)
             _finish(video_id, task_id, batch_id, 'completed', deps)
             return
 
