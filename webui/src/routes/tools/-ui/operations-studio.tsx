@@ -88,6 +88,7 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
       'Cleans up featured artists, commas, Romanized non-Latin titles, and inconsistent album release metadata.',
     jobIds: [
       'album_tag_consistency',
+      'album_release_year_repair',
       'comma_artist_splitter',
       'genre_tag_cleaner',
       'suspect_album_tag_detector',
@@ -96,6 +97,7 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     ],
     findingTypes: [
       'album_tag_inconsistency',
+      'album_release_year_mismatch',
       'comma_artist_split',
       'genre_cleanup',
       'suspect_album_tag',

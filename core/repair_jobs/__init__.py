@@ -60,6 +60,7 @@ _JOB_MODULES = [
     'core.repair_jobs.suspect_album_tag',
     'core.repair_jobs.bpm_backfill',
     'core.repair_jobs.artist_nfo_backfill',
+    'core.repair_jobs.album_release_year_repair',
 ]
 
 

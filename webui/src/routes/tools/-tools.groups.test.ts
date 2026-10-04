@@ -309,6 +309,7 @@ describe('the blurbs', () => {
     'comma_artist_split',
     'fake_lossless',
     'album_needs_enrichment',
+    'album_release_year_mismatch',
   ];
 
   it('covers every finding type', () => {

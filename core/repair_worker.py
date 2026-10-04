@@ -112,6 +112,7 @@ FINDING_TYPE_META = {
     'comma_artist_split':       {'label': 'Combined Artists', 'verb': 'Split Artists'},
     'fake_lossless':            {'label': 'Fake Lossless', 'verb': 'Re-download FLAC'},
     'album_needs_enrichment':   {'label': 'Needs Enrichment', 'verb': None},
+    'album_release_year_mismatch': {'label': 'Album Release Year Mismatch', 'verb': 'Fix Release Year'},
 }
 
 
@@ -169,6 +170,7 @@ JOB_CATEGORIES = {
     'bpm_backfill': 'Tags & metadata',
     'artist_nfo_backfill': 'Tags & metadata',
     'canonical_version_resolve': 'Tags & metadata',
+    'album_release_year_repair': 'Tags & metadata',
     'missing_cover_art': 'Artwork & lyrics',
     'missing_lyrics': 'Artwork & lyrics',
     # Filling gaps in what you own, rather than repairing what you have.
@@ -2094,6 +2096,7 @@ class RepairWorker:
             'comma_artist_split': self._fix_comma_artist_split,
             'suspect_album_tag': self._fix_suspect_album_tag,
             'fake_lossless': self._fix_fake_lossless,
+            'album_release_year_mismatch': self._fix_album_release_year_mismatch,
         }
 
     def _execute_fix(self, finding_type: str, entity_type: str, entity_id: str,
@@ -4629,6 +4632,48 @@ class RepairWorker:
             return {'success': False, 'error': f'Failed to fix {errors} file(s)'}
         else:
             return {'success': True, 'action': 'already_consistent', 'message': 'All tags already consistent'}
+
+    def _fix_album_release_year_mismatch(self, entity_type, entity_id, file_path, details):
+        """Align album and track release years to canonical release dates and rename folder."""
+        from core.repair_jobs.album_release_year_repair import apply_album_year_fix
+
+        album_id = details.get('album_id')
+        canonical_year = details.get('canonical_year')
+        canonical_date = details.get('canonical_date')
+        tracks = details.get('tracks', [])
+        folder_path = details.get('folder_path')
+        new_folder_name = details.get('new_folder_name')
+
+        if not album_id or not canonical_year:
+            return {'success': False, 'error': 'Missing album_id or canonical_year in finding details'}
+
+        cfg = self._config_manager
+        rename_folders = cfg.get('repair.jobs.album_release_year_repair.rename_folders', True) if cfg else True
+        update_date_tag = cfg.get('repair.jobs.album_release_year_repair.update_date_tag', True) if cfg else True
+
+        res = apply_album_year_fix(
+            db=self.db,
+            album_id=int(album_id),
+            canonical_year=str(canonical_year),
+            canonical_date=canonical_date,
+            tracks=tracks,
+            transfer_folder=self.transfer_folder,
+            config_manager=self._config_manager,
+            rename_folders=rename_folders,
+            update_date_tag=update_date_tag,
+            folder_path=folder_path,
+            new_folder_name=new_folder_name,
+        )
+
+        if res.get('success'):
+            return {
+                'success': True,
+                'action': 'aligned_release_year',
+                'fixed_files': res.get('fixed_files', 0),
+                'renamed_folder': res.get('renamed_folder'),
+                'message': '; '.join(res.get('changes', [])) or f'Aligned year to {canonical_year}',
+            }
+        return {'success': False, 'error': res.get('error') or 'Failed to align album release year'}
 
     # --- Album Completeness Auto-Fill ---
 
