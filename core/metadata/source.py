@@ -313,7 +313,28 @@ def _cached_mb_artist_details(mb_service, artist_mbid: str) -> Optional[Dict[str
     return detail
 
 
-def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
+def _audio_file_duration_ms(audio_file) -> Optional[int]:
+    """Best-effort duration (ms) of the downloaded file for the MusicBrainz
+    recording match (#1509 duration gate). None when unknown — the gate
+    simply doesn't apply. Never raises: mutagen may be missing and files may
+    be unreadable; either way the match falls back to name/identity only.
+    """
+    if not audio_file:
+        return None
+    try:
+        symbols = get_mutagen_symbols()
+        if not symbols:
+            return None
+        audio = symbols.File(str(audio_file))
+        length = getattr(getattr(audio, "info", None), "length", None)
+        if length and float(length) > 0:
+            return int(float(length) * 1000)
+    except Exception:  # noqa: BLE001, S110 — probe failure means 'unknown', never a reject
+        pass
+    return None
+
+
+def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str, audio_file=None) -> None:
     if cfg.get("musicbrainz.embed_tags", True) is False:
         return
     if not track_title or not artist_name:
@@ -325,9 +346,24 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
         return
 
     pinned_release = metadata.get("musicbrainz_release_id")
+
+    # Resolve the artist identity FIRST: the recording lookup below takes it
+    # as a hard gate (#1509 — a same-named band's recording can otherwise
+    # outscore the real artist's on printed-credit text alone).
+    track_artist_name = metadata.get("artist", "") or artist_name
+    if ", " in track_artist_name:
+        track_artist_name = track_artist_name.split(", ")[0]
+    artist_result = None if pinned_release else _cached_mb_artist(mb_service, track_artist_name)
+    if artist_result and artist_result.get("mbid"):
+        pp["artist_mbid"] = artist_result["mbid"]
+        pp["id_tags"]["MUSICBRAINZ_ARTIST_ID"] = pp["artist_mbid"]
+
     details = {}
     searched_recording = None
-    result = None if pinned_release else _call_source_lookup("MusicBrainz recording", mb_service.match_recording, track_title, artist_name)
+    result = None if pinned_release else _call_source_lookup(
+        "MusicBrainz recording", mb_service.match_recording, track_title, artist_name,
+        artist_mbid=pp.get("artist_mbid"),
+        duration_ms=_audio_file_duration_ms(audio_file))
     if result and result.get("mbid"):
         pp["recording_mbid"] = result["mbid"]
         searched_recording = result["mbid"]
@@ -343,14 +379,6 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
             if isrcs:
                 pp["isrc"] = isrcs[0]
             pp["mb_genres"] = [g["name"] for g in sorted(details.get("genres", []), key=lambda x: x.get("count", 0), reverse=True)]
-
-    track_artist_name = metadata.get("artist", "") or artist_name
-    if ", " in track_artist_name:
-        track_artist_name = track_artist_name.split(", ")[0]
-    artist_result = None if pinned_release else _cached_mb_artist(mb_service, track_artist_name)
-    if artist_result and artist_result.get("mbid"):
-        pp["artist_mbid"] = artist_result["mbid"]
-        pp["id_tags"]["MUSICBRAINZ_ARTIST_ID"] = pp["artist_mbid"]
 
     album_name_for_mb = metadata.get("album", "")
     if album_name_for_mb or pinned_release:
@@ -875,9 +903,9 @@ def _process_bandcamp_source(pp: dict, metadata: dict, cfg, runtime, track_title
             pp["bandcamp_label"] = bc_label
 
 
-def _process_source_enrichment(source_name: str, pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str, provenance=None) -> None:
+def _process_source_enrichment(source_name: str, pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str, provenance=None, audio_file=None) -> None:
     if source_name == "musicbrainz":
-        _process_musicbrainz_source(pp, metadata, cfg, runtime, track_title, artist_name)
+        _process_musicbrainz_source(pp, metadata, cfg, runtime, track_title, artist_name, audio_file=audio_file)
     elif source_name == "deezer":
         _process_deezer_source(pp, metadata, cfg, runtime, track_title, artist_name, provenance=provenance)
     elif source_name == "audiodb":
@@ -1594,7 +1622,7 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
 
         for source_name in source_order:
             _process_source_enrichment(source_name, pp, metadata, cfg, runtime, track_title, artist_name,
-                                       provenance=cached_meta)
+                                       provenance=cached_meta, audio_file=audio_file)
 
         if not pp["id_tags"] and not pp["deezer_bpm"] and not pp["deezer_isrc"] and not pp["tidal_bpm"] and not pp["hifi_bpm"] and not pp["hifi_copyright"] and not pp["audiodb_mood"] and not pp["audiodb_style"] and not pp["bandcamp_url"] and not pp["bandcamp_tags"]:
             return

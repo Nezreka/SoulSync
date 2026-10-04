@@ -356,7 +356,7 @@ def test_embed_source_ids_writes_musicbrainz_release_year_and_updates_album_year
         def __init__(self):
             self.mb_client = _FakeMBClient()
 
-        def match_recording(self, title, artist):
+        def match_recording(self, title, artist, **kwargs):
             return {"mbid": "rec-mbid"}
 
         def match_artist(self, artist):
@@ -431,7 +431,7 @@ def test_musicbrainz_release_lookup_failure_does_not_poison_cache(monkeypatch):
             self.release_calls = 0
             self.mb_client = _FakeMBClient()
 
-        def match_recording(self, title, artist):
+        def match_recording(self, title, artist, **kwargs):
             return None
 
         def match_artist(self, artist):
@@ -692,7 +692,7 @@ def _build_mb_genre_test(monkeypatch, *, recording_genres, release_genres, artis
         def __init__(self):
             self.mb_client = _FakeMBClient()
 
-        def match_recording(self, t, a):
+        def match_recording(self, t, a, **kwargs):
             return {"mbid": "rec-mbid"}
 
         def match_artist(self, a):
