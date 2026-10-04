@@ -2930,6 +2930,7 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
     border-color: rgba(var(--accent-rgb, 88 101 242), 0.92); outline: none; }
 .vreq-card-btn:disabled { opacity: 0.5; cursor: default; }
 .vsr-card:hover .vreq-card-btn, .vd-sim-card:hover .vreq-card-btn, .vwlp-card:hover .vreq-card-btn,
+.vd-ep:hover .vreq-card-btn, .vd-ep:focus-within .vreq-card-btn, .vd-ep--open .vreq-card-btn,
 .vreq-card-btn:focus-visible { opacity: 1; transform: none; }
 @media (hover: none) { .vreq-card-btn { opacity: 1; transform: none; } }
 .vsr-ribbon--req { background: rgba(59, 130, 246, 0.9); border: none; }
