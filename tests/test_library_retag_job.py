@@ -190,13 +190,16 @@ def test_scan_full_depth_auto_apply_runs_enrich(tmp_path, monkeypatch):
                         lambda fp, db_data, **k: {'success': True})
     enriched = []
     monkeypatch.setattr(lr, '_run_full_enrich',
-                        lambda fp, meta: enriched.append((fp, meta)) or True)
+                        lambda fp, meta, **k: enriched.append((fp, meta, k.get('runtime'))) or True)
 
     result = lr.LibraryRetagJob().scan(ctx)
 
     assert result.auto_fixed == 1
     assert len(enriched) == 1
     assert enriched[0][1]['spotify_track_id'] == 'sp_trk'
+    # the scan must thread a REAL (non-None) runtime through apply -> enrich,
+    # otherwise depth=full silently stays the old no-op (#1511.1)
+    assert enriched[0][2] is not None
 
 
 def test_scan_light_depth_does_not_run_enrich(tmp_path, monkeypatch):
@@ -213,7 +216,7 @@ def test_scan_light_depth_does_not_run_enrich(tmp_path, monkeypatch):
                         lambda fp, db_data, **k: {'success': True})
     enriched = []
     monkeypatch.setattr(lr, '_run_full_enrich',
-                        lambda fp, meta: enriched.append(fp) or True)
+                        lambda fp, meta, **k: enriched.append(fp) or True)
 
     lr.LibraryRetagJob().scan(ctx)
     assert enriched == []
@@ -244,7 +247,164 @@ def test_add_source_ids_maps_per_source():
     assert db2 == {'musicbrainz_release_id': 'REL', 'musicbrainz_recording_id': 'REC'}
 
 
+def test_scan_full_depth_fill_missing_includes_unchanged_tracks(tmp_path, monkeypatch):
+    """Issue #1511.3: at depth=full, fill_missing tracks with complete tags and
+    no changes still get the enrichment — the scan creates a finding with
+    full_meta instead of skipping them."""
+    track = tmp_path / 'track.flac'; track.write_bytes(b'')
+    conn = _db_with_album(str(tmp_path / 'm.db'), str(track), current_title='Real Title')
+    ctx = _context(conn, {'mode': 'fill_missing', 'cover_art': 'skip', 'source': 'spotify',
+                          'depth': 'full'})
+    _patch_source(monkeypatch, {
+        'title': 'Real Title', 'album_artist': 'Real Artist', 'album': 'Real Album',
+        'year': '2021', 'genre': 'Rock', 'track_number': 1, 'disc_number': 1,
+    })
+
+    result = lr.LibraryRetagJob().scan(ctx)
+
+    assert result.findings_created == 1
+    d = ctx.findings[0]['details']
+    assert d['tracks'][0]['changes'] == {}
+    assert d['tracks'][0]['full_meta']['spotify_track_id'] == 'sp_trk'
+    assert '(enrichment)' in ctx.findings[0]['title']
+
+
+def test_build_retag_enrichment_runtime_wires_source_clients(monkeypatch):
+    """Issue #1511.1: the runtime handed to embed_source_ids() carries real
+    client objects in the worker-shaped attrs the source processors read
+    (mb_worker.mb_service, *_worker.client)."""
+    import sys, types
+    made = {}
+
+    def _fake_client_module(name, cls_name):
+        mod = types.ModuleType(name)
+
+        def _init(self, *a, **k):
+            made.setdefault(cls_name, self)
+
+        cls = type(cls_name, (), {'__init__': _init})
+        setattr(mod, cls_name, cls)
+        return mod
+
+    monkeypatch.setitem(sys.modules, 'core.deezer_client',
+                        _fake_client_module('core.deezer_client', 'DeezerClient'))
+    monkeypatch.setitem(sys.modules, 'core.audiodb_client',
+                        _fake_client_module('core.audiodb_client', 'AudioDBClient'))
+    monkeypatch.setitem(sys.modules, 'core.lastfm_client',
+                        _fake_client_module('core.lastfm_client', 'LastFMClient'))
+    mb_mod = types.ModuleType('core.musicbrainz_service')
+
+    def _mb_init(self, *a, **k):
+        made.setdefault('MusicBrainzService', self)
+
+    mb_mod.MusicBrainzService = type('MusicBrainzService', (), {'__init__': _mb_init})
+    monkeypatch.setitem(sys.modules, 'core.musicbrainz_service', mb_mod)
+
+    rt = lr.build_retag_enrichment_runtime(
+        config_manager=SimpleNamespace(get=lambda k, d=None: 'KEY' if k == 'lastfm.api_key' else d),
+        db=object())
+
+    assert rt.deezer_worker.client is made['DeezerClient']
+    assert rt.audiodb_worker.client is made['AudioDBClient']
+    assert rt.lastfm_worker.client is made['LastFMClient']
+    assert rt.mb_worker.mb_service is made['MusicBrainzService']
+
+
+def test_run_full_enrich_passes_file_date_to_enrichment(monkeypatch):
+    """Issue #1511.2: the file's full date is handed to embed_source_ids() in
+    the metadata (blocking the writer's unconditional release-year fallback).
+    Pins the handover, not the write itself — embed_source_ids is mocked."""
+    import sys, types
+    seen = {}
+    src_mod = types.ModuleType('core.metadata.source')
+    src_mod.embed_source_ids = lambda audio, meta, context=None, runtime=None: seen.update(
+        meta=dict(meta), runtime=runtime)
+    monkeypatch.setitem(sys.modules, 'core.metadata.source', src_mod)
+    common_mod = types.ModuleType('core.metadata.common')
+    audio = SimpleNamespace(tags=object(), save=lambda: seen.setdefault('saved', True))
+    common_mod.get_mutagen_symbols = lambda: SimpleNamespace(File=lambda p, **k: audio)
+    monkeypatch.setitem(sys.modules, 'core.metadata.common', common_mod)
+    monkeypatch.setattr(lr, '_read_embedded_date', lambda fp, symbols: '2016-01-19')
+
+    full_meta = {'title': 'T', 'spotify_track_id': 'x'}
+    rt = SimpleNamespace(deezer_worker=SimpleNamespace(client=object()))
+    assert lr._run_full_enrich('/tmp/does-not-matter.flac', full_meta, runtime=rt) is True
+
+    assert seen['meta']['date'] == '2016-01-19'
+    assert 'date' not in full_meta            # caller dict untouched
+    assert seen['runtime'] is rt               # real runtime actually passed
+    assert seen['saved'] is True
+
+
+def test_apply_enrichment_only_plan_runs_enrich(tmp_path, monkeypatch):
+    """Issue #1511.2 (review): a full-depth plan with empty db_data (e.g. a
+    deezer-matched track — deezer ids are never stamped) must still reach
+    _run_full_enrich instead of being skipped, and count as written."""
+    track = tmp_path / 'track.flac'; track.write_bytes(b'')
+    enriched = []
+    monkeypatch.setattr(lr, '_run_full_enrich',
+                        lambda fp, meta, **k: enriched.append((fp, meta)) or True)
+    plans = [{'file_path': str(track), 'db_data': {},
+              'full_meta': {'title': 'T', 'artist': 'A'}}]
+
+    res = lr.apply_track_plans(plans, full=True, enrich_runtime=SimpleNamespace())
+
+    assert enriched and enriched[0][0] == str(track)
+    assert res['written'] == 1
+    assert res['skipped'] == 0
+    assert res['failed'] == 0
+
+
+def test_apply_enrichment_only_plan_counts_enrich_failure(tmp_path, monkeypatch):
+    """The mirror: enrichment-only plan whose enrichment fails counts failed."""
+    track = tmp_path / 'track.flac'; track.write_bytes(b'')
+    monkeypatch.setattr(lr, '_run_full_enrich', lambda fp, meta, **k: False)
+    plans = [{'file_path': str(track), 'db_data': {},
+              'full_meta': {'title': 'T', 'artist': 'A'}}]
+
+    res = lr.apply_track_plans(plans, full=True, enrich_runtime=SimpleNamespace())
+
+    assert res['written'] == 0
+    assert res['failed'] == 1
+
+
 # ── apply handler ──
+
+def test_fix_library_retag_passes_enrichment_runtime(tmp_path, monkeypatch):
+    """_fix_library_retag must hand apply_track_plans a real enrichment runtime
+    at full depth (and None at light depth) — the #1511.1 wiring seam."""
+    import core.repair_worker as rw
+    track = tmp_path / 'a.flac'; track.write_bytes(b'')
+
+    worker = rw.RepairWorker.__new__(rw.RepairWorker)
+    worker.db = SimpleNamespace()
+    worker._config_manager = SimpleNamespace(get=lambda k, d=None: d)
+    worker.transfer_folder = str(tmp_path)
+    monkeypatch.setattr(rw, '_resolve_file_path', lambda p, *a, **k: p)
+
+    calls = []
+    monkeypatch.setattr('core.repair_jobs.library_retag.apply_track_plans',
+                        lambda plans, *a, **k: calls.append(k) or {'written': 1, 'failed': 0,
+                                                                 'skipped': 0, 'cover_written': False})
+    sentinel = SimpleNamespace()
+    monkeypatch.setattr('core.repair_jobs.library_retag.build_retag_enrichment_runtime',
+                        lambda cm, db: sentinel)
+
+    base = {'tracks': [{'file_path': str(track), 'db_data': {'title': 'x'},
+                        'full_meta': {'title': 'x'}}],
+            'cover_action': None, 'cover_url': None}
+
+    res = worker._fix_library_retag('album', '1', None, {**base, 'depth': 'full'})
+    assert res['success'] is True
+    assert calls[-1]['full'] is True
+    assert calls[-1]['enrich_runtime'] is sentinel
+
+    calls.clear()
+    res = worker._fix_library_retag('album', '1', None, {**base, 'depth': 'light'})
+    assert res['success'] is True
+    assert calls[-1]['full'] is False
+    assert calls[-1]['enrich_runtime'] is None
+
 
 def test_fix_library_retag_writes_each_track(tmp_path, monkeypatch):
     import core.repair_worker as rw
