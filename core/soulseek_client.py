@@ -112,7 +112,7 @@ class SoulseekClient(DownloadSourcePlugin):
         # state instead of clearing other clients' (Lidarr's slskd plugin, a
         # second SoulSync, a manual download in slskd's own UI). In-memory by
         # design: after a restart, pre-restart transfers are simply left alone.
-        self._own_downloads: Dict[str, set] = {}  # username -> {id, filename}
+        self._own_downloads: Dict[str, set] = {}  # username -> {slskd transfer id}
         self._own_search_ids: set = set()
 
         # Rate limiting for searches: the 35/220 window lives in the shared
@@ -832,12 +832,14 @@ class SoulseekClient(DownloadSourcePlugin):
     
     async def download(self, username: str, filename: str, file_size: int = 0) -> Optional[str]:
         token = await self._download_impl(username, filename, file_size)
-        if token:
-            # Record both the returned token (id, or filename fallback) and the
-            # filename: enqueue responses do not always carry an id, and the
-            # transfer list carries both, so ownership can match either.
+        if token and str(token) != str(filename):
+            # Ownership is tracked by slskd's transfer id ONLY. The filename
+            # is deliberately not recorded: two clients can download the same
+            # file from the same user, and a filename match would hand the
+            # other client's transfer to our cleanup (#1499 through the side
+            # door). Fail closed: an enqueue whose response carried no id is
+            # left for scope=all or manual cleanup, like pre-restart transfers.
             self._remember_own_download(username, token)
-            self._remember_own_download(username, filename)
         return token
 
     async def _download_impl(self, username: str, filename: str, file_size: int = 0) -> Optional[str]:
@@ -1378,15 +1380,12 @@ class SoulseekClient(DownloadSourcePlugin):
         owned = self._owned_downloads().get(username)
         if not owned:
             return False
-        return (str(file_data.get('id', '')) in owned
-                or str(file_data.get('filename', '')) in owned)
+        return str(file_data.get('id', '')) in owned
 
     def _forget_own_download(self, username: str, file_data: dict) -> None:
         owned = self._owned_downloads().get(username)
-        if not owned:
-            return
-        owned.discard(str(file_data.get('id', '')))
-        owned.discard(str(file_data.get('filename', '')))
+        if owned:
+            owned.discard(str(file_data.get('id', '')))
 
     @staticmethod
     def _is_terminal_state(state) -> bool:

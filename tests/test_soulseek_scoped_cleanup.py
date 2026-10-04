@@ -52,7 +52,9 @@ def _transfers():
             {'id': 'own-1', 'filename': 'a\\own1.flac', 'state': 'Completed, Succeeded'},
             {'id': 'own-2', 'filename': 'a\\own2.flac', 'state': 'Completed, Errored'},
             {'id': 'own-3', 'filename': 'a\\own3.flac', 'state': 'InProgress'},
-            {'id': 'other-1', 'filename': 'a\\other.flac', 'state': 'Completed, Succeeded'},
+            # same filename as own-1, different id: another client grabbed
+            # the same file from the same peer (the #1501 review catch)
+            {'id': 'other-1', 'filename': 'a\\own1.flac', 'state': 'Completed, Succeeded'},
         ]}]},
         {'username': 'peerB', 'directories': [{'files': [
             {'id': 'other-2', 'filename': 'b\\lidarr.flac', 'state': 'Completed, Succeeded'},
@@ -177,7 +179,7 @@ def test_scoped_buffer_threshold_ignores_foreign_volume():
     assert _deletes(calls) == []
 
 
-def test_download_records_ownership():
+def test_download_records_ownership_by_id_only():
     c = _client()
 
     async def impl(username, filename, file_size=0):
@@ -186,4 +188,19 @@ def test_download_records_ownership():
     c._download_impl = impl
     token = asyncio.run(c.download('peerA', 'a\\song.flac', 123))
     assert token == 'id-9'
-    assert c._own_downloads['peerA'] == {'id-9', 'a\\song.flac'}
+    # id only: a filename record would match another client's transfer of
+    # the same file from the same user
+    assert c._own_downloads['peerA'] == {'id-9'}
+
+
+def test_idless_enqueue_records_nothing():
+    c = _client()
+
+    async def impl(username, filename, file_size=0):
+        return filename  # slskd response carried no id
+
+    c._download_impl = impl
+    token = asyncio.run(c.download('peerA', 'a\\song.flac', 123))
+    assert token == 'a\\song.flac'
+    # fail closed: nothing recorded, so scoped cleanup leaves it alone
+    assert c._own_downloads.get('peerA', set()) == set() or 'peerA' not in c._own_downloads
