@@ -742,7 +742,14 @@ class ConfigManager:
                 "session_key": "",
                 "scrobble_enabled": False,
                 "username": "",
-                "listening_sync_enabled": False
+                "listening_sync_enabled": False,
+                "tags": {
+                    # #1513: when no genre source yields a genre, fall back to
+                    # the artist's Last.fm top tags. opt-in, off by default.
+                    # Requires metadata_enhancement.tags.genre_merge to be on
+                    # (the fallback hooks into the genre-merge block).
+                    "artist_genre_fallback": False,
+                }
             },
             "genius": {
                 "access_token": ""
