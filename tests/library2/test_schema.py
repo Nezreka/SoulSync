@@ -21,6 +21,8 @@ _EXPECTED_TABLES = {
     "lib2_provider_attempts", "lib2_media_server_mappings", "lib2_library_roots",
     # Cached artist counts used only as the artist list's ORDER BY key.
     "lib2_artist_rollup",
+    # Provider credit snapshots, linked when a guest artist joins (A04).
+    "lib2_provider_credits",
 }
 
 

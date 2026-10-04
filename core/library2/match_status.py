@@ -412,6 +412,10 @@ def set_library_v2_match(
     # The default edition names the release the album row stands for, or the
     # chip says one release while completeness and track-number repair read
     # another (feature-parity A01). Same transaction as the id.
+    if canonical == "artist" and value and service in ("spotify", "deezer"):
+        # credits stored before this artist had the id (A04)
+        from core.library2.provider_credits import materialize_artist_credits
+        materialize_artist_credits(conn, int(entity_id))
     if canonical == "album":
         try:
             from core.library2.editions import sync_default_edition

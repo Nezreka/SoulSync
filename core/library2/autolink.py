@@ -242,6 +242,8 @@ def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None,
                 "WHERE id=? AND spotify_id IS NULL", (provider_id, row["id"]))
         elif namespace is not None:
             _adopt_external_id(conn, "lib2_artists", row["id"], namespace, provider_id)
+        if namespace in ("spotify", "deezer"):
+            _materialize_credits(conn, row["id"])
         return row["id"]
 
     if not create:
@@ -258,7 +260,15 @@ def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None,
         "quality_profile_id, monitored) VALUES(?, ?, ?, ?, ?, ?, ?)",
         (name, key, name, provider_id if namespace == "spotify" else None,
          external_json, default_quality_profile_id(conn), monitored))
+    if namespace in ("spotify", "deezer"):
+        _materialize_credits(conn, cur.lastrowid)
     return cur.lastrowid
+
+
+def _materialize_credits(conn, artist_id) -> None:
+    """A guest credited on tracks matched before this artist joined (A04)."""
+    from core.library2.provider_credits import materialize_artist_credits
+    materialize_artist_credits(conn, artist_id)
 
 
 def _find_or_create_album(conn, artist_id: int, title: str, *,

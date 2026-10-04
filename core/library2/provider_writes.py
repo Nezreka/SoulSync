@@ -122,6 +122,10 @@ def write_provider_enrichment(
                 f"UPDATE {table} SET {promoted}=? "
                 f"WHERE id=? AND COALESCE({promoted},'')<>?",
                 (value, entity_id, value))
+        if entity == "artist" and key in ("spotify", "deezer"):
+            # credits stored before this artist had the id (A04)
+            from core.library2.provider_credits import materialize_artist_credits
+            materialize_artist_credits(conn, entity_id)
 
     if columns:
         available = _columns(conn, table)

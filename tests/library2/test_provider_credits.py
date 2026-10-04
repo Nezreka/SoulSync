@@ -67,3 +67,48 @@ def test_an_id_on_two_artists_is_not_guessed(tmp_path):
     conn.execute("UPDATE lib2_artists SET spotify_id='sp-ye' WHERE id=?", (other,))
     assert link_credited_artists(conn, "track", track, "spotify",
                                  [{"id": "sp-jay"}, {"id": "sp-ye"}]) == 0
+
+
+def test_a_guest_who_joins_later_gets_the_credits_matched_before(tmp_path):
+    """A04: the credit list is kept; when the guest gains the provider id,
+    the track and album junctions follow without re-matching anything."""
+    from core.library2.match_status import set_library_v2_match
+
+    db, conn, jay, _kanye, album, track = _world(tmp_path)
+    credits = [{"id": "sp-jay", "name": "Jay-Z"}, {"id": "sp-frank", "name": "Frank Ocean"}]
+    assert link_credited_artists(conn, "track", track, "spotify", credits) == 0
+    assert link_credited_artists(conn, "album", album, "spotify", credits) == 0
+
+    frank = seed_artist(conn, server_id="frank", name="Frank Ocean", server_source="soulsync")
+    set_library_v2_match(conn, "artist", frank, "spotify", "sp-frank")
+
+    assert (frank, "featured") in _credits(conn, "lib2_track_artists", "track_id", track)
+    assert (frank, "featured") in _credits(conn, "lib2_album_artists", "album_id", album)
+
+
+def test_a_worker_match_and_a_new_download_artist_materialize_too(tmp_path):
+    from core.library2.autolink import find_or_create_artist
+    from core.library2.provider_writes import write_provider_enrichment
+
+    db, conn, _jay, _kanye, _album, track = _world(tmp_path)
+    link_credited_artists(conn, "track", track, "deezer",
+                          [{"id": "dz-jay"}, {"id": "dz-frank"}, {"id": "dz-nas"}])
+
+    frank = seed_artist(conn, server_id="frank", name="Frank Ocean", server_source="soulsync")
+    write_provider_enrichment(conn, entity_type="artist", entity_id=frank,
+                              service="deezer", provider_id="dz-frank")
+    nas = find_or_create_artist(conn, "Nas", spotify_id="dz-nas", source="deezer")
+
+    linked = _credits(conn, "lib2_track_artists", "track_id", track)
+    assert (frank, "featured") in linked and (nas, "featured") in linked
+
+
+def test_a_new_match_replaces_the_credit_snapshot(tmp_path):
+    db, conn, _jay, _kanye, _album, track = _world(tmp_path)
+    link_credited_artists(conn, "track", track, "spotify", [{"id": "sp-jay"}, {"id": "sp-old"}])
+    link_credited_artists(conn, "track", track, "spotify", [{"id": "sp-jay"}, {"id": "sp-new"}])
+
+    stored = [r[0] for r in conn.execute(
+        "SELECT source_artist_id FROM lib2_provider_credits WHERE entity_id=? ORDER BY position",
+        (track,))]
+    assert stored == ["sp-jay", "sp-new"]

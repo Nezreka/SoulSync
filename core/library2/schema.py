@@ -1182,6 +1182,13 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         ensure_editions_schema(cursor)
     except Exception as e:  # noqa: BLE001
         logger.error("edition/recording schema failed (will retry next start): %s", e)
+    # Provider credit snapshots (A04): every artist a source credits on a
+    # track/album, linked when that artist joins the library.
+    try:
+        from core.library2.provider_credits import ensure_provider_credits_schema
+        ensure_provider_credits_schema(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("provider-credit schema failed (will retry next start): %s", e)
     # Typed provider provenance (audit ADR-06): normalized payload snapshots
     # carry completeness, parser version and a stable hash. Refresh paths use
     # this contract to distinguish a complete catalog from partial pagination.
