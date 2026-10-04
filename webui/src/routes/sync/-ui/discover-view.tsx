@@ -13,7 +13,6 @@ import type { ReactNode } from 'react';
 
 import { useOverviewModel } from './overview/use-overview-model';
 import { runSyncHeaderAction } from './sync-shell';
-
 import './discover-view.css';
 
 export interface DiscoverViewProps {
@@ -79,9 +78,7 @@ export function DiscoverView({
               <button
                 type="button"
                 className="pl-discover-cta"
-                onClick={() =>
-                  runSyncHeaderAction(stage.actionKey, onOpenAutoSync, onActivity)
-                }
+                onClick={() => runSyncHeaderAction(stage.actionKey, onOpenAutoSync, onActivity)}
               >
                 {stage.cta}
               </button>
@@ -93,9 +90,7 @@ export function DiscoverView({
       <section aria-label="Discovered">
         <div className="pl-discover-stage-head">
           <h3 className="pl-section-title">Discovered</h3>
-          <p className="pl-caption">
-            {discoveredCount} playlists with tracks waiting
-          </p>
+          <p className="pl-caption">{discoveredCount} playlists with tracks waiting</p>
         </div>
         {discovery}
       </section>
