@@ -136,6 +136,7 @@ import {
 import { computeTrackEditValues } from '../-metadata-edit';
 import { ArtistVideosSection } from '../../artist-detail/-ui/artist-videos-section';
 import { ConcertsSection } from '../../artist-detail/-ui/concerts-section';
+import { ReassignModal } from '../../artist-detail/-ui/reassign-modal';
 import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal';
 import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
 import {
@@ -152,7 +153,7 @@ import { groupHistoryEvents } from './history-groups';
 import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
 import { QualityProfilePicker } from './quality-profile-modal';
-import { ReassignModal } from './reassign-modal';
+import { reassignSubject } from './reassign';
 import { AlbumReorganizeModal, ArtistRenamePreviewModal } from './reorganize-modal';
 import { RetagModal } from './retag-modal';
 import { LibraryToolDialog } from './tool-dialog';
@@ -3194,7 +3195,7 @@ export function AlbumOverflowMenu({
       ) : null}
       {showReassign ? (
         <ReassignModal
-          albumId={album.id}
+          albumId={reassignSubject(album.id)}
           albumTitle={album.title}
           currentArtist={album.artist_name || 'its current artist'}
           imageUrl={album.image_url ?? undefined}

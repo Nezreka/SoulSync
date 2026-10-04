@@ -5651,12 +5651,6 @@ textarea.searchInput {
   flex-shrink: 0;
 }
 
-.reassignDialog:global(.reid-modal) {
-  width: min(940px, calc(100vw - 36px));
-  max-height: calc(100dvh - 36px);
-  border-radius: 16px;
-}
-
 @media (max-width: 768px) {
   .page {
     margin: 0;
@@ -6143,26 +6137,6 @@ textarea.searchInput {
   }
 }
 
-.reassignDialog :global(.reid-search-input) {
-  width: 0;
-  min-width: 0;
-}
-.reassignDialog :global(.reid-results) {
-  min-height: 150px;
-}
-.reassignDialog :global(.reid-state) {
-  min-height: 140px;
-}
-@media (max-width: 600px) {
-  .reassignDialog :global(.reid-search),
-  .reassignDialog :global(.reid-footer) {
-    padding-inline: 14px;
-  }
-  .reassignDialog :global(.reid-search-icon) {
-    left: 28px;
-  }
-}
-
 .wantedTable.trackTable .trackActions {
   width: 36px;
 }
@@ -6194,8 +6168,7 @@ textarea.searchInput {
 .toolWorkspace.toolFitContent,
 .toolWorkspace.toolFitContent:has(.retagTable),
 .modalDetail,
-.modalDetail.modalSettings,
-.reassignDialog:global(.reid-modal) {
+.modalDetail.modalSettings {
   width: min(1780px, 100%);
 }
 .toolWorkspace .resultsWrap {
