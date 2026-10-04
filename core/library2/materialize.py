@@ -25,6 +25,7 @@ the artist bookmark / Artist Settings per §52.3).
 
 from __future__ import annotations
 
+from contextlib import closing
 from typing import Any, Dict, Optional
 
 from utils.logging_config import get_logger
@@ -206,8 +207,7 @@ def materialize_wishlist_intent(
         # (core/library2/bootstrap.py) delivers 100% of the warning.
         from database.music_database import get_database
         db = get_database()
-        conn = db._get_connection()
-        try:
+        with closing(db._get_connection()) as conn:
             result = materialize_from_spotify_track(
                 conn, spotify_track_data,
                 explicit_profile_id=explicit_profile_id,
@@ -217,8 +217,6 @@ def materialize_wishlist_intent(
             if result is not None:
                 conn.commit()
             return result
-        finally:
-            conn.close()
     except Exception as e:  # noqa: BLE001
         logger.debug("wishlist materialization failed: %s", e)
         return None

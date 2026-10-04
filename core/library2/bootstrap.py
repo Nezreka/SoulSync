@@ -48,6 +48,7 @@ import threading
 import time
 import uuid
 import json
+from contextlib import closing
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
@@ -211,8 +212,7 @@ def source_watermark(database: Any) -> str:
     Counts plus max ids are intentionally cheap and sufficient to detect a
     changed upgrade source while the compatibility tables still exist.
     """
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         snapshot = {}
         for table in ("artists", "albums", "tracks"):
             exists = conn.execute(
@@ -227,8 +227,6 @@ def source_watermark(database: Any) -> str:
             ).fetchone()
             snapshot[table] = [int(row["n"] or 0), str(row["max_id"] or "")]
         return json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
-    finally:
-        conn.close()
 
 
 def source_row_count(watermark: str) -> int:
@@ -272,8 +270,7 @@ def _is_stale(iso_value: Optional[str], stale_after_seconds: int) -> bool:
 
 def get_state(database: Any) -> Dict[str, Any]:
     """Read the persisted bootstrap status. Safe to call before any claim."""
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         cursor = conn.cursor()
         ensure_bootstrap_schema(cursor)
         conn.commit()
@@ -284,8 +281,6 @@ def get_state(database: Any) -> Dict[str, Any]:
             "FROM lib2_bootstrap_state WHERE id = 1"
         )
         row = cursor.fetchone()
-    finally:
-        conn.close()
     if row is None:
         return {
             "status": "pending", "attempts": 0, "stage": None,
@@ -582,8 +577,7 @@ ClaimKeepalive = _ClaimKeepalive
 
 
 def mark_done(database: Any, owner_token: str, *, watermark: Optional[str] = None) -> bool:
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         cursor = conn.cursor()
         now = _now_iso()
         # A completed run has nothing left to resume; clearing the checkpoint
@@ -599,15 +593,12 @@ def mark_done(database: Any, owner_token: str, *, watermark: Optional[str] = Non
         updated = cursor.rowcount > 0
         conn.commit()
         return updated
-    finally:
-        conn.close()
 
 
 def mark_failed(database: Any, owner_token: str, error: str) -> bool:
     """Record a failed run. The resume checkpoint is deliberately kept: the
     retry should continue where this attempt stopped, not start over."""
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         cursor = conn.cursor()
         now = _now_iso()
         cursor.execute(
@@ -619,14 +610,11 @@ def mark_failed(database: Any, owner_token: str, error: str) -> bool:
         updated = cursor.rowcount > 0
         conn.commit()
         return updated
-    finally:
-        conn.close()
 
 
 def mark_waiting_for_source(database: Any, owner_token: str, *, watermark: str) -> bool:
     """Release an empty bootstrap without declaring it permanently complete."""
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         now = _now_iso()
         cursor = conn.execute(
             "UPDATE lib2_bootstrap_state SET status='waiting_for_source', "
@@ -636,8 +624,6 @@ def mark_waiting_for_source(database: Any, owner_token: str, *, watermark: str) 
         )
         conn.commit()
         return cursor.rowcount > 0
-    finally:
-        conn.close()
 
 
 def _checkpoint_wal(database: Any) -> None:

@@ -23,6 +23,7 @@ would reject good matches for a collision that is not one.
 
 from __future__ import annotations
 
+from contextlib import closing
 from typing import Any, Callable, List, Optional
 
 from core.library2.provider_ids import (
@@ -231,16 +232,13 @@ def _record_unavailable(db, entity_type: str, entity_id: Any, service: str,
     try:
         from core.library2 import provider_attempts
 
-        conn = db._get_connection()
-        try:
+        with closing(db._get_connection()) as conn:
             if not provider_attempts._table_exists(conn, "lib2_provider_attempts"):
                 return
             provider_attempts.record_attempt(
                 conn, entity_type=entity_type, entity_id=entity_id,
                 service=service, status="error", detail=detail[:500])
             conn.commit()
-        finally:
-            conn.close()
     except Exception as exc:  # noqa: BLE001 - bookkeeping must not break the run
         logger.debug("could not record failed stored-id refresh for %s #%s: %s",
                      entity_type, entity_id, exc)
@@ -278,11 +276,8 @@ def honor_stored_match(db, *, entity_type: str, entity_id: Any, service: str,
     error is not — a failed write is something the worker has to hear about
     rather than report as a match that never landed.
     """
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         stored = stored_provider_id(conn, entity_type, entity_id, service)
-    finally:
-        conn.close()
     if not stored:
         return NO_STORED_ID
 

@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import uuid
+from contextlib import closing
 from typing import Any, Callable, Dict, List, Optional
 
 
@@ -226,8 +227,7 @@ def _scope_snapshot(
         marks = ",".join("?" for _ in file_ids)
         id_filter = f" AND tf.id IN ({marks})"
         id_params = [int(f) for f in file_ids]
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         if entity == "artists":
             from core.library2.artist_aliases import resolve_alias_group
 
@@ -270,8 +270,6 @@ def _scope_snapshot(
             ).fetchall()
             title = entity_row["title"]
         return str(title), [dict(row) for row in rows]
-    finally:
-        conn.close()
 
 
 def preview_entity_files(
@@ -418,11 +416,8 @@ def _operation_snapshot(conn, operation_id: str) -> Dict[str, Any]:
 
 
 def get_delete_operation(database, operation_id: str) -> Dict[str, Any]:
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         return _operation_snapshot(conn, operation_id)
-    finally:
-        conn.close()
 
 
 def _mark_file_rows_deleted(conn, file_ids: List[int]) -> None:
@@ -480,8 +475,7 @@ def remove_entity_file_records(
     token = hashlib.sha256(
         json.dumps(token_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         ensure_file_delete_schema(conn.cursor())
         conn.execute(
             """INSERT INTO lib2_file_delete_operations(
@@ -525,8 +519,6 @@ def remove_entity_file_records(
             track_id for item in grouped.values() for track_id in item["track_ids"]
         })
         return result
-    finally:
-        conn.close()
 
 
 def _finish_operation(conn, operation_id: str) -> None:
@@ -559,18 +551,14 @@ def reconcile_incomplete_deletes(database) -> int:
     finish the DB lifecycle; if it still exists, fail closed and require a new
     preview/command instead of deleting automatically after restart.
     """
-    read_conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as read_conn:
         rows = [dict(row) for row in read_conn.execute(
             """SELECT id, operation_id, file_ids_json, resolved_path
                  FROM lib2_file_delete_items WHERE status='deleting'"""
         ).fetchall()]
-    finally:
-        read_conn.close()
 
     observations = [(row, os.path.exists(row["resolved_path"])) for row in rows]
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         operation_ids = {row["operation_id"] for row in rows}
         recovered = 0
         for row, still_exists in observations:
@@ -594,8 +582,6 @@ def reconcile_incomplete_deletes(database) -> int:
             _finish_operation(conn, operation_id)
         conn.commit()
         return recovered
-    finally:
-        conn.close()
 
 
 def _execute_delete_items(
@@ -633,8 +619,7 @@ def _execute_delete_items(
         else:
             validation_error = "file_changed_after_preview"
 
-        conn = database._get_connection()
-        try:
+        with closing(database._get_connection()) as conn:
             if not unchanged:
                 conn.execute(
                     """UPDATE lib2_file_delete_items SET status='failed', error=?
@@ -654,28 +639,22 @@ def _execute_delete_items(
                 (operation_id, item["path"]),
             )
             conn.commit()
-        finally:
-            conn.close()
 
         try:
             unlink(item["path"])
         except Exception as exc:  # noqa: BLE001
             error = str(exc) or exc.__class__.__name__
-            conn = database._get_connection()
-            try:
+            with closing(database._get_connection()) as conn:
                 conn.execute(
                     """UPDATE lib2_file_delete_items SET status='failed', error=?
                          WHERE operation_id=? AND resolved_path=?""",
                     (error, operation_id, item["path"]),
                 )
                 conn.commit()
-            finally:
-                conn.close()
             failed.append({"path": item["path"], "error": error})
             continue
 
-        conn = database._get_connection()
-        try:
+        with closing(database._get_connection()) as conn:
             _mark_file_rows_deleted(conn, item["file_ids"])
             conn.execute(
                 """UPDATE lib2_file_delete_items
@@ -684,8 +663,6 @@ def _execute_delete_items(
                 (operation_id, item["path"]),
             )
             conn.commit()
-        finally:
-            conn.close()
         deleted.append(item["path"])
 
     return {"deleted": deleted, "failed": failed}
@@ -800,32 +777,25 @@ def delete_files_journaled(
     # Before recovery, not after: a worker can reach this on a database whose
     # journal tables were never created, and "no such table" must not be how a
     # delete fails.
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         ensure_file_delete_schema(conn.cursor())
         conn.commit()
-    finally:
-        conn.close()
 
     reconcile_incomplete_deletes(database)
     roots = _library_roots(config_manager)
 
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         planned = [
             _plan_target(conn, target, roots, config_manager,
                          require_library_root=require_library_root)
             for target in targets
         ]
-    finally:
-        conn.close()
 
     ok = [item for item in planned if not item["error"]]
     rejected = [item for item in planned if item["error"]]
 
     operation_id = uuid.uuid4().hex
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         ensure_file_delete_schema(conn.cursor())
         conn.execute(
             """INSERT INTO lib2_file_delete_operations(
@@ -862,19 +832,14 @@ def delete_files_journaled(
                 ),
             )
         conn.commit()
-    finally:
-        conn.close()
 
     outcome = _execute_delete_items(
         database, operation_id, ok, config_manager=config_manager, unlink=unlink,
     )
 
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         _finish_operation(conn, operation_id)
         conn.commit()
-    finally:
-        conn.close()
 
     return {
         "operation_id": operation_id,
@@ -935,8 +900,7 @@ def delete_entity_files(
     to_unlink = [item for item in preview["files"] if item["deletable"]]
 
     operation_id = uuid.uuid4().hex
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         ensure_file_delete_schema(conn.cursor())
         conn.execute(
             """INSERT INTO lib2_file_delete_operations(
@@ -978,16 +942,13 @@ def delete_entity_files(
         for item in gone:
             _mark_file_rows_deleted(conn, item["file_ids"])
         conn.commit()
-    finally:
-        conn.close()
 
     _execute_delete_items(
         database, operation_id, to_unlink,
         config_manager=config_manager, unlink=unlink,
     )
 
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         _finish_operation(conn, operation_id)
         conn.commit()
         result = _operation_snapshot(conn, operation_id)
@@ -997,8 +958,6 @@ def delete_entity_files(
             for track_id in item["track_ids"]
         })
         return result
-    finally:
-        conn.close()
 
 
 __all__ = [

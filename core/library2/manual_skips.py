@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import closing
 from typing import Any, Iterable, Optional, Sequence
 
 
@@ -19,8 +20,7 @@ def record_manual_skip(
     checks = sorted({str(check).strip() for check in skipped_checks if str(check).strip()})
     if not checks:
         return None
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         cursor = conn.execute(
             """INSERT INTO lib2_manual_skips(
                    content_key, title, artist, skipped_checks, profile_id, reason)
@@ -29,8 +29,6 @@ def record_manual_skip(
         )
         conn.commit()
         return int(cursor.lastrowid)
-    finally:
-        conn.close()
 
 
 def attach_manual_skip_file(database, *, content_key: str, file_path: Any) -> bool:
@@ -38,8 +36,7 @@ def attach_manual_skip_file(database, *, content_key: str, file_path: Any) -> bo
     path = str(file_path or "").strip()
     if not content_key or not path:
         return False
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         row = conn.execute(
             """SELECT id FROM lib2_manual_skips
                 WHERE content_key=? AND file_path IS NULL
@@ -54,8 +51,6 @@ def attach_manual_skip_file(database, *, content_key: str, file_path: Any) -> bo
         )
         conn.commit()
         return True
-    finally:
-        conn.close()
 
 
 def active_skip_paths(

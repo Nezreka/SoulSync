@@ -8,6 +8,7 @@ per album and keeps metadata network work out of the import transaction.
 from __future__ import annotations
 
 import threading
+from contextlib import closing
 from typing import Any, Callable, Dict, Iterable, Optional
 
 from utils.logging_config import get_logger
@@ -119,8 +120,7 @@ def schedule_file_track_reconcile(
 ) -> bool:
     """Resolve a freshly linked file's album and enqueue it."""
     try:
-        conn = database._get_connection()
-        try:
+        with closing(database._get_connection()) as conn:
             row = conn.execute(
                 """SELECT t.album_id
                      FROM lib2_track_files tf
@@ -128,8 +128,6 @@ def schedule_file_track_reconcile(
                     WHERE tf.id=?""",
                 (int(file_id),),
             ).fetchone()
-        finally:
-            conn.close()
         if row is None:
             return False
         return schedule_album_track_reconcile(

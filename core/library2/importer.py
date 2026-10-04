@@ -25,6 +25,7 @@ import json
 import re
 import sqlite3
 import uuid
+from contextlib import closing
 from typing import Any, Callable, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
 
 from utils.logging_config import get_logger
@@ -1371,8 +1372,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
     }
     if reset:
         resume = None
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         ensure_library_v2_schema(conn)
         cursor = conn.cursor()
         run_id = resume.run_id if resume else uuid.uuid4().hex
@@ -2358,8 +2358,6 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         conn.commit()
         checkpoint(FINALIZE_STAGE, _FINALIZE_STEPS, _FINALIZE_STEPS)
         logger.info("Library v2 import complete: %s", stats)
-    finally:
-        conn.close()
     # §62.6 Stufe 4: heal artist/album twins that pre-fix imports left behind
     # (own connection, after the import transaction closed). Cheap when clean;
     # best-effort — a repair failure must never fail the import that just
@@ -2371,13 +2369,10 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         logger.warning("Post-import duplicate repair failed: %s", repair_error)
     if first_upgrade:  # after the artist twins are folded: the album's artist is final
         try:
-            backlog_conn = database._get_connection()
-            try:
+            with closing(database._get_connection()) as backlog_conn:
                 stats["reorganize_backlog"] = _carry_reorganize_backlog(
                     backlog_conn.cursor(), album_map, live_owners)
                 backlog_conn.commit()
-            finally:
-                backlog_conn.close()
         except Exception as backlog_error:  # noqa: BLE001 - the import itself succeeded
             logger.warning("Post-import reorganize backlog carry failed: %s", backlog_error)
     # an own library's watchlist is its artists' intent now, not after the

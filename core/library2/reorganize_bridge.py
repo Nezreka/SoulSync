@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from typing import Any, Dict, List, Optional
 
 from utils.logging_config import get_logger
@@ -96,16 +97,13 @@ def catalogue_preview_fn(
     """
     from core.library2.reorganize_plan import plan_album_reorganize
 
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         return plan_album_reorganize(
             conn, album_id,
             build_final_path_fn=build_final_path_fn,
             transfer_dir=transfer_dir,
             resolve_file_path_fn=resolve_file_path_fn,
         )
-    finally:
-        conn.close()
 
 
 def preview_album_reorganize(
@@ -165,16 +163,13 @@ def enqueue_artist_reorganize_all(
     from core.reorganize_queue import get_queue
 
     metadata_source = mode if mode in ("api", "tags") else "api"
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         artist = conn.execute("SELECT id FROM lib2_artists WHERE id=?", (int(lib2_artist_id),)).fetchone()
         if artist is None:
             raise ReorganizeBridgeError("Artist not found", status=404)
         from core.library2.artist_aliases import resolve_alias_group
 
         group = resolve_alias_group(conn, lib2_artist_id)
-    finally:
-        conn.close()
 
     albums_by_id = {}
     for artist_id in group:

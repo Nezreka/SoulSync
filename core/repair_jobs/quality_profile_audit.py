@@ -2,6 +2,7 @@
 
 from core.library2.quality_eval import effective_track_profile, probe_profile_file, quality_issue
 from core.repair_jobs import register_job
+from contextlib import closing
 from core.repair_jobs.base import JobContext, JobResult, RepairJob, drop_hand_tagged, scoped_file_subjects
 
 
@@ -35,8 +36,7 @@ class QualityProfileAuditJob(RepairJob):
         # primary can belong to another owner, leaving several local copies.
         by_id = {row["file_id"]: row for row in rows}
         primary = {}
-        conn = context.db._get_connection()
-        try:
+        with closing(context.db._get_connection()) as conn:
             for selected in conn.execute(
                 "SELECT id FROM lib2_track_files WHERE COALESCE(file_state,'active')='active' "
                 f"ORDER BY {primary_order()}"
@@ -44,8 +44,6 @@ class QualityProfileAuditJob(RepairJob):
                 row = by_id.get(selected["id"])
                 if row:
                     primary.setdefault((row["track_id"], row.get("owner_profile_id")), row)
-        finally:
-            conn.close()
         return drop_hand_tagged(context, scoped_file_subjects(context, list(primary.values())))
 
     def estimate_scope(self, context: JobContext) -> int:
@@ -58,8 +56,7 @@ class QualityProfileAuditJob(RepairJob):
         subjects = self._subjects(context)
         total = len(subjects)
         profiles, skips = {}, {}
-        conn = context.db._get_connection()
-        try:
+        with closing(context.db._get_connection()) as conn:
             for index, row in enumerate(subjects):
                 if context.check_stop() or context.wait_if_paused():
                     result.stopped_early = f"Quality audit interrupted at file {index + 1} of {total}."
@@ -111,6 +108,4 @@ class QualityProfileAuditJob(RepairJob):
                         result.findings_skipped_dedup += 1
                 if context.update_progress:
                     context.update_progress(index + 1, total)
-        finally:
-            conn.close()
         return result

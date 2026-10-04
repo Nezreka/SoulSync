@@ -12,6 +12,7 @@ retry decisions stay in the shared task_worker/monitor machinery
 
 from __future__ import annotations
 
+from contextlib import closing
 from typing import Any, Callable, Mapping, Optional, Tuple
 
 from core.acquisition.candidates import redact_sensitive_text
@@ -129,13 +130,10 @@ def resume_interrupted_retry_walks(
     Called from the periodic acquisition worker cycle. Also purges expired
     journal rows so terminal requests never accumulate worker data.
     """
-    conn = connection_factory()
-    try:
+    with closing(connection_factory()) as conn:
         purge_expired_retry_state(conn, now=now)
         states = list_active_retry_states(conn, now=now, limit=limit)
         conn.commit()
-    finally:
-        conn.close()
     if not states:
         return ()
 

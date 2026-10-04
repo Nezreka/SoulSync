@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import closing
+
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -54,8 +56,7 @@ class MonitoringListReconcileJob(RepairJob):
 
     def estimate_scope(self, context: JobContext) -> int:
         try:
-            conn = context.db._get_connection()
-            try:
+            with closing(context.db._get_connection()) as conn:
                 from core.library2 import ADMIN_PROFILE_ID
                 pending = int(conn.execute(
                     "SELECT COUNT(*) FROM lib2_mirror_outbox WHERE status='pending'"
@@ -69,8 +70,6 @@ class MonitoringListReconcileJob(RepairJob):
                     (ADMIN_PROFILE_ID,),
                 ).fetchone()[0])
                 return pending + artists + wanted
-            finally:
-                conn.close()
         except Exception:  # noqa: BLE001
             return 0
 
@@ -120,12 +119,9 @@ class MonitoringListReconcileJob(RepairJob):
                 result.scanned += int(wishlist_stats["scanned"])
                 result.auto_fixed += int(wishlist_stats["mirrored"])
 
-            conn = context.db._get_connection()
-            try:
+            with closing(context.db._get_connection()) as conn:
                 prune_done(conn, keep=settings["keep_done"])
                 conn.commit()
-            finally:
-                conn.close()
         except Exception as exc:  # noqa: BLE001
             logger.error("monitoring-list reconcile failed: %s", exc, exc_info=True)
             result.errors += 1

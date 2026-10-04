@@ -15,6 +15,7 @@ queued when its file is a genuine upgrade candidate.
 
 from __future__ import annotations
 
+from contextlib import closing
 from typing import Any, Dict, List, Optional
 
 from utils.logging_config import get_logger
@@ -380,8 +381,7 @@ def refresh_quality_profile_wishlist(db, quality_profile_id: int, *,
     """Re-evaluate every Library-v2 track using an edited profile."""
     from core.library2.wanted import recompute_wanted
 
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         recompute_wanted(conn, profile_id=profile_id)
         rows = conn.execute(
             "SELECT track_id, wanted FROM lib2_wanted_tracks "
@@ -396,8 +396,6 @@ def refresh_quality_profile_wishlist(db, quality_profile_id: int, *,
         conn.commit()
         return mirror_projected_tracks_wishlist(
             db, conn, sorted(track_ids), profile_id=profile_id, user_initiated=False)
-    finally:
-        conn.close()
 
 
 __all__ = [

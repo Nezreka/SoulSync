@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import threading
+from contextlib import closing
 from typing import Any, Dict, List, Optional
 
 from utils.logging_config import get_logger
@@ -404,18 +405,14 @@ def drain(db, *, limit: int = 500) -> Dict[str, int]:
     """
     done = failed = superseded = 0
     with _drain_lock:
-        conn = db._get_connection()
-        try:
+        with closing(db._get_connection()) as conn:
             rows = [dict(r) for r in conn.execute(
                 "SELECT id, op, payload, profile_id, user_initiated, attempts "
                 "FROM lib2_mirror_outbox WHERE status='pending' ORDER BY id LIMIT ?",
                 (limit,))]
             obsolete = _superseded_ids(conn, rows)
-        finally:
-            conn.close()
         if obsolete:
-            conn = db._get_connection()
-            try:
+            with closing(db._get_connection()) as conn:
                 marks = ",".join("?" for _ in obsolete)
                 conn.execute(
                     f"""UPDATE lib2_mirror_outbox
@@ -425,8 +422,6 @@ def drain(db, *, limit: int = 500) -> Dict[str, int]:
                     tuple(obsolete),
                 )
                 conn.commit()
-            finally:
-                conn.close()
             superseded = len(obsolete)
             logger.info(
                 "mirror outbox: skipped %d row(s) overridden by a newer op",
@@ -441,8 +436,7 @@ def drain(db, *, limit: int = 500) -> Dict[str, int]:
                 error: Optional[str] = None
             except Exception as e:  # noqa: BLE001
                 error = str(e) or e.__class__.__name__
-            conn = db._get_connection()
-            try:
+            with closing(db._get_connection()) as conn:
                 if error is None:
                     conn.execute(
                         "UPDATE lib2_mirror_outbox SET status='done', "
@@ -460,8 +454,6 @@ def drain(db, *, limit: int = 500) -> Dict[str, int]:
                     logger.warning("mirror outbox op %s (row %s) failed (attempt %d): %s",
                                    row["op"], row["id"], row["attempts"] + 1, error)
                 conn.commit()
-            finally:
-                conn.close()
 
     # iss29-D11: prune here, on the path that actually runs.
     #

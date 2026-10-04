@@ -24,6 +24,7 @@ time the hook fires, and a healing pass is never worth failing that.
 from __future__ import annotations
 
 import threading
+from contextlib import closing
 from typing import Any, Callable, Dict, Optional
 
 from utils.logging_config import get_logger
@@ -59,12 +60,9 @@ def run_unmapped_artist_reconcile(*, cooldown_hours: float) -> Dict[str, Any]:
     from core.library2.native_enrich import reconcile_unmapped_native_artists
 
     db = get_database()
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         stats = reconcile_unmapped_native_artists(conn, cooldown_hours=cooldown_hours)
         conn.commit()
-    finally:
-        conn.close()
     return stats
 
 

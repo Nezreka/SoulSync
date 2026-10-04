@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import re
+from contextlib import closing
 from typing import Any, Dict, List, Optional
 
 from utils.logging_config import get_logger
@@ -525,8 +526,7 @@ def repair_duplicate_artists(database: Any) -> Dict[str, Any]:
         "artists_merged": 0, "alias_linked": 0,
         "albums_folded": 0, "album_review": 0,
     }
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         cursor = conn.cursor()
         # Namespace hygiene FIRST: a fake "spotify" id (really iTunes/Deezer)
         # on one twin would otherwise read as a same-source conflict and
@@ -629,8 +629,6 @@ def repair_duplicate_artists(database: Any) -> Dict[str, Any]:
         # read that finds nothing on a healthy catalogue.
         stats.update(fold_duplicate_track_rows(conn))
         conn.commit()
-    finally:
-        conn.close()
     if stats["albums_folded"]:
         # Deliver any wishlist un-mirrors the folds enqueued (best-effort).
         try:

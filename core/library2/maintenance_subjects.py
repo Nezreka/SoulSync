@@ -9,6 +9,7 @@ enumeration.
 
 from __future__ import annotations
 
+from contextlib import closing
 from typing import Any, Dict, List, Mapping, Optional
 
 from core.library2.provider_ids import source_ids_from_values
@@ -56,8 +57,7 @@ def active_file_subjects(
 ) -> List[Dict[str, Any]]:
     """Return every indexed Library-v2 file with full entity/provider context."""
 
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         if not _table_exists(conn, "lib2_track_files"):
             return []
         state_clause = (
@@ -150,8 +150,6 @@ def active_file_subjects(
             _compat_provider_fields(subject)
             subjects.append(subject)
         return subjects
-    finally:
-        conn.close()
 
 
 def active_album_subjects(
@@ -162,8 +160,7 @@ def active_album_subjects(
 ) -> List[Dict[str, Any]]:
     """Return native releases with provider IDs and an optional file anchor."""
 
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         if not _table_exists(conn, "lib2_albums"):
             return []
         from core.library2.sql_util import owner_clause
@@ -224,8 +221,6 @@ def active_album_subjects(
             _compat_provider_fields(subject)
             subjects.append(subject)
         return subjects
-    finally:
-        conn.close()
 
 
 def subject_details(subject: Mapping[str, Any]) -> Dict[str, Any]:
@@ -266,8 +261,7 @@ def subject_details(subject: Mapping[str, Any]) -> Dict[str, Any]:
 def count_active_files(database: Any, config_manager: Any) -> int:
     """Cheap native scope count used by job progress estimates."""
 
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         if not _table_exists(conn, "lib2_track_files"):
             return 0
         row = conn.execute(
@@ -275,8 +269,6 @@ def count_active_files(database: Any, config_manager: Any) -> int:
             "AND path<>'' AND COALESCE(file_state,'active')='active'"
         ).fetchone()
         return int(row[0]) if row else 0
-    finally:
-        conn.close()
 
 
 __all__ = [

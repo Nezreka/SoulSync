@@ -8,6 +8,7 @@ retried without losing the acquisition/manual-grab correlation.
 from __future__ import annotations
 
 import os
+from contextlib import closing
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Mapping, Optional
 
@@ -303,11 +304,8 @@ def recover_quarantine_entry_to_staging(
         plan_recover_to_staging,
     )
 
-    conn = connection_factory()
-    try:
+    with closing(connection_factory()) as conn:
         existing = get_quarantine_recovery(conn, entry_id)
-    finally:
-        conn.close()
 
     if existing is None:
         plan = plan_recover_to_staging(quarantine_dir, staging_dir, entry_id)

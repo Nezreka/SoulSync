@@ -28,6 +28,7 @@ Persistence rules:
 from __future__ import annotations
 
 import threading
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -398,11 +399,8 @@ def _match_existing(index: Dict[str, List[Dict[str, Any]]], *, title: str,
 
 def _resolve_group(database, artist_id: int) -> List[int]:
     from core.library2.artist_aliases import resolve_alias_group
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         return resolve_alias_group(conn, artist_id)
-    finally:
-        conn.close()
 
 
 def _aggregate_group_stats(requested_id: int, per_member: Dict[int, Dict[str, Any]]) -> Dict[str, Any]:
@@ -474,8 +472,7 @@ def _expand_artist_discography(
         "prune_skipped": False, "auto_monitor_album_ids": [],
     }
     new_album_ids: List[int] = []
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         artist = conn.execute(
             "SELECT id, name, spotify_id, external_ids, quality_profile_id, monitored, monitor_new_items, "
             "discography_synced_at FROM lib2_artists WHERE id=?",
@@ -744,8 +741,6 @@ def _expand_artist_discography(
             "UPDATE lib2_artists SET discography_synced_at=CURRENT_TIMESTAMP WHERE id=?",
             (artist_id,))
         conn.commit()
-    finally:
-        conn.close()
     # perf25-04: releases that just appeared are not covered by the last
     # precache run.  Warm them (and the artist itself) in the background so the
     # discography view does not open on the cold artwork path.
@@ -808,8 +803,7 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
 
     mirrored = 0
     filters_cache: Dict[int, Dict[str, bool]] = {}
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         # Batched once up front (not per-album inside the loop below): a
         # sweep over every monitored artist's releases can cover thousands
         # of albums, and title/primary_artist_id never change mid-loop.
@@ -938,8 +932,6 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
                     track_ids,
                     profile_id=wishlist_profile_id,
                 )
-    finally:
-        conn.close()
     return mirrored
 
 

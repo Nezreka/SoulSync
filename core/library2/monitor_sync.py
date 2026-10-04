@@ -33,6 +33,7 @@ Both operate on the admin profile (ADR-01). Never touches files.
 from __future__ import annotations
 
 import json
+from contextlib import closing
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 from core.library2.sql_util import select_existing_ids
@@ -178,8 +179,7 @@ def demonitor_lib2_artists_for_removed_watchlist(
     from core.library2.monitor_rules import PROVENANCE_USER, record_rule
     from core.library2.wanted import entity_track_ids, recompute_wanted
 
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         artist_ids = _match_lib2_artists(conn, external_ids, name)
         if not artist_ids:
             return {"matched": 0, "demonitored": 0}
@@ -229,8 +229,6 @@ def demonitor_lib2_artists_for_removed_watchlist(
         )
         return {"matched": len(artist_ids), "demonitored": demonitored,
                 "tracks_mirrored": mirrored}
-    finally:
-        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -457,8 +455,7 @@ def demonitor_lib2_tracks_for_removed_wishlist(
     from core.library2.monitor_rules import PROVENANCE_USER, record_rule
     from core.library2.wanted import recompute_wanted
 
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         track_ids = _descriptor_lib2_track_ids(conn, descriptors)
         if not track_ids:
             return {"matched": 0, "demonitored": 0, "tracks_mirrored": 0}
@@ -495,8 +492,6 @@ def demonitor_lib2_tracks_for_removed_wishlist(
             "demonitored": demonitored,
             "tracks_mirrored": mirrored,
         }
-    finally:
-        conn.close()
 
 
 def monitor_lib2_tracks_for_added_wishlist(
@@ -521,8 +516,7 @@ def monitor_lib2_tracks_for_added_wishlist(
     from core.library2.monitor_rules import PROVENANCE_USER, record_rule
     from core.library2.wanted import recompute_wanted
 
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         track_ids = _descriptor_lib2_track_ids(conn, descriptors)
         if not track_ids:
             return {"matched": 0, "monitored": 0}
@@ -545,8 +539,6 @@ def monitor_lib2_tracks_for_added_wishlist(
             len(track_ids), monitored,
         )
         return {"matched": len(track_ids), "monitored": monitored}
-    finally:
-        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -624,8 +616,7 @@ def sync_watchlist_addition(
         from core.library2.monitor_rules import PROVENANCE_USER, record_rule
         from core.library2.wanted import recompute_wanted_for_entity
 
-        conn = db._get_connection()
-        try:
+        with closing(db._get_connection()) as conn:
             artist_id = find_or_create_artist(
                 conn, clean_name,
                 spotify_id=(str(provider_id).strip() or None) if provider_id else None,
@@ -637,8 +628,6 @@ def sync_watchlist_addition(
             recompute_wanted_for_entity(conn, "artists", artist_id, profile_id=profile_id)
             conn.commit()
             return int(artist_id)
-        finally:
-            conn.close()
     except Exception as exc:  # noqa: BLE001
         logger.debug("watchlist forward-sync skipped: %s", exc)
         return None
@@ -767,8 +756,7 @@ def reconcile_artist_watchlist(
     from core.library2.provider_ids import source_ids_from_values
     from core.library2.wanted import entity_track_ids, recompute_wanted
 
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         watchlist_available, watchlist_entries = _watchlist_artist_snapshot(
             conn, profile_id=profile_id,
         )
@@ -887,8 +875,6 @@ def reconcile_artist_watchlist(
             stats["scanned"], stats["monitor_flags_changed"], stats["mirrored"],
         )
         return stats
-    finally:
-        conn.close()
 
 
 def _wishlisted_lib2_track_ids(conn, *, profile_id: int) -> List[int]:
@@ -962,8 +948,7 @@ def reconcile_track_wishlist(
     except Exception as exc:  # noqa: BLE001 — an unknown state is not a licence to delete
         logger.debug("bootstrap activity check unavailable: %s", exc)
         pruning_allowed = False
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         recompute_stats = recompute_wanted(conn, profile_id=profile_id)
         conn.commit()
         changed_set = set(recompute_stats.get("changed_track_ids") or [])
@@ -1036,8 +1021,6 @@ def reconcile_track_wishlist(
             stats["pruned"], stats["refreshed"], stats["mirrored"],
         )
         return stats
-    finally:
-        conn.close()
 
 
 def sync_scanned_tracks_wishlist(
@@ -1065,8 +1048,7 @@ def sync_scanned_tracks_wishlist(
     stats = {"tracks": len(ids), "mirrored": 0}
     if not ids:
         return stats
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         recompute_wanted(conn, profile_id=profile_id, track_ids=ids)
         conn.commit()
         stats["mirrored"] = mirror_projected_tracks_wishlist(
@@ -1074,8 +1056,6 @@ def sync_scanned_tracks_wishlist(
         logger.info("post-scan wishlist sync: %d track(s), %d mirror op(s)",
                     stats["tracks"], stats["mirrored"])
         return stats
-    finally:
-        conn.close()
 
 
 __all__ = [

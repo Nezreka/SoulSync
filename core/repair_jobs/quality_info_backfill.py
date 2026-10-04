@@ -26,6 +26,8 @@ Runs against the native Library-v2 catalogue. Never touches files.
 
 from __future__ import annotations
 
+from contextlib import closing
+
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -86,11 +88,8 @@ class QualityInfoBackfillJob(RepairJob):
 
     def estimate_scope(self, context: JobContext) -> int:
         try:
-            conn = context.db._get_connection()
-            try:
+            with closing(context.db._get_connection()) as conn:
                 return len(_candidate_file_ids(conn))
-            finally:
-                conn.close()
         except Exception:
             return 0
 

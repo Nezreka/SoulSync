@@ -13,6 +13,7 @@ resolved from the files' own embedded art or providers) instead of a
 from __future__ import annotations
 
 import json
+from contextlib import closing
 from typing import Any, Dict, List, Optional, Tuple
 
 from utils.logging_config import get_logger
@@ -399,13 +400,10 @@ def _persist_file_tags(database, file_id: int, file_tags: Dict[str, Any]) -> boo
     """Persist one tag-cache result in a short transaction."""
     from core.library2.tag_cache import persist_tag_cache
 
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         persisted = persist_tag_cache(conn, int(file_id), file_tags)
         conn.commit()
         return persisted
-    finally:
-        conn.close()
 
 
 def _write_sibling_files(database, row: Dict[str, Any], db_data: Dict[str, Any],
@@ -505,11 +503,8 @@ def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
 
     stats: Dict[str, Any] = {"written": 0, "skipped": 0, "failed": 0, "errors": []}
     covers: Dict[int, Optional[Tuple[bytes, str]]] = {}
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         rows = track_contexts(conn, track_ids)
-    finally:
-        conn.close()
     for i, row in enumerate(rows):
         if progress:
             progress("retag", i, len(rows))

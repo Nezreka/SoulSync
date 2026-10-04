@@ -25,6 +25,7 @@ transition, and a recovered path returns to active.
 from __future__ import annotations
 
 import os
+from contextlib import closing
 from typing import Any, Callable, Dict, List, Optional
 
 from utils.logging_config import get_logger
@@ -306,8 +307,7 @@ def rescan_files(
         "path_repointed": 0, "missing_suspected": 0, "missing_confirmed": 0,
         "recovered": 0,
     }
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         # sqlite3.Row values remain tied to the result shape, so materialize
         # plain dicts before closing the read snapshot connection.
         rows = [
@@ -316,8 +316,6 @@ def rescan_files(
                 conn, album_ids=album_ids, file_ids=file_ids,
             )
         ]
-    finally:
-        conn.close()
 
     total = len(rows)
     presence: List[int] = []
@@ -364,8 +362,7 @@ def _flush_observations(database, pending, stats, presence=None) -> None:
     """
     if not pending:
         return
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         for kind, track_id, payload in pending:
             if kind == "missing":
                 state, changed = _persist_missing_observation(
@@ -383,8 +380,6 @@ def _flush_observations(database, pending, stats, presence=None) -> None:
                 stats["recovered"] += 1
                 if presence is not None and track_id:
                     presence.append(int(track_id))
-    finally:
-        conn.close()
     pending.clear()
 
 

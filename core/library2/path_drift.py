@@ -29,6 +29,7 @@ updates the stored native index path.
 from __future__ import annotations
 
 import os
+from contextlib import closing
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -242,8 +243,7 @@ def scan_path_drift(
     produces an empty report for the price of the resolve calls the scan does
     anyway.  Never writes, never touches the filesystem beyond reads.
     """
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         if file_ids is not None:
             if not file_ids:
                 return {"checked": 0, "truncated": False, "proposals": [],
@@ -332,8 +332,6 @@ def scan_path_drift(
 
         return {"checked": checked, "truncated": truncated,
                 "proposals": proposals, "unresolved": unresolved}
-    finally:
-        conn.close()
 
 
 def apply_path_drift_fix(
@@ -416,16 +414,13 @@ def reconcile_imported_path_drift(
     after = 0
     size = max(1, int(batch_size))
     while True:
-        conn = database._get_connection()
-        try:
+        with closing(database._get_connection()) as conn:
             ids = [int(row[0]) for row in conn.execute(
                 "SELECT id FROM lib2_track_files WHERE id>? "
                 "AND legacy_import_run_id IS NOT NULL AND path IS NOT NULL "
                 "AND TRIM(path)<>'' AND COALESCE(file_state,'active')<>'deleted' "
                 "ORDER BY id LIMIT ?", (after, size),
             ).fetchall()]
-        finally:
-            conn.close()
         if not ids:
             break
         after = ids[-1]

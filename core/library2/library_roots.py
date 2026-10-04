@@ -28,6 +28,7 @@ legacy import's owner, or a media-server path this process cannot map.
 from __future__ import annotations
 
 import os
+from contextlib import closing
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from utils.logging_config import get_logger
@@ -213,15 +214,12 @@ def sync_library_roots(database: Any = None) -> int:
             from database.music_database import get_database
             database = get_database()
         roots = configured_roots(database)
-        conn = database._get_connection()
-        try:
+        with closing(database._get_connection()) as conn:
             cursor = conn.cursor()
             ensure_library_roots_schema(cursor)
             moved = apply_roots(cursor, roots)
             conn.commit()
             return moved
-        finally:
-            conn.close()
     except Exception as exc:  # noqa: BLE001 - ownership falls back to the writers' stamps
         logger.error("could not sync library folders: %s", exc)
         return 0

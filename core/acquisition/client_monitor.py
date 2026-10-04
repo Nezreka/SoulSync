@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import threading
 import unicodedata
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple
@@ -560,8 +561,7 @@ class UsenetAcquisitionMonitor:
     def _load_cancel_targets(
         self, download_ids: Iterable[str],
     ) -> Dict[str, str]:
-        conn = self._connection_factory()
-        try:
+        with closing(self._connection_factory()) as conn:
             from core.acquisition.grabs import get_grab
             targets = {}
             for download_id in download_ids:
@@ -569,8 +569,6 @@ class UsenetAcquisitionMonitor:
                 if grab and grab.get("external_job_id"):
                     targets[str(download_id)] = str(grab["external_job_id"])
             return targets
-        finally:
-            conn.close()
 
     def _persist_cancelled(self, download_ids: Iterable[str]) -> Tuple[str, ...]:
         ids = tuple(sorted(set(str(item) for item in download_ids)))

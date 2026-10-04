@@ -30,6 +30,7 @@ import os
 import sqlite3
 import sys
 from collections import Counter, defaultdict
+from contextlib import closing
 from typing import Any, Dict, List
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -56,8 +57,7 @@ def _default_db_path() -> str:
 
 
 def diagnose(db_path: str, profile_id: int) -> Dict[str, Any]:
-    conn = _open_readonly(db_path)
-    try:
+    with closing(_open_readonly(db_path)) as conn:
         stored = conn.execute(
             "SELECT COUNT(*) AS n FROM wishlist_tracks WHERE profile_id = ?",
             (profile_id,),
@@ -69,8 +69,6 @@ def diagnose(db_path: str, profile_id: int) -> Dict[str, Any]:
             "FROM wishlist_tracks WHERE profile_id = ? ORDER BY date_added",
             (profile_id,),
         ).fetchall()
-    finally:
-        conn.close()
 
     unreadable: List[Dict[str, Any]] = []
     parsed: List[Dict[str, Any]] = []

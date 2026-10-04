@@ -27,6 +27,8 @@ the native Library-v2 catalogue. Never touches files.
 
 from __future__ import annotations
 
+from contextlib import closing
+
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -74,8 +76,7 @@ class Lib2DiscographyRefreshJob(RepairJob):
                                 result: JobResult) -> None:
         if not context.create_finding or not album_ids:
             return
-        conn = context.db._get_connection()
-        try:
+        with closing(context.db._get_connection()) as conn:
             for album_id in album_ids:
                 row = conn.execute(
                     """SELECT al.id, al.title, ar.name AS artist_name,
@@ -108,8 +109,6 @@ class Lib2DiscographyRefreshJob(RepairJob):
                 )
                 if inserted:
                     result.findings_created += 1
-        finally:
-            conn.close()
 
     def _artist_ids(self, conn) -> list:
         # §40: alias-member rows (canonical_artist_id set) are skipped as
@@ -127,11 +126,8 @@ class Lib2DiscographyRefreshJob(RepairJob):
 
     def estimate_scope(self, context: JobContext) -> int:
         try:
-            conn = context.db._get_connection()
-            try:
+            with closing(context.db._get_connection()) as conn:
                 return len(self._artist_ids(conn))
-            finally:
-                conn.close()
         except Exception:
             return 0
 
@@ -140,11 +136,8 @@ class Lib2DiscographyRefreshJob(RepairJob):
 
         from core.library2.discography import refresh_artist_discography
 
-        conn = context.db._get_connection()
-        try:
+        with closing(context.db._get_connection()) as conn:
             artist_ids = self._artist_ids(conn)
-        finally:
-            conn.close()
 
         total = len(artist_ids)
         mode = self._mode(context)

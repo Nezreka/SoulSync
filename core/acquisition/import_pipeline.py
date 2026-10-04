@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -129,11 +130,8 @@ def advance_import(
     timestamp = float(now) if now is not None else datetime.now(timezone.utc).timestamp()
 
     for _ in range(4):
-        conn = connection_factory()
-        try:
+        with closing(connection_factory()) as conn:
             record = get_import(conn, import_id)
-        finally:
-            conn.close()
         if record is None:
             return "missing"
         if record.status == "needs_review":
@@ -218,11 +216,8 @@ def advance_import(
                 claim_token = _claim_dispatch(connection_factory, record.id)
                 if claim_token is None:
                     return "already_running"
-                conn = connection_factory()
-                try:
+                with closing(connection_factory()) as conn:
                     current = get_import(conn, record.id)
-                finally:
-                    conn.close()
                 if current is None:
                     return "missing"
                 if current.status != "importing":
@@ -236,11 +231,8 @@ def advance_import(
                     current.id,
                     config_get=config_get,
                 )
-                conn = connection_factory()
-                try:
+                with closing(connection_factory()) as conn:
                     current = get_import(conn, current.id)
-                finally:
-                    conn.close()
                 if current and current.status == "completed":
                     return "completed"
                 if result.errors:
@@ -285,24 +277,18 @@ def advance_open_imports(
     # forever.
     try:
         from core.acquisition.manual_grab import fail_stale_correlated_grabs
-        sweep_conn = connection_factory()
-        try:
+        with closing(connection_factory()) as sweep_conn:
             if fail_stale_correlated_grabs(sweep_conn, now=timestamp):
                 sweep_conn.commit()
-        finally:
-            sweep_conn.close()
     except Exception as exc:  # noqa: BLE001 - sweep must not stop imports
         logger.warning("Stale correlated grab sweep failed: %s", exc)
 
-    conn = connection_factory()
-    try:
+    with closing(connection_factory()) as conn:
         records = [
             record for record in list_open_imports(conn)
             if record.status not in {"needs_review", "recovered_to_staging"}
             and is_due(record, now=timestamp)
         ][:max(int(limit), 0)]
-    finally:
-        conn.close()
 
     outcomes = {}
     for record in records:

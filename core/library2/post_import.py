@@ -18,6 +18,7 @@ being unreachable must never turn a successful migration into a failed one.
 
 from __future__ import annotations
 
+from contextlib import closing
 from typing import Any, Callable, Dict, Optional
 
 from utils.logging_config import get_logger
@@ -61,11 +62,8 @@ def run_post_import_precache(database: Any, config_manager: Any, *,
         migration pays for the whole build on the request thread.
         """
         from core.library2.artist_rollup import refresh_artist_rollup
-        conn = database._get_connection()
-        try:
+        with closing(database._get_connection()) as conn:
             refresh_artist_rollup(conn)
-        finally:
-            conn.close()
 
     # Tracklists first: they turn "3 of 12 tracks known" into real, monitorable
     # rows, which is what the user sees on the page. Tag reading is local file

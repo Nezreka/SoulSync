@@ -9,6 +9,7 @@ tagging, path and retry decision.
 from __future__ import annotations
 
 import hashlib
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
@@ -317,8 +318,7 @@ def dispatch_import_to_main_pipeline(
         from core.imports.pipeline import post_process_matched_download_with_verification
         processor = post_process_matched_download_with_verification
 
-    conn = connection_factory()
-    try:
+    with closing(connection_factory()) as conn:
         from core.acquisition.grabs import get_grab
         from core.acquisition.imports import get_import
         record = get_import(conn, import_id)
@@ -340,8 +340,6 @@ def dispatch_import_to_main_pipeline(
                 continue
             work.append((dict(match), _pipeline_context(conn, record, match, source=source)))
         resolved_path = record.resolved_path
-    finally:
-        conn.close()
 
     from core.imports.paths import docker_resolve_path
     transfer_dir = docker_resolve_path(

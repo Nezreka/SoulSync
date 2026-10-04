@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import closing
 from typing import Any, Dict, Optional
 
 from utils.logging_config import get_logger
@@ -760,8 +761,7 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
 
         from database.music_database import get_database
         db = get_database()
-        conn = db._get_connection()
-        try:
+        with closing(db._get_connection()) as conn:
             track_id = album_id = None
             track_identity_source = "spotify" if embedded_spotify_id else identity_source
             if direct_track_id:
@@ -1019,8 +1019,6 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
             logger.info("Library v2 auto-linked download: %s → track %s (file %s)",
                         os.path.basename(str(file_path)), track_id, file_id)
             return file_id
-        finally:
-            conn.close()
     except Exception as e:  # noqa: BLE001
         logger.debug("library v2 autolink failed: %s", e)
         if raise_on_error:

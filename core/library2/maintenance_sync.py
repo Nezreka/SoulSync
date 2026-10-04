@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import closing
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from core.library2.maintenance_subjects import (
@@ -425,8 +426,7 @@ def annotate_finding_details(
     """Attach stable native identities without creating catalogue rows."""
 
     payload = dict(details or {})
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         if not _table_exists(conn, "lib2_track_files"):
             return payload
         links = _resolve_links(
@@ -437,8 +437,6 @@ def annotate_finding_details(
             details=payload,
             config_manager=config_manager,
         )
-    finally:
-        conn.close()
     if any(links.values()):
         payload["library_v2"] = {
             "artist_id": links["artists"][0] if links["artists"] else None,
@@ -625,8 +623,7 @@ def sync_repair_change(
     """Finalize one successful native repair mutation."""
 
     details, result = dict(details or {}), dict(result or {})
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         if not _table_exists(conn, "lib2_track_files"):
             return {"enabled": True, "reason": "schema_missing", "converged": False}
 
@@ -703,8 +700,6 @@ def sync_repair_change(
             links["files"] = sorted(set(links["files"]) | {new_file_id})
             changed_fields.update({"new_file", "quality"})
         conn.commit()
-    finally:
-        conn.close()
 
     scan_stats = {"scanned": 0, "updated": 0, "missing": 0}
     if links["files"] and not deleting and effects.intersection(
@@ -735,8 +730,7 @@ def sync_repair_change(
     # says so explicitly rather than relying on the job-level effect set.
     forced_recompute = bool(result.get("library_v2_recompute_wanted"))
     if deleting or new_file_id is not None or "wanted" in effects or forced_recompute:
-        conn = database._get_connection()
-        try:
+        with closing(database._get_connection()) as conn:
             from core.library2 import ADMIN_PROFILE_ID
             from core.library2.wanted import ensure_wanted_schema, recompute_wanted
 
@@ -770,11 +764,8 @@ def sync_repair_change(
                     links["tracks"],
                     profile_id=ADMIN_PROFILE_ID,
                 )
-        finally:
-            conn.close()
 
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         events = _record_events(
             conn,
             job_id=job_id,
@@ -786,8 +777,6 @@ def sync_repair_change(
             changed_fields=sorted(changed_fields),
         )
         conn.commit()
-    finally:
-        conn.close()
     return {
         "enabled": True,
         "reason": "synchronized",

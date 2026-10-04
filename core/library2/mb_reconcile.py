@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import re
+from contextlib import closing
 from typing import Any, Dict, List, Optional
 
 from utils.logging_config import get_logger
@@ -372,8 +373,7 @@ def reconcile_artist_release_groups(database: Any, artist_id: int, *,
         "assigned": 0, "merged": 0, "review": 0, "renamespaced": 0,
         "release_groups": 0, "skipped": None,
     }
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         conn.execute(LIB2_RELEASE_GROUP_REVIEW_DDL)
         artist = conn.execute(
             "SELECT id, name, musicbrainz_id, external_ids FROM lib2_artists "
@@ -479,8 +479,6 @@ def reconcile_artist_release_groups(database: Any, artist_id: int, *,
                         (artist_id, survivor["id"], duplicate["id"], rg_mbid))
                     stats["review"] += cursor.rowcount
         conn.commit()
-    finally:
-        conn.close()
     if stats["merged"]:
         # Deliver any wishlist un-mirrors the folds enqueued (best-effort;
         # a later drain retries whatever this one misses).
