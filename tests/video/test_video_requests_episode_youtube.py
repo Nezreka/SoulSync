@@ -309,12 +309,15 @@ def test_episode_quality_profile_scopes_to_the_episode(app_db, monkeypatch):
     monkeypatch.setattr(req_mod, "_quality_profile", lambda v: int(v) if v else None)
     _as_member(persona)
     base = {"kind": "episode", "tmdb_id": 1396, "title": "Breaking Bad"}
+    # quality profiles are admin-only: a member's pick at filing is ignored
     r1 = client.post("/api/video/requests",
                      json={**base, "season": 2, "episode": 7, "quality_profile_id": 7}).get_json()["id"]
+    assert db.get_video_request(r1)["quality_profile_id"] is None
     r2 = client.post("/api/video/requests",
                      json={**base, "season": 2, "episode": 8}).get_json()["id"]
     persona.update({"profile_id": 1, "is_admin": True})
-    client.post("/api/video/requests/%d/approve" % r1)
+    # the admin's pick on approve stamps only that episode's row
+    client.post("/api/video/requests/%d/approve" % r1, json={"quality_profile_id": 7})
     client.post("/api/video/requests/%d/approve" % r2)
     rows = {r[0]: r[1] for r in db._get_connection().execute(
         "SELECT episode_number, quality_profile_id FROM video_wishlist "

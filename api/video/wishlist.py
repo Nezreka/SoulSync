@@ -29,6 +29,16 @@ def _server():
         return None
 
 
+def _profile() -> int:
+    """The requesting profile: the video watchlist/wishlist are per-profile
+    (like the music side) — a non-admin must never see the admin's lists."""
+    try:
+        from core.profile_context import get_current_profile_id
+        return int(get_current_profile_id() or 1)
+    except Exception:
+        return 1
+
+
 def _annotate_live_state(db, kind, items):
     """Stamp reality onto the page's rows: ``downloading`` (an active download
     row exists for the item) and ``upgrade_from`` (owned below the profile
@@ -100,12 +110,13 @@ def register_routes(bp):
         from . import get_video_db
         try:
             db = get_video_db()
-            counts = db.wishlist_counts()
+            counts = db.wishlist_counts(profile_id=_profile())
             kind = request.args.get("kind")
             if kind in _KINDS:
                 res = db.query_wishlist(
                     kind, search=request.args.get("search", ""), sort=request.args.get("sort", "added"),
-                    page=request.args.get("page", 1), limit=request.args.get("limit", 60))
+                    page=request.args.get("page", 1), limit=request.args.get("limit", 60),
+                    profile_id=_profile())
                 _annotate_live_state(db, kind, res.get("items") or [])
                 from .kids import filter_tmdb_items, video_cap
                 cap = video_cap()
@@ -125,8 +136,8 @@ def register_routes(bp):
         from . import get_video_db
         try:
             db = get_video_db()
-            counts = db.wishlist_counts()                 # {movie, show, episode, total(movie+ep)}
-            yt = db.youtube_wishlist_counts()             # {channel, video}  (its own table-shape)
+            counts = db.wishlist_counts(profile_id=_profile())  # {movie, show, episode, total(movie+ep)}
+            yt = db.youtube_wishlist_counts(profile_id=_profile())  # {channel, video}  (its own table-shape)
             counts["video"] = yt.get("video", 0)
             counts["channel"] = yt.get("channel", 0)
             # The header/sidebar badge is the WHOLE wishlist — movies + episodes + YouTube
@@ -155,7 +166,8 @@ def register_routes(bp):
             from core.video.wishlist_search import manual_search
             res = manual_search(scope, tmdb_id,
                                 season_number=data.get("season_number"),
-                                episode_number=data.get("episode_number"))
+                                episode_number=data.get("episode_number"),
+                                profile_id=_profile())
             return jsonify({"success": True, **res})
         except Exception:
             logger.exception("wishlist manual search failed")
@@ -189,7 +201,7 @@ def register_routes(bp):
 
         data = get_video_db().wishlist_row_diagnostics(
             kind, tmdb_id, season_number=_opt("season_number"),
-            episode_number=_opt("episode_number"))
+            episode_number=_opt("episode_number"), profile_id=_profile())
         if not data.get("row"):
             return jsonify({"success": False, "error": "No such wishlist row."}), 404
         return jsonify({"success": True, **data})
@@ -210,12 +222,13 @@ def register_routes(bp):
             reset = get_video_db().reset_wishlist_search_state(
                 kind, tmdb_id,
                 season_number=data.get("season_number"),
-                episode_number=data.get("episode_number"))
+                episode_number=data.get("episode_number"),
+                profile_id=_profile())
             reset_source_cooldowns()
             res = manual_search(scope, tmdb_id,
                                 season_number=data.get("season_number"),
                                 episode_number=data.get("episode_number"),
-                                all_sources=True)
+                                all_sources=True, profile_id=_profile())
             return jsonify({"success": True, "reset": reset, **res})
         except Exception:
             logger.exception("wishlist retry-all-sources failed")
@@ -249,8 +262,10 @@ def register_routes(bp):
                 ok = db.add_movie_to_wishlist(
                     int(movie["tmdb_id"]), movie["title"].strip(), year=movie.get("year"),
                     poster_url=movie.get("poster_url") or None,
-                    library_id=movie.get("library_id") or None, server_source=srv)
-                return jsonify({"success": ok, "added": 1 if ok else 0, "counts": db.wishlist_counts()})
+                    library_id=movie.get("library_id") or None, server_source=srv,
+                    profile_id=_profile())
+                return jsonify({"success": ok, "added": 1 if ok else 0,
+                                "counts": db.wishlist_counts(profile_id=_profile())})
 
             show = body.get("show")
             episodes = body.get("episodes") or []
@@ -258,8 +273,10 @@ def register_routes(bp):
                 n = db.add_episodes_to_wishlist(
                     int(show["tmdb_id"]), show["title"].strip(), episodes,
                     poster_url=show.get("poster_url") or None,
-                    library_id=show.get("library_id") or None, server_source=srv)
-                return jsonify({"success": n > 0, "added": n, "counts": db.wishlist_counts()})
+                    library_id=show.get("library_id") or None, server_source=srv,
+                    profile_id=_profile())
+                return jsonify({"success": n > 0, "added": n,
+                                "counts": db.wishlist_counts(profile_id=_profile())})
 
             return jsonify({"success": False, "error": "movie or show+episodes required"}), 400
         except Exception:
@@ -279,8 +296,10 @@ def register_routes(bp):
             db = get_video_db()
             removed = db.remove_from_wishlist(
                 scope, tmdb_id=int(tmdb_id),
-                season_number=body.get("season_number"), episode_number=body.get("episode_number"))
-            return jsonify({"success": True, "removed": removed, "counts": db.wishlist_counts()})
+                season_number=body.get("season_number"), episode_number=body.get("episode_number"),
+                profile_id=_profile())
+            return jsonify({"success": True, "removed": removed,
+                            "counts": db.wishlist_counts(profile_id=_profile())})
         except Exception:
             logger.exception("Failed to remove from video wishlist")
             return jsonify({"success": False, "error": "Failed"}), 500
@@ -311,7 +330,7 @@ def register_routes(bp):
                 return jsonify({"success": False,
                                 "error": "Set the YouTube library folder on Settings → Downloads first."}), 400
 
-            wanted = db.youtube_wishlist_to_download() or []
+            wanted = db.youtube_wishlist_to_download(profile_id=_profile()) or []
             already = [d.get("media_id") for d in db.get_active_video_downloads()
                        if d.get("source") == "youtube" and d.get("media_id")]
             states = db.youtube_retry_state()
@@ -353,9 +372,10 @@ def register_routes(bp):
             return jsonify({"success": False, "error": "kind must be movie|show|youtube"}), 400
         try:
             db = get_video_db()
-            removed = db.clear_wishlist(kind)
+            removed = db.clear_wishlist(kind, profile_id=_profile())
             return jsonify({"success": True, "removed": removed,
-                            "counts": db.wishlist_counts(), "youtube_counts": db.youtube_wishlist_counts()})
+                            "counts": db.wishlist_counts(profile_id=_profile()),
+                             "youtube_counts": db.youtube_wishlist_counts(profile_id=_profile())})
         except Exception:
             logger.exception("Failed to clear video wishlist")
             return jsonify({"success": False, "error": "Failed"}), 500
@@ -424,11 +444,12 @@ def register_routes(bp):
         try:
             db = get_video_db()
             st = db.wishlist_state(
-                movie_ids=body.get("movie_ids") or [], show_tmdb_id=body.get("show_tmdb_id"))
+                movie_ids=body.get("movie_ids") or [], show_tmdb_id=body.get("show_tmdb_id"),
+                profile_id=_profile())
             out = {"success": True, "movies": sorted(st["movies"]), "episodes": sorted(st["episodes"])}
             shows = body.get("shows")   # multi-show membership for the calendar button
             if shows:
-                keys = db.wishlist_keys_for_shows(shows)
+                keys = db.wishlist_keys_for_shows(shows, profile_id=_profile())
                 out["by_show"] = {str(tid): sorted(ks) for tid, ks in keys.items()}
             return jsonify(out)
         except Exception:

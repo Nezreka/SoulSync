@@ -46,9 +46,9 @@ from core.automation.handlers.download_cleanup import (
 )
 from core.automation.handlers.run_script import auto_run_script
 from core.automation.handlers.search_and_download import auto_search_and_download
-from core.automation.handlers.video_auto_wishlist_airing import auto_video_add_airing_episodes
-from core.automation.handlers.video_refresh_airing_schedules import auto_video_refresh_airing_schedules
-from core.automation.handlers.video_reenrich_stale import auto_video_reenrich_stale
+from core.automation.handlers.video_auto_wishlist_airing import auto_video_add_airing_episodes, is_airing_already_running
+from core.automation.handlers.video_refresh_airing_schedules import auto_video_refresh_airing_schedules, is_refresh_already_running
+from core.automation.handlers.video_reenrich_stale import auto_video_reenrich_stale, is_reenrich_already_running
 from core.automation.handlers.video_clean_youtube import auto_video_clean_youtube_episodes
 from core.automation.handlers.video_purge_recycle import auto_video_purge_recycle_bin
 from core.automation.handlers.video_scan_watchlist_people import auto_video_scan_watchlist_people
@@ -326,18 +326,21 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'video_add_airing_episodes',
         lambda config: auto_video_add_airing_episodes(config, deps),
+        guard_fn=is_airing_already_running,
     )
     # Keep the calendar honest: re-pull TMDB episode schedules for still-airing watchlist
     # shows (the airing automation above reads the LOCAL calendar, so it needs this fresh).
     engine.register_action_handler(
         'video_refresh_airing_schedules',
         lambda config: auto_video_refresh_airing_schedules(config, deps),
+        guard_fn=is_refresh_already_running,
     )
     # Freshness: rolling re-enrichment of the stalest matched library items (oldest-refreshed
     # first, skipping anything already fresh) so ratings/overviews/art never go out of date.
     engine.register_action_handler(
         'video_reenrich_stale',
         lambda config: auto_video_reenrich_stale(config, deps),
+        guard_fn=is_reenrich_already_running,
     )
     # YouTube retention: delete channel episodes outside each channel's keep window (opt-in
     # per channel; default keeps everything). The history row stays so it's not re-downloaded.

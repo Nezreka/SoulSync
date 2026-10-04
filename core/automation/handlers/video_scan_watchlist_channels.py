@@ -157,9 +157,20 @@ def select_channel_video_gaps(
 
 
 # ── production seams ──────────────────────────────────────────────────────────
+def _profile() -> int:
+    """The automation owner's profile: the scan reads/writes its owner's
+    watchlist/wishlist (the engine sets the background profile to the owner
+    before the run)."""
+    try:
+        from core.profile_context import get_current_profile_id
+        return int(get_current_profile_id() or 1)
+    except Exception:
+        return 1
+
+
 def _default_fetch_channels() -> List[Dict[str, Any]]:
     from api.video import get_video_db
-    return get_video_db().list_watchlist_channels()
+    return get_video_db().list_watchlist_channels(profile_id=_profile())
 
 
 def _default_fetch_uploads(channel_id: Any, limit: int) -> List[Dict[str, Any]]:
@@ -197,7 +208,7 @@ def _default_channel_settings(channel_id: Any) -> Dict[str, Any]:
 
 def _default_wishlisted_ids(channel_id: Any) -> List[Any]:
     from api.video import get_video_db
-    return get_video_db().wishlisted_video_ids_for_channel(channel_id)
+    return get_video_db().wishlisted_video_ids_for_channel(channel_id, profile_id=_profile())
 
 
 def _default_dismissed_ids(channel_id: Any) -> List[Any]:
@@ -216,7 +227,8 @@ def _default_downloaded_ids(channel_id: Any) -> List[Any]:
 def _default_add_videos(channel: Dict[str, Any], videos: List[Dict[str, Any]]) -> int:
     from api.video import get_video_db
     from core.video.sources import resolve_video_server
-    return get_video_db().add_videos_to_wishlist(channel, videos, server_source=resolve_video_server())
+    return get_video_db().add_videos_to_wishlist(
+        channel, videos, server_source=resolve_video_server(), profile_id=_profile())
 
 
 def _default_backfill_count() -> int:

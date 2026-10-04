@@ -85,7 +85,12 @@ def register_routes(bp):
         try:
             presets = studio_presets()             # logos are baked in → no TMDB round-trips
             try:
-                followed = get_video_db().watchlist_state("studio", preset_member_ids())
+                from core.profile_context import get_current_profile_id
+                try:
+                    _pid = int(get_current_profile_id() or 1)
+                except Exception:
+                    _pid = 1
+                followed = get_video_db().watchlist_state("studio", preset_member_ids(), profile_id=_pid)
             except Exception:   # noqa: BLE001 - picker still works without follow state
                 followed = {}
             for p in presets:

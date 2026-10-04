@@ -122,6 +122,9 @@ EXPECTED_GUARDED_ACTIONS = frozenset({
     'video_extto_fresh_refresh',
     'video_apply_overlays',
     'video_clean_plex_images',
+    'video_reenrich_stale',
+    'video_refresh_airing_schedules',
+    'video_add_airing_episodes',
 })
 
 

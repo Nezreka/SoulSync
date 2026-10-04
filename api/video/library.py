@@ -47,6 +47,15 @@ def _capped_library(db, cap, server):
                            "has_prev": page > 1, "has_next": page < total_pages}}
 
 
+def _profile() -> int:
+    """The requesting user's profile for per-profile watchlist reads."""
+    try:
+        from core.profile_context import get_current_profile_id
+        return int(get_current_profile_id() or 1)
+    except Exception:
+        return 1
+
+
 def register_routes(bp):
     @bp.route("/library", methods=["GET"])
     def video_library():
@@ -62,6 +71,7 @@ def register_routes(bp):
                     sort=request.args.get("sort", "title"),
                     page=request.args.get("page", 1),
                     limit=request.args.get("limit", 75),
+                    profile_id=_profile(),
                 ))
             from .kids import video_cap
             cap = video_cap()

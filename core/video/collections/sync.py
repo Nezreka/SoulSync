@@ -352,6 +352,11 @@ def wishlist_missing_movies(db, definition: Dict[str, Any], missing) -> int:
     add = getattr(db, "add_movie_to_wishlist", None)
     if not callable(add):
         return 0
+    try:
+        from core.profile_context import get_current_profile_id
+        _pid = get_current_profile_id() or 1
+    except Exception:  # noqa: BLE001 - no profile context → admin behavior
+        _pid = 1
     n = 0
     for m in missing or []:
         tid = m.get("tmdb_id")
@@ -359,7 +364,7 @@ def wishlist_missing_movies(db, definition: Dict[str, Any], missing) -> int:
             continue
         try:
             if add(int(tid), m.get("title") or "Untitled", year=m.get("year"),
-                   poster_url=m.get("poster_url"), status="wanted"):
+                   poster_url=m.get("poster_url"), status="wanted", profile_id=_pid):
                 n += 1
         except Exception:   # noqa: BLE001 - one bad wishlist row shouldn't stop the sync
             logger.debug("wishlist add failed for tmdb %s", tid, exc_info=True)
@@ -371,7 +376,8 @@ def wishlist_missing_movies(db, definition: Dict[str, Any], missing) -> int:
 # automation then wishes its new episodes. Ended shows are skipped: following
 # them is meaningless (nothing will air) and the nightly watchlist-prune would
 # just remove them again; the missing browser stays the manual route for those.
-_TERMINAL_STATUS = {"ended", "canceled", "cancelled", "completed"}
+_TERMINAL_STATUS = {"ended", "canceled", "cancelled"}
+# NOTE: "completed" was removed — TMDB never returns it for TV shows.
 _SHOW_WATCHLIST_CAP = 10      # status lookups per sync run — the rest next pass
 
 
@@ -395,7 +401,12 @@ def watchlist_missing_shows(db, definition: Dict[str, Any], missing, *,
             return 0
     if engine is None:
         return 0
-    states = states_fn("show") if callable(states_fn) else {}
+    try:
+        from core.profile_context import get_current_profile_id
+        _pid = get_current_profile_id() or 1
+    except Exception:  # noqa: BLE001 - no profile context → admin behavior
+        _pid = 1
+    states = states_fn("show", profile_id=_pid) if callable(states_fn) else {}
 
     added = 0
     checked = 0
@@ -414,7 +425,7 @@ def watchlist_missing_shows(db, definition: Dict[str, Any], missing, *,
             if status in _TERMINAL_STATUS:
                 continue                        # nothing will air — manual-get territory
             if add("show", int(tid), m.get("title") or "Untitled",
-                   poster_url=m.get("poster_url")):
+                   poster_url=m.get("poster_url"), profile_id=_pid):
                 added += 1
         except Exception:   # noqa: BLE001 - one bad show shouldn't stop the sync
             logger.debug("show watchlist add failed for tmdb %s", tid, exc_info=True)
