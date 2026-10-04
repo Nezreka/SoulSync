@@ -418,6 +418,7 @@ def check_album_completion(
                     expected_year=_release_year_of(album_data),
                     completeness_cache=completeness_cache,
                     candidate_tracks=candidate_tracks,
+                    metadata_source=source_override,
                 )
             except TypeError:
                 db_album, confidence, owned_tracks, expected_tracks, is_complete, formats = db.check_album_exists_with_completeness(
