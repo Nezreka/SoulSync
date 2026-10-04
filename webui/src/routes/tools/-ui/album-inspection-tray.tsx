@@ -128,7 +128,10 @@ export function AlbumInspectionTray({
 
   const handleFixAllOnAlbum = async () => {
     if (!findings || findings.length === 0) return;
-    const fixable = findings.filter((f) => f.status === 'pending');
+    // only what has a fix: the rest would be marked resolved without one
+    const fixable = findings.filter(
+      (f) => f.status === 'pending' && Boolean(findingFixLabel(f.finding_type)),
+    );
     if (fixable.length === 0) return;
 
     const hasDestructive = fixable.some(
@@ -347,7 +350,9 @@ export function AlbumInspectionTray({
               const details = (f.details as Record<string, any>) || {};
               const fixLabel = findingFixLabel(f.finding_type);
               const busy = busyIds.has(f.id);
-              const isRedl = isRedownloadFinding(f.finding_type);
+              // the re-download search needs the track behind the finding; a
+              // finding without one (fake lossless reports a file) keeps its fix
+              const isRedl = isRedownloadFinding(f.finding_type) && Boolean(f.entity_id);
 
               // Never display database row ID (f.entity_id) as track number!
               const rawNum = details.track_number;

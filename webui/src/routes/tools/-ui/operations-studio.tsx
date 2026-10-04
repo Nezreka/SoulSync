@@ -858,11 +858,13 @@ export function OperationsStudio({
       </div>
 
       {/* ── Redownload Modal ──────────────────────────────────────────────── */}
-      {redownloadFinding ? (
+      {/* a finding with no track behind it (a fake-lossless FILE finding) has no
+          id to search for; its finding id is not a track id */}
+      {redownloadFinding?.entity_id ? (
         <RedownloadModal
           track={{
-            id: redownloadFinding.entity_id || String(redownloadFinding.id),
-            track_id: redownloadFinding.entity_id || String(redownloadFinding.id),
+            id: String(redownloadFinding.entity_id),
+            track_id: String(redownloadFinding.entity_id),
             title: String(
               (redownloadFinding.details as Record<string, any>)?.track_title ||
                 redownloadFinding.title ||
@@ -887,8 +889,8 @@ export function OperationsStudio({
               '',
             tracks: [
               {
-                id: redownloadFinding.entity_id || String(redownloadFinding.id),
-                track_id: redownloadFinding.entity_id || String(redownloadFinding.id),
+                id: String(redownloadFinding.entity_id),
+                track_id: String(redownloadFinding.entity_id),
                 title: String(
                   (redownloadFinding.details as Record<string, any>)?.track_title ||
                     redownloadFinding.title ||
