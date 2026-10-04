@@ -108,7 +108,7 @@ def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False
     for tp in track_plans or []:
         fp = tp.get('file_path')
         db_data = tp.get('db_data') or {}
-        if not fp or not _os.path.isfile(fp) or (not db_data and not embed_cover and not _lyrics_client):
+        if not fp or not _os.path.isfile(fp):
             result['skipped'] += 1
             continue
         try:
