@@ -2499,7 +2499,9 @@ class RepairWorker:
                 spotify_track_data=track_data,
                 failure_reason='Discography backfill — missing from library',
                 source_type='repair',
-                source_info={'job': 'discography_backfill', 'artist': details.get('artist_name', '')}
+                source_info={'job': 'discography_backfill', 'artist': details.get('artist_name', '')},
+                # #1504: stashed by the producer; None -> shared/1.
+                profile_id=details.get('owner_profile_id') or 1,
             )
             track_name = track_data.get('name', '?')
             if success:
@@ -2540,9 +2542,15 @@ class RepairWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
+            # #1504: owner_profile_id may not exist in minimal test schemas;
+            # fall back to NULL (routes to shared) when the column is absent.
+            cursor.execute("PRAGMA table_info(tracks)")
+            _track_cols = {col[1] for col in cursor.fetchall()}
+            _owner_sel = "t.owner_profile_id" if 'owner_profile_id' in _track_cols else "NULL AS owner_profile_id"
+            cursor.execute(f"""
                 SELECT t.id, t.title, t.track_number, t.duration,
                        t.spotify_track_id, t.itunes_track_id, t.deezer_id,
+                       {_owner_sel},
                        ar.name AS artist_name,
                        al.title AS album_title, al.spotify_album_id,
                        al.record_type, al.track_count, al.year, al.thumb_url AS album_thumb
@@ -2619,6 +2627,10 @@ class RepairWorker:
                 'uri': (f"spotify:track:{_from('spotify_track_id')}"
                         if _from('spotify_track_id') else ''),
                 'is_local': False,
+                # #1504: owning profile for wishlist routing (None = shared).
+                # read from the row when available; callers map None -> 1
+                # (the wishlist column is NOT NULL).
+                'owner_profile_id': row['owner_profile_id'] if row is not None else None,
             }
         except Exception as e:
             logger.warning("Track identity lookup failed for track %s: %s", entity_id, e)
@@ -2713,6 +2725,9 @@ class RepairWorker:
                     'provider': details.get('provider'),
                 },
                 quality_profile_id=details.get('quality_profile_id'),
+                # #1504: route to the owning profile's wishlist. this is the
+                # USER profile, not the quality profile above — separate kwargs.
+                profile_id=track_data.get('owner_profile_id') or 1,
             )
             track_name = track_data.get('name', '?')
             if success:
@@ -2772,6 +2787,8 @@ class RepairWorker:
                 failure_reason='Dead file — re-download requested',
                 source_type='redownload',
                 source_info=source_info,
+                # #1504: owning profile's wishlist (None -> shared/1).
+                profile_id=track_data.get('owner_profile_id') or 1,
             )
 
             # Remove dead track entry from DB regardless of whether wishlist already had it
@@ -2841,6 +2858,8 @@ class RepairWorker:
                 failure_reason='Preview clip — re-downloading full track',
                 source_type='redownload',
                 source_info=source_info,
+                # #1504: owning profile's wishlist (None -> shared/1).
+                profile_id=track_data.get('owner_profile_id') or 1,
             )
 
             # Delete the preview file (path resolved like the other delete tools).
@@ -2935,6 +2954,8 @@ class RepairWorker:
                 failure_reason='Corrupt file — re-downloading',
                 source_type='redownload',
                 source_info=source_info,
+                # #1504: owning profile's wishlist (None -> shared/1).
+                profile_id=track_data.get('owner_profile_id') or 1,
             )
 
             # Quarantine the corrupt file (path resolved like the other delete tools).
@@ -3058,6 +3079,8 @@ class RepairWorker:
                 failure_reason=f"Fake lossless detected — spectral cutoff at ~{details.get('detected_cutoff_khz', '?')} kHz",
                 source_type='repair',
                 source_info=source_info,
+                # #1504: owning profile's wishlist (None -> shared/1).
+                profile_id=track_data.get('owner_profile_id') or 1,
             )
             if added:
                 return {'success': True, 'action': 'added_to_wishlist',
@@ -4318,6 +4341,25 @@ class RepairWorker:
             album_title = details.get('album_title', '')
             if expected_title and expected_artist:
                 try:
+                    # #1504: capture the owner BEFORE the row is deleted below.
+                    # (column may be absent in minimal test schemas -> NULL.)
+                    owner_pid = None
+                    if track_id:
+                        try:
+                            oconn = self.db._get_connection()
+                            try:
+                                ocols = {c[1] for c in oconn.execute("PRAGMA table_info(tracks)")}
+                                if 'owner_profile_id' in ocols:
+                                    orow = oconn.execute(
+                                        "SELECT owner_profile_id FROM tracks WHERE id = ?",
+                                        (track_id,),
+                                    ).fetchone()
+                                    if orow and orow[0]:
+                                        owner_pid = int(orow[0])
+                            finally:
+                                oconn.close()
+                        except Exception as exc:
+                            logger.debug("AcoustID owner lookup failed: %s", exc)
                     track_data = {
                         'id': f'acoustid_fix_{uuid.uuid4().hex[:8]}',
                         'name': expected_title,
@@ -4328,6 +4370,9 @@ class RepairWorker:
                         spotify_track_data=track_data,
                         failure_reason='AcoustID mismatch — re-downloading correct track',
                         source_type='repair',
+                        # #1504: the re-downloaded correct track belongs to the
+                        # same library that held the wrong file.
+                        profile_id=owner_pid or 1,
                     )
                     logger.info("Added '%s' by '%s' to wishlist for re-download",
                                 expected_title, expected_artist)
@@ -4399,10 +4444,28 @@ class RepairWorker:
             from core.tag_writer import write_tags_to_file
             from core.imports.file_ops import safe_move_file
             try:
+                # #1504: capture the owner BEFORE the row is dropped, so the
+                # staged file carries a breadcrumb for auto-import.
+                relocate_owner_pid = None
+                if track_id:
+                    try:
+                        ro_conn = self.db._get_connection()
+                        ro_cols = {c[1] for c in ro_conn.execute("PRAGMA table_info(tracks)")}
+                        if 'owner_profile_id' in ro_cols:
+                            ro_row = ro_conn.execute(
+                                "SELECT owner_profile_id FROM tracks WHERE id = ?",
+                                (track_id,),
+                            ).fetchone()
+                            if ro_row and ro_row[0]:
+                                relocate_owner_pid = int(ro_row[0])
+                        ro_conn.close()
+                    except Exception as exc:
+                        logger.debug("relocate owner lookup failed: %s", exc)
                 dest = relocate_mismatch_to_staging(
                     resolved, staging_path, tag_updates,
                     write_tags=write_tags_to_file, move_file=safe_move_file,
-                    drop_db_row=_drop_row, exists=os.path.exists)
+                    drop_db_row=_drop_row, exists=os.path.exists,
+                    owner_profile_id=relocate_owner_pid)
             except Exception as e:
                 return {'success': False, 'error': f'Relocate failed: {e}'}
             self._cleanup_empty_parents(resolved)   # remove the now-empty wrong folder
@@ -4817,6 +4880,24 @@ class RepairWorker:
         if not album_id:
             return {'success': False, 'error': 'Missing album_id in finding details'}
 
+        # #1504: the missing tracks belong to the album owner's library.
+        # (column may be absent in minimal test schemas -> NULL/shared.)
+        album_owner_pid = None
+        try:
+            oconn = self.db._get_connection()
+            try:
+                ocols = {c[1] for c in oconn.execute("PRAGMA table_info(albums)")}
+                if 'owner_profile_id' in ocols:
+                    orow = oconn.execute(
+                        "SELECT owner_profile_id FROM albums WHERE id = ?", (str(album_id),)
+                    ).fetchone()
+                    if orow and orow[0]:
+                        album_owner_pid = int(orow[0])
+            finally:
+                oconn.close()
+        except Exception as exc:
+            logger.debug("Incomplete-album owner lookup failed: %s", exc)
+
         # If missing_tracks list is empty (scanner couldn't identify them), try to fetch now
         if not missing_tracks:
             missing_tracks = self._refetch_missing_tracks(album_id, details)
@@ -5025,6 +5106,8 @@ class RepairWorker:
                         failure_reason='Missing from incomplete album',
                         source_type='album',
                         source_info=source_info,
+                        # #1504: route to the album owner's wishlist.
+                        profile_id=album_owner_pid or 1,
                     )
                     wishlisted_count += 1
                     track_details.append({

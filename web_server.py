@@ -10422,7 +10422,8 @@ def reorganize_album_preview(album_id):
         mode: 'api' (default — query metadata source) or 'tags' (read
             embedded file tags as the source of truth, issue #592)."""
     try:
-        from core.library_reorganize import preview_album_reorganize
+        from core.library_reorganize import preview_album_reorganize, resolve_album_profile_id
+        from core.imports.paths import library_root_for_profile
         data = request.get_json() or {}
         chosen_source = data.get('source') or None
         metadata_source = data.get('mode') or config_manager.get(
@@ -10430,17 +10431,26 @@ def reorganize_album_preview(album_id):
         ) or 'api'
         if metadata_source not in ('api', 'tags'):
             metadata_source = 'api'
-        transfer_dir = config_root_path(
-            config_manager.get('soulseek.transfer_path', './Transfer'), './Transfer')
+        db = get_database()
+        # #1504: resolve the owning profile so preview destinations are
+        # computed against the right library root, not the shared folder.
+        profile_id = resolve_album_profile_id(
+            db, album_id, resolve_file_path_fn=_resolve_library_file_path)
+        transfer_dir = (
+            library_root_for_profile(profile_id, announce=False)
+            or config_root_path(
+                config_manager.get('soulseek.transfer_path', './Transfer'), './Transfer')
+        )
         result = preview_album_reorganize(
             album_id=album_id,
-            db=get_database(),
+            db=db,
             transfer_dir=transfer_dir,
             resolve_file_path_fn=_resolve_library_file_path,
             build_final_path_fn=_build_final_path_for_track,
             primary_source=chosen_source,
             strict_source=bool(chosen_source),
             metadata_source=metadata_source,
+            profile_id=profile_id,
         )
         if result.get('status') == 'no_album':
             return jsonify({"success": False, "error": "Album not found"}), 404

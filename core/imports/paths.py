@@ -269,6 +269,68 @@ def transfer_root_for_context(context) -> str:
     return library_root_for_profile(import_profile_id(context)) or shared_transfer_root()
 
 
+# ── reverse lookup: which profile owns a path (#1504) ─────────────────────────
+#
+# downloads stamp profile_id into the context going forward; maintenance and
+# repair tools work backwards from a file already on disk. these helpers answer
+# "whose library is this path in" without touching the database rows.
+
+def _own_library_match(path):
+    """(profile_id, canonical_root) of the own library containing path, or None.
+
+    Longest-prefix match so nested roots resolve to the innermost owner.
+    Returns None for the shared library (and on any DB error — fail closed)."""
+    if not path:
+        return None
+    try:
+        from database.music_database import get_database
+        profiles = get_database().get_own_library_profiles()
+    except Exception:  # noqa: BLE001 - no db, no own libraries
+        return None
+    if not profiles:
+        return None
+    norm_path = os.path.normpath(docker_resolve_path(str(path)))
+    best = None  # (root_len, profile_id, norm_root)
+    for p in profiles:
+        root = p.get("root")
+        if not root:
+            continue
+        norm_root = os.path.normpath(config_root_path(root))
+        # directory-boundary prefix match: /a/user1 must not match /a/user1-backup
+        if norm_path == norm_root or norm_path.startswith(norm_root + os.sep):
+            pid = p.get("id")
+            try:
+                pid = int(pid)
+            except (TypeError, ValueError):
+                continue
+            if best is None or len(norm_root) > best[0]:
+                best = (len(norm_root), pid, norm_root)
+    if best is None:
+        return None
+    return (best[1], best[2])
+
+
+def profile_id_for_path(path) -> Optional[int]:
+    """the profile whose own library contains this path, or None for shared.
+
+    Inverse of library_root_for_profile(). Used by maintenance/repair tools
+    (#1504) to route operations to the owning profile instead of assuming the
+    shared folder. None means shared library — current behavior everywhere."""
+    m = _own_library_match(path)
+    return m[0] if m else None
+
+
+def library_containing(path) -> Optional[str]:
+    """the own-library root containing this path, or None for shared.
+
+    Used by the cross-library move guard: a maintenance operation must never
+    move a file when library_containing(src) != library_containing(dst).
+    None == None for two shared-folder paths, so shared-to-shared moves still
+    pass the guard."""
+    m = _own_library_match(path)
+    return m[1] if m else None
+
+
 def build_simple_download_destination(context, file_path: str):
     """Build the destination path for a simple download into Transfer."""
     context = normalize_import_context(context)

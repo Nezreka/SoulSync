@@ -52,17 +52,20 @@ class FakeLosslessDetectorJob(RepairJob):
         settings = self._get_settings(context)
         cutoff_khz = settings.get('spectral_cutoff_khz', 16.0)
 
-        transfer = context.transfer_folder
-        if not os.path.isdir(transfer):
+        from core.repair_jobs.base import all_library_roots
+        # #1504: walk every library root (shared + own), not just shared.
+        roots = all_library_roots(context)
+        if not roots:
             return result
 
         # Collect lossless files
         lossless_files = []
-        for root, _dirs, files in walk_library(transfer):
-            if context.check_stop():
-                return result
-            for fname in files:
-                ext = os.path.splitext(fname)[1].lower()
+        for lib_root in roots:
+            for root, _dirs, files in walk_library(lib_root):
+                if context.check_stop():
+                    return result
+                for fname in files:
+                    ext = os.path.splitext(fname)[1].lower()
                 if ext in LOSSLESS_EXTENSIONS:
                     lossless_files.append(os.path.join(root, fname))
 
@@ -162,14 +165,14 @@ class FakeLosslessDetectorJob(RepairJob):
         return merged
 
     def estimate_scope(self, context: JobContext) -> int:
-        transfer = context.transfer_folder
-        if not os.path.isdir(transfer):
-            return 0
+        from core.repair_jobs.base import all_library_roots
+        # #1504: count across every library root.
         count = 0
-        for _root, _dirs, files in walk_library(transfer):
-            for fname in files:
-                if os.path.splitext(fname)[1].lower() in LOSSLESS_EXTENSIONS:
-                    count += 1
+        for lib_root in all_library_roots(context):
+            for _root, _dirs, files in walk_library(lib_root):
+                for fname in files:
+                    if os.path.splitext(fname)[1].lower() in LOSSLESS_EXTENSIONS:
+                        count += 1
         return count
 
 

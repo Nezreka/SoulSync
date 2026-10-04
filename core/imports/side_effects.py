@@ -457,6 +457,14 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         if not final_path:
             return
 
+        # #1504: owning user profile for the new rows (from auto-import
+        # breadcrumb, download request, etc.). None = shared.
+        owner_pid = context.get('profile_id')
+        try:
+            owner_pid = int(owner_pid) if owner_pid else None
+        except (TypeError, ValueError):
+            owner_pid = None
+
         album_ctx = get_import_context_album(context)
         track_info = get_import_track_info(context)
         original_search = get_import_original_search(context)
@@ -623,10 +631,10 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                     artist_id = _stable_soulsync_id(artist_name.lower().strip() + "::soulsync")
                 cursor.execute(
                     """
-                    INSERT INTO artists (id, name, genres, thumb_url, server_source, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    INSERT INTO artists (id, name, genres, thumb_url, server_source, owner_profile_id, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, 'soulsync', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     """,
-                    (artist_id, artist_name, genres_json, image_url),
+                    (artist_id, artist_name, genres_json, image_url, owner_pid),
                 )
                 if artist_source_col and artist_source_id:
                     try:
@@ -693,10 +701,10 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                 cursor.execute(
                     """
                     INSERT INTO albums (id, artist_id, title, year, thumb_url, genres, track_count,
-                                        duration, server_source, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                                        duration, server_source, owner_profile_id, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     """,
-                    (album_id, artist_id, album_name, year, image_url, genres_json, total_tracks, album_total_duration_ms),
+                    (album_id, artist_id, album_name, year, image_url, genres_json, total_tracks, album_total_duration_ms, owner_pid),
                 )
                 if album_source_col and album_source_id:
                     try:
@@ -786,11 +794,11 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                                                     duration, file_path, bitrate, file_size, track_artist,
                                                     musicbrainz_recording_id, isrc, quality_profile_id,
                                                     acquired_quality_json, retention_json, server_source,
-                                                    created_at, updated_at)
+                                                    owner_profile_id, created_at, updated_at)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                                        'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                                        'soulsync', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                                 """,
-                                base_values + (acquired_quality_json, retention_json),
+                                base_values + (acquired_quality_json, retention_json, owner_pid),
                             )
                         else:
                             cursor.execute(
@@ -798,11 +806,11 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                                 INSERT INTO tracks (id, album_id, artist_id, title, track_number,
                                                     duration, file_path, bitrate, file_size, track_artist,
                                                     musicbrainz_recording_id, isrc, quality_profile_id, server_source,
-                                                    created_at, updated_at)
+                                                    owner_profile_id, created_at, updated_at)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                                        'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                                        'soulsync', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                                 """,
-                                base_values,
+                                base_values + (owner_pid,),
                             )
                         break
                     except sqlite3.IntegrityError:

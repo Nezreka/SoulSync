@@ -2253,6 +2253,29 @@ class AutoImportWorker:
                 if auto_import_profile_id:
                     context['track_info']['quality_profile_id'] = auto_import_profile_id
 
+                # #1504: AcoustID relocate breadcrumb — the staged file may
+                # carry a sidecar with the owning user profile. Read it into
+                # the context as profile_id (the USER profile, not the quality
+                # profile above) so the import lands in the right library.
+                try:
+                    import json as _json
+                    _sidecar = file_path + ".soulsync-owner.json"
+                    if os.path.isfile(_sidecar):
+                        with open(_sidecar, encoding='utf-8') as _sf:
+                            _crumb = _json.load(_sf)
+                        _owner = _crumb.get('owner_profile_id')
+                        if _owner:
+                            context['profile_id'] = int(_owner)
+                        # #1504: delete the breadcrumb after reading it so a
+                        # later staged file with the same basename can never
+                        # pick up a stale owner.
+                        try:
+                            os.remove(_sidecar)
+                        except OSError as exc:
+                            logger.debug("owner breadcrumb cleanup failed: %s", exc)
+                except Exception as exc:
+                    logger.debug("owner breadcrumb read failed: %s", exc)
+
                 self._process_callback(context_key, context, file_path)
                 rejection = import_rejection_reason(context)
                 final_path = context.get('_final_processed_path') or context.get('_final_path')

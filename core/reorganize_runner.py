@@ -161,6 +161,20 @@ def build_runner(
         # server restart.
         download_dir = get_download_path()
         transfer_dir = get_transfer_path()
+        # #1504: resolve the owning profile so the run targets the right
+        # library root instead of the shared folder.
+        profile_id = None
+        try:
+            from core.library_reorganize import resolve_album_profile_id
+            from core.imports.paths import library_root_for_profile
+            profile_id = resolve_album_profile_id(
+                get_database(), item.album_id,
+                resolve_file_path_fn=resolve_file_path_fn)
+            own_root = library_root_for_profile(profile_id, announce=False)
+            if own_root:
+                transfer_dir = own_root
+        except Exception as e:
+            logger.debug("[Reorganize] profile resolution failed: %s", e)
 
         def _cleanup_empty(src_dir):
             try:
@@ -197,6 +211,7 @@ def build_runner(
                 strict_source=bool(item.source),
                 metadata_source=getattr(item, 'metadata_source', 'api') or 'api',
                 stop_check=is_shutting_down_fn,
+                profile_id=profile_id,
             )
 
         staging_root = os.path.join(download_dir, 'ssync_staging')
@@ -225,6 +240,7 @@ def build_runner(
             strict_source=bool(item.source),
             stop_check=is_shutting_down_fn,
             metadata_source=getattr(item, 'metadata_source', 'api') or 'api',
+            profile_id=profile_id,
         )
 
     return runner

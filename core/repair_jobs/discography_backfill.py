@@ -142,6 +142,8 @@ class DiscographyBackfillJob(RepairJob):
         """
         artist_name = artist['name']
         result.scanned += 1
+        # #1504: owning profile for wishlist routing (None -> shared).
+        artist_owner_pid = artist.get('owner_profile_id') or None
 
         # Build source ID map for more accurate lookups. Primary fallback
         # relies on artist-name search when a source ID is missing.
@@ -338,6 +340,8 @@ class DiscographyBackfillJob(RepairJob):
                                 'album_name': release_name,
                                 'album_image_url': release_image,
                                 'source': source,
+                                # #1504: owning profile for wishlist routing.
+                                'owner_profile_id': artist_owner_pid,
                             },
                         )
                         if inserted:
@@ -362,6 +366,8 @@ class DiscographyBackfillJob(RepairJob):
                                         'artist': artist_name,
                                         'auto_added': True,
                                     },
+                                    # #1504: route to the artist owner's wishlist.
+                                    profile_id=artist_owner_pid or 1,
                                 )
                             except Exception as wl_err:
                                 logger.debug("Auto-add to wishlist failed for '%s': %s", track_name, wl_err)
@@ -431,6 +437,9 @@ class DiscographyBackfillJob(RepairJob):
                 select.append("itunes_artist_id")
             if 'deezer_id' in columns:
                 select.append("deezer_id")
+            # #1504: owning profile so backfill findings/wishlist route correctly.
+            if 'owner_profile_id' in columns:
+                select.append("owner_profile_id")
 
             # Only artists actually IN the library — those you own at least one track
             # or album by. The `artists` table also carries bare rows for featured/
