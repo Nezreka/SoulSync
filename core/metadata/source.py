@@ -1023,13 +1023,20 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
             enrichment_genres += pp["bandcamp_tags"]
         if enrichment_genres:
             from core.genre_filter import filter_genres as _filter_genres
+            from core.genre_filter import _normalize_for_match
 
             enrichment_genres = _filter_genres(enrichment_genres, cfg)
             source_genres = [g.strip() for g in str(metadata.get("genre", "")).split(",") if g.strip()]
             seen = set()
             merged = []
             for genre in source_genres + enrichment_genres:
-                key = genre.strip().lower()
+                # #1512: dedupe on normalized genre identity so spelling
+                # variants ("Hip-Hop" vs "Hip Hop", "R&B" vs "RnB") collapse
+                # to the first spelling instead of surviving as duplicates.
+                # Note: _normalize_for_match's alias table now doubles as tag
+                # identity — any future alias added for whitelist matching
+                # will also change what counts as a duplicate genre here.
+                key = _normalize_for_match(genre)
                 if key and key not in seen:
                     seen.add(key)
                     merged.append(genre.strip().title())
