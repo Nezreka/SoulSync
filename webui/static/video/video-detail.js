@@ -2236,7 +2236,10 @@
         var isYt = !!(data && data.source === 'youtube');
         var seasonMissing = season.episodes.filter(function (e) { return !e.owned; });
         if (isYt && (ytFilter.q || ytFilter.state !== 'all' || ytFilter.duration !== 'all')) seasonMissing = [];   // a filtered view isn't "the season"
-        var canAcquire = !!(seasonMissing.length && (isYt || window.VideoGrab));
+        // A profile without download rights gets no acquisition buttons here either —
+        // the server 403s the grab/wishlist endpoints for it (same as the per-row buttons).
+        var canDl = (typeof canDownload !== 'function') || canDownload();
+        var canAcquire = !!(seasonMissing.length && canDl && (isYt || window.VideoGrab));
         // Monitoring and stale-failure resets matter on a COMPLETE season too, so a
         // library show always gets the bar. YouTube never does: it has no episode
         // rows to monitor, and a preview has no library row to act on at all.
@@ -3821,6 +3824,23 @@
         document.addEventListener('soulsync:video-wishlist-changed', function () {
             if (currentKind === 'movie' && data) { data._wl_checked = false; renderActions(data); }
         });
+        // The profile can arrive (or switch) after this page rendered: canDownload()
+        // answers "yes" until the profile is known, so the acquisition buttons may
+        // have been built for the wrong profile — a no-download member saw grab +
+        // wishlist buttons that the server then 403s, instead of the request
+        // buttons. Re-render the permission-dependent UI when the profile lands,
+        // but only when the permission outcome actually changed (avatar/name edits
+        // fire this event too — they must not collapse open episode panels).
+        var _lastCanDl = null;
+        function onProfileChanged() {
+            var canDl = (typeof canDownload === 'function') ? canDownload() : true;
+            if (_lastCanDl === canDl) return;
+            _lastCanDl = canDl;
+            if (!data || !root()) return;
+            renderActions(data);
+            renderEpisodes();
+        }
+        window.addEventListener('ss:webui-profile-context-changed', onProfileChanged);
         // Metadata edited via the Manage panel → re-render the page from the DB
         // (title/genres/summary changed under us). Quiet events (toggles) skip it.
         document.addEventListener('soulsync:video-meta-changed', function (e) {
