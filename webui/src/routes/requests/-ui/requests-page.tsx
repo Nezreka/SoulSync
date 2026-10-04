@@ -17,6 +17,7 @@ import {
   declineMusicRequest,
   declineMusicVideoRequest,
   deleteMusicRequest,
+  deleteMusicVideoRequest,
   invalidateMusicRequests,
   markMusicRequestsSeen,
   musicRequestsQueryOptions,
@@ -160,6 +161,9 @@ export function RequestsPage() {
 
   const remove = useMutation({
     mutationFn: (item: RequestItem) => {
+      if (item.source === 'video-history') {
+        return deleteMusicVideoRequest(profileId, item.video.id);
+      }
       if (item.source !== 'history') throw new Error('Only finished requests can be removed');
       return deleteMusicRequest(profileId, item.row.id);
     },
@@ -406,7 +410,7 @@ function RequestRow({
                     Withdraw
                   </Menu.Item>
                 ) : null}
-                {!pending && item.source === 'history' ? (
+                {!pending && (item.source === 'history' || item.source === 'video-history') ? (
                   <Menu.Item className={styles.menuItem} onClick={onRemove}>
                     Remove from history
                   </Menu.Item>

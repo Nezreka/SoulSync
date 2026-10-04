@@ -110,7 +110,7 @@ def sweep_fulfillment(db, only_pid=None) -> int:
                 _event("music_request_available", req)
     for req in db.list_music_video_requests(profile_id=only_pid, status="approved"):
         if db.music_video_downloaded(req["video_id"]) \
-                and db.set_music_video_request_status(req["id"], "available"):
+                and db.mark_music_video_request_available(req["id"]):
             changed += 1
             _notify(int(req["profile_id"]), f"{req.get('title') or 'The video'} is in your library now",
                     "success")

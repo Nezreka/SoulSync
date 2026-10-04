@@ -26119,6 +26119,23 @@ class MusicDatabase:
             logger.error("Error setting music video request status: %s", e)
             return False
 
+    def mark_music_video_request_available(self, request_id: int) -> bool:
+        """approved -> available, clearing seen_at so the requester's badge
+        lights up. mirrors set_music_request_status for track requests."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_video_request_schema(cursor)
+                cursor.execute(
+                    "UPDATE music_video_requests SET status = 'available', seen_at = NULL "
+                    "WHERE id = ? AND status = 'approved'",
+                    (int(request_id),))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error marking music video request available %s: %s", request_id, e)
+            return False
+
     def mark_music_video_requests_seen(self, profile_id: int) -> int:
         try:
             with self._get_connection() as conn:

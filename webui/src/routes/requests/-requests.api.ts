@@ -129,6 +129,14 @@ export async function deleteMusicRequest(profileId: number, requestId: number): 
   assertOk(payload, 'Could not remove that request');
 }
 
+/** remove a finished video request from history (own, or any as admin). */
+export async function deleteMusicVideoRequest(profileId: number, requestId: number): Promise<void> {
+  const payload = await readJson<Ok>(
+    apiClient.delete(`requests/music/videos/${requestId}`, { headers: headersFor(profileId) }),
+  );
+  assertOk(payload, 'Could not remove that request');
+}
+
 export async function markMusicRequestsSeen(profileId: number): Promise<void> {
   const payload = await readJson<Ok>(
     apiClient.post('requests/music/seen', { headers: headersFor(profileId) }),

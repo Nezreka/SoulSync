@@ -203,3 +203,67 @@ def test_video_request_counts_in_badge(asker):
     # the shared list response carries the video count alongside the tracks
     body = admin.get('/api/requests/music').get_json()
     assert body['counts'].get('pending_videos') == 1
+
+
+def test_sweep_flips_approved_video_to_available(asker, notes, monkeypatch):
+    """regression: the fulfillment sweep must move approved video requests to
+    available once the download lands in the library history (and notify the
+    requester). the old code called set_music_video_request_status which only
+    transitions from pending, so the sweep silently did nothing."""
+    import api.music_requests as mr
+
+    pid = asker
+    tag = uuid4().hex[:6]
+    rid = _file(_client_as(pid), tag)['id']
+
+    monkeypatch.setattr(mr, '_start_music_video', lambda data: {'success': True})
+    r = _client_as(1).post(f'/api/requests/music/videos/{rid}/approve')
+    assert r.status_code == 200
+
+    # the download lands: library_history row keyed by source_track_id
+    db = web_server.get_database()
+    with db._get_connection() as conn:
+        conn.execute(
+            "INSERT INTO library_history (event_type, title, source_track_id) VALUES (?,?,?)",
+            ('download', f'Windowlicker {tag}', f'vid{tag}'))
+        conn.commit()
+
+    # the sweep runs on list; the request must flip and the member notified
+    body = _client_as(pid).get('/api/requests/music').get_json()
+    assert body['success'] is True
+    hist = [v for v in body.get('video_history', []) if v['id'] == rid]
+    assert hist and hist[0]['status'] == 'available'
+    assert any(p == pid and 'is in your library now' in m for p, k, m in notes)
+
+
+def test_member_deletes_own_video_history(asker):
+    pid = asker
+    tag = uuid4().hex[:6]
+    rid = _file(_client_as(pid), tag)['id']
+    # decline it so it lands in history (not pending)
+    assert _client_as(1).post(f'/api/requests/music/videos/{rid}/decline').status_code == 200
+
+    r = _client_as(pid).delete(f'/api/requests/music/videos/{rid}')
+    assert r.status_code == 200 and r.get_json()['success'] is True
+    assert rid not in [v['id'] for v in _video_history_for(_client_as(pid), pid)]
+
+
+def test_delete_video_history_rejects_pending_and_strangers(asker):
+    pid = asker
+    db = web_server.get_database()
+    other = db.create_profile(name=f'vother_{uuid4().hex[:8]}', can_download=False)
+    try:
+        tag = uuid4().hex[:6]
+        rid = _file(_client_as(pid), tag)['id']
+        # pending rows can't be deleted via history endpoint (withdraw instead)
+        r = _client_as(pid).delete(f'/api/requests/music/videos/{rid}')
+        assert r.status_code == 409
+        # a stranger can't delete someone else's history (404, not 403)
+        assert _client_as(1).post(f'/api/requests/music/videos/{rid}/decline').status_code == 200
+        r = _client_as(other).delete(f'/api/requests/music/videos/{rid}')
+        assert r.status_code == 404
+        # but an admin can
+        r = _client_as(1).delete(f'/api/requests/music/videos/{rid}')
+        assert r.status_code == 200 and r.get_json()['success'] is True
+    finally:
+        db.delete_profile(other)
