@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from datetime import datetime, timezone
 
 pytest_plugins = ["tests.library2.conftest"]
@@ -72,8 +73,7 @@ def test_unchanged_wanted_projection_is_idempotent(legacy_db):
 
 def test_present_track_does_not_create_request(legacy_db):
     import_legacy_library(legacy_db)
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         track = conn.execute(
             "SELECT id FROM lib2_tracks ORDER BY id LIMIT 1"
         ).fetchone()[0]
@@ -81,8 +81,6 @@ def test_present_track_does_not_create_request(legacy_db):
         ensure_acquisition_schema(conn)
 
         assert materialize_wanted_requests(conn, track_ids=[track]) == ()
-    finally:
-        conn.close()
 
 
 def test_due_no_candidate_request_retries_same_identity(legacy_db):

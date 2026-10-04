@@ -12,6 +12,7 @@ import asyncio
 import sqlite3
 import threading
 import time
+from contextlib import closing
 from io import BytesIO
 
 import pytest
@@ -851,14 +852,11 @@ def test_acquisition_request_resolves_server_owned_profiles_and_is_idempotent(ap
 
 def test_acquisition_correlation_coverage_endpoint_is_redacted(api):
     client, db, _ids = api
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         from core.acquisition.correlation_coverage import record_correlation_outcome
         record_correlation_outcome(conn, "manual", "prepared")
         record_correlation_outcome(conn, "scheduled", "blocked")
         conn.commit()
-    finally:
-        conn.close()
 
     response = client.get(
         "/api/library/v2/acquisition/correlation-coverage?days=7")
@@ -908,8 +906,7 @@ def test_public_acquisition_request_rejects_browser_owned_search_options(api):
 
 def test_public_acquisition_options_preserve_group_edition_recording_layers(api):
     client, db, ids = api
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         from core.library2.editions import backfill_editions
         backfill_editions(conn.cursor())
         row = conn.execute(
@@ -918,8 +915,6 @@ def test_public_acquisition_options_preserve_group_edition_recording_layers(api)
             (ids["album_track"],),
         ).fetchone()
         conn.commit()
-    finally:
-        conn.close()
 
     edition = client.post("/api/library/v2/acquisition/requests", json={
         "scope": "release_edition",
@@ -966,8 +961,7 @@ def test_acquisition_evaluation_returns_only_public_candidates_and_reasons(api):
         "idempotency_key": "evaluate-views",
     }).get_json()
     request_id = created["request"]["id"]
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         from core.acquisition.candidates import register_candidate
         good, _ = register_candidate(
             conn,
@@ -996,8 +990,6 @@ def test_acquisition_evaluation_returns_only_public_candidates_and_reasons(api):
             facts={"artist": "Other", "release_title": "Views", "format": "flac"},
         )
         conn.commit()
-    finally:
-        conn.close()
 
     evaluated = client.post(
         f"/api/library/v2/acquisition/requests/{request_id}/evaluate",
@@ -1213,8 +1205,7 @@ def test_acquisition_blocklist_can_be_read_and_manually_unblocked(api):
         "entity_id": ids["views"],
         "idempotency_key": "blocklist-api",
     }).get_json()
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         from core.acquisition.blocklist import block_candidate
         from core.acquisition.candidates import register_candidate
         candidate, _ = register_candidate(
@@ -1232,8 +1223,6 @@ def test_acquisition_blocklist_can_be_read_and_manually_unblocked(api):
         entry, _ = block_candidate(
             conn, candidate.id, reason_code="client_failure")
         conn.commit()
-    finally:
-        conn.close()
 
     listed = client.get(
         "/api/library/v2/acquisition/blocklist").get_json()
@@ -1280,8 +1269,7 @@ def test_acquisition_grab_submits_once_and_returns_only_public_state(api):
         "idempotency_key": "grab-api",
     }).get_json()
     request_id = created["request"]["id"]
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         from core.acquisition.candidates import register_candidate
         candidate, _ = register_candidate(
             conn,
@@ -1296,8 +1284,6 @@ def test_acquisition_grab_submits_once_and_returns_only_public_state(api):
             facts={"release_title": "Views"},
         )
         conn.commit()
-    finally:
-        conn.close()
     evaluated = client.post(
         f"/api/library/v2/acquisition/requests/{request_id}/evaluate")
     assert evaluated.status_code == 200
@@ -1349,8 +1335,7 @@ def test_acquisition_grab_submits_once_and_returns_only_public_state(api):
 
 def test_wanted_materialize_endpoint_is_shadow_only_and_idempotent(api):
     client, db, ids = api
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         from core.library2.wanted import recompute_wanted
         conn.execute("DELETE FROM lib2_track_files WHERE track_id=?", (ids["album_track"],))
         conn.execute(
@@ -1367,8 +1352,6 @@ def test_wanted_materialize_endpoint_is_shadow_only_and_idempotent(api):
         from core.library2.editions import backfill_editions
         backfill_editions(conn.cursor())
         conn.commit()
-    finally:
-        conn.close()
 
     first = client.post(
         "/api/library/v2/acquisition/wanted/materialize",
@@ -3236,13 +3219,10 @@ def test_discovery_resolve_is_read_only_and_finds_an_existing_artist(api):
 
     assert known["artist_id"] == _ids_artist(db, "Drake")
     assert unknown["artist_id"] is None
-    conn = _conn(db)
-    try:
+    with closing(_conn(db)) as conn:
         assert conn.execute(
             "SELECT COUNT(*) FROM lib2_artists WHERE name='Nobody At All'"
         ).fetchone()[0] == 0
-    finally:
-        conn.close()
 
 
 def test_discovery_materialize_creates_the_artist_once(api):
@@ -3257,13 +3237,10 @@ def test_discovery_materialize_creates_the_artist_once(api):
                                "name": "Fresh Artist"}).get_json()
 
     assert first["artist_id"] == second["artist_id"]
-    conn = _conn(db)
-    try:
+    with closing(_conn(db)) as conn:
         row = conn.execute(
             "SELECT spotify_id FROM lib2_artists WHERE id=?", (first["artist_id"],),
         ).fetchone()
-    finally:
-        conn.close()
     assert row["spotify_id"] == "sp-new"
 
 
@@ -3276,8 +3253,7 @@ def test_discovery_artist_monitor_is_the_first_write_and_records_intent(api):
               "name": "Monitor Me", "monitored": True},
     ).get_json()
 
-    conn = _conn(db)
-    try:
+    with closing(_conn(db)) as conn:
         row = conn.execute(
             "SELECT monitored FROM lib2_artists WHERE id=?", (result["artist_id"],)
         ).fetchone()
@@ -3285,8 +3261,6 @@ def test_discovery_artist_monitor_is_the_first_write_and_records_intent(api):
             "SELECT monitored, provenance FROM lib2_monitor_rules "
             "WHERE entity_type='artist' AND entity_id=?", (result["artist_id"],)
         ).fetchone()
-    finally:
-        conn.close()
     assert result["monitored"] is True
     assert row["monitored"] == 1
     assert (rule["monitored"], rule["provenance"]) == (1, "user_explicit")
@@ -3312,8 +3286,7 @@ def test_discovery_album_monitor_materializes_only_after_explicit_action(
         },
     ).get_json()
 
-    conn = _conn(db)
-    try:
+    with closing(_conn(db)) as conn:
         artist = conn.execute(
             "SELECT monitored FROM lib2_artists WHERE id=?", (result["artist_id"],)
         ).fetchone()
@@ -3321,8 +3294,6 @@ def test_discovery_album_monitor_materializes_only_after_explicit_action(
             "SELECT monitored, origin, expected_track_count FROM lib2_albums WHERE id=?",
             (result["album_id"],),
         ).fetchone()
-    finally:
-        conn.close()
     assert artist["monitored"] == 0
     assert (album["monitored"], album["origin"], album["expected_track_count"]) == (
         1, "discography", 9)
@@ -3344,12 +3315,9 @@ def test_discovery_never_writes_a_legacy_id_into_a_provider_column(api):
                                 "name": "Legacy Only"}).get_json()
 
     assert resolved.get_json()["artist_id"] == ids["artist"]
-    conn = _conn(db)
-    try:
+    with closing(_conn(db)) as conn:
         row = conn.execute("SELECT spotify_id, external_ids FROM lib2_artists WHERE id=?",
                            (created["artist_id"],)).fetchone()
-    finally:
-        conn.close()
     assert row["spotify_id"] is None
     assert "plex-99" not in (row["external_ids"] or "")
 
@@ -3371,12 +3339,9 @@ def test_discovery_rejects_an_empty_identity(api):
 
 
 def _ids_artist(db, name: str) -> int:
-    conn = _conn(db)
-    try:
+    with closing(_conn(db)) as conn:
         return conn.execute(
             "SELECT id FROM lib2_artists WHERE name=?", (name,)).fetchone()["id"]
-    finally:
-        conn.close()
 
 
 def test_monitored_track_keeps_its_release_visible_in_my_library(api):
@@ -3514,14 +3479,11 @@ def test_discovery_track_never_monitors_the_whole_album(api, monkeypatch):
         "album_title": "Fresh Album", "album_provider_id": "sp-fresh-album",
     }).get_json()
 
-    conn = _conn(db)
-    try:
+    with closing(_conn(db)) as conn:
         album = conn.execute("SELECT monitored FROM lib2_albums WHERE id=?",
                              (body["album_id"],)).fetchone()
         track = conn.execute("SELECT monitored FROM lib2_tracks WHERE id=?",
                              (body["track_id"],)).fetchone()
-    finally:
-        conn.close()
     assert album["monitored"] == 0
     assert track["monitored"] == 0
 
@@ -3630,13 +3592,10 @@ def test_discovery_track_marks_a_new_release_as_provider_only(api, monkeypatch):
         "album_provider_id": "512013",
     }).get_json()
 
-    conn = _conn(db)
-    try:
+    with closing(_conn(db)) as conn:
         album = conn.execute(
             "SELECT origin, external_ids FROM lib2_albums WHERE id=?",
             (body["album_id"],)).fetchone()
-    finally:
-        conn.close()
     assert album["origin"] == "discography"
     # And it keeps the identity it was created from, so the tracklist can
     # actually be resolved later.
@@ -3755,8 +3714,7 @@ def test_album_resolve_stops_polling_when_no_provider_answers(api, monkeypatch):
     client.get(f"/api/library/v2/albums/{ids['single']}?resolve=1")
     _drain(resolved)
 
-    conn = _conn(db)
-    try:
+    with closing(_conn(db)) as conn:
         for _ in range(200):
             status = conn.execute(
                 "SELECT tracklist_status FROM lib2_albums WHERE id=?",
@@ -3764,8 +3722,6 @@ def test_album_resolve_stops_polling_when_no_provider_answers(api, monkeypatch):
             if status != "pending":
                 break
             time.sleep(0.01)
-    finally:
-        conn.close()
     assert status == "failed"
 
 
@@ -3773,11 +3729,8 @@ def test_album_resolve_stops_polling_when_no_provider_answers(api, monkeypatch):
 
 
 def _table_count(db, table: str) -> int:
-    conn = _conn(db)
-    try:
+    with closing(_conn(db)) as conn:
         return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-    finally:
-        conn.close()
 
 
 def test_reset_empties_the_catalogue_and_rearms_the_migration(api):
@@ -3811,15 +3764,12 @@ def test_reset_empties_the_catalogue_and_rearms_the_migration(api):
 
 def test_reset_keeps_the_tables_that_are_not_the_catalogue(api):
     client, db, _ids = api
-    conn = _conn(db)
-    try:
+    with closing(_conn(db)) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO lib2_ui_preferences(id, preferences_json) "
             "VALUES(1, '{\"artistColumns\": []}')"
         )
         conn.commit()
-    finally:
-        conn.close()
 
     client.post("/api/library/v2/reset")
 
@@ -3868,8 +3818,7 @@ def test_reset_only_ever_touches_lib2_tables(api):
 
 def test_reset_leaves_the_append_only_history_intact(api):
     client, db, ids = api
-    conn = _conn(db)
-    try:
+    with closing(_conn(db)) as conn:
         conn.execute(
             "INSERT INTO lib2_entity_history"
             "(event_type, subject_type, subject_id, to_entity_type, "
@@ -3878,18 +3827,13 @@ def test_reset_leaves_the_append_only_history_intact(api):
             (ids["artist"], ids["artist"]),
         )
         conn.commit()
-    finally:
-        conn.close()
 
     assert client.post("/api/library/v2/reset").status_code == 200
 
-    conn = _conn(db)
-    try:
+    with closing(_conn(db)) as conn:
         survived = conn.execute(
             "SELECT COUNT(*) FROM lib2_entity_history WHERE event_type='entity_moved'"
         ).fetchone()[0]
-    finally:
-        conn.close()
     assert survived == 1
 
 

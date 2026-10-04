@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import subprocess
+from contextlib import closing
 from itertools import count
 from pathlib import Path
 from uuid import uuid4
@@ -264,8 +265,7 @@ def test_prepare_submission_unknown_before_container_restart() -> None:
     _write_review_fixture(audio_path)
     assert audio_path.is_file()
 
-    conn = _connect()
-    try:
+    with closing(_connect()) as conn:
         ensure_acquisition_schema(conn)
         _seed_expected_edition(conn)
         request, created = create_request(
@@ -314,8 +314,6 @@ def test_prepare_submission_unknown_before_container_restart() -> None:
         assert grab["external_job_id"] is None
         assert grab["last_client_state"] == "submission_unknown"
         assert remote_root
-    finally:
-        conn.close()
 
 
 def test_verify_restart_adoption_and_mounted_path_mapping() -> None:
@@ -324,8 +322,7 @@ def test_verify_restart_adoption_and_mounted_path_mapping() -> None:
 
     adapter = _adapter()
     assert run_async(adapter.check_connection()) is True
-    conn = _connect()
-    try:
+    with closing(_connect()) as conn:
         pending = list(open_grabs(conn, "usenet"))
         assert len(pending) == 1
         download_id = pending[0]["download_id"]
@@ -333,8 +330,6 @@ def test_verify_restart_adoption_and_mounted_path_mapping() -> None:
             pending[0].get("adopted")
             and pending[0].get("external_job_id")
         )
-    finally:
-        conn.close()
 
     monitor = UsenetAcquisitionMonitor(
         _connect,
@@ -349,15 +344,12 @@ def test_verify_restart_adoption_and_mounted_path_mapping() -> None:
     else:
         assert download_id in result.reconciliation.adopted
 
-    conn = _connect()
-    try:
+    with closing(_connect()) as conn:
         adopted = get_grab(conn, download_id)
         assert adopted is not None
         assert adopted["adopted"] == 1
         assert adopted["external_job_id"]
         external_job_id = adopted["external_job_id"]
-    finally:
-        conn.close()
 
     remote_root, local_root = _mapping_roots()
     config = {
@@ -391,23 +383,19 @@ def test_verify_restart_adoption_and_mounted_path_mapping() -> None:
             error=None,
         ),),
     )
-    conn = _connect()
-    try:
+    with closing(_connect()) as conn:
         completion_result = reconcile_usenet_snapshot(conn, completion)
         assert download_id in completion_result.completed
         pending_import = get_import_by_download(conn, download_id)
         assert pending_import is not None
         conn.commit()
-    finally:
-        conn.close()
 
     pipeline_result = advance_open_imports(
         _connect,
         config_get=config_get,
     )
     assert pipeline_result.outcomes[pending_import.id] == "needs_review"
-    conn = _connect()
-    try:
+    with closing(_connect()) as conn:
         review = get_import(conn, pending_import.id)
         assert review is not None
         assert review.status == "needs_review"
@@ -442,22 +430,17 @@ def test_verify_restart_adoption_and_mounted_path_mapping() -> None:
         assert resolved.status == "importing"
         assert resolved.matches[0]["strategy"] == "manual"
         conn.commit()
-    finally:
-        conn.close()
 
     completed_result = advance_open_imports(
         _connect,
         config_get=config_get,
     )
     assert completed_result.outcomes[pending_import.id] == "completed"
-    conn = _connect()
-    try:
+    with closing(_connect()) as conn:
         completed = get_import(conn, pending_import.id)
         assert completed is not None
         assert completed.status == "completed"
         assert completed.result["processed"][0]["track_id"] == 101
         assert completed.result["processed"][0]["final_path"]
-    finally:
-        conn.close()
 
     assert run_async(adapter.remove(str(external_job_id), delete_files=True)) is True

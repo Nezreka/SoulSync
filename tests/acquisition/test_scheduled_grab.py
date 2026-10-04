@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import closing
+
 pytest_plugins = ["tests.library2.conftest"]
 
 from core.acquisition.history import list_history_events
@@ -27,8 +29,7 @@ from tests.acquisition.grab_support import (
 
 
 def test_wishlist_dispatch_correlates_scheduled_request(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         markers = correlate_scheduled_grab(
             conn,
             lib2_context=_track_context(conn),
@@ -60,13 +61,10 @@ def test_wishlist_dispatch_correlates_scheduled_request(legacy_db):
         events = [event.event_type for event in list_history_events(
             conn, request_id=request.id)]
         assert events == ["request_created", "scheduled_grab_correlated"]
-    finally:
-        conn.close()
 
 
 def test_wishlist_dispatch_without_lib2_entity_uses_task_target(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         markers = correlate_scheduled_grab(
             conn,
             target_context={
@@ -96,13 +94,10 @@ def test_wishlist_dispatch_without_lib2_entity_uses_task_target(legacy_db):
         assert run["accepted"] == 0
         event = list_history_events(conn, request_id=request.id)[-1]
         assert "artist_mismatch" in event.payload["rejections"]
-    finally:
-        conn.close()
 
 
 def test_scheduled_grab_can_be_persisted_before_client_dispatch(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         markers = prepare_scheduled_grab(
             conn,
             target_context={
@@ -125,13 +120,10 @@ def test_scheduled_grab_can_be_persisted_before_client_dispatch(legacy_db):
         assert request.status == "grabbing"
         assert grab["status"] == "submitting"
         assert '"legacy_download_id": null' in grab["context_json"]
-    finally:
-        conn.close()
 
 
 def test_gate_rejections_are_recorded_but_never_enforced(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         markers = correlate_scheduled_grab(
             conn,
             lib2_context=_track_context(conn),
@@ -159,13 +151,10 @@ def test_gate_rejections_are_recorded_but_never_enforced(legacy_db):
         assert correlated[0].reason_code == (
             "gate_rejections_observed_not_enforced")
         assert "artist_mismatch" in correlated[0].payload["rejections"]
-    finally:
-        conn.close()
 
 
 def test_bundle_scope_sources_are_not_correlated(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         markers = correlate_scheduled_grab(
             conn,
             lib2_context=_track_context(conn),
@@ -177,13 +166,10 @@ def test_bundle_scope_sources_are_not_correlated(legacy_db):
         assert markers is None
         assert conn.execute(
             "SELECT COUNT(*) FROM acquisition_requests").fetchone()[0] == 0
-    finally:
-        conn.close()
 
 
 def test_success_callback_completes_scheduled_grab(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         markers = correlate_scheduled_grab(
             conn,
             lib2_context=_track_context(conn),
@@ -207,13 +193,10 @@ def test_success_callback_completes_scheduled_grab(legacy_db):
             (markers["download_id"],),
         ).fetchone()
         assert grab["status"] == "completed"
-    finally:
-        conn.close()
 
 
 def test_stale_sweep_covers_manual_and_scheduled_grabs(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         stale_manual = correlate_manual_grab(
             conn,
             lib2_context=_track_context(conn),
@@ -251,8 +234,6 @@ def test_stale_sweep_covers_manual_and_scheduled_grabs(legacy_db):
         # runtime failures must never blocklist the release itself
         assert conn.execute(
             "SELECT COUNT(*) FROM release_blocklist").fetchone()[0] == 0
-    finally:
-        conn.close()
 
 
 def test_try_wrapper_fails_open(legacy_db):
@@ -276,8 +257,7 @@ def test_try_wrapper_fails_open(legacy_db):
 
 
 def test_cancel_closes_manual_correlated_grab(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         markers = correlate_manual_grab(
             conn,
             lib2_context=_track_context(conn),
@@ -300,13 +280,10 @@ def test_cancel_closes_manual_correlated_grab(legacy_db):
         event = list_history_events(conn, download_id=markers["download_id"])[-1]
         assert event.event_type == "cancelled"
         assert event.reason_code == "client_job_removed"
-    finally:
-        conn.close()
 
 
 def test_cancel_closes_scheduled_correlated_grab(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         markers = correlate_scheduled_grab(
             conn,
             lib2_context=_track_context(conn),
@@ -325,13 +302,10 @@ def test_cancel_closes_scheduled_correlated_grab(legacy_db):
             "SELECT status FROM acquisition_grabs WHERE download_id=?",
             (markers["download_id"],),
         ).fetchone()["status"] == "cancelled"
-    finally:
-        conn.close()
 
 
 def test_cancel_preserves_completed_correlated_grab(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         markers = correlate_manual_grab(
             conn,
             lib2_context=_track_context(conn),
@@ -350,15 +324,10 @@ def test_cancel_preserves_completed_correlated_grab(legacy_db):
         assert get_request(conn, markers["request_id"]).status == "completed"
         events = list_history_events(conn, download_id=markers["download_id"])
         assert [event.event_type for event in events].count("cancelled") == 0
-    finally:
-        conn.close()
 
 
 def test_cancel_unknown_download_is_a_noop(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         assert not notify_correlated_grab_cancelled(
             "not-correlated", connection_factory=legacy_db._get_connection)
         assert conn.execute("SELECT COUNT(*) FROM acquisition_history").fetchone()[0] == 0
-    finally:
-        conn.close()

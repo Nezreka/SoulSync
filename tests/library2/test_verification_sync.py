@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import closing
+
 from core.library2.verification import mark_file_verification_status
 
 
@@ -43,10 +45,7 @@ def test_human_approve_matches_resolved_mapped_path(imported_conn, monkeypatch):
 def test_verification_sync_is_noop_without_library_v2_schema(tmp_path):
     import sqlite3
 
-    conn = sqlite3.connect(tmp_path / "plain.sqlite")
-    try:
+    with closing(sqlite3.connect(tmp_path / "plain.sqlite")) as conn:
         assert mark_file_verification_status(
             conn, ["/music/song.flac"], "human_verified"
         ) == 0
-    finally:
-        conn.close()

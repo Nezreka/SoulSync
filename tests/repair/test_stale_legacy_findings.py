@@ -20,6 +20,7 @@ disk that the catalogue does not know, and its fix is a pure retag.
 
 from __future__ import annotations
 
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -102,13 +103,10 @@ def _pending(db: MusicDatabase, job_id, finding_type, entity_id, status='pending
 
 
 def _surviving(db: MusicDatabase) -> set:
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         return {(r[0], r[1]) for r in conn.execute(
             "SELECT finding_type, COALESCE(entity_id,'') FROM repair_findings "
             "WHERE status='pending'")}
-    finally:
-        conn.close()
 
 
 def test_startup_prunes_the_stale_findings_it_would_refuse(tmp_path: Path):
@@ -135,11 +133,8 @@ def test_the_prune_keeps_resolved_history(tmp_path: Path):
 
     RepairWorker._prune_stale_legacy_findings(_worker(db, tmp_path))
 
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         assert conn.execute("SELECT COUNT(*) FROM repair_findings").fetchone()[0] == 1
-    finally:
-        conn.close()
 
 
 def test_the_worker_no_longer_reads_the_legacy_catalogue():

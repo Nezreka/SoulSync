@@ -12,6 +12,7 @@ stored path.
 from __future__ import annotations
 
 import os
+from contextlib import closing
 from pathlib import Path
 
 from core.repair_worker import RepairWorker
@@ -49,11 +50,8 @@ def _db_with_native_track(tmp_path: Path, audio: Path) -> MusicDatabase:
 
 
 def _stored_path(db: MusicDatabase) -> str:
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         return conn.execute("SELECT path FROM lib2_track_files WHERE id=70").fetchone()[0]
-    finally:
-        conn.close()
 
 
 def test_blasphemy_mode_repoints_the_catalogue_at_the_lossy_copy(tmp_path: Path):

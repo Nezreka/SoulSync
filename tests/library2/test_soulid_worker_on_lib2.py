@@ -17,6 +17,8 @@ consequences shape the port:
 
 from __future__ import annotations
 
+from contextlib import closing
+
 
 import pytest
 
@@ -58,21 +60,15 @@ def worker(tmp_path):
 
 
 def _row(worker, table, entity_id):
-    conn = worker.db._get_connection()
-    try:
+    with closing(worker.db._get_connection()) as conn:
         return conn.execute(f"SELECT * FROM {table} WHERE id=?", (entity_id,)).fetchone()
-    finally:
-        conn.close()
 
 
 def _exec(worker, sql, params=()):
-    conn = worker.db._get_connection()
-    try:
+    with closing(worker.db._get_connection()) as conn:
         cursor = conn.execute(sql, params)
         conn.commit()
         return cursor.lastrowid
-    finally:
-        conn.close()
 
 
 class TestAlbums:
@@ -158,12 +154,9 @@ class TestTheAlgorithmVersionReset:
         _exec(worker, "UPDATE lib2_artists SET soul_id='soul_old' WHERE id=1")
         worker._migrate_artist_soul_ids()
         assert _row(worker, "lib2_artists", 1)["soul_id"] is None
-        conn = worker.db._get_connection()
-        try:
+        with closing(worker.db._get_connection()) as conn:
             value = conn.execute(
                 "SELECT value FROM metadata WHERE key='soulid_artist_version'").fetchone()[0]
-        finally:
-            conn.close()
         assert value == "debut_year_api_v2"
 
     def test_it_does_not_run_twice(self, worker):

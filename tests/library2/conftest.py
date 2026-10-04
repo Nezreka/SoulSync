@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import tempfile
+from contextlib import closing
 
 import pytest
 
@@ -153,14 +154,11 @@ _MIGRATED_COLUMNS = {
 
 
 def _migrate_legacy_schema(path: str) -> None:
-    conn = sqlite3.connect(path)
-    try:
+    with closing(sqlite3.connect(path)) as conn:
         for table, columns in _MIGRATED_COLUMNS.items():
             for column in columns:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column}")
         conn.commit()
-    finally:
-        conn.close()
 
 
 @pytest.fixture

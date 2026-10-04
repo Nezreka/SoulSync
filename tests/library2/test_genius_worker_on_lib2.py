@@ -9,6 +9,7 @@ queue must skip albums rather than attempt and mark them.
 from __future__ import annotations
 
 import json
+from contextlib import closing
 
 import pytest
 
@@ -58,11 +59,8 @@ def worker(tmp_path, monkeypatch):
 
 
 def _row(worker, table, entity_id=1):
-    conn = worker.db._get_connection()
-    try:
+    with closing(worker.db._get_connection()) as conn:
         return conn.execute(f"SELECT * FROM {table} WHERE id=?", (entity_id,)).fetchone()
-    finally:
-        conn.close()
 
 
 def test_albums_are_never_offered(worker):
@@ -114,11 +112,8 @@ def test_a_failed_lyrics_fetch_does_not_erase_them(worker):
 def test_the_attempt_is_recorded(worker):
     worker._update_track(1, {"id": 5}, {"id": 5}, "words")
 
-    conn = worker.db._get_connection()
-    try:
+    with closing(worker.db._get_connection()) as conn:
         state = attempt_state(conn, entity_type="track", entity_id=1)
-    finally:
-        conn.close()
     assert state["genius"]["status"] == "matched"
 
 

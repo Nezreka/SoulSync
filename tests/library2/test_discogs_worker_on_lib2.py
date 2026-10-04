@@ -10,6 +10,7 @@ endpoint.
 from __future__ import annotations
 
 import json
+from contextlib import closing
 
 import pytest
 
@@ -59,11 +60,8 @@ def worker(tmp_path, monkeypatch):
 
 
 def _row(worker, table, entity_id=1):
-    conn = worker.db._get_connection()
-    try:
+    with closing(worker.db._get_connection()) as conn:
         return conn.execute(f"SELECT * FROM {table} WHERE id=?", (entity_id,)).fetchone()
-    finally:
-        conn.close()
 
 
 def test_tracks_are_never_offered(worker):
@@ -158,11 +156,8 @@ def test_a_claimed_provider_id_is_refused(worker):
     worker.client = _Client()
     worker._search_and_match_artist(1, 'Rone')
 
-    conn = worker.db._get_connection()
-    try:
+    with closing(worker.db._get_connection()) as conn:
         state = attempt_state(conn, entity_type='artist', entity_id=1)
-    finally:
-        conn.close()
     assert state['discogs']['status'] == 'not_found'
     assert json.loads(_row(worker, 'lib2_artists')['external_ids']) == {}
 

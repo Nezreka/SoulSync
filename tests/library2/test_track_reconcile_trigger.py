@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from contextlib import closing
 
 import core.library2.track_reconcile_trigger as TRT
 
@@ -48,16 +49,13 @@ def test_fresh_file_resolves_its_album_before_scheduling(legacy_db):
     from core.library2.importer import import_legacy_library
 
     import_legacy_library(legacy_db)
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute(
             """SELECT tf.id AS file_id, t.album_id
                  FROM lib2_track_files tf
                  JOIN lib2_tracks t ON t.id=tf.track_id
                 ORDER BY tf.id LIMIT 1"""
         ).fetchone()
-    finally:
-        conn.close()
 
     TRT.reset_for_tests()
     done = threading.Event()

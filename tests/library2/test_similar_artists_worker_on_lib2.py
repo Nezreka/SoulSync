@@ -19,6 +19,7 @@ same source_artist_id instead of duplicating the work.
 from __future__ import annotations
 
 import json
+from contextlib import closing
 
 import pytest
 
@@ -54,8 +55,7 @@ def worker(tmp_path):
 
 def _artist(worker, name, *, spotify_id=None, musicbrainz_id=None,
             external_ids=None):
-    conn = worker.db._get_connection()
-    try:
+    with closing(worker.db._get_connection()) as conn:
         artist_id = conn.execute(
             "INSERT INTO lib2_artists(name, sort_name, spotify_id, musicbrainz_id, "
             "external_ids) VALUES(?,?,?,?,?)",
@@ -69,8 +69,6 @@ def _artist(worker, name, *, spotify_id=None, musicbrainz_id=None,
             "INSERT INTO lib2_tracks(album_id,title) VALUES(?,'Bora')", (album,))
         conn.commit()
         return artist_id
-    finally:
-        conn.close()
 
 
 class TestPickingTheSourceId:
@@ -184,11 +182,8 @@ def test_the_mark_reaches_the_ledger(worker):
 
     worker._mark(artist, 'matched')
 
-    conn = worker.db._get_connection()
-    try:
+    with closing(worker.db._get_connection()) as conn:
         state = attempt_state(conn, entity_type='artist', entity_id=artist)
-    finally:
-        conn.close()
     assert state['similar_artists']['status'] == 'matched'
 
 

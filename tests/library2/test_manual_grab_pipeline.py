@@ -27,6 +27,7 @@ from __future__ import annotations
 import os
 import sys
 import types
+from contextlib import closing
 
 import pytest
 
@@ -231,14 +232,11 @@ def test_manual_grab_with_lib2_entity_routes_through_full_pipeline(
     assert "Transfer" not in context["_final_processed_path"]
     assert organized_final_path.exists()
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         file_row = conn.execute(
             "SELECT track_id, path FROM lib2_track_files WHERE track_id=?",
             (target_track_id,),
         ).fetchone()
-    finally:
-        conn.close()
 
     assert file_row is not None, (
         "Manual grab completed through the full pipeline, but no "

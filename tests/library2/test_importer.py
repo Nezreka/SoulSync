@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -121,13 +122,10 @@ def test_import_commits_track_batches_before_publishing_progress(legacy_db):
     def progress(stage, current, total, *, connection=None):
         assert connection is not None
         if stage == "tracks" and current == 200:
-            external = legacy_db._get_connection()
-            try:
+            with closing(legacy_db._get_connection()) as external:
                 externally_visible.append(
                     external.execute("SELECT COUNT(*) FROM lib2_tracks").fetchone()[0]
                 )
-            finally:
-                external.close()
 
     progress.lib2_connection_aware = True
     import_legacy_library(legacy_db, progress=progress)
@@ -222,8 +220,7 @@ def test_partial_album_is_not_blanket_monitored_on_import(legacy_db):
     'One Dance' single is fully present → stays monitored (owned → upgradeable).
     """
     import_legacy_library(legacy_db)
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         monitored = {
             r["title"]: r["monitored"] for r in conn.execute(
                 "SELECT title, monitored FROM lib2_albums")
@@ -260,8 +257,6 @@ def test_partial_album_is_not_blanket_monitored_on_import(legacy_db):
         assert (present_wanted["wanted"], present_wanted["reason"]) == (
             1, "track_rule:file_import"
         )
-    finally:
-        conn.close()
 
 
 def _fresh_resolver(legacy_db):
@@ -358,8 +353,7 @@ def test_import_captures_all_provider_ids_into_external_ids(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute(
             "SELECT spotify_id, musicbrainz_id, external_ids FROM lib2_artists "
             "WHERE name='Drake'").fetchone()
@@ -368,8 +362,6 @@ def test_import_captures_all_provider_ids_into_external_ids(legacy_db):
         assert ext.get("spotify") == "sp1"          # conftest spotify_artist_id
         assert ext.get("musicbrainz") == "mb_drake"
         assert row["musicbrainz_id"] == "mb_drake"  # well-known column also filled
-    finally:
-        conn.close()
 
 
 def test_import_captures_album_provider_ids_into_external_ids(legacy_db):
@@ -388,15 +380,12 @@ def test_import_captures_album_provider_ids_into_external_ids(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         ext = json.loads(
             conn.execute("SELECT external_ids FROM lib2_albums WHERE title='Views'")
             .fetchone()["external_ids"] or "{}")
         assert ext.get("deezer") == "dz_views"
         assert ext.get("spotify") == "sp_views"
-    finally:
-        conn.close()
 
 
 def test_import_captures_album_long_tail_provider_ids_into_external_ids(legacy_db):
@@ -417,8 +406,7 @@ def test_import_captures_album_long_tail_provider_ids_into_external_ids(legacy_d
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         ext = json.loads(
             conn.execute("SELECT external_ids FROM lib2_albums WHERE title='Views'")
             .fetchone()["external_ids"] or "{}")
@@ -428,8 +416,6 @@ def test_import_captures_album_long_tail_provider_ids_into_external_ids(legacy_d
         assert ext.get("amazon") == "am_views"
         assert ext.get("jiosaavn") == "js_views"
         assert ext.get("bandcamp") == "https://drake.bandcamp.com/album/views"
-    finally:
-        conn.close()
 
 
 def test_import_captures_track_provider_ids_into_external_ids(legacy_db):
@@ -453,8 +439,7 @@ def test_import_captures_track_provider_ids_into_external_ids(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         ext = json.loads(
             conn.execute(
                 "SELECT external_ids FROM lib2_tracks WHERE title='One Dance' "
@@ -470,8 +455,6 @@ def test_import_captures_track_provider_ids_into_external_ids(legacy_db):
         assert ext.get("jiosaavn") == "js_t100"
         assert ext.get("bandcamp") == "https://x.bandcamp.com/track/one-dance"
         assert ext.get("lastfm") == "https://last.fm/one-dance"
-    finally:
-        conn.close()
 
 
 def test_import_captures_track_bpm_and_explicit(legacy_db):
@@ -486,16 +469,13 @@ def test_import_captures_track_bpm_and_explicit(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute(
             "SELECT bpm, explicit FROM lib2_tracks WHERE title='One Dance' "
             "AND legacy_track_id=100"
         ).fetchone()
         assert row["bpm"] == 104.5
         assert row["explicit"] == 1
-    finally:
-        conn.close()
 
 
 def test_import_captures_track_style_mood(legacy_db):
@@ -510,16 +490,13 @@ def test_import_captures_track_style_mood(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute(
             "SELECT style, mood FROM lib2_tracks WHERE title='One Dance' "
             "AND legacy_track_id=100"
         ).fetchone()
         assert row["style"] == "Pop Rap"
         assert row["mood"] == "Chill"
-    finally:
-        conn.close()
 
 
 def test_import_captures_album_explicit_label_upc(legacy_db):
@@ -537,16 +514,13 @@ def test_import_captures_album_explicit_label_upc(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute(
             "SELECT explicit, label, upc FROM lib2_albums WHERE title='Views'"
         ).fetchone()
         assert row["explicit"] == 1
         assert row["label"] == "OVO Sound"
         assert row["upc"] == "00602557546317"
-    finally:
-        conn.close()
 
 
 def test_import_captures_album_style_mood(legacy_db):
@@ -561,15 +535,12 @@ def test_import_captures_album_style_mood(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute(
             "SELECT style, mood FROM lib2_albums WHERE title='Views'"
         ).fetchone()
         assert row["style"] == "Hip Hop"
         assert row["mood"] == "Moody"
-    finally:
-        conn.close()
 
 
 def test_import_captures_artist_style_mood_label_aliases_banner(legacy_db):
@@ -591,8 +562,7 @@ def test_import_captures_artist_style_mood_label_aliases_banner(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute(
             "SELECT style, mood, label, aliases, banner_url FROM lib2_artists "
             "WHERE name='Drake'"
@@ -602,8 +572,6 @@ def test_import_captures_artist_style_mood_label_aliases_banner(legacy_db):
         assert row["label"] == "OVO Sound"
         assert json.loads(row["aliases"]) == ["Drizzy", "Champagne Papi"]
         assert row["banner_url"] == "http://img/banner.jpg"
-    finally:
-        conn.close()
 
 
 def test_import_reimport_keeps_artist_flat_fields_when_legacy_column_missing(legacy_db):
@@ -625,12 +593,9 @@ def test_import_reimport_keeps_artist_flat_fields_when_legacy_column_missing(leg
     conn.close()
     import_legacy_library(legacy_db, reset=False)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute("SELECT style FROM lib2_artists WHERE name='Drake'").fetchone()
         assert row["style"] == "Hip Hop"
-    finally:
-        conn.close()
 
 
 def test_import_captures_artist_lastfm_genius_discogs_enrichment(legacy_db):
@@ -656,8 +621,7 @@ def test_import_captures_artist_lastfm_genius_discogs_enrichment(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         enrichment = json.loads(
             conn.execute(
                 "SELECT enrichment FROM lib2_artists WHERE name='Drake'"
@@ -671,8 +635,6 @@ def test_import_captures_artist_lastfm_genius_discogs_enrichment(legacy_db):
         assert enrichment["genius"]["alt_names"] == ["Drizzy"]
         assert enrichment["discogs"]["bio"] == "Canadian rapper."
         assert enrichment["discogs"]["members"] == ["Drake"]
-    finally:
-        conn.close()
 
 
 def test_import_enrichment_merge_never_overwrites_richer_existing_data(legacy_db):
@@ -692,15 +654,12 @@ def test_import_enrichment_merge_never_overwrites_richer_existing_data(legacy_db
     conn.close()
     import_legacy_library(legacy_db, reset=False)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         enrichment = json.loads(
             conn.execute(
                 "SELECT enrichment FROM lib2_artists WHERE name='Drake'"
             ).fetchone()["enrichment"])
         assert enrichment["lastfm"]["bio"] == "A rapper from Toronto."
-    finally:
-        conn.close()
 
 
 def test_import_captures_track_genius_lyrics_copyright_play_count_last_played(legacy_db):
@@ -721,8 +680,7 @@ def test_import_captures_track_genius_lyrics_copyright_play_count_last_played(le
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute(
             "SELECT genius_lyrics, copyright, play_count, last_played "
             "FROM lib2_tracks WHERE title='One Dance' AND legacy_track_id=100"
@@ -731,8 +689,6 @@ def test_import_captures_track_genius_lyrics_copyright_play_count_last_played(le
         assert row["copyright"] == "(C) 2016 OVO Sound"
         assert row["play_count"] == 42
         assert row["last_played"] == "2026-07-01 12:00:00"
-    finally:
-        conn.close()
 
 
 def test_import_track_play_count_defaults_to_zero_without_legacy_column(legacy_db):
@@ -742,15 +698,12 @@ def test_import_track_play_count_defaults_to_zero_without_legacy_column(legacy_d
     stats = import_legacy_library(legacy_db, reset=True)
     assert stats["tracks"] > 0
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute(
             "SELECT play_count FROM lib2_tracks WHERE title='One Dance' "
             "AND legacy_track_id=100"
         ).fetchone()
         assert row["play_count"] == 0
-    finally:
-        conn.close()
 
 
 def test_import_new_track_uses_legacy_quality_profile_id_when_valid(legacy_db):
@@ -768,8 +721,7 @@ def test_import_new_track_uses_legacy_quality_profile_id_when_valid(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute(
             "SELECT quality_profile_id FROM lib2_tracks WHERE title='One Dance' "
             "AND legacy_track_id=100"
@@ -780,8 +732,6 @@ def test_import_new_track_uses_legacy_quality_profile_id_when_valid(legacy_db):
             "SELECT quality_profile_id FROM lib2_tracks WHERE legacy_track_id=101"
         ).fetchone()
         assert other["quality_profile_id"] == 1
-    finally:
-        conn.close()
 
 
 def test_import_new_track_falls_back_to_default_for_dangling_legacy_profile_id(legacy_db):
@@ -799,15 +749,12 @@ def test_import_new_track_falls_back_to_default_for_dangling_legacy_profile_id(l
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute(
             "SELECT quality_profile_id FROM lib2_tracks WHERE title='One Dance' "
             "AND legacy_track_id=100"
         ).fetchone()
         assert row["quality_profile_id"] == 1
-    finally:
-        conn.close()
 
 
 def test_import_captures_real_schema_artist_provider_ids(legacy_db):
@@ -828,16 +775,13 @@ def test_import_captures_real_schema_artist_provider_ids(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         ext = json.loads(conn.execute(
             "SELECT external_ids FROM lib2_artists WHERE name='Drake'"
         ).fetchone()["external_ids"] or "{}")
         assert ext.get("deezer") == "259"
         assert ext.get("tidal") == "tid1"
         assert ext.get("qobuz") == "qob1"
-    finally:
-        conn.close()
 
 
 def test_reimport_matches_artist_with_text_legacy_id_no_duplicate(tmp_path):
@@ -1060,16 +1004,13 @@ def test_import_captures_real_schema_album_provider_ids(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         ext = json.loads(conn.execute(
             "SELECT external_ids FROM lib2_albums WHERE title='Views'"
         ).fetchone()["external_ids"] or "{}")
         assert ext.get("deezer") == "dz10"
         assert ext.get("tidal") == "td10"
         assert ext.get("qobuz") == "qb10"
-    finally:
-        conn.close()
 
 
 def test_import_prefers_explicit_album_type_over_one_track_heuristic(legacy_db):
@@ -1126,8 +1067,7 @@ def test_reimport_rebuilds_album_artist_credits_after_metadata_changes(legacy_db
 
     import_legacy_library(legacy_db, reset=False)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         credits = [
             (row["name"], row["role"])
             for row in conn.execute(
@@ -1140,8 +1080,6 @@ def test_reimport_rebuilds_album_artist_credits_after_metadata_changes(legacy_db
             )
         ]
         assert credits == [("New Primary", "primary")]
-    finally:
-        conn.close()
 
 
 def test_single_album_linkage(imported_conn):
@@ -1393,16 +1331,13 @@ def test_import_uses_live_default_after_profile_one_is_deleted(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         for table in ("lib2_artists", "lib2_albums", "lib2_tracks"):
             profile_ids = {
                 row[0] for row in conn.execute(
                     f"SELECT DISTINCT quality_profile_id FROM {table}")
             }
             assert profile_ids == {2}, table
-    finally:
-        conn.close()
 
 
 def test_wishlist_only_track_seeds_missing_monitored_library_rows(legacy_db):
@@ -2125,8 +2060,7 @@ def test_deezer_wishlist_ids_do_not_land_in_spotify_columns(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = row_conn(legacy_db.path)
-    try:
+    with closing(row_conn(legacy_db.path)) as conn:
         track = conn.execute(
             "SELECT * FROM lib2_tracks WHERE title='Deezer Song'").fetchone()
         album = conn.execute(
@@ -2139,8 +2073,6 @@ def test_deezer_wishlist_ids_do_not_land_in_spotify_columns(legacy_db):
         assert json.loads(album["external_ids"])["deezer"] == "789"
         assert artist["spotify_id"] in (None, "")
         assert json.loads(artist["external_ids"])["deezer"] == "456"
-    finally:
-        conn.close()
 
 
 def test_the_provider_can_also_come_from_source_info(legacy_db):
@@ -2150,13 +2082,10 @@ def test_the_provider_can_also_come_from_source_info(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = row_conn(legacy_db.path)
-    try:
+    with closing(row_conn(legacy_db.path)) as conn:
         track = conn.execute(
             "SELECT * FROM lib2_tracks WHERE title='Deezer Song'").fetchone()
         assert json.loads(track["external_ids"])["deezer"] == "123"
-    finally:
-        conn.close()
 
 
 def test_a_spotify_wishlist_row_still_uses_the_spotify_column(legacy_db):
@@ -2186,13 +2115,10 @@ def test_a_spotify_wishlist_row_still_uses_the_spotify_column(legacy_db):
 
     import_legacy_library(legacy_db, reset=True)
 
-    conn = row_conn(legacy_db.path)
-    try:
+    with closing(row_conn(legacy_db.path)) as conn:
         assert conn.execute(
             "SELECT spotify_id FROM lib2_tracks WHERE title='Spotify Song'"
         ).fetchone()[0] == "sp_t"
-    finally:
-        conn.close()
 
 
 def test_an_existing_deezer_track_is_reused_not_duplicated(legacy_db):
@@ -2207,13 +2133,10 @@ def test_an_existing_deezer_track_is_reused_not_duplicated(legacy_db):
     # track it created the first time round via the deezer namespace.
     import_legacy_library(legacy_db, reset=False)
 
-    conn = sqlite3.connect(legacy_db.path)
-    try:
+    with closing(sqlite3.connect(legacy_db.path)) as conn:
         assert conn.execute(
             "SELECT COUNT(*) FROM lib2_tracks WHERE title='Deezer Song'"
         ).fetchone()[0] == 1
-    finally:
-        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -2341,13 +2264,10 @@ def test_media_server_mappings_are_written_by_the_import_itself(migrated_legacy_
 
     import_legacy_library(migrated_legacy_db, reset=True)
 
-    conn = sqlite3.connect(migrated_legacy_db.path)
-    try:
+    with closing(sqlite3.connect(migrated_legacy_db.path)) as conn:
         by_type = dict(conn.execute(
             "SELECT entity_type, COUNT(*) FROM lib2_media_server_mappings "
             "WHERE server_source='plex' GROUP BY entity_type").fetchall())
-    finally:
-        conn.close()
 
     assert by_type.get("artist"), "no artist mapping — needs a restart to appear"
     assert by_type.get("album"), "no album mapping — needs a restart to appear"
@@ -2363,13 +2283,10 @@ def test_the_mapping_backfill_is_idempotent_across_imports(migrated_legacy_db):
     import_legacy_library(migrated_legacy_db, reset=True)
     import_legacy_library(migrated_legacy_db)
 
-    conn = sqlite3.connect(migrated_legacy_db.path)
-    try:
+    with closing(sqlite3.connect(migrated_legacy_db.path)) as conn:
         assert conn.execute(
             "SELECT COUNT(*) FROM lib2_media_server_mappings "
             "WHERE entity_type='artist' AND server_source='plex'").fetchone()[0] == 1
-    finally:
-        conn.close()
 
 
 def test_reconcile_preserves_a_deezer_only_identity(legacy_db):
@@ -2504,22 +2421,16 @@ def test_reimport_never_resets_a_healed_track_number(legacy_db):
     """
     import_legacy_library(legacy_db)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         conn.execute("UPDATE lib2_tracks SET track_number=7 WHERE title='Hotline Bling'")
         conn.commit()
-    finally:
-        conn.close()
 
     import_legacy_library(legacy_db)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         assert conn.execute(
             "SELECT track_number FROM lib2_tracks WHERE title='Hotline Bling'"
         ).fetchone()[0] == 7
-    finally:
-        conn.close()
 
 
 def test_reimport_leaves_a_track_on_the_album_a_fold_moved_it_to(legacy_db):
@@ -2527,25 +2438,19 @@ def test_reimport_leaves_a_track_on_the_album_a_fold_moved_it_to(legacy_db):
     the legacy album on every re-import would undo every fold."""
     import_legacy_library(legacy_db)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         moved_to = conn.execute(
             "SELECT id FROM lib2_albums WHERE title='One Dance'").fetchone()[0]
         conn.execute("UPDATE lib2_tracks SET album_id=? WHERE title='Hotline Bling'",
                      (moved_to,))
         conn.commit()
-    finally:
-        conn.close()
 
     import_legacy_library(legacy_db)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         assert conn.execute(
             "SELECT album_id FROM lib2_tracks WHERE title='Hotline Bling'"
         ).fetchone()[0] == moved_to
-    finally:
-        conn.close()
 
 
 def test_reimport_keeps_the_album_totals_lib2_recomputed(legacy_db):
@@ -2556,26 +2461,20 @@ def test_reimport_keeps_the_album_totals_lib2_recomputed(legacy_db):
     counters, so a healed album read as incomplete again."""
     import_legacy_library(legacy_db)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         conn.execute(
             "UPDATE lib2_albums SET track_count=19, expected_track_count=20, year=2016 "
             "WHERE title='Views'")
         conn.commit()
-    finally:
-        conn.close()
 
     import_legacy_library(legacy_db)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute(
             "SELECT track_count, expected_track_count, year FROM lib2_albums "
             "WHERE title='Views'").fetchone()
         assert (row["track_count"], row["expected_track_count"]) == (19, 20)
         assert row["year"] == 2016
-    finally:
-        conn.close()
 
 
 def test_reimport_keeps_provider_genres_a_legacy_row_does_not_carry(legacy_db):
@@ -2584,19 +2483,15 @@ def test_reimport_keeps_provider_genres_a_legacy_row_does_not_carry(legacy_db):
     `native_enrich` had fetched whenever the legacy row had no genres."""
     import_legacy_library(legacy_db)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         conn.execute("UPDATE lib2_albums SET genres='[\"hip hop\"]' WHERE title='Views'")
         conn.execute("UPDATE lib2_artists SET genres='[\"rap\"]', summary='Bio.' "
                      "WHERE name='Drake'")
         conn.commit()
-    finally:
-        conn.close()
 
     import_legacy_library(legacy_db)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         assert conn.execute(
             "SELECT genres FROM lib2_albums WHERE title='Views'").fetchone()[0] \
             == '["hip hop"]'
@@ -2604,8 +2499,6 @@ def test_reimport_keeps_provider_genres_a_legacy_row_does_not_carry(legacy_db):
             "SELECT genres, summary FROM lib2_artists WHERE name='Drake'").fetchone()
         assert artist["genres"] == '["rap"]'
         assert artist["summary"] == 'Bio.'
-    finally:
-        conn.close()
 
 
 def test_reimport_does_not_blank_artwork_a_legacy_row_has_none_for(legacy_db):
@@ -2614,13 +2507,10 @@ def test_reimport_does_not_blank_artwork_a_legacy_row_has_none_for(legacy_db):
     found. The album upsert had the COALESCE already; this is the same rule."""
     import_legacy_library(legacy_db)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         conn.execute("UPDATE lib2_artists SET image_url='http://art/drake.jpg', "
                      "art_locked=0 WHERE name='Drake'")
         conn.commit()
-    finally:
-        conn.close()
     legacy = _conn(legacy_db)
     legacy.execute("UPDATE artists SET thumb_url=NULL WHERE name='Drake'")
     legacy.commit()
@@ -2628,13 +2518,10 @@ def test_reimport_does_not_blank_artwork_a_legacy_row_has_none_for(legacy_db):
 
     import_legacy_library(legacy_db)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         assert conn.execute(
             "SELECT image_url FROM lib2_artists WHERE name='Drake'").fetchone()[0] \
             == 'http://art/drake.jpg'
-    finally:
-        conn.close()
 
 
 def test_reimport_does_not_undo_an_artist_merge(legacy_db):
@@ -2645,8 +2532,7 @@ def test_reimport_does_not_undo_an_artist_merge(legacy_db):
     re-created exactly the split the merge had closed."""
     import_legacy_library(legacy_db)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         folded = conn.execute(
             "SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()[0]
         survivor = conn.execute(
@@ -2655,13 +2541,10 @@ def test_reimport_does_not_undo_an_artist_merge(legacy_db):
         conn.execute("UPDATE lib2_artists SET canonical_artist_id=? WHERE id=?",
                      (survivor, folded))
         conn.commit()
-    finally:
-        conn.close()
 
     import_legacy_library(legacy_db)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         owners = {
             row[0] for row in conn.execute(
                 "SELECT DISTINCT primary_artist_id FROM lib2_albums "
@@ -2673,8 +2556,6 @@ def test_reimport_does_not_undo_an_artist_merge(legacy_db):
                 "SELECT DISTINCT artist_id FROM lib2_track_artists")
         }
         assert folded not in credited
-    finally:
-        conn.close()
 
 
 def test_reimport_rebuilds_credits_on_the_album_a_fold_moved_a_track_to(legacy_db):
@@ -2686,8 +2567,7 @@ def test_reimport_rebuilds_credits_on_the_album_a_fold_moved_a_track_to(legacy_d
     listing a release it has no track on."""
     import_legacy_library(legacy_db)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         artist = conn.execute(
             "SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()[0]
         # A provider-only release: origin='discography', no legacy_album_id.
@@ -2704,13 +2584,10 @@ def test_reimport_rebuilds_credits_on_the_album_a_fold_moved_a_track_to(legacy_d
             "INSERT INTO lib2_album_artists(album_id, artist_id, role) "
             "VALUES(?,?,'featured')", (moved_to, ghost))
         conn.commit()
-    finally:
-        conn.close()
 
     import_legacy_library(legacy_db)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         assert conn.execute(
             "SELECT COUNT(*) FROM lib2_album_artists WHERE album_id=? AND artist_id=?",
             (moved_to, ghost)).fetchone()[0] == 0
@@ -2718,5 +2595,3 @@ def test_reimport_rebuilds_credits_on_the_album_a_fold_moved_a_track_to(legacy_d
         assert conn.execute(
             "SELECT COUNT(*) FROM lib2_album_artists WHERE album_id=? AND artist_id=?",
             (moved_to, artist)).fetchone()[0] == 1
-    finally:
-        conn.close()

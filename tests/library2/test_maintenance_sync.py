@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import closing
+
 from core.repair_jobs.base import JobContext, JobResult
 from tests.lib2_seed import row_conn
 
@@ -26,8 +28,7 @@ def _import(legacy_db):
 
 
 def _add_v2_only_file(legacy_db, path, *, title="V2-only Song"):
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         album_id = conn.execute(
             "SELECT id FROM lib2_albums WHERE legacy_album_id=10"
         ).fetchone()[0]
@@ -55,8 +56,6 @@ def _add_v2_only_file(legacy_db, path, *, title="V2-only Song"):
         ).lastrowid
         conn.commit()
         return int(track_id), int(file_id)
-    finally:
-        conn.close()
 
 
 def test_finding_annotation_attaches_stable_v2_subjects(legacy_db):
@@ -98,11 +97,8 @@ def test_deprecated_false_flag_cannot_silence_maintenance_sync(legacy_db):
 
     assert outcome["enabled"] is True
     assert outcome["reason"] == "synchronized"
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         count = conn.execute("SELECT COUNT(*) FROM lib2_maintenance_events").fetchone()[0]
-    finally:
-        conn.close()
     assert count == 1
 
 
@@ -140,14 +136,11 @@ def test_verification_change_updates_v2_file_and_history(legacy_db):
     )
 
     assert outcome["reason"] == "synchronized"
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute(
             "SELECT verification_status FROM lib2_track_files WHERE legacy_track_id=100"
         ).fetchone()
         history = scoped_history(conn, scope="track", entity_id=track_id)
-    finally:
-        conn.close()
     assert row[0] == "verified"
     event = next(item for item in history if item["event_type"] == "verification_status_updated")
     assert event["title"] == "Acoustic ID status updated"
@@ -182,8 +175,7 @@ def test_successful_delete_marks_v2_file_deleted_and_recomputes_wanted(legacy_db
     )
 
     assert outcome["reason"] == "synchronized"
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute(
             "SELECT file_state FROM lib2_track_files WHERE legacy_track_id=100"
         ).fetchone()
@@ -192,8 +184,6 @@ def test_successful_delete_marks_v2_file_deleted_and_recomputes_wanted(legacy_db
             "WHERE lib2_track_id=(SELECT id FROM lib2_tracks WHERE legacy_track_id=100) "
             "ORDER BY id DESC LIMIT 1"
         ).fetchone()
-    finally:
-        conn.close()
     assert row[0] == "deleted"
     assert event[0] == "redownload"
     assert "file_state" in event[1]
@@ -249,8 +239,7 @@ def test_remove_only_suppresses_wanted_even_for_monitored_track(legacy_db):
         result={"library_v2_file_deleted": True, "repair_intent": "remove"},
     )
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         assert conn.execute(
             "SELECT monitored FROM lib2_tracks WHERE id=?", (native["track_id"],)
         ).fetchone()[0] == 0
@@ -258,8 +247,6 @@ def test_remove_only_suppresses_wanted_even_for_monitored_track(legacy_db):
             "SELECT wanted FROM lib2_wanted_tracks WHERE profile_id=1 AND track_id=?",
             (native["track_id"],),
         ).fetchone()[0] == 0
-    finally:
-        conn.close()
 
 
 def test_redownload_forces_wanted_even_for_unmonitored_track(legacy_db):
@@ -289,8 +276,7 @@ def test_redownload_forces_wanted_even_for_unmonitored_track(legacy_db):
     )
 
     assert outcome["repair_intent"] == "redownload"
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         assert conn.execute(
             "SELECT monitored FROM lib2_tracks WHERE id=?", (native["track_id"],)
         ).fetchone()[0] == 1
@@ -298,8 +284,6 @@ def test_redownload_forces_wanted_even_for_unmonitored_track(legacy_db):
             "SELECT wanted FROM lib2_wanted_tracks WHERE profile_id=1 AND track_id=?",
             (native["track_id"],),
         ).fetchone()[0] == 1
-    finally:
-        conn.close()
 
 
 def test_native_track_number_scan_uses_missing_tracks_in_canonical_album_list(
@@ -383,16 +367,13 @@ def test_native_track_number_fix_updates_the_catalogue(legacy_db, tmp_path):
     assert result["success"] is True
     renamed = tmp_path / "02 - Song.flac"
     assert renamed.exists() and not original.exists()
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         v2 = conn.execute(
             "SELECT track_number FROM lib2_tracks WHERE id=?", (native["track_id"],)
         ).fetchone()[0]
         v2_path = conn.execute(
             "SELECT path FROM lib2_track_files WHERE id=?", (native["file_id"],)
         ).fetchone()[0]
-    finally:
-        conn.close()
     assert v2 == 2
     assert v2_path == str(renamed)
 
@@ -403,13 +384,10 @@ def test_new_derivative_is_linked_to_same_v2_track(legacy_db, tmp_path):
     _import(legacy_db)
     output = tmp_path / "01.mp3"
     output.write_bytes(b"synthetic derivative")
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         parent = conn.execute(
             "SELECT id, track_id FROM lib2_track_files WHERE legacy_track_id=100"
         ).fetchone()
-    finally:
-        conn.close()
 
     outcome = sync_repair_change(
         legacy_db,
@@ -436,8 +414,7 @@ def test_new_derivative_is_linked_to_same_v2_track(legacy_db, tmp_path):
     )
 
     assert outcome["reason"] == "synchronized"
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         original = conn.execute(
             "SELECT track_id FROM lib2_track_files WHERE legacy_track_id=100"
         ).fetchone()
@@ -447,8 +424,6 @@ def test_new_derivative_is_linked_to_same_v2_track(legacy_db, tmp_path):
                  FROM lib2_track_files WHERE path=?""",
             (str(output),),
         ).fetchone()
-    finally:
-        conn.close()
     assert derivative is not None
     assert derivative[0] == original[0]
     assert derivative[1] == "repair_job"
@@ -464,8 +439,7 @@ def test_lossy_source_replacement_stays_active_after_maintenance_sync(legacy_db,
     _import(legacy_db)
     output = tmp_path / "01.mp3"
     output.write_bytes(b"replacement")
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         source = conn.execute(
             "SELECT id, track_id, path FROM lib2_track_files WHERE legacy_track_id=100"
         ).fetchone()
@@ -476,8 +450,6 @@ def test_lossy_source_replacement_stays_active_after_maintenance_sync(legacy_db,
             (str(output), source["id"]),
         )
         conn.commit()
-    finally:
-        conn.close()
 
     outcome = sync_repair_change(
         legacy_db,
@@ -507,15 +479,12 @@ def test_lossy_source_replacement_stays_active_after_maintenance_sync(legacy_db,
     )
 
     assert outcome["reason"] == "synchronized"
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         rows = conn.execute(
             """SELECT id, path, file_state, file_role, retention_json
                  FROM lib2_track_files WHERE track_id=? AND path=?""",
             (source["track_id"], str(output)),
         ).fetchall()
-    finally:
-        conn.close()
     assert len(rows) == 1
     assert rows[0]["id"] == source["id"]
     assert rows[0]["file_state"] == "active"
@@ -637,8 +606,7 @@ def test_v2_file_subjects_carry_full_track_album_context(legacy_db, tmp_path):
     audio = tmp_path / "context.flac"
     audio.write_bytes(b"audio")
     track_id, file_id = _add_v2_only_file(legacy_db, audio, title="Context Song")
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         conn.execute(
             "UPDATE lib2_tracks SET track_number=9, disc_number=2, isrc='ISRC123', "
             "spotify_id='sp-track', musicbrainz_id='mb-track', "
@@ -652,8 +620,6 @@ def test_v2_file_subjects_carry_full_track_album_context(legacy_db, tmp_path):
             (track_id,),
         )
         conn.commit()
-    finally:
-        conn.close()
 
     subject = next(
         row for row in active_file_subjects(legacy_db, _Config(True))
@@ -673,8 +639,7 @@ def test_v2_file_subjects_carry_full_track_album_context(legacy_db, tmp_path):
 
 
 def _add_v2_only_album(legacy_db, path, *, title="V2-only Album"):
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         artist_id = conn.execute(
             "INSERT INTO lib2_artists(name, spotify_id, image_url) "
             "VALUES('V2 Only Artist','sp-v2-artist','http://artist-img')"
@@ -700,8 +665,6 @@ def _add_v2_only_album(legacy_db, path, *, title="V2-only Album"):
         ).lastrowid
         conn.commit()
         return int(album_id), int(artist_id), int(track_id), int(file_id)
-    finally:
-        conn.close()
 
 
 def test_v2_album_subject_enumerator_lists_all_native_albums(legacy_db, tmp_path):
@@ -755,13 +718,10 @@ def test_acoustid_scanner_persists_native_verification_for_v2_only_file(
     result = AcoustIDScannerJob().scan(context)
 
     assert result.scanned >= 1
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute(
             "SELECT verification_status FROM lib2_track_files WHERE id=?", (file_id,)
         ).fetchone()
-    finally:
-        conn.close()
     assert row[0] == "verified"
 
 
@@ -946,13 +906,10 @@ def test_cover_art_fix_applies_natively_to_v2_album(legacy_db, tmp_path):
     )
 
     assert result["success"] is True, result
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute(
             "SELECT image_url FROM lib2_albums WHERE id=?", (album_id,)
         ).fetchone()
-    finally:
-        conn.close()
     assert row[0] == "http://new-art"
 
 
@@ -1030,8 +987,7 @@ def test_lossy_converter_covers_v2_only_file(legacy_db, tmp_path):
     audio = tmp_path / "v2-lossless.flac"
     audio.write_bytes(b"audio")
     track_id, file_id = _add_v2_only_file(legacy_db, audio, title="Lossless Only")
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         profile_id = conn.execute(
             "SELECT quality_profile_id FROM lib2_tracks WHERE id=?", (track_id,)
         ).fetchone()[0]
@@ -1047,8 +1003,6 @@ def test_lossy_converter_covers_v2_only_file(legacy_db, tmp_path):
             (track_id,),
         )
         conn.commit()
-    finally:
-        conn.close()
     findings = []
     context = JobContext(
         db=legacy_db,
@@ -1202,13 +1156,10 @@ def test_metadata_gap_fix_writes_natively_to_v2_track(legacy_db, tmp_path):
     )
 
     assert result["success"] is True, result
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute(
             "SELECT isrc, musicbrainz_id FROM lib2_tracks WHERE id=?", (track_id,)
         ).fetchone()
-    finally:
-        conn.close()
     assert row[0] == "DE1234567890"
     assert row[1] == "mb-42"
 
@@ -1365,13 +1316,10 @@ def test_legacy_album_finding_still_converges_into_v2(legacy_db, tmp_path):
     from core.library2.maintenance_sync import sync_repair_change
 
     _import(legacy_db)
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         native_album_id = conn.execute(
             "SELECT id FROM lib2_albums WHERE legacy_album_id=10"
         ).fetchone()[0]
-    finally:
-        conn.close()
 
     outcome = sync_repair_change(
         legacy_db,
@@ -1387,14 +1335,11 @@ def test_legacy_album_finding_still_converges_into_v2(legacy_db, tmp_path):
 
     assert outcome["reason"] == "synchronized"
     assert outcome["albums"] == 1
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         event = conn.execute(
             "SELECT lib2_album_id FROM lib2_maintenance_events "
             "WHERE job_id='album_tag_consistency' LIMIT 1"
         ).fetchone()
-    finally:
-        conn.close()
     assert event is not None and int(event[0]) == int(native_album_id)
 
 
@@ -1413,13 +1358,10 @@ def test_legacy_track_finding_still_converges_into_v2(legacy_db):
         details={},
     )
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         native_track_id = conn.execute(
             "SELECT id FROM lib2_tracks WHERE legacy_track_id=101"
         ).fetchone()[0]
-    finally:
-        conn.close()
     assert details["library_v2"]["track_id"] == int(native_track_id)
 
 
@@ -1552,8 +1494,7 @@ def test_album_scoped_delete_retires_only_the_file_the_repair_removed(legacy_db)
     # The seed album has a single file; a second one is what makes the
     # over-wide delete observable at all.
     _add_v2_only_file(legacy_db, "/m/02.flac", title="Second Track")
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         album_id = conn.execute(
             "SELECT id FROM lib2_albums WHERE legacy_album_id=10"
         ).fetchone()[0]
@@ -1566,8 +1507,6 @@ def test_album_scoped_delete_retires_only_the_file_the_repair_removed(legacy_db)
             "WHERE t.album_id=? AND f.id<>?",
             (album_id, target["file_id"]),
         ).fetchall()
-    finally:
-        conn.close()
 
     outcome = sync_repair_change(
         legacy_db,
@@ -1583,8 +1522,7 @@ def test_album_scoped_delete_retires_only_the_file_the_repair_removed(legacy_db)
     )
 
     assert outcome["reason"] == "synchronized"
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         removed = conn.execute(
             "SELECT file_state FROM lib2_track_files WHERE id=?", (target["file_id"],)
         ).fetchone()[0]
@@ -1595,8 +1533,6 @@ def test_album_scoped_delete_retires_only_the_file_the_repair_removed(legacy_db)
             ).fetchone()[0]
             for row in sibling_files
         ]
-    finally:
-        conn.close()
 
     assert removed == "deleted"
     assert survivors, "fixture must have at least one other file on the album"

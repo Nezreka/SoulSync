@@ -9,6 +9,7 @@ carries the catalogue id next to the server one (§50.4.4.25).
 from __future__ import annotations
 
 import json
+from contextlib import closing
 
 import pytest
 
@@ -24,8 +25,7 @@ def db(tmp_path) -> MusicDatabase:
 
 def _track(db, *, title='Uprising', artist='Muse', server_source=None,
            server_id=None, genres=None, legacy_track_id=None) -> int:
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         artist_id = conn.execute(
             "INSERT INTO lib2_artists(name, name_key, genres) VALUES(?,?,?)",
             (artist, normalize_name(artist), json.dumps(genres or []))).lastrowid
@@ -38,8 +38,6 @@ def _track(db, *, title='Uprising', artist='Muse', server_source=None,
             (album_id, title, server_source, server_id, legacy_track_id)).lastrowid
         conn.commit()
         return int(track_id)
-    finally:
-        conn.close()
 
 
 def _worker(db) -> ListeningStatsWorker:
@@ -93,13 +91,10 @@ def test_update_track_play_counts_writes_the_catalogue_row(db):
         {'db_track_id': 'rk-42', 'lib2_track_id': track_id,
          'play_count': 9, 'last_played': '2026-08-12T10:00:00'}])
 
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         row = conn.execute(
             "SELECT play_count, last_played FROM lib2_tracks WHERE id=?",
             (track_id,)).fetchone()
-    finally:
-        conn.close()
     assert (row[0], row[1]) == (9, '2026-08-12T10:00:00')
 
 
@@ -114,12 +109,9 @@ def test_a_history_event_stores_the_catalogue_id(db):
         'server_source': 'plex', 'lib2_track_id': track_id,
     }])
 
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         assert conn.execute(
             "SELECT lib2_track_id FROM listening_history").fetchone()[0] == track_id
-    finally:
-        conn.close()
 
 
 def test_the_history_resolver_matches_across_accents(db):
@@ -151,21 +143,15 @@ def test_old_history_rows_find_their_catalogue_row(db):
     lib2's own back-reference maps them over — no legacy table is read for it,
     and running the migration twice changes nothing."""
     track_id = _track(db, legacy_track_id=555)
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         conn.execute(
             "INSERT INTO listening_history(track_id, title, artist, played_at,"
             "                              server_source, db_track_id)"
             " VALUES('rk-9','Uprising','Muse','2026-08-01T10:00:00','plex',555)")
         conn.commit()
-    finally:
-        conn.close()
 
     db._initialize_database()  # idempotent; carries the backfill
 
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         assert conn.execute(
             "SELECT lib2_track_id FROM listening_history").fetchone()[0] == track_id
-    finally:
-        conn.close()

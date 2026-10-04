@@ -17,6 +17,7 @@ of the library that was already migrated, so it is tested from both sides.
 from __future__ import annotations
 
 import time
+from contextlib import closing
 
 import pytest
 
@@ -56,44 +57,32 @@ class _ProgressSpy:
 
 
 def _counts(db):
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         return {
             table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             for table in ("lib2_artists", "lib2_albums", "lib2_tracks")
         }
-    finally:
-        conn.close()
 
 
 def _duration_of_legacy_track(db, legacy_track_id):
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         row = conn.execute(
             "SELECT duration FROM lib2_tracks WHERE legacy_track_id=?",
             (str(legacy_track_id),),
         ).fetchone()
         return row["duration"] if row else None
-    finally:
-        conn.close()
 
 
 def _clear_lib2_durations(db):
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         conn.execute("UPDATE lib2_tracks SET duration=NULL")
         conn.commit()
-    finally:
-        conn.close()
 
 
 def _set_legacy_duration(db, track_id, duration):
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         conn.execute("UPDATE tracks SET duration=? WHERE id=?", (duration, track_id))
         conn.commit()
-    finally:
-        conn.close()
 
 
 # --- importer ------------------------------------------------------------
@@ -139,13 +128,10 @@ def test_resume_keeps_the_rows_the_crashed_run_already_wrote(legacy_db):
 
 
 def _legacy_linked_albums(db):
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         return conn.execute(
             "SELECT COUNT(*) FROM lib2_albums WHERE legacy_album_id IS NOT NULL"
         ).fetchone()[0]
-    finally:
-        conn.close()
 
 
 def test_resume_under_a_foreign_run_id_would_unlink_the_migrated_rows(legacy_db):
@@ -330,15 +316,12 @@ def test_run_bootstrap_resumes_a_crashed_attempt(legacy_db, monkeypatch):
         rowid=101, run_id="run-abc",
     )
     # The process died: the claim stays "running" with a heartbeat nobody extends.
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         conn.execute(
             "UPDATE lib2_bootstrap_state SET heartbeat_at='2000-01-01T00:00:00+00:00' "
             "WHERE id=1"
         )
         conn.commit()
-    finally:
-        conn.close()
 
     seen = {}
 
@@ -362,8 +345,7 @@ def test_run_bootstrap_starts_clean_when_the_source_changed_since_the_crash(
         legacy_db, owner, stage="tracks", current=5, total=9,
         rowid=101, run_id="run-abc",
     )
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         conn.execute(
             "UPDATE lib2_bootstrap_state SET heartbeat_at='2000-01-01T00:00:00+00:00' "
             "WHERE id=1"
@@ -372,8 +354,6 @@ def test_run_bootstrap_starts_clean_when_the_source_changed_since_the_crash(
         # row offsets no longer mean what they meant.
         conn.execute("INSERT INTO artists(id, name) VALUES(90002, 'Newcomer')")
         conn.commit()
-    finally:
-        conn.close()
 
     seen = {}
 
@@ -514,15 +494,12 @@ def test_autostart_stops_once_the_catalogue_is_converged(result, expected):
 
 def _add_legacy_artist(db, artist_id=2, name="Newcomer"):
     """One more row in the legacy source, i.e. a new source watermark."""
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         conn.execute(
             "INSERT INTO artists VALUES(?,?,NULL,NULL,NULL,NULL,NULL)",
             (artist_id, name),
         )
         conn.commit()
-    finally:
-        conn.close()
 
 
 def test_claim_does_not_revive_a_checkpoint_from_another_source_snapshot(legacy_db):

@@ -13,6 +13,7 @@ import logging
 import sqlite3
 import threading
 import time
+from contextlib import closing
 
 import pytest
 
@@ -50,8 +51,7 @@ class TestSchemaEnsureStaysOffTheStartupPath:
 
     def test_run_backfills_false_creates_tables_but_no_edition_rows(self, legacy_db):
         import_legacy_library(legacy_db, profile_id=1)
-        conn = _conn(legacy_db)
-        try:
+        with closing(_conn(legacy_db)) as conn:
             conn.execute("DELETE FROM lib2_release_tracks")
             conn.execute("DELETE FROM lib2_release_editions")
             conn.execute("DELETE FROM lib2_wanted_tracks")
@@ -65,13 +65,10 @@ class TestSchemaEnsureStaysOffTheStartupPath:
             assert _count(conn, "lib2_release_editions") == 0
             assert _count(conn, "lib2_release_tracks") == 0
             assert _count(conn, "lib2_wanted_tracks") == 0
-        finally:
-            conn.close()
 
     def test_deferred_runner_converges_what_the_schema_step_skipped(self, legacy_db):
         import_legacy_library(legacy_db, profile_id=1)
-        conn = _conn(legacy_db)
-        try:
+        with closing(_conn(legacy_db)) as conn:
             conn.execute("DELETE FROM lib2_release_tracks")
             conn.execute("DELETE FROM lib2_release_editions")
             conn.execute("DELETE FROM lib2_wanted_tracks")
@@ -88,14 +85,11 @@ class TestSchemaEnsureStaysOffTheStartupPath:
             assert conn.execute(
                 "SELECT COUNT(*) FROM lib2_tracks WHERE stable_id IS NULL"
             ).fetchone()[0] == 0
-        finally:
-            conn.close()
 
     def test_default_still_backfills_for_the_importer_and_tests(self, legacy_db):
         """The old behaviour has to survive: only the app startup opts out."""
         import_legacy_library(legacy_db, profile_id=1)
-        conn = _conn(legacy_db)
-        try:
+        with closing(_conn(legacy_db)) as conn:
             conn.execute("DELETE FROM lib2_release_tracks")
             conn.execute("DELETE FROM lib2_release_editions")
             conn.commit()
@@ -104,8 +98,6 @@ class TestSchemaEnsureStaysOffTheStartupPath:
             conn.commit()
 
             assert _count(conn, "lib2_release_editions") > 0
-        finally:
-            conn.close()
 
 
 class TestBackfillReleasesTheWriteLock:
@@ -140,8 +132,7 @@ class TestBackfillReleasesTheWriteLock:
 
     def test_progress_is_reported_per_batch(self, legacy_db):
         import_legacy_library(legacy_db, profile_id=1)
-        conn = _conn(legacy_db)
-        try:
+        with closing(_conn(legacy_db)) as conn:
             conn.execute("DELETE FROM lib2_release_tracks")
             conn.execute("DELETE FROM lib2_release_editions")
             conn.commit()
@@ -153,13 +144,10 @@ class TestBackfillReleasesTheWriteLock:
             assert reports, "a stage that reports nothing is indistinguishable from a hang"
             assert {stage for stage, _done, _total in reports} == {
                 "editions", "release_tracks"}
-        finally:
-            conn.close()
 
     def test_stopping_early_is_safe_and_resumable(self, legacy_db):
         import_legacy_library(legacy_db, profile_id=1)
-        conn = _conn(legacy_db)
-        try:
+        with closing(_conn(legacy_db)) as conn:
             conn.execute("DELETE FROM lib2_release_tracks")
             conn.execute("DELETE FROM lib2_release_editions")
             conn.commit()
@@ -183,13 +171,10 @@ class TestBackfillReleasesTheWriteLock:
                     WHERE NOT EXISTS (SELECT 1 FROM lib2_release_editions e
                                        WHERE e.release_group_id = al.id)"""
             ).fetchone()[0] == 0
-        finally:
-            conn.close()
 
     def test_batched_wanted_projection_matches_the_unbatched_one(self, legacy_db):
         import_legacy_library(legacy_db, profile_id=1)
-        conn = _conn(legacy_db)
-        try:
+        with closing(_conn(legacy_db)) as conn:
             unbatched = recompute_wanted(conn)
             conn.execute("DELETE FROM lib2_wanted_tracks")
             batches = []
@@ -199,8 +184,6 @@ class TestBackfillReleasesTheWriteLock:
             assert batched["projected"] == unbatched["projected"]
             assert batched["wanted"] == unbatched["wanted"]
             assert len(batches) >= 1
-        finally:
-            conn.close()
 
 
 class TestImportFinalizeReportsAndCommits:
@@ -300,23 +283,17 @@ class TestBootstrapActivitySignal:
     """iss32-M02: the pause must hang on persisted state, not a flag."""
 
     def test_a_fresh_claim_reads_as_active(self, legacy_db):
-        conn = _conn(legacy_db)
-        try:
+        with closing(_conn(legacy_db)) as conn:
             lib2_bootstrap.ensure_bootstrap_schema(conn)
             conn.commit()
-        finally:
-            conn.close()
         token = lib2_bootstrap.try_claim(legacy_db, watermark="w1")
         assert token
         assert lib2_bootstrap.bootstrap_is_active(legacy_db) is True
 
     def test_a_stale_claim_reads_as_inactive(self, legacy_db):
-        conn = _conn(legacy_db)
-        try:
+        with closing(_conn(legacy_db)) as conn:
             lib2_bootstrap.ensure_bootstrap_schema(conn)
             conn.commit()
-        finally:
-            conn.close()
         assert lib2_bootstrap.try_claim(legacy_db, watermark="w1")
 
         # A process that died mid-migration stops beating. Nothing cleans the
@@ -325,12 +302,9 @@ class TestBootstrapActivitySignal:
             legacy_db, stale_after_seconds=-1) is False
 
     def test_no_claim_at_all_reads_as_inactive(self, legacy_db):
-        conn = _conn(legacy_db)
-        try:
+        with closing(_conn(legacy_db)) as conn:
             lib2_bootstrap.ensure_bootstrap_schema(conn)
             conn.commit()
-        finally:
-            conn.close()
         assert lib2_bootstrap.bootstrap_is_active(legacy_db) is False
 
 
@@ -525,8 +499,7 @@ class TestRecordingLookupUsesItsPartialIndex:
     ])
     def test_hard_id_probe_is_an_index_search(self, legacy_db, column, index):
         import_legacy_library(legacy_db, profile_id=1)
-        conn = _conn(legacy_db)
-        try:
+        with closing(_conn(legacy_db)) as conn:
             plan = self._plan(
                 conn,
                 f"SELECT id FROM lib2_recordings "
@@ -534,21 +507,16 @@ class TestRecordingLookupUsesItsPartialIndex:
                 ("x",))
             assert index in plan and "SCAN" not in plan, (
                 f"the {column} probe fell back to a table scan: {plan}")
-        finally:
-            conn.close()
 
     def test_the_naive_form_really_is_the_trap(self, legacy_db):
         """Pin the reason, so nobody 'simplifies' the predicate back out."""
         import_legacy_library(legacy_db, profile_id=1)
-        conn = _conn(legacy_db)
-        try:
+        with closing(_conn(legacy_db)) as conn:
             naive = self._plan(conn, "SELECT id FROM lib2_recordings WHERE isrc=?", ("x",))
             assert "SCAN" in naive, (
                 "if SQLite learned to prove this, the extra conjuncts in "
                 "_find_recording_by_hard_ids may be dropped — until then they "
                 f"are load-bearing. Plan was: {naive}")
-        finally:
-            conn.close()
 
 
 class TestBarrierMatchesRealBlueprintEndpoints:

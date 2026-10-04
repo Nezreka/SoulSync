@@ -1,5 +1,6 @@
 from core.repair_worker import RepairWorker
 from database.music_database import MusicDatabase
+from contextlib import closing
 
 
 def _create(worker, path, details):
@@ -27,15 +28,12 @@ def test_file_findings_dedup_per_file_and_fingerprint(tmp_path):
     assert _create(worker, first, {"profile_id": 1, "target": "flac"}) is True
     assert _create(worker, second, {"profile_id": 1, "target": "flac"}) is True
 
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         conn.execute(
             "UPDATE repair_findings SET status='dismissed' WHERE file_path=?",
             (str(first),),
         )
         conn.commit()
-    finally:
-        conn.close()
 
     assert _create(worker, first, {"profile_id": 1, "target": "flac"}) is False
     assert _create(worker, first, {"profile_id": 2, "target": "24bit-flac"}) is True
@@ -53,13 +51,10 @@ def test_failed_library_sync_keeps_successful_physical_fix_pending(
         severity="warning", entity_type="track", entity_id="lib2:9",
         file_path=str(target), title="Corrupt", description="test", details={},
     )
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         finding_id = conn.execute(
             "SELECT id FROM repair_findings WHERE file_path=?", (str(target),)
         ).fetchone()[0]
-    finally:
-        conn.close()
     monkeypatch.setattr(
         worker, "_execute_fix",
         lambda *_args, **_kwargs: {"success": True, "action": "redownload"},
@@ -73,10 +68,7 @@ def test_failed_library_sync_keeps_successful_physical_fix_pending(
 
     assert result["success"] is False
     assert result["retryable"] is True
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         assert conn.execute(
             "SELECT status FROM repair_findings WHERE id=?", (finding_id,)
         ).fetchone()[0] == "pending"
-    finally:
-        conn.close()

@@ -7,6 +7,7 @@ retry seams instead of maintaining a second test-only implementation.
 
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 
 import pytest
@@ -188,12 +189,9 @@ def test_source_selection_and_candidate_order_match_legacy(
     legacy_order = [
         item.key for item in _legacy_candidate_order(candidates, source_policy)
     ]
-    conn = _connection()
-    try:
+    with closing(_connection()) as conn:
         acquisition_order, selected = _acquisition_candidate_order(
             conn, candidates, source_policy)
-    finally:
-        conn.close()
 
     assert legacy_order == expected_order
     assert acquisition_order == legacy_order

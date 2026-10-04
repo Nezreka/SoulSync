@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import closing
 
 import pytest
 
@@ -1194,8 +1195,7 @@ def test_enrichment_releases_the_write_lock_before_calling_a_provider(
         def _fake_provider(*_args, **_kwargs):
             # Exactly what a provider client does after answering: cache the
             # response through its own connection to the same database.
-            other = legacy_db._get_connection()
-            try:
+            with closing(legacy_db._get_connection()) as other:
                 other.execute("PRAGMA busy_timeout = 1500")
                 other.execute(
                     "UPDATE lib2_artists SET summary='cached' WHERE id=?",
@@ -1203,8 +1203,6 @@ def test_enrichment_releases_the_write_lock_before_calling_a_provider(
                 )
                 other.commit()
                 observed["cached"] = True
-            finally:
-                other.close()
             return None
 
         monkeypatch.setattr(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from contextlib import closing
 from unittest.mock import MagicMock
 
 from core.library2 import completeness
@@ -143,8 +144,7 @@ def test_precache_materializes_cached_tracklists_before_provider_lookup(legacy_d
 
     assert precache_tracklists(legacy_db, config_manager=None) >= 1
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute(
             "SELECT title, monitored, quality_profile_id, spotify_id FROM lib2_tracks "
             "WHERE album_id=? AND track_number=3",
@@ -167,8 +167,6 @@ def test_precache_materializes_cached_tracklists_before_provider_lookup(legacy_d
         assert snapshot["parser_version"] == TRACKLIST_PARSER_VERSION
         assert json.loads(snapshot["payload_json"])["reference"][
             "release_edition_id"] is not None
-    finally:
-        conn.close()
 
 
 def test_resolve_tracklist_snapshots_spotify_and_reuses_durable_cache(
@@ -364,16 +362,13 @@ def test_edition_change_persists_invalidation_when_provider_is_unavailable(
     assert resolve_tracklist(None, conn, views_id) is None
     conn.close()
 
-    reopened = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as reopened:
         row = reopened.execute(
             "SELECT tracklist_json, tracklist_status FROM lib2_albums WHERE id=?",
             (views_id,),
         ).fetchone()
         assert row["tracklist_json"] is None
         assert row["tracklist_status"] == "idle"
-    finally:
-        reopened.close()
 
 
 def test_persist_tracklist_tracks_infers_discs_when_numbers_reset(imported_conn):

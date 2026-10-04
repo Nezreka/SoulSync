@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import threading
 import time
+from contextlib import closing
 from io import BytesIO
 from types import SimpleNamespace
 
@@ -198,15 +199,12 @@ def test_apply_does_not_block_a_concurrent_writer_while_queued(
 
     import sqlite3
 
-    other = sqlite3.connect(legacy_db.path, timeout=2)
-    try:
+    with closing(sqlite3.connect(legacy_db.path, timeout=2)) as other:
         other.execute(
             "UPDATE lib2_artists SET sort_name = 'contention probe' WHERE id=?",
             (artist_id,),
         )
         other.commit()
-    finally:
-        other.close()
 
     holder_may_release.set()
     assert apply_done.wait(10)

@@ -12,6 +12,7 @@ ratchet pins for the whole tree.
 from __future__ import annotations
 
 import json
+from contextlib import closing
 
 import pytest
 
@@ -68,19 +69,13 @@ def worker(tmp_path, monkeypatch):
 
 
 def _row(worker, table, entity_id=1):
-    conn = worker.db._get_connection()
-    try:
+    with closing(worker.db._get_connection()) as conn:
         return conn.execute(f"SELECT * FROM {table} WHERE id=?", (entity_id,)).fetchone()
-    finally:
-        conn.close()
 
 
 def _state(worker, entity_type, entity_id=1):
-    conn = worker.db._get_connection()
-    try:
+    with closing(worker.db._get_connection()) as conn:
         return attempt_state(conn, entity_type=entity_type, entity_id=entity_id)
-    finally:
-        conn.close()
 
 
 class TestPicking:

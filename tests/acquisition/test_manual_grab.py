@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import closing
+
 pytest_plugins = ["tests.library2.conftest"]
 
 from core.acquisition.history import list_history_events
@@ -37,8 +39,7 @@ def test_correlation_enforcement_is_explicit_and_default_off():
 
 
 def test_track_grab_correlates_recording_request(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         markers = correlate_manual_grab(
             conn,
             lib2_context=_track_context(conn),
@@ -66,13 +67,10 @@ def test_track_grab_correlates_recording_request(legacy_db):
         events = [event.event_type for event in list_history_events(
             conn, request_id=request.id)]
         assert events == ["request_created", "manual_grab_correlated"]
-    finally:
-        conn.close()
 
 
 def test_manual_grab_without_lib2_entity_uses_legacy_shadow_identity(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         target = {
             "id": "spotify-track-123",
             "source": "spotify",
@@ -103,13 +101,10 @@ def test_manual_grab_without_lib2_entity_uses_legacy_shadow_identity(legacy_db):
         assert first_request.search_options["catalog_snapshot"] == {
             "album": "Views", "artist": "Drake", "title": "One Dance"}
         assert "lib2_track_id" not in first_request.search_options
-    finally:
-        conn.close()
 
 
 def test_manual_grab_prepares_before_dispatch_then_binds_transfer(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         markers = prepare_manual_grab(
             conn,
             target_context={
@@ -151,13 +146,10 @@ def test_manual_grab_prepares_before_dispatch_then_binds_transfer(legacy_db):
             "legacy-transfer-1")
         events = list_history_events(conn, request_id=markers["request_id"])
         assert [event.event_type for event in events][-1] == "grab_submitted"
-    finally:
-        conn.close()
 
 
 def test_failed_manual_dispatch_closes_prepared_request_without_blocklist(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         markers = prepare_manual_grab(
             conn,
             target_context={"name": "One Dance", "artist": "Drake"},
@@ -179,13 +171,10 @@ def test_failed_manual_dispatch_closes_prepared_request_without_blocklist(legacy
         ).fetchone()["status"] == "failed"
         assert conn.execute(
             "SELECT COUNT(*) FROM release_blocklist").fetchone()[0] == 0
-    finally:
-        conn.close()
 
 
 def test_matching_manual_pick_is_accepted_by_the_gate(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         markers = correlate_manual_grab(
             conn,
             lib2_context=_track_context(conn),
@@ -200,13 +189,10 @@ def test_matching_manual_pick_is_accepted_by_the_gate(legacy_db):
             (markers["download_id"],),
         ).fetchone()
         assert run["accepted"] == 1
-    finally:
-        conn.close()
 
 
 def test_gate_rejections_do_not_block_a_manual_pick(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         markers = correlate_manual_grab(
             conn,
             lib2_context=_track_context(conn),
@@ -233,13 +219,10 @@ def test_gate_rejections_do_not_block_a_manual_pick(legacy_db):
         assert correlated[0].reason_code == (
             "gate_rejections_overridden_by_manual_pick")
         assert "artist_mismatch" in correlated[0].payload["rejections"]
-    finally:
-        conn.close()
 
 
 def test_album_only_context_uses_release_group_scope(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         album_id = _track_context(conn)["album_id"]
         markers = correlate_manual_grab(
             conn,
@@ -255,13 +238,10 @@ def test_album_only_context_uses_release_group_scope(legacy_db):
         assert request.entity_id == album_id
         assert request.search_options["manual_batch_id"] == "batch-1"
         assert request.search_options["content_scope"] == "recording"
-    finally:
-        conn.close()
 
 
 def test_bundle_scope_sources_are_not_correlated(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         markers = correlate_manual_grab(
             conn,
             lib2_context=_track_context(conn),
@@ -272,13 +252,10 @@ def test_bundle_scope_sources_are_not_correlated(legacy_db):
         assert markers is None
         assert conn.execute(
             "SELECT COUNT(*) FROM acquisition_requests").fetchone()[0] == 0
-    finally:
-        conn.close()
 
 
 def test_success_callback_completes_grab_and_request(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         markers = correlate_manual_grab(
             conn,
             lib2_context=_track_context(conn),
@@ -314,13 +291,10 @@ def test_success_callback_completes_grab_and_request(legacy_db):
             conn, request_id=request.id)]
         assert events.count("grab_completed") == 1
         assert events.count("import_completed") == 1
-    finally:
-        conn.close()
 
 
 def test_manual_pipeline_checks_share_the_grab_correlation(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         markers = correlate_manual_grab(
             conn,
             lib2_context=_track_context(conn),
@@ -352,13 +326,10 @@ def test_manual_pipeline_checks_share_the_grab_correlation(legacy_db):
         assert events[-1].download_id == markers["download_id"]
         assert events[-1].payload["actor"] == "user"
         assert events[-1].payload["status"] == "skipped"
-    finally:
-        conn.close()
 
 
 def test_quarantine_callback_journals_without_closing(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         markers = correlate_manual_grab(
             conn,
             lib2_context=_track_context(conn),
@@ -382,8 +353,6 @@ def test_quarantine_callback_journals_without_closing(legacy_db):
         ]
         assert quarantined[0].reason_code == "quality"
         assert quarantined[0].payload["manual_grab"] is True
-    finally:
-        conn.close()
 
 
 def test_unmarked_context_is_a_noop_for_both_callbacks(legacy_db):
@@ -398,8 +367,7 @@ def test_unmarked_context_is_a_noop_for_both_callbacks(legacy_db):
 
 
 def test_stale_sweep_fails_only_expired_manual_grabs(legacy_db):
-    conn = _prepared_conn(legacy_db)
-    try:
+    with closing(_prepared_conn(legacy_db)) as conn:
         stale = correlate_manual_grab(
             conn,
             lib2_context=_track_context(conn),
@@ -431,8 +399,6 @@ def test_stale_sweep_fails_only_expired_manual_grabs(legacy_db):
         # runtime failures must never blocklist the release itself
         assert conn.execute(
             "SELECT COUNT(*) FROM release_blocklist").fetchone()[0] == 0
-    finally:
-        conn.close()
 
 
 def test_try_wrapper_fails_open(legacy_db):

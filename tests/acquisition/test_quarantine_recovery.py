@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from contextlib import closing
 
 from core.acquisition import ensure_acquisition_schema
 from core.acquisition.candidates import register_candidate
@@ -127,8 +128,7 @@ def test_recovery_journals_move_and_parks_acquisition_import(tmp_path):
     assert os.path.isfile(recovery.staged_path)
     assert not source.exists()
     assert not sidecar.exists()
-    conn = factory()
-    try:
+    with closing(factory()) as conn:
         assert get_import(conn, import_id).status == "recovered_to_staging"
         event = conn.execute(
             "SELECT event_type, reason_code FROM acquisition_history "
@@ -147,8 +147,6 @@ def test_recovery_journals_move_and_parks_acquisition_import(tmp_path):
         assert payload["entry_id"] == entry_id
         assert payload["previous_path"]
         assert payload["staged_path"] == recovery.staged_path
-    finally:
-        conn.close()
 
 
 def test_recovered_manual_import_restores_markers_and_closes_move_journal(tmp_path):
@@ -177,19 +175,13 @@ def test_recovered_manual_import_restores_markers_and_closes_move_journal(tmp_pa
     assert context["_acquisition_track_id"] == 55
     assert context["track_info"]["_acquisition_import_id"] == import_id
     assert context["_quarantine_recovery_entry_id"] == entry_id
-    conn = factory()
-    try:
+    with closing(factory()) as conn:
         assert get_import(conn, import_id).status == "importing"
         assert get_quarantine_recovery(conn, entry_id).status == "reimporting"
-    finally:
-        conn.close()
 
     assert record_recovered_staging_result(factory, context, success=True)
-    conn = factory()
-    try:
+    with closing(factory()) as conn:
         assert get_quarantine_recovery(conn, entry_id).status == "completed"
-    finally:
-        conn.close()
 
 
 def test_prepared_move_recovers_after_crash_between_disk_and_db_commit(tmp_path):
@@ -297,13 +289,10 @@ def test_failed_reimport_with_staging_file_remains_retryable(tmp_path):
         factory, context, success=False, error="temporary pipeline error",
     )
 
-    conn = factory()
-    try:
+    with closing(factory()) as conn:
         current = get_quarantine_recovery(conn, entry_id)
         assert current.status == "recovered"
         assert current.error == "temporary pipeline error"
-    finally:
-        conn.close()
     retry_context = attach_recovered_staging_context(
         factory, recovery.staged_path, {},
     )

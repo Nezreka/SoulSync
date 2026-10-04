@@ -8,6 +8,8 @@ download created one and the artist page kept treating it as unknown.
 
 from __future__ import annotations
 
+from contextlib import closing
+
 import pytest
 
 pytest.importorskip("flask")
@@ -40,14 +42,11 @@ def client(tmp_path, monkeypatch):
 
 
 def _lib2_artist(db, name):
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         row = conn.execute(
             "SELECT id, monitored, spotify_id, external_ids FROM lib2_artists WHERE name = ?",
             (name,)).fetchone()
         return dict(row) if row else None
-    finally:
-        conn.close()
 
 
 def test_a_spotify_artist_is_monitored_under_its_id(client):

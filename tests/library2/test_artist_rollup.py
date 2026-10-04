@@ -15,6 +15,7 @@ one number and labelled with another. That is what most of this file pins.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -231,9 +232,6 @@ def test_concurrent_requests_rebuild_once(tmp_path):
     assert errors == []
     assert len(calls) == 1, f"rebuilt {len(calls)} times, expected 1"
 
-    check = sqlite3.connect(db_path)
-    try:
+    with closing(sqlite3.connect(db_path)) as check:
         assert check.execute(
             "SELECT COUNT(*) FROM lib2_artist_rollup").fetchone()[0] == 2
-    finally:
-        check.close()

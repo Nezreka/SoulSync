@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import threading
 import time
+from contextlib import closing
 from pathlib import Path
 
 from core.repair_worker import RepairWorker
@@ -73,13 +74,10 @@ def test_a_failed_fix_releases_the_claim_and_stays_retryable(tmp_path: Path):
 
     assert worker.fix_finding(finding_id)["success"] is False
 
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         row = conn.execute(
             "SELECT status, fix_claimed_at FROM repair_findings WHERE id=?",
             (finding_id,)).fetchone()
-    finally:
-        conn.close()
     assert row["status"] == "pending", "a failed fix must remain fixable"
     assert row["fix_claimed_at"] is None, "the claim must not outlive the attempt"
 
@@ -96,13 +94,10 @@ def test_an_exception_in_the_handler_still_releases_the_claim(tmp_path: Path):
     worker._execute_fix = boom
     assert worker.fix_finding(finding_id)["success"] is False
 
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         claimed = conn.execute(
             "SELECT fix_claimed_at FROM repair_findings WHERE id=?",
             (finding_id,)).fetchone()[0]
-    finally:
-        conn.close()
     assert claimed is None, "an exploding handler must not wedge the finding"
 
 

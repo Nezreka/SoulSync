@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import sqlite3
 import types
+from contextlib import closing
 
 import pytest
 
@@ -36,8 +37,7 @@ def db(tmp_path):
 
 
 def _seed_file(db, *, verification_status=None, acoustid_status=None) -> int:
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         conn.execute(
             "INSERT INTO lib2_artists(id, name) VALUES(1, 'Michael Jackson')"
         )
@@ -54,20 +54,15 @@ def _seed_file(db, *, verification_status=None, acoustid_status=None) -> int:
         )
         conn.commit()
         return int(cursor.lastrowid)
-    finally:
-        conn.close()
 
 
 def _file_row(db, file_id) -> sqlite3.Row:
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         return conn.execute(
             "SELECT verification_status, acoustid_status, pipeline_result_json "
             "FROM lib2_track_files WHERE id=?",
             (file_id,),
         ).fetchone()
-    finally:
-        conn.close()
 
 
 def _context(db):

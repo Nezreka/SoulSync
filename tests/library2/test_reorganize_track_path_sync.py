@@ -7,6 +7,7 @@ reorganization updates ``lib2_track_files`` through the Library-v2 path flow.
 
 import sys
 import types
+from contextlib import closing
 from unittest.mock import MagicMock
 
 import pytest
@@ -79,8 +80,7 @@ def imported_legacy_db(legacy_db):
 def test_native_path_update_repoints_same_stem_file_versions(
     monkeypatch, tmp_path, imported_legacy_db
 ):
-    conn = imported_legacy_db._get_connection()
-    try:
+    with closing(imported_legacy_db._get_connection()) as conn:
         primary = conn.execute(
             "SELECT track_id, path FROM lib2_track_files WHERE legacy_track_id=100"
         ).fetchone()
@@ -92,8 +92,6 @@ def test_native_path_update_repoints_same_stem_file_versions(
             (track_id, secondary_path),
         )
         conn.commit()
-    finally:
-        conn.close()
 
     captured = {}
 
@@ -122,8 +120,7 @@ def test_native_path_update_repoints_same_stem_file_versions(
     summary = runner(_make_item())
     assert summary['status'] == 'completed'
 
-    conn = imported_legacy_db._get_connection()
-    try:
+    with closing(imported_legacy_db._get_connection()) as conn:
         lib2_row = conn.execute(
             "SELECT path FROM lib2_track_files WHERE legacy_track_id=100"
         ).fetchone()
@@ -134,8 +131,6 @@ def test_native_path_update_repoints_same_stem_file_versions(
             (track_id,),
         ).fetchone()
         assert secondary_row["path"] == "/library/Drake/Views/01 One Dance.opus"
-    finally:
-        conn.close()
 
 
 def test_update_track_path_without_lib2_schema_fails_closed(monkeypatch, tmp_path):

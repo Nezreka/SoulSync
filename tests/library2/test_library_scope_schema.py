@@ -8,6 +8,7 @@ that has no own-library profile behaves exactly as it did before.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -193,12 +194,9 @@ class TestTheUpgradePath:
 
     @staticmethod
     def _files(shim):
-        connection = row_conn(shim.path)
-        try:
+        with closing(row_conn(shim.path)) as connection:
             return {r["path"]: r["owner_profile_id"] for r in connection.execute(
                 "SELECT path, owner_profile_id FROM lib2_track_files")}
-        finally:
-            connection.close()
 
     def test_a_legacy_owner_lands_on_the_file(self, legacy_db, monkeypatch):
         from core import library_scope

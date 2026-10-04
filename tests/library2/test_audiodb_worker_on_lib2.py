@@ -17,6 +17,7 @@ onto our artist.
 from __future__ import annotations
 
 import json
+from contextlib import closing
 
 import pytest
 
@@ -59,12 +60,9 @@ def worker(tmp_path):
 
 
 def _row(worker, table, entity_id=1):
-    conn = worker.db._get_connection()
-    try:
+    with closing(worker.db._get_connection()) as conn:
         return conn.execute(
             f"SELECT * FROM {table} WHERE id=?", (entity_id,)).fetchone()
-    finally:
-        conn.close()
 
 
 class TestTheQueue:
@@ -160,11 +158,8 @@ class TestWritingTheArtist:
     def test_the_attempt_is_recorded(self, worker):
         worker._update_artist(1, {'idArtist': '111'})
 
-        conn = worker.db._get_connection()
-        try:
+        with closing(worker.db._get_connection()) as conn:
             state = attempt_state(conn, entity_type='artist', entity_id=1)
-        finally:
-            conn.close()
         assert state['audiodb']['status'] == 'matched'
 
 
@@ -256,15 +251,12 @@ def test_the_duplicate_id_gate_reads_lib2_not_the_legacy_twin(worker):
     V2-native artist has no legacy twin — so the gate saw an empty table and
     waved through exactly the collision it exists to stop.
     """
-    conn = worker.db._get_connection()
-    try:
+    with closing(worker.db._get_connection()) as conn:
         conn.execute(
             "INSERT INTO lib2_artists(id, name, sort_name, external_ids) "
             "VALUES(2, 'Portishead', 'Portishead', ?)",
             (json.dumps({'audiodb': '111'}),))
         conn.commit()
-    finally:
-        conn.close()
 
     class _Client:
         def search_artist(self, name):

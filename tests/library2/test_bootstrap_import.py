@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from contextlib import closing
 
 import pytest
 
@@ -56,11 +57,8 @@ def test_run_bootstrap_if_needed_first_run_imports_and_marks_done(legacy_db):
     assert state["status"] == "done"
     assert state["finished_at"] is not None
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         row = conn.execute("SELECT COUNT(*) AS n FROM lib2_artists").fetchone()
-    finally:
-        conn.close()
     assert row["n"] >= 1
 
 
@@ -84,14 +82,11 @@ def test_bootstrap_repairs_stale_imported_path_before_marking_done(
     def post_import(progress):
         from core.library2.post_import import run_post_import_precache
         run_post_import_precache(legacy_db, object(), progress=progress)
-        check = legacy_db._get_connection()
-        try:
+        with closing(legacy_db._get_connection()) as check:
             assert check.execute(
                 "SELECT path FROM lib2_track_files WHERE legacy_track_id='100'"
             ).fetchone()["path"] == str(real)
             assert lib2_bootstrap.get_state(legacy_db)["status"] == "running"
-        finally:
-            check.close()
 
     result = lib2_bootstrap.run_bootstrap_if_needed(
         legacy_db, _enabled, post_import=post_import,
@@ -154,15 +149,12 @@ def test_try_claim_blocks_concurrent_run_with_fresh_heartbeat(legacy_db):
 def test_try_claim_reclaims_stale_running_lock(legacy_db):
     assert lib2_bootstrap.try_claim(legacy_db)
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         conn.execute(
             "UPDATE lib2_bootstrap_state SET heartbeat_at = '2000-01-01T00:00:00+00:00' "
             "WHERE id = 1"
         )
         conn.commit()
-    finally:
-        conn.close()
 
     assert lib2_bootstrap.try_claim(legacy_db, stale_after_seconds=600)
 
@@ -170,15 +162,12 @@ def test_try_claim_reclaims_stale_running_lock(legacy_db):
 def test_stale_owner_cannot_overwrite_reclaimed_run(legacy_db):
     stale_owner = lib2_bootstrap.try_claim(legacy_db)
     assert stale_owner
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         conn.execute(
             "UPDATE lib2_bootstrap_state SET heartbeat_at='2000-01-01T00:00:00+00:00' "
             "WHERE id=1"
         )
         conn.commit()
-    finally:
-        conn.close()
 
     current_owner = lib2_bootstrap.try_claim(legacy_db, stale_after_seconds=600)
     assert current_owner and current_owner != stale_owner
@@ -256,14 +245,11 @@ def test_empty_fresh_install_is_immediately_converged(legacy_db):
     next start skips it, and an upgrade whose rows DO exist moves the watermark
     and runs normally.
     """
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         conn.execute("DELETE FROM tracks")
         conn.execute("DELETE FROM albums")
         conn.execute("DELETE FROM artists")
         conn.commit()
-    finally:
-        conn.close()
 
     first = lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled)
     assert first == {"skipped": "empty_source"}
@@ -277,24 +263,18 @@ def test_a_source_that_appears_later_still_runs(legacy_db):
     """``waiting_for_source`` must not become a permanent refusal: the state is
     pinned to the watermark it was written for, so rows arriving afterwards
     change the watermark and start a normal run."""
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         conn.execute("DELETE FROM tracks")
         conn.execute("DELETE FROM albums")
         conn.execute("DELETE FROM artists")
         conn.commit()
-    finally:
-        conn.close()
     assert lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled) == {
         "skipped": "empty_source"
     }
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         conn.execute("INSERT INTO artists (id, name) VALUES (1, 'A-ha')")
         conn.commit()
-    finally:
-        conn.close()
 
     second = lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled)
     assert second.get("success") is True

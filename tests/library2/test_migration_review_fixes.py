@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -326,8 +327,7 @@ def music_db(tmp_path):
 
 
 def _server_track(db, *, server_id, title="Song", source="plex"):
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         artist = conn.execute(
             "INSERT INTO lib2_artists(name,name_key) VALUES('Muse','muse')").lastrowid
         album = conn.execute(
@@ -341,8 +341,6 @@ def _server_track(db, *, server_id, title="Song", source="plex"):
             " VALUES(?,?,1,'active')", (track, f"/music/{track}.flac"))
         conn.commit()
         return track
-    finally:
-        conn.close()
 
 
 def test_a_blank_server_id_never_enters_the_stale_set(music_db):
@@ -361,11 +359,8 @@ def test_a_blank_server_id_never_enters_the_stale_set(music_db):
 
     # Even handed one explicitly, it must not become a wildcard.
     music_db.delete_stale_tracks({""}, "plex")
-    conn = music_db._get_connection()
-    try:
+    with closing(music_db._get_connection()) as conn:
         alive = {int(r[0]) for r in conn.execute("SELECT id FROM lib2_tracks")}
-    finally:
-        conn.close()
     assert alive == {blank, real}
 
 
@@ -378,15 +373,12 @@ def test_the_mapping_beats_a_stale_snapshot_for_the_same_server_id(music_db):
     """
     stale = _server_track(music_db, server_id="p-1", title="Old")
     current = _server_track(music_db, server_id="p-1", title="New")
-    conn = music_db._get_connection()
-    try:
+    with closing(music_db._get_connection()) as conn:
         conn.execute(
             "INSERT INTO lib2_media_server_mappings"
             "(entity_type,entity_id,server_source,server_id,match_status)"
             " VALUES('track',?,'plex','p-1','recognized')", (current,))
         conn.commit()
-    finally:
-        conn.close()
 
     found = music_db.get_track_by_server_id("p-1", "plex")
 

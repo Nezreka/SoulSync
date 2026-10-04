@@ -9,6 +9,7 @@ which rows it means, and the bytes/paths live on the file rows (ADR-03).
 from __future__ import annotations
 
 import json
+from contextlib import closing
 
 import pytest
 
@@ -22,8 +23,7 @@ def db(tmp_path) -> MusicDatabase:
 
 def _artist(db, name, *, spotify_id=None, musicbrainz_id=None,
             external_ids=None, enrichment=None) -> int:
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         artist_id = conn.execute(
             "INSERT INTO lib2_artists(name, name_key, spotify_id, musicbrainz_id,"
             "                         external_ids, enrichment)"
@@ -33,15 +33,12 @@ def _artist(db, name, *, spotify_id=None, musicbrainz_id=None,
         ).lastrowid
         conn.commit()
         return int(artist_id)
-    finally:
-        conn.close()
 
 
 def _track(db, artist_id, *, title='Song', origin='library', path=None,
            size=None, duration=None, play_count=0, album_title='Album',
            file_state='active') -> int:
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         album_id = conn.execute(
             "INSERT INTO lib2_albums(primary_artist_id, title, origin) VALUES(?,?,?)",
             (artist_id, album_title, origin)).lastrowid
@@ -55,8 +52,6 @@ def _track(db, artist_id, *, title='Song', origin='library', path=None,
                 (track_id, path, size, file_state))
         conn.commit()
         return int(track_id)
-    finally:
-        conn.close()
 
 
 # ── get_library_health ─────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from contextlib import closing
 from unittest.mock import MagicMock
 
 import pytest
@@ -52,13 +53,10 @@ def test_precache_tag_cache_populates_never_scanned_file(
     counts = precache_tag_cache(database, None)
 
     assert counts == {"scanned": 1, "updated": 1}
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         row = conn.execute(
             "SELECT tags_json FROM lib2_track_files WHERE path='/m/0.flac'"
         ).fetchone()
-    finally:
-        conn.close()
     tags = json.loads(row["tags_json"])
     assert tags["replaygain_track_gain"] == "-6.0 dB"
     assert tags["lyrics"] == "some lyrics"
@@ -122,13 +120,10 @@ def test_precache_tag_cache_skips_already_scanned_files(
     # Only /m/single.flac (track 102) was ever un-scanned; /m/01.flac was
     # excluded by the tags_json != '{}' filter.
     assert counts == {"scanned": 1, "updated": 1}
-    conn = database._get_connection()
-    try:
+    with closing(database._get_connection()) as conn:
         row = conn.execute(
             "SELECT tags_json FROM lib2_track_files WHERE path='/m/01.flac'"
         ).fetchone()
-    finally:
-        conn.close()
     assert json.loads(row["tags_json"]) == {"title": "One Dance"}
 
 

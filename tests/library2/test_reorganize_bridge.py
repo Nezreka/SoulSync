@@ -2,6 +2,7 @@
 
 import sys
 import types
+from contextlib import closing
 from unittest.mock import MagicMock
 
 import pytest
@@ -39,8 +40,7 @@ def _attach_reorganize_helpers(db):
     import types as _types
 
     def get_album_display_meta(self, album_id):
-        conn = self._get_connection()
-        try:
+        with closing(self._get_connection()) as conn:
             row = conn.execute(
                 """SELECT al.title AS album_title, ar.id AS artist_id, ar.name AS artist_name
                    FROM lib2_albums al JOIN lib2_artists ar ON al.primary_artist_id = ar.id
@@ -48,13 +48,10 @@ def _attach_reorganize_helpers(db):
                      SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f ON f.track_id=t.id
                      WHERE t.album_id=al.id AND f.file_state='active')""", (album_id,),
             ).fetchone()
-        finally:
-            conn.close()
         return dict(row) if row else None
 
     def get_artist_albums_for_reorganize(self, artist_id):
-        conn = self._get_connection()
-        try:
+        with closing(self._get_connection()) as conn:
             rows = conn.execute(
                 """SELECT al.id AS album_id, al.title AS album_title, ar.id AS artist_id,
                           ar.name AS artist_name FROM lib2_albums al
@@ -63,8 +60,6 @@ def _attach_reorganize_helpers(db):
                      WHERE t.album_id=al.id AND f.file_state='active')
                    ORDER BY al.year ASC, al.title ASC""", (artist_id,),
             ).fetchall()
-        finally:
-            conn.close()
         return [dict(r) for r in rows]
 
     db.get_album_display_meta = _types.MethodType(get_album_display_meta, db)
@@ -83,8 +78,7 @@ def imported_legacy_db(legacy_db):
 def discography_only_album(imported_legacy_db):
     """A lib2 album with NO legacy back-reference (added via Update
     Discography, never present in the legacy scan)."""
-    conn = imported_legacy_db._get_connection()
-    try:
+    with closing(imported_legacy_db._get_connection()) as conn:
         artist_id = conn.execute("SELECT id FROM lib2_artists LIMIT 1").fetchone()["id"]
         conn.execute(
             "INSERT INTO lib2_albums(title, primary_artist_id, origin, legacy_album_id) "
@@ -95,8 +89,6 @@ def discography_only_album(imported_legacy_db):
         album_id = conn.execute(
             "SELECT id FROM lib2_albums WHERE title='Unowned Release'"
         ).fetchone()["id"]
-    finally:
-        conn.close()
     return album_id
 
 

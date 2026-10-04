@@ -15,6 +15,7 @@ database over.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -114,8 +115,7 @@ def test_an_upgraded_database_is_rebuilt_and_keeps_its_rows(tmp_path):
     raw.commit()
     raw.close()
 
-    conn = MusicDatabase(path)._get_connection()
-    try:
+    with closing(MusicDatabase(path)._get_connection()) as conn:
         assert dict(_row(conn, "artist", 7)) == {
             "origin": "automatic", "external_id": "sp-old", "actor": "system"}
         conn.execute(
@@ -124,8 +124,6 @@ def test_an_upgraded_database_is_rebuilt_and_keeps_its_rows(tmp_path):
             "VALUES('lib2_track', 9, 'deezer', 'manual', 'dz-9')")
         conn.commit()
         assert _row(conn, "lib2_track", 9, "deezer") is not None
-    finally:
-        conn.close()
 
 
 def test_the_rebuild_runs_only_once(tmp_path):
@@ -222,14 +220,11 @@ def test_a_stale_trigger_does_not_break_the_rebuild(tmp_path):
     path = str(tmp_path / "stale.db")
     _stale_trigger_database(path)
 
-    conn = MusicDatabase(path)._get_connection()
-    try:
+    with closing(MusicDatabase(path)._get_connection()) as conn:
         assert not [n for n in _trigger_names(conn)
                     if n.startswith("metadata_match_")]
         assert dict(_row(conn, "artist", 7)) == {
             "origin": "automatic", "external_id": "sp-old", "actor": "system"}
-    finally:
-        conn.close()
 
 
 def test_a_stale_trigger_is_dropped_even_without_a_rebuild(tmp_path):
@@ -248,11 +243,8 @@ def test_a_stale_trigger_is_dropped_even_without_a_rebuild(tmp_path):
     raw.close()
 
     db = MusicDatabase(path)
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         db._add_metadata_match_provenance(conn.cursor())
         conn.commit()
         assert not [n for n in _trigger_names(conn)
                     if n.startswith("metadata_match_")]
-    finally:
-        conn.close()

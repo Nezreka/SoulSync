@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import struct
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -150,14 +151,11 @@ def test_genre_fix_rewrites_the_native_row(genre_db, monkeypatch):
     out = worker._fix_genre_cleanup('artist', 'lib2:1', None, {'kept_genres': ['Rock']})
 
     assert out['success'] is True
-    conn = genre_db._get_connection()
-    try:
+    with closing(genre_db._get_connection()) as conn:
         stored = conn.execute(
             "SELECT genres FROM lib2_artists WHERE id=1").fetchone()['genres']
         legacy_untouched = conn.execute(
             "SELECT genres FROM artists WHERE id='LEG1'").fetchone()['genres']
-    finally:
-        conn.close()
     assert json.loads(stored) == ['Rock']
     assert json.loads(legacy_untouched) == ['seen live']
 

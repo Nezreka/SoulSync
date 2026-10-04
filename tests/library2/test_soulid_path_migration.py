@@ -16,6 +16,7 @@ than assumed canonical.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -56,12 +57,9 @@ def _artist(db, name, soul_id, albums=()):
 
 
 def _paths(db):
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         return {r["id"]: r["soul_id_path"] for r in
                 conn.execute("SELECT id, soul_id_path FROM lib2_artists")}
-    finally:
-        conn.close()
 
 
 def test_a_name_only_id_is_proven_and_labelled(db):
@@ -130,16 +128,13 @@ def test_it_runs_once_and_stamps_its_own_version(db):
 
     worker._migrate_artist_soul_id_paths()
 
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         assert conn.execute(
             "SELECT value FROM metadata WHERE key=?",
             (SoulIDWorker.PATH_MIGRATION_KEY,)).fetchone()[0] == \
             SoulIDWorker.PATH_MIGRATION_VERSION
         conn.execute("UPDATE lib2_artists SET soul_id_path=NULL")
         conn.commit()
-    finally:
-        conn.close()
 
     worker._migrate_artist_soul_id_paths()
 

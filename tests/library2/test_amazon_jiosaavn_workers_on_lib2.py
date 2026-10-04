@@ -19,6 +19,7 @@ plain Amazon error is a provider problem that must not loop.
 from __future__ import annotations
 
 import json
+from contextlib import closing
 from types import SimpleNamespace
 
 import pytest
@@ -91,12 +92,9 @@ def _stub_client(worker, **methods):
 
 
 def _row(worker, table, entity_id=1):
-    conn = worker.db._get_connection()
-    try:
+    with closing(worker.db._get_connection()) as conn:
         return conn.execute(
             f"SELECT * FROM {table} WHERE id=?", (entity_id,)).fetchone()
-    finally:
-        conn.close()
 
 
 def _ids(worker, table, entity_id=1):
@@ -104,12 +102,9 @@ def _ids(worker, table, entity_id=1):
 
 
 def _status(worker, service, entity_type='artist', entity_id=1):
-    conn = worker.db._get_connection()
-    try:
+    with closing(worker.db._get_connection()) as conn:
         return attempt_state(conn, entity_type=entity_type, entity_id=entity_id
                              ).get(service, {}).get('status')
-    finally:
-        conn.close()
 
 
 class TestJioSaavn:

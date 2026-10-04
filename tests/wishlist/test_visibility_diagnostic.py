@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -89,12 +90,9 @@ def test_the_diagnostic_cannot_write(tmp_path):
     """It runs against production data, where the whole point is to preserve
     the evidence — including from itself."""
     path = _db(tmp_path, [("t", json.dumps({"name": "A"}), None, "2026-01-01")])
-    conn = diag._open_readonly(path)
-    try:
+    with closing(diag._open_readonly(path)) as conn:
         with pytest.raises(sqlite3.OperationalError):
             conn.execute("DELETE FROM wishlist_tracks")
-    finally:
-        conn.close()
 
 
 def test_rows_are_grouped_by_source(tmp_path):

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from contextlib import closing
 
 from core import db_lock_watchdog
 
@@ -38,19 +39,13 @@ def test_probe_detects_a_held_write_lock(legacy_db):
 def test_probe_writes_nothing(legacy_db):
     """It asks for the lock with BEGIN IMMEDIATE and rolls back — a pure read
     of the lock state, never a mutation of the database it is watching."""
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         before = conn.execute("SELECT COUNT(*) FROM artists").fetchone()[0]
-    finally:
-        conn.close()
 
     assert db_lock_watchdog.probe_write_lock(legacy_db) is True
 
-    conn = legacy_db._get_connection()
-    try:
+    with closing(legacy_db._get_connection()) as conn:
         assert conn.execute("SELECT COUNT(*) FROM artists").fetchone()[0] == before
-    finally:
-        conn.close()
 
 
 def test_probe_stays_quiet_when_the_database_is_unreachable(legacy_db, monkeypatch):

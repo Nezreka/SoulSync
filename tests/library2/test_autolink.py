@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import closing
 
 import pytest
 
@@ -529,8 +530,7 @@ def test_relink_refreshes_verification_fields_without_duplicating_row(
 
 
 def test_new_autolink_artist_uses_live_default_profile(lib2_enabled, imported_conn):
-    conn = lib2_enabled._get_connection()
-    try:
+    with closing(lib2_enabled._get_connection()) as conn:
         conn.execute("UPDATE quality_profiles SET is_default=0")
         conn.execute("UPDATE quality_profiles SET is_default=1 WHERE id=2")
         for table in ("lib2_artists", "lib2_albums", "lib2_tracks"):
@@ -542,8 +542,6 @@ def test_new_autolink_artist_uses_live_default_profile(lib2_enabled, imported_co
             "SELECT quality_profile_id FROM lib2_artists WHERE id=?", (artist_id,)
         ).fetchone()[0]
         conn.rollback()
-    finally:
-        conn.close()
 
     assert profile_id == 2
 
@@ -560,16 +558,13 @@ def test_autolink_projects_wanted_state_under_the_admin_user_profile(
     the admin status reports the track missing, and `list_cutoff_unmet` never
     offers the upgrade. The quality profile still governs quality, through the
     track's own `quality_profile_id` cascade."""
-    conn = lib2_enabled._get_connection()
-    try:
+    with closing(lib2_enabled._get_connection()) as conn:
         conn.execute("UPDATE quality_profiles SET is_default=0")
         conn.execute("UPDATE quality_profiles SET is_default=1 WHERE id=2")
         for table in ("lib2_artists", "lib2_albums", "lib2_tracks"):
             conn.execute(f"UPDATE {table} SET quality_profile_id=2 WHERE quality_profile_id=1")
         conn.execute("DELETE FROM quality_profiles WHERE id=1")
         conn.commit()
-    finally:
-        conn.close()
 
     file_id = A.link_download_into_library_v2(_context())
     assert file_id is not None
@@ -1261,8 +1256,7 @@ def _artists_conn(tmp_path, rows=()):
     ("Aphex  Twin", "Aphex Twin"),  # normalize_name collapses whitespace
 ])
 def test_existing_artist_is_found_without_scanning_the_table(tmp_path, stored, looked_up):
-    conn = _artists_conn(tmp_path, [stored, "Filler One", "Filler Two"])
-    try:
+    with closing(_artists_conn(tmp_path, [stored, "Filler One", "Filler Two"])) as conn:
         statements = []
         conn.set_trace_callback(statements.append)
         artist_id = A._find_or_create_artist(conn, looked_up, create=False)
@@ -1272,22 +1266,17 @@ def test_existing_artist_is_found_without_scanning_the_table(tmp_path, stored, l
         assert not [s for s in statements if "FROM lib2_artists" in s and "WHERE" not in s], (
             "fell back to a full-table scan: " + repr(statements)
         )
-    finally:
-        conn.close()
 
 
 def test_new_artist_row_carries_its_normalized_key(tmp_path):
     from core.library2.importer import normalize_name
 
-    conn = _artists_conn(tmp_path)
-    try:
+    with closing(_artists_conn(tmp_path)) as conn:
         artist_id = A._find_or_create_artist(conn, "ЛЮБЭ")
         row = conn.execute("SELECT name, name_key FROM lib2_artists WHERE id=?",
                            (artist_id,)).fetchone()
         assert row["name"] == "ЛЮБЭ", "display name must stay untouched"
         assert row["name_key"] == normalize_name("ЛЮБЭ")
-    finally:
-        conn.close()
 
 
 def test_schema_migration_backfills_the_key_for_existing_rows(tmp_path):
@@ -1330,14 +1319,11 @@ def test_rows_without_a_key_are_still_matched(tmp_path):
     so it costs nothing on a migrated database and still finds anything a
     direct SQL insert (tests, ad-hoc repair) left behind.
     """
-    conn = _artists_conn(tmp_path, ["Filler"])
-    try:
+    with closing(_artists_conn(tmp_path, ["Filler"])) as conn:
         conn.execute(
             "INSERT INTO lib2_artists(name, sort_name, name_key) VALUES('ЛЮБЭ','ЛЮБЭ',NULL)")
         conn.commit()
         assert A._find_or_create_artist(conn, "любэ", create=False) is not None
-    finally:
-        conn.close()
 
 
 def test_reimport_onto_a_deleted_path_reactivates_its_row(lib2_enabled, imported_conn):

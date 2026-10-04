@@ -10,6 +10,7 @@ only folds ASCII (§50.4.4.21).
 from __future__ import annotations
 
 import json
+from contextlib import closing
 
 import pytest
 
@@ -23,33 +24,26 @@ def db(tmp_path) -> MusicDatabase:
 
 def _artist(db, name, *, genres=None) -> int:
     from core.library2.importer import normalize_name
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         artist_id = conn.execute(
             "INSERT INTO lib2_artists(name, name_key, genres) VALUES(?,?,?)",
             (name, normalize_name(name), json.dumps(genres or []))).lastrowid
         conn.commit()
         return int(artist_id)
-    finally:
-        conn.close()
 
 
 def _album(db, artist_id, title, *, origin='library', spotify_id=None) -> int:
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         album_id = conn.execute(
             "INSERT INTO lib2_albums(primary_artist_id, title, origin, spotify_id)"
             " VALUES(?,?,?,?)", (artist_id, title, origin, spotify_id)).lastrowid
         conn.commit()
         return int(album_id)
-    finally:
-        conn.close()
 
 
 def _track(db, album_id, title, *, path=None, duration=None, track_number=None,
            file_state='active') -> int:
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         track_id = conn.execute(
             "INSERT INTO lib2_tracks(album_id, title, duration, track_number)"
             " VALUES(?,?,?,?)", (album_id, title, duration, track_number)).lastrowid
@@ -59,8 +53,6 @@ def _track(db, album_id, title, *, path=None, duration=None, track_number=None,
                 " VALUES(?,?,1,?)", (track_id, path, file_state))
         conn.commit()
         return int(track_id)
-    finally:
-        conn.close()
 
 
 # ── export ─────────────────────────────────────────────────────────────────

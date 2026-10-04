@@ -10,6 +10,7 @@ level) and writes it straight into the artwork cache.
 from __future__ import annotations
 
 import time
+from contextlib import closing
 from io import BytesIO
 
 import pytest
@@ -182,8 +183,7 @@ def test_release_album_art_clears_override_and_lock(monkeypatch, api):
 
     assert response.status_code == 200
     assert response.get_json()["art_locked"] is False
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         row = conn.execute(
             "SELECT art_locked FROM lib2_albums WHERE id=?", (ids["album"],)
         ).fetchone()
@@ -192,8 +192,6 @@ def test_release_album_art_clears_override_and_lock(monkeypatch, api):
             "WHERE entity_type='release_group' AND entity_id=? AND field_name='image_url'",
             (ids["album"],),
         ).fetchone()
-    finally:
-        conn.close()
     assert row[0] == 0
     assert override is None
 
@@ -388,8 +386,7 @@ def test_release_artist_art_clears_override_and_lock(monkeypatch, api):
     response = client.delete(endpoint)
 
     assert response.status_code == 200
-    conn = db._get_connection()
-    try:
+    with closing(db._get_connection()) as conn:
         row = conn.execute(
             "SELECT art_locked FROM lib2_artists WHERE id=?", (ids["artist"],)
         ).fetchone()
@@ -398,8 +395,6 @@ def test_release_artist_art_clears_override_and_lock(monkeypatch, api):
             "WHERE entity_type='artist' AND entity_id=? AND field_name='image_url'",
             (ids["artist"],),
         ).fetchone()
-    finally:
-        conn.close()
     assert response.get_json()["art_locked"] is False
     assert row[0] == 0
     assert override is None
