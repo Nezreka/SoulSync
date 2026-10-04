@@ -874,6 +874,7 @@ def _run_batch_completion_side_effects(batch_id: str, batch: dict, deps: Lifecyc
                     from core.album_consistency import run_album_consistency
                     from core.metadata.musicbrainz_tags import selected_release_id
                     from core.metadata.common import get_file_lock
+                    _cons_barcode = _cons_album.get('upc') or _cons_album.get('barcode') if isinstance(_cons_album, dict) else None
                     _cons_result = run_album_consistency(
                         file_infos=_cons_files,
                         album_name=_cons_album_name,
@@ -882,6 +883,7 @@ def _run_batch_completion_side_effects(batch_id: str, batch: dict, deps: Lifecyc
                         total_discs=_cons_album.get('total_discs', 1),
                         release_mbid=selected_release_id(_cons_album),
                         file_lock_fn=get_file_lock,
+                        barcode=_cons_barcode,
                     )
                     if _cons_result.get('success'):
                         logger.info(f"{cons_tag} {_cons_result['tags_written']}/{_cons_result['total_files']} files "

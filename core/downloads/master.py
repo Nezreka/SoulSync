@@ -583,9 +583,10 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                             from core.album_consistency import _find_best_release
                             from core.metadata.musicbrainz_tags import selected_release_id
                             selected = selected_release_id(batch_album_context)
+                            barcode_pf = batch_album_context.get('upc') or batch_album_context.get('barcode')
                             release = (mb_svc.mb_client.get_release(
                                 selected, includes=['release-groups', 'labels', 'media', 'artist-credits', 'recordings'])
-                                if selected else _find_best_release(album_name_pf, artist_name_pf, len(tracks_json), mb_svc))
+                                if selected else _find_best_release(album_name_pf, artist_name_pf, len(tracks_json), mb_svc, barcode=barcode_pf))
                             if release and release.get('id'):
                                 release_mbid = release['id']
                                 _artist_key = artist_name_pf.lower().strip()

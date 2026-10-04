@@ -13008,14 +13008,14 @@ def _is_explicit_blocked(track_data):
     return sp_data.get('explicit', False)
 
 
-def _preflight_mb_release(album_name, artist_name, track_count):
+def _preflight_mb_release(album_name, artist_name, track_count, barcode=None):
     """Pre-populate the MusicBrainz release cache so every track of an album
     download resolves to the same release."""
     try:
         mb_svc = mb_worker.mb_service if mb_worker else None
         if mb_svc and album_name and artist_name:
             from core.album_consistency import _find_best_release
-            _pf_release = _find_best_release(album_name, artist_name, track_count, mb_svc)
+            _pf_release = _find_best_release(album_name, artist_name, track_count, mb_svc, barcode=barcode)
             if _pf_release and _pf_release.get('id'):
                 _pf_mbid = _pf_release['id']
                 _pf_artist_key = artist_name.lower().strip()
@@ -13045,7 +13045,8 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
 
     # PREFLIGHT: Pre-populate MusicBrainz release cache so all tracks get the same release
     _preflight_mb_release(spotify_album.get('name'), spotify_artist.get('name'),
-                          len(enhanced_tracks) + len(unmatched_tracks))
+                          len(enhanced_tracks) + len(unmatched_tracks),
+                          barcode=spotify_album.get('upc') or spotify_album.get('barcode'))
 
     # Process matched tracks with full Spotify metadata
     for matched_item in enhanced_tracks:
@@ -13496,7 +13497,8 @@ def _enriched_start_album(data, source, files):
     if not picked:
         return jsonify({"success": False, "error": "No files are assigned to a track."}), 400
 
-    _preflight_mb_release(album.get('name'), album_artist, len(picked))
+    _preflight_mb_release(album.get('name'), album_artist, len(picked),
+                          barcode=album.get('upc') or album.get('barcode'))
     artist_ctx = {'name': album_artist, 'id': '', 'genres': [], 'source': source}
 
     if all(_pinned_batch.is_pinnable(f.get('username')) for f, _t in picked):

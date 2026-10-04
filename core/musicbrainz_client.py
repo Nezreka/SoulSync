@@ -383,6 +383,45 @@ class MusicBrainzClient:
             if raise_on_error:
                 raise
             return []
+
+    def search_release_by_barcode(self, barcode: str, limit: int = 5,
+                                  raise_on_error: bool = False) -> List[Dict[str, Any]]:
+        """
+        Search for releases by commercial barcode (UPC / EAN).
+
+        Args:
+            barcode: Barcode string (e.g. UPC-A, EAN-13)
+            limit: Maximum number of results to return
+            raise_on_error: Whether to re-raise transport errors
+
+        Returns:
+            List of matching release dictionaries
+        """
+        clean_barcode = re.sub(r'[^0-9]', '', str(barcode or '')).strip()
+        if not clean_barcode:
+            return []
+
+        try:
+            params = {
+                'query': f'barcode:{clean_barcode}',
+                'fmt': 'json',
+                'limit': limit
+            }
+
+            response = self._get("/release", params=params)
+            response.raise_for_status()
+
+            data = response.json()
+            releases = data.get('releases', [])
+
+            logger.debug(f"Found {len(releases)} releases for barcode: {clean_barcode}")
+            return releases
+
+        except Exception as e:
+            logger.error(f"Error searching for release by barcode '{barcode}': {e}")
+            if raise_on_error:
+                raise
+            return []
     
     def search_recording(self, track_name: str, artist_name: Optional[str] = None,
                          limit: int = 10, strict: bool = True,

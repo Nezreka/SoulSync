@@ -31,6 +31,7 @@ _ALBUM_LEVEL_TAGS = [
     'RELEASESTATUS',
     'RELEASECOUNTRY',
     'ORIGINALDATE',
+    'ORIGINALYEAR',
     'BARCODE',
     'MEDIA',
     'TOTALDISCS',
@@ -51,6 +52,7 @@ _ID3_TXXX_MAP = {
     'RELEASESTATUS': 'MusicBrainz Album Status',
     'RELEASECOUNTRY': 'MusicBrainz Album Release Country',
     'ORIGINALDATE': 'ORIGINALDATE',
+    'ORIGINALYEAR': 'originalyear',
     'BARCODE': 'BARCODE',
     'MEDIA': 'MEDIA',
     'TOTALDISCS': 'TOTALDISCS',
@@ -86,10 +88,11 @@ _STATUS_SCORES = {
 }
 
 
-def _score_release(release: dict, expected_track_count: int) -> float:
+def _score_release(release: dict, expected_track_count: int, target_barcode: Optional[str] = None) -> float:
     """Score a MusicBrainz release for preference ranking.
 
     Higher score = better candidate. Factors:
+    - Target barcode match (highest priority — exact commercial digital edition)
     - Track count match (most important — wrong count is wrong release)
     - Release status (Official > Promo > Bootleg)
     - Country preference (US/worldwide > regional)
@@ -98,6 +101,13 @@ def _score_release(release: dict, expected_track_count: int) -> float:
     - Penalize releases with no media info (incomplete data)
     """
     score = 0.0
+
+    # Exact barcode match (+50 points — strongly prefer the commercial edition matching our metadata)
+    if target_barcode and release.get('barcode'):
+        clean_target = re.sub(r'[^0-9]', '', str(target_barcode)).strip()
+        clean_rel = re.sub(r'[^0-9]', '', str(release.get('barcode', ''))).strip()
+        if clean_target and clean_rel and (clean_target == clean_rel or clean_target.endswith(clean_rel) or clean_rel.endswith(clean_target)):
+            score += 50
 
     # Track count match (0-40 points, biggest factor)
     media = release.get('media', [])
@@ -169,13 +179,13 @@ def _credited_to(release, artist_name, mb_service, memo):
     return bool(memo['mbid']) and release_by_artist(release, artist_name, memo['mbid'])
 
 
-def _find_best_release(album_name, artist_name, track_count, mb_service):
+def _find_best_release(album_name, artist_name, track_count, mb_service, barcode: Optional[str] = None):
     """Search MusicBrainz for the best release matching this album.
 
-    Uses Picard-style preference scoring: track count match, release status,
-    country (US/worldwide preferred), format (Digital/CD preferred), barcode
-    presence, and date completeness. Deterministic — same inputs always
-    produce the same release.
+    Uses Picard-style preference scoring: barcode match, track count match,
+    release status, country (US/worldwide preferred), format (Digital/CD
+    preferred), barcode presence, and date completeness. Deterministic —
+    same inputs always produce the same release.
     """
     try:
         import re
@@ -202,10 +212,23 @@ def _find_best_release(album_name, artist_name, track_count, mb_service):
 
         # Collect candidate release MBIDs from all search variants
         candidate_mbids = []
+
+        # If barcode / UPC is provided, search by barcode first
+        if barcode:
+            try:
+                if hasattr(mb_service.mb_client, 'search_release_by_barcode'):
+                    barcode_results = mb_service.mb_client.search_release_by_barcode(barcode)
+                    for br in (barcode_results or []):
+                        br_id = br.get('id', '')
+                        if br_id and br_id not in candidate_mbids:
+                            candidate_mbids.append(br_id)
+            except Exception as e:
+                logger.debug("search_release_by_barcode failed: %s", e)
+
         for name in search_names:
             # Try cached match first
             match = mb_service.match_release(name, artist_name)
-            if match and match.get('mbid'):
+            if match and match.get('mbid') and match['mbid'] not in candidate_mbids:
                 candidate_mbids.append(match['mbid'])
 
             # Also try direct search for more candidates
@@ -242,7 +265,7 @@ def _find_best_release(album_name, artist_name, track_count, mb_service):
                                 mbid[:8], release.get('title'), artist_name)
                     continue
 
-                score = _score_release(release, track_count)
+                score = _score_release(release, track_count, target_barcode=barcode)
 
                 if score > best_score:
                     best_score = score
@@ -270,7 +293,7 @@ def _find_best_release(album_name, artist_name, track_count, mb_service):
         return None
 
 
-def _resolve_album_release(album_name, artist_name, track_count, mb_service):
+def _resolve_album_release(album_name, artist_name, track_count, mb_service, barcode: Optional[str] = None):
     """Resolve ONE MusicBrainz release for the album, PINNED across runs.
 
     The bug this fixes (#999-adjacent, Meshuggah "Catch Thirtythree" split): an
@@ -318,7 +341,7 @@ def _resolve_album_release(album_name, artist_name, track_count, mb_service):
                 logger.debug("Pinned release %s fetch failed (%s); re-searching", pinned[:8], e)
 
     # 2. No usable pin — score a fresh search (today's behavior).
-    release = _find_best_release(album_name, artist_name, track_count, mb_service)
+    release = _find_best_release(album_name, artist_name, track_count, mb_service, barcode=barcode)
 
     # 3. Pin the winner so every future run of this album reuses it.
     if release and release.get('id') and norm_key and artist_key:
@@ -628,6 +651,7 @@ def run_album_consistency(
     total_discs: int = 1,
     file_lock_fn=None,
     release_mbid=None,
+    barcode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Picard-style album consistency: pick ONE MusicBrainz release for the album,
@@ -641,6 +665,7 @@ def run_album_consistency(
         total_discs: Number of discs in the album
         file_lock_fn: Optional function(path) -> context manager for thread-safe writes
         release_mbid: Concrete user-selected edition; never reselected or replaced by siblings
+        barcode: Optional commercial barcode (UPC/EAN) from source metadata
 
     Returns:
         {success, release_mbid, matched_tracks, total_files, tags_written, error}
@@ -711,7 +736,7 @@ def run_album_consistency(
             result['error'] = 'Selected MusicBrainz release is unavailable; keeping existing tags'
             return result
     else:
-        release = _resolve_album_release(album_name, artist_name, len(file_infos), mb_service)
+        release = _resolve_album_release(album_name, artist_name, len(file_infos), mb_service, barcode=barcode)
     if not release:
         result['error'] = f'No MusicBrainz release found for "{album_name}"'
         return result

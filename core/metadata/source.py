@@ -384,9 +384,15 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
                     if persisted:
                         release_mbid = persisted
                     else:
-                        rc_result = _call_source_lookup("MusicBrainz release", mb_service.match_release, album_name_for_mb, artist_name)
-                        if rc_result and rc_result.get("mbid"):
-                            release_mbid = rc_result["mbid"]
+                        barcode_for_mb = metadata.get("barcode") or metadata.get("upc")
+                        if barcode_for_mb and hasattr(mb_service.mb_client, "search_release_by_barcode"):
+                            b_res = _call_source_lookup("MusicBrainz barcode", mb_service.mb_client.search_release_by_barcode, barcode_for_mb)
+                            if b_res and b_res[0].get("id"):
+                                release_mbid = b_res[0]["id"]
+                        if not release_mbid:
+                            rc_result = _call_source_lookup("MusicBrainz release", mb_service.match_release, album_name_for_mb, artist_name)
+                            if rc_result and rc_result.get("mbid"):
+                                release_mbid = rc_result["mbid"]
 
                     if release_mbid:
                         _bounded_cache_set(mb_release_cache, rc_key_norm, release_mbid, _MB_RELEASE_CACHE_MAX_ENTRIES)
