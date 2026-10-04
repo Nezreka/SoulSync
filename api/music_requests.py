@@ -185,8 +185,9 @@ def _quota(db, profile):
         finally:
             conn.close()
         used += db.count_music_video_requests_since(profile["id"], quota["days"])
-    except Exception:  # noqa: BLE001
-        return None
+    except Exception:  # noqa: BLE001 - fail closed: quota unknown means no asks allowed
+        logger.warning("quota check failed, denying asks", exc_info=True)
+        return {"limit": quota["limit"], "days": quota["days"], "used": quota["limit"], "remaining": 0}
     return quota_state(quota, used)
 
 
