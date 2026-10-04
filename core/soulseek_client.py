@@ -872,16 +872,13 @@ class SoulseekClient(DownloadSourcePlugin):
                 if response is not None:  # 201 Created might return download info
                     logger.info(f"[SUCCESS] Started download: {filename} from {username}")
                     # Try to extract download ID from response if available
-                    if isinstance(response, dict) and 'id' in response:
-                        logger.debug(f"Got download ID from response: {response['id']}")
-                        return response['id']
-                    elif isinstance(response, list) and len(response) > 0 and 'id' in response[0]:
-                        logger.debug(f"Got download ID from response list: {response[0]['id']}")
-                        return response[0]['id']
-                    else:
-                        # Fallback to filename if no ID in response
-                        logger.debug(f"No ID in response, using filename as fallback: {response}")
-                        return filename
+                    transfer_id = self._extract_transfer_id(response, filename)
+                    if transfer_id is not None:
+                        logger.debug(f"Got download ID from response: {transfer_id}")
+                        return transfer_id
+                    # Fallback to filename if no ID in response
+                    logger.debug(f"No ID in response, using filename as fallback: {response}")
+                    return filename
                 else:
                     logger.debug("Web interface endpoint returned no response")
                     
@@ -907,16 +904,13 @@ class SoulseekClient(DownloadSourcePlugin):
                     if response is not None:
                         logger.info(f"[SUCCESS] Started download: {filename} from {username} using endpoint: {endpoint}")
                         # Try to extract download ID from response if available
-                        if isinstance(response, dict) and 'id' in response:
-                            logger.debug(f"Got download ID from response: {response['id']}")
-                            return response['id']
-                        elif isinstance(response, list) and len(response) > 0 and 'id' in response[0]:
-                            logger.debug(f"Got download ID from response list: {response[0]['id']}")
-                            return response[0]['id']
-                        else:
-                            # Fallback to filename if no ID in response
-                            logger.debug(f"No ID in response, using filename as fallback: {response}")
-                            return filename
+                        transfer_id = self._extract_transfer_id(response, filename)
+                        if transfer_id is not None:
+                            logger.debug(f"Got download ID from response: {transfer_id}")
+                            return transfer_id
+                        # Fallback to filename if no ID in response
+                        logger.debug(f"No ID in response, using filename as fallback: {response}")
+                        return filename
                     else:
                         logger.debug(f"Endpoint {endpoint} returned no response")
                         
@@ -943,16 +937,13 @@ class SoulseekClient(DownloadSourcePlugin):
                     if response is not None:
                         logger.info(f"[SUCCESS] Started download: {filename} from {username} using fallback endpoint: {endpoint}")
                         # Try to extract download ID from response if available
-                        if isinstance(response, dict) and 'id' in response:
-                            logger.debug(f"Got download ID from response: {response['id']}")
-                            return response['id']
-                        elif isinstance(response, list) and len(response) > 0 and 'id' in response[0]:
-                            logger.debug(f"Got download ID from response list: {response[0]['id']}")
-                            return response[0]['id']
-                        else:
-                            # Fallback to filename if no ID in response
-                            logger.debug(f"No ID in response, using filename as fallback: {response}")
-                            return filename
+                        transfer_id = self._extract_transfer_id(response, filename)
+                        if transfer_id is not None:
+                            logger.debug(f"Got download ID from response: {transfer_id}")
+                            return transfer_id
+                        # Fallback to filename if no ID in response
+                        logger.debug(f"No ID in response, using filename as fallback: {response}")
+                        return filename
                     else:
                         logger.debug(f"Fallback endpoint {endpoint} returned no response")
                         
@@ -967,6 +958,34 @@ class SoulseekClient(DownloadSourcePlugin):
             logger.error(f"Error starting download: {e}")
             return None
     
+    @staticmethod
+    def _extract_transfer_id(response, filename: str):
+        """Pull the slskd transfer id out of an enqueue reply, or None.
+
+        slskd 0.25.x/0.26 answers POST transfers/downloads/{user} with
+        ``201 {"enqueued": [Transfer, ...], "failed": [...]}``: no top-level
+        ``id``. Match the enqueued transfer by filename; a single-file
+        request has one entry, so fall back to it when the filename was
+        normalised by the peer. The older bare ``{"id": ...}`` / ``[{"id":
+        ...}]`` shapes are still read.
+        """
+        if isinstance(response, dict):
+            enqueued = response.get('enqueued')
+            if isinstance(enqueued, list):
+                items = [t for t in enqueued if isinstance(t, dict) and t.get('id')]
+                for t in items:
+                    if t.get('filename') == filename:
+                        return t['id']
+                if len(items) == 1:
+                    return items[0]['id']
+                return None
+            if 'id' in response:
+                return response['id']
+        elif isinstance(response, list) and response and isinstance(response[0], dict) \
+                and 'id' in response[0]:
+            return response[0]['id']
+        return None
+
     @staticmethod
     def _looks_like_transfer_id(value: str) -> bool:
         """Whether this is a slskd transfer UUID rather than a filename.
@@ -1438,6 +1457,7 @@ class SoulseekClient(DownloadSourcePlugin):
                         result = await self._make_request('DELETE', endpoint)
                         if result is not None:
                             cancelled += 1
+                            self._forget_own_download(username, file_data)
                         else:
                             failed += 1
 
