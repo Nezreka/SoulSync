@@ -13,12 +13,14 @@ discography page.
 
 New rule (Deezer cards only): with exactly ONE exact normalized-title
 candidate, the year no longer vetoes the match — it cannot be
-disambiguating anything. Other metadata sources (spotify, musicbrainz, ...)
-have trustworthy original release years, so their gate — and any
-unknown/None source — behaves exactly as before. With >=2 same-title
-candidates the veto stays even for Deezer (that is the true re-release
-ambiguity the gate was built for). The displayed card year is intentionally
-unchanged by this fix — only the owned/missing decision.
+disambiguating anything — UNLESS the candidate carries a stored Deezer id
+that conflicts with the card's (hard proof of different releases, e.g.
+owned standard vs deluxe card). Other metadata sources (spotify,
+musicbrainz, ...) have trustworthy original release years, so their gate —
+and any unknown/None source — behaves exactly as before. With >=2
+same-title candidates the veto stays even for Deezer (that is the true
+re-release ambiguity the gate was built for). The displayed card year is
+intentionally unchanged by this fix — only the owned/missing decision.
 """
 
 from __future__ import annotations

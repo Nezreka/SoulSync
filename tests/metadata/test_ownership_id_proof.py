@@ -75,22 +75,68 @@ def test_id_proof_beats_title_drift(library):
     assert r['status'] == 'completed'
 
 
-def test_rerelease_card_with_different_id_matches_when_deezer_single_candidate(library):
-    """#1289 (Deezer-scoped exemption): this card IS the Deezer reissue-date
-    scenario — a deezer card ('Disintegration', 1989) against the single
-    owned candidate ('Disintegration', 2014). Deezer's release_date is the
-    digital reissue date, so the year mismatch cannot prove "different
-    release" and the gate is skipped; the fuzzy title match resolves.
-    The sibling-edition guard survives where years are trustworthy: non-Deezer
-    sources (see test_year_gate_unchanged_without_enrichment_id) and the >=2
-    same-title candidates case, where the year veto still fires. Id proof
-    still matters when fuzzy FAILS (title drift) — see
-    test_id_proof_beats_title_drift."""
+def test_rerelease_card_with_different_id_still_missing(library):
+    """#1289 tighter ID-conflict rule: the library candidate carries stored
+    deezer_id 'DZ-9' but the Deezer card is 'DZ-2019-DELUXE' — hard proof of
+    different releases (owned standard vs deluxe card), so the reissue-date
+    exemption does not fire and the year gate still vetoes (1989 vs 2014).
+    Id proof can't rescue either: the card's id matches no stored id."""
     db, candidates = library
     r = check_album_completion(db, _card(id='DZ-2019-DELUXE', year=1989),
                                'The Cure', source_override='deezer',
                                candidate_albums=candidates)
+    assert r['status'] == 'missing'
+
+
+def test_deezer_card_with_matching_id_exempt_no_conflict(library):
+    """#1289 tighter rule, no-conflict branch: the card's Deezer id equals the
+    candidate's stored id, so there is no ID conflict and the single-candidate
+    exemption fires — owned. (Id proof would rescue this too; this pins the
+    helper's equal-id branch.)"""
+    db, candidates = library
+    r = check_album_completion(db, _card(id='DZ-9', year=1989),
+                               'The Cure', source_override='deezer',
+                               candidate_albums=candidates)
     assert r['status'] == 'completed'
+
+
+def test_single_completion_deezer_exemption_fires(library):
+    """#1289 consistency: the singles path threads metadata_source too, so a
+    Deezer single card with one exact-title candidate and a year conflict is
+    owned. The card carries no id, so id proof cannot rescue — the exemption
+    is the only path to owned, which pins the threading."""
+    db, candidates = library
+    single = {'name': 'Disintegration', 'total_tracks': 12,
+              'album_type': 'single', 'year': 1989}
+    r = check_single_completion(db, single, 'The Cure',
+                                source_override='deezer',
+                                candidate_albums=candidates)
+    assert r['status'] == 'completed'
+
+
+def test_single_completion_spotify_gate_holds(library):
+    """#1289 consistency: a spotify single card keeps the strict gate — the
+    same year conflict still reads missing."""
+    db, candidates = library
+    single = {'id': 'SP-123', 'name': 'Disintegration', 'total_tracks': 12,
+              'album_type': 'single', 'year': 1989}
+    r = check_single_completion(db, single, 'The Cure',
+                                source_override='spotify',
+                                candidate_albums=candidates)
+    assert r['status'] == 'missing'
+
+
+def test_single_completion_deezer_conflicting_id_still_missing(library):
+    """#1289 tighter rule on the singles path: a Deezer card whose id
+    conflicts with the candidate's stored id is a different release — the
+    exemption does not fire, the gate vetoes."""
+    db, candidates = library
+    single = {'id': 'DZ-2019-DELUXE', 'name': 'Disintegration',
+              'total_tracks': 12, 'album_type': 'single', 'year': 1989}
+    r = check_single_completion(db, single, 'The Cure',
+                                source_override='deezer',
+                                candidate_albums=candidates)
+    assert r['status'] == 'missing'
 
 
 def test_year_gate_unchanged_without_enrichment_id(library):
