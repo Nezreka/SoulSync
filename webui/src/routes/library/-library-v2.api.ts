@@ -1,3 +1,5 @@
+import type { ResponsePromise } from 'ky';
+
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
 
 import { apiClient, readJson } from '@/app/api-client';
@@ -35,8 +37,16 @@ import { bitrateKbps } from './-bitrate';
 
 export const LIBRARY_V2_QUERY_KEY = ['library-v2'] as const;
 
-interface EnabledResponse {
-  success: boolean;
+type Ok = { success: boolean; error?: string };
+
+/** A Library v2 answer; `success: false` throws its error (or `fallback`). */
+async function lib2Json<T extends Ok = Ok>(request: ResponsePromise, fallback: string): Promise<T> {
+  const payload = await readJson<T>(request as ResponsePromise<T>);
+  if (!payload.success) throw new Error(payload.error || fallback);
+  return payload;
+}
+
+interface EnabledResponse extends Ok {
   enabled: boolean;
   /** iss29-C10: whether THIS profile may mutate the catalogue at all. */
   can_write?: boolean;
@@ -51,31 +61,21 @@ export interface LibraryV2Availability {
   /** True for the admin, and for a profile in a library of its own (#1199). */
   canWish: boolean;
 }
-interface ArtistsResponse {
-  success: boolean;
+interface ArtistsResponse extends Ok {
   artists: LibraryV2ArtistSummary[];
   pagination: LibraryV2Pagination;
-  error?: string;
 }
-interface ArtistResponse {
-  success: boolean;
+interface ArtistResponse extends Ok {
   artist?: LibraryV2ArtistDetail;
-  error?: string;
 }
-interface AlbumResponse {
-  success: boolean;
+interface AlbumResponse extends Ok {
   album?: LibraryV2AlbumDetail;
-  error?: string;
 }
-interface TrackResponse {
-  success: boolean;
+interface TrackResponse extends Ok {
   track?: LibraryV2Track;
-  error?: string;
 }
-interface QualityProfilesResponse {
-  success: boolean;
+interface QualityProfilesResponse extends Ok {
   profiles: LibraryV2QualityProfile[];
-  error?: string;
 }
 
 export async function fetchLibraryV2Enabled(): Promise<LibraryV2Availability> {
@@ -102,19 +102,16 @@ export async function fetchLibraryV2Artists(
   // other consumer of this endpoint and didn't invalidate an already-fetched
   // list when the preference was toggled.
   if (search.includeSize) params.set('include', 'size');
-  const payload = await readJson<ArtistsResponse>(
+  return lib2Json<ArtistsResponse>(
     apiClient.get('library/v2/artists', { searchParams: params }),
+    'Failed to load library',
   );
-  if (!payload.success) throw new Error(payload.error || 'Failed to load library');
-  return payload;
 }
 
-interface WantedResponse {
-  success: boolean;
+interface WantedResponse extends Ok {
   kind: LibraryV2WantedKind;
   tracks: LibraryV2WantedRow[];
   pagination: LibraryV2Pagination;
-  error?: string;
 }
 
 /** §64 I2: library-wide Missing / Cutoff Unmet lists. */
@@ -125,11 +122,10 @@ export async function fetchLibraryV2Wanted(
   params.set('kind', search.wantedKind);
   if (search.q) params.set('search', search.q);
   params.set('page', String(search.page));
-  const payload = await readJson<WantedResponse>(
+  return lib2Json<WantedResponse>(
     apiClient.get('library/v2/wanted', { searchParams: params }),
+    'Failed to load wanted tracks',
   );
-  if (!payload.success) throw new Error(payload.error || 'Failed to load wanted tracks');
-  return payload;
 }
 
 export function libraryV2WantedQueryOptions(
@@ -146,10 +142,10 @@ export async function setLibraryV2Monitored(
   id: number,
   monitored: boolean,
 ): Promise<void> {
-  const payload = await readJson<{ success: boolean; error?: string }>(
+  await lib2Json(
     apiClient.post(`library/v2/${entity}/${id}/monitor`, { json: { monitored } }),
+    'Failed to update monitoring',
   );
-  if (!payload.success) throw new Error(payload.error || 'Failed to update monitoring');
 }
 
 /** Turn a missing album slot into a real track row (legacy "Add to Library"
@@ -159,21 +155,18 @@ export async function materializeLibraryV2MissingTrack(
   albumId: number,
   slot: { track_number: number; disc_number?: number; title?: string },
 ): Promise<{ track_id: number; created: boolean }> {
-  const payload = await readJson<{
-    success: boolean;
-    track_id: number;
-    created: boolean;
-    error?: string;
-  }>(apiClient.post(`library/v2/albums/${albumId}/missing-tracks/materialize`, { json: slot }));
-  if (!payload.success) throw new Error(payload.error || 'Failed to add track to library');
+  const payload = await lib2Json<Ok & { track_id: number; created: boolean }>(
+    apiClient.post(`library/v2/albums/${albumId}/missing-tracks/materialize`, { json: slot }),
+    'Failed to add track to library',
+  );
   return { track_id: payload.track_id, created: payload.created };
 }
 
 export async function fetchLibraryV2QualityProfiles(): Promise<LibraryV2QualityProfile[]> {
-  const payload = await readJson<QualityProfilesResponse>(
+  const payload = await lib2Json<QualityProfilesResponse>(
     apiClient.get('library/v2/quality-profiles'),
+    'Failed to load quality profiles',
   );
-  if (!payload.success) throw new Error(payload.error || 'Failed to load quality profiles');
   return payload.profiles;
 }
 
@@ -184,7 +177,7 @@ export async function setLibraryV2QualityProfile(
   cascade = true,
   monitorExisting = false,
 ): Promise<void> {
-  const payload = await readJson<{ success: boolean; error?: string }>(
+  await lib2Json(
     apiClient.post(`library/v2/${entity}/${id}/quality-profile`, {
       json: {
         ...(qualityProfileId === null
@@ -197,8 +190,8 @@ export async function setLibraryV2QualityProfile(
         monitor_existing: monitorExisting,
       },
     }),
+    'Failed to update quality profile',
   );
-  if (!payload.success) throw new Error(payload.error || 'Failed to update quality profile');
 }
 
 export async function refreshLibraryV2(entity: 'artists' | 'albums', id: number): Promise<string> {
@@ -252,13 +245,9 @@ export interface LibraryV2ArtistMatchStatus {
 export async function fetchLibraryV2ArtistMatchStatus(
   artistId: number,
 ): Promise<LibraryV2ArtistMatchStatus> {
-  const payload = await readJson<{
-    success: boolean;
-    services: LibraryV2MatchService[];
-    enrichment_coverage?: Record<string, number>;
-    error?: string;
-  }>(apiClient.get(`library/v2/artists/${artistId}/match-status`));
-  if (!payload.success) throw new Error(payload.error || 'Failed to load match status');
+  const payload = await lib2Json<
+    Ok & { services: LibraryV2MatchService[]; enrichment_coverage?: Record<string, number> }
+  >(apiClient.get(`library/v2/artists/${artistId}/match-status`), 'Failed to load match status');
   return {
     services: payload.services ?? [],
     enrichmentCoverage: payload.enrichment_coverage ?? {},
@@ -274,13 +263,9 @@ export interface LibraryV2AlbumMatchBundle {
 export async function fetchLibraryV2AlbumMatchStatus(
   albumId: number,
 ): Promise<LibraryV2AlbumMatchBundle> {
-  const payload = await readJson<{
-    success: boolean;
-    album: LibraryV2MatchService[];
-    tracks: Record<number, LibraryV2MatchService[]>;
-    error?: string;
-  }>(apiClient.get(`library/v2/albums/${albumId}/match-status`));
-  if (!payload.success) throw new Error(payload.error || 'Failed to load match status');
+  const payload = await lib2Json<
+    Ok & { album: LibraryV2MatchService[]; tracks: Record<number, LibraryV2MatchService[]> }
+  >(apiClient.get(`library/v2/albums/${albumId}/match-status`), 'Failed to load match status');
   return { album: payload.album ?? [], tracks: payload.tracks ?? {} };
 }
 
@@ -290,13 +275,9 @@ export async function fetchLibraryV2AlbumMatchStatus(
 export async function fetchLibraryV2ArtistAliases(
   artistId: number,
 ): Promise<{ canonicalArtistId: number; aliases: LibraryV2ArtistAliasMember[] }> {
-  const payload = await readJson<{
-    success: boolean;
-    canonical_artist_id?: number;
-    aliases?: LibraryV2ArtistAliasMember[];
-    error?: string;
-  }>(apiClient.get(`library/v2/artists/${artistId}/aliases`));
-  if (!payload.success) throw new Error(payload.error || 'Failed to load aliases');
+  const payload = await lib2Json<
+    Ok & { canonical_artist_id?: number; aliases?: LibraryV2ArtistAliasMember[] }
+  >(apiClient.get(`library/v2/artists/${artistId}/aliases`), 'Failed to load aliases');
   return {
     canonicalArtistId: payload.canonical_artist_id ?? artistId,
     aliases: payload.aliases ?? [],
@@ -307,21 +288,18 @@ export async function fetchLibraryV2ArtistAliases(
  *  under a different, unlinked provider identity. Both rows keep their own
  *  albums/tracks (soft link, nothing is reassigned or deleted). */
 export async function linkLibraryV2ArtistAlias(artistId: number, aliasOfId: number): Promise<void> {
-  const payload = await readJson<{ success: boolean; error?: string }>(
+  await lib2Json(
     apiClient.post(`library/v2/artists/${artistId}/link-alias`, {
       json: { alias_of: aliasOfId },
     }),
+    'Link failed',
   );
-  if (!payload.success) throw new Error(payload.error || 'Link failed');
 }
 
 /** §40: detach ``artistId`` from its canonical artist, if any — it becomes a
  *  standalone entry again (its own albums are untouched either way). */
 export async function unlinkLibraryV2ArtistAlias(artistId: number): Promise<void> {
-  const payload = await readJson<{ success: boolean; error?: string }>(
-    apiClient.delete(`library/v2/artists/${artistId}/link-alias`),
-  );
-  if (!payload.success) throw new Error(payload.error || 'Unlink failed');
+  await lib2Json(apiClient.delete(`library/v2/artists/${artistId}/link-alias`), 'Unlink failed');
 }
 
 /** Manually match an entity to a provider id, reusing the app-wide legacy
@@ -339,7 +317,7 @@ export async function manualMatchLibraryV2Entity(input: {
   if (!useLegacy && input.library_v2_entity_id == null) {
     throw new Error('No matchable entity id');
   }
-  const payload = await readJson<{ success: boolean; error?: string }>(
+  await lib2Json(
     useLegacy
       ? apiClient.put('library/manual-match', {
           json: {
@@ -361,8 +339,8 @@ export async function manualMatchLibraryV2Entity(input: {
             },
           },
         ),
+    'Manual match failed',
   );
-  if (!payload.success) throw new Error(payload.error || 'Manual match failed');
 }
 
 /** Clear a wrong provider identity, optionally keeping the linked Watchlist
@@ -378,7 +356,7 @@ export async function clearLibraryV2EntityMatch(input: {
   if (!useLegacy && input.library_v2_entity_id == null) {
     throw new Error('No matchable entity id');
   }
-  const payload = await readJson<{ success: boolean; error?: string }>(
+  await lib2Json(
     useLegacy
       ? apiClient.put('library/clear-match', {
           json: {
@@ -397,8 +375,8 @@ export async function clearLibraryV2EntityMatch(input: {
             },
           },
         ),
+    'Clear match failed',
   );
-  if (!payload.success) throw new Error(payload.error || 'Clear match failed');
 }
 
 export interface LibraryV2MatchSearchResult {
@@ -433,12 +411,10 @@ export async function searchLibraryV2MatchService(input: {
   entity_type: 'artist' | 'album' | 'track';
   query: string;
 }): Promise<LibraryV2MatchSearchResult[]> {
-  const payload = await readJson<{
-    success: boolean;
-    results: LibraryV2MatchSearchResult[];
-    error?: string;
-  }>(apiClient.post('library/search-service', { json: input }));
-  if (!payload.success) throw new Error(payload.error || 'Provider search failed');
+  const payload = await lib2Json<Ok & { results: LibraryV2MatchSearchResult[] }>(
+    apiClient.post('library/search-service', { json: input }),
+    'Provider search failed',
+  );
   return payload.results ?? [];
 }
 
@@ -449,21 +425,16 @@ export async function fetchLibraryV2MatchArtistReleases(input: {
   artist_name: string;
   limit?: number;
 }): Promise<LibraryV2MatchReleasePreview> {
-  const payload = await readJson<{
-    success: boolean;
-    supported?: boolean;
-    albums?: LibraryV2MatchRelease[];
-    error?: string;
-  }>(apiClient.post('library/match-artist-releases', { json: input }));
-  if (!payload.success) throw new Error(payload.error || 'Release preview failed');
+  const payload = await lib2Json<Ok & { supported?: boolean; albums?: LibraryV2MatchRelease[] }>(
+    apiClient.post('library/match-artist-releases', { json: input }),
+    'Release preview failed',
+  );
   return { supported: payload.supported !== false, albums: payload.albums ?? [] };
 }
 
-interface SourceInfoResponse {
-  success: boolean;
+interface SourceInfoResponse extends Ok {
   downloads: LibraryV2TrackDownload[];
   manual_skips?: LibraryV2ManualSkip[];
-  error?: string;
 }
 
 export interface LibraryV2TrackSourceInfo {
@@ -476,10 +447,10 @@ export interface LibraryV2TrackSourceInfo {
 export async function fetchLibraryV2TrackSourceInfo(
   trackId: number,
 ): Promise<LibraryV2TrackSourceInfo> {
-  const payload = await readJson<SourceInfoResponse>(
+  const payload = await lib2Json<SourceInfoResponse>(
     apiClient.get(`library/v2/tracks/${trackId}/source-info`),
+    'Failed to load source info',
   );
-  if (!payload.success) throw new Error(payload.error || 'Failed to load source info');
   return { downloads: payload.downloads ?? [], manual_skips: payload.manual_skips ?? [] };
 }
 
@@ -490,12 +461,12 @@ export async function blacklistLibraryV2Source(input: {
   blocked_filename: string;
   blocked_username: string;
 }): Promise<void> {
-  const payload = await readJson<{ success: boolean; error?: string }>(
+  await lib2Json(
     apiClient.post('library/blacklist', {
       json: { reason: 'user_rejected', track_artist: '', ...input },
     }),
+    'Failed to blacklist source',
   );
-  if (!payload.success) throw new Error(payload.error || 'Failed to blacklist source');
 }
 
 /** Start the provider discography walk. Returns the background job to poll.
@@ -548,12 +519,12 @@ export async function resolveLibraryV2DiscoveryArtist(input: {
   providerId: string;
   name: string;
 }): Promise<number | null> {
-  const payload = await readJson<{ success: boolean; artist_id: number | null; error?: string }>(
+  const payload = await lib2Json<Ok & { artist_id: number | null }>(
     apiClient.get('library/v2/discovery/artist', {
       searchParams: { source: input.source, provider_id: input.providerId, name: input.name },
     }),
+    'Artist lookup failed',
   );
-  if (!payload.success) throw new Error(payload.error || 'Artist lookup failed');
   return payload.artist_id;
 }
 
@@ -570,12 +541,7 @@ export async function monitorLibraryV2DiscoveryAlbum(input: {
   imageUrl?: string | null;
   trackCount?: number | null;
 }): Promise<{ artistId: number; albumId: number }> {
-  const payload = await readJson<{
-    success: boolean;
-    artist_id: number;
-    album_id: number;
-    error?: string;
-  }>(
+  const payload = await lib2Json<Ok & { artist_id: number; album_id: number }>(
     apiClient.post('library/v2/discovery/album', {
       json: {
         source: input.source,
@@ -590,8 +556,8 @@ export async function monitorLibraryV2DiscoveryAlbum(input: {
         track_count: input.trackCount ?? null,
       },
     }),
+    'Could not monitor this release',
   );
-  if (!payload.success) throw new Error(payload.error || 'Could not monitor this release');
   return { artistId: payload.artist_id, albumId: payload.album_id };
 }
 
@@ -628,7 +594,7 @@ export async function monitorLibraryV2DiscoveryTrack(input: {
   albumProviderId?: string | null;
   albumType?: string | null;
 }): Promise<number> {
-  const payload = await readJson<{ success: boolean; track_id: number; error?: string }>(
+  const payload = await lib2Json<Ok & { track_id: number }>(
     apiClient.post('library/v2/discovery/track', {
       json: {
         source: input.source,
@@ -645,8 +611,8 @@ export async function monitorLibraryV2DiscoveryTrack(input: {
         monitored: true,
       },
     }),
+    'Could not bookmark this track',
   );
-  if (!payload.success) throw new Error(payload.error || 'Could not bookmark this track');
   return payload.track_id;
 }
 
@@ -773,12 +739,12 @@ export async function bulkMonitorLibraryV2Releases(
   monitored: boolean,
   albumIds?: number[],
 ): Promise<string> {
-  const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
+  const payload = await lib2Json<Ok & { job_id?: string }>(
     apiClient.post(`library/v2/artists/${artistId}/releases/monitor`, {
       json: { scope, monitored, ...(albumIds ? { album_ids: albumIds } : {}) },
     }),
+    'Bulk monitor failed',
   );
-  if (!payload.success) throw new Error(payload.error || 'Bulk monitor failed');
   if (!payload.job_id) throw new Error('Bulk monitor did not return a job id');
   return payload.job_id;
 }
@@ -787,12 +753,12 @@ export async function editLibraryV2Artist(
   artistId: number,
   monitorNewItems: 'all' | 'none' | 'new',
 ): Promise<void> {
-  const payload = await readJson<{ success: boolean; error?: string }>(
+  await lib2Json(
     apiClient.post(`library/v2/artists/${artistId}/edit`, {
       json: { monitor_new_items: monitorNewItems },
     }),
+    'Edit failed',
   );
-  if (!payload.success) throw new Error(payload.error || 'Edit failed');
 }
 
 /** §52.5/§56.2: on-demand Spotify stats for the current-match identity card —
@@ -905,16 +871,12 @@ export async function updateLibraryV2MetadataOverrides(
   values: Record<string, unknown>,
   clear: string[] = [],
 ): Promise<Record<string, unknown>> {
-  const payload = await readJson<{
-    success: boolean;
-    overrides?: Record<string, unknown>;
-    error?: string;
-  }>(
+  const payload = await lib2Json<Ok & { overrides?: Record<string, unknown> }>(
     apiClient.patch(`library/v2/metadata-overrides/${entity}/${entityId}`, {
       json: { set: values, clear },
     }),
+    'Edit failed',
   );
-  if (!payload.success) throw new Error(payload.error || 'Edit failed');
   return payload.overrides ?? {};
 }
 
@@ -937,10 +899,7 @@ export async function deleteLibraryV2Entity(
   entity: 'artists' | 'albums',
   id: number,
 ): Promise<void> {
-  const payload = await readJson<{ success: boolean; error?: string }>(
-    apiClient.delete(`library/v2/${entity}/${id}`),
-  );
-  if (!payload.success) throw new Error(payload.error || 'Delete failed');
+  await lib2Json(apiClient.delete(`library/v2/${entity}/${id}`), 'Delete failed');
 }
 
 /** Impact preview for artist delete: owned releases cascade, featured
@@ -956,11 +915,10 @@ export interface LibraryV2ArtistDeletePreview {
 export async function fetchLibraryV2ArtistDeletePreview(
   id: number,
 ): Promise<LibraryV2ArtistDeletePreview> {
-  const payload = await readJson<
-    { success: boolean; error?: string } & LibraryV2ArtistDeletePreview
-  >(apiClient.get(`library/v2/artists/${id}/delete-preview`));
-  if (!payload.success) throw new Error(payload.error || 'Delete preview failed');
-  return payload;
+  return lib2Json<Ok & LibraryV2ArtistDeletePreview>(
+    apiClient.get(`library/v2/artists/${id}/delete-preview`),
+    'Delete preview failed',
+  );
 }
 
 export interface LibraryV2FileDeletePreviewItem {
@@ -1039,11 +997,10 @@ export async function fetchLibraryV2FileDeletePreview(
   const searchParams = fileIds?.length
     ? new URLSearchParams({ file_ids: fileIds.join(',') })
     : undefined;
-  const payload = await readJson<{ success: boolean; error?: string } & LibraryV2FileDeletePreview>(
+  return lib2Json<Ok & LibraryV2FileDeletePreview>(
     apiClient.get(`library/v2/${entity}/${id}/file-delete-preview`, { searchParams }),
+    'File delete preview failed',
   );
-  if (!payload.success) throw new Error(payload.error || 'File delete preview failed');
-  return payload;
 }
 
 export async function deleteLibraryV2Files(
@@ -1133,13 +1090,12 @@ export async function fetchLibraryV2ArtistTrackFiles(
   if (search) params.set('search', search);
   params.set('page', String(page));
   params.set('limit', String(limit));
-  const payload = await readJson<{
-    success: boolean;
-    error?: string;
-    files?: LibraryV2ArtistTrackFile[];
-    pagination?: LibraryV2Pagination;
-  }>(apiClient.get(`library/v2/artists/${artistId}/track-files`, { searchParams: params }));
-  if (!payload.success) throw new Error(payload.error || 'Track files failed');
+  const payload = await lib2Json<
+    Ok & { files?: LibraryV2ArtistTrackFile[]; pagination?: LibraryV2Pagination }
+  >(
+    apiClient.get(`library/v2/artists/${artistId}/track-files`, { searchParams: params }),
+    'Track files failed',
+  );
   return {
     files: payload.files ?? [],
     pagination: payload.pagination ?? {
@@ -1161,13 +1117,12 @@ export async function fetchLibraryV2ArtistPlaybackFiles(
   const params = new URLSearchParams();
   params.set('page', String(page));
   params.set('limit', String(limit));
-  const payload = await readJson<{
-    success: boolean;
-    error?: string;
-    files?: LibraryV2ArtistPlaybackFile[];
-    pagination?: LibraryV2Pagination;
-  }>(apiClient.get(`library/v2/artists/${artistId}/play-queue`, { searchParams: params }));
-  if (!payload.success) throw new Error(payload.error || 'Play queue failed');
+  const payload = await lib2Json<
+    Ok & { files?: LibraryV2ArtistPlaybackFile[]; pagination?: LibraryV2Pagination }
+  >(
+    apiClient.get(`library/v2/artists/${artistId}/play-queue`, { searchParams: params }),
+    'Play queue failed',
+  );
   return {
     files: payload.files ?? [],
     pagination: payload.pagination ?? {
@@ -1182,10 +1137,10 @@ export async function fetchLibraryV2ArtistPlaybackFiles(
 }
 
 export async function setLibraryV2PrimaryTrackFile(trackId: number, fileId: number): Promise<void> {
-  const payload = await readJson<{ success: boolean; error?: string }>(
+  await lib2Json(
     apiClient.post(`library/v2/tracks/${trackId}/files/${fileId}/primary`),
+    'Primary file could not be changed',
   );
-  if (!payload.success) throw new Error(payload.error || 'Primary file could not be changed');
 }
 
 export type LibraryV2HistoryCategory =
@@ -1223,12 +1178,10 @@ export async function fetchLibraryV2ArtistHistory(
   artistId: number,
   limit = 50,
 ): Promise<LibraryV2HistoryEntry[]> {
-  const payload = await readJson<{
-    success: boolean;
-    history?: LibraryV2HistoryEntry[];
-    error?: string;
-  }>(apiClient.get(`library/v2/artists/${artistId}/history`, { searchParams: { limit } }));
-  if (!payload.success) throw new Error(payload.error || 'History failed');
+  const payload = await lib2Json<Ok & { history?: LibraryV2HistoryEntry[] }>(
+    apiClient.get(`library/v2/artists/${artistId}/history`, { searchParams: { limit } }),
+    'History failed',
+  );
   return payload.history ?? [];
 }
 
@@ -1237,12 +1190,10 @@ export async function fetchLibraryV2ArtistHistory(
 export async function fetchLibraryV2TrackHistory(
   trackId: number,
 ): Promise<LibraryV2HistoryEntry[]> {
-  const payload = await readJson<{
-    success: boolean;
-    history?: LibraryV2HistoryEntry[];
-    error?: string;
-  }>(apiClient.get(`library/v2/tracks/${trackId}/history`));
-  if (!payload.success) throw new Error(payload.error || 'History failed');
+  const payload = await lib2Json<Ok & { history?: LibraryV2HistoryEntry[] }>(
+    apiClient.get(`library/v2/tracks/${trackId}/history`),
+    'History failed',
+  );
   return payload.history ?? [];
 }
 
@@ -1252,12 +1203,10 @@ export async function fetchLibraryV2AlbumHistory(
   albumId: number,
   limit = 50,
 ): Promise<LibraryV2HistoryEntry[]> {
-  const payload = await readJson<{
-    success: boolean;
-    history?: LibraryV2HistoryEntry[];
-    error?: string;
-  }>(apiClient.get(`library/v2/albums/${albumId}/history`, { searchParams: { limit } }));
-  if (!payload.success) throw new Error(payload.error || 'History failed');
+  const payload = await lib2Json<Ok & { history?: LibraryV2HistoryEntry[] }>(
+    apiClient.get(`library/v2/albums/${albumId}/history`, { searchParams: { limit } }),
+    'History failed',
+  );
   return payload.history ?? [];
 }
 
@@ -1297,14 +1246,12 @@ export async function fetchLibraryV2TagPreview(
   entity: 'artists' | 'albums',
   id: number,
 ): Promise<{ tracks: LibraryV2TagPreviewTrack[]; changed_count: number; truncated: boolean }> {
-  const payload = await readJson<{
-    success: boolean;
-    tracks?: LibraryV2TagPreviewTrack[];
-    changed_count?: number;
-    truncated?: boolean;
-    error?: string;
-  }>(apiClient.get(`library/v2/${entity}/${id}/tag-preview`, { timeout: 120_000 }));
-  if (!payload.success) throw new Error(payload.error || 'Tag preview failed');
+  const payload = await lib2Json<
+    Ok & { tracks?: LibraryV2TagPreviewTrack[]; changed_count?: number; truncated?: boolean }
+  >(
+    apiClient.get(`library/v2/${entity}/${id}/tag-preview`, { timeout: 120_000 }),
+    'Tag preview failed',
+  );
   return {
     tracks: payload.tracks ?? [],
     changed_count: payload.changed_count ?? 0,
@@ -1320,7 +1267,7 @@ export async function writeLibraryV2Tags(
    *  the rule everywhere else in Library v2. */
   overwriteManual: [number, string][] = [],
 ): Promise<string> {
-  const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
+  const payload = await lib2Json<Ok & { job_id?: string }>(
     apiClient.post('library/v2/tags/write', {
       json: {
         track_ids: trackIds,
@@ -1328,8 +1275,8 @@ export async function writeLibraryV2Tags(
         ...(overwriteManual.length ? { overwrite_manual: overwriteManual } : {}),
       },
     }),
+    'Write tags failed',
   );
-  if (!payload.success) throw new Error(payload.error || 'Write tags failed');
   if (!payload.job_id) throw new Error('Tag writer did not return a job id');
   return payload.job_id;
 }
@@ -1338,10 +1285,10 @@ export async function writeLibraryV2Tags(
  *  from providers (best-effort) before writing tags, so a field the
  *  catalogue never had a chance to get (not just one it already had). */
 export async function fillLibraryV2TagGaps(trackId: number): Promise<string> {
-  const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
+  const payload = await lib2Json<Ok & { job_id?: string }>(
     apiClient.post(`library/v2/tracks/${trackId}/fill-tag-gaps`, { json: {} }),
+    'Fill tag gaps failed',
   );
-  if (!payload.success) throw new Error(payload.error || 'Fill tag gaps failed');
   if (!payload.job_id) throw new Error('Fill tag gaps did not return a job id');
   return payload.job_id;
 }
@@ -1375,34 +1322,32 @@ export async function moveLibraryV2TrackFile(
   fromTrackId: number,
   toTrackId: number,
 ): Promise<void> {
-  const payload = await readJson<{ success: boolean; error?: string }>(
+  await lib2Json(
     apiClient.post(`library/v2/tracks/${fromTrackId}/move-file`, {
       json: { to_track_id: toTrackId },
     }),
+    'Move failed',
   );
-  if (!payload.success) throw new Error(payload.error || 'Move failed');
 }
 
 /** Unlink a duplicate pair: the single stops pointing at the album version
  *  (it becomes its own canonical recording again). */
 export async function unlinkLibraryV2Duplicate(trackId: number): Promise<void> {
-  const payload = await readJson<{ success: boolean; error?: string }>(
+  await lib2Json(
     apiClient.post(`library/v2/tracks/${trackId}/canonical`, {
       json: { canonical_track_id: null },
     }),
+    'Unlink failed',
   );
-  if (!payload.success) throw new Error(payload.error || 'Unlink failed');
 }
 
 export async function fetchLibraryV2Duplicates(
   artistId: number,
 ): Promise<LibraryV2DuplicatePair[]> {
-  const payload = await readJson<{
-    success: boolean;
-    pairs?: LibraryV2DuplicatePair[];
-    error?: string;
-  }>(apiClient.get(`library/v2/artists/${artistId}/duplicates`));
-  if (!payload.success) throw new Error(payload.error || 'Duplicates failed');
+  const payload = await lib2Json<Ok & { pairs?: LibraryV2DuplicatePair[] }>(
+    apiClient.get(`library/v2/artists/${artistId}/duplicates`),
+    'Duplicates failed',
+  );
   return payload.pairs ?? [];
 }
 
@@ -1426,10 +1371,10 @@ export async function runRepairJob(
  *  fetchLibraryV2JobStatus; the result carries `{scanned, matched, split,
  *  unmatched}`. */
 export async function reconcileUnmappedArtists(): Promise<string> {
-  const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
+  const payload = await lib2Json<Ok & { job_id?: string }>(
     apiClient.post('library/v2/maintenance/reconcile-unmapped-artists', { json: {} }),
+    'Reconcile failed',
   );
-  if (!payload.success) throw new Error(payload.error || 'Reconcile failed');
   if (!payload.job_id) throw new Error('Reconcile did not return a job id');
   return payload.job_id;
 }
@@ -1440,10 +1385,10 @@ export async function reconcileUnmappedArtists(): Promise<string> {
  *  fetchLibraryV2JobStatus; the result carries `{scanned, wanted, wishlisted,
  *  mirrored}`. */
 export async function reconcileWishlist(): Promise<string> {
-  const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
+  const payload = await lib2Json<Ok & { job_id?: string }>(
     apiClient.post('library/v2/maintenance/reconcile-wishlist', { json: {} }),
+    'Reconcile failed',
   );
-  if (!payload.success) throw new Error(payload.error || 'Reconcile failed');
   if (!payload.job_id) throw new Error('Reconcile did not return a job id');
   return payload.job_id;
 }
@@ -1516,10 +1461,10 @@ export function libraryV2QueueStatusQueryOptions(
 /** Analyze an album's files and write track+album ReplayGain tags. Returns a
  *  job id to poll via fetchLibraryV2JobStatus (legacy Enrich→ReplayGain). */
 export async function startLibraryV2AlbumReplayGain(albumId: number): Promise<string> {
-  const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
+  const payload = await lib2Json<Ok & { job_id?: string }>(
     apiClient.post(`library/v2/albums/${albumId}/replaygain`, { json: {} }),
+    'ReplayGain analysis failed',
   );
-  if (!payload.success) throw new Error(payload.error || 'ReplayGain analysis failed');
   if (!payload.job_id) throw new Error('ReplayGain did not return a job id');
   return payload.job_id;
 }
@@ -1527,22 +1472,20 @@ export async function startLibraryV2AlbumReplayGain(albumId: number): Promise<st
 /** Analyze one track and write its track-level ReplayGain tags (synchronous).
  *  Returns the track gain in dB. */
 export async function analyzeLibraryV2TrackReplayGain(trackId: number): Promise<number | null> {
-  const payload = await readJson<{
-    success: boolean;
-    track_gain_db?: number | null;
-    error?: string;
-  }>(apiClient.post(`library/v2/tracks/${trackId}/replaygain`, { json: {} }));
-  if (!payload.success) throw new Error(payload.error || 'ReplayGain analysis failed');
+  const payload = await lib2Json<Ok & { track_gain_db?: number | null }>(
+    apiClient.post(`library/v2/tracks/${trackId}/replaygain`, { json: {} }),
+    'ReplayGain analysis failed',
+  );
   return payload.track_gain_db ?? null;
 }
 
 /** Fetch + write lyrics for one track from LRClib (synchronous) — the "LR"
  *  badge's missing→click path (deep-dive B3). */
 export async function fetchLibraryV2TrackLyrics(trackId: number): Promise<void> {
-  const payload = await readJson<{ success: boolean; fetched?: boolean; error?: string }>(
+  await lib2Json<Ok & { fetched?: boolean }>(
     apiClient.post(`library/v2/tracks/${trackId}/fetch-lyrics`, { json: {} }),
+    'Lyrics fetch failed',
   );
-  if (!payload.success) throw new Error(payload.error || 'Lyrics fetch failed');
 }
 
 /** Re-query one metadata provider for one entity (legacy Enrich parity, §44).
@@ -1568,12 +1511,10 @@ export async function enrichLibraryV2Entity(
 export async function fetchLibraryV2ReorganizeSourcesGlobal(): Promise<
   LibraryV2ReorganizeSource[]
 > {
-  const payload = await readJson<{
-    success: boolean;
-    sources: LibraryV2ReorganizeSource[];
-    error?: string;
-  }>(apiClient.get('library/v2/reorganize/sources'));
-  if (!payload.success) throw new Error(payload.error || 'Failed to load reorganize sources');
+  const payload = await lib2Json<Ok & { sources: LibraryV2ReorganizeSource[] }>(
+    apiClient.get('library/v2/reorganize/sources'),
+    'Failed to load reorganize sources',
+  );
   return payload.sources;
 }
 
@@ -1582,12 +1523,10 @@ export async function fetchLibraryV2ReorganizeSourcesGlobal(): Promise<
 export async function fetchLibraryV2AlbumReorganizeSources(
   albumId: number,
 ): Promise<LibraryV2ReorganizeSource[]> {
-  const payload = await readJson<{
-    success: boolean;
-    sources: LibraryV2ReorganizeSource[];
-    error?: string;
-  }>(apiClient.get(`library/v2/albums/${albumId}/reorganize/sources`));
-  if (!payload.success) throw new Error(payload.error || 'Failed to load reorganize sources');
+  const payload = await lib2Json<Ok & { sources: LibraryV2ReorganizeSource[] }>(
+    apiClient.get(`library/v2/albums/${albumId}/reorganize/sources`),
+    'Failed to load reorganize sources',
+  );
   return payload.sources;
 }
 
@@ -1597,7 +1536,7 @@ export async function previewLibraryV2AlbumReorganize(
   albumId: number,
   _options: Record<string, never> = {},
 ): Promise<LibraryV2ReorganizePreview> {
-  const payload = await readJson<LibraryV2ReorganizePreview & { error?: string }>(
+  return lib2Json<LibraryV2ReorganizePreview & { error?: string }>(
     apiClient.post(`library/v2/albums/${albumId}/reorganize/preview`, {
       // The plan comes from the catalogue, so the body names no source and no
       // mode. The long timeout stays: it was needed for a cold provider lookup
@@ -1605,9 +1544,8 @@ export async function previewLibraryV2AlbumReorganize(
       json: {},
       timeout: 120_000,
     }),
+    'Reorganize preview failed',
   );
-  if (!payload.success) throw new Error(payload.error || 'Reorganize preview failed');
-  return payload;
 }
 
 /** Enqueue one lib2 album for reorganize — returns immediately, the queue
@@ -1618,14 +1556,10 @@ export async function applyLibraryV2AlbumReorganize(
   // artist-wide variant still takes one, and the two call sites read alike.
   _options: Record<string, never> = {},
 ): Promise<{ queued: boolean; queueId?: string; reason?: string }> {
-  const payload = await readJson<{
-    success: boolean;
-    queued?: boolean;
-    queue_id?: string;
-    reason?: string;
-    error?: string;
-  }>(apiClient.post(`library/v2/albums/${albumId}/reorganize`, { json: {} }));
-  if (!payload.success) throw new Error(payload.error || 'Reorganize failed');
+  const payload = await lib2Json<Ok & { queued?: boolean; queue_id?: string; reason?: string }>(
+    apiClient.post(`library/v2/albums/${albumId}/reorganize`, { json: {} }),
+    'Reorganize failed',
+  );
   return { queued: Boolean(payload.queued), queueId: payload.queue_id, reason: payload.reason };
 }
 
@@ -1635,18 +1569,14 @@ export async function applyLibraryV2ArtistReorganizeAll(
   artistId: number,
   options: { source?: string | null; mode?: 'api' | 'tags' } = {},
 ): Promise<{ enqueued: number; alreadyQueued: number; totalAlbums: number }> {
-  const payload = await readJson<{
-    success: boolean;
-    enqueued?: number;
-    already_queued?: number;
-    total_albums?: number;
-    error?: string;
-  }>(
+  const payload = await lib2Json<
+    Ok & { enqueued?: number; already_queued?: number; total_albums?: number }
+  >(
     apiClient.post(`library/v2/artists/${artistId}/reorganize-all`, {
       json: { source: options.source ?? null, mode: options.mode ?? 'api' },
     }),
+    'Reorganize-all failed',
   );
-  if (!payload.success) throw new Error(payload.error || 'Reorganize-all failed');
   return {
     enqueued: payload.enqueued ?? 0,
     alreadyQueued: payload.already_queued ?? 0,
@@ -1690,14 +1620,13 @@ function normalizeReorganizeQueueItem(raw: RawReorganizeQueueItem): LibraryV2Reo
  *  `queueId` (per-album apply) or `artistName` (best-effort for the
  *  artist-wide bulk apply, which doesn't get per-item ids back). */
 export async function fetchLibraryV2ReorganizeQueueSnapshot(): Promise<LibraryV2ReorganizeQueueSnapshot> {
-  const payload = await readJson<{
-    success: boolean;
-    active?: RawReorganizeQueueItem | null;
-    queued?: RawReorganizeQueueItem[];
-    recent?: RawReorganizeQueueItem[];
-    error?: string;
-  }>(apiClient.get('library/reorganize/queue'));
-  if (!payload.success) throw new Error(payload.error || 'Failed to load the reorganize queue');
+  const payload = await lib2Json<
+    Ok & {
+      active?: RawReorganizeQueueItem | null;
+      queued?: RawReorganizeQueueItem[];
+      recent?: RawReorganizeQueueItem[];
+    }
+  >(apiClient.get('library/reorganize/queue'), 'Failed to load the reorganize queue');
   return {
     active: payload.active ? normalizeReorganizeQueueItem(payload.active) : null,
     queued: (payload.queued ?? []).map(normalizeReorganizeQueueItem),
@@ -1712,11 +1641,7 @@ export async function fetchLibraryV2AlbumArtOptions(
 ): Promise<LibraryV2ArtCandidate[]> {
   const params = new URLSearchParams();
   if (options.refresh) params.set('refresh', '1');
-  const payload = await readJson<{
-    success: boolean;
-    candidates: LibraryV2ArtCandidate[];
-    error?: string;
-  }>(
+  const payload = await lib2Json<Ok & { candidates: LibraryV2ArtCandidate[] }>(
     apiClient.get(`library/v2/albums/${albumId}/art-options`, {
       searchParams: params,
       // iss27-03: the backend fans out to ~7 providers under its own bounded
@@ -1726,8 +1651,8 @@ export async function fetchLibraryV2AlbumArtOptions(
       // after the client had already given up and blanked the picker.
       timeout: 20_000,
     }),
+    'Failed to load cover art options',
   );
-  if (!payload.success) throw new Error(payload.error || 'Failed to load cover art options');
   return payload.candidates;
 }
 
@@ -1755,10 +1680,10 @@ export async function applyLibraryV2AlbumArt(albumId: number, url: string): Prom
 /** Stop overriding an album cover. The current image remains until the next
  * artwork rebuild/server refresh supplies the baseline again. */
 export async function releaseLibraryV2AlbumArt(albumId: number): Promise<void> {
-  const payload = await readJson<{ success: boolean; error?: string }>(
+  await lib2Json(
     apiClient.delete(`library/v2/albums/${albumId}/art`),
+    'Failed to release cover art',
   );
-  if (!payload.success) throw new Error(payload.error || 'Failed to release cover art');
 }
 
 /** Candidate photos for an artist, for the image picker (deep-dive A9). */
@@ -1768,18 +1693,14 @@ export async function fetchLibraryV2ArtistArtOptions(
 ): Promise<LibraryV2ArtCandidate[]> {
   const params = new URLSearchParams();
   if (options.refresh) params.set('refresh', '1');
-  const payload = await readJson<{
-    success: boolean;
-    candidates: LibraryV2ArtCandidate[];
-    error?: string;
-  }>(
+  const payload = await lib2Json<Ok & { candidates: LibraryV2ArtCandidate[] }>(
     apiClient.get(`library/v2/artists/${artistId}/art-options`, {
       searchParams: params,
       // iss27-03: see the matching comment on fetchLibraryV2AlbumArtOptions.
       timeout: 20_000,
     }),
+    'Failed to load photo options',
   );
-  if (!payload.success) throw new Error(payload.error || 'Failed to load photo options');
   return payload.candidates;
 }
 
@@ -1801,10 +1722,10 @@ export async function applyLibraryV2ArtistArt(artistId: number, url: string): Pr
 
 /** Stop overriding an artist photo and follow automatic/server artwork again. */
 export async function releaseLibraryV2ArtistArt(artistId: number): Promise<void> {
-  const payload = await readJson<{ success: boolean; error?: string }>(
+  await lib2Json(
     apiClient.delete(`library/v2/artists/${artistId}/art`),
+    'Failed to release artist photo',
   );
-  if (!payload.success) throw new Error(payload.error || 'Failed to release artist photo');
 }
 
 export async function fetchLibraryV2JobStatus(jobId?: string): Promise<LibraryV2JobState> {
@@ -2065,20 +1986,19 @@ interface FileTagsResponse extends LibraryV2FileTags {
 
 /** Live embedded tags + lyrics read straight from the file (§18.1). */
 export async function fetchLibraryV2TrackFileTags(trackId: number): Promise<LibraryV2FileTags> {
-  const payload = await readJson<FileTagsResponse>(
+  return lib2Json<FileTagsResponse>(
     apiClient.get(`library/v2/tracks/${trackId}/file-tags`),
+    'Failed to read file tags',
   );
-  if (!payload.success) throw new Error(payload.error || 'Failed to read file tags');
-  return payload;
 }
 
 export async function editTrackFileTag(trackId: number, key: string, value: string): Promise<void> {
-  const payload = await readJson<{ success: boolean; error?: string }>(
+  await lib2Json(
     apiClient.post(`library/v2/tracks/${trackId}/file-tags/edit`, {
       json: { key, value },
     }),
+    'Failed to edit tag',
   );
-  if (!payload.success) throw new Error(payload.error || 'Failed to edit tag');
 }
 
 export function libraryV2TrackFileTagsQueryOptions(trackId: number, enabled: boolean) {
@@ -2126,10 +2046,8 @@ export function libraryV2QualityProfilesQueryOptions() {
 
 // --- UI display preferences (B5) ---------------------------------------------
 
-interface UiPreferencesResponse {
-  success: boolean;
+interface UiPreferencesResponse extends Ok {
   preferences: LibraryV2UiPreferences;
-  error?: string;
 }
 
 /** Deep-partial patch for the PUT endpoint's shallow-merge-per-section
@@ -2153,8 +2071,10 @@ type UiPreferencesPatch = {
 };
 
 export async function fetchLibraryV2UiPreferences(): Promise<LibraryV2UiPreferences> {
-  const payload = await readJson<UiPreferencesResponse>(apiClient.get('library/v2/ui-preferences'));
-  if (!payload.success) throw new Error(payload.error || 'Failed to load UI preferences');
+  const payload = await lib2Json<UiPreferencesResponse>(
+    apiClient.get('library/v2/ui-preferences'),
+    'Failed to load UI preferences',
+  );
   return payload.preferences;
 }
 
@@ -2163,10 +2083,10 @@ export async function fetchLibraryV2UiPreferences(): Promise<LibraryV2UiPreferen
 export async function updateLibraryV2UiPreferences(
   patch: UiPreferencesPatch,
 ): Promise<LibraryV2UiPreferences> {
-  const payload = await readJson<UiPreferencesResponse>(
+  const payload = await lib2Json<UiPreferencesResponse>(
     apiClient.put('library/v2/ui-preferences', { json: patch }),
+    'Failed to update UI preferences',
   );
-  if (!payload.success) throw new Error(payload.error || 'Failed to update UI preferences');
   return payload.preferences;
 }
 
@@ -2186,21 +2106,15 @@ export interface LibraryV2MirrorStatus {
 }
 
 export async function fetchLibraryV2MirrorStatus(): Promise<LibraryV2MirrorStatus> {
-  const payload = await readJson<{
-    success: boolean;
-    pending?: number;
-    failed?: number;
-    error?: string;
-  }>(apiClient.get('library/v2/mirror-status'));
-  if (!payload.success) throw new Error(payload.error || 'Failed to load mirror status');
+  const payload = await lib2Json<Ok & { pending?: number; failed?: number }>(
+    apiClient.get('library/v2/mirror-status'),
+    'Failed to load mirror status',
+  );
   return { pending: payload.pending ?? 0, failed: payload.failed ?? 0 };
 }
 
 export async function retryLibraryV2Mirror(): Promise<void> {
-  const payload = await readJson<{ success: boolean; error?: string }>(
-    apiClient.post('library/v2/mirror-retry', { json: {} }),
-  );
-  if (!payload.success) throw new Error(payload.error || 'Mirror retry failed');
+  await lib2Json(apiClient.post('library/v2/mirror-retry', { json: {} }), 'Mirror retry failed');
 }
 
 export function libraryV2MirrorStatusQueryOptions() {
@@ -2449,8 +2363,7 @@ export type LibraryV2ArtworkState =
   | { state: 'pending' }
   | { state: 'unavailable' };
 
-interface ArtworkStatusResponse {
-  success: boolean;
+interface ArtworkStatusResponse extends Ok {
   states: Record<string, LibraryV2ArtworkState>;
 }
 
