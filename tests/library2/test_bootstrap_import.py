@@ -281,6 +281,59 @@ def test_a_source_that_appears_later_still_runs(legacy_db):
     assert lib2_bootstrap.get_state(legacy_db)["status"] == "done"
 
 
+def _wishlist_only(legacy_db):
+    """An upstream install that never scanned a library: empty catalogue
+    tables, one wish."""
+    import json
+
+    with closing(legacy_db._get_connection()) as conn:
+        conn.execute("DELETE FROM tracks")
+        conn.execute("DELETE FROM albums")
+        conn.execute("DELETE FROM artists")
+        conn.execute(
+            "CREATE TABLE wishlist_tracks(id INTEGER PRIMARY KEY, spotify_track_id TEXT,"
+            " spotify_data TEXT, source_type TEXT, date_added TEXT, source_info TEXT,"
+            " profile_id INTEGER, quality_profile_id INTEGER)")
+        payload = {"id": "sp-song", "name": "Wanted Song", "artists": [{"name": "Wanted Artist"}],
+                   "album": {"id": "sp-album", "name": "Wanted Album", "total_tracks": 1}}
+        conn.execute("INSERT INTO wishlist_tracks VALUES(1, 'sp-song', ?, 'manual',"
+                     " '2026-09-01', NULL, 1, NULL)", (json.dumps(payload),))
+        conn.commit()
+
+
+def _native_missing(legacy_db) -> int:
+    from core.library2.wanted_views import list_missing
+
+    with closing(legacy_db._get_connection()) as conn:
+        return list_missing(conn)[1]
+
+
+def test_a_wishlist_without_a_catalogue_is_still_imported(legacy_db):
+    """F07: the wishes of an install that never scanned a library are user
+    state too. Parking them as `empty_source` left the native Missing view
+    empty until a manual import."""
+    _wishlist_only(legacy_db)
+
+    result = lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled)
+
+    assert result.get("success") is True
+    assert lib2_bootstrap.get_state(legacy_db)["status"] == "done"
+    assert _native_missing(legacy_db) == 1
+    assert lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled) == {"skipped": "already_done"}
+
+
+def test_a_wishlist_parked_by_an_earlier_build_is_imported(legacy_db, monkeypatch):
+    """An install where an earlier build already wrote `waiting_for_source`
+    over the same empty catalogue runs the import on the next start."""
+    _wishlist_only(legacy_db)
+    monkeypatch.setattr(lib2_bootstrap, "legacy_user_state_waiting", lambda database: False)
+    assert lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled) == {"skipped": "empty_source"}
+    monkeypatch.undo()
+
+    assert lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled).get("success") is True
+    assert _native_missing(legacy_db) == 1
+
+
 # --- iss29-A08: a working migration must never look dead ------------------
 #
 # The lease is kept alive only by progress callbacks, and post-import precache

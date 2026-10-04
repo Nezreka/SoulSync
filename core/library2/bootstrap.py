@@ -238,6 +238,24 @@ def source_row_count(watermark: str) -> int:
         return 0
 
 
+def legacy_user_state_waiting(database: Any) -> bool:
+    """Is there legacy user state to carry over although no catalogue row is?
+
+    An install that never scanned a library still has a wishlist and a
+    watchlist. Its catalogue tables exist (empty), so it is an upgrade, and
+    the import is what turns those wishes into native rows. A fresh install
+    has no legacy tables at all and answers False here.
+    """
+    with closing(database._get_connection()) as conn:
+        tables = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        if not {"artists", "albums", "tracks"} <= tables:
+            return False
+        return any(table in tables
+                   and conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone() is not None
+                   for table in ("wishlist_tracks", "watchlist_artists"))
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -757,7 +775,11 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
     current_watermark = source_watermark(database)
     state = get_state(database)
     if state.get("status") in {"done", "waiting_for_source"}:
-        if state.get("source_watermark") == current_watermark:
+        # an empty catalogue with wishes behind it still has something to
+        # import (F07): earlier builds parked exactly that as waiting
+        if state.get("source_watermark") == current_watermark and not (
+                state.get("status") == "waiting_for_source"
+                and legacy_user_state_waiting(database)):
             reason = "already_done" if state.get("status") == "done" else "empty_source"
             return {"skipped": reason}
 
@@ -775,7 +797,8 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
     # watermark is unchanged, and an upgrade whose legacy rows do exist changes
     # the watermark and runs normally. A resume checkpoint always wins: a run
     # interrupted mid-walk must finish, whatever the source counts today.
-    if not resume and not source_row_count(current_watermark):
+    if (not resume and not source_row_count(current_watermark)
+            and not legacy_user_state_waiting(database)):
         mark_waiting_for_source(database, owner_token, watermark=current_watermark)
         logger.info("Library v2 bootstrap: no legacy catalogue to import")
         return {"skipped": "empty_source"}
