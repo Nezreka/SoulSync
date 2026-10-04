@@ -202,7 +202,7 @@ class MusicBrainzWorker:
 
             # Priority 3: Unattempted tracks
             cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name
+                SELECT t.id, t.title, ar.name AS artist_name, t.duration
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
                 WHERE t.musicbrainz_match_status IS NULL AND t.id IS NOT NULL
@@ -211,7 +211,7 @@ class MusicBrainzWorker:
             """)
             row = cursor.fetchone()
             if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2]}
+                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'duration': row[3]}
 
             # Priority 4: Retry 'not_found' artists after retry_days
             not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
@@ -242,7 +242,7 @@ class MusicBrainzWorker:
 
             # Priority 6: Retry 'not_found' tracks
             cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name
+                SELECT t.id, t.title, ar.name AS artist_name, t.duration
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
                 WHERE t.musicbrainz_match_status IN ('not_found', 'error') AND t.musicbrainz_last_attempted < ?
@@ -251,7 +251,7 @@ class MusicBrainzWorker:
             """, (not_found_cutoff,))
             row = cursor.fetchone()
             if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2]}
+                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'duration': row[3]}
 
             return None
 
@@ -423,7 +423,18 @@ class MusicBrainzWorker:
 
             elif item_type == 'track':
                 artist_name = item.get('artist')
-                result = self.mb_service.match_recording(item_name, artist_name)
+                # The artist pass runs before tracks (priority 1), so the
+                # catalogue usually already holds this artist's MBID — pass
+                # it in so the recording match is gated on the known identity
+                # (#1509) instead of trusting the printed credit text. The
+                # track's own duration (ms) feeds the length gate the same
+                # way. Both are best-effort: None falls back to the old
+                # name-only behaviour.
+                artist_mbid = self.mb_service._artist_row_mbid(artist_name)
+                result = self.mb_service.match_recording(
+                    item_name, artist_name,
+                    artist_mbid=artist_mbid,
+                    duration_ms=item.get('duration'))
                 if result and result.get('mbid'):
                     self.mb_service.update_track_mbid(item_id, result['mbid'], 'matched')
                     self.stats['matched'] += 1
