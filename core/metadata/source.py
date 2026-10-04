@@ -58,6 +58,12 @@ mb_artist_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 mb_artist_cache_lock = threading.RLock()
 mb_artist_detail_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 mb_artist_detail_cache_lock = threading.RLock()
+# #1513: Last.fm artist top-tags used as a genre fallback. Cached per
+# (normalized artist name, whitelist hash) so an album's tracks hit Last.fm
+# once, not per track, and config changes don't serve stale genres.
+_LFM_ARTIST_TAGS_CACHE_MAX_ENTRIES = 1024
+lfm_artist_tags_cache: "OrderedDict[tuple, list[str]]" = OrderedDict()
+lfm_artist_tags_cache_lock = threading.RLock()
 logger = _create_logger("metadata.source")
 
 _SOURCE_NETWORK_EXCEPTIONS = (requests.RequestException, socket.timeout, TimeoutError)
@@ -957,6 +963,84 @@ def _more_precise_date(existing: Any, new: Any) -> str:
     return new_str
 
 
+def _lastfm_artist_genre_fallback(lf_client, artist_name: str, cfg) -> list[str]:
+    """Return genre names from the artist's Last.fm top tags (#1513).
+
+    Used when no genre source yields a genre and the
+    ``lastfm.tags.artist_genre_fallback`` setting is enabled. Only tags with
+    weight >= 10 are considered, filtered through the genre whitelist so
+    non-genre tags ("seen live", etc.) never become genres. Results (including
+    empty) are cached per normalized artist name + whitelist — one album's
+    tracks hit Last.fm once, and a Last.fm outage doesn't stall every track.
+    """
+    key = str(artist_name or "").strip().lower()
+    if not key or lf_client is None:
+        return []
+    # Cache key includes the whitelist so config changes don't serve stale genres.
+    from core.genre_filter import DEFAULT_GENRES, _normalize_for_match
+    user_genres = cfg.get("genre_whitelist.genres", None) if cfg else None
+    whitelist = user_genres if isinstance(user_genres, list) and user_genres else DEFAULT_GENRES
+    wl_key = hash(tuple(sorted(_normalize_for_match(g) for g in whitelist)))
+    cache_key = (key, wl_key)
+    with lfm_artist_tags_cache_lock:
+        cached = _bounded_cache_get(lfm_artist_tags_cache, cache_key)
+        if cached is not None:
+            return list(cached)
+    genres = []
+    try:
+        tags = lf_client.get_artist_top_tags(artist_name)
+    except Exception:
+        logger.debug("Last.fm artist tags lookup failed for %r", artist_name)
+        tags = []
+    if tags:
+        # Weight threshold: Last.fm counts are 0-100, reporter proposed 10.
+        candidates = []
+        for tag in tags:
+            if not isinstance(tag, dict):
+                continue
+            name = tag.get("name", "")
+            try:
+                weight = int(tag.get("count", 0))
+            except (TypeError, ValueError):
+                weight = 0
+            if name and weight >= 10:
+                candidates.append(str(name))
+        # Filter through the genre whitelist. Use exact normalized matching
+        # only — translate_genre's fuzzy 'accepted' would let near-misses
+        # ("seen live" ~ "sea shanty") leak into the genre frame.
+        lookup = {_normalize_for_match(g): g for g in whitelist}
+        seen = set()
+        for candidate in candidates:
+            norm = _normalize_for_match(candidate)
+            matched = lookup.get(norm)
+            if matched and norm not in seen:
+                seen.add(norm)
+                genres.append(matched)
+            if len(genres) >= 5:
+                break
+    # Cache even empty results (negative caching) so a Last.fm outage or an
+    # artist with no valid genres doesn't re-hit the network per track.
+    with lfm_artist_tags_cache_lock:
+        _bounded_cache_set(lfm_artist_tags_cache, cache_key, list(genres), _LFM_ARTIST_TAGS_CACHE_MAX_ENTRIES)
+    return genres
+
+
+def _write_genre_frame(audio_file, genres: list[str], cfg, symbols, source: str = "merged") -> None:
+    """Write a genre list to the audio file's genre frame (ID3/TCON, Vorbis GENRE, MP4 ©gen)."""
+    if not genres:
+        return
+    genre_string = ", ".join(genres)
+    from core.metadata.multi_value import genre_values
+    genres_out = genre_values(genres, bool(cfg.get("metadata_enhancement.tags.write_multi_artist", False)))
+    if isinstance(audio_file.tags, symbols.ID3):
+        audio_file.tags.add(symbols.TCON(encoding=3, text=genres_out))
+    elif is_vorbis_like(audio_file, symbols):
+        audio_file["GENRE"] = genres_out
+    elif isinstance(audio_file, symbols.MP4):
+        audio_file["\xa9gen"] = genres_out
+    logger.info("Genres %s: %s", source, genre_string)
+
+
 def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols):
     filtered_tags: Dict[str, str] = {}
     for tag_name, value in pp["id_tags"].items():
@@ -1082,16 +1166,31 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
                 if len(merged) >= 5:
                     break
             if merged:
-                genre_string = ", ".join(merged)
-                from core.metadata.multi_value import genre_values
-                genres_out = genre_values(merged, bool(cfg.get("metadata_enhancement.tags.write_multi_artist", False)))
-                if isinstance(audio_file.tags, symbols.ID3):
-                    audio_file.tags.add(symbols.TCON(encoding=3, text=genres_out))
-                elif is_vorbis_like(audio_file, symbols):
-                    audio_file["GENRE"] = genres_out
-                elif isinstance(audio_file, symbols.MP4):
-                    audio_file["\xa9gen"] = genres_out
-                logger.info("Genres merged: %s", genre_string)
+                _write_genre_frame(audio_file, merged, cfg, symbols)
+        elif cfg.get("lastfm.tags.artist_genre_fallback", False):
+            # #1513: no genre source yielded anything — fall back to the
+            # artist's Last.fm top tags (opt-in, off by default). Source genres
+            # from the download (metadata["genre"]) are kept, mirroring the
+            # merge path above.
+            fallback_genres = _lastfm_artist_genre_fallback(
+                pp.get("_lf_client_for_genre_fallback"),
+                pp.get("_artist_name_for_genre_fallback") or metadata.get("artist", ""),
+                cfg,
+            )
+            if fallback_genres:
+                source_genres = [g.strip() for g in str(metadata.get("genre", "")).split(",") if g.strip()]
+                # Merge source genres + fallback, deduped, capped at 5.
+                seen = set()
+                merged_fallback = []
+                for genre in source_genres + fallback_genres:
+                    key = genre.strip().lower()
+                    if key and key not in seen:
+                        seen.add(key)
+                        merged_fallback.append(genre.strip().title())
+                    if len(merged_fallback) >= 5:
+                        break
+                if merged_fallback:
+                    _write_genre_frame(audio_file, merged_fallback, cfg, symbols, source="fallback")
 
     isrc_candidates = []
     if pp["isrc"] and _tag_enabled(cfg, "musicbrainz.tags.isrc"):
@@ -1642,7 +1741,18 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
             _process_source_enrichment(source_name, pp, metadata, cfg, runtime, track_title, artist_name,
                                        provenance=cached_meta, audio_file=audio_file)
 
-        if not pp["id_tags"] and not pp["deezer_bpm"] and not pp["deezer_isrc"] and not pp["tidal_bpm"] and not pp["hifi_bpm"] and not pp["hifi_copyright"] and not pp["audiodb_mood"] and not pp["audiodb_style"] and not pp["bandcamp_url"] and not pp["bandcamp_tags"]:
+        # #1513: stash the Last.fm client + artist name for the genre fallback
+        # in _write_embedded_metadata (opt-in, only fetched if no genre source
+        # yields anything).
+        fallback_enabled = cfg.get("lastfm.tags.artist_genre_fallback", False)
+        if fallback_enabled:
+            lastfm_worker = getattr(runtime, "lastfm_worker", None)
+            pp["_lf_client_for_genre_fallback"] = lastfm_worker.client if lastfm_worker else None
+            pp["_artist_name_for_genre_fallback"] = artist_name
+
+        # Skip the early return when the genre fallback is on — there may be
+        # genres to write even if no other metadata was enriched.
+        if not fallback_enabled and not pp["id_tags"] and not pp["deezer_bpm"] and not pp["deezer_isrc"] and not pp["tidal_bpm"] and not pp["hifi_bpm"] and not pp["hifi_copyright"] and not pp["audiodb_mood"] and not pp["audiodb_style"] and not pp["bandcamp_url"] and not pp["bandcamp_tags"]:
             return
 
         release_year = _write_embedded_metadata(audio_file, metadata, pp, cfg, symbols)

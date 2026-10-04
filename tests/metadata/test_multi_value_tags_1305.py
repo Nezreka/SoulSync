@@ -36,7 +36,7 @@ def test_the_writers_use_the_lists():
     src = inspect.getsource(source)
     assert "label_values = split_values(final_label)" in src
     assert 'audio_file["LABEL"] = label_values' in src
-    assert "genre_values(merged," in src
+    assert "genre_values(genres," in src
     enr = inspect.getsource(enrichment)
     assert 'audio_file["genre"] = genres_out' in enr
     assert "text=genres_out" in enr
