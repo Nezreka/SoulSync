@@ -3213,6 +3213,9 @@ async function loadSettingsData() {
         document.getElementById('embed-itunes').checked = settings.itunes?.embed_tags !== false;
         loadMusicBrainzServerSettings(settings);
         document.getElementById('embed-musicbrainz').checked = settings.musicbrainz?.embed_tags !== false;
+        // #1451: beets-style original-date-as-DATE (default off)
+        const _mbDateEl = document.getElementById('mb-use-original-date-for-date');
+        if (_mbDateEl) _mbDateEl.checked = settings.musicbrainz?.use_original_date_for_date === true;
         document.getElementById('embed-deezer').checked = settings.deezer?.embed_tags !== false;
         document.getElementById('embed-audiodb').checked = settings.audiodb?.embed_tags !== false;
         document.getElementById('embed-tidal').checked = settings.tidal?.embed_tags !== false;
@@ -3383,6 +3386,10 @@ async function loadSettingsData() {
         // Library Organize: preserve the user's casing (default on)
         const _pcEl = document.getElementById('reorganize-preserve-casing');
         if (_pcEl) _pcEl.checked = settings.library?.reorganize_preserve_casing !== false;
+
+        // #1449: write artist.nfo into new artist folders (default off)
+        const _nfoEl = document.getElementById('write-artist-nfo');
+        if (_nfoEl) _nfoEl.checked = settings.library?.write_artist_nfo === true;
 
         // Populate Content Filter settings
         document.getElementById('allow-explicit').checked = settings.content_filter?.allow_explicit !== false;
@@ -6348,6 +6355,7 @@ async function saveSettings(quiet = false) {
         musicbrainz: {
             ...musicBrainzServerSettings,
             embed_tags: document.getElementById('embed-musicbrainz').checked,
+            use_original_date_for_date: _cfgBool('mb-use-original-date-for-date'),
             tags: _collectServiceTags('musicbrainz')
         },
         deezer: {
@@ -6416,7 +6424,8 @@ async function saveSettings(quiet = false) {
             music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos',
             podcasts_path: _cfgStr('podcasts-path', { fallback: './podcasts' }),
             audiobooks_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),
-            reorganize_preserve_casing: _cfgBool('reorganize-preserve-casing')
+            reorganize_preserve_casing: _cfgBool('reorganize-preserve-casing'),
+            write_artist_nfo: _cfgBool('write-artist-nfo')
         },
         podcasts: {
             download_path: _cfgStr('podcasts-path', { fallback: './podcasts' }),

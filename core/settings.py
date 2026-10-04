@@ -799,7 +799,13 @@ class ConfigManager:
             "musicbrainz": {
                 "base_url": "https://musicbrainz.org/ws/2",
                 "request_interval": 1.05,
-                "embed_tags": True
+                "embed_tags": True,
+                # #1451: beets-style "original date as DATE" (opt-in, default
+                # off). When True, the release-group first-release-date is
+                # written as DATE/TDRC instead of the downloaded edition's
+                # date. Independent precision guard (never downgrade a more
+                # precise same-year date) always applies.
+                "use_original_date_for_date": False,
             },
             "jiosaavn": {
                 "embed_tags": True,
@@ -875,6 +881,12 @@ class ConfigManager:
                 # alone — no cosmetic rename churn on already-organized files.
                 # Turn off to canonicalize casing to the metadata source.
                 "reorganize_preserve_casing": True,
+                # #1449: write a Kodi-format artist.nfo (artist name +
+                # MusicBrainz artist ID) into the artist folder when an
+                # import creates it. Jellyfin/Kodi/Emby use it to identify
+                # the artist instead of guessing by name. Off by default —
+                # the Artist NFO Backfill repair job covers existing folders.
+                "write_artist_nfo": False,
             },
             "file_organization": {
                 "enabled": True,
