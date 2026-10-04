@@ -37,6 +37,9 @@ function helpers(): Helpers {
     'qualityName',
     'cardStates',
     'quotaSpent',
+    // cardStates keys rows through these
+    'reqKey',
+    'rowKey',
   ];
   const body = names.map((n) => extractFunction(n, JS)).join('\n');
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
@@ -164,6 +167,19 @@ describe('quality names and card states', () => {
       { kind: 'movie', tmdb_id: 4, status: 'denied' },
     ]);
     expect(s).toEqual({ 'movie:1': 'requested', 'show:2': 'available', 'show:3': 'requested' });
+  });
+
+  it('keys episodes and youtube videos by their own identity', () => {
+    const s = h.cardStates([
+      { kind: 'episode', tmdb_id: 5, season_number: 2, episode_number: 7, status: 'pending' },
+      { kind: 'episode', tmdb_id: 5, season_number: 2, episode_number: 8, status: 'pending' },
+      { kind: 'youtube', youtube_id: 'dQw4w9WgXcQ', status: 'approved', state: 'available' },
+    ]);
+    expect(s).toEqual({
+      'episode:5:2:7': 'requested',
+      'episode:5:2:8': 'requested',
+      'youtube:dQw4w9WgXcQ': 'available',
+    });
   });
 
   it('knows a spent quota', () => {

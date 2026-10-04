@@ -1007,8 +1007,17 @@ def create_podcasts_blueprint() -> Blueprint:
         except (ValueError, TypeError):
             episode_count = None
 
-        from .helpers import acting_profile_id
+        from .helpers import acting_profile_id, download_permission_error
         profile_id = acting_profile_id(request, body.get("profile_id"))
+
+        # The direct /download endpoint asks this; the watchlist never did, so
+        # a profile with downloads off could follow a show (auto_download
+        # defaults on) and the automation would fetch episodes for it anyway.
+        # Following is harmless — only the downloading is gated — so the
+        # follow lands with auto-download forced off instead of 403ing.
+        downloads_off = download_permission_error() is not None
+        if downloads_off:
+            auto_download = False
 
         db = _db()
         if db is None:
@@ -1029,7 +1038,8 @@ def create_podcasts_blueprint() -> Blueprint:
                 profile_id=profile_id,
             )
             pod = db.get_watchlist_podcast(feed_url=feed_url, profile_id=profile_id)
-            return jsonify({"success": bool(ok), "is_watching": True, "podcast": pod})
+            return jsonify({"success": bool(ok), "is_watching": True, "podcast": pod,
+                            "downloads_disabled": downloads_off})
         except Exception as exc:
             logger.exception("podcasts_watchlist_add failed for %s: %s", title, exc)
             return jsonify({"success": False, "error": f"Failed to add to watchlist: {exc}"}), 500
@@ -1071,6 +1081,14 @@ def create_podcasts_blueprint() -> Blueprint:
         auto_download = body.get("auto_download")
         if auto_download is not None:
             auto_download = bool(auto_download)
+            # same gate as /watchlist/add: a profile that may not download
+            # can't arm auto-download here either (the automation re-checks,
+            # but the flag should never be set in the first place)
+            if auto_download:
+                from .helpers import download_permission_error
+                denied = download_permission_error()
+                if denied is not None:
+                    return denied
 
         retention_days = body.get("retention_days")
         if retention_days is not None:

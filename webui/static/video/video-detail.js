@@ -1960,6 +1960,17 @@
                 'title="Open on YouTube">YouTube</a>'
             : '';
         var wished = !!ep.wished;
+        // A profile without download rights can't grab or wishlist — it can
+        // ASK for the video instead (the request flow). Owned videos keep
+        // their treatment: nothing left to ask for.
+        var noDl = (typeof canDownload === 'function') && !canDownload() && window.VideoRequests;
+        var ch = (data && data._channel) || {};
+        var reqBtn = (!ep.owned && noDl)
+            ? '<div class="vd-ep-get">' + window.VideoRequests.cardButton({
+                kind: 'youtube', youtubeId: ep.youtube_id, title: ep.title,
+                channel: { youtube_id: ch.youtube_id || data.youtube_id || '',
+                           title: ch.title || data.title || '' } }) + '</div>'
+            : '';
         // Downloaded videos wear the SAME owned treatment as TV episodes (.vd-ep--owned
         // + badge) but KEEP the direct-download button: a server-side delete leaves the
         // ownership ledger intact, and re-grabbing is the sanctioned way back (Boulder).
@@ -1980,12 +1991,13 @@
                         '</div>'
                       : '<div class="vd-ep-get" data-vd-ep-get="' + esc(ep.youtube_id) + '">' +
                             '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
+                            (reqBtn ||
                             '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-yt-grab="' + esc(ep.youtube_id) +
                                 '" title="Download this video now" aria-label="Download video">⭳</button>' +
                             '<button class="vd-ep-getbtn vd-ep-wish' + (wished ? ' vd-ep-wish--done' : '') +
                                 '" type="button" data-vd-yt-wish="' + esc(ep.youtube_id) +
                                 '" title="' + (wished ? 'Remove from wishlist' : 'Add this video to the wishlist') +
-                                '" aria-label="Wishlist video">' + (wished ? '✓' : '＋') + '</button>' +
+                                '" aria-label="Wishlist video">' + (wished ? '✓' : '＋') + '</button>') +
                         '</div>') +
             '<span class="vd-ep-chev" aria-hidden="true">⌄</span></div>' +
             '<div class="vd-ep-extra" data-vd-ep-panel="' + key + '" hidden></div>';
@@ -2055,9 +2067,17 @@
             // stack treats owned rows as upgrade candidates (upgrade-until-
             // cutoff), so re-download / manual search / wishlist must not
             // vanish once something is on disk.
+            // A profile without download rights can't grab or wishlist — on a
+            // TMDB preview or a library show it can ASK for a missing episode
+            // instead (the request flow); owned episodes have nothing to ask.
             ((ep.owned ? '<div class="vd-ep-badge">Owned' + (ep.versions > 1 ? ' ×' + ep.versions : '') + '</div>' : '') +
-             (!window.VideoGrab
-                ? (ep.owned ? '' : '<div class="vd-ep-badge">Missing</div>')
+             ((typeof canDownload === 'function' && !canDownload())
+                ? ((!ep.owned && data && data.tmdb_id && window.VideoRequests)
+                    ? '<div class="vd-ep-get">' + window.VideoRequests.cardButton({
+                        kind: 'episode', tmdbId: data.tmdb_id, season: selectedSeason,
+                        episode: ep.episode_number, title: data.title, year: data.year,
+                        poster: data.poster_url }) + '</div>'
+                    : (ep.owned ? '' : '<div class="vd-ep-badge">Missing</div>'))
                 : '<div class="vd-ep-get" data-vd-ep-get="' + ep.episode_number + '">' +
                     '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
                     '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-ep-grab="' + ep.episode_number +

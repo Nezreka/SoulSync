@@ -816,13 +816,18 @@ CREATE TABLE IF NOT EXISTS video_requests (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     profile_id     INTEGER NOT NULL DEFAULT 1,
     requester_name TEXT,
-    kind           TEXT NOT NULL,                  -- movie | show
-    tmdb_id        INTEGER NOT NULL,
+    kind           TEXT NOT NULL,                  -- movie | show | episode | youtube
+    tmdb_id        INTEGER NOT NULL,             -- 0 for youtube (no tmdb id)
     title          TEXT NOT NULL,
     year           INTEGER,
     poster_url     TEXT,
     note           TEXT,                           -- the requester's "why"
     monitor        TEXT DEFAULT 'future',          -- shows: P2 monitor policy applied on approve
+    season_number  INTEGER,                      -- episode requests: which season
+    episode_number INTEGER,                      -- episode requests: which episode
+    youtube_id     TEXT,                         -- youtube requests: the video id
+    channel_youtube_id TEXT,                    -- youtube requests: channel id
+    channel_title  TEXT,                         -- youtube requests: channel name
     status         TEXT NOT NULL DEFAULT 'pending',-- pending | approved | denied
     admin_response TEXT,
     resolved_by    INTEGER,
