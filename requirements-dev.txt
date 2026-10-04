@@ -6,3 +6,4 @@ ruff==0.15.12
 
 # Test runner
 pytest==9.0.3
+pytest-xdist==3.8.0
