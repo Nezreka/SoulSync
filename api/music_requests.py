@@ -488,3 +488,21 @@ def withdraw_music_video_request(request_id):
         return jsonify({"success": False, "error": "Not yours"}), 403
     ok = db.delete_music_video_request(request_id)
     return (jsonify({"success": True}) if ok else (jsonify({"success": False, "error": "Not found"}), 404))
+
+
+@bp.route("/api/requests/music/videos/<int:request_id>", methods=["DELETE"])
+def delete_music_video_request_history(request_id):
+    """take a finished video request out of the history (own, or any as admin)."""
+    pid = get_current_profile_id()
+    if pid is None:
+        return jsonify({"success": False, "error": "profile_required"}), 401
+    db = get_database()
+    req = db.get_music_video_request(request_id)
+    if not req:
+        return jsonify({"success": False, "error": "Not found"}), 404
+    if not is_admin_request() and int(req.get("profile_id") or 0) != int(pid):
+        return jsonify({"success": False, "error": "Not found"}), 404
+    if req.get("status") == "pending":
+        return jsonify({"success": False, "error": "Withdraw a pending request instead"}), 409
+    ok = db.delete_music_video_request(request_id)
+    return (jsonify({"success": True}) if ok else (jsonify({"success": False, "error": "Not found"}), 404))
