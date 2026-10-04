@@ -570,3 +570,57 @@ def test_canonicalization_failure_does_not_break_discovery(monkeypatch):
     dy.run_youtube_discovery_worker('h', deps)
 
     assert states['h']['discovery_results'][0]['status'] == 'Found'
+
+
+# ---------------------------------------------------------------------------
+# Regression: pre-seeded counter must not double-count (issue: "365 out of 364")
+# ---------------------------------------------------------------------------
+
+class _SelectiveCacheDB(_FakeDB):
+    """Returns a cache hit only for the given (title, artist) pairs."""
+
+    def __init__(self, hits):
+        super().__init__(cache_match=None)
+        self._hits = {(t.lower(), a.lower()) for t, a in hits}
+
+    def get_discovery_cache_match(self, title, artist, source):
+        if (title.lower(), artist.lower()) in self._hits:
+            return {
+                'name': title,
+                'artists': [artist],
+                'album': {'name': 'Cached Album'},
+            }
+        return None
+
+
+def test_preseeded_counter_does_not_double_count_cached_tracks():
+    """Mirrored discovery used to pre-seed spotify_matches with the cached
+    count, but the worker re-processes those tracks and increments again on
+    cache hit — yielding "365 out of 364". The seed must start at 0 so the
+    worker counts every track exactly once.
+
+    Regression test: 2 tracks, both cache hits, counter starts at 0.
+    Must end at exactly 2 (the old pre-seed of 2 would have made 4)."""
+    states = {}
+    tracks = [
+        _track(name='Cached Song One', artist='Cached Artist'),
+        _track(name='Cached Song Two', artist='Cached Artist'),
+    ]
+    # This mirrors the fixed prepare_mirrored_discovery: counter starts at 0,
+    # not pre-seeded with the cached-track count.
+    _seed_state('h1', states, tracks=tracks)
+    assert states['h1']['spotify_matches'] == 0
+
+    db = _SelectiveCacheDB(hits=[
+        ('Cached Song One', 'Cached Artist'),
+        ('Cached Song Two', 'Cached Artist'),
+    ])
+    deps = _build_deps(states=states)
+    deps._db = db
+    deps.get_database = lambda: db
+
+    dy.run_youtube_discovery_worker('h1', deps)
+
+    state = states['h1']
+    assert state['spotify_matches'] == 2
+    assert len(state['discovery_results']) == 2
