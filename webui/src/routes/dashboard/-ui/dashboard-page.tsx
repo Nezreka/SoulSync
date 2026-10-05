@@ -34,6 +34,7 @@ import { LibraryCard } from './library-card';
 import { ListenBand } from './listen-band';
 import { ListeningHistoryBand } from './listening-history-band';
 import { SyncRail } from './sync-band';
+import { WeeklyDigest } from './weekly-digest';
 
 export function DashboardPage() {
   const header = useDashboardHeader();
@@ -50,6 +51,8 @@ export function DashboardPage() {
       <AlertsBand />
       <div className="dash-layout">
         <div className="dash-main">
+          {/* This week in listening — renders nothing until plays exist. */}
+          <WeeklyDigest />
           {/* Only while something is downloading. It stays full width: the
               download cards are painted by vanilla into this shell. */}
           <ActiveDownloadsShell />
