@@ -24,18 +24,34 @@ NEW = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:
 
 
 class _DB:
-    def __init__(self, candidates, mirrored=None, watched=None):
+    def __init__(self, candidates, mirrored=None, watched=None, mirror_tracks=None):
         self._candidates = candidates
         self._mirrored = mirrored or []
         self._watched = watched or []
+        # {playlist_id: [track dicts]} ; a None value means the read fails
+        # (membership unknown → name-level protection). omitted ids mean the
+        # mirror row has no id (also unreadable).
+        self._mirror_tracks = mirror_tracks if mirror_tracks is not None else {}
         self.deleted_paths = []
         self.deleted_history = []
+
+    def get_all_profiles(self):
+        return [{'id': 1}]
 
     def get_origin_cleanup_candidates(self):
         return [dict(c) for c in self._candidates]
 
     def get_mirrored_playlists(self, profile_id=1):
-        return [{'name': n} for n in self._mirrored]
+        return [dict(m) if isinstance(m, dict) else {'name': m}
+                for m in self._mirrored]
+
+    def get_mirrored_playlist_tracks(self, playlist_id, profile_id=None):
+        if playlist_id not in self._mirror_tracks:
+            raise RuntimeError(f"no tracks recorded for playlist {playlist_id}")
+        tracks = self._mirror_tracks[playlist_id]
+        if tracks is None:
+            raise RuntimeError("mirror track list unreadable")
+        return [dict(t) for t in tracks]
 
     def get_watchlist_artists(self, profile_id=1):
         return [SimpleNamespace(artist_name=n) for n in self._watched]
@@ -47,6 +63,19 @@ class _DB:
     def delete_library_history_rows(self, ids):
         self.deleted_history.extend(ids)
         return len(ids)
+
+
+class _DBNoTrackReader(_DB):
+    # a database that predates get_mirrored_playlist_tracks: the job must
+    # fall back to name-level protection, not crash or expose downloads.
+    get_mirrored_playlist_tracks = None
+
+
+def _mirror(pid, name, custom_name=None):
+    d = {'id': pid, 'name': name}
+    if custom_name:
+        d['custom_name'] = custom_name
+    return d
 
 
 def _ctx(db, settings, findings):
@@ -95,6 +124,95 @@ def test_scan_protects_actively_mirrored_playlist():
     findings = []
     ExpiredDownloadCleanerJob().scan(_ctx(db, {'playlist_retention': '1w'}, findings))
     assert findings == []   # still mirrored → protected
+
+
+def test_scan_track_rotated_out_of_mirrored_playlist_expires():
+    # the reported scenario: playlist still mirrored, but this track is no
+    # longer in its current track list → not protected → finding created.
+    db = _DB(
+        [_cand(1, origin="playlist", ctx="Your Listening Mix", created=OLD,
+               play_count=0)],
+        mirrored=[_mirror(7, "Your Listening Mix")],
+        mirror_tracks={7: [{'artist_name': 'Other Artist',
+                            'track_name': 'Other Song'}]},
+    )
+    findings = []
+    res = ExpiredDownloadCleanerJob().scan(
+        _ctx(db, {'playlist_retention': '1w'}, findings))
+    assert res.findings_created == 1
+    assert findings[0]['details']['history_id'] == 1
+
+
+def test_scan_track_still_in_mirrored_playlist_protected():
+    db = _DB(
+        [_cand(1, origin="playlist", ctx="Your Listening Mix", created=OLD,
+               play_count=0)],
+        mirrored=[_mirror(7, "Your Listening Mix")],
+        # differently cased/padded — the membership key is normalized
+        mirror_tracks={7: [{'artist_name': '  ARTIST ', 'track_name': 't1'}]},
+    )
+    findings = []
+    ExpiredDownloadCleanerJob().scan(_ctx(db, {'playlist_retention': '1w'}, findings))
+    assert findings == []   # still in the playlist → protected
+
+
+def test_scan_custom_name_matches_membership():
+    db = _DB(
+        [_cand(1, origin="playlist", ctx="Renamed Mix", created=OLD,
+               play_count=0)],
+        mirrored=[_mirror(7, "Upstream Name", custom_name="Renamed Mix")],
+        mirror_tracks={7: [{'artist_name': 'Someone Else',
+                            'track_name': 'Some Song'}]},
+    )
+    findings = []
+    res = ExpiredDownloadCleanerJob().scan(
+        _ctx(db, {'playlist_retention': '1w'}, findings))
+    assert res.findings_created == 1  # renamed mirror, track rotated out
+
+
+def test_scan_unreadable_mirror_tracks_keep_name_protection():
+    db = _DB(
+        [_cand(1, origin="playlist", ctx="My Mix", created=OLD, play_count=0)],
+        mirrored=[_mirror(7, "My Mix")],
+        mirror_tracks={7: None},  # read fails → membership unknown → keep
+    )
+    findings = []
+    ExpiredDownloadCleanerJob().scan(_ctx(db, {'playlist_retention': '1w'}, findings))
+    assert findings == []
+
+
+def test_scan_no_track_reader_method_keeps_name_protection():
+    db = _DBNoTrackReader(
+        [_cand(1, origin="playlist", ctx="My Mix", created=OLD, play_count=0)],
+        mirrored=["My Mix"],
+    )
+    findings = []
+    ExpiredDownloadCleanerJob().scan(_ctx(db, {'playlist_retention': '1w'}, findings))
+    assert findings == []
+
+
+def test_scan_unidentifiable_candidate_stays_protected():
+    c = _cand(1, origin="playlist", ctx="My Mix", created=OLD, play_count=0)
+    c['title'] = ''
+    c['artist_name'] = ''
+    db = _DB([c], mirrored=[_mirror(7, "My Mix")],
+             mirror_tracks={7: [{'artist_name': 'X', 'track_name': 'Y'}]})
+    findings = []
+    ExpiredDownloadCleanerJob().scan(_ctx(db, {'playlist_retention': '1w'}, findings))
+    assert findings == []   # cannot prove the track left → keep
+
+
+def test_scan_origin_playlist_no_longer_mirrored_expires():
+    db = _DB(
+        [_cand(1, origin="playlist", ctx="Deleted Mix", created=OLD,
+               play_count=0)],
+        mirrored=[_mirror(7, "Your Listening Mix")],
+        mirror_tracks={7: []},
+    )
+    findings = []
+    res = ExpiredDownloadCleanerJob().scan(
+        _ctx(db, {'playlist_retention': '1w'}, findings))
+    assert res.findings_created == 1
 
 
 def test_scan_protects_watched_artist():

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from core.library.expired_cleanup import (
+    normalize_track_key,
     retention_cutoff,
     is_expired,
     select_expired,
@@ -93,3 +94,21 @@ def test_select_expired_filters():
     # starts failing on a date nobody touched anything — it armed on 2026-07-27.
     out = select_expired(entries, watchlist_retention="off", playlist_retention="2mo", now=NOW)
     assert [e["id"] for e in out] == [1]
+
+
+# ── normalize_track_key ──────────────────────────────────────────────────
+
+def test_normalize_track_key_case_and_whitespace():
+    assert normalize_track_key("Artist", "Song") == "artist|song"
+    assert normalize_track_key("  ARTIST  ", "  Song\tTitle ") == \
+        normalize_track_key("artist", "song title")
+
+
+def test_normalize_track_key_empty_title_unusable():
+    assert normalize_track_key("Artist", "") == ""
+    assert normalize_track_key("Artist", "   ") == ""
+    assert normalize_track_key("", "") == ""
+
+
+def test_normalize_track_key_artist_may_be_empty():
+    assert normalize_track_key("", "Song") == "|song"

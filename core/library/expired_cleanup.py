@@ -62,6 +62,26 @@ def path_suffix_key(path: Any, segments: int = 2) -> str:
     return '/'.join(parts[-segments:]).casefold()
 
 
+def normalize_track_key(artist: Any, title: Any) -> str:
+    """Normalized ``artist|title`` identity — the key that matches a download
+    (``library_history``) to a mirrored-playlist track
+    (``mirrored_playlist_tracks``).
+
+    Both sides originate from the same sync pipeline but pass through
+    different metadata (source listing vs downloaded file tags), so the
+    comparison is deliberately coarse: casefolded, trimmed, internal
+    whitespace collapsed. '' when the title is unusable — a track that
+    cannot be identified must never be treated as "not in the playlist".
+
+    Lives here, in the pure module, so the membership check is unit-testable
+    without a database.
+    """
+    norm = lambda text: ' '.join(str(text or '').split()).casefold()
+    if not norm(title):
+        return ''
+    return f"{norm(artist)}|{norm(title)}"
+
+
 def parse_ts(value: Any) -> Optional[datetime]:
     """Parse a SQLite CURRENT_TIMESTAMP (UTC, no zone) or ISO string."""
     if isinstance(value, datetime):
