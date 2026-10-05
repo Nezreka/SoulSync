@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from core.library.expired_cleanup import (
+    normalize_track_key,
     retention_cutoff,
     is_expired,
     select_expired,
@@ -93,3 +94,43 @@ def test_select_expired_filters():
     # starts failing on a date nobody touched anything — it armed on 2026-07-27.
     out = select_expired(entries, watchlist_retention="off", playlist_retention="2mo", now=NOW)
     assert [e["id"] for e in out] == [1]
+
+
+# ── normalize_track_key ──────────────────────────────────────────────────
+
+def test_normalize_track_key_case_and_whitespace():
+    assert normalize_track_key("Artist", "Song") == "artist|song"
+    assert normalize_track_key("  ARTIST  ", "  Song\tTitle ") == \
+        normalize_track_key("artist", "song title")
+
+
+def test_normalize_track_key_qualifiers_stripped():
+    # the two key sides come from different metadata provenances (playlist
+    # source title vs discovery provider's matched title), so qualifier
+    # drift must not unprotect a track that is still in the playlist.
+    base = normalize_track_key("Artist", "Midnight Drive")
+    assert normalize_track_key("Artist", "Midnight Drive (Remastered)") == base
+    assert normalize_track_key("Artist", "Midnight Drive [Remaster]") == base
+    assert normalize_track_key("Artist", "Midnight Drive - Remastered") == base
+    assert normalize_track_key("Artist", "Midnight Drive (feat. Someone)") == base
+    assert normalize_track_key("Artist", "Midnight Drive feat. Someone") == base
+    assert normalize_track_key("Artist", "Midnight Drive - Live") == base
+    # genuinely different qualifiers still key apart from the bare title
+    assert normalize_track_key("Artist", "Midnight Drive") != \
+        normalize_track_key("Artist", "Daylight Drive")
+
+
+def test_normalize_track_key_accents_and_punctuation():
+    import pytest
+    pytest.importorskip("unidecode")  # accent folding needs it; absent locally, present in CI/prod
+    assert normalize_track_key("Beyoncé", "Halo!") == \
+        normalize_track_key("beyonce", "halo")
+    assert normalize_track_key("AC/DC", "Song") == \
+        normalize_track_key("acdc", "song")
+
+
+def test_normalize_track_key_empty_side_unusable():
+    assert normalize_track_key("Artist", "") == ""
+    assert normalize_track_key("Artist", "   ") == ""
+    assert normalize_track_key("", "Song") == ""
+    assert normalize_track_key("", "") == ""

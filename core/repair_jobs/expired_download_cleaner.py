@@ -17,10 +17,12 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
+from typing import Optional
 
 from core.library.expired_cleanup import (
     RETENTION_OPTIONS,
     is_curated,
+    normalize_track_key,
     parse_ts,
     path_suffix_key,
     select_expired,
@@ -152,6 +154,13 @@ class ExpiredDownloadCleanerJob(RepairJob):
         'server has favourited it, rated it, or put it in a playlist, and you '
         'have played it fewer than the keep-threshold (default: played more '
         'than once is kept). '
+        'For playlist downloads, "still mirrored" is checked per track against '
+        'the playlist\'s current track list — songs rotated out of a refreshed '
+        'playlist become eligible once they pass retention, instead of staying '
+        'protected forever because the playlist itself still exists. '
+        'If a mirrored playlist\'s track list cannot be read (or is empty), '
+        'protection falls back to the playlist name, so emptying a playlist '
+        'without removing its mirror keeps the old behavior. '
         'It only touches downloads recorded from the Download Origins feature '
         'forward — never your pre-existing or manually-added library, and never '
         'anything downloaded before your library was last rebuilt.\n\n'
@@ -285,15 +294,56 @@ class ExpiredDownloadCleanerJob(RepairJob):
             False,
         )
 
-    def _protected_names(self, context: JobContext):
-        """(mirrored playlist names, watched artist names), case-folded, that
-        keep their downloads.
+    @staticmethod
+    def _mirror_track_keys(context: JobContext, playlist_id, profile_id=None) -> Optional[set]:
+        """Normalized track keys for a mirror's CURRENT tracks, or None when
+        they cannot be read. None means "membership unknown" — the caller
+        keeps name-level protection rather than exposing the download."""
+        reader = getattr(context.db, 'get_mirrored_playlist_tracks', None)
+        if not callable(reader):
+            return None
+        try:
+            # playlist ids are global, so the unscoped call returns the same
+            # rows; the keyword is only passed when a profile was given.
+            kwargs = {} if profile_id is None else {'profile_id': int(profile_id)}
+            tracks = reader(int(playlist_id), **kwargs) or []
+        except Exception as e:
+            logger.debug("expired cleanup: mirror track list unreadable for %s: %s",
+                         playlist_id, e)
+            return None
+        keys = set()
+        for t in tracks:
+            if not isinstance(t, dict):
+                continue
+            key = normalize_track_key(t.get('artist_name'), t.get('track_name'))
+            if key:
+                keys.add(key)
+        return keys
+
+    def _protection_facts(self, context: JobContext):
+        """(playlist_membership, watched artist names).
+
+        ``playlist_membership`` maps every case-folded playlist name that
+        keeps downloads to ``{'unreadable': bool, 'keys': set()}``: the
+        normalized track keys of the mirror's CURRENT track list.
+        ``unreadable`` means the membership could not be verified (no track
+        reader, no usable id, a failed read, an empty track list, or a server
+        sync name with no mirror row behind it) — those names keep the old
+        name-level protection.
 
         every profile's, not just the admin's: these defaulted to profile 1,
         so another profile's still-mirrored playlist protected nothing and its
         downloads aged out from under it (#1416). a download records the name
         the sync ran under, which is the upstream name, the user's rename, or
-        a collision-suffixed sync name, so all three count."""
+        a collision-suffixed sync name, so all three count.
+
+        membership is per TRACK, not per playlist: a rotating discovery
+        playlist (Listening Mix and friends) is always still mirrored, so
+        name-level protection kept every download it ever produced forever and
+        the cleaner could never fire for exactly the installs it was built
+        for. ``mirrored_playlist_tracks`` is replaced on every sync, so it is
+        the current membership.
+        """
         db = context.db
         try:
             pids = [p.get('id') for p in (db.get_all_profiles() or []) if p.get('id') is not None]
@@ -302,34 +352,81 @@ class ExpiredDownloadCleanerJob(RepairJob):
             pids = []
         pids = pids or [1]
 
-        mirrored, watched = set(), set()
+        membership = {}
+        watched = set()
+
+        def _entry(name):
+            n = str(name or '').strip().casefold()
+            if not n:
+                return None
+            return membership.setdefault(n, {'unreadable': False, 'keys': set()})
 
         def _add(target, name):
             n = str(name or '').strip().casefold()
             if n:
                 target.add(n)
 
+        # server-side sync name per mirror id (a download records the name
+        # the sync ran under: upstream name, user rename, or collision-
+        # suffixed sync name). resolved once — mirror ids are global.
+        sync_names = {}
+        try:
+            from core.playlists.sync_names import all_sync_names
+            server = context.config_manager.get_active_media_server() if context.config_manager else None
+            sync_names = all_sync_names(db, server) or {}
+        except Exception as e:
+            logger.debug("expired cleanup: sync names unavailable: %s", e)
+
+        seen_mirror_ids = set()
         for pid in pids:
             try:
-                for p in (db.get_mirrored_playlists(profile_id=pid) or []):
-                    if isinstance(p, dict):
-                        _add(mirrored, p.get('name'))
-                        _add(mirrored, p.get('custom_name'))
+                mirrors = db.get_mirrored_playlists(profile_id=pid) or []
             except Exception as e:
                 logger.debug("expired cleanup: mirrored lookup failed for %s: %s", pid, e)
+                continue
+            for p in mirrors:
+                if not isinstance(p, dict):
+                    continue
+                mid = p.get('id')
+                seen_mirror_ids.add(mid)
+                keys = self._mirror_track_keys(context, mid, profile_id=pid)
+                names = [p.get('name'), p.get('custom_name')]
+                sname = sync_names.get(mid)
+                if sname:
+                    names.append(sname)
+                for name in names:
+                    entry = _entry(name)
+                    if entry is None:
+                        continue
+                    if not keys:
+                        # None (unreadable) or empty (no verifiable membership):
+                        # latch name-level protection. an empty track list is
+                        # ambiguous — emptied playlist vs a sync that never
+                        # populated it — and this job deletes files, so the
+                        # ambiguous case keeps the old behavior (#1416).
+                        entry['unreadable'] = True
+                    else:
+                        entry['keys'] |= keys
             try:
                 for a in (db.get_watchlist_artists(profile_id=pid) or []):
                     _add(watched, getattr(a, 'artist_name', None))
             except Exception as e:
                 logger.debug("expired cleanup: watchlist lookup failed for %s: %s", pid, e)
-        try:
-            from core.playlists.sync_names import all_sync_names
-            server = context.config_manager.get_active_media_server() if context.config_manager else None
-            for name in all_sync_names(db, server).values():
-                _add(mirrored, name)
-        except Exception as e:
-            logger.debug("expired cleanup: sync names unavailable: %s", e)
-        return mirrored, watched
+        for mid, sname in sync_names.items():
+            if mid in seen_mirror_ids:
+                continue
+            # a server sync name with no mirror row read behind it: no
+            # membership to check, so it keeps name-level protection.
+            entry = _entry(sname)
+            if entry is not None:
+                if entry['keys'] and not entry['unreadable']:
+                    # a stale sync name colliding with a readable mirror's
+                    # local name: the name-level latch wins (fail safe), which
+                    # silently neuters per-track protection for that playlist.
+                    logger.debug("expired cleanup: sync name %r latches name-level "
+                                 "protection over a readable mirror", sname)
+                entry['unreadable'] = True
+        return membership, watched
 
     def _get_settings(self, context: JobContext) -> dict:
         merged = dict(self.default_settings)
@@ -355,7 +452,7 @@ class ExpiredDownloadCleanerJob(RepairJob):
         if not candidates:
             return result
 
-        mirrored_names, watched_names = self._protected_names(context)
+        playlist_membership, watched_names = self._protection_facts(context)
 
         # Anything downloaded before the library database was last rebuilt is
         # permanently out of scope. A rebuild wipes tracks/albums/artists —
@@ -388,9 +485,21 @@ class ExpiredDownloadCleanerJob(RepairJob):
         for c in candidates:
             ctx = (c.get('origin_context') or '').strip().casefold()
             origin = (c.get('origin') or '').strip().lower()
-            c['protected'] = bool(
-                (origin == 'playlist' and ctx and ctx in mirrored_names) or
-                (origin == 'watchlist' and ctx and ctx in watched_names))
+            if origin == 'playlist' and ctx:
+                entry = playlist_membership.get(ctx)
+                if entry is None:
+                    # origin playlist is not mirrored anywhere: nothing to keep it
+                    c['protected'] = False
+                else:
+                    key = normalize_track_key(c.get('artist_name'), c.get('title'))
+                    c['protected'] = bool(
+                        not key  # unidentifiable track — cannot prove it left
+                        or entry['unreadable']  # membership unknown — keep old behavior
+                        or key in entry['keys']  # still in the playlist's track list
+                    )
+            else:
+                c['protected'] = bool(
+                    origin == 'watchlist' and ctx and ctx in watched_names)
             if signals_stale:
                 c['curated'] = True
             elif curated_keys is not None:
