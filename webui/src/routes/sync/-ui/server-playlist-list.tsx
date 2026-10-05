@@ -249,24 +249,26 @@ export function OtherOwnersBlock({
   startIndex,
   serverType,
   onOpen,
+  title = 'Everyone else',
+  note = "Other people's playlists on this server. Editing or deleting one changes it for them.",
 }: {
   groups: ServerPlaylistGroup[];
   startIndex: number;
   serverType: string | undefined;
   onOpen: (playlist: ServerPlaylist) => void;
+  title?: string;
+  note?: string;
 }) {
   const total = groups.reduce((n, g) => n + g.playlists.length, 0);
   let index = startIndex;
   return (
     <div className="server-pl-section server-pl-others">
       <div className="server-pl-section-header">
-        <span className="server-pl-section-title">Everyone else</span>
+        <span className="server-pl-section-title">{title}</span>
         <span className="server-pl-section-count">{total}</span>
         <span className="server-pl-admin-only">Admin only</span>
       </div>
-      <p className="server-pl-others-note">
-        Other people&apos;s playlists on this server. Editing or deleting one changes it for them.
-      </p>
+      <p className="server-pl-others-note">{note}</p>
       {groups.map((group) => {
         const first = index;
         index += group.playlists.length;
@@ -307,6 +309,7 @@ export function ServerPlaylistList({ onOpenCompare }: ServerPlaylistListProps) {
   const [state, setState] = useState<{
     synced: ServerPlaylist[];
     unsynced: ServerPlaylist[];
+    serverAdmin: ServerPlaylistGroup[];
     others: ServerPlaylistGroup[];
     scope?: ServerPlaylistScope;
     serverType?: string;
@@ -355,10 +358,12 @@ export function ServerPlaylistList({ onOpenCompare }: ServerPlaylistListProps) {
         historyNames,
       );
       const others = data.others ?? [];
+      const serverAdmin = data.server_admin ?? [];
       // a shared-account profile with nothing synced yet still gets the link prompt
       if (
         synced.length === 0 &&
         unsynced.length === 0 &&
+        serverAdmin.length === 0 &&
         others.length === 0 &&
         data.scope !== 'shared'
       ) {
@@ -366,7 +371,14 @@ export function ServerPlaylistList({ onOpenCompare }: ServerPlaylistListProps) {
         return;
       }
       serverTypeRef.current = data.server_type;
-      setState({ synced, unsynced, others, scope: data.scope, serverType: data.server_type });
+      setState({
+        synced,
+        unsynced,
+        serverAdmin,
+        others,
+        scope: data.scope,
+        serverType: data.server_type,
+      });
     } catch (error) {
       setPlaceholder(`Error: ${error instanceof Error ? error.message : 'unknown error'}`);
     } finally {
@@ -450,11 +462,29 @@ export function ServerPlaylistList({ onOpenCompare }: ServerPlaylistListProps) {
                 onOpen={(pl) => void openPlaylist(pl)}
               />
             )}
+            {state.serverAdmin.length > 0 && (
+              <OtherOwnersBlock
+                groups={state.serverAdmin}
+                startIndex={state.synced.length + state.unsynced.length}
+                serverType={state.serverType}
+                title="Server admin"
+                note="Playlists owned by other server admins. Editing or deleting one changes it for them."
+                // never matched to a mirror by name: the admin's own mirror of
+                // the same name is not this person's playlist
+                onOpen={(pl) => openCompare(pl, null)}
+              />
+            )}
             {state.others.length > 0 && (
               <OtherOwnersBlock
                 groups={state.others}
-                startIndex={state.synced.length + state.unsynced.length}
+                startIndex={
+                  state.synced.length +
+                  state.unsynced.length +
+                  state.serverAdmin.reduce((n, g) => n + g.playlists.length, 0)
+                }
                 serverType={state.serverType}
+                title="Everyone else"
+                note="Other people's playlists on this server. Editing or deleting one changes it for them."
                 // never matched to a mirror by name: the admin's own mirror of
                 // the same name is not this person's playlist
                 onOpen={(pl) => openCompare(pl, null)}

@@ -101,8 +101,10 @@ def test_admin_split_groups_navidrome_playlists_by_owner():
 
     base = _Nav([_pl('1', 'Chill', 'soulsync'), _pl('2', 'Kids', 'thomas'),
                  _pl('3', 'Party', 'guest')])
-    mine, groups = spa.admin_split('navidrome', base, _DB())
+    mine, admin_groups, groups = spa.admin_split('navidrome', base, _DB())
     assert [p.title for p in mine] == ['Chill']
+    # _Nav has no is_server_admin: everyone lands in "everyone else"
+    assert admin_groups == []
     assert {(g['owner'], g['profile']): [p.title for p in g['playlists']] for g in groups} == {
         ('thomas', 'ThomasClan'): ['Kids'], ('guest', None): ['Party']}
 
