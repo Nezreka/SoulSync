@@ -263,3 +263,24 @@ def test_untracked_orphan_can_still_be_moved_to_staging(worker, tmp_path):
     assert result["action"] == "moved_to_staging"
     assert (tmp_path / "Staging" / track.name).read_bytes() == b"audio"
     assert not track.exists()
+
+
+def test_same_filename_in_another_album_does_not_retire_or_delete_orphan(worker, tmp_path):
+    track = tmp_path / "Artist" / "Album" / "01 - Intro.flac"
+    track.parent.mkdir(parents=True)
+    track.write_bytes(b"audio")
+    fid = _add(worker, track, job_id="orphan_file_detector",
+               finding_type="orphan_file")
+    worker.db._conn.execute(
+        "INSERT INTO tracks (file_path) VALUES (?)",
+        ("/music/Other Artist/Other Album/01 - Intro.flac",),
+    )
+    worker.db._conn.commit()
+
+    assert worker.retire_tracked_orphan_findings() == 0
+    result = worker.fix_finding(fid, fix_action="delete")
+
+    assert result["success"] is False
+    assert "same filename" in result["error"]
+    assert track.read_bytes() == b"audio"
+    assert _row(worker, fid)["status"] == "pending"

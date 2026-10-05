@@ -204,3 +204,30 @@ def test_track_imported_during_scan_does_not_become_orphan(tmp_path: Path) -> No
     assert result.scanned == 1
     assert result.findings_created == 0
     assert findings == []
+
+
+def test_same_filename_in_another_album_does_not_hide_orphan(tmp_path: Path) -> None:
+    db_path = tmp_path / "library.sqlite"
+    _seed_library(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO tracks (id, album_id, artist_id, title, file_path) "
+            "VALUES (101, 10, 1, 'Other Intro', '/music/Other Artist/Other Album/01 - Intro.flac')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    track = tmp_path / "Artist" / "Album" / "01 - Intro.flac"
+    track.parent.mkdir(parents=True)
+    track.write_bytes(b"audio with unreadable tags")
+    findings = []
+    context = JobContext(
+        db=_DB(db_path), transfer_folder=str(tmp_path), config_manager=None,
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    result = OrphanFileDetectorJob().scan(context)
+
+    assert result.findings_created == 1
+    assert [finding['file_path'] for finding in findings] == [str(track)]

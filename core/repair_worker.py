@@ -1929,7 +1929,8 @@ class RepairWorker:
                     "AND file_path IS NOT NULL AND file_path != ''"
                 ).fetchall()
                 tracked = [row[0] for row in rows
-                           if is_tracked_path(row[1], suffixes)]
+                           if os.path.isfile(row[1])
+                           and is_tracked_path(row[1], suffixes)]
                 if tracked:
                     conn.executemany(
                         "UPDATE repair_findings SET status = 'resolved', "
@@ -3177,6 +3178,10 @@ class RepairWorker:
             if is_tracked_path(resolved, suffixes):
                 return {'success': True, 'action': 'already_tracked',
                         'message': 'File is now tracked in the library; no file was changed'}
+            if is_tracked_path(resolved, suffixes, min_depth=1):
+                return {'success': False, 'error':
+                        'Another library track has the same filename, but its album path '
+                        'differs; verify this orphan manually before moving or deleting it'}
 
             if fix_action == 'staging':
                 # Move to staging folder

@@ -29,12 +29,17 @@ def known_file_suffixes(db):
         conn.close()
 
 
-def is_tracked_path(file_path, suffixes):
-    """Apply the same suffix matching to scans, reconciliation, and fixes."""
+def is_tracked_path(file_path, suffixes, *, min_depth=2):
+    """Match a DB path without conflating unrelated same-named files.
+
+    A filename alone is not evidence of identity: many albums contain files
+    such as ``01 - Intro.flac``. Keep that weaker check available to destructive
+    fixes so they can stop for manual review rather than act on an uncertain file.
+    """
     parts = file_path.replace('\\', '/').split('/')
     return any(
         '/'.join(parts[-depth:]).lower() in suffixes
-        for depth in range(1, min(5, len(parts) + 1))
+        for depth in range(min_depth, min(5, len(parts) + 1))
     )
 
 
@@ -71,8 +76,8 @@ class OrphanFileDetectorJob(RepairJob):
         # DB may store paths with a different base prefix than the local filesystem
         # (e.g. DB has /mnt/musicBackup/Artist/Album/track.mp3, local disk is
         # H:\Music\Artist\Album\track.mp3).  We compare using suffix fragments
-        # of depth 1-4 (filename, album/filename, artist/album/filename) which
-        # covers all realistic path-prefix mismatches.
+        # of depth 2-4 (album/filename, artist/album/filename) which covers
+        # mount-prefix mismatches without conflating common filenames.
         known_titles = set()       # (title_lower, artist_lower) for exact match
         known_titles_clean = set()  # (clean_title, clean_artist) for normalized match
         conn = None
