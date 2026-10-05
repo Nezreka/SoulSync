@@ -86,7 +86,7 @@ REVIEW_ONLY_FINDING_TYPES = frozenset({
 #   verb: the button label — say what will HAPPEN, not "Fix"
 #   dry_run_capable: the owning job supports a dry-run/preview mode
 FINDING_TYPE_META = {
-    'reconciliation_metadata': {'label': 'Audio-backed Metadata', 'verb': 'Apply Tags'},
+    'reconciliation_metadata': {'label': 'Audio-backed Repair', 'verb': 'Apply Repair'},
     'reconciliation_extra': {'label': 'Unassigned Audio', 'verb': 'Quarantine File'},
     'reconciliation_unresolved': {'label': 'Unidentified Audio'},
     'reconciliation_intent': {'label': 'Album Completion Intent', 'verb': 'Choose Intent'},
@@ -3854,23 +3854,54 @@ class RepairWorker:
             return {'success': False, 'error': error}
         track_id = details.get('track_id') or entity_id
         db_data = details.get('db_data') or {}
+        db_track_updates = details.get('db_track_updates') or {}
         album_title = details.get('db_album_title')
-        if not track_id or not (db_data or album_title):
-            return {'success': False, 'error': 'No track or tag changes in this proposal'}
+        target_path = details.get('target_path') or ''
+        allowed_track_fields = {'title', 'track_number', 'disc_number',
+                                'musicbrainz_recording_id'}
+        if not isinstance(db_track_updates, dict) or not set(db_track_updates) <= allowed_track_fields:
+            return {'success': False, 'error': 'Invalid library track metadata proposal'}
+        if not track_id or not (db_data or db_track_updates or album_title or target_path):
+            return {'success': False, 'error': 'No file or metadata changes in this proposal'}
+        renamed = False
+        if target_path:
+            if (os.path.dirname(target_path) != os.path.dirname(file_path) or
+                    os.path.splitext(target_path)[1].lower() !=
+                    os.path.splitext(file_path)[1].lower()):
+                return {'success': False, 'error': 'Proposed filename escapes the album folder'}
+            if os.path.lexists(target_path):
+                return {'success': False, 'error': 'Proposed filename already exists'}
         conn = self.db._get_connection()
         try:
             cursor = conn.cursor()
             locked = ('COALESCE(metadata_locked, 0)' if self._has_column(cursor, 'tracks',
                                                                             'metadata_locked') else '0')
             row = cursor.execute(
-                f'SELECT file_path, {locked} FROM tracks WHERE id = ?', (track_id,)).fetchone()
+                f'''SELECT file_path, {locked}, title, track_number, disc_number,
+                           musicbrainz_recording_id FROM tracks WHERE id = ?''',
+                (track_id,)).fetchone()
             if not row or row[1]:
                 return {'success': False, 'error': 'Track is missing or metadata is locked'}
             stored = row[0]
+            scanned_db = details.get('current_library_metadata') or {}
+            current_db = dict(zip(('title', 'track_number', 'disc_number',
+                                   'musicbrainz_recording_id'), row[2:6], strict=True))
+            if any(current_db.get(key) != scanned_db.get(key)
+                   for key in db_track_updates if key in scanned_db):
+                return {'success': False, 'error': 'Track metadata changed; rescan before applying'}
             resolved = _resolve_file_path(stored, self.transfer_folder,
                                           config_manager=self._config_manager)
             if not resolved or os.path.normpath(resolved) != os.path.normpath(file_path):
                 return {'success': False, 'error': 'Track now points to another file'}
+            new_stored_path = ''
+            if target_path:
+                new_stored_path = os.path.join(
+                    os.path.dirname(stored), os.path.basename(target_path))
+                collision = cursor.execute(
+                    'SELECT id FROM tracks WHERE file_path = ? AND id != ? LIMIT 1',
+                    (new_stored_path, track_id)).fetchone()
+                if collision:
+                    return {'success': False, 'error': 'Another track row uses that filename'}
             if album_title:
                 album_row = cursor.execute('SELECT title FROM albums WHERE id = ?',
                                            (details.get('album_id'),)).fetchone()
@@ -3882,25 +3913,42 @@ class RepairWorker:
                                               'db_data': db_data}])
                 if outcome['written'] != 1 or outcome['failed'] or outcome['skipped']:
                     return {'success': False, 'error': 'Tag writer did not complete', **outcome}
-            updates = {}
+            if target_path:
+                from core.repair_jobs.track_number_repair import _rename_to_basename
+                renamed_path = _rename_to_basename(
+                    file_path, os.path.basename(file_path),
+                    os.path.splitext(os.path.basename(target_path))[0])
+                if renamed_path != target_path:
+                    return {'success': False, 'error': 'File rename did not complete'}
+                renamed = True
+            updates = dict(db_track_updates)
             for key in ('title', 'track_number', 'disc_number'):
                 if key in db_data:
                     updates[key] = db_data[key]
-            mbid = details.get('recording_mbid')
-            if mbid and details.get('source') == 'musicbrainz':
-                updates['musicbrainz_recording_id'] = mbid
+            if renamed:
+                updates['file_path'] = new_stored_path
             if updates:
                 columns = ', '.join(f'{key} = ?' for key in updates)
                 cursor.execute(f'UPDATE tracks SET {columns}, updated_at = CURRENT_TIMESTAMP '
-                               'WHERE id = ?', [*updates.values(), track_id])
+                               'WHERE id = ? AND file_path = ?',
+                               [*updates.values(), track_id, stored])
+                if cursor.rowcount != 1:
+                    raise RuntimeError('Track row changed during metadata repair')
             if album_title:
                 cursor.execute('''UPDATE albums SET title = ?, updated_at = CURRENT_TIMESTAMP
                                   WHERE id = ?''', (album_title, details.get('album_id')))
             if updates or album_title:
                 conn.commit()
             return {'success': True, 'action': 'reconciliation_metadata',
-                    'message': 'Updated file tags and track metadata'}
+                    'message': 'Updated file and track metadata'}
         except Exception as exc:
+            if renamed:
+                try:
+                    from core.repair_jobs.track_number_repair import _rename_to_basename
+                    _rename_to_basename(target_path, os.path.basename(target_path),
+                                        os.path.splitext(os.path.basename(file_path))[0])
+                except Exception:
+                    logger.error('Could not restore file name after database failure', exc_info=True)
             logger.error('Reconciliation tag repair failed: %s', exc, exc_info=True)
             return {'success': False, 'error': str(exc)}
         finally:

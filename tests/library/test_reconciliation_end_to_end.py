@@ -14,7 +14,9 @@ from mutagen.flac import FLAC
 
 from core.library.reconciliation_evidence import ReconciliationEvidence
 from core.repair_jobs.base import JobContext
-from core.repair_jobs.library_reconciliation import LibraryReconciliationJob, _group_disc_folders
+from core.repair_jobs.library_reconciliation import (
+    LibraryReconciliationJob, _group_disc_folders, _suggest_filename,
+)
 from core.repair_worker import RepairWorker
 from database.music_database import MusicDatabase
 
@@ -208,6 +210,49 @@ def test_api_error_stops_full_scan_before_repeating_failed_requests(tmp_path, mo
     assert findings == []
 
 
+def test_completed_scan_retires_absent_folder_findings_but_stopped_scan_keeps_them(
+        tmp_path, monkeypatch):
+    import core.repair_jobs.library_reconciliation as module
+
+    root = tmp_path / 'music'
+    root.mkdir()
+    path = root / '01 - Laid to Rest.flac'
+    path.write_bytes(b'audio fixture')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, path)
+    worker = RepairWorker(database=db)
+    client = _Acoustid({path.name: {'mbid': 'laid-id', 'title': 'Laid to Rest',
+                                   'artist': 'Lamb of God', 'score': 0.99}})
+    monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
+    monkeypatch.setattr(module, '_read_file_tags', lambda _path: {
+        'title': 'Laid to Rest', 'artist': 'Lamb of God',
+        'album': 'Ashes of the Wake', 'track_number': 1,
+        'disc_number': 1, 'duration_ms': 200000,
+    })
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args: [
+        {'id': 'laid-id', 'name': 'Laid to Rest', 'track_number': 1,
+         'disc_number': 1, 'duration_ms': 200000},
+        {'id': 'hourglass-id', 'name': 'Hourglass', 'track_number': 2,
+         'disc_number': 1, 'duration_ms': 200000},
+    ])
+    monkeypatch.setattr(module, 'get_album_for_source', lambda *_args: {
+        'name': 'Ashes of the Wake'})
+    context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
+                         acoustid_client=client, create_finding=worker._create_finding)
+    job = LibraryReconciliationJob()
+    job.scan(context)
+    assert worker.get_review_cases()['total'] == 1
+
+    path.unlink()
+    context.should_stop = lambda: True
+    job.scan(context)
+    assert worker.get_review_cases()['total'] == 1
+
+    context.should_stop = None
+    job.scan(context)
+    assert worker.get_review_cases()['total'] == 0
+
+
 def test_mixed_album_folder_is_reviewed_without_quarantine_proposals(tmp_path, monkeypatch):
     import core.repair_jobs.library_reconciliation as module
 
@@ -257,6 +302,18 @@ def test_disc_subfolders_are_one_release_audit_without_merging_unrelated_folders
     assert set(grouped['/music/Artist/Album']) == set(folders['/music/Artist/Album/Disc 1'] +
                                                      folders['/music/Artist/Album/Disc 2'])
     assert grouped['/music/Other/Disc 1'] == folders['/music/Other/Disc 1']
+
+
+def test_filename_plan_preserves_numbering_and_harmless_title_flavor():
+    assert _suggest_filename('/music/0201 - Wrong.flac', {
+        'title': 'Hourglass', 'disc_number': 2, 'track_number': 2,
+    }) == '/music/0202 - Hourglass.flac'
+    assert _suggest_filename('/music/01 - Song (Serenade From the Stars).flac', {
+        'title': 'Song', 'disc_number': 1, 'track_number': 1,
+    }) == ''
+    assert _suggest_filename('/music/2026 - Wrong.flac', {
+        'title': 'Hourglass', 'disc_number': 1, 'track_number': 2,
+    }) == '/music/2026 - Hourglass.flac'
 
 
 def test_release_discovery_samples_distinct_files_not_three_ids_from_first_file():
@@ -351,7 +408,7 @@ def test_audio_backed_retag_writes_real_flac_and_track_row(tmp_path, monkeypatch
 
     root = tmp_path / 'music'
     root.mkdir()
-    path = root / '02 - Hourglass.flac'
+    path = root / '01 - Laid to Rest.flac'
     _minimal_flac(path, {'title': 'Laid to Rest', 'artist': 'Lamb of God',
                          'album': 'Ashes of the Wake', 'tracknumber': '1'})
     db = MusicDatabase(str(tmp_path / 'music.db'))
@@ -378,6 +435,7 @@ def test_audio_backed_retag_writes_real_flac_and_track_row(tmp_path, monkeypatch
     assert finding['finding_type'] == 'reconciliation_metadata'
     assert finding['details']['changes']['title']['new'] == 'Hourglass'
     assert finding['details']['changes']['musicbrainz_recording_id']['new'] == 'hourglass-id'
+    assert finding['details']['changes']['filename']['new'] == '02 - Hourglass.flac'
     assert db.set_album_canonical(10, 'musicbrainz', 'different-release', 0.9, locked=True)
     stale = worker.apply_review_decision(case_id, finding['id'],
                                          evidence_token=finding['evidence_token'], action='fix')
@@ -385,14 +443,23 @@ def test_audio_backed_retag_writes_real_flac_and_track_row(tmp_path, monkeypatch
     assert FLAC(str(path))['title'][0] == 'Laid to Rest'
     assert db.set_album_canonical(10, 'musicbrainz', 'ashes-mb-release', 0.9, locked=True)
     finding = worker.get_review_case(case_id)['items'][0]
+    target_path = root / '02 - Hourglass.flac'
+    target_path.write_bytes(b'collision')
+    collision = worker.apply_review_decision(case_id, finding['id'],
+                                             evidence_token=finding['evidence_token'], action='fix')
+    assert collision['success'] is False and 'already exists' in collision['error']
+    assert FLAC(str(path))['title'][0] == 'Laid to Rest'
+    target_path.unlink()
+    finding = worker.get_review_case(case_id)['items'][0]
     applied = worker.apply_review_decision(case_id, finding['id'],
                                            evidence_token=finding['evidence_token'], action='fix')
     assert applied['success'], applied
-    assert FLAC(str(path))['title'][0] == 'Hourglass'
+    assert not path.exists()
+    assert FLAC(str(target_path))['title'][0] == 'Hourglass'
     with db._get_connection() as conn:
-        row = conn.execute('''SELECT title, track_number, musicbrainz_recording_id
+        row = conn.execute('''SELECT title, track_number, musicbrainz_recording_id, file_path
                               FROM tracks WHERE id = 1''').fetchone()
-    assert tuple(row) == ('Hourglass', 2, 'hourglass-id')
+    assert tuple(row) == ('Hourglass', 2, 'hourglass-id', str(target_path))
 
 
 def test_exact_release_title_repairs_rated_r_album_and_file_tags(tmp_path, monkeypatch):
@@ -438,3 +505,42 @@ def test_exact_release_title_repairs_rated_r_album_and_file_tags(tmp_path, monke
     with db._get_connection() as conn:
         title = conn.execute('SELECT title FROM albums WHERE id = 10').fetchone()[0]
     assert title == 'Rated R'
+
+
+def test_filename_and_library_row_repair_when_file_tags_are_already_correct(tmp_path, monkeypatch):
+    import core.repair_jobs.library_reconciliation as module
+
+    root = tmp_path / 'music'
+    root.mkdir()
+    path = root / '01 - Wrong.flac'
+    _minimal_flac(path, {'title': 'Hourglass', 'artist': 'Lamb of God',
+                         'album': 'Ashes of the Wake', 'tracknumber': '2'})
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, path)
+    worker = RepairWorker(database=db)
+    client = _Acoustid({path.name: {'mbid': 'hourglass-id', 'title': 'Hourglass',
+                                   'artist': 'Lamb of God', 'score': 0.99}})
+    monkeypatch.setattr(RepairWorker, 'acoustid_client', property(lambda _self: client))
+    monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args: [
+        {'id': 'hourglass-id', 'name': 'Hourglass', 'track_number': 2,
+         'disc_number': 1, 'duration_ms': 200000},
+    ])
+    monkeypatch.setattr(module, 'get_album_for_source', lambda *_args: {
+        'name': 'Ashes of the Wake'})
+    context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
+                         acoustid_client=client, create_finding=worker._create_finding)
+    LibraryReconciliationJob().scan(context)
+    case_id = worker.get_review_cases()['items'][0]['case_id']
+    finding = worker.get_review_case(case_id)['items'][0]
+    assert finding['details']['db_data'] == {}
+    assert finding['details']['db_track_updates']['title'] == 'Hourglass'
+    result = worker.apply_review_decision(case_id, finding['id'],
+                                          evidence_token=finding['evidence_token'], action='fix')
+    assert result['success'], result
+    target = root / '02 - Hourglass.flac'
+    assert target.exists() and not path.exists()
+    assert FLAC(str(target))['title'][0] == 'Hourglass'
+    with db._get_connection() as conn:
+        row = conn.execute('SELECT title, track_number, file_path FROM tracks WHERE id = 1').fetchone()
+    assert tuple(row) == ('Hourglass', 2, str(target))

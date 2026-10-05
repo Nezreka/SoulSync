@@ -58,7 +58,7 @@ export interface FindingTypeInfo {
  * `findingTypeBlurb` degrades to '' rather than printing a slug at the user).
  */
 export const FINDING_TYPE_BLURBS: Record<string, string> = {
-  reconciliation_metadata: 'Audio and release-slot evidence suggest specific tag corrections.',
+  reconciliation_metadata: 'Audio and release slots suggest tag or filename corrections.',
   reconciliation_extra: 'A file does not fit any slot on the selected release.',
   reconciliation_unresolved: 'The audio or release could not be identified reliably.',
   reconciliation_intent: 'Choose complete or partial album before requesting tracks.',

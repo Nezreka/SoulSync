@@ -69,7 +69,7 @@ function evidence(finding: ReviewFinding) {
     ['Expected album', d.album_title || d.album || d.album_name],
     ['Duration', d.duration_ms || d.file_duration_ms || d.duration],
     ['Recording MBID', d.musicbrainz_recording_id || d.recording_mbid],
-    ['Proposed tag changes', d.changes],
+    ['Proposed changes', d.changes],
     ['Why this slot', d.match_reasons],
   ] as const;
 }

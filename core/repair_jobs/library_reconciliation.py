@@ -18,6 +18,7 @@ from typing import Any
 from core.auto_import_worker import _read_file_tags
 from core.imports.staging import AUDIO_EXTENSIONS
 from core.library.path_resolver import resolve_library_file_path
+from core.library_reorganize import _safe_filename
 from core.library.reconciliation_evidence import ReconciliationEvidence, folder_audio_path_digest
 from core.library.reconciliation_plan import reconcile_folder, _title_score
 from core.library.retag_planner import plan_track
@@ -25,7 +26,7 @@ from core.matching.audio_verification import fingerprint_is_ambiguous
 from core.metadata.album_tracks import get_album_for_source, get_album_tracks_for_source
 from core.repair_jobs import register_job
 from core.repair_jobs.base import RepairJob, JobContext, JobResult, all_library_roots, walk_library
-from core.repair_review_identity import missing_slot_key, review_case_key
+from core.repair_review_identity import missing_slot_key
 from utils.logging_config import get_logger
 
 logger = get_logger('repair_job.library_reconciliation')
@@ -37,6 +38,37 @@ _SOURCES = {
     'deezer_id': 'deezer',
 }
 _DISC_FOLDER = re.compile(r'^(?:cd|disc|disk|volume|vol)\s*[-_. ]*\d+\b', re.I)
+_NUMBERED_FILENAME = re.compile(r'^(\d{1,4})(\s*[-_.]\s*|\s+)(.+)$')
+
+
+def _suggest_filename(path: str, slot: dict) -> str:
+    """Keep the file's numbering convention while correcting a clear slot."""
+    if not str(slot.get('title') or '').strip():
+        return ''
+    stem, extension = os.path.splitext(os.path.basename(path))
+    match = _NUMBERED_FILENAME.match(stem)
+    if match:
+        digits, separator, old_title = match.groups()
+        try:
+            track = int(slot['track_number'])
+            disc = int(slot.get('disc_number') or 1)
+        except (TypeError, ValueError, KeyError):
+            track, disc = 0, 0
+        if (len(digits) == 4 and 0 < int(digits[:2]) <= 9 and
+                0 < int(digits[2:]) < 100 and 0 < track < 100 and 0 < disc <= 9):
+            number = f'{disc:02d}{track:02d}'
+        elif len(digits) <= 2 and track > 0:
+            number = str(track).zfill(len(digits))
+        else:
+            number = digits
+        title = (old_title if _title_score(old_title, slot['title']) >= 0.83
+                 else _safe_filename(slot['title']))
+        proposed = f'{number}{separator}{title}{extension}'
+    else:
+        title = (stem if _title_score(stem, slot['title']) >= 0.83
+                 else _safe_filename(slot['title']))
+        proposed = f'{title}{extension}'
+    return os.path.join(os.path.dirname(path), proposed) if proposed != os.path.basename(path) else ''
 
 
 def _group_disc_folders(folders: dict[str, list[str]], tracks: dict,
@@ -69,15 +101,14 @@ def _group_disc_folders(folders: dict[str, list[str]], tracks: dict,
     return groups
 
 
-def _retire_stale_case(db, case_id: str, observed: set[tuple[str, str, str]]) -> None:
-    """Close old pending proposals only after this case had a complete scan."""
+def _retire_stale_findings(db, observed: set[tuple[str, str, str]]) -> None:
+    """Close proposals absent from a completed library scan."""
     conn = db._get_connection()
     try:
         rows = conn.execute('''
             SELECT id, finding_type, entity_type, entity_id FROM repair_findings
             WHERE job_id = 'library_reconciliation' AND status = 'pending'
-              AND review_case_key = ?
-        ''', (case_id,)).fetchall()
+        ''').fetchall()
         stale = [row[0] for row in rows if tuple(str(part) for part in row[1:4])
                  not in observed]
         if stale:
@@ -296,6 +327,9 @@ class LibraryReconciliationJob(RepairJob):
             result.stopped_early = reason or 'AcoustID unavailable'
             return result
         roots = all_library_roots(context)
+        if not roots or any(not os.path.isdir(root) for root in roots):
+            result.stopped_early = 'A configured library root is unavailable'
+            return result
         tracks, albums = self._load_rows(context)
         intents = self._intents(context)
         folders: dict[str, list[str]] = defaultdict(list)
@@ -307,6 +341,8 @@ class LibraryReconciliationJob(RepairJob):
                     if os.path.splitext(name)[1].lower() in AUDIO_EXTENSIONS:
                         folders[dirpath].append(os.path.join(dirpath, name))
         folders = _group_disc_folders(folders, tracks, roots)
+        observed: set[tuple[str, str, str]] = set()
+        completed = True
         album_folder_counts: Counter[object] = Counter()
         for paths in folders.values():
             album_folder_counts.update({tracks[os.path.normpath(path)]['album_id']
@@ -318,8 +354,8 @@ class LibraryReconciliationJob(RepairJob):
         try:
             for folder_index, (folder, paths) in enumerate(sorted(folders.items())):
                 if context.check_stop() or context.wait_if_paused():
+                    completed = False
                     break
-                observed: set[tuple[str, str, str]] = set()
                 emit = partial(_emit_finding, context, observed)
 
                 files = []
@@ -333,6 +369,7 @@ class LibraryReconciliationJob(RepairJob):
                         stat = os.stat(path)
                     except OSError:
                         result.skipped += 1
+                        completed = False
                         continue
                     audio = cache.identify(path)
                     if audio.get('status') == 'error':
@@ -347,6 +384,7 @@ class LibraryReconciliationJob(RepairJob):
                 # its write lock before create_finding opens another one.
                 cache.checkpoint()
                 if cancelled or result.stopped_early:
+                    completed = False
                     break
                 if not files:
                     continue
@@ -503,6 +541,27 @@ class LibraryReconciliationJob(RepairJob):
                         changed['musicbrainz_recording_id'] = {
                             'old': tags.get('mbid') or '', 'new': confirmed_mbid}
                         tag_plan['db_data']['musicbrainz_recording_id'] = confirmed_mbid
+                    db_updates = {}
+                    row = file.get('db') or {}
+                    if (row and _title_score(row.get('title') or '', slot['title']) < 0.83):
+                        db_updates['title'] = slot['title']
+                        changed['library_title'] = {
+                            'old': row.get('title') or '', 'new': slot['title']}
+                    for field in ('track_number', 'disc_number'):
+                        if row and slot.get(field) is not None and row.get(field) != slot[field]:
+                            db_updates[field] = slot[field]
+                            changed[f'library_{field}'] = {
+                                'old': str(row.get(field) or ''), 'new': str(slot[field])}
+                    if (row and confirmed_mbid and
+                            row.get('musicbrainz_recording_id') != confirmed_mbid):
+                        db_updates['musicbrainz_recording_id'] = confirmed_mbid
+                        changed['library_recording_mbid'] = {
+                            'old': row.get('musicbrainz_recording_id') or '',
+                            'new': confirmed_mbid}
+                    target_path = _suggest_filename(file['path'], slot) if file.get('db') else ''
+                    if target_path:
+                        changed['filename'] = {'old': os.path.basename(file['path']),
+                                               'new': os.path.basename(target_path)}
                     db_album_title = ''
                     if (album and file.get('db') and not album_title_proposed and
                             album.get('album_title') != release_title):
@@ -532,12 +591,18 @@ class LibraryReconciliationJob(RepairJob):
                                'current_title': tags.get('title'),
                                'current_album': tags.get('album'),
                                'current_tags': tags, 'acoustid': file['acoustid'],
+                               'current_library_metadata': {
+                                   key: row.get(key) for key in
+                                   ('title', 'track_number', 'disc_number',
+                                    'musicbrainz_recording_id')},
                                'fingerprint_key': file['acoustid'].get('fingerprint_key'),
                                'size_bytes': file['size_bytes'], 'mtime_ns': file['mtime_ns'],
                                'match_reasons': pair['reasons'],
                                'confidence': pair['confidence'],
                                'changes': changed, 'db_data': tag_plan['db_data'],
-                               'db_album_title': db_album_title}
+                               'db_track_updates': db_updates,
+                               'db_album_title': db_album_title,
+                               'target_path': target_path}
                     if emit(
                         job_id=self.job_id, finding_type='reconciliation_metadata',
                         severity='warning', entity_type='track',
@@ -603,10 +668,11 @@ class LibraryReconciliationJob(RepairJob):
                                 }] }):
                                 result.findings_created += 1
                 cache.checkpoint()
-                if context.create_finding:
-                    _retire_stale_case(context.db, review_case_key(common, None), observed)
                 if context.update_progress:
                     context.update_progress(folder_index + 1, len(folders))
+            if completed and not context.check_stop() and context.create_finding:
+                cache.checkpoint()
+                _retire_stale_findings(context.db, observed)
         finally:
             logger.info('Library reconciliation: %d files, %d findings, %d fingerprints, '
                         '%d fingerprint hits, %d lookups, %d lookup hits, %d releases',
