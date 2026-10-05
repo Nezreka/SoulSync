@@ -20,6 +20,8 @@
  * entries anchor to it, and pages-extra.js documents it as React-owned DOM.
  */
 
+import type { CSSProperties } from 'react';
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { AutoSyncSeamState } from '../-dash.autosync';
@@ -837,6 +839,9 @@ export function SyncRail() {
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={health.pct}
+                /* The v3 ring reads the real pct from this custom property —
+                   no behaviour change, styling seam only. */
+                style={{ '--dash-sync-pct': health.pct } as CSSProperties}
               >
                 <span style={{ width: `${health.pct}%` }}></span>
               </div>

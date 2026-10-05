@@ -1,53 +1,56 @@
 /* ═══════════════════════════════════════════════════════════════════════
-   Dashboard premier redesign v2 (Oct 2026) — a pure visual reskin of the
-   music dashboard. Loaded after style.css so it wins by cascade.
+   Dashboard redesign v3 (Oct 2026) — the mockup composition. A pure visual
+   reskin + layout restructure of the music dashboard. Loaded after style.css
+   so it wins by cascade.
 
-   The v2 direction (Broque: premier/Fortune-10, bold AND refined):
-   - Ambient, professional warmth: warm amber glow upper-left/centre, deep
-     violet upper-right, near-black plum base. Layered radial gradients with
-     an extremely slow drift (80s). Faint vignette where the hero meets the
-     page. NO geometric lines, grids, or network-graph motifs anywhere.
-   - Hero left: editorial — date eyebrow, larger two-tone greeting (muted
-     lead, bright name with a faint warm sheen), stats as a divided band
-     with tabular numerals. The library status is no longer nested under
-     the greeting: it is a FULL-WIDTH console strip beneath the hero grid —
-     live status dot, server title + subtitle, primary Quick Scan, the ⋯
-     menu with every server action (Deep scan / Browse library / Verify
-     matches / Review downloads / Repair / Back up now). The strip is a
-     pure CSS re-gridding (display:contents on .dash-hero-main): the DOM is
-     untouched, so the orb contract, the tour ids, and the page tests'
-     structural assertions all stay green.
-   - Hero right: the worker-orb constellation floats FREE — no card, no
-     border, no container chrome behind it. All 17 orb nodes/ids/classes are
-     untouched (worker-orbs.js anchors .orb-stage and reads the DOM every
-     frame; JioSaavn/Hydrabase stay mounted, hidden via inline display
-     only). A soft violet glow sits behind the orbs; the "N workers busy"
-     caption is centred beneath; Manage Workers is a quiet ghost button.
-   - Listen band: cinematic — Library Radio as a wide card with a CSS
-     vinyl-fan motif, amber equalizer bars (a tiny aria-hidden span hook in
-     listen-band.tsx) and a big glowing play button; Your Mixes as an
-     elevated tile. Both are real features; nothing is faked.
-   - Rails: composed section headers (title + count pill + subtitle), the
-     segmented feed switcher, larger rounded cards with caption chips and
-     format·source badges, hover lift + warm glow.
-   - Right column (~400px at 1600w): three breathing cards — Playlist sync
-     (elegant health meter, restyled sort select, taller rows with art and
-     hover-reveal actions), Up next (status dots, trigger + last-run,
-     countdown pills), watchlist/wishlist as true cards with badges and
-     countdowns. 20px gaps, generous padding — nothing squooshed.
-   - Footer: QuickSettings quiet and minimal.
+   THE COMPOSITION (deliberately NOT the original's):
+   The original was: one big hero box (greeting + stats left, orbs boxed
+   right, status strip inside), a radio row under it, boxed rails, and a
+   right column of boxed cards. v3 dissolves the boxes and recomposes the
+   whole page as ONE grid:
 
-   What it does NOT change: every JS-referenced hook stays put — the orb
-   layer's classes/ids, the tour's live ids, the library-card markup (the
-   ⋯ menu stays mounted-but-hidden so its ids always resolve), and all
+   - No hero box at all. The greeting floats on the ambient field, top-left:
+     date eyebrow, a two-line greeting, and the library size as ONE inline
+     line ("309,638 Tracks • 70,363 Albums • 5,705 Artists").
+   - The server status is a slim floating pill under the greeting — live dot,
+     server title + subtitle, Quick Scan primary, the ⋯ menu with every
+     server action (Deep scan / Browse library / Verify matches / Review
+     downloads / Repair / Back up now). Same DOM, same ids, same flows.
+   - Library Radio and Your Mixes are LARGE cinematic hero cards, top-centre:
+     a fanned vinyl-sleeve cluster, breathing EQ, a haloed play button (the
+     real window.startLibraryRadio seam — honest UI, nothing faked).
+   - The worker orbs hang LARGE top-right, free of any container. The orb
+     DOM contract is untouched: no stacking context on .orb-stage, all 17
+     orb nodes/ids/classes byte-identical (worker-orbs.js anchors .orb-stage
+     and reads the DOM every frame).
+   - Recently Added / Recently Played are free-floating rails with soft edge
+     fades on their horizontal scroll — no boxes anywhere near them.
+   - The right column is ONE breathing glass panel: the SYNC STATUS header
+     with the glowing sync-health RING (concentric tick ring + arc driven by
+     the real pct), the playlist rows, upcoming automations, and the
+     watchlist/wishlist tiles.
+   - Ambient: warm amber breathing in from the upper-left, deep violet from
+     the upper-right, dissolving into near-black plum. NO geometric lines,
+     grids, or network-graph motifs anywhere.
+
+   How the layout is done: #dashboard-page becomes the grid; the intermediate
+   wrappers (.dash-hero, .dash-hero-main, .dash-layout, .dash-main) dissolve
+   with display:contents (plain divs — a11y-safe, DOM byte-identical, so the
+   orb contract, the tour ids, and the structural tests all stay green) and
+   every section takes an explicit grid seat. article[data-card="listen"] and
+   aside.dash-side keep their semantics as grid items.
+
+   What it does NOT change: every JS-referenced hook stays put, the orb
+   layer's classes/ids, the tour's live ids, the library-card markup (the ⋯
+   menu stays mounted-but-hidden so its ids always resolve), and all
    data-testid hooks. No user-visible strings are touched (that's the tsx's
-   job, and it isn't).
+   job — the one exception is the --dash-sync-pct custom property on the
+   sync bar, set from the real health pct).
 
    Motion gating: every ambient/pulse animation below is declared twice —
-   once normally, once killed — so it runs ONLY when
-   `body` has neither `.reduce-effects` nor `.max-performance` AND the OS
-   does not prefer reduced motion. (style.css's global reduce-effects rule
-   already strips box-shadow/filter, which degrades the glows gracefully.)
+   once normally, once killed — so it runs ONLY when `body` has neither
+   `.reduce-effects` nor `.max-performance` AND the OS does not prefer
+   reduced motion.
    ═══════════════════════════════════════════════════════════════════════ */
 
 /* ── 0. TOKENS ───────────────────────────────────────────────────────── */
@@ -61,101 +64,79 @@
   --dash-plum: #0b0c10;
 }
 
-/* ── 1. AMBIENT — the room the dashboard lives in ─────────────────────── */
+/* ── 1. THE PAGE GRID ────────────────────────────────────────────────── */
 
-/* The hero carries the ambient field: warm amber breathing in from the
-   upper-left, deep violet from the upper-right, dissolving into the page's
-   near-black plum. The layer is oversized and drifts almost imperceptibly
-   (80s) — aliveness you feel, not watch. pointer-events:none, z-index:-1 so
-   it sits genuinely behind the hero's content (a positioned z-index:0 layer
-   would paint ABOVE non-positioned text) and never intercepts clicks. */
-#dashboard-page .dashboard-header.dash-hero::before {
-  content: '';
-  position: absolute;
-  inset: -32px -24px;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(
-      620px 420px at 10% 0%,
-      rgba(var(--dash-amber), 0.13) 0%,
-      rgba(var(--dash-amber), 0.04) 42%,
-      transparent 68%
-    ),
-    radial-gradient(
-      760px 480px at 92% 6%,
-      rgba(var(--dash-violet), 0.16) 0%,
-      rgba(var(--dash-violet), 0.05) 45%,
-      transparent 70%
-    ),
-    radial-gradient(900px 500px at 55% 110%, rgba(var(--dash-violet), 0.07) 0%, transparent 60%);
-  opacity: 0.9;
-}
-body:not(.reduce-effects):not(.max-performance)
-  #dashboard-page
-  .dashboard-header.dash-hero::before {
-  animation: dash-ambient-drift 80s ease-in-out infinite alternate;
-}
-@keyframes dash-ambient-drift {
-  from {
-    transform: translate3d(-26px, -8px, 0) scale(1);
-  }
-  to {
-    transform: translate3d(30px, 14px, 0) scale(1.06);
-  }
-}
-/* A faint vignette where the hero settles into the page — the glow has a
-   floor instead of ending in a hard line. Painted on the sweep element's
-   own layer so it never touches the orb tooltips' stacking. */
-#dashboard-page .dashboard-header-sweep::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 120px;
-  pointer-events: none;
-  background: linear-gradient(180deg, transparent 0%, rgba(4, 4, 7, 0.35) 100%);
-}
-/* The page itself leans a touch warmer and deeper than the shell default —
-   a vertical wash, static, no motion to gate. */
+/* One composed grid for the whole page. isolation:isolate keeps the ambient
+   ::before (z-index:-1) inside the page instead of sinking behind the shell. */
 #dashboard-page {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: minmax(0, 1.34fr) minmax(0, 1.22fr) minmax(0, 0.56fr) minmax(280px, 300px);
+  column-gap: 30px;
+  row-gap: 32px;
+  align-items: start;
   background: linear-gradient(
     180deg,
-    rgba(var(--dash-amber), 0.025) 0%,
-    transparent 22%,
-    transparent 70%,
-    rgba(5, 5, 9, 0.35) 100%
+    rgba(var(--dash-amber), 0.03) 0%,
+    transparent 26%,
+    transparent 74%,
+    rgba(5, 5, 9, 0.4) 100%
   );
   border-radius: 18px;
 }
 
-/* ── 2. HERO — re-gridded ──────────────────────────────────────────── */
-
-/* The hero's own accent wash and bottom border retire — the ambient field
-   above owns the hero now, and the ::after accent hairline stays as the
-   single signature line. */
-#dashboard-page .dashboard-header.dash-hero {
-  background: none;
-  border-bottom: none;
-  /* Vertical rhythm is owned by the items' margins (rows need different
-       gaps); the column gap separates the intro from the orbs. */
-  column-gap: 40px;
-  row-gap: 0;
+/* The ambient field: warm amber upper-left, deep violet upper-right,
+   dissolving into the page. Oversized, drifting almost imperceptibly. */
+#dashboard-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    radial-gradient(
+      660px 460px at 10% 2%,
+      rgba(var(--dash-amber), 0.18) 0%,
+      rgba(var(--dash-amber), 0.055) 45%,
+      transparent 68%
+    ),
+    radial-gradient(
+      820px 540px at 90% 6%,
+      rgba(var(--dash-violet), 0.22) 0%,
+      rgba(var(--dash-violet), 0.07) 46%,
+      transparent 70%
+    ),
+    radial-gradient(980px 560px at 52% 112%, rgba(var(--dash-violet), 0.09) 0%, transparent 60%);
+}
+body:not(.reduce-effects):not(.max-performance) #dashboard-page::before {
+  animation: dash3-ambient-drift 80s ease-in-out infinite alternate;
+}
+@keyframes dash3-ambient-drift {
+  from {
+    transform: translate3d(-28px, -10px, 0) scale(1);
+  }
+  to {
+    transform: translate3d(32px, 16px, 0) scale(1.06);
+  }
 }
 
-/* THE LAYOUT MOVE: .dash-hero-main dissolves as a box (display:contents)
-   so its children become grid items of the hero itself. The intro stack
-   (eyebrow / greeting / stats) takes column 1, the orb stage takes column 2
-   beside it, and the library status becomes a full-width console strip on
-   its own row beneath — the server's actions get a designed, unmissable
-   home. The DOM is byte-identical: .dash-hero-main [data-card="library"]
-   still resolves, the orb stage keeps its parent, worker-orbs.js and the
-   tour see nothing change. (display:contents on a plain div is a11y-safe;
-   the labelled content inside keeps its own semantics.) */
-#dashboard-page .dash-hero-main {
+/* The wrappers dissolve: their children become grid items of the page.
+   DOM byte-identical — selectors, tests, worker-orbs.js and the tour see
+   nothing change. */
+#dashboard-page .dashboard-header.dash-hero,
+#dashboard-page .dash-hero-main,
+#dashboard-page .dash-layout,
+#dashboard-page .dash-main {
   display: contents;
 }
+#dashboard-page .dashboard-header-sweep {
+  display: none;
+}
+
+/* ── 2. HERO SEATS ───────────────────────────────────────────────────── */
+
 #dashboard-page .dash-hero-eyebrow,
 #dashboard-page .dash-hero .hello-greeting,
 #dashboard-page .dash-hero-numbers,
@@ -167,13 +148,13 @@ body:not(.reduce-effects):not(.max-performance)
   grid-column: 1;
   grid-row: 1;
   align-self: end;
-  margin: 0 0 18px;
+  margin: 26px 0 14px;
 }
 #dashboard-page .dash-hero .hello-greeting {
   grid-column: 1;
   grid-row: 2;
   align-self: start;
-  margin: 0 0 26px;
+  margin: 0 0 20px;
 }
 #dashboard-page .dash-hero-numbers {
   grid-column: 1;
@@ -181,33 +162,78 @@ body:not(.reduce-effects):not(.max-performance)
   align-self: start;
   margin: 0;
 }
-/* The console strip: the library's status and every server action, full
-   width, composed as one control bar. */
+/* The status pill: its own row under the greeting. */
 #dashboard-page .dash-hero-library {
-  grid-column: 1 / -1;
+  grid-column: 1;
   grid-row: 4;
-  margin: 30px 0 0;
+  align-self: start;
+  margin: 4px 0 0;
   position: relative;
   z-index: 6;
 }
-
-/* Date eyebrow — the quiet editorial kicker, with a little more air. */
-#dashboard-page .dash-hero-eyebrow {
-  margin: 0;
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: rgba(var(--dash-ink), 0.44);
+/* Library Radio + Your Mixes: the large cinematic hero cards, top-centre. */
+#dashboard-page .dash-main > article.dash-card[data-card='listen'] {
+  grid-column: 2 / 4;
+  grid-row: 1 / 5;
+  align-self: stretch;
+  min-width: 0;
+  margin-top: 26px;
+}
+/* The orbs: large, top-right, floating free. */
+#dashboard-page .orb-stage {
+  grid-column: 4;
+  grid-row: 1 / 4;
+  align-self: start;
+  margin-top: 18px;
+}
+/* Active downloads: full width, collapses to nothing while hidden. */
+#dashboard-page .dash-main > article.dash-card[data-card='active-downloads'] {
+  grid-column: 1 / -1;
+  grid-row: 6;
+}
+/* The exception surface, when it has something to say: full width, right
+   under the hero — an explicit seat (auto-placement proved unpredictable
+   with the collapsed rows around it). */
+#dashboard-page article[data-card='alerts'] {
+  grid-column: 1 / -1;
+  grid-row: 5;
+}
+/* The rails: free-floating, spanning the content columns. */
+#dashboard-page article.dash-card--rail:not([data-card='listen']) {
+  grid-column: 1 / 4;
+}
+#dashboard-page .dash-main > article.dash-card--rail:not([data-card]) {
+  grid-row: 7;
+}
+#dashboard-page article.dash-card--rail[data-card='listening-history'] {
+  grid-row: 8;
+}
+/* The right column: one breathing panel, beside the rails. */
+#dashboard-page aside.dash-side {
+  grid-column: 4;
+  grid-row: 4 / 10;
+  align-self: start;
+}
+#dashboard-page .dash-footer {
+  grid-column: 1 / 4;
+  grid-row: 9;
 }
 
-/* The greeting, elevated: larger, tighter, two tones. The moment in muted
-   lead; the name in bright white with a faint warm sheen — static, not
-   animated (the old shimmer read as decoration, not confidence). */
-#dashboard-page .dash-hero .hello-greeting {
-  font-size: clamp(34px, 3.4vw, 46px);
+/* ── 3. GREETING — floats on the ambient field ───────────────────────── */
+
+#dashboard-page .dash-hero-eyebrow {
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: -0.025em;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgba(var(--dash-amber), 0.8);
+}
+/* Two-line editorial greeting: the moment, then the name on its own line
+   with a whisper of candlelight. */
+#dashboard-page .dash-hero .hello-greeting {
+  font-size: clamp(30px, 2.5vw, 36px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
   line-height: 1.08;
 }
 #dashboard-page .dash-hero .hello-greeting > span {
@@ -215,97 +241,126 @@ body:not(.reduce-effects):not(.max-performance)
   -webkit-text-fill-color: currentColor;
   color: #f4f5f7;
   animation: none;
-  padding-bottom: 0.1em;
-  margin-bottom: -0.1em;
+  padding-bottom: 0;
+  margin-bottom: 0;
 }
 #dashboard-page .hello-greet-lead {
-  font-weight: 500;
-  color: rgba(var(--dash-ink), 0.55);
+  font-weight: 600;
+  color: rgba(var(--dash-ink), 0.72);
 }
 #dashboard-page .hello-greet-name {
-  /* A whisper of candlelight on the name — barely there, unmistakably warm. */
-  background: linear-gradient(112deg, #ffffff 25%, #ffe3b8 48%, #ffffff 72%);
+  display: block;
+  background: linear-gradient(115deg, #ffffff 28%, #ffe0ae 50%, #ffffff 72%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
   -webkit-text-fill-color: transparent;
 }
-
-/* Stats as a divided band — hairline rules between figures, tabular
-   numerals, labels with real letterspacing. The premier analytics look. */
+/* The library size as ONE inline line, mockup-style. The stat buttons keep
+   their click-through to the library. */
 #dashboard-page .dash-hero-numbers {
-  gap: 0;
-  margin-top: 4px;
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 7px;
 }
 #dashboard-page .dash-hero-number {
-  position: relative;
-  padding: 4px 34px;
-  gap: 5px;
+  padding: 0;
 }
-#dashboard-page .dash-hero-number:first-child {
-  padding-left: 0;
+#dashboard-page .dash-hero-number {
+  appearance: none;
+  background: none;
+  border: none;
+  font: inherit;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 7px;
+  padding: 0;
+  cursor: pointer;
 }
-#dashboard-page .dash-hero-number:last-child {
-  padding-right: 0;
-}
-#dashboard-page .dash-hero-number + .dash-hero-number::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 6px;
-  bottom: 6px;
-  width: 1px;
-  background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.14), transparent);
+/* Specificity beats the base `.dash-hero .hello-stat + .hello-stat::before
+   { content: none }` so the separators actually render. */
+#dashboard-page .dash-hero .dash-hero-number + .dash-hero-number::before {
+  content: '•';
+  color: rgba(var(--dash-ink), 0.28);
+  margin-right: 3px;
+  background: none;
+  width: auto;
+  position: static;
+  left: auto;
+  top: auto;
+  bottom: auto;
 }
 #dashboard-page .dash-hero-number-value {
-  font-size: 27px;
+  font-size: 14.5px;
   font-weight: 750;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
-  color: #f6f7f9;
+  color: #f4f5f7;
 }
 #dashboard-page .dash-hero-number-label {
-  font-size: 10.5px;
-  font-weight: 650;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: rgba(var(--dash-ink), 0.48);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: rgba(var(--dash-ink), 0.55);
+}
+#dashboard-page .dash-hero-number:hover .dash-hero-number-label {
+  color: rgba(var(--dash-ink), 0.85);
+}
+#dashboard-page .dash-hero-number:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.7);
+  outline-offset: 3px;
+  border-radius: 4px;
 }
 
-/* The library status, recomposed as ONE composed control bar: the live
-   status on the left (pulsing dot while scanning), the server title and
-   subtitle beside it, and deliberate actions on the right — Quick Scan as
-   the primary, the ⋯ menu as its quiet partner. Every server action lives
-   behind that menu and is one click away; the menu stays mounted (hidden)
-   so its ids always resolve. */
+/* ── 4. SERVER STATUS — a slim floating pill ─────────────────────────── */
+
+/* The mockup's "Plex status" chip, made honest: live dot, server title +
+   subtitle, Quick Scan primary, the ⋯ menu with every server action. */
+#dashboard-page .dash-hero-library .library-status-card {
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
 #dashboard-page .dash-hero-library .library-status-header {
+  display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 12px 12px 12px 20px;
-  border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.018));
+  gap: 12px;
+  padding: 9px 9px 9px 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: rgba(255, 255, 255, 0.05);
   box-shadow:
-    0 10px 30px rgba(0, 0, 0, 0.28),
-    0 1px 0 rgba(255, 255, 255, 0.05) inset;
-  max-width: 680px;
+    0 10px 28px rgba(0, 0, 0, 0.3),
+    0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  max-width: 100%;
 }
 #dashboard-page .dash-hero-library .library-status-info {
   order: 1;
   flex: 1 1 auto;
   min-width: 0;
+  display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 10px;
+}
+#dashboard-page .dash-hero-library .library-status-dot {
+  flex: none;
 }
 #dashboard-page .dash-hero-library .library-status-title {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 700;
   letter-spacing: 0.01em;
   white-space: nowrap;
 }
 #dashboard-page .dash-hero-library .library-status-subtitle {
-  font-size: 13px;
-  color: rgba(var(--dash-ink), 0.52);
+  font-size: 12.5px;
+  color: rgba(var(--dash-ink), 0.5);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -313,19 +368,22 @@ body:not(.reduce-effects):not(.max-performance)
 #dashboard-page .dash-hero-library .library-status-actions {
   order: 2;
   flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-/* Quick Scan — the primary. Accent-tinted (it follows the user's accent),
-   with a warm hover lift. */
+/* Quick Scan — the primary, compact in the pill. */
 #dashboard-page .dash-hero-library .library-status-btn {
-  min-height: 40px;
-  padding: 0 22px;
-  font-size: 13.5px;
+  min-height: 36px;
+  padding: 0 18px;
+  font-size: 13px;
   font-weight: 650;
   letter-spacing: 0.015em;
+  border-radius: 999px;
   border-color: rgba(var(--accent-rgb), 0.42);
-  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.2), rgba(var(--accent-rgb), 0.1));
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.22), rgba(var(--accent-rgb), 0.12));
   box-shadow:
-    0 4px 16px rgba(var(--accent-rgb), 0.18),
+    0 4px 14px rgba(var(--accent-rgb), 0.2),
     0 1px 0 rgba(255, 255, 255, 0.08) inset;
   transition:
     background 0.18s ease,
@@ -334,10 +392,10 @@ body:not(.reduce-effects):not(.max-performance)
     box-shadow 0.18s ease;
 }
 #dashboard-page .dash-hero-library .library-status-btn:hover {
-  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.3), rgba(var(--accent-rgb), 0.16));
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.32), rgba(var(--accent-rgb), 0.18));
   border-color: rgba(var(--accent-rgb), 0.65);
   box-shadow:
-    0 6px 22px rgba(var(--accent-rgb), 0.28),
+    0 6px 20px rgba(var(--accent-rgb), 0.3),
     0 1px 0 rgba(255, 255, 255, 0.1) inset;
 }
 #dashboard-page .dash-hero-library .library-status-btn:active {
@@ -348,11 +406,10 @@ body:not(.reduce-effects):not(.max-performance)
   background: rgba(var(--dash-amber), 0.1);
   color: rgb(var(--dash-amber));
 }
-/* The ⋯ menu button — a quiet ghost circle that reads as intentional, with
-   a real focus ring. */
+/* The ⋯ menu button — a quiet ghost circle. */
 #dashboard-page .library-status-more {
-  width: 40px;
-  min-height: 40px;
+  width: 36px;
+  min-height: 36px;
   border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.045);
@@ -376,63 +433,89 @@ body:not(.reduce-effects):not(.max-performance)
   outline: 2px solid rgba(var(--accent-rgb), 0.75);
   outline-offset: 3px;
 }
-/* The scan progress bar glows warm while it works. */
+/* Scan progress unfurls beneath the pill. */
+#dashboard-page .dash-hero-library .library-status-progress {
+  margin: 12px 8px 0;
+  max-width: 520px;
+}
+#dashboard-page .dash-hero-library .library-status-phase {
+  font-size: 12px;
+  color: rgba(var(--dash-ink), 0.6);
+  margin-bottom: 6px;
+}
+#dashboard-page .dash-hero-library .library-status-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
 #dashboard-page .dash-hero-library .library-status-bar-fill {
+  height: 100%;
+  border-radius: 999px;
   background: linear-gradient(90deg, rgb(var(--dash-amber-deep)), rgb(var(--dash-amber)));
   box-shadow: 0 0 12px rgba(var(--dash-amber), 0.5);
+  transition: width 0.4s ease;
+}
+#dashboard-page .dash-hero-library .library-status-progress-detail {
+  font-size: 11.5px;
+  color: rgba(var(--dash-ink), 0.45);
+  margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+}
+#dashboard-page .dash-hero-library .library-status-message {
+  margin: 12px 8px 0;
+  max-width: 560px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(var(--dash-ink), 0.65);
 }
 
-/* ── 3. HERO RIGHT — the orb constellation, floating free ─────────────── */
+/* ── 5. ORBS — large, top-right, floating free ───────────────────────── */
 
-/* No card, no border, no container chrome: the orbs hang in the ambient
-   field. The stage keeps its size (worker-orbs.js measures it and draws
-   its canvas against it every frame) and its soft violet aura, painted as
-   a plain background — backgrounds never disturb the orb DOM. */
+/* No card, no border, no container chrome: the constellation hangs in the
+   ambient field with a soft violet aura. The stage keeps its size
+   (worker-orbs.js measures it every frame). No z-index, transform, filter
+   or opacity here — the stage must NOT create a stacking context
+   (tooltips are z-6000). */
 #dashboard-page .orb-stage {
-  /* The stage's grid seat: column 2, spanning the intro rows beside the
-       greeting and stats. (Without an explicit seat, auto-placement would
-       park it in row 1 next to the eyebrow and stretch that row to the
-       stage's full height.) align-self keeps it vertically centred against
-       the intro stack. No z-index, transform, filter or opacity here —
-       the stage must NOT create a stacking context (tooltips are z-6000). */
-  grid-column: 2;
-  grid-row: 1 / 4;
-  align-self: center;
   background: radial-gradient(
-    58% 62% at 50% 44%,
-    rgba(var(--dash-violet), 0.14) 0%,
-    rgba(var(--dash-violet), 0.04) 52%,
-    transparent 72%
+    62% 56% at 50% 40%,
+    rgba(var(--dash-violet), 0.16) 0%,
+    rgba(var(--dash-violet), 0.045) 54%,
+    transparent 74%
   );
   border: none;
   box-shadow: none;
   border-radius: 0;
-  padding: 6px 6px 54px;
-  min-height: 264px;
+  padding: 8px 6px 64px;
+  min-height: 340px;
   justify-content: center;
 }
-/* The caption, centred beneath the constellation like a gallery label —
-   with real clearance below the canvas so it never collides with an orb. */
+/* The caption, centred beneath the constellation like a gallery label. */
 #dashboard-page .orb-stage-caption {
   left: 50%;
   transform: translateX(-50%);
-  bottom: 14px;
+  bottom: 18px;
   font-size: 12.5px;
-  letter-spacing: 0.04em;
-  color: rgba(var(--dash-ink), 0.58);
+  letter-spacing: 0.06em;
+  color: rgba(var(--dash-ink), 0.6);
   white-space: nowrap;
+  padding: 7px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(10, 10, 16, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 #dashboard-page .orb-stage-dot {
   width: 7px;
   height: 7px;
 }
-/* Manage Workers — a quiet ghost button, not a glowing pill. It lives in
-   the worker grid (visible even when the orbs are in canvas mode), so it
-   keeps its id, label span, and click seam; only the chrome changes. */
+/* Manage Workers — a quiet ghost pill under the caption. */
 #dashboard-page .orb-stage .em-manage-btn {
   height: 36px;
   padding: 0 15px 0 7px;
-  margin: 10px auto 0;
+  margin: 12px auto 0;
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 999px;
@@ -470,72 +553,109 @@ body:not(.reduce-effects):not(.max-performance)
   outline-offset: 3px;
 }
 
-/* ── 4. LISTEN BAND — the payoff, cinematic ──────────────────────────── */
+/* ── 6. LISTEN — the cinematic hero cards ────────────────────────────── */
 
-#dashboard-page .listen-band {
-  gap: 18px;
+#dashboard-page .dash-main > article.dash-card[data-card='listen'] {
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  overflow: visible;
 }
-/* Library Radio: a wide cinematic card. Amber heat from the left, violet
-   depth from the right, and a fan of vinyl discs half-clipped at the
-   right edge (pure CSS: concentric groove rings on dark wax). Content sits
-   above the discs; overflow clips them, never the text. */
+#dashboard-page .listen-band {
+  display: grid;
+  grid-template-columns: 1.62fr 1fr;
+  gap: 28px;
+  align-items: end;
+  height: 100%;
+}
+/* Library Radio: the big cinematic card. A fanned cluster of vinyl sleeves
+   half-clipped at the top-right (pure CSS), amber heat from the left,
+   violet depth from the right. Bottom row: icon, title + copy, the
+   breathing EQ, and the big haloed play button. */
 #dashboard-page .listen-hero {
   position: relative;
   overflow: hidden;
-  padding: 26px 30px;
-  border-radius: 22px;
-  border: 1px solid rgba(var(--dash-amber), 0.28);
+  height: 100%;
+  min-height: 348px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-rows: 1fr auto;
+  grid-template-areas: '. . . .' 'icon text eq play';
+  align-items: end;
+  column-gap: 16px;
+  padding: 26px 28px;
+  border-radius: 28px;
+  border: 1px solid rgba(var(--dash-amber), 0.3);
   background:
     radial-gradient(
-      90% 160% at 0% 0%,
-      rgba(var(--dash-amber), 0.2) 0%,
-      rgba(var(--dash-amber), 0.05) 48%,
-      transparent 72%
+      92px 92px at 87% 26%,
+      rgba(var(--dash-amber), 0.5) 0 13%,
+      rgba(16, 13, 10, 0.95) 14% 32%,
+      transparent 33%
     ),
-    radial-gradient(70% 130% at 100% 20%, rgba(var(--dash-violet), 0.16) 0%, transparent 60%),
-    linear-gradient(165deg, rgba(17, 15, 20, 0.97), rgba(8, 8, 12, 0.99));
+    repeating-radial-gradient(
+      92px 92px at 87% 26%,
+      rgba(255, 255, 255, 0.07) 0 1px,
+      transparent 1px 7px
+    ),
+    radial-gradient(
+      130% 170% at 0% 100%,
+      rgba(var(--dash-amber), 0.16) 0%,
+      rgba(var(--dash-amber), 0.04) 46%,
+      transparent 70%
+    ),
+    radial-gradient(90% 140% at 100% 0%, rgba(var(--dash-violet), 0.14) 0%, transparent 58%),
+    linear-gradient(160deg, rgba(24, 19, 15, 0.97), rgba(9, 9, 13, 0.99));
   box-shadow:
-    0 18px 50px rgba(0, 0, 0, 0.45),
-    0 0 40px rgba(var(--dash-amber), 0.06);
-  gap: 20px;
+    0 24px 60px rgba(0, 0, 0, 0.5),
+    0 0 50px rgba(var(--dash-amber), 0.07);
+  text-align: left;
+  color: #fff;
+  cursor: pointer;
   transition:
     border-color 0.22s ease,
     box-shadow 0.22s ease,
     transform 0.22s ease;
 }
+/* Two fanned sleeves behind the vinyl. */
 #dashboard-page .listen-hero::before,
 #dashboard-page .listen-hero::after {
   content: '';
   position: absolute;
-  border-radius: 50%;
+  width: 158px;
+  height: 158px;
+  border-radius: 14px;
   pointer-events: none;
-  /* wax with groove rings and a warm centre label */
-  background:
-    radial-gradient(
-      circle,
-      rgba(var(--dash-amber), 0.55) 0 9%,
-      rgba(20, 16, 12, 0.9) 10% 26%,
-      transparent 27%
-    ),
-    repeating-radial-gradient(circle, rgba(255, 255, 255, 0.075) 0 1px, transparent 1px 6px),
-    radial-gradient(circle, #1b1a20 0 62%, #0b0b0e 63% 100%);
-  box-shadow: 0 0 60px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 26px 60px rgba(0, 0, 0, 0.6);
 }
 #dashboard-page .listen-hero::before {
-  width: 250px;
-  height: 250px;
-  right: -84px;
-  top: 50%;
-  transform: translateY(-50%) rotate(-8deg);
-  opacity: 0.85;
+  right: 108px;
+  top: -48px;
+  transform: rotate(-13deg);
+  background:
+    radial-gradient(
+      circle at 72% 30%,
+      rgba(var(--dash-amber), 0.4) 0 16%,
+      rgba(10, 8, 6, 0.9) 17% 34%,
+      transparent 35%
+    ),
+    linear-gradient(150deg, #7a5527 0%, #3a2a12 55%, #191006 100%);
+  border: 1px solid rgba(var(--dash-amber), 0.25);
 }
 #dashboard-page .listen-hero::after {
-  width: 190px;
-  height: 190px;
-  right: 96px;
-  top: 50%;
-  transform: translateY(-50%) rotate(10deg);
-  opacity: 0.5;
+  right: -30px;
+  top: -26px;
+  transform: rotate(9deg);
+  background:
+    radial-gradient(
+      circle at 30% 68%,
+      rgba(var(--dash-violet-soft), 0.35) 0 15%,
+      rgba(8, 6, 12, 0.9) 16% 32%,
+      transparent 33%
+    ),
+    linear-gradient(150deg, #4a3a6e 0%, #241b3d 55%, #100c1c 100%);
+  border: 1px solid rgba(var(--dash-violet), 0.3);
 }
 #dashboard-page .listen-hero > * {
   position: relative;
@@ -544,54 +664,60 @@ body:not(.reduce-effects):not(.max-performance)
 #dashboard-page .listen-hero:hover {
   border-color: rgba(var(--dash-amber), 0.55);
   box-shadow:
-    0 22px 60px rgba(0, 0, 0, 0.5),
-    0 0 60px rgba(var(--dash-amber), 0.12);
-  transform: translateY(-2px);
-}
-#dashboard-page .listen-hero:hover .listen-hero-play {
-  background: rgba(var(--dash-amber), 0.92);
-  transform: scale(1.1);
+    0 28px 70px rgba(0, 0, 0, 0.55),
+    0 0 70px rgba(var(--dash-amber), 0.13);
+  transform: translateY(-3px);
 }
 #dashboard-page .listen-hero-icon {
-  width: 58px;
-  height: 58px;
-  border-radius: 16px;
+  grid-area: icon;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
   color: rgb(var(--dash-amber));
   background: rgba(var(--dash-amber), 0.12);
   border: 1px solid rgba(var(--dash-amber), 0.32);
 }
+#dashboard-page .listen-hero-text {
+  grid-area: text;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
 #dashboard-page .listen-hero-text strong {
   font-size: 19px;
   font-weight: 750;
-  letter-spacing: -0.015em;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
 }
 #dashboard-page .listen-hero-text span {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.58);
-  max-width: 46ch;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.6);
 }
-/* The equalizer: five amber bars breathing at different rates. Markup is a
-   single aria-hidden span (see listen-band.tsx) — pure decoration, zero
-   behaviour. */
+/* The equalizer: five amber bars breathing at different rates. */
 #dashboard-page .listen-eq {
+  grid-area: eq;
   display: flex;
   align-items: flex-end;
   gap: 4px;
   height: 26px;
-  flex: none;
-  margin-left: auto;
   opacity: 0.9;
 }
 #dashboard-page .listen-eq i {
-  width: 3.5px;
+  width: 4px;
   border-radius: 3px;
   background: linear-gradient(180deg, #ffe3b8, rgb(var(--dash-amber)));
-  box-shadow: 0 0 8px rgba(var(--dash-amber), 0.45);
+  box-shadow: 0 0 10px rgba(var(--dash-amber), 0.45);
   transform-origin: bottom;
   height: 40%;
 }
 body:not(.reduce-effects):not(.max-performance) #dashboard-page .listen-eq i {
-  animation: dash-eq-breathe 1.6s ease-in-out infinite;
+  animation: dash3-eq-breathe 1.6s ease-in-out infinite;
 }
 #dashboard-page .listen-eq i:nth-child(1) {
   animation-delay: 0s;
@@ -613,7 +739,7 @@ body:not(.reduce-effects):not(.max-performance) #dashboard-page .listen-eq i {
   animation-delay: 0.34s;
   animation-duration: 1.45s;
 }
-@keyframes dash-eq-breathe {
+@keyframes dash3-eq-breathe {
   0%,
   100% {
     transform: scaleY(0.35);
@@ -622,89 +748,152 @@ body:not(.reduce-effects):not(.max-performance) #dashboard-page .listen-eq i {
     transform: scaleY(1);
   }
 }
-/* The play button: bigger, glowing, with a slow halo ring. */
+/* The play button: big, glowing, haloed. */
 #dashboard-page .listen-hero-play {
+  grid-area: play;
   width: 56px;
   height: 56px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
   font-size: 18px;
-  background: rgba(var(--dash-amber), 0.85);
+  padding-left: 3px;
+  color: #1a1208;
+  background: rgba(var(--dash-amber), 0.92);
   box-shadow:
-    0 6px 26px rgba(var(--dash-amber), 0.5),
-    0 0 0 6px rgba(var(--dash-amber), 0.1);
+    0 8px 30px rgba(var(--dash-amber), 0.5),
+    0 0 0 7px rgba(var(--dash-amber), 0.1);
   transition:
     background 0.2s ease,
     transform 0.2s ease,
     box-shadow 0.2s ease;
 }
-body:not(.reduce-effects):not(.max-performance) #dashboard-page .listen-hero-play {
-  animation: dash-play-halo 3.2s ease-in-out infinite;
+#dashboard-page .listen-hero:hover .listen-hero-play {
+  transform: scale(1.08);
 }
-@keyframes dash-play-halo {
+body:not(.reduce-effects):not(.max-performance) #dashboard-page .listen-hero-play {
+  animation: dash3-play-halo 3.2s ease-in-out infinite;
+}
+@keyframes dash3-play-halo {
   0%,
   100% {
     box-shadow:
-      0 6px 26px rgba(var(--dash-amber), 0.5),
-      0 0 0 6px rgba(var(--dash-amber), 0.1);
+      0 8px 30px rgba(var(--dash-amber), 0.5),
+      0 0 0 7px rgba(var(--dash-amber), 0.1);
   }
   50% {
     box-shadow:
-      0 6px 26px rgba(var(--dash-amber), 0.55),
-      0 0 0 11px rgba(var(--dash-amber), 0.05);
+      0 8px 30px rgba(var(--dash-amber), 0.55),
+      0 0 0 13px rgba(var(--dash-amber), 0.05);
   }
 }
-/* Your Mixes: an elevated tile with violet depth, the doorway to Discover. */
+/* Your Mixes: the violet companion tile, bottom-aligned with the radio
+   card, with a small fanned cover motif of its own. Narrow by design — a
+   ticket-stub mini card next to the big radio card. */
 #dashboard-page .listen-tile {
-  padding: 22px 26px;
-  border-radius: 22px;
-  border: 1px solid rgba(var(--dash-violet), 0.26);
-  background:
-    radial-gradient(120% 160% at 100% 0%, rgba(var(--dash-violet), 0.16) 0%, transparent 55%),
-    linear-gradient(165deg, rgba(18, 16, 24, 0.96), rgba(9, 9, 13, 0.99));
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.4);
-  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  align-self: end;
+  min-height: 252px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
   gap: 6px;
+  padding: 22px 20px;
+  border-radius: 24px;
+  border: 1px solid rgba(var(--dash-violet), 0.32);
+  background:
+    radial-gradient(120% 120% at 100% 0%, rgba(var(--dash-violet), 0.22) 0%, transparent 56%),
+    linear-gradient(165deg, rgba(24, 20, 36, 0.97), rgba(10, 10, 16, 0.99));
+  box-shadow:
+    0 20px 50px rgba(0, 0, 0, 0.45),
+    0 0 40px rgba(var(--dash-violet), 0.08);
+  text-align: left;
+  color: #fff;
+  cursor: pointer;
   transition:
     border-color 0.2s ease,
     box-shadow 0.2s ease,
     transform 0.2s ease;
 }
+#dashboard-page .listen-tile::before,
+#dashboard-page .listen-tile::after {
+  content: '';
+  position: absolute;
+  border-radius: 12px;
+  pointer-events: none;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
+}
+#dashboard-page .listen-tile::before {
+  width: 76px;
+  height: 76px;
+  left: 20px;
+  top: -24px;
+  transform: rotate(-10deg);
+  background: linear-gradient(150deg, #5b4a8f 0%, #2c2347 60%, #161226 100%);
+  border: 1px solid rgba(var(--dash-violet), 0.35);
+}
+#dashboard-page .listen-tile::after {
+  width: 76px;
+  height: 76px;
+  left: 76px;
+  top: -16px;
+  transform: rotate(7deg);
+  background: linear-gradient(150deg, #8f5a6e 0%, #47232f 60%, #261016 100%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+#dashboard-page .listen-tile > * {
+  position: relative;
+  z-index: 1;
+}
 #dashboard-page .listen-tile:hover {
-  border-color: rgba(var(--dash-violet), 0.5);
+  border-color: rgba(var(--dash-violet), 0.55);
   box-shadow:
-    0 18px 48px rgba(0, 0, 0, 0.45),
-    0 0 34px rgba(var(--dash-violet), 0.12);
-  transform: translateY(-2px);
-  background:
-    radial-gradient(120% 160% at 100% 0%, rgba(var(--dash-violet), 0.22) 0%, transparent 55%),
-    linear-gradient(165deg, rgba(22, 19, 30, 0.97), rgba(10, 10, 15, 0.99));
+    0 24px 58px rgba(0, 0, 0, 0.5),
+    0 0 54px rgba(var(--dash-violet), 0.14);
+  transform: translateY(-3px);
 }
 #dashboard-page .listen-tile-title {
   font-size: 16px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
 }
 #dashboard-page .listen-tile-sub {
-  font-size: 12.5px;
-  line-height: 1.5;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.6);
 }
 #dashboard-page .listen-tile-arrow {
-  font-size: 18px;
+  font-size: 16px;
+  color: rgb(var(--dash-violet-soft));
+  margin-top: 2px;
 }
 
-/* ── 5. RAILS — composed headers, confident cards ─────────────────────── */
+/* ── 7. RAILS — free-floating shelves with soft edge fades ──────────── */
 
+#dashboard-page article.dash-card--rail:not([data-card='listen']) {
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  overflow: visible;
+  min-width: 0;
+}
 #dashboard-page .dash-rail-head {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
   padding: 0 4px;
 }
 #dashboard-page .dash-rail-titleblock {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
 }
 #dashboard-page .dash-rail-title {
@@ -712,12 +901,11 @@ body:not(.reduce-effects):not(.max-performance) #dashboard-page .listen-hero-pla
   display: flex;
   align-items: baseline;
   gap: 12px;
-  font-size: 23px;
+  font-size: 24px;
   font-weight: 750;
   letter-spacing: -0.02em;
   color: #f4f5f7;
 }
-/* The count becomes a real pill — the number earns its chrome. */
 #dashboard-page .dash-rail-count {
   font-size: 12px;
   font-weight: 700;
@@ -757,10 +945,10 @@ body:not(.reduce-effects):not(.max-performance) #dashboard-page .listen-hero-pla
 }
 #dashboard-page .dash-rail-subtitle {
   font-size: 13.5px;
-  color: rgba(var(--dash-ink), 0.52);
+  color: rgba(var(--dash-ink), 0.5);
   line-height: 1.5;
 }
-/* Segmented control — the premier idiom for the feed switcher. */
+/* Segmented control for the feed switcher. */
 #dashboard-page .dash-band-tabs {
   flex: none;
   display: flex;
@@ -806,16 +994,39 @@ body:not(.reduce-effects):not(.max-performance) #dashboard-page .listen-hero-pla
   outline: 2px solid rgba(var(--accent-rgb), 0.7);
   outline-offset: 2px;
 }
-/* The shelf: air between covers, larger cards, hover with intent — a lift
-   and a warm edge, not just a shadow. */
+/* The shelf: no scrollbar chrome, soft fades at both scroll edges. The mask
+   is fixed to the visible box, so the fades stay at the edges while the
+   covers scroll beneath them. */
 #dashboard-page .dash-rail {
-  gap: 18px;
-  padding: 6px 4px 14px;
+  display: flex;
+  gap: 20px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 6px 34px 20px;
+  margin: 0 -34px;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    #000 34px,
+    #000 calc(100% - 34px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    #000 34px,
+    #000 calc(100% - 34px),
+    transparent 100%
+  );
+}
+#dashboard-page .dash-rail::-webkit-scrollbar {
+  display: none;
 }
 #dashboard-page .dash-rail .dash-rail-card {
-  width: 168px;
+  width: 176px;
   flex: none;
-  border-radius: 16px;
+  border-radius: 18px;
   border-color: rgba(255, 255, 255, 0.08);
   transition:
     transform 0.22s ease,
@@ -823,11 +1034,11 @@ body:not(.reduce-effects):not(.max-performance) #dashboard-page .listen-hero-pla
     border-color 0.22s ease;
 }
 #dashboard-page .dash-rail .dash-rail-card:hover {
-  transform: translateY(-4px);
-  border-color: rgba(var(--dash-amber), 0.38);
+  transform: translateY(-5px);
+  border-color: rgba(var(--dash-amber), 0.4);
   box-shadow:
-    0 16px 36px rgba(0, 0, 0, 0.5),
-    0 0 26px rgba(var(--dash-amber), 0.1);
+    0 18px 40px rgba(0, 0, 0, 0.5),
+    0 0 28px rgba(var(--dash-amber), 0.12);
 }
 #dashboard-page .dash-rail-caption {
   top: 10px;
@@ -849,7 +1060,6 @@ body:not(.reduce-effects):not(.max-performance) #dashboard-page .listen-hero-pla
   color: rgba(var(--dash-ink), 0.52);
   margin-top: 4px;
 }
-/* The artist line: a quieter link — underline only on hover, no accent shout. */
 #dashboard-page .dash-rail .ya-card-sub--link {
   color: rgba(var(--dash-ink), 0.62);
 }
@@ -858,50 +1068,64 @@ body:not(.reduce-effects):not(.max-performance) #dashboard-page .listen-hero-pla
   text-decoration-color: rgba(var(--dash-amber), 0.6);
 }
 
-/* ── 6. RIGHT COLUMN — room to breathe ───────────────────────────────── */
+/* ── 8. RIGHT COLUMN — one breathing glass panel ─────────────────────── */
 
-#dashboard-page .dash-layout {
-  grid-template-columns: minmax(0, 1fr) 400px;
-  gap: 32px;
-}
-#dashboard-page .dash-main {
-  gap: 32px;
-}
-#dashboard-page .dash-side {
-  gap: 20px;
-}
-/* The cards: deeper padding, a soft top-light, a real shadow. Calm
-   containers for dense information. */
-#dashboard-page .dash-side-card {
-  padding: 28px;
-  border-radius: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-top-color: rgba(255, 255, 255, 0.12);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.014));
+#dashboard-page aside.dash-side {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  min-width: 0;
+  padding: 28px 26px;
+  border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-top-color: rgba(255, 255, 255, 0.13);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015));
   box-shadow:
-    0 20px 50px rgba(0, 0, 0, 0.35),
+    0 28px 70px rgba(0, 0, 0, 0.42),
     0 1px 0 rgba(255, 255, 255, 0.05) inset;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
-#dashboard-page .dash-side-card:hover {
-  border-color: rgba(255, 255, 255, 0.08);
-  border-top-color: rgba(255, 255, 255, 0.12);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018));
+/* The articles inside are sections of the panel, not cards. */
+#dashboard-page aside.dash-side > article.dash-card {
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  border-radius: 0;
+  overflow: visible;
+}
+#dashboard-page aside.dash-side > article.dash-card:hover {
+  background: none;
+  border: none;
+  box-shadow: none;
+  transform: none;
 }
 #dashboard-page .dash-side-head {
-  margin-bottom: 20px;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
 }
-#dashboard-page .dash-side-title {
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: -0.015em;
+/* Eyebrow titles: "PLAYLIST SYNC", "UP NEXT". */
+#dashboard-page aside.dash-side .dash-side-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgba(var(--dash-ink), 0.62);
 }
 #dashboard-page .dash-side-link {
-  font-size: 13px;
-  font-weight: 600;
-  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  padding: 7px 14px;
   border-radius: 999px;
-  border: 1px solid transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(var(--dash-ink), 0.75);
   transition:
     background 0.16s ease,
     border-color 0.16s ease,
@@ -909,49 +1133,101 @@ body:not(.reduce-effects):not(.max-performance) #dashboard-page .listen-hero-pla
 }
 #dashboard-page .dash-side-link:hover {
   color: #fff;
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
-/* Playlist sync health: one calm number, the story beside it, and a slim
-   bar with a warm glow — amber into violet, the page's own gradient. */
+/* ── 9. THE SYNC-HEALTH RING ─────────────────────────────────────────── */
+
+/* The mockup's signature element: a glowing ring whose arc is the real sync
+   pct (driven by --dash-sync-pct, set from the health value in tsx), a
+   concentric tick ring, and the number centred inside. */
 #dashboard-page .dash-sync-health {
-  gap: 14px;
-  margin-bottom: 20px;
-}
-#dashboard-page .dash-sync-health-line {
-  gap: 14px;
-}
-#dashboard-page .dash-sync-pct {
-  font-size: 36px;
-  font-weight: 800;
-  letter-spacing: -0.025em;
-  font-variant-numeric: tabular-nums;
-  background: linear-gradient(120deg, #ffffff 40%, #ffd9a3 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-}
-#dashboard-page .dash-sync-of {
-  font-size: 13px;
-  line-height: 1.45;
-  max-width: 190px;
-  color: rgba(var(--dash-ink), 0.58);
+  display: grid;
+  justify-items: center;
+  position: relative;
+  padding: 14px 0 10px;
+  margin: 0;
 }
 #dashboard-page .dash-sync-bar {
-  height: 8px;
-  background: rgba(255, 255, 255, 0.07);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset;
+  grid-row: 1;
+  grid-column: 1;
+  position: relative;
+  width: 228px;
+  height: 228px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 270deg,
+    rgb(var(--dash-violet-soft)) 0 calc(var(--dash-sync-pct, 94) * 1%),
+    rgba(255, 255, 255, 0.07) calc(var(--dash-sync-pct, 94) * 1%) 100%
+  );
+  -webkit-mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - 16px),
+    #000 calc(100% - 15px)
+  );
+  mask: radial-gradient(farthest-side, transparent calc(100% - 16px), #000 calc(100% - 15px));
+  filter: drop-shadow(0 0 24px rgba(var(--dash-violet), 0.45));
   overflow: visible;
+  box-shadow: none;
 }
+/* The old linear fill is retired — the ring IS the meter now. */
 #dashboard-page .dash-sync-bar > span {
-  background: linear-gradient(90deg, rgb(var(--dash-amber)), rgb(var(--dash-violet-soft)));
-  box-shadow: 0 0 14px rgba(var(--dash-amber), 0.45);
+  display: none;
 }
-/* The sort: a quieter word, a more deliberate select. */
+/* The tick ring, concentric with the arc. */
+#dashboard-page .dash-sync-bar::before {
+  content: '';
+  position: absolute;
+  inset: -20px;
+  border-radius: 50%;
+  background: repeating-conic-gradient(
+    from 270deg,
+    rgba(255, 255, 255, 0.17) 0deg 0.7deg,
+    transparent 0.7deg 10deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 6px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 6px));
+}
+body:not(.reduce-effects):not(.max-performance) #dashboard-page .dash-sync-bar::before {
+  animation: dash3-ring-spin 90s linear infinite;
+}
+@keyframes dash3-ring-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+#dashboard-page .dash-sync-health-line {
+  grid-row: 1;
+  grid-column: 1;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+#dashboard-page .dash-sync-pct {
+  font-size: 54px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  text-shadow: 0 0 34px rgba(var(--dash-violet), 0.55);
+}
+#dashboard-page .dash-sync-of {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  line-height: 1.7;
+  max-width: 158px;
+  color: rgba(var(--dash-ink), 0.52);
+}
+/* The sort row, quiet. */
 #dashboard-page .dash-sync-sortbar {
-  margin: 0 0 10px;
+  margin: 14px 0 8px;
 }
 #dashboard-page .dash-side-sort {
   font-size: 12px;
@@ -965,17 +1241,21 @@ body:not(.reduce-effects):not(.max-performance) #dashboard-page .listen-hero-pla
   border-color: rgba(255, 255, 255, 0.1);
   background-color: rgba(255, 255, 255, 0.05);
 }
-/* Rows that breathe: taller, larger art, real hover intent. The actions
-   reveal on hover exactly as before (base handles the swap); the buttons
-   are a touch larger and warm on hover. */
+/* Synced playlist rows: taller, larger art, real hover intent. The actions
+   reveal on hover exactly as before; only the chrome changes. */
 #dashboard-page .dash-sync-rows {
-  gap: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 #dashboard-page .dash-sync-row {
-  grid-template-columns: 40px minmax(0, 1fr) auto;
-  min-height: 58px;
-  padding: 6px 10px 6px 6px;
-  border-radius: 14px;
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 7px 12px 7px 7px;
+  border-radius: 16px;
   border: 1px solid transparent;
   transition:
     background 0.16s ease,
@@ -983,16 +1263,16 @@ body:not(.reduce-effects):not(.max-performance) #dashboard-page .listen-hero-pla
 }
 #dashboard-page .dash-sync-row:hover {
   background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.07);
 }
 #dashboard-page .dash-sync-row .syncband-art {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
 }
 #dashboard-page .dash-sync-name {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 14.5px;
+  font-weight: 650;
   letter-spacing: 0.005em;
 }
 #dashboard-page .dash-sync-missing {
@@ -1004,6 +1284,7 @@ body:not(.reduce-effects):not(.max-performance) #dashboard-page .listen-hero-pla
 #dashboard-page .dash-sync-done {
   font-size: 12.5px;
   font-weight: 550;
+  color: rgba(var(--dash-ink), 0.6);
 }
 #dashboard-page .dash-sync-live {
   font-size: 12px;
@@ -1030,32 +1311,53 @@ body:not(.reduce-effects):not(.max-performance) #dashboard-page .listen-hero-pla
   color: rgb(var(--dash-amber));
 }
 
-/* Up next: the same flat-row language, taller and quieter. Countdowns get
-   pills; the running pill glows. */
-#dashboard-page .dash-side-card[data-card='automations'] .dash-autom-row {
-  padding: 12px 10px 12px 8px;
-  border-radius: 14px;
+/* ── 10. UP NEXT — the automation list ───────────────────────────────── */
+
+#dashboard-page aside.dash-side article[data-card='automations'] {
+  padding-top: 26px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+#dashboard-page aside.dash-side article[data-card='automations'] .dash-autom-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#dashboard-page aside.dash-side article[data-card='automations'] .dash-autom-row {
+  display: flex;
+  align-items: center;
   gap: 12px;
+  padding: 11px 10px 11px 6px;
+  border-radius: 14px;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease;
+  border: 1px solid transparent;
 }
-#dashboard-page .dash-side-card[data-card='automations'] .dash-autom-name {
+#dashboard-page aside.dash-side article[data-card='automations'] .dash-autom-row:hover {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(255, 255, 255, 0.06);
+}
+#dashboard-page aside.dash-side article[data-card='automations'] .dash-autom-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+#dashboard-page aside.dash-side article[data-card='automations'] .dash-autom-name {
   font-size: 14.5px;
-  font-weight: 600;
+  font-weight: 650;
   letter-spacing: 0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-#dashboard-page .dash-side-card[data-card='automations'] .dash-autom-meta {
-  gap: 8px;
+#dashboard-page aside.dash-side article[data-card='automations'] .dash-autom-meta {
+  font-size: 12px;
+  color: rgba(var(--dash-ink), 0.5);
 }
-#dashboard-page .dash-side-card[data-card='automations'] .dash-autom-last {
-  font-size: 12.5px;
-}
-#dashboard-page .dash-side-card[data-card='automations'] .dash-autom-when {
-  font-size: 12.5px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: rgba(var(--dash-ink), 0.65);
-}
-/* The countdown, as a pill — it reads as "when", not "a bare green ago". */
-#dashboard-page .dash-side-card[data-card='automations'] .dash-autom-next {
+/* The countdown, as a pill — "when", not a bare green ago. */
+#dashboard-page aside.dash-side article[data-card='automations'] .dash-autom-next {
   display: inline-block;
   padding: 4px 11px;
   border-radius: 999px;
@@ -1067,7 +1369,7 @@ body:not(.reduce-effects):not(.max-performance) #dashboard-page .listen-hero-pla
   border: 1px solid rgba(var(--dash-violet), 0.28);
   white-space: nowrap;
 }
-#dashboard-page .dash-side-card[data-card='automations'] .dash-autom-live-pill {
+#dashboard-page aside.dash-side article[data-card='automations'] .dash-autom-live-pill {
   padding: 4px 11px;
   border-radius: 999px;
   font-size: 12px;
@@ -1077,272 +1379,331 @@ body:not(.reduce-effects):not(.max-performance) #dashboard-page .listen-hero-pla
   border: 1px solid rgba(var(--accent-rgb), 0.5);
   box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.35);
 }
-#dashboard-page .dash-side-card[data-card='automations'] .dash-autom-paused {
+#dashboard-page aside.dash-side article[data-card='automations'] .dash-autom-paused {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: rgba(var(--dash-ink), 0.42);
 }
-#dashboard-page .dash-side-card[data-card='automations'] .dash-autom-run {
+#dashboard-page aside.dash-side article[data-card='automations'] .dash-autom-run {
   min-width: 34px;
   height: 34px;
   border-radius: 50%;
   font-size: 12.5px;
   font-weight: 650;
+  flex: none;
 }
-#dashboard-page .dash-side-card[data-card='automations'] .dash-autom-run:hover:not(:disabled) {
+#dashboard-page
+  aside.dash-side
+  article[data-card='automations']
+  .dash-autom-run:hover:not(:disabled) {
   border-color: rgba(var(--dash-amber), 0.55);
   color: rgb(var(--dash-amber));
 }
 
-/* Watchlist / wishlist tiles: true cards — numerals with presence, a warm
-   hover, badges that count. */
-#dashboard-page .dash-tiles.header-quick-nav {
-  gap: 18px;
+/* ── 11. WATCHLIST / WISHLIST — compact glass tiles ──────────────────── */
+
+#dashboard-page aside.dash-side .header-quick-nav.dash-tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  padding-top: 26px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
-#dashboard-page .dash-tiles .dash-tile.header-button {
-  min-height: 116px;
-  padding: 22px;
+#dashboard-page aside.dash-side .dash-tiles .dash-tile.header-button {
+  min-height: 104px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: 18px;
   border-radius: 20px;
-  gap: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-top-color: rgba(255, 255, 255, 0.12);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.014));
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.035);
+  box-shadow: none;
   transition:
     border-color 0.2s ease,
-    box-shadow 0.2s ease,
-    transform 0.2s ease,
-    background 0.2s ease;
+    background 0.2s ease,
+    transform 0.2s ease;
 }
-#dashboard-page .dash-tiles .dash-tile.header-button:hover {
-  border-color: rgba(var(--dash-amber), 0.3);
-  background: linear-gradient(180deg, rgba(var(--dash-amber), 0.06), rgba(255, 255, 255, 0.015));
-  box-shadow:
-    0 20px 48px rgba(0, 0, 0, 0.38),
-    0 0 30px rgba(var(--dash-amber), 0.08);
+#dashboard-page aside.dash-side .dash-tiles .dash-tile.header-button:hover {
+  border-color: rgba(var(--dash-amber), 0.32);
+  background: rgba(var(--dash-amber), 0.05);
   transform: translateY(-2px);
+  box-shadow: none;
 }
-#dashboard-page .dash-tiles .dash-tile .hero-btn-badge {
-  font-size: 33px;
+#dashboard-page aside.dash-side .dash-tiles .dash-tile .hero-btn-badge {
+  font-size: 30px;
   font-weight: 800;
   letter-spacing: -0.025em;
   font-variant-numeric: tabular-nums;
+  color: #f4f5f7;
 }
-#dashboard-page .dash-tiles .dash-tile .hero-btn-badge.has-items {
+#dashboard-page aside.dash-side .dash-tiles .dash-tile .hero-btn-badge.has-items {
   background: linear-gradient(120deg, #ffffff 40%, #ffd9a3 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
   -webkit-text-fill-color: transparent;
 }
-#dashboard-page .dash-tiles .dash-tile .hero-btn-label {
-  font-size: 13.5px;
+#dashboard-page aside.dash-side .dash-tiles .dash-tile .hero-btn-label {
+  font-size: 12.5px;
   font-weight: 550;
-  color: rgba(var(--dash-ink), 0.72);
+  color: rgba(var(--dash-ink), 0.68);
 }
-#dashboard-page .dash-tiles .dash-tile-sub {
-  font-size: 12px;
-  color: rgba(var(--dash-ink), 0.5);
+#dashboard-page aside.dash-side .dash-tiles .dash-tile-sub {
+  font-size: 11.5px;
+  color: rgba(var(--dash-ink), 0.48);
   font-variant-numeric: tabular-nums;
 }
 
-/* ── 7. FOOTER — quieter still ───────────────────────────────────────── */
+/* ── 12. FOOTER — quiet ──────────────────────────────────────────────── */
 
 #dashboard-page .dash-footer {
-  margin-top: 14px;
+  margin-top: 6px;
   padding-top: 24px;
-  border-top-color: rgba(255, 255, 255, 0.06);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 #dashboard-page .dash-footer .dash-quick-settings-label {
   color: rgba(255, 255, 255, 0.34);
   letter-spacing: 0.1em;
 }
 
-/* ── 8. MOTION GATES ─────────────────────────────────────────────────── */
-/* Every animation above only runs when the user hasn't asked for calm —
-   the selectors already gate on body:not(.reduce-effects):not(.max-performance).
-   This block is the OS-level backstop, plus the always-on safety nets. */
+/* ── 13. MOTION GATES ───────────────────────────────────────────────── */
+
 @media (prefers-reduced-motion: reduce) {
-  #dashboard-page .dashboard-header.dash-hero::before,
+  #dashboard-page::before,
   #dashboard-page .listen-eq i,
-  #dashboard-page .listen-hero-play {
+  #dashboard-page .listen-hero-play,
+  #dashboard-page .dash-sync-bar::before {
     animation: none !important;
-  }
-  #dashboard-page .dash-hero-library .scanning .library-status-dot {
-    animation: none;
   }
   #dashboard-page .listen-hero:hover,
   #dashboard-page .listen-tile:hover,
   #dashboard-page .dash-rail .dash-rail-card:hover,
-  #dashboard-page .dash-tiles .dash-tile.header-button:hover {
+  #dashboard-page aside.dash-side .dash-tiles .dash-tile.header-button:hover {
     transform: none;
   }
 }
 
-/* ── 9. RESPONSIVE ───────────────────────────────────────────────────── */
+/* ── 14. RESPONSIVE ──────────────────────────────────────────────────── */
 
-/* The hero grid collapses to a single column at 1260px (base style.css).
-   The display:contents intro items lose their desktop seats and flow in
-   DOM order: eyebrow → greeting → stats → the full-width console strip →
-   the orb stage. The stage's explicit column-2 seat is released or the
-   grid would grow an implicit second column and overflow. */
-@media (max-width: 1260px) {
-  #dashboard-page .dash-hero-eyebrow,
-  #dashboard-page .dash-hero .hello-greeting,
+/* The panel needs room; at laptop widths the page drops to two columns:
+   greeting + orbs on the first row, the hero cards full-width beneath,
+   then rails, then the panel as a two-column spread. */
+@media (max-width: 1380px) {
+  #dashboard-page {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 32px;
+  }
+  #dashboard-page .dash-hero-eyebrow {
+    grid-column: 1;
+    grid-row: 1;
+    margin-top: 20px;
+  }
+  #dashboard-page .dash-hero .hello-greeting {
+    grid-column: 1;
+    grid-row: 2;
+  }
   #dashboard-page .dash-hero-numbers {
     grid-column: 1;
-    grid-row: auto;
-  }
-  #dashboard-page .dash-hero-library {
-    grid-column: 1;
-    grid-row: auto;
-    margin-top: 26px;
+    grid-row: 3;
   }
   #dashboard-page .orb-stage {
-    grid-column: 1;
-    grid-row: auto;
-    align-self: auto;
-    min-height: 240px;
+    grid-column: 2;
+    grid-row: 1 / 4;
+    min-height: 320px;
+    margin-top: 12px;
   }
-}
-
-/* The 400px rail needs room; it stacks a touch earlier so rows never squeeze. */
-@media (max-width: 1400px) {
-  #dashboard-page .dash-layout {
-    grid-template-columns: minmax(0, 1fr) 360px;
-    gap: 28px;
-  }
-}
-@media (max-width: 1320px) {
-  #dashboard-page .dash-layout {
-    grid-template-columns: 1fr;
-    gap: 26px;
-  }
-  #dashboard-page .dash-side {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 20px;
-    align-items: start;
-  }
-  #dashboard-page .dash-side > .header-quick-nav {
+  #dashboard-page .dash-hero-library {
     grid-column: 1 / -1;
+    grid-row: 4;
   }
-}
-
-@media (max-width: 960px) {
-  #dashboard-page .dash-hero .hello-greeting {
-    font-size: clamp(26px, 6vw, 32px);
+  #dashboard-page .dash-hero-library .library-status-header {
+    max-width: 100%;
   }
-  #dashboard-page .dash-hero-number {
-    padding: 2px 20px;
+  #dashboard-page article[data-card='alerts'] {
+    grid-column: 1 / -1;
+    grid-row: 5;
   }
-  #dashboard-page .dash-hero-number-value {
+  #dashboard-page .dash-main > article.dash-card[data-card='listen'] {
+    grid-column: 1 / -1;
+    grid-row: 6;
+    margin-top: 0;
+  }
+  /* Full-width hero cards get their room back at this breakpoint. */
+  #dashboard-page .listen-hero {
+    min-height: 320px;
+    column-gap: 20px;
+    padding: 30px 34px;
+  }
+  #dashboard-page .listen-hero-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+  }
+  #dashboard-page .listen-hero-text strong {
     font-size: 22px;
   }
-  /* The composed library bar stacks: status above, actions below. */
-  #dashboard-page .dash-hero-library .library-status-header {
-    align-items: stretch;
-    flex-direction: column;
-    padding: 16px 16px 14px 18px;
+  #dashboard-page .listen-hero-text span {
+    font-size: 13.5px;
+    max-width: 52ch;
   }
-  #dashboard-page .dash-hero-library .library-status-info {
-    flex-wrap: wrap;
-  }
-  #dashboard-page .dash-hero-library .library-status-subtitle {
-    white-space: normal;
-  }
-  #dashboard-page .dash-hero-library .library-status-actions {
-    justify-content: flex-start;
-  }
-  /* Rail header stacks: title block above the segmented control. */
-  #dashboard-page .dash-rail-head {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 14px;
-  }
-  #dashboard-page .dash-rail-title {
+  #dashboard-page .listen-hero-play {
+    width: 64px;
+    height: 64px;
     font-size: 20px;
   }
-  #dashboard-page .dash-side {
-    grid-template-columns: 1fr;
+  #dashboard-page .listen-tile {
+    min-height: 280px;
   }
-  /* The vinyl fan tucks away on small screens so the copy owns the card. */
-  #dashboard-page .listen-hero::before {
-    width: 170px;
-    height: 170px;
-    right: -70px;
-    opacity: 0.55;
+  #dashboard-page .dash-main > article.dash-card[data-card='active-downloads'] {
+    grid-column: 1 / -1;
+    grid-row: 7;
   }
-  #dashboard-page .listen-hero::after {
-    display: none;
+  #dashboard-page .dash-main > article.dash-card--rail:not([data-card]) {
+    grid-column: 1 / -1;
+    grid-row: 8;
   }
-  #dashboard-page .listen-eq {
-    display: none;
+  #dashboard-page article.dash-card--rail[data-card='listening-history'] {
+    grid-column: 1 / -1;
+    grid-row: 9;
   }
-  /* The orb stage breathes down on small screens, like the base layer. */
-  #dashboard-page .orb-stage {
-    min-height: 220px;
-    padding: 10px 10px 44px;
+  #dashboard-page aside.dash-side {
+    grid-column: 1 / -1;
+    grid-row: 10;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 28px;
+    align-items: start;
+  }
+  #dashboard-page aside.dash-side article[data-card='automations'] {
+    padding-top: 0;
+    border-top: none;
+  }
+  #dashboard-page aside.dash-side .header-quick-nav.dash-tiles {
+    grid-column: 1 / -1;
+    padding-top: 28px;
+  }
+  #dashboard-page .dash-footer {
+    grid-column: 1 / -1;
+    grid-row: 11;
   }
 }
 
-@media (max-width: 640px) {
-  #dashboard-page .dash-hero-eyebrow {
-    font-size: 10.5px;
-    letter-spacing: 0.18em;
-    margin-bottom: 12px;
+/* Phones and narrow tablets: one column, hero cards stacked. */
+@media (max-width: 900px) {
+  #dashboard-page {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 26px;
+  }
+  #dashboard-page .dash-hero-eyebrow,
+  #dashboard-page .dash-hero .hello-greeting,
+  #dashboard-page .dash-hero-numbers,
+  #dashboard-page .dash-hero-library,
+  #dashboard-page .orb-stage,
+  #dashboard-page .dash-main > article.dash-card[data-card='listen'],
+  #dashboard-page .dash-main > article.dash-card[data-card='active-downloads'],
+  #dashboard-page .dash-main > article.dash-card--rail:not([data-card]),
+  #dashboard-page article.dash-card--rail[data-card='listening-history'],
+  #dashboard-page aside.dash-side,
+  #dashboard-page .dash-footer,
+  #dashboard-page article[data-card='alerts'] {
+    grid-column: 1;
+    grid-row: auto;
   }
   #dashboard-page .dash-hero .hello-greeting {
-    margin-bottom: 20px;
+    font-size: clamp(30px, 8vw, 38px);
   }
-  /* The divided band wraps to two-per-row on phones; the hairline
-       dividers retire (they'd slice wrapped rows oddly) and spacing does
-       the separating instead. */
-  #dashboard-page .dash-hero-numbers {
+  #dashboard-page .orb-stage {
+    min-height: 260px;
+    margin-top: 0;
+  }
+  #dashboard-page .listen-band {
+    grid-template-columns: 1fr;
+  }
+  #dashboard-page .listen-hero {
+    min-height: 300px;
+  }
+  #dashboard-page .listen-tile {
+    min-height: 200px;
+  }
+  #dashboard-page aside.dash-side {
+    display: flex;
+    flex-direction: column;
+  }
+  #dashboard-page aside.dash-side article[data-card='automations'] {
+    padding-top: 26px;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+  }
+  /* The composed status pill stacks: info above, actions below. */
+  #dashboard-page .dash-hero-library .library-status-header {
     flex-wrap: wrap;
-    row-gap: 14px;
+    border-radius: 24px;
+    padding: 14px 14px 12px 16px;
   }
-  #dashboard-page .dash-hero-number {
-    padding: 2px 18px;
+  #dashboard-page .dash-hero-library .library-status-info {
+    flex: 1 1 100%;
   }
-  #dashboard-page .dash-hero-number:first-child {
-    padding-left: 0;
-  }
-  #dashboard-page .dash-hero-number + .dash-hero-number::before {
-    display: none;
-  }
-  #dashboard-page .dash-hero-number-value {
-    font-size: 21px;
-  }
-  #dashboard-page .dash-hero-library {
-    margin-top: 22px;
-  }
-  /* Quick Scan owns its row on phones — thumb-sized, unmissable. */
   #dashboard-page .dash-hero-library .library-status-actions {
-    width: 100%;
+    flex: 1 1 100%;
+    justify-content: flex-start;
   }
   #dashboard-page .dash-hero-library .library-status-btn {
     flex: 1 1 auto;
     justify-content: center;
   }
-  /* Rails: the shelf breathes a touch less, the segmented control scrolls
-       if it ever outgrows the phone. */
-  #dashboard-page .dash-rail .dash-rail-card {
-    width: 152px;
+  /* Rail headers stack: title block above the segmented control. */
+  #dashboard-page .dash-rail-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
   }
   #dashboard-page .dash-band-tabs {
     max-width: 100%;
     overflow-x: auto;
   }
-  /* Side cards keep their air but lose a little padding on phones. */
-  #dashboard-page .dash-side-card {
-    padding: 22px 20px;
-    border-radius: 20px;
+  /* The vinyl cluster tucks away on small screens so the copy owns the card. */
+  #dashboard-page .listen-hero::before {
+    width: 150px;
+    height: 150px;
+    right: 90px;
+    top: -50px;
+    opacity: 0.7;
   }
-  /* The tiles stack on narrow phones — two full-width count cards. */
-  #dashboard-page .dash-tiles.header-quick-nav {
-    flex-direction: column;
+  #dashboard-page .listen-hero::after {
+    width: 150px;
+    height: 150px;
+    right: -50px;
+    top: -40px;
+    opacity: 0.7;
+  }
+  #dashboard-page .listen-eq {
+    display: none;
+  }
+  /* The rail fades narrow on phones. */
+  #dashboard-page .dash-rail {
+    padding-left: 22px;
+    padding-right: 22px;
+    margin-left: -22px;
+    margin-right: -22px;
+    -webkit-mask-image: linear-gradient(
+      90deg,
+      transparent 0,
+      #000 22px,
+      #000 calc(100% - 22px),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      90deg,
+      transparent 0,
+      #000 22px,
+      #000 calc(100% - 22px),
+      transparent 100%
+    );
+  }
+  #dashboard-page .dash-rail .dash-rail-card {
+    width: 152px;
   }
 }
