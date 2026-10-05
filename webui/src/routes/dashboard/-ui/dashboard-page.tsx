@@ -53,12 +53,12 @@ export function DashboardPage() {
           {/* Only while something is downloading. It stays full width: the
               download cards are painted by vanilla into this shell. */}
           <ActiveDownloadsShell />
-          {/* The payoff: Library Radio and the Mixes doorway. */}
-          <ListenBand />
           {/* What's new in the library. Renders nothing until a feed has rows. */}
           <ContentBand />
           {/* What you've been playing. Renders nothing until history exists. */}
           <ListeningHistoryBand />
+          {/* The payoff: Library Radio and the Mixes doorway — below the rails. */}
+          <ListenBand />
         </div>
         <aside className="dash-side" aria-label="Your system">
           <SyncRail />
