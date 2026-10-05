@@ -38,6 +38,8 @@ export interface ServerPlaylistsResponse {
   error?: string;
   server_type?: string;
   playlists?: ServerPlaylist[];
+  /** #1542: playlists owned by other server admins (navidrome only) */
+  server_admin?: ServerPlaylistGroup[];
   others?: ServerPlaylistGroup[];
   scope?: ServerPlaylistScope;
   acting_as?: string | null;

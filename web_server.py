@@ -17850,8 +17850,11 @@ def get_server_playlists():
                     'owner': getattr(pl, 'owner', None)}
 
         others = []
+        server_admin = []
         if scope.is_admin:
-            mine, groups = admin_split(active_server, base, get_database())
+            mine, admin_groups, groups = admin_split(active_server, base, get_database())
+            server_admin = [{'owner': grp['owner'], 'profile': grp['profile'],
+                             'playlists': [_row(p) for p in grp['playlists']]} for grp in admin_groups]
             others = [{'owner': grp['owner'], 'profile': grp['profile'],
                        'playlists': [_row(p) for p in grp['playlists']]} for grp in groups]
         else:
@@ -17860,6 +17863,7 @@ def get_server_playlists():
             "success": True,
             "server_type": active_server,
             "playlists": [_row(p) for p in mine],
+            "server_admin": server_admin,
             "others": others,
             "scope": 'admin' if scope.is_admin else ('own' if scope.acting_as else 'shared'),
             "acting_as": scope.acting_as,

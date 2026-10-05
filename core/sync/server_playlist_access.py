@@ -173,18 +173,25 @@ def _profile_names(db: Any) -> dict:
 
 
 def admin_split(server: str, base_client: Any, db: Any) -> tuple:
-    """the admin's view: (its own playlists, everyone else's in groups).
+    """the admin's view: (its own playlists, server-admin groups, everyone else's groups).
 
     each group is ``{'owner', 'profile', 'playlists'}``: ``owner`` is the server
     user, ``profile`` the SoulSync profile linked to it (None when no profile is).
     navidrome lists every user's playlists to an admin with their owner. plex
     and jellyfin only show a user's playlists through that user, so there the
-    groups are the profiles linked to a server user of their own."""
+    groups are the profiles linked to a server user of their own (and the
+    server-admin list is always empty).
+
+    #1542: on navidrome, playlists owned by other server admins get their own
+    section, above "everyone else". adminRole comes from Subsonic getUser,
+    cached for an hour; when the lookup fails the owner stays in "everyone
+    else" (current behavior preserved).
+    """
     try:
         listed = list_playlists(server, base_client)
     except Exception as e:
         logger.warning("server playlists: admin listing failed for %s: %s", server, e)
-        return [], []
+        return [], [], []
     names = _profile_names(db)
     if server == 'navidrome':
         me = _norm(getattr(base_client, 'username', ''))
@@ -197,16 +204,25 @@ def admin_split(server: str, base_client: Any, db: Any) -> tuple:
                 login = None
             if login and login[0]:
                 by_login[_norm(login[0])] = pname
-        groups: dict = {}
+        admin_groups: dict = {}
+        other_groups: dict = {}
+        is_admin = getattr(base_client, 'is_server_admin', None)
         for p in listed:
             owner = getattr(p, 'owner', None)
             if owner is None or _norm(owner) == me:
                 continue
-            g = groups.setdefault(_norm(owner), {'owner': str(owner),
-                                                 'profile': by_login.get(_norm(owner)),
-                                                 'playlists': []})
+            target = other_groups
+            if callable(is_admin):
+                try:
+                    if is_admin(owner):
+                        target = admin_groups
+                except Exception as e:  # noqa: BLE001 - lookup failed: keep current grouping
+                    logger.debug("server admin lookup failed for %r: %s", owner, e)
+            g = target.setdefault(_norm(owner), {'owner': str(owner),
+                                                'profile': by_login.get(_norm(owner)),
+                                                'playlists': []})
             g['playlists'].append(p)
-        return mine, list(groups.values())
+        return mine, list(admin_groups.values()), list(other_groups.values())
     groups = []
     for pid, pname in names.items():
         view = client_for_profile(server, base_client, pid)
@@ -220,7 +236,7 @@ def admin_split(server: str, base_client: Any, db: Any) -> tuple:
             continue
         if theirs:
             groups.append({'owner': str(acting_as), 'profile': pname, 'playlists': theirs})
-    return list(listed), groups
+    return list(listed), [], groups
 
 
 __all__ = [
