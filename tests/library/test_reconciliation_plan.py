@@ -53,6 +53,34 @@ def test_numbered_parts_remain_separate_when_only_title_is_available():
     assert {(p['file_index'], p['slot_index']) for p in pairs} == {(0, 1), (1, 0)}
 
 
+def test_near_exact_duration_breaks_tie_between_otherwise_identical_titles():
+    files = [_file('Song', '/album/01 - Song.flac', 200000)]
+    slots = [
+        {'title': 'Song', 'duration_ms': 200010},
+        {'title': 'Song', 'duration_ms': 202990},
+    ]
+
+    pair = reconcile_folder(files, slots)['pairs'][0]
+
+    assert pair['slot_index'] == 0
+    assert pair['confidence'] == 'likely'
+    assert pair['duration_delta_ms'] == 10
+    assert pair['ambiguity_reasons'] == []
+
+
+def test_duration_does_not_hide_two_equally_plausible_slots():
+    files = [_file('Song', '/album/01 - Song.flac', 200000)]
+    slots = [
+        {'title': 'Song', 'duration_ms': 200010},
+        {'title': 'Song', 'duration_ms': 200500},
+    ]
+
+    pair = reconcile_folder(files, slots)['pairs'][0]
+
+    assert pair['confidence'] == 'ambiguous'
+    assert pair['ambiguity_reasons'] == ['another release track fits nearly as well']
+
+
 def test_ambiguous_acoustid_result_does_not_authorize_clear_repair():
     files = [_file('Mystery', '/album/01.flac', 200000,
                    {'mbid': 'one', 'title': 'Song One', 'artist': 'Artist', 'score': 0.9})]

@@ -35,14 +35,18 @@ const finding = {
           {
             file: '01 - Laid to Rest.flac',
             tag_title: 'Laid to Rest',
+            file_duration_ms: 240000,
             audio_title: 'Laid to Rest',
             audio_artist: 'Lamb of God',
             audio_score: 0.98,
             slot_title: 'Laid to Rest',
             slot_number: 1,
             disc_number: 1,
+            slot_duration_ms: 240010,
+            duration_delta_ms: 10,
             confidence: 'clear',
             reasons: ['AcoustID recording ID matches release slot'],
+            ambiguity_reasons: [],
           },
         ],
       },
@@ -166,6 +170,9 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByText('Candidate 1 · musicbrainz')).toBeTruthy();
     expect(screen.getByText('Candidate 2 · musicbrainz')).toBeTruthy();
     expect(screen.getByText('AcoustID recording ID matches release slot')).toBeTruthy();
+    expect(screen.getByText('Exact')).toBeTruthy();
+    expect(screen.getByText(/Δ 0.01s/)).toBeTruthy();
+    expect(screen.getByText('1 confirmed match')).toBeTruthy();
     expect(screen.getByText(/Track comparisons were not saved/)).toBeTruthy();
     expect(screen.queryByText(/"release_id"/)).toBeNull();
   });

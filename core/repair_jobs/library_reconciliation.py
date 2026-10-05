@@ -189,14 +189,18 @@ def _candidate_evidence(files: list[dict], scored: tuple) -> dict:
         pairs.append({
             'file': os.path.basename(file['path']),
             'tag_title': file['tags'].get('title') or '',
+            'file_duration_ms': file['tags'].get('duration_ms') or file.get('duration_ms') or 0,
             'audio_title': top.get('title') or '',
             'audio_artist': top.get('artist') or '',
             'audio_score': top.get('score'),
             'slot_title': slot['title'],
             'slot_number': slot.get('track_number'),
             'disc_number': slot.get('disc_number'),
+            'slot_duration_ms': slot.get('duration_ms') or 0,
+            'duration_delta_ms': pair.get('duration_delta_ms'),
             'confidence': pair['confidence'],
             'reasons': pair['reasons'],
+            'ambiguity_reasons': pair.get('ambiguity_reasons') or [],
         })
     return {
         'source': source, 'release_id': release_id,

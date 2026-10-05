@@ -408,20 +408,29 @@ export function ReviewPage() {
                 {active.description || 'Review the evidence below.'}
               </p>
 
-              <section className={styles.suggestion} aria-label="Suggested resolution">
-                <div className={styles.eyebrow}>Suggested resolution</div>
-                <strong>
-                  {suggested
-                    ? typeInfo?.verb || 'Apply repair'
-                    : canApply
-                      ? 'Choose the correct action after reviewing the evidence'
-                      : 'Review manually'}
-                </strong>
-                <p>
-                  {suggested
-                    ? 'This maintenance job has a direct repair action. Check the evidence and apply it below.'
-                    : 'The available evidence does not justify an automatic choice for this finding.'}
-                </p>
+              <section
+                className={styles.suggestion}
+                data-tone={suggested ? 'good' : 'warning'}
+                aria-label="Suggested resolution"
+              >
+                <span className={styles.suggestionIcon} aria-hidden="true">
+                  {suggested ? '✓' : '!'}
+                </span>
+                <div>
+                  <div className={styles.eyebrow}>Suggested resolution</div>
+                  <strong>
+                    {suggested
+                      ? typeInfo?.verb || 'Apply repair'
+                      : canApply
+                        ? 'Choose the correct action after reviewing the evidence'
+                        : 'Review manually'}
+                  </strong>
+                  <p>
+                    {suggested
+                      ? 'Evidence supports a direct repair.'
+                      : 'The evidence still requires a decision.'}
+                  </p>
+                </div>
               </section>
 
               <ReconciliationEvidence

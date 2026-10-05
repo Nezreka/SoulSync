@@ -525,6 +525,10 @@ def test_locked_release_with_better_fitting_edition_requires_release_review(tmp_
     assert better['pairs'][0]['audio_title'] == 'Hourglass'
     assert better['pairs'][0]['slot_title'] == 'Hourglass'
     assert better['pairs'][0]['confidence'] == 'clear'
+    assert better['pairs'][0]['file_duration_ms'] == 200000
+    assert better['pairs'][0]['slot_duration_ms'] == 200000
+    assert better['pairs'][0]['duration_delta_ms'] == 0
+    assert better['pairs'][0]['ambiguity_reasons'] == []
 
 
 def test_ambiguous_unassigned_audio_is_not_offered_for_quarantine(tmp_path, monkeypatch):

@@ -45,6 +45,29 @@ def _recording_id(slot: dict) -> str:
                or slot.get('recording_id') or '')
 
 
+def _duration_delta_ms(file: dict, slot: dict) -> int | None:
+    tags = file.get('tags') or {}
+    file_duration = int(tags.get('duration_ms') or file.get('duration_ms') or 0)
+    slot_duration = int(slot.get('duration_ms') or 0)
+    if not file_duration or not slot_duration:
+        return None
+    return abs(file_duration - slot_duration)
+
+
+def _duration_weight(delta_ms: int) -> int:
+    """Reward precise duration fits without letting duration outrank identity.
+
+    Catalog and decoder durations routinely differ by fractions of a second.
+    Inside the existing three-second compatibility window, retain that
+    precision as a tie-breaker instead of assigning every fit the same score.
+    """
+    if delta_ms <= 3000:
+        return 800 - round(delta_ms * 600 / 3000)
+    if delta_ms <= 15000:
+        return 100 - round((delta_ms - 3000) * 75 / 12000)
+    return 0
+
+
 def _pair_weight(file: dict, slot: dict) -> tuple[int, list[str]]:
     tags = file.get('tags') or {}
     evidence = file.get('acoustid') or {}
@@ -93,15 +116,14 @@ def _pair_weight(file: dict, slot: dict) -> tuple[int, list[str]]:
         weight += 300 if fingerprint_weight else 1200
         reasons.append('embedded recording ID agrees')
 
-    file_duration = int(tags.get('duration_ms') or file.get('duration_ms') or 0)
-    slot_duration = int(slot.get('duration_ms') or 0)
-    if file_duration and slot_duration:
-        delta = abs(file_duration - slot_duration)
+    delta = _duration_delta_ms(file, slot)
+    if delta is not None:
         if delta <= 3000:
-            weight += 500
+            weight += _duration_weight(delta)
             reasons.append(f'duration differs by {delta / 1000:.2f}s')
         elif delta <= 15000:
-            weight += 100
+            weight += _duration_weight(delta)
+            reasons.append(f'duration differs by {delta / 1000:.2f}s')
         elif delta > 30000 and not fingerprint_weight:
             return 0, []
     if tag_title >= 0.83 and tags.get('track_number') == slot.get('track_number'):
@@ -133,9 +155,18 @@ def reconcile_folder(files: list[dict], slots: list[dict]) -> dict[str, Any]:
             other_index != file_index and weighted[other_index][slot_index][0] >= weight * 0.80
             for other_index in range(len(files))
         )
+        ambiguity_reasons = []
+        if ambiguous:
+            ambiguity_reasons.append('AcoustID returned competing identities')
+        if close_alternative:
+            ambiguity_reasons.append('another release track fits nearly as well')
+        if competing_file:
+            ambiguity_reasons.append('another local file fits this release track')
         pairs.append({
             'file_index': file_index, 'slot_index': slot_index,
             'score': weight, 'reasons': reasons,
+            'duration_delta_ms': _duration_delta_ms(files[file_index], slots[slot_index]),
+            'ambiguity_reasons': ambiguity_reasons,
             'confidence': 'ambiguous' if ambiguous or close_alternative or competing_file
                           else 'clear' if weight >= 4500 else 'likely',
         })
