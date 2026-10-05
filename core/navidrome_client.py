@@ -1368,7 +1368,14 @@ class NavidromeClient(MediaServerClient):
                 elif hasattr(track, 'id'):
                     track_ids.append(str(track.id))
 
-            if not track_ids:
+            if not track_ids and playlist_id is None:
+                # #1543: allow creating an EMPTY playlist (new mirror with
+                # no library matches yet — tracks land on later syncs).
+                # The Subsonic createPlaylist accepts a name with no songIds.
+                # Emptying an EXISTING playlist via update is still refused;
+                # the sync service's zero-match guard owns that decision.
+                logger.info(f"Creating empty Navidrome playlist '{name}'")
+            elif not track_ids:
                 logger.warning(f"No valid tracks provided for playlist '{name}'")
                 return False
 
