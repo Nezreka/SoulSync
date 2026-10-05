@@ -1,7 +1,7 @@
 # SoulSync WebUI Dockerfile
 # Multi-architecture support for AMD64 and ARM64
 
-FROM node:24-slim AS webui-builder
+FROM --platform=$BUILDPLATFORM node:24-slim AS webui-builder
 
 WORKDIR /app/webui
 
