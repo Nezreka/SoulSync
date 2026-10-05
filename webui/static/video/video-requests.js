@@ -767,6 +767,14 @@
         document.dispatchEvent(new CustomEvent('soulsync:video-requests-changed'));
     }
 
+    // season 0 is the specials season — a real, requestable season. only a
+    // missing value (null/undefined/'') or a non-number means "no season".
+    function validRequestSeason(s) {
+        if (s === undefined || s === null || s === '') return false;
+        var n = Number(s);
+        return isFinite(n) && n >= 0;
+    }
+
     // item: {kind, tmdb_id, title, year?, poster_url?} for movie/show;
     // {kind:'episode', tmdb_id (show), season, episode, title} for episodes;
     // {kind:'youtube', youtube_id, title, channel?} for YouTube videos.
@@ -775,7 +783,7 @@
     function requestTitle(item) {
         if (!item) return Promise.resolve(null);
         var key = reqKey(item.kind, item.tmdb_id, item.season, item.episode, item.youtube_id);
-        if (item.kind === 'episode' && (!item.tmdb_id || !item.season || !item.episode)) return Promise.resolve(null);
+        if (item.kind === 'episode' && (!item.tmdb_id || !validRequestSeason(item.season) || !item.episode)) return Promise.resolve(null);
         if (item.kind === 'youtube' && !item.youtube_id) return Promise.resolve(null);
         if (item.kind !== 'episode' && item.kind !== 'youtube' &&
             (!item.tmdb_id || (item.kind !== 'movie' && item.kind !== 'show'))) return Promise.resolve(null);
@@ -849,7 +857,7 @@
                 (o.channel ? ' data-channel="' + esc(JSON.stringify({
                     youtube_id: o.channel.youtube_id || '', title: o.channel.title || '' })) + '"' : '');
         } else if (o.kind === 'episode') {
-            if (!o.tmdbId || !o.season || !o.episode) return '';
+            if (!o.tmdbId || !validRequestSeason(o.season) || !o.episode) return '';
             attrs = ' data-kind="episode" data-tmdb="' + esc(o.tmdbId) + '"' +
                 ' data-season="' + esc(o.season) + '" data-episode="' + esc(o.episode) + '"';
         } else {
@@ -913,8 +921,11 @@
         } else {
             item.tmdb_id = Number(b.getAttribute('data-tmdb'));
             if (item.kind === 'episode') {
-                item.season = Number(b.getAttribute('data-season'));
-                item.episode = Number(b.getAttribute('data-episode'));
+                // a missing attribute stays missing (null) instead of
+                // collapsing to 0 — season 0 is the valid specials season.
+                var sRaw = b.getAttribute('data-season'), eRaw = b.getAttribute('data-episode');
+                item.season = (sRaw === null || sRaw === '') ? null : Number(sRaw);
+                item.episode = (eRaw === null || eRaw === '') ? null : Number(eRaw);
             }
         }
         requestTitle(item).then(function () { b.disabled = false; });

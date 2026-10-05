@@ -59,12 +59,15 @@ def parse_youtube_id(value: Any) -> Optional[str]:
 
 
 def parse_season_episode(value: Any) -> Optional[int]:
-    """A season/episode number (positive int) or None."""
+    """A season/episode number (non-negative int) or None.
+
+    Season 0 is the specials season — a real, requestable season, so 0 is
+    valid here (unlike a missing value)."""
     try:
         n = int(value)
     except (TypeError, ValueError):
         return None
-    return n if n > 0 else None
+    return n if n >= 0 else None
 
 
 def episode_request_title(show_title: str, season: int, episode: int) -> str:

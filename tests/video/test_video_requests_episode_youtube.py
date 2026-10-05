@@ -69,7 +69,7 @@ def test_parse_youtube_id():
 def test_parse_season_episode():
     assert parse_season_episode(2) == 2
     assert parse_season_episode("7") == 7
-    assert parse_season_episode(0) is None
+    assert parse_season_episode(0) == 0  # season 0 = specials, requestable
     assert parse_season_episode(-1) is None
     assert parse_season_episode("x") is None
     assert parse_season_episode(None) is None
@@ -109,10 +109,34 @@ def test_episode_request_needs_season_and_episode(app_db):
     _as_member(persona)
     for body in ({"kind": "episode", "tmdb_id": 1396, "season": 2},
                  {"kind": "episode", "tmdb_id": 1396, "episode": 7},
-                 {"kind": "episode", "tmdb_id": 1396, "season": 0, "episode": 7},
-                 {"kind": "episode", "tmdb_id": 1396, "season": "x", "episode": 7}):
+                 {"kind": "episode", "tmdb_id": 1396, "season": "x", "episode": 7},
+                 {"kind": "episode", "tmdb_id": 1396, "season": -1, "episode": 7}):
         resp = client.post("/api/video/requests", json=body)
         assert resp.status_code == 400, body
+
+
+def test_member_files_specials_season_zero_request(app_db):
+    # season 0 (specials) is a real, requestable season — it used to 400
+    client, db, persona = app_db
+    _as_member(persona)
+    base = {"kind": "episode", "tmdb_id": 1396, "title": "Black Clover"}
+    out = client.post("/api/video/requests",
+                      json={**base, "season": 0, "episode": 2}).get_json()
+    assert out["success"] and not out["already"]
+    rows = db.list_video_requests(profile_id=5, status="pending")
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["kind"] == "episode" and r["tmdb_id"] == 1396
+    assert r["season_number"] == 0 and r["episode_number"] == 2
+    assert r["title"] == "Black Clover S00E02"
+    # idempotent per (season, episode) — a re-ask finds the same row
+    again = client.post("/api/video/requests",
+                        json={**base, "season": 0, "episode": 2}).get_json()
+    assert again["already"] is True and again["id"] == out["id"]
+    # a different season is a different title
+    other = client.post("/api/video/requests",
+                        json={**base, "season": 1, "episode": 2}).get_json()
+    assert other["already"] is False and other["id"] != out["id"]
 
 
 def test_episode_idempotency_scopes_to_the_episode(app_db):
