@@ -49,6 +49,7 @@ import {
 import {
   closeDownloadOriginsModal,
   deleteSelectedOriginEntries,
+  removeSelectedOriginEntries,
   openDownloadOriginsModal,
   switchDownloadOriginTab,
   toggleAllOriginEntries,
@@ -87,6 +88,7 @@ export const SHELL_WINDOW_EXPORTS = {
   toggleOriginEntry,
   toggleAllOriginEntries,
   deleteSelectedOriginEntries,
+  removeSelectedOriginEntries,
   // watchlist-history.js (ported aug 26)
   openWatchlistHistoryModal,
   closeWatchlistHistoryModal,

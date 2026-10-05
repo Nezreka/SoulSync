@@ -590,6 +590,7 @@ declare global {
     toggleOriginEntry?: (id: number, on: boolean) => void;
     toggleAllOriginEntries?: (on: boolean) => void;
     deleteSelectedOriginEntries?: (singleId?: number) => Promise<void>;
+    removeSelectedOriginEntries?: (singleId?: number) => Promise<void>;
     openMyAccountsModal?: () => void;
     /** clears vanilla's listenbrainz playlist caches after a connect/disconnect (init.js) */
     _invalidateListenBrainzCache?: () => void;

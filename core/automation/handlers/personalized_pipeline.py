@@ -145,12 +145,19 @@ def auto_personalized_pipeline(config: Dict[str, Any], deps: AutomationDeps) -> 
 
         # ── COMPLETE ────────────────────────────────────────────────
         duration = int(time.time() - pipeline_start)
+        # #1549: surface unidentified tracks instead of claiming 100% clean.
+        skipped = sync_summary.get('skipped', 0)
+        complete_log = f'Personalized pipeline finished in {duration // 60}m {duration % 60}s'
+        complete_type = 'success'
+        if skipped > 0:
+            complete_log += f' — {skipped} track{"s" if skipped != 1 else ""} need identification'
+            complete_type = 'warning'
         deps.update_progress(
             automation_id,
             status='finished', progress=100,
             phase='Pipeline complete',
-            log_line=f'Personalized pipeline finished in {duration // 60}m {duration % 60}s',
-            log_type='success',
+            log_line=complete_log,
+            log_type=complete_type,
         )
 
         deps.state.set_pipeline_running(False)
