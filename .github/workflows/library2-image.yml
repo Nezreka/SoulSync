@@ -1,16 +1,16 @@
-name: Publish foundation image
+name: Publish library2 image
 on:
   push:
     branches: [library-overhaul]
   workflow_dispatch:
 concurrency:
-  group: foundation-image
+  group: library2-image
   cancel-in-progress: false
 permissions:
   contents: read
   packages: write
 env:
-  IMAGE: ghcr.io/nick2000713/soulsync:foundation
+  IMAGE: ghcr.io/nick2000713/soulsync:library2
 jobs:
   publish:
     if: github.repository == 'nick2000713/SoulSync'
@@ -35,8 +35,10 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha,scope=foundation
-          cache-to: type=gha,mode=max,scope=foundation
+          cache-from: |
+            type=gha,scope=library2
+            type=gha,scope=foundation
+          cache-to: type=gha,mode=max,scope=library2
       - name: Verify compilation and Library regressions in the image
         run: >-
           docker run --rm --entrypoint /bin/sh "$IMAGE" -c
