@@ -104,11 +104,33 @@ def test_normalize_track_key_case_and_whitespace():
         normalize_track_key("artist", "song title")
 
 
-def test_normalize_track_key_empty_title_unusable():
+def test_normalize_track_key_qualifiers_stripped():
+    # the two key sides come from different metadata provenances (playlist
+    # source title vs discovery provider's matched title), so qualifier
+    # drift must not unprotect a track that is still in the playlist.
+    base = normalize_track_key("Artist", "Midnight Drive")
+    assert normalize_track_key("Artist", "Midnight Drive (Remastered)") == base
+    assert normalize_track_key("Artist", "Midnight Drive [Remaster]") == base
+    assert normalize_track_key("Artist", "Midnight Drive - Remastered") == base
+    assert normalize_track_key("Artist", "Midnight Drive (feat. Someone)") == base
+    assert normalize_track_key("Artist", "Midnight Drive feat. Someone") == base
+    assert normalize_track_key("Artist", "Midnight Drive - Live") == base
+    # genuinely different qualifiers still key apart from the bare title
+    assert normalize_track_key("Artist", "Midnight Drive") != \
+        normalize_track_key("Artist", "Daylight Drive")
+
+
+def test_normalize_track_key_accents_and_punctuation():
+    import pytest
+    pytest.importorskip("unidecode")  # accent folding needs it; absent locally, present in CI/prod
+    assert normalize_track_key("Beyoncé", "Halo!") == \
+        normalize_track_key("beyonce", "halo")
+    assert normalize_track_key("AC/DC", "Song") == \
+        normalize_track_key("acdc", "song")
+
+
+def test_normalize_track_key_empty_side_unusable():
     assert normalize_track_key("Artist", "") == ""
     assert normalize_track_key("Artist", "   ") == ""
+    assert normalize_track_key("", "Song") == ""
     assert normalize_track_key("", "") == ""
-
-
-def test_normalize_track_key_artist_may_be_empty():
-    assert normalize_track_key("", "Song") == "|song"

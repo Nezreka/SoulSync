@@ -119,11 +119,31 @@ def test_scan_creates_findings_for_expired():
 
 
 def test_scan_protects_actively_mirrored_playlist():
-    db = _DB([_cand(1, origin="playlist", ctx="My Mix", created=OLD)],
-             mirrored=["My Mix"])
+    # track still in the mirror's current track list → protected by
+    # membership, not merely by the playlist name.
+    db = _DB(
+        [_cand(1, origin="playlist", ctx="My Mix", created=OLD)],
+        mirrored=[_mirror(1, "My Mix")],
+        mirror_tracks={1: [{'artist_name': 'Artist', 'track_name': 'T1'}]},
+    )
     findings = []
     ExpiredDownloadCleanerJob().scan(_ctx(db, {'playlist_retention': '1w'}, findings))
-    assert findings == []   # still mirrored → protected
+    assert findings == []   # still in the playlist → protected
+
+
+def test_scan_protects_despite_title_drift():
+    # the mirror row carries the playlist source's title ("T1 (Remastered)")
+    # while the download was recorded under the discovery provider's matched
+    # title ("T1") — qualifier drift must not unprotect the track.
+    db = _DB(
+        [_cand(1, origin="playlist", ctx="My Mix", created=OLD)],
+        mirrored=[_mirror(1, "My Mix")],
+        mirror_tracks={1: [{'artist_name': 'Artist',
+                            'track_name': 'T1 (Remastered)'}]},
+    )
+    findings = []
+    ExpiredDownloadCleanerJob().scan(_ctx(db, {'playlist_retention': '1w'}, findings))
+    assert findings == []
 
 
 def test_scan_track_rotated_out_of_mirrored_playlist_expires():
@@ -321,3 +341,50 @@ def test_a_renamed_or_suffixed_mirror_still_protects(real_db):
     real_db.candidates = [_cand(1, ctx='My Rename'), _cand(2, ctx='Release Radar - ThomasClan'),
                           _cand(3, ctx='Upstream Name')]
     assert _expired_ids(real_db) == set()
+
+
+def test_1416_membership_nonempty_other_profile_mirror_protects(real_db):
+    # same as test_another_profiles_mirror_and_watchlist_protect_their_downloads
+    # but with a real track list: protection must come from membership, and a
+    # non-member of a still-mirrored playlist must expire.
+    thomas = real_db.create_profile('ThomasClan')
+    real_db.mirror_playlist('spotify', 'p-t', 'Thomas Mix',
+                            [{'track_name': 'T1', 'artist_name': 'Artist'}],
+                            profile_id=thomas)
+    real_db.candidates = [_cand(1, ctx='Thomas Mix'),
+                          _cand(2, ctx='Thomas Mix'),
+                          _cand(3, ctx='Deleted Playlist')]
+    # candidate 2 is T2 — not in the mirror's track list → expires
+    assert _expired_ids(real_db) == {2, 3}
+
+
+def test_1416_membership_nonempty_rename_and_suffixed_names_protect(real_db):
+    # rename / upstream / collision-suffixed names all resolve to the same
+    # mirror's track list; a track not in that list still expires.
+    thomas = real_db.create_profile('ThomasClan')
+    mid = real_db.mirror_playlist('spotify', 'p-r', 'Upstream Name',
+                                  [{'track_name': 'T1', 'artist_name': 'Artist'}],
+                                  profile_id=thomas)
+    real_db.set_mirrored_playlist_custom_name(mid, 'My Rename', profile_id=thomas)
+    # a same-named mirror on profile 1 forces the collision-suffixed sync name
+    # 'Release Radar - ThomasClan' for the thomas mirror.
+    real_db.mirror_playlist('spotify', 'rr-a', 'Release Radar',
+                            [{'track_name': 'T9', 'artist_name': 'Artist'}],
+                            profile_id=1)
+    real_db.mirror_playlist('spotify', 'rr-t', 'Release Radar',
+                            [{'track_name': 'T2', 'artist_name': 'Artist'}],
+                            profile_id=thomas)
+    real_db.candidates = [_cand(1, ctx='My Rename'),
+                          _cand(2, ctx='Release Radar - ThomasClan'),
+                          _cand(3, ctx='Upstream Name')]
+    # candidate 3 is T3 — the 'Upstream Name' mirror only lists T1 → expires
+    assert _expired_ids(real_db) == {3}
+
+
+def test_1416_membership_nonempty_rotated_out_track_expires(real_db):
+    thomas = real_db.create_profile('ThomasClan')
+    real_db.mirror_playlist('spotify', 'p-t', 'Thomas Mix',
+                            [{'track_name': 'Other Song', 'artist_name': 'Other Artist'}],
+                            profile_id=thomas)
+    real_db.candidates = [_cand(1, ctx='Thomas Mix')]
+    assert _expired_ids(real_db) == {1}

@@ -158,6 +158,9 @@ class ExpiredDownloadCleanerJob(RepairJob):
         'the playlist\'s current track list — songs rotated out of a refreshed '
         'playlist become eligible once they pass retention, instead of staying '
         'protected forever because the playlist itself still exists. '
+        'If a mirrored playlist\'s track list cannot be read (or is empty), '
+        'protection falls back to the playlist name, so emptying a playlist '
+        'without removing its mirror keeps the old behavior. '
         'It only touches downloads recorded from the Download Origins feature '
         'forward — never your pre-existing or manually-added library, and never '
         'anything downloaded before your library was last rebuilt.\n\n'
@@ -300,10 +303,10 @@ class ExpiredDownloadCleanerJob(RepairJob):
         if not callable(reader):
             return None
         try:
-            if profile_id is None:
-                tracks = reader(int(playlist_id)) or []
-            else:
-                tracks = reader(int(playlist_id), profile_id=int(profile_id)) or []
+            # playlist ids are global, so the unscoped call returns the same
+            # rows; the keyword is only passed when a profile was given.
+            kwargs = {} if profile_id is None else {'profile_id': int(profile_id)}
+            tracks = reader(int(playlist_id), **kwargs) or []
         except Exception as e:
             logger.debug("expired cleanup: mirror track list unreadable for %s: %s",
                          playlist_id, e)
@@ -416,6 +419,12 @@ class ExpiredDownloadCleanerJob(RepairJob):
             # membership to check, so it keeps name-level protection.
             entry = _entry(sname)
             if entry is not None:
+                if entry['keys'] and not entry['unreadable']:
+                    # a stale sync name colliding with a readable mirror's
+                    # local name: the name-level latch wins (fail safe), which
+                    # silently neuters per-track protection for that playlist.
+                    logger.debug("expired cleanup: sync name %r latches name-level "
+                                 "protection over a readable mirror", sname)
                 entry['unreadable'] = True
         return membership, watched
 

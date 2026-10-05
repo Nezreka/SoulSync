@@ -21,8 +21,11 @@ user's files, so every unknown fails toward keeping.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
+
+from core.text.normalize import normalize_key
 
 # Retention option → days. 'off' (or anything unmapped) disables that origin.
 RETENTION_DAYS = {
@@ -62,24 +65,51 @@ def path_suffix_key(path: Any, segments: int = 2) -> str:
     return '/'.join(parts[-segments:]).casefold()
 
 
+# Qualifier noise stripped before a track key is built. The two sides of a
+# membership check come from different metadata provenances — the mirror row
+# carries the playlist source's title (e.g. Spotify), while the download was
+# recorded under the discovery provider's matched title (often Deezer) — so
+# "Song (Remastered)" vs "Song" drift is realistic. Stripping qualifiers can
+# only ever ADD matches (more protection), never remove them: the fail-safe
+# direction for a job that deletes files.
+_PAREN_RE = re.compile(r'\([^()]*\)|\[[^\[\]]*\]')
+_FEAT_RE = re.compile(r'\s*\b(?:feat|ft|featuring)\.?\s+.*$', re.IGNORECASE)
+_DASH_QUALIFIER_RE = re.compile(
+    r'\s+-\s+(?:remaster(?:ed)?|live|acoustic|demo|edit|remix|version|deluxe|'
+    r'explicit|radio\s+edit|single\s+version|album\s+version|original(?:\s+mix)?|'
+    r'extended\s+mix|bonus(?:\s+track)?|instrumental)\s*$',
+    re.IGNORECASE)
+
+
 def normalize_track_key(artist: Any, title: Any) -> str:
     """Normalized ``artist|title`` identity — the key that matches a download
     (``library_history``) to a mirrored-playlist track
     (``mirrored_playlist_tracks``).
 
     Both sides originate from the same sync pipeline but pass through
-    different metadata (source listing vs downloaded file tags), so the
-    comparison is deliberately coarse: casefolded, trimmed, internal
-    whitespace collapsed. '' when the title is unusable — a track that
-    cannot be identified must never be treated as "not in the playlist".
+    different metadata (source listing vs the discovery provider's matched
+    title), so the comparison is deliberately coarse: parenthetical/bracket
+    qualifiers ("(Remastered)", "[Live]"), trailing "feat." clauses and
+    " - <qualifier>" suffixes are stripped, then the codebase's canonical
+    ``normalize_key`` folds accents, case and punctuation
+    ("Beyoncé" == "beyonce", "AC/DC" == "acdc").
+
+    '' when the artist or title is unusable — a track that cannot be
+    identified must never be treated as "not in the playlist".
 
     Lives here, in the pure module, so the membership check is unit-testable
     without a database.
     """
-    norm = lambda text: ' '.join(str(text or '').split()).casefold()
-    if not norm(title):
+    def _base(text):
+        text = _PAREN_RE.sub('', str(text or ''))
+        text = _FEAT_RE.sub('', text)
+        text = _DASH_QUALIFIER_RE.sub('', text)
+        return normalize_key(text)
+
+    a, t = _base(artist), _base(title)
+    if not a or not t:
         return ''
-    return f"{norm(artist)}|{norm(title)}"
+    return f"{a}|{t}"
 
 
 def parse_ts(value: Any) -> Optional[datetime]:
