@@ -112,7 +112,8 @@ def _pair_weight(file: dict, slot: dict) -> tuple[int, list[str]]:
 def reconcile_folder(files: list[dict], slots: list[dict]) -> dict[str, Any]:
     """Assign every file at most one slot and explain uncertain leftovers."""
     if not files:
-        return {'pairs': [], 'extra_files': [], 'missing_slots': list(range(len(slots)))}
+        return {'pairs': [], 'extra_files': [], 'competing_files': {},
+                'missing_slots': list(range(len(slots)))}
     weighted = [[_pair_weight(file, slot) for slot in slots] for file in files]
     assigned = assign_max_weight([[weight for weight, _ in row] for row in weighted])
     pairs = []
@@ -125,16 +126,31 @@ def reconcile_folder(files: list[dict], slots: list[dict]) -> dict[str, Any]:
         alternatives = sorted((w for j, (w, _) in enumerate(weighted[file_index])
                                if j != slot_index), reverse=True)
         close_alternative = bool(alternatives and alternatives[0] >= weight * 0.92)
+        # A duplicate copy can have a poorer filename or stale tags while
+        # sharing the same strong AcoustID identity. Leave room for those
+        # weaker metadata layers before declaring either copy the keeper.
+        competing_file = any(
+            other_index != file_index and weighted[other_index][slot_index][0] >= weight * 0.80
+            for other_index in range(len(files))
+        )
         pairs.append({
             'file_index': file_index, 'slot_index': slot_index,
             'score': weight, 'reasons': reasons,
-            'confidence': 'ambiguous' if ambiguous or close_alternative
+            'confidence': 'ambiguous' if ambiguous or close_alternative or competing_file
                           else 'clear' if weight >= 4500 else 'likely',
         })
     used_files = {pair['file_index'] for pair in pairs}
     used_slots = {pair['slot_index'] for pair in pairs}
+    extra_files = [i for i in range(len(files)) if i not in used_files]
+    competing_files = {
+        extra_index: [
+            pair['file_index'] for pair in pairs
+            if weighted[extra_index][pair['slot_index']][0] >= pair['score'] * 0.80
+        ] for extra_index in extra_files
+    }
     return {
         'pairs': pairs,
-        'extra_files': [i for i in range(len(files)) if i not in used_files],
+        'extra_files': extra_files,
+        'competing_files': {index: rivals for index, rivals in competing_files.items() if rivals},
         'missing_slots': [i for i in range(len(slots)) if i not in used_slots],
     }

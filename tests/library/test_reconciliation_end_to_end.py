@@ -15,7 +15,7 @@ from mutagen.flac import FLAC
 from core.library.reconciliation_evidence import ReconciliationEvidence
 from core.repair_jobs.base import JobContext
 from core.repair_jobs.library_reconciliation import (
-    LibraryReconciliationJob, _group_disc_folders, _suggest_filename,
+    LibraryReconciliationJob, _group_disc_folders, _normalize_slot, _suggest_filename,
 )
 from core.repair_worker import RepairWorker
 from database.music_database import MusicDatabase
@@ -141,6 +141,54 @@ def test_scan_review_intent_and_exact_missing_request(tmp_path, monkeypatch):
     pending = worker.get_review_case(case_id)['items']
     assert any(item['finding_type'] == 'reconciliation_intent' and
                item['details']['release_id'] == 'alternate-edition' for item in pending)
+
+
+def test_musicbrainz_release_group_missing_request_uses_exact_edition(tmp_path, monkeypatch):
+    import core.repair_jobs.library_reconciliation as module
+
+    root = tmp_path / 'music'
+    root.mkdir()
+    path = root / '01 - Laid to Rest.flac'
+    path.write_bytes(b'audio fixture')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, path)
+    assert db.set_album_canonical(10, 'musicbrainz', 'release-group-id', 0.9, locked=True)
+    worker = RepairWorker(database=db)
+    client = _Acoustid({path.name: {'mbid': 'laid-id', 'title': 'Laid to Rest',
+                                   'artist': 'Lamb of God', 'score': 0.99}})
+    monkeypatch.setattr(RepairWorker, 'acoustid_client', property(lambda _self: client))
+    monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
+    monkeypatch.setattr(module, '_read_file_tags', lambda _path: {
+        'title': 'Laid to Rest', 'artist': 'Lamb of God',
+        'album': 'Ashes of the Wake', 'track_number': 1,
+        'disc_number': 1, 'duration_ms': 200000,
+    })
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args: [
+        {'id': 'laid-id', 'name': 'Laid to Rest', 'track_number': 1,
+         'disc_number': 1, 'duration_ms': 200000},
+        {'id': 'hourglass-id', 'name': 'Hourglass', 'track_number': 2,
+         'disc_number': 1, 'duration_ms': 200000},
+    ])
+    monkeypatch.setattr(module, 'get_album_for_source', lambda *_args: {
+        'name': 'Ashes of the Wake', 'musicbrainz_release_id': 'exact-release-id'})
+    context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
+                         acoustid_client=client, create_finding=worker._create_finding)
+    LibraryReconciliationJob().scan(context)
+    case_id = worker.get_review_cases()['items'][0]['case_id']
+    intent = next(item for item in worker.get_review_case(case_id)['items']
+                  if item['finding_type'] == 'reconciliation_intent')
+    assert worker.apply_review_decision(case_id, intent['id'],
+                                        evidence_token=intent['evidence_token'],
+                                        action='fix', fix_action='complete')['success']
+    missing = next(item for item in worker.get_review_case(case_id)['items']
+                   if item['finding_type'] == 'reconciliation_missing')
+    assert worker.apply_review_decision(case_id, missing['id'],
+                                        evidence_token=missing['evidence_token'],
+                                        action='fix')['success']
+    with db._get_connection() as conn:
+        row = conn.execute('SELECT spotify_data, source_info FROM wishlist_tracks').fetchone()
+    assert json.loads(row['spotify_data'])['album']['id'] == 'exact-release-id'
+    assert json.loads(row['source_info'])['source_album_id'] == 'exact-release-id'
 
 
 def test_audio_evidence_cache_survives_rename_but_retries_errors(tmp_path):
@@ -316,6 +364,13 @@ def test_filename_plan_preserves_numbering_and_harmless_title_flavor():
     }) == '/music/2026 - Hourglass.flac'
 
 
+def test_release_slot_numbers_are_normalized_before_db_comparison():
+    slot = _normalize_slot({'id': 'hourglass-id', 'name': 'Hourglass',
+                            'track_number': '02', 'disc_number': '1',
+                            'duration_ms': '200000'}, 'spotify')
+    assert (slot['track_number'], slot['disc_number'], slot['duration_ms']) == (2, 1, 200000)
+
+
 def test_release_discovery_samples_distinct_files_not_three_ids_from_first_file():
     calls = []
     class MusicBrainz:
@@ -401,6 +456,114 @@ def test_wrong_audio_with_pinned_release_yields_extra_and_missing_intent(tmp_pat
     assert (root / '.deleted' / path.name).exists()
     with db._get_connection() as conn:
         assert conn.execute('SELECT id FROM tracks WHERE id = 1').fetchone() is None
+
+
+def test_locked_release_with_better_fitting_edition_requires_release_review(tmp_path, monkeypatch):
+    import core.repair_jobs.library_reconciliation as module
+
+    root = tmp_path / 'music'
+    root.mkdir()
+    path = root / '01 - Hourglass.flac'
+    path.write_bytes(b'audio fixture')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, path)
+    with db._get_connection() as conn:
+        conn.execute("UPDATE albums SET spotify_album_id = 'better-edition' WHERE id = 10")
+        conn.commit()
+    assert db.set_album_canonical(10, 'spotify', 'ashes-release', 0.9, locked=True)
+    worker = RepairWorker(database=db)
+    client = _Acoustid({path.name: {'mbid': 'hourglass-id', 'title': 'Hourglass',
+                                   'artist': 'Lamb of God', 'score': 0.99}})
+    monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
+    monkeypatch.setattr(module, '_read_file_tags', lambda _path: {
+        'title': 'Hourglass', 'artist': 'Lamb of God', 'album': 'Ashes of the Wake',
+        'track_number': 1, 'disc_number': 1, 'duration_ms': 200000,
+    })
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda _source, release: [
+        {'id': 'hourglass-id' if release == 'better-edition' else 'other-id',
+         'name': 'Hourglass' if release == 'better-edition' else 'Other Song',
+         'track_number': 1, 'disc_number': 1, 'duration_ms': 200000},
+    ])
+    context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
+                         acoustid_client=client, create_finding=worker._create_finding)
+    LibraryReconciliationJob().scan(context)
+    case_id = worker.get_review_cases()['items'][0]['case_id']
+    finding = worker.get_review_case(case_id)['items'][0]
+    assert finding['finding_type'] == 'reconciliation_release'
+    assert finding['details']['locked_release'] == {
+        'source': 'spotify', 'release_id': 'ashes-release'}
+    assert finding['details']['candidates'][0]['release_id'] == 'better-edition'
+
+
+def test_ambiguous_unassigned_audio_is_not_offered_for_quarantine(tmp_path, monkeypatch):
+    import core.repair_jobs.library_reconciliation as module
+
+    root = tmp_path / 'music'
+    root.mkdir()
+    path = root / '01 - Laid to Rest.flac'
+    path.write_bytes(b'audio fixture')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, path)
+    worker = RepairWorker(database=db)
+    client = _Acoustid({})
+    client.lookup_fingerprint_with_status = lambda *_args: {
+        'status': 'ok', 'recordings': [
+            {'mbid': 'one', 'title': 'Southbound', 'artist': 'Thin Lizzy', 'score': 0.99},
+            {'mbid': 'two', 'title': 'Another Song', 'artist': 'Other', 'score': 0.99},
+        ],
+    }
+    monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
+    monkeypatch.setattr(module, '_read_file_tags', lambda _path: {
+        'title': 'Laid to Rest', 'artist': 'Lamb of God',
+        'album': 'Ashes of the Wake', 'track_number': 1,
+        'disc_number': 1, 'duration_ms': 200000,
+    })
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args: [
+        {'id': 'laid-id', 'name': 'Laid to Rest', 'track_number': 1,
+         'disc_number': 1, 'duration_ms': 200000},
+    ])
+    context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
+                         acoustid_client=client, create_finding=worker._create_finding)
+    LibraryReconciliationJob().scan(context)
+    case_id = worker.get_review_cases()['items'][0]['case_id']
+    findings = worker.get_review_case(case_id)['items']
+    assert any(item['finding_type'] == 'reconciliation_unresolved' for item in findings)
+    assert all(item['finding_type'] != 'reconciliation_extra' for item in findings)
+
+
+def test_competing_copies_are_reviewed_without_picking_one_to_quarantine(tmp_path, monkeypatch):
+    import core.repair_jobs.library_reconciliation as module
+
+    root = tmp_path / 'music'
+    root.mkdir()
+    first = root / '01 - Hourglass.flac'
+    second = root / 'copy - Hourglass.flac'
+    first.write_bytes(b'first fixture')
+    second.write_bytes(b'second fixture')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, first)
+    worker = RepairWorker(database=db)
+    client = _Acoustid({path.name: {'mbid': 'hourglass-id', 'title': 'Hourglass',
+                                   'artist': 'Lamb of God', 'score': 0.99}
+                        for path in (first, second)})
+    monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
+    monkeypatch.setattr(module, '_read_file_tags', lambda _path: {
+        'title': 'Hourglass', 'artist': 'Lamb of God',
+        'album': 'Ashes of the Wake', 'track_number': 1,
+        'disc_number': 1, 'duration_ms': 200000,
+    })
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args: [
+        {'id': 'hourglass-id', 'name': 'Hourglass', 'track_number': 1,
+         'disc_number': 1, 'duration_ms': 200000},
+    ])
+    context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
+                         acoustid_client=client, create_finding=worker._create_finding)
+    LibraryReconciliationJob().scan(context)
+    case_id = worker.get_review_cases()['items'][0]['case_id']
+    findings = worker.get_review_case(case_id)['items']
+    assert all(item['finding_type'] == 'reconciliation_unresolved' for item in findings), [
+        item['finding_type'] for item in findings]
+    assert any(item['details'].get('competing_copies') for item in findings)
 
 
 def test_audio_backed_retag_writes_real_flac_and_track_row(tmp_path, monkeypatch):

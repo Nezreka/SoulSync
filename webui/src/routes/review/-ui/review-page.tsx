@@ -69,6 +69,7 @@ function evidence(finding: ReviewFinding) {
     ['Expected album', d.album_title || d.album || d.album_name],
     ['Duration', d.duration_ms || d.file_duration_ms || d.duration],
     ['Recording MBID', d.musicbrainz_recording_id || d.recording_mbid],
+    ['Other matching files', d.competing_copies],
     ['Proposed changes', d.changes],
     ['Why this slot', d.match_reasons],
   ] as const;
@@ -169,11 +170,11 @@ export function ReviewPage() {
   const refresh = async () => {
     setError('');
     try {
-      await refreshQueue();
+      const updatedQueue = await refreshQueue();
       if (caseId) {
         const updated = await fetchReviewCase(caseId).catch(() => null);
         setReviewCase(updated);
-        if (!updated) setCaseId('');
+        if (!updated) setCaseId(updatedQueue.items[0]?.case_id || '');
       }
     } catch (cause) {
       setError((cause as Error).message);
@@ -253,6 +254,7 @@ export function ReviewPage() {
         setReviewCase(null);
         const next = updatedQueue.items.find((item) => item.case_id !== caseId);
         setCaseId(next?.case_id || '');
+        if (!next && updatedQueue.total > 0 && page > 0) setPage(0);
       }
     } catch (cause) {
       setError((cause as Error).message);
@@ -306,6 +308,7 @@ export function ReviewPage() {
             id="review-search"
             value={query}
             onChange={(event) => {
+              setCaseId('');
               setPage(0);
               setQuery(event.target.value);
             }}
@@ -329,14 +332,24 @@ export function ReviewPage() {
             ))}
           </div>
           <div className={styles.pagination}>
-            <button type="button" disabled={page === 0} onClick={() => setPage(page - 1)}>
+            <button
+              type="button"
+              disabled={page === 0}
+              onClick={() => {
+                setCaseId('');
+                setPage(page - 1);
+              }}
+            >
               Previous
             </button>
             <span>Page {page + 1}</span>
             <button
               type="button"
               disabled={!queue || (page + 1) * queue.limit >= queue.total}
-              onClick={() => setPage(page + 1)}
+              onClick={() => {
+                setCaseId('');
+                setPage(page + 1);
+              }}
             >
               Next
             </button>

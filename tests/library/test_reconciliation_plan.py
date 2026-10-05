@@ -87,6 +87,20 @@ def test_wrong_audio_cannot_be_rescued_by_two_wrong_metadata_layers():
     assert result['missing_slots'] == [0]
 
 
+def test_two_copies_competing_for_one_slot_are_not_clear_repairs():
+    recording = {'mbid': 'same-id', 'title': 'Hourglass',
+                 'artist': 'Lamb of God', 'score': 0.99}
+    files = [_file('Hourglass', '/album/01 - Hourglass.flac', 200000, recording),
+             _file('Hourglass', '/album/copy - Hourglass.flac', 200000, recording)]
+    slots = [{'title': 'Hourglass', 'recording_mbid': 'same-id',
+              'duration_ms': 200000}]
+    result = reconcile_folder(files, slots)
+    assert len(result['pairs']) == 1
+    assert result['pairs'][0]['confidence'] == 'ambiguous'
+    assert len(result['extra_files']) == 1
+    assert result['competing_files'][result['extra_files'][0]] == [result['pairs'][0]['file_index']]
+
+
 def test_material_version_marker_is_distinct_but_subtitle_flavor_can_match():
     live = [_file('Song (Live)', '/album/01 - Song (Live).flac', 200000)]
     studio_slot = [{'title': 'Song', 'duration_ms': 200000}]

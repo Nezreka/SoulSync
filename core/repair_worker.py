@@ -4056,6 +4056,7 @@ class RepairWorker:
             return {'success': False, 'error': 'This release slot has no exact source track ID'}
         source = details.get('source')
         release_id = details.get('release_id')
+        exact_release_id = details.get('exact_release_id') or release_id
         album = self.db.get_album_canonical(album_id)
         if album and (album['source'], album['album_id']) != (source, release_id):
             return {'success': False, 'error': 'The album release changed; rescan before requesting'}
@@ -4067,7 +4068,7 @@ class RepairWorker:
             'id': source_track_id, 'name': name, 'provider': source,
             'artists': [{'name': details.get('artist_name') or 'Unknown Artist'}],
             'album': {'name': details.get('album_title') or 'Unknown Album',
-                      'id': release_id, 'images': [], 'album_type': 'album',
+                      'id': exact_release_id, 'images': [], 'album_type': 'album',
                       'total_tracks': details.get('release_track_count') or 0},
             'track_number': slot.get('track_number'),
             'disc_number': slot.get('disc_number') or 1,
@@ -4077,7 +4078,7 @@ class RepairWorker:
             payload, failure_reason='Missing from intended album',
             source_type='album', profile_id=profile_id,
             source_info={'source': source, 'source_track_id': source_track_id,
-                         'source_album_id': release_id, 'is_album': True,
+                         'source_album_id': exact_release_id, 'is_album': True,
                          'album_title': payload['album']['name'],
                          'track_number': slot.get('track_number'),
                          'disc_number': slot.get('disc_number') or 1,

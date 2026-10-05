@@ -39,6 +39,55 @@ afterEach(() => {
 });
 
 describe('review queue', () => {
+  it('selects the first case on the next queue page', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === '/api/repair/finding-types') return Promise.resolve(reply({ types: [] }));
+      if (url.startsWith('/api/repair/review-queue?')) {
+        const page = Number(new URL(url, 'http://localhost').searchParams.get('page'));
+        const album = page === 0 ? 'Ashes of the Wake' : 'OK Computer';
+        const caseId = page === 0 ? 'album:1:ashes' : 'album:1:ok';
+        return Promise.resolve(
+          reply({
+            items: [
+              {
+                case_id: caseId,
+                album,
+                artist: page === 0 ? 'Lamb of God' : 'Radiohead',
+                pending: 1,
+                priority: 1,
+                finding_types: ['genre_cleanup'],
+                error_count: 0,
+              },
+            ],
+            total: 2,
+            page,
+            limit: 1,
+          }),
+        );
+      }
+      if (url.endsWith('/album%3A1%3Aashes') || url.endsWith('/album%3A1%3Aok')) {
+        const later = url.endsWith('/album%3A1%3Aok');
+        return Promise.resolve(
+          reply({
+            case_id: later ? 'album:1:ok' : 'album:1:ashes',
+            album: later ? 'OK Computer' : 'Ashes of the Wake',
+            artist: later ? 'Radiohead' : 'Lamb of God',
+            folder: null,
+            count: 1,
+            status: 'pending',
+            items: [finding],
+          }),
+        );
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    render(<ReviewPage />);
+    await screen.findByRole('heading', { name: 'Ashes of the Wake' });
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/ }));
+    await screen.findByRole('heading', { name: 'OK Computer' });
+    expect(window.location.search).toContain('album%3A1%3Aok');
+  });
+
   it('queues the reconciliation scan from the review screen', async () => {
     fetchMock.mockImplementation((url: string, options?: RequestInit) => {
       if (url === '/api/repair/jobs/library_reconciliation/run') {

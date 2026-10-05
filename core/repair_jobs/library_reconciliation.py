@@ -134,6 +134,13 @@ def _track_items(data) -> list[dict]:
 
 
 def _normalize_slot(item: dict, source: str) -> dict:
+    def positive_int(value, default=None):
+        try:
+            number = int(value)
+            return number if number > 0 else default
+        except (TypeError, ValueError):
+            return default
+
     artists = item.get('artists') or []
     artist = next((a.get('name') for a in artists if isinstance(a, dict) and a.get('name')), '')
     if not artist and artists and isinstance(artists[0], str):
@@ -141,9 +148,9 @@ def _normalize_slot(item: dict, source: str) -> dict:
     return {
         'title': item.get('name') or item.get('title') or '',
         'artist': artist or '',
-        'track_number': item.get('track_number'),
-        'disc_number': item.get('disc_number') or 1,
-        'duration_ms': item.get('duration_ms') or 0,
+        'track_number': positive_int(item.get('track_number')),
+        'disc_number': positive_int(item.get('disc_number'), 1),
+        'duration_ms': positive_int(item.get('duration_ms'), 0),
         'source_track_id': item.get('id') or '',
         'recording_mbid': item.get('id') if source == 'musicbrainz' else '',
     }
@@ -402,6 +409,7 @@ class LibraryReconciliationJob(RepairJob):
                         result.findings_created += 1
                     continue
                 album_id = album_counts.most_common(1)[0][0] if album_counts else None
+                album = albums.get(album_id)
                 if album_id is not None and album_folder_counts[album_id] > 1:
                     if emit(
                         job_id=self.job_id, finding_type='reconciliation_unresolved',
@@ -409,11 +417,11 @@ class LibraryReconciliationJob(RepairJob):
                         file_path=None, title=f'Split album: {os.path.basename(folder)}',
                         description='This album spans separate folders that cannot be safely combined.',
                         details={'album_id': album_id, 'album_folder': folder,
+                                 'profile_id': album.get('owner_profile_id') if album else 1,
                                  'album_title': os.path.basename(folder), 'file_count': len(files),
                                  'evidence_signature': _evidence_signature(files, album_id)}):
                         result.findings_created += 1
                     continue
-                album = albums.get(album_id)
                 candidates = self._release_candidates(files, album, context)
                 scored = _score_release_candidates(files, candidates, release_cache)
                 best_initial = max(scored, key=lambda c: c[:3]) if scored else None
@@ -432,6 +440,7 @@ class LibraryReconciliationJob(RepairJob):
                         description='No usable exact release tracklist was found for these files.',
                         details={'album_id': album_id, 'album_title':
                                  album.get('album_title') if album else os.path.basename(folder),
+                                 'profile_id': album.get('owner_profile_id') if album else 1,
                                  'artist_name': album.get('artist_name') if album else '',
                                  'album_folder': folder, 'file_count': len(files),
                                  'acoustid_statuses': [f['acoustid'].get('status') for f in files],
@@ -443,34 +452,47 @@ class LibraryReconciliationJob(RepairJob):
                 pinned_row = None
                 if album and album.get('canonical_locked'):
                     pinned_row = next((row for row in scored
-                                       if row[:3] == scored[0][:3] and
-                                       (row[3], row[4]) ==
+                                       if (row[3], row[4]) ==
                                        (album.get('canonical_source'),
                                         str(album.get('canonical_album_id') or ''))), None)
-                    if pinned_row:
+                    if pinned_row and pinned_row[:3] == scored[0][:3]:
                         scored.remove(pinned_row)
                         scored.insert(0, pinned_row)
                 clear, matched, _extras, source, release_id, slots, plan = scored[0]
+                locked_conflict = bool(album and album.get('canonical_locked') and
+                                       (not pinned_row or pinned_row[:3] != scored[0][:3]))
                 tied = (len(scored) > 1 and scored[1][:3] == scored[0][:3]
                         and (source, release_id) != (scored[1][3], scored[1][4]))
-                if pinned_row:
+                if pinned_row and not locked_conflict:
                     tied = False
                 pinned = bool(album and album.get('canonical_source') == source
                               and str(album.get('canonical_album_id') or '') == release_id)
-                if tied or (matched == 0 and not pinned):
-                    issue_type = 'reconciliation_release' if tied and album_id is not None else 'reconciliation_unresolved'
+                if locked_conflict or tied or (matched == 0 and not pinned):
+                    issue_type = ('reconciliation_release' if album_id is not None and
+                                  (tied or locked_conflict) else 'reconciliation_unresolved')
+                    if locked_conflict:
+                        description = ('The locked release does not fit as well as another candidate.'
+                                       if pinned_row else
+                                       'The locked release tracklist could not be loaded.')
+                    elif tied:
+                        description = 'Multiple releases fit equally well.'
+                    else:
+                        description = 'No release track could be assigned confidently.'
                     if emit(
                         job_id=self.job_id, finding_type=issue_type,
-                        severity='warning' if tied else 'info',
+                        severity='warning' if tied or locked_conflict else 'info',
                         entity_type='album' if album_id is not None else 'folder',
                         entity_id=str(album_id) if album_id is not None else folder,
                         file_path=None, title=f'Choose release: {os.path.basename(folder)}',
-                        description='Multiple releases fit equally well.' if tied else
-                                    'No release track could be assigned confidently.',
+                        description=description,
                         details={'album_id': album_id, 'album_title':
                                  album.get('album_title') if album else os.path.basename(folder),
+                                 'profile_id': album.get('owner_profile_id') if album else 1,
                                  'artist_name': album.get('artist_name') if album else '',
                                  'album_folder': folder,
+                                 'locked_release': {'source': album.get('canonical_source'),
+                                                    'release_id': str(album.get('canonical_album_id') or '')}
+                                 if locked_conflict else None,
                                  'evidence_signature': _evidence_signature(
                                      files, [(row[3], row[4], row[0], row[1])
                                              for row in scored]),
@@ -484,6 +506,12 @@ class LibraryReconciliationJob(RepairJob):
                 if release_key not in release_meta_cache:
                     release_meta_cache[release_key] = get_album_for_source(source, release_id) or {}
                 release_meta = release_meta_cache[release_key]
+                # MusicBrainz album IDs can be release-group IDs. Its album
+                # adapter picks a concrete representative release and exposes
+                # that ID here; a missing-track request must target that exact
+                # edition even while the stored canonical pin remains a group.
+                exact_release_id = (release_meta.get('musicbrainz_release_id')
+                                    if source == 'musicbrainz' else None) or release_id
                 release_title = (release_meta.get('name') or release_meta.get('title') or
                                  (album.get('album_title') if album else '') or
                                  os.path.basename(folder))
@@ -496,6 +524,7 @@ class LibraryReconciliationJob(RepairJob):
                     'artist_name': release_artist or (album.get('artist_name') if album else ''),
                     'profile_id': album.get('owner_profile_id') if album else 1,
                     'album_folder': folder, 'source': source, 'release_id': release_id,
+                    'exact_release_id': exact_release_id,
                     'release_track_count': len(slots), 'local_file_count': len(files),
                     'folder_audio_path_digest': folder_audio_path_digest(folder),
                 }
@@ -617,12 +646,23 @@ class LibraryReconciliationJob(RepairJob):
                     audio = file['acoustid']
                     recordings = audio.get('recordings') or []
                     best = max(recordings, key=lambda r: r.get('score') or 0) if recordings else {}
-                    identified = audio.get('status') == 'ok' and float(best.get('score') or 0) >= 0.80
+                    competing_paths = [files[index]['path'] for index in
+                                       plan.get('competing_files', {}).get(file_index, [])]
+                    same_audio_paths = [files[pair['file_index']]['path'] for pair in plan['pairs']
+                                        if audio.get('fingerprint_key') and
+                                        files[pair['file_index']]['acoustid'].get('fingerprint_key') ==
+                                        audio['fingerprint_key']]
+                    competing_paths = list(dict.fromkeys(competing_paths + same_audio_paths))
+                    identified = (audio.get('status') == 'ok' and
+                                  float(best.get('score') or 0) >= 0.80 and
+                                  not fingerprint_is_ambiguous(recordings) and
+                                  not competing_paths)
                     details = {**common, 'current_title': file['tags'].get('title'),
                                'current_tags': file['tags'], 'acoustid': audio,
                                'fingerprint_key': audio.get('fingerprint_key'),
                                'size_bytes': file['size_bytes'], 'mtime_ns': file['mtime_ns'],
                                'track_id': file['db']['id'] if file.get('db') else None,
+                               'competing_copies': competing_paths,
                                'acoustid_title': best.get('title'),
                                'acoustid_artist': best.get('artist'),
                                'acoustid_score': best.get('score')}
@@ -634,7 +674,9 @@ class LibraryReconciliationJob(RepairJob):
                         entity_id=str(file['db']['id']) if file.get('db') else file['path'],
                         file_path=file['path'],
                         title=f'Unassigned audio: {file["tags"].get("title") or os.path.basename(file["path"])}',
-                        description=('Audio does not fit a slot on the selected release.'
+                        description=('Another file also fits this release slot; choose a keeper.'
+                                     if competing_paths else
+                                     'Audio does not fit a slot on the selected release.'
                                      if identified else 'Audio identity could not be established.'),
                         details=details):
                         result.findings_created += 1
