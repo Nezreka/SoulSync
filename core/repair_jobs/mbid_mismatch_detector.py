@@ -379,7 +379,6 @@ class MbidMismatchDetectorJob(RepairJob):
             return result
 
         checked = 0
-        import time
 
         for i, row in enumerate(tracks):
             if context.check_stop():
@@ -420,10 +419,7 @@ class MbidMismatchDetectorJob(RepairJob):
                 )
 
             try:
-                # Rate limit: MusicBrainz allows ~1 req/sec
-                if context.sleep_or_stop(1.1):
-                    return result
-
+                # The client applies the configured interval and enforces the public API minimum.
                 recording = mb_client.get_recording(mbid, includes=['artist-credits'])
                 if not recording:
                     # MBID doesn't exist — definitely wrong

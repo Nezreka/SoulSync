@@ -323,3 +323,61 @@ def test_settings_endpoint_rejects_invalid_values_before_saving(settings):
     assert status == 400
     assert response.json['success'] is False
     assert saves == []
+
+
+@pytest.mark.parametrize('url,interval,expected_interval', [
+    ('http://mirror:5000', '0', 0),
+    ('http://mirror:5000', '0.1', 0.1),
+    ('https://musicbrainz.org', '0', 1.05),
+])
+def test_mbid_mismatch_detector_uses_client_pacing(monkeypatch, url, interval, expected_interval):
+    """The repair job must not add a public-API delay on top of client pacing."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from core.repair_jobs import mbid_mismatch_detector as detector
+    from core.repair_jobs.base import JobContext
+
+    monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_BASE_URL', url)
+    monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_REQUEST_INTERVAL', interval)
+    client = mb.MusicBrainzClient()
+    response = SimpleNamespace(
+        status_code=200,
+        raise_for_status=lambda: None,
+        json=lambda: {'title': 'Example', 'artist-credit': []},
+    )
+    client.session.get = Mock(return_value=response)
+    intervals = []
+    monkeypatch.setattr(mb, '_wait_for_musicbrainz_slot', intervals.append)
+
+    class FakeConnection:
+        def cursor(self):
+            return self
+
+        def execute(self, *args):
+            pass
+
+        def fetchall(self):
+            return [(1, 'Example', 'Artist', 'Album', '/music/example.flac', None, None, 2)]
+
+        def close(self):
+            pass
+
+    class FakeDatabase:
+        def _get_connection(self):
+            return FakeConnection()
+
+    context = JobContext(db=FakeDatabase(), transfer_folder='/music', config_manager=None,
+                         mb_client=client)
+    context.sleep_or_stop = Mock(side_effect=AssertionError('unexpected fixed delay'))
+    monkeypatch.setattr(detector, '_resolve_file_path', lambda *args, **kwargs: '/music/example.flac')
+    monkeypatch.setattr(detector, '_read_file_tags', lambda path: ('a' * 36, 'Example', 'flac'))
+    monkeypatch.setattr(detector.MbidMismatchDetectorJob, '_scan_album_mbid_consistency',
+                        lambda *args: None)
+
+    result = detector.MbidMismatchDetectorJob().scan(context)
+
+    assert result.scanned == 1
+    assert intervals == [expected_interval]
+    assert client.session.get.call_count == 1
+    context.sleep_or_stop.assert_not_called()
