@@ -580,11 +580,16 @@ def _replace_template_variables(template: str, context: dict) -> str:
         # $disambiguation above. Lets a filename tell "Song (acoustic)"
         # from the album version.
         "track_disambiguation": clean_context.get("track_disambiguation", ""),
+        # Record label (MusicBrainz label-info, first named label). Empty
+        # when the source didn't provide one; the folder cleanup below
+        # drops the empty segment like any other unset variable.
+        "label": clean_context.get("label", ""),
     }
     for var_name, val in bracket_map.items():
         result = result.replace("${" + var_name + "}", val)
 
     result = result.replace("$disambiguation", clean_context.get("disambiguation", ""))
+    result = result.replace("$label", clean_context.get("label", ""))
     result = result.replace("$albumartist", album_artist_value)
     result = result.replace("$albumtype", clean_context.get("albumtype", "Album"))
     # Order is not load-bearing here — "$atypes" and "$album" share only "$a",
@@ -1275,6 +1280,9 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             "disambiguation": str((album_context or {}).get("disambiguation") or "").strip(),
             # #1536: the one thing telling same-titled recordings apart.
             "track_disambiguation": str((track_info or {}).get("disambiguation") or "").strip(),
+            # Record label for $label (MusicBrainz label-info; empty when
+            # the source didn't provide one).
+            "label": str((album_context or {}).get("label") or "").strip(),
         }
         # A caller that KNOWS the disc count is authoritative: re-deriving it from
         # a live provider tracklist made the destination depend on whether that
