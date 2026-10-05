@@ -1360,6 +1360,7 @@ button.featureTag:disabled {
 
 /* --- status badges --- */
 .statusOk,
+.statusNeutral,
 .statusWarn {
   font-size: 11px;
   font-weight: 600;
@@ -1373,7 +1374,13 @@ button.featureTag:disabled {
   color: rgb(16, 185, 129);
 }
 
+.statusNeutral {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.65);
+}
+
 button.statusOk,
+button.statusNeutral,
 button.statusWarn {
   border: none;
   cursor: pointer;
@@ -1381,6 +1388,7 @@ button.statusWarn {
 }
 
 button.statusOk:disabled,
+button.statusNeutral:disabled,
 button.statusWarn:disabled {
   cursor: default;
   opacity: 0.6;

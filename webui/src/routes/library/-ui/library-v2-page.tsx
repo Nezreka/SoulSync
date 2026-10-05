@@ -9822,7 +9822,7 @@ export function TrackMetadataGapsCell({
           type="button"
           delay={150}
           className={
-            track.metadata_validation?.status === 'correct' ? styles.statusOk : styles.muted
+            track.metadata_validation?.status === 'correct' ? styles.statusOk : styles.statusNeutral
           }
           onClick={(e) => {
             e.stopPropagation();
