@@ -1,0 +1,96 @@
+"""Library-shaped examples from the user's reconciliation investigations."""
+
+from core.library.reconciliation_plan import reconcile_folder
+
+
+def _file(title, path, duration_ms, recording=None):
+    return {'path': path, 'tags': {'title': title, 'duration_ms': duration_ms},
+            'acoustid': {'status': 'ok', 'recordings': [recording]} if recording else
+                        {'status': 'no_match', 'recordings': []}}
+
+
+def test_ok_computer_lucky_keeps_its_title_even_when_earlier_song_has_same_length():
+    files = [
+        _file('The Tourist', '/Radiohead/OK Computer/12 - The Tourist.flac', 323000),
+        _file('Lucky', '/Radiohead/OK Computer/11 - Lucky.flac', 259370),
+        _file('No Surprises', '/Radiohead/OK Computer/10 - No Surprises.flac', 229000),
+    ]
+    slots = [
+        {'title': 'No Surprises', 'duration_ms': 229000},
+        {'title': 'Lucky', 'duration_ms': 260000},
+        {'title': 'The Tourist', 'duration_ms': 323000},
+    ]
+    result = reconcile_folder(files, slots)
+    assert {(p['file_index'], p['slot_index']) for p in result['pairs']} == {
+        (0, 2), (1, 1), (2, 0),
+    }
+    assert result['missing_slots'] == []
+
+
+def test_ashes_of_the_wake_swapped_tags_do_not_override_audio_and_filename():
+    files = [
+        _file('Laid to Rest', '/Lamb of God/Ashes of the Wake/02 - Hourglass.flac',
+              240000, {'mbid': 'hourglass-id', 'title': 'Hourglass',
+                       'artist': 'Lamb of God', 'score': 0.98}),
+        _file('Hourglass', '/Lamb of God/Ashes of the Wake/01 - Laid to Rest.flac',
+              230000, {'mbid': 'laid-id', 'title': 'Laid to Rest',
+                       'artist': 'Lamb of God', 'score': 0.97}),
+    ]
+    slots = [
+        {'title': 'Laid to Rest', 'recording_mbid': 'laid-id', 'duration_ms': 230000},
+        {'title': 'Hourglass', 'recording_mbid': 'hourglass-id', 'duration_ms': 240000},
+    ]
+    result = reconcile_folder(files, slots)
+    assert {(p['file_index'], p['slot_index']) for p in result['pairs']} == {(0, 1), (1, 0)}
+
+
+def test_numbered_parts_remain_separate_when_only_title_is_available():
+    files = [_file('Ultima Esperanza, Pt. 1', '/album/01.flac', 200000),
+             _file('Ultima Esperanza, Pt. 2', '/album/02.flac', 201000)]
+    slots = [{'title': 'Ultima Esperanza, Pt. 2', 'duration_ms': 201000},
+             {'title': 'Ultima Esperanza, Pt. 1', 'duration_ms': 200000}]
+    pairs = reconcile_folder(files, slots)['pairs']
+    assert {(p['file_index'], p['slot_index']) for p in pairs} == {(0, 1), (1, 0)}
+
+
+def test_ambiguous_acoustid_result_does_not_authorize_clear_repair():
+    files = [_file('Mystery', '/album/01.flac', 200000,
+                   {'mbid': 'one', 'title': 'Song One', 'artist': 'Artist', 'score': 0.9})]
+    files[0]['acoustid']['recordings'].append(
+        {'mbid': 'two', 'title': 'Song Two', 'artist': 'Artist', 'score': 0.9})
+    slots = [{'title': 'Song One', 'recording_mbid': 'one', 'duration_ms': 200000}]
+    pairs = reconcile_folder(files, slots)['pairs']
+    assert pairs[0]['confidence'] == 'ambiguous'
+
+
+def test_wrong_audio_is_extra_and_intended_slot_is_missing():
+    files = [_file('Southbound', '/album/01 - Southbound.flac', 200000,
+                   {'mbid': 'wrong', 'title': 'Different Song',
+                    'artist': 'Other', 'score': 0.99})]
+    slots = [{'title': 'Wanted Song', 'recording_mbid': 'wanted',
+              'duration_ms': 300000}]
+    result = reconcile_folder(files, slots)
+    assert result['pairs'] == []
+    assert result['extra_files'] == [0]
+    assert result['missing_slots'] == [0]
+
+
+def test_wrong_audio_cannot_be_rescued_by_two_wrong_metadata_layers():
+    files = [_file('Wanted Song', '/album/01 - Wanted Song.flac', 300000,
+                   {'mbid': 'other', 'title': 'Different Song',
+                    'artist': 'Other', 'score': 0.99})]
+    slots = [{'title': 'Wanted Song', 'recording_mbid': 'wanted',
+              'duration_ms': 300000, 'track_number': 1}]
+    result = reconcile_folder(files, slots)
+    assert result['pairs'] == []
+    assert result['extra_files'] == [0]
+    assert result['missing_slots'] == [0]
+
+
+def test_material_version_marker_is_distinct_but_subtitle_flavor_can_match():
+    live = [_file('Song (Live)', '/album/01 - Song (Live).flac', 200000)]
+    studio_slot = [{'title': 'Song', 'duration_ms': 200000}]
+    assert reconcile_folder(live, studio_slot)['pairs'] == []
+    subtitle = [_file('Song (Serenade From the Stars)',
+                      '/album/01 - Song (Serenade From the Stars).flac', 200000)]
+    assert len(reconcile_folder(subtitle, studio_slot)['pairs']) == 1

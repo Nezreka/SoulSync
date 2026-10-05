@@ -1,0 +1,104 @@
+# Library reconciliation and review queue design (2026-10-05)
+
+Status: implemented as an opt-in first working slice on `feat/library-reconciliation-review-queue`. The reuse analysis below was checked against `upstream/dev` at `4d45b9ed4` (2026-10-04). The sections headed “Proposed” record the design target; see the implementation notes at the end for the shipped boundary.
+
+## Goal
+
+Give a collector a reliable way to return an existing library to a clean baseline. Scan each directory's actual audio, compare it with the intended release and wanted tracks, propose repairs with the supporting evidence, then review and apply those repairs album by album. Tags, filenames, and folder names are clues, not proof. AcoustID is stronger evidence when it has a confident, unambiguous result, but it is not a guaranteed recording or release identifier.
+
+The intended review experience is a full-width queue. It presents one actionable issue at a time with its album context, shows why the recommendation was made, lets the user apply or change it, and advances through that album before moving to the next. The existing maintenance job controls remain available for scanning and configuration.
+
+## Reconciliation pipeline
+
+1. **Inventory once.** Walk every shared and personal library root; join physical files, DB tracks, playlist membership, manually tagged or locked metadata, and known acquisition intent in bulk. Include files missing from the DB and DB rows missing from disk. Keep library owner/root in every identity key.
+2. **Collect evidence.** Read audio duration and embedded tags/IDs, filename, folder, and stored DB metadata. Reuse a cached fingerprint and AcoustID candidate set when the audio is unchanged. Preserve `ok`, `no_match`, `unsupported`, and error states separately. Do not treat a missing result as evidence that the tags are correct.
+3. **Generate bounded release candidates.** Start with explicit album/release IDs, acquisition intent, validated IDs from files, and the dominant recording candidates in the folder. Fetch exact release tracklists once per candidate. Expand to alternate editions only if fit is poor or ambiguous. Mixed compilations, singles, bonus discs, live sets, and folders containing more than one release need explicit handling; a simple majority cannot establish the release alone.
+4. **Score the folder against each candidate release.** Compare recording candidates, title and artist (including meaningful version qualifiers), duration, disc/track position, count, and intended album. Keep conflicting evidence and alternate explanations visible. Select a release only when the evidence distinguishes it; otherwise request review.
+5. **Assign files to release slots jointly.** Build candidate file/slot edges, reject implausible edges, then choose a one-to-one assignment for the album. An AcoustID recording can appear on multiple releases, so release choice and slot choice must be evaluated together. Do not let an early duration or track-number match consume a slot that another file clearly fits. Uncertain assignments remain uncertain.
+6. **Compare actual, intended, and missing.** A missing release slot is not automatically a wanted download: distinguish a complete-album goal from playlist-only acquisitions, partial editions, and tracks already present elsewhere. A file outside the inferred release can be a valid standalone acquisition, a misplaced file, or unwanted audio. Check global copies and playlist references before proposing duplicate removal.
+7. **Create a reviewable plan.** Show tag and filename edits, moves, recoverable removals, wishlist additions, and intentional exceptions as distinct actions with exact targets and preconditions. Reuse existing repair writers and quarantine handling only after the plan is approved. Recheck changed files, locks, destination collisions, and related findings at apply time; record each result and refresh the affected album.
+
+Never silently delete a file, infer a wanted album solely from a folder majority, or retag a wrong recording into a second copy of a song the library already has.
+
+## Existing code to reuse
+
+| Concern | Existing implementation | Use and boundary |
+| --- | --- | --- |
+| Library traversal | `core/repair_jobs/base.py` (`all_library_roots`, `walk_library`), `core/library/path_resolver.py` | Covers shared and own roots and ignores SoulSync staging/quarantine. Build one inventory rather than running several scanners. |
+| Folder/tag parsing | `core/auto_import_worker.py` (`FolderCandidate`, tag and directory parsing) | Reuse parsing helpers. Its current first-success identification and three-file AcoustID fallback are import heuristics, not reconciliation proof. |
+| AcoustID | `core/acoustid_client.py::lookup_with_status`, `core/acoustid_verification.py`, `core/matching/audio_verification.py` | Reuse structured outcomes, candidate comparison, ambiguity and version logic. Factor evidence retrieval from expected-title verification so a file is fingerprinted once. |
+| Release discovery | `core/metadata/canonical_resolver.py`, `core/metadata/album_tracks.py`, `core/imports/exact_id_discovery.py` | Reuse candidate discovery and tracklist fetching. Keep exact release/recording IDs in the normalized tracklist; the current default resolver output drops some IDs. Do not persist a canonical pin before review. |
+| File/slot scoring | `core/imports/album_matching.py`, `core/repair_jobs/album_completeness.py`, `core/text/`, `core/matching/` | Reuse normalization, duration and identifier scoring, and missing-track payloads. Replace the import matcher's early position dedup and greedy final assignment for this use case. The separate canonical title/duration assignment work may supply the global matcher after it lands. |
+| Duplicates and intent | `core/library/duplicate_rules.py`, `core/library/duplicate_keep.py`, `core/library/track_identity.py`, playlist membership in `JobContext` | Reuse version/number safeguards and keeper preferences. Bulk-load all relevant copies; `find_library_track_by_external_id` returns only one row, and metadata buckets alone cannot prove duplicate audio. |
+| Repairs | `core/library/retag_planner.py`, `core/repair_jobs/library_retag.py`, `core/library_reorganize.py`, `core/repair_worker.py`, `core/library/deleted_quarantine.py` | Reuse per-field tag diffs, path preview, job lifecycle, finding status, and recoverable removal. Do not call whole-library jobs again for each album. |
+
+Important boundaries: the persistent album MBID cache in `core/metadata/album_mbid_cache.py` removes edition qualifiers from its key, so it cannot be an exact-edition authority. `core/imports/file_ops.py::safe_move_file` uses `os.replace` and can overwrite a destination; reconciliation needs collision checks and a no-overwrite move. The import matcher deduplicates by position before proving audio identity, then uses descending greedy matches. The album completeness matcher also relies on potentially wrong DB tags/IDs. Reuse their components, not their final decisions.
+
+## Performance contract
+
+- **One scan, one joined inventory.** Load DB rows and playlist/intent data in batches. Index by physical path, owner, album, recording ID, and fingerprint candidates in memory. Do not issue one global duplicate query or one album query per file.
+- **Cache audio evidence.** Separate fingerprint generation from AcoustID lookup without changing the fingerprint algorithm. Retain the fingerprint and structured lookup candidates with provenance/version. File size and modification time provide a cheap skip hint; verify identity again before a destructive or path-changing action. A move or tag-only edit should not force another AcoustID request. Retry errors with backoff; never cache them as permanent no-matches.
+- **Bound network work.** Cache exact release tracklists by source and release ID; deduplicate requests within a run. Cap alternate-release expansion, honor configured metadata source/mirror and provider throttling, and send unresolved cases to review instead of searching indefinitely.
+- **Match locally.** Build sparse candidate edges from strong IDs, reasonable duration windows, and title/artist matches. Global assignment is cheap at album scale relative to fingerprinting and network calls; measure before optimizing it. Preserve ambiguity rather than resolving ties by input order.
+- **Resume and refresh narrowly.** Checkpoint per folder, persist report inputs/version, and recompute only affected folders and cross-album/global-copy relationships after applying a plan. Page queue summaries and load full evidence for the active album only.
+- **Instrument.** Count files walked, fingerprints computed/reused, AcoustID calls/errors, release fetches/cache hits, candidates scored, match time, and apply failures. Use those numbers to tune concurrency; bound local fingerprint workers separately from rate-limited remote calls.
+
+## Why the current results UI needs a different read model
+
+The current simple screen in `webui/src/routes/tools/-ui/operations-studio.tsx` shows an album grid and opens `album-inspection-tray.tsx`. Advanced mode in `maintenance-hero.tsx` mounts `findings-surface.tsx`, with grouping by type, album, or artist. This is useful for surveying the backlog and operating individual jobs, but it does not present one decision with all its evidence and a clear next step.
+
+The existing `/api/repair/findings/albums` in `api/repair.py` groups by artist and album **text** extracted from finding details, orders largely by audio quality, and omits rows without both names. This can merge different editions or owners and can miss untagged/wrongly tagged files. The tray searches findings by text with `limit: 100`, filters client-side, and falls back to the unfiltered results when none match. Thus it cannot be the authoritative album membership query. Its album-wide fix loop catches individual failures and can still announce success. The new queue must use stable identities, exact server-side membership, and actual apply results.
+
+## Proposed review surface
+
+Use a dedicated full-width **Review Queue** page reachable from the maintenance overview and from a finding/album deep link. Keep simple/advanced as ways to inspect and run maintenance jobs; let both lead to the same queue. The unit of navigation is an **album case** (or an explicit unassigned-files case). Inside it, advance through **decisions**, which may combine several raw findings when they describe the same problem: two swapped titles, an extra wrong-audio file plus a missing wanted slot, or duplicate candidates. Do not present those as independent fixes that can contradict each other.
+
+Suggested layout:
+
+```text
+Queue: 17 albums need review · 3 blocked · 42 ready     [filters] [search]
+← Previous album       Artist — Album [release/edition]       Next album →
+Album context: intended release, 10/12 present, 2 missing, 1 extra; source/pin
+
+Decision 2 of 4: Track 7 appears to be a different recording
+Recommendation: Move this file aside and request the intended track
+Why: AcoustID candidates, duration, filename, tags, expected release slot
+Other plausible explanation / uncertainty; full evidence and provenance
+
+Current file  |  Intended slot  |  Other copies / playlist use
+path, tags,   |  title, IDs,     |  where found, quality,
+length, IDs   |  length, edition |  references
+
+[Preview plan] [Apply recommendation] [Choose another action] [Defer]
+Result / error / undo or recovery link                         Next decision →
+Album tracklist: matched · uncertain · missing · extra (expandable)
+```
+
+The recommendation is a typed, evidence-backed plan, not a free-text command or a blanket “resolve album” button. Display a short reason, confidence *category* (clear, likely, ambiguous, unavailable), conflicting signals, and precise consequences. Show AcoustID alternatives and scores, recording/release IDs, current tags, filename/folder, duration deltas, intended playlist/album origin, and other library copies when relevant. A title variation may be harmless; version annotations, combined tracks, bonus tracks and live recordings can be material. Let the user inspect the complete tracklist without losing their place. Playback can be offered where an existing playable file endpoint supports it.
+
+Actions should include apply recommendation, select another supported resolution, mark as acceptable/ignore with a reason, defer, and revisit/undo where supported. A successful action advances automatically within the album. Errors keep the decision in place with the actual failure. When an action changes other decisions, refresh their evidence and mark stale recommendations for reconsideration. Dismissal must not be mistaken for a successful repair. Keep the prior decision reachable through history.
+
+Queue ordering should favor blockers and high-confidence fixes before ambiguous cases, but never hide ambiguous or unnamed files. Allow filters by album, issue type, severity, confidence, status, and owner. Persist progress across sessions; direct links should reopen the same album/decision. Support keyboard navigation with explicit focus and screen-reader labels; do not bind destructive actions to a single accidental keypress. Small screens can stack the evidence panels, while desktop gets the large comparison view.
+
+## API and state proposal
+
+Keep `repair_findings` and existing fix/dismiss endpoints for legacy jobs. Add a queue read model that assembles related raw findings and new reconciliation evidence without rewriting every scanner. A case needs a stable ID based on library owner plus a release ID where known and physical folder/cluster identity where not; artist/album strings are display fields. Each decision should carry source finding IDs, affected file IDs/paths, evidence version, supported actions, recommended action, dependencies, status, and last apply result. Exact membership must be queried on the server and paged as needed.
+
+Possible endpoints: `GET /api/repair/review-queue` for paged case summaries, `GET /api/repair/review-queue/<case_id>` for full album evidence, `POST /api/repair/review-queue/<case_id>/decisions/<id>/preview`, and a corresponding `apply` endpoint carrying an idempotency key and evidence version. These names are provisional. Legacy findings can initially offer the current per-finding actions through an adapter; multi-file reconciliation actions need their own planner/apply path. Return partial failures by action, never a generic success for an incomplete album. Apply should validate current file state, locks, owner, and destination; journal completed operations and provide quarantine/restore references.
+
+## Implementation sequence
+
+1. Build the stable queue case/detail API over existing findings, including exact album membership, unassigned findings, paging, statuses, and provenance. Fix the tray's false-success path as part of moving actions into a shared typed action layer.
+2. Build the full-width queue UI using existing finding detail renderers, prompts, API calls, and job progress where they fit. Launch from both simple and advanced screens. Verify navigation, failure handling, and persistence with realistic albums containing multiple issue types.
+3. Add the inventory/evidence/cache pipeline and release/slot planner above. Feed its cases into the same queue. Start read-only; validate ambiguous editions, swapped tags, mixed folders, duplicates, combined tracks, and missing intent before enabling apply.
+4. Add guarded, idempotent multi-action apply and targeted refresh. Roll out low-risk tag/path corrections first, then recoverable removals and wishlist requests after end-to-end checks.
+
+Open design choice for implementation: where to persist *intent* that an album must be complete versus a playlist track only. Existing tags and folder membership cannot answer this reliably; use acquisition history where available and ask once when it is absent. Also decide whether accepted exceptions expire when audio or release evidence changes; an exception tied only to title text is too broad.
+
+## Implementation notes
+
+The `library_reconciliation` job is opt-in and creates findings without editing files. It walks all library roots, merges conventional disc subfolders, keeps path/stat fingerprints and successful AcoustID lookups in SQLite, and stops on API errors so a failing key or rate limit is not retried across every track. It compares at most six exact release candidates per folder with a one-to-one assignment. A strong fingerprint contradicting both tags and filename blocks that slot. Uncertain pairs, mixed folders, ambiguous releases, and unavailable identities remain review findings. The job retires old pending proposals only after completing that folder's audit.
+
+The `/review` page lists exact folder/album cases from existing and new repair findings, shows evidence, and applies one finding at a time through the existing handlers. Stale evidence tokens, changed audio, changed pinned releases, locks, and newly arrived files reject actions. The page can queue a reconciliation scan and refresh the queue. The job's new actions cover a selected release, complete-versus-partial album intent, audio-backed tag/MBID and album-title corrections, exact-ID wishlist requests, and recoverable quarantine for a reviewed unassigned file. Grouped bulk fix excludes these review-only actions.
+
+The current implementation deliberately leaves uncertain or mixed folders for manual review. It does not automatically identify an intended edition without a usable source/release ID or MusicBrainz recording releases, infer playlist intent from folder completeness, move an unassigned song into another release, rename files, or prove that a quarantined file has another library copy. The existing duplicate detector, library reorganizer, and playback tools remain available for those decisions. Accepted reconciliation exceptions are reopened when their audio fingerprint, release ID, or folder evidence signature changes. This boundary avoids guessing a wanted track or removing a unique recording from insufficient evidence.

@@ -107,6 +107,32 @@ def test_lookup_status_unavailable_without_key(tmp_path, monkeypatch):
     assert c.lookup_with_status(str(f))["status"] == "unavailable"
 
 
+def test_reusable_fingerprint_lookup_keeps_best_candidate_per_recording(monkeypatch):
+    c, fake = _client_with_fake_acoustid(monkeypatch)
+    calls = []
+    fake.lookup = lambda key, fingerprint, duration: calls.append((key, fingerprint, duration)) or {}
+    fake.parse_lookup_result = lambda _data: [
+        (0.80, 'mb-one', 'Lucky', 'Radiohead'),
+        (0.97, 'mb-one', 'Lucky', 'Radiohead'),
+        (0.94, 'mb-two', 'The Tourist', 'Radiohead'),
+    ]
+    result = c.lookup_fingerprint_with_status('fingerprint', 260.0)
+    assert calls == [('testkey123', 'fingerprint', 260.0)]
+    assert result['status'] == 'ok'
+    assert len(result['recordings']) == 2
+    assert result['recordings'][0]['score'] == 0.97
+
+
+def test_reusable_fingerprint_lookup_surfaces_invalid_key(monkeypatch):
+    c, fake = _client_with_fake_acoustid(monkeypatch)
+    def fail(*_args):
+        raise fake.WebServiceError('status: error')
+    fake.lookup = fail
+    result = c.lookup_fingerprint_with_status('fingerprint', 260.0)
+    assert result['status'] == 'error'
+    assert result['invalid_key'] is True
+
+
 # ── fingerprint_and_lookup keeps its dict-or-None contract ─────────────────
 
 def test_legacy_wrapper_returns_dict_on_match(tmp_path, monkeypatch):

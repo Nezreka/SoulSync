@@ -17,6 +17,7 @@ import { Route as SyncRouteRouteImport } from './routes/sync/route'
 import { Route as StatsRouteRouteImport } from './routes/stats/route'
 import { Route as SearchRouteRouteImport } from './routes/search/route'
 import { Route as SampleStudioRouteRouteImport } from './routes/sample-studio/route'
+import { Route as ReviewRouteRouteImport } from './routes/review/route'
 import { Route as RequestsRouteRouteImport } from './routes/requests/route'
 import { Route as PodcastsRouteRouteImport } from './routes/podcasts/route'
 import { Route as PlaylistExplorerRouteRouteImport } from './routes/playlist-explorer/route'
@@ -83,6 +84,11 @@ const SearchRouteRoute = SearchRouteRouteImport.update({
 const SampleStudioRouteRoute = SampleStudioRouteRouteImport.update({
   id: '/sample-studio',
   path: '/sample-studio',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReviewRouteRoute = ReviewRouteRouteImport.update({
+  id: '/review',
+  path: '/review',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RequestsRouteRoute = RequestsRouteRouteImport.update({
@@ -234,6 +240,7 @@ export interface FileRoutesByFullPath {
   '/playlist-explorer': typeof PlaylistExplorerRouteRoute
   '/podcasts': typeof PodcastsRouteRouteWithChildren
   '/requests': typeof RequestsRouteRoute
+  '/review': typeof ReviewRouteRoute
   '/sample-studio': typeof SampleStudioRouteRoute
   '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
@@ -268,6 +275,7 @@ export interface FileRoutesByTo {
   '/library': typeof LibraryRouteRoute
   '/playlist-explorer': typeof PlaylistExplorerRouteRoute
   '/requests': typeof RequestsRouteRoute
+  '/review': typeof ReviewRouteRoute
   '/sample-studio': typeof SampleStudioRouteRoute
   '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
@@ -306,6 +314,7 @@ export interface FileRoutesById {
   '/playlist-explorer': typeof PlaylistExplorerRouteRoute
   '/podcasts': typeof PodcastsRouteRouteWithChildren
   '/requests': typeof RequestsRouteRoute
+  '/review': typeof ReviewRouteRoute
   '/sample-studio': typeof SampleStudioRouteRoute
   '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
@@ -345,6 +354,7 @@ export interface FileRouteTypes {
     | '/playlist-explorer'
     | '/podcasts'
     | '/requests'
+    | '/review'
     | '/sample-studio'
     | '/search'
     | '/stats'
@@ -379,6 +389,7 @@ export interface FileRouteTypes {
     | '/library'
     | '/playlist-explorer'
     | '/requests'
+    | '/review'
     | '/sample-studio'
     | '/search'
     | '/stats'
@@ -416,6 +427,7 @@ export interface FileRouteTypes {
     | '/playlist-explorer'
     | '/podcasts'
     | '/requests'
+    | '/review'
     | '/sample-studio'
     | '/search'
     | '/stats'
@@ -454,6 +466,7 @@ export interface RootRouteChildren {
   PlaylistExplorerRouteRoute: typeof PlaylistExplorerRouteRoute
   PodcastsRouteRoute: typeof PodcastsRouteRouteWithChildren
   RequestsRouteRoute: typeof RequestsRouteRoute
+  ReviewRouteRoute: typeof ReviewRouteRoute
   SampleStudioRouteRoute: typeof SampleStudioRouteRoute
   SearchRouteRoute: typeof SearchRouteRoute
   StatsRouteRoute: typeof StatsRouteRoute
@@ -522,6 +535,13 @@ declare module '@tanstack/react-router' {
       path: '/sample-studio'
       fullPath: '/sample-studio'
       preLoaderRoute: typeof SampleStudioRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/review': {
+      id: '/review'
+      path: '/review'
+      fullPath: '/review'
+      preLoaderRoute: typeof ReviewRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/requests': {
@@ -785,6 +805,7 @@ const rootRouteChildren: RootRouteChildren = {
   PlaylistExplorerRouteRoute: PlaylistExplorerRouteRoute,
   PodcastsRouteRoute: PodcastsRouteRouteWithChildren,
   RequestsRouteRoute: RequestsRouteRoute,
+  ReviewRouteRoute: ReviewRouteRoute,
   SampleStudioRouteRoute: SampleStudioRouteRoute,
   SearchRouteRoute: SearchRouteRoute,
   StatsRouteRoute: StatsRouteRoute,

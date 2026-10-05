@@ -73,7 +73,7 @@ export function FindingsInbox({
         const destructive = Boolean(info?.destructive);
         // A type with no handler gets NO button. The client used to guess at
         // fixability and offered two types a button that could only ever fail.
-        const canFix = Boolean(info?.fixable) && group.pending > 0;
+        const canFix = Boolean(info?.fixable && !info.review_only) && group.pending > 0;
 
         return (
           <div

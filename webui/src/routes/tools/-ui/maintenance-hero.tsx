@@ -453,6 +453,9 @@ export function MaintenanceHero() {
               {enabled ? 'Enabled' : 'Disabled'}
             </span>
           </label>
+          <a href="/review" className="btn btn--primary">
+            Open Review Queue
+          </a>
         </div>
       </div>
 

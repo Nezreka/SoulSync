@@ -32,6 +32,7 @@ _JOB_MODULES = [
     'core.repair_jobs.dead_file_cleaner',
     'core.repair_jobs.duplicate_detector',
     'core.repair_jobs.acoustid_scanner',
+    'core.repair_jobs.library_reconciliation',
     'core.repair_jobs.missing_cover_art',
     'core.repair_jobs.missing_lyrics',
     'core.repair_jobs.replaygain_filler',

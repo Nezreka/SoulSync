@@ -440,6 +440,70 @@ class AcoustIDClient:
             logger.error(f"Unexpected error in AcoustID lookup: {e}", exc_info=True)
             return {'status': 'error', 'recordings': [], 'error': f'Unexpected error: {e}'}
 
+    def fingerprint_audio_file(self, audio_file: str) -> Dict[str, Any]:
+        """Generate reusable audio evidence without making an AcoustID request.
+
+        The review scanner caches this independently from lookup results so a
+        moved file, or a re-encoded file with the same fingerprint, does not
+        require another network request.
+        """
+        if not ACOUSTID_AVAILABLE:
+            return {'status': 'unavailable', 'error': 'pyacoustid library not installed'}
+        if not os.path.isfile(audio_file):
+            return {'status': 'not_found', 'error': 'Audio file not found'}
+        try:
+            from mutagen import File as MutagenFile
+            media = MutagenFile(audio_file)
+            channels = getattr(getattr(media, 'info', None), 'channels', 2)
+            if channels and channels > 2:
+                return {'status': 'unsupported', 'error': f'{channels}-channel audio is unsupported'}
+        except Exception as exc:
+            logger.debug('Could not read channel count for %s: %s', audio_file, exc)
+        try:
+            import acoustid
+            duration, fingerprint = acoustid.fingerprint_file(audio_file)
+            return {'status': 'ok', 'duration_s': duration, 'fingerprint': fingerprint}
+        except acoustid.NoBackendError:
+            return {'status': 'no_backend', 'error': 'Chromaprint/fpcalc not installed'}
+        except acoustid.FingerprintGenerationError as exc:
+            return {'status': 'fingerprint_error', 'error': str(exc)}
+        except Exception as exc:
+            logger.warning('Could not fingerprint %s: %s', audio_file, exc)
+            return {'status': 'fingerprint_error', 'error': str(exc)}
+
+    def lookup_fingerprint_with_status(self, fingerprint: str, duration_s: float) -> Dict[str, Any]:
+        """Look up an already-generated fingerprint, retaining all candidates."""
+        if not ACOUSTID_AVAILABLE or not self.api_key:
+            return {'status': 'unavailable', 'recordings': [],
+                    'error': 'AcoustID is unavailable or no API key is configured'}
+        try:
+            import acoustid
+            data = acoustid.lookup(self.api_key, fingerprint, duration_s)
+            recordings = []
+            by_mbid = {}
+            for score, mbid, title, artist in acoustid.parse_lookup_result(data):
+                if not mbid:
+                    continue
+                if mbid not in by_mbid or score > by_mbid[mbid]['score']:
+                    by_mbid[mbid] = {'mbid': mbid, 'title': title,
+                                     'artist': artist, 'score': score}
+            recordings.extend(by_mbid.values())
+            if not recordings:
+                return {'status': 'no_match', 'recordings': [], 'recording_mbids': [],
+                        'best_score': 0.0}
+            return {'status': 'ok', 'recordings': recordings,
+                    'recording_mbids': list(by_mbid),
+                    'best_score': max(r['score'] for r in recordings)}
+        except acoustid.WebServiceError as exc:
+            message = str(exc)
+            low = message.lower()
+            return {'status': 'error', 'recordings': [],
+                    'invalid_key': any(s in low for s in ('invalid', 'unknown', 'status: error')),
+                    'error': f'AcoustID API error: {message}'}
+        except Exception as exc:
+            logger.warning('AcoustID fingerprint lookup failed: %s', exc)
+            return {'status': 'error', 'recordings': [], 'error': str(exc)}
+
     def fingerprint_and_lookup(self, audio_file: str) -> Optional[Dict[str, Any]]:
         """Legacy dict-or-None lookup. Returns the recordings dict on a confirmed
         match, else None. Kept for callers that only need "did we identify it"

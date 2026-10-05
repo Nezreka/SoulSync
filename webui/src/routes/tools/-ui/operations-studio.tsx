@@ -287,8 +287,11 @@ export function OperationsStudio({
       const info = catalog[g.finding_type];
       const isDestructive = info ? info.destructive : (g as any).destructive;
       const isFixable = info ? info.fixable : (g as any).fixable;
+      const reviewOnly = info?.review_only;
 
-      if (isDestructive) {
+      if (reviewOnly) {
+        suggestions += count;
+      } else if (isDestructive) {
         quarantine += count;
       } else if (isFixable) {
         safe += count;

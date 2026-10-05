@@ -8504,6 +8504,32 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE repair_findings ADD COLUMN last_error TEXT")
                 logger.info("Added last_error column to repair_findings")
 
+            if 'review_case_key' not in finding_cols:
+                cursor.execute("ALTER TABLE repair_findings ADD COLUMN review_case_key TEXT")
+                logger.info("Added review_case_key column to repair_findings")
+
+            # One-time, resumable backfill for findings created before the review
+            # queue. Use exact album row/folder identity, never artist/title text.
+            from core.repair_review_identity import review_case_key
+            cursor.execute(
+                "SELECT id, details_json, file_path FROM repair_findings "
+                "WHERE review_case_key IS NULL LIMIT 500"
+            )
+            while rows := cursor.fetchall():
+                updates = []
+                for finding_id, raw_details, file_path in rows:
+                    try:
+                        details = json.loads(raw_details) if raw_details else {}
+                    except (TypeError, ValueError):
+                        details = {}
+                    updates.append((review_case_key(details, file_path, finding_id), finding_id))
+                cursor.executemany(
+                    "UPDATE repair_findings SET review_case_key = ? WHERE id = ?", updates)
+                cursor.execute(
+                    "SELECT id, details_json, file_path FROM repair_findings "
+                    "WHERE review_case_key IS NULL LIMIT 500"
+                )
+
             cursor.execute("PRAGMA table_info(repair_job_runs)")
             run_cols = {c[1] for c in cursor.fetchall()}
             if 'error_text' not in run_cols:
@@ -8524,6 +8550,9 @@ class MusicDatabase:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_rf_type_status "
                 "ON repair_findings (finding_type, status)")
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rf_review_case "
+                "ON repair_findings (status, review_case_key)")
         except Exception as e:
             logger.error(f"Error migrating repair worker columns: {e}")
 

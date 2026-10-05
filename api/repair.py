@@ -54,6 +54,64 @@ def create_blueprint():
 
 # --- Repair Worker API Endpoints ---
 
+
+@bp.route('/api/repair/review-queue', methods=['GET'])
+def repair_review_queue_list():
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify({'items': [], 'total': 0, 'page': 0, 'limit': 30}), 200
+    status = request.args.get('status') or 'pending'
+    if status not in ('pending', 'resolved', 'dismissed', 'auto_fixed'):
+        return jsonify({'error': 'Invalid finding status'}), 400
+    try:
+        return jsonify(worker.get_review_cases(
+            status=status, page=_safe_int(request.args.get('page')),
+            limit=_safe_int(request.args.get('limit'), 30),
+            q=request.args.get('q') or ''))
+    except Exception as exc:
+        logger.error('Error loading review queue: %s', exc, exc_info=True)
+        return jsonify({'error': 'Could not load review queue'}), 500
+
+
+@bp.route('/api/repair/review-queue/<path:case_id>', methods=['GET'])
+def repair_review_queue_case(case_id):
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify({'error': 'Repair worker not initialized'}), 503
+    status = request.args.get('status') or 'pending'
+    if status not in ('pending', 'resolved', 'dismissed', 'auto_fixed'):
+        return jsonify({'error': 'Invalid finding status'}), 400
+    try:
+        case = worker.get_review_case(case_id, status=status)
+        if case is None:
+            return jsonify({'error': 'Review case not found'}), 404
+        for item in case['items']:
+            for key in ('album_thumb_url', 'artist_thumb_url'):
+                if item['details'].get(key):
+                    item['details'][key] = fix_artist_image_url(item['details'][key])
+        return jsonify(case)
+    except Exception as exc:
+        logger.error('Error loading review case: %s', exc, exc_info=True)
+        return jsonify({'error': 'Could not load review case'}), 500
+
+
+@bp.route('/api/repair/review-queue/<path:case_id>/findings/<int:finding_id>/apply', methods=['POST'])
+def repair_review_queue_apply(case_id, finding_id):
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify({'error': 'Repair worker not initialized'}), 503
+    data = request.get_json(silent=True) or {}
+    if data.get('action') not in ('fix', 'dismiss'):
+        return jsonify({'error': 'action must be fix or dismiss'}), 400
+    try:
+        result = worker.apply_review_decision(
+            case_id, finding_id, evidence_token=data.get('evidence_token') or '',
+            action=data['action'], fix_action=data.get('fix_action'))
+        return jsonify(result), 200 if result.get('success') else (409 if result.get('stale') else 400)
+    except Exception as exc:
+        logger.error('Error applying review decision: %s', exc, exc_info=True)
+        return jsonify({'error': 'Could not apply review decision'}), 500
+
 @bp.route('/api/repair/status', methods=['GET'])
 def repair_status():
     """Get repair worker status"""
@@ -171,7 +229,9 @@ def repair_job_run(job_id):
         if _repair_worker() is None:
             return jsonify({'error': 'Repair worker not initialized'}), 400
 
-        _repair_worker().run_job_now(job_id)
+        queued = _repair_worker().run_job_now(job_id)
+        if not queued:
+            return jsonify({'error': f'Unknown repair job: {job_id}'}), 404
         logger.info("Repair job %s triggered manually via UI", job_id)
         return jsonify({'success': True, 'job_id': job_id}), 200
     except Exception as e:
@@ -545,4 +605,3 @@ def repair_job_progress():
     except Exception as e:
         logger.error(f"Error getting repair progress: {e}")
         return jsonify({'error': str(e)}), 500
-

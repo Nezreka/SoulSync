@@ -41,6 +41,7 @@ export interface FindingTypeInfo {
   verb: string | null;
   fixable: boolean;
   destructive: boolean;
+  review_only?: boolean;
   job_ids?: string[];
   /** What the bulk-fix confirmation says, when the generic warning is wrong. */
   confirm?: string;
@@ -57,6 +58,12 @@ export interface FindingTypeInfo {
  * `findingTypeBlurb` degrades to '' rather than printing a slug at the user).
  */
 export const FINDING_TYPE_BLURBS: Record<string, string> = {
+  reconciliation_metadata: 'Audio and release-slot evidence suggest specific tag corrections.',
+  reconciliation_extra: 'A file does not fit any slot on the selected release.',
+  reconciliation_unresolved: 'The audio or release could not be identified reliably.',
+  reconciliation_intent: 'Choose complete or partial album before requesting tracks.',
+  reconciliation_missing: 'A track is absent from an album you marked as complete.',
+  reconciliation_release: 'Several release editions fit the folder equally well.',
   dead_file: 'Library rows whose audio file is missing from disk.',
   orphan_file: 'Audio files on disk with no matching row in the library.',
   track_number_mismatch: "Tag track numbers disagree with the release's order.",
@@ -288,7 +295,8 @@ export function safeFixablePending(
   let total = 0;
   for (const group of groups) {
     const info = infoOf(group.finding_type);
-    if (info?.fixable && !info.destructive) total += Math.max(0, group.pending || 0);
+    if (info?.fixable && !info.destructive && !info.review_only)
+      total += Math.max(0, group.pending || 0);
   }
   return total;
 }
