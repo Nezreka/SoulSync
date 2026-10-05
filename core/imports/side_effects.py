@@ -47,6 +47,25 @@ def _primary_track_artist_name(track_info: Dict[str, Any]) -> str:
     return str((track_info or {}).get("artist", "") or "")
 
 
+def _recording_identity(context: Dict[str, Any]) -> tuple[str | None, str | None]:
+    """Return a recording MBID and its comment only when they belong together."""
+    track_info = get_import_track_info(context) or get_import_search_result(context)
+    source_ids = get_import_source_ids(context)
+    source_mbid = source_ids["track_id"] if get_import_source(context).lower() == "musicbrainz" else ""
+    embedded_mbid = (context.get("_embedded_id_tags") or {}).get("MUSICBRAINZ_RECORDING_ID")
+    candidate = embedded_mbid or track_info.get("musicbrainz_recording_id") or source_mbid
+    track_mbid = str(candidate or "").strip().lower() or None
+    if not track_mbid:
+        return None, None
+
+    disambiguation = context.get("_recording_disambiguation")
+    if disambiguation is None and str(
+        track_info.get("musicbrainz_recording_id") or source_mbid or ""
+    ).strip().lower() == track_mbid:
+        disambiguation = track_info.get("disambiguation")
+    return track_mbid, str(disambiguation or "").strip() or None
+
+
 def _stable_soulsync_id(text: str) -> str:
     return str(abs(int(hashlib.md5(text.encode("utf-8", errors="replace")).hexdigest(), 16)) % (10 ** 9))
 
@@ -378,7 +397,7 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
         deezer_track_id = _embedded("DEEZER_TRACK_ID")
         tidal_track_id = _embedded("TIDAL_TRACK_ID")
         qobuz_track_id = _embedded("QOBUZ_TRACK_ID")
-        musicbrainz_recording_id = _embedded("MUSICBRAINZ_RECORDING_ID")
+        musicbrainz_recording_id, recording_disambiguation = _recording_identity(context)
         audiodb_id = _embedded("AUDIODB_TRACK_ID")
         soul_id = _embedded("SOUL_ID")
         isrc = context.get("_isrc")
@@ -404,6 +423,7 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
             tidal_track_id=tidal_track_id,
             qobuz_track_id=qobuz_track_id,
             musicbrainz_recording_id=musicbrainz_recording_id,
+            recording_disambiguation=recording_disambiguation,
             audiodb_id=audiodb_id,
             soul_id=soul_id,
             isrc=isrc,
@@ -766,7 +786,7 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             # so the watchlist scanner's stable-ID match path recognises
             # auto-imported tracks the next time the user adds the artist
             # to a watchlist.
-            track_mbid = (track_info.get("musicbrainz_recording_id") or "").strip().lower() or None
+            track_mbid, recording_disambiguation = _recording_identity(context)
             track_isrc = (track_info.get("isrc") or "").strip().upper() or None
             # Carries whatever the pipeline resolved for this item (a wishlist
             # row's or Auto-Import's own override, or None for "follow the
@@ -827,6 +847,10 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                     _t_cols += ["acquired_quality_json", "retention_json"]
                     _t_vals += ["?", "?"]
                     _t_params += [acquired_quality_json, retention_json]
+                if "recording_disambiguation" in track_columns:
+                    _t_cols.append("recording_disambiguation")
+                    _t_vals.append("?")
+                    _t_params.append(recording_disambiguation)
                 _t_cols.append("server_source")
                 _t_vals.append("'soulsync'")
                 if has_track_owner:
@@ -871,18 +895,28 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                             )
                     except Exception as e:
                         logger.debug("track source-id update failed: %s", e)
-            elif has_retention_columns:
+            else:
                 # A repeated/import-resume write refreshes transformation
                 # provenance for the existing physical row.  Never retain an
                 # old destructive-policy claim after a clean untransformed
                 # import of that same path.
-                cursor.execute(
-                    """UPDATE tracks
-                          SET acquired_quality_json=?, retention_json=?,
-                              updated_at=CURRENT_TIMESTAMP
-                        WHERE id=?""",
-                    (acquired_quality_json, retention_json, existing_track[0]),
-                )
+                if has_retention_columns:
+                    cursor.execute(
+                        """UPDATE tracks
+                              SET acquired_quality_json=?, retention_json=?,
+                                  updated_at=CURRENT_TIMESTAMP
+                            WHERE id=?""",
+                        (acquired_quality_json, retention_json, existing_track[0]),
+                    )
+                if recording_disambiguation and "recording_disambiguation" in track_columns:
+                    cursor.execute(
+                        "UPDATE tracks SET recording_disambiguation = ?, "
+                        "musicbrainz_recording_id = COALESCE(NULLIF(musicbrainz_recording_id, ''), ?) "
+                        "WHERE id = ? AND (musicbrainz_recording_id IS NULL "
+                        "OR musicbrainz_recording_id = '' "
+                        "OR LOWER(musicbrainz_recording_id) = ?)",
+                        (recording_disambiguation, track_mbid, existing_track[0], track_mbid),
+                    )
 
             conn.commit()
             logger.info("[SoulSync Library] Added: %s / %s / %s", artist_name, album_name, track_name)

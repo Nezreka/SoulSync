@@ -28,6 +28,7 @@ import os
 import sqlite3
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict
 
 import pytest
@@ -70,11 +71,14 @@ class TestSchemaMigration:
         assert 'tidal_track_id' in cols
         assert 'qobuz_track_id' in cols
         assert 'musicbrainz_recording_id' in cols
+        assert 'recording_disambiguation' in cols
         assert 'audiodb_id' in cols
         assert 'soul_id' in cols
         assert 'isrc' in cols
         assert 'acquired_quality_json' in cols
         assert 'retention_json' in cols
+        cursor.execute("PRAGMA table_info(tracks)")
+        assert 'recording_disambiguation' in {row[1] for row in cursor.fetchall()}
 
     def test_track_downloads_has_external_id_indexes(self, db):
         conn = db._get_connection()
@@ -109,6 +113,7 @@ class TestRecordTrackDownloadPersistsIds:
             tidal_track_id='td1',
             qobuz_track_id='qb1',
             musicbrainz_recording_id='mb-uuid-1',
+            recording_disambiguation='Connect Sets acoustic',
             audiodb_id='adb1',
             soul_id='hyd-soul-1',
             isrc='USRC17607839',
@@ -120,12 +125,14 @@ class TestRecordTrackDownloadPersistsIds:
         cursor.execute(
             "SELECT spotify_track_id, itunes_track_id, deezer_track_id, "
             "tidal_track_id, qobuz_track_id, musicbrainz_recording_id, "
+            "recording_disambiguation, "
             "audiodb_id, soul_id, isrc FROM track_downloads WHERE id = ?",
             (rec_id,),
         )
         row = tuple(cursor.fetchone())
         assert row == (
             'sp1', 'it1', 'dz1', 'td1', 'qb1', 'mb-uuid-1',
+            'Connect Sets acoustic',
             'adb1', 'hyd-soul-1', 'USRC17607839',
         )
 
@@ -266,6 +273,52 @@ class TestBackfillTrackExternalIdsFromProvenance:
             ('t1',),
         )
         assert tuple(cursor.fetchone()) == ('sp1', 'dz1', 'USRC17607839')
+
+    def test_recording_disambiguation_follows_matching_provenance_mbid(self, db):
+        self._seed_artist_album_and_track(db, track_id='t1', file_path='/lib/Track.mp3')
+        db.record_track_download(
+            file_path='/lib/Track.mp3', source_service='soulseek',
+            source_username='u', source_filename='Track.mp3',
+            musicbrainz_recording_id='mb-acoustic',
+            recording_disambiguation='Connect Sets acoustic',
+        )
+        db.backfill_track_external_ids_from_provenance('t1', '/lib/Track.mp3')
+        row = db._get_connection().execute(
+            "SELECT musicbrainz_recording_id, recording_disambiguation FROM tracks WHERE id='t1'"
+        ).fetchone()
+        assert tuple(row) == ('mb-acoustic', 'Connect Sets acoustic')
+
+        conn = db._get_connection()
+        conn.execute("UPDATE tracks SET musicbrainz_recording_id='mb-other', "
+                     "recording_disambiguation=NULL WHERE id='t1'")
+        conn.commit()
+        db.backfill_track_external_ids_from_provenance('t1', '/lib/Track.mp3')
+        row = conn.execute(
+            "SELECT musicbrainz_recording_id, recording_disambiguation FROM tracks WHERE id='t1'"
+        ).fetchone()
+        assert tuple(row) == ('mb-other', None)
+
+    def test_media_server_scan_preserves_or_clears_recording_comment_with_mbid(self, db):
+        self._seed_artist_album_and_track(db, track_id='t1', file_path='/lib/Track.mp3')
+        conn = db._get_connection()
+        conn.execute("UPDATE tracks SET musicbrainz_recording_id='rec-a', "
+                     "recording_disambiguation='acoustic' WHERE id='t1'")
+        conn.commit()
+
+        track = SimpleNamespace(
+            ratingKey='t1', title='Test Track', trackNumber=1,
+            duration=180000, path='/lib/Track.mp3', musicBrainzId=None,
+        )
+        assert db.insert_or_update_media_track(track, 'album-1', 'artist-1')
+        row = conn.execute("SELECT musicbrainz_recording_id, recording_disambiguation "
+                           "FROM tracks WHERE id='t1'").fetchone()
+        assert tuple(row) == ('rec-a', 'acoustic')
+
+        track.musicBrainzId = 'rec-b'
+        assert db.insert_or_update_media_track(track, 'album-1', 'artist-1')
+        row = conn.execute("SELECT musicbrainz_recording_id, recording_disambiguation "
+                           "FROM tracks WHERE id='t1'").fetchone()
+        assert tuple(row) == ('rec-b', None)
 
     def test_preserves_existing_ids(self, db):
         """COALESCE-update — if the enrichment worker already wrote a

@@ -35731,6 +35731,11 @@ div.artist-hero-badge {
     color: rgba(255, 255, 255, 0.95);
 }
 
+.fix-result-disambiguation {
+    font-size: 12px;
+    color: rgba(var(--accent-rgb), 0.9);
+}
+
 .fix-result-artist {
     font-size: 13px;
     color: rgba(255, 255, 255, 0.7);

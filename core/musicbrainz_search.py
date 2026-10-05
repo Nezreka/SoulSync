@@ -1031,6 +1031,7 @@ class MusicBrainzSearchClient:
             return {
                 'id': rec.get('id', '') or mbid,
                 'name': rec.get('title', '') or '',
+                'source': 'musicbrainz',
                 'artists': artists if artists else [],
                 'album': album_name,
                 'duration_ms': rec.get('length') or 0,
@@ -1107,6 +1108,7 @@ class MusicBrainzSearchClient:
                 results.append({
                     'id': r.get('id', ''),
                     'name': r.get('title', ''),
+                    'disambiguation': (r.get('disambiguation') or '').strip(),
                     'artists': [{'name': a, 'id': ''} for a in artists],
                     'album': {
                         'id': rg_id or release_id,
@@ -1235,6 +1237,7 @@ class MusicBrainzSearchClient:
                 tracks.append({
                     'id': recording.get('id', track.get('id', '')),
                     'name': recording.get('title', track.get('title', '')),
+                    'disambiguation': (recording.get('disambiguation') or '').strip(),
                     'artists': [{'name': a} for a in track_artists],
                     'duration_ms': recording.get('length', 0) or track.get('length', 0) or 0,
                     'track_number': track_num,

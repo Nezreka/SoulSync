@@ -377,6 +377,8 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
         pp["recording_mbid"] = result["mbid"]
         searched_recording = result["mbid"]
         pp["id_tags"]["MUSICBRAINZ_RECORDING_ID"] = pp["recording_mbid"]
+        if result.get("recording_disambiguation") is not None:
+            pp["recording_disambiguation"] = str(result["recording_disambiguation"]).strip()
         details = _call_source_lookup(
             "MusicBrainz recording details",
             mb_service.mb_client.get_recording,
@@ -501,6 +503,9 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
                                     if release_recording.get("id"):
                                         pp["recording_mbid"] = release_recording["id"]
                                         pp["id_tags"]["MUSICBRAINZ_RECORDING_ID"] = release_recording["id"]
+                                        pp["recording_disambiguation"] = (
+                                            release_recording.get("disambiguation") or ""
+                                        ).strip()
                                     break
                             break
                 except (ValueError, TypeError):
@@ -525,6 +530,9 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
             pp["isrc"] = (final_recording.get("isrcs") or [None])[0]
             pp["mb_isrcs"] = final_recording.get("isrcs") or []
             pp["mb_genres"] = [g["name"] for g in sorted(final_recording.get("genres", []), key=lambda g: g.get("count", 0), reverse=True)]
+            recording_disambiguation = (final_recording.get("disambiguation") or "").strip()
+            if "disambiguation" in final_recording:
+                pp["recording_disambiguation"] = recording_disambiguation
             # #1510: ARTISTSORT keeps only the sort names of the credited
             # artists that match the primary source's artist list — or is
             # left out entirely when nothing matches — so the sort tag names
@@ -534,9 +542,8 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
             # #1536: the recording's disambiguation ("acoustic", "live") —
             # track-level mirror of MUSICBRAINZ_ALBUMCOMMENT. Already in the
             # fetched recording dict; no extra lookup needed.
-            _recording_disambiguation = (final_recording.get("disambiguation") or "").strip()
-            if _recording_disambiguation:
-                pp["id_tags"]["MUSICBRAINZ_TRACKCOMMENT"] = _recording_disambiguation
+            if recording_disambiguation:
+                pp["id_tags"]["MUSICBRAINZ_TRACKCOMMENT"] = recording_disambiguation
 
     # Genre fallback chain: most MusicBrainz recordings don't carry genres at
     # the track level, but releases and artists usually do. If the recording
@@ -1780,6 +1787,7 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
         if isinstance(context, dict):
             try:
                 context["_embedded_id_tags"] = dict(pp.get("id_tags") or {})
+                context["_recording_disambiguation"] = pp.get("recording_disambiguation")
                 isrc_value = (
                     pp.get("isrc") or pp.get("deezer_isrc") or pp.get("tidal_isrc")
                     or pp.get("hifi_isrc") or pp.get("qobuz_isrc")

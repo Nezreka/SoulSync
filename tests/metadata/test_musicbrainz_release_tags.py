@@ -59,6 +59,30 @@ def test_selected_edition_bypasses_name_cache_and_other_edition(runtime):
     assert ms.mb_release_cache == {("confessions", "madonna"): "wrong"}
 
 
+def test_recording_disambiguation_comes_from_final_release_recording(runtime):
+    client = runtime.mb_worker.mb_service.mb_client
+    client.get_recording.return_value = {
+        "disambiguation": "  acoustic set  ", "artist-credit": release()["artist-credit"]
+    }
+
+    _, state = process(runtime)
+
+    assert state["id_tags"]["MUSICBRAINZ_RECORDING_ID"] == "chosen-recording"
+    assert state["recording_disambiguation"] == "acoustic set"
+
+
+def test_release_recording_comment_survives_partial_detail_response(runtime):
+    selected = release()
+    selected["media"][0]["tracks"][0]["recording"]["disambiguation"] = "acoustic"
+    client = runtime.mb_worker.mb_service.mb_client
+    client.get_release.side_effect = None
+    client.get_release.return_value = selected
+
+    _, state = process(runtime)
+
+    assert state["recording_disambiguation"] == "acoustic"
+
+
 def test_unavailable_selected_edition_does_not_fallback(runtime):
     runtime.mb_worker.mb_service.mb_client.get_release.return_value = None
     runtime.mb_worker.mb_service.mb_client.get_release.side_effect = None

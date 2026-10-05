@@ -3528,7 +3528,7 @@ class MusicDatabase:
                     added_external = True
             if added_external:
                 logger.info(f"Added external-ID columns to track_downloads: {', '.join(external_id_cols)}")
-            for _col in ('acquired_quality_json', 'retention_json'):
+            for _col in ('acquired_quality_json', 'retention_json', 'recording_disambiguation'):
                 if _col not in td_columns:
                     cursor.execute(f"ALTER TABLE track_downloads ADD COLUMN {_col} TEXT")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_spotify_id ON track_downloads (spotify_track_id)")
@@ -4545,6 +4545,9 @@ class MusicDatabase:
             added_tracks = False
             if 'musicbrainz_recording_id' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN musicbrainz_recording_id TEXT")
+                added_tracks = True
+            if 'recording_disambiguation' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN recording_disambiguation TEXT")
                 added_tracks = True
             if 'musicbrainz_last_attempted' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN musicbrainz_last_attempted TIMESTAMP")
@@ -10602,12 +10605,16 @@ class MusicDatabase:
                             file_size = COALESCE(?, file_size),
                             server_source = ?,
                             track_artist = COALESCE(?, track_artist),
+                            recording_disambiguation = CASE
+                                WHEN ? IS NOT NULL AND (musicbrainz_recording_id IS NULL
+                                     OR LOWER(?) != LOWER(musicbrainz_recording_id))
+                                THEN NULL ELSE recording_disambiguation END,
                             musicbrainz_recording_id = COALESCE(?, musicbrainz_recording_id),
                             title_norm = ?,
                             track_artist_norm = COALESCE(?, track_artist_norm),
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    """, (album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, title_norm, track_artist_norm, track_id))
+                    """, (album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, mbid, mbid, title_norm, track_artist_norm, track_id))
 
                 if is_new_track or track_artist_norm is not None:
                     cursor.execute("DELETE FROM track_credits WHERE track_id = ?", (track_id,))
@@ -20893,6 +20900,7 @@ class MusicDatabase:
                                tidal_track_id: Optional[str] = None,
                                qobuz_track_id: Optional[str] = None,
                                musicbrainz_recording_id: Optional[str] = None,
+                               recording_disambiguation: Optional[str] = None,
                                audiodb_id: Optional[str] = None,
                                soul_id: Optional[str] = None,
                                isrc: Optional[str] = None,
@@ -20933,14 +20941,16 @@ class MusicDatabase:
                  source_size, audio_quality, track_title, track_artist, track_album, status,
                  bit_depth, sample_rate, bitrate,
                  spotify_track_id, itunes_track_id, deezer_track_id, tidal_track_id,
-                 qobuz_track_id, musicbrainz_recording_id, audiodb_id, soul_id, isrc,
+                 qobuz_track_id, musicbrainz_recording_id, recording_disambiguation,
+                 audiodb_id, soul_id, isrc,
                  acquired_quality_json, retention_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (track_id, file_path, source_service, source_username, source_filename,
                   source_size, audio_quality, track_title, track_artist, track_album, status,
                   bit_depth, sample_rate, bitrate,
                   spotify_track_id, itunes_track_id, deezer_track_id, tidal_track_id,
-                  qobuz_track_id, musicbrainz_recording_id, audiodb_id, soul_id, isrc,
+                  qobuz_track_id, musicbrainz_recording_id, recording_disambiguation,
+                  audiodb_id, soul_id, isrc,
                   acquired_quality_json, retention_json))
             conn.commit()
             return cursor.lastrowid
@@ -21042,6 +21052,17 @@ class MusicDatabase:
             for track_col, val in updates.items():
                 set_clauses.append(f"{track_col} = COALESCE(NULLIF({track_col}, ''), ?)")
                 params.append(val)
+            disambiguation = prov.get('recording_disambiguation')
+            prov_mbid = prov.get('musicbrainz_recording_id')
+            if disambiguation and prov_mbid:
+                set_clauses.append(
+                    "recording_disambiguation = CASE "
+                    "WHEN musicbrainz_recording_id IS NULL OR musicbrainz_recording_id = '' "
+                    "OR LOWER(musicbrainz_recording_id) = LOWER(?) "
+                    "THEN COALESCE(NULLIF(recording_disambiguation, ''), ?) "
+                    "ELSE recording_disambiguation END"
+                )
+                params.extend((prov_mbid, disambiguation))
             params.append(track_id)
             cursor.execute(
                 f"UPDATE tracks SET {', '.join(set_clauses)} WHERE id = ?",

@@ -413,6 +413,7 @@ def search_musicbrainz_tracks():
             'duration_ms': t.duration_ms,
             'image_url': t.image_url,
             'source': 'musicbrainz',
+            'disambiguation': t.disambiguation or '',
         } for t in tracks]
 
         return jsonify({'tracks': tracks_dict})
@@ -4396,6 +4397,8 @@ def update_youtube_discovery_match():
                 'image_url': image_url,
                 'source': match_source,
             }
+            if spotify_track.get('disambiguation'):
+                matched_data['disambiguation'] = spotify_track['disambiguation']
             cache_db = get_database()
             cache_db.save_discovery_cache_match(
                 cache_key[0], cache_key[1], _get_active_discovery_source(), 1.0, matched_data,
@@ -4502,6 +4505,8 @@ def _build_fix_modal_spotify_data(spotify_track):
     for k in ('source', 'provider', 'isrc', 'track_number', 'disc_number', 'release_date'):
         if spotify_track.get(k) is not None:
             data[k] = spotify_track[k]
+    if spotify_track.get('disambiguation'):
+        data['disambiguation'] = spotify_track['disambiguation']
     return data
 
 
@@ -5044,6 +5049,8 @@ def update_ytmusic_discovery_match():
                 'image_url': image_url,
                 'source': match_source,
             }
+            if spotify_track.get('disambiguation'):
+                matched_data['disambiguation'] = spotify_track['disambiguation']
             cache_db = get_database()
             cache_db.save_discovery_cache_match(
                 cache_key[0], cache_key[1], _get_active_discovery_source(), 1.0, matched_data,
