@@ -576,6 +576,10 @@ def _replace_template_variables(template: str, context: dict) -> str:
         "year": str(clean_context.get("year", "")),
         "quality": clean_context.get("quality", ""),
         "disambiguation": clean_context.get("disambiguation", ""),
+        # #1536: the RECORDING's disambiguation, distinct from the album's
+        # $disambiguation above. Lets a filename tell "Song (acoustic)"
+        # from the album version.
+        "track_disambiguation": clean_context.get("track_disambiguation", ""),
     }
     for var_name, val in bracket_map.items():
         result = result.replace("${" + var_name + "}", val)
@@ -592,6 +596,10 @@ def _replace_template_variables(template: str, context: dict) -> str:
     result = result.replace("$artist", clean_context.get("artist", "Unknown Artist"))
     result = result.replace("$album", clean_context.get("album", "Unknown Album"))
     result = result.replace("$title", clean_context.get("title", "Unknown Track"))
+    # $track_disambiguation must replace before $track: it starts with $track,
+    # so the shorter replace would otherwise eat its prefix (longest-prefix-first,
+    # same rule the $cdnum/$track pair below follows).
+    result = result.replace("$track_disambiguation", clean_context.get("track_disambiguation", ""))
     # $cdnum must replace before $track to follow the longest-prefix-first
     # rule used throughout this function (no current $c* var collides, but
     # ordering matches the web_server.py path-builder for parity).
@@ -645,6 +653,42 @@ def with_disambiguation(template: str, disambiguation: str, album_name: str = ""
         return template
     end = matches[-1].end()
     return folder[:end] + " ($disambiguation)" + folder[end:] + sep + filename
+
+
+# $title as its own token, not the front of $track_disambiguation.
+_TITLE_TOKEN_RE = re.compile(r"\$\{title\}|\$title(?![\w])")
+
+
+def with_track_disambiguation(template: str, track_disambiguation: str, track_title: str = "") -> str:
+    """Give the filename the recording's disambiguation when the template doesn't.
+
+    Track-level mirror of ``with_disambiguation`` (#1536): two recordings can
+    share a title and differ only by musicbrainz's recording disambiguation
+    ("acoustic", "live"). Without it in the filename they land on the same
+    name and collide. So the suffix goes on after the last $title in the
+    filename part, unless the template already places $track_disambiguation
+    itself or the track title already carries it. No disambiguation, or no
+    $title token to hang it on, means the template comes back untouched.
+
+    Callers gate this behind ``file_organization.auto_disambiguation`` just
+    like the album-level suffix.
+    """
+    track_disambiguation = (track_disambiguation or "").strip()
+    if not track_disambiguation or not template:
+        return template
+    if "$track_disambiguation" in template or "${track_disambiguation}" in template:
+        return template
+    if album_name_carries(track_title, track_disambiguation):
+        return template
+    folder, sep, filename = template.rpartition("/")
+    if not sep:
+        folder, filename = "", template
+    matches = list(_TITLE_TOKEN_RE.finditer(filename))
+    if not matches:
+        return template
+    end = matches[-1].end()
+    new_filename = filename[:end] + " ($track_disambiguation)" + filename[end:]
+    return folder + sep + new_filename if sep else new_filename
 
 
 def _auto_disambiguation_enabled() -> bool:
@@ -727,6 +771,9 @@ def get_file_path_from_template_raw(template: str, context: dict) -> tuple[str, 
     # #1352: the auto-suffix rewrites the template; only do it when enabled.
     if _auto_disambiguation_enabled():
         template = with_disambiguation(template, context.get("disambiguation", ""), context.get("album", ""))
+        # #1536: same for the recording's disambiguation on the filename.
+        template = with_track_disambiguation(
+            template, context.get("track_disambiguation", ""), context.get("title", ""))
     _template_has_disc = template_uses_disc_variable(template)
     full_path = apply_path_template(template, context)
 
@@ -830,6 +877,9 @@ def get_file_path_from_template(context: dict, template_type: str = "album_path"
     # #1352: the auto-suffix rewrites the template; only do it when enabled.
     if _auto_disambiguation_enabled():
         template = with_disambiguation(template, context.get("disambiguation", ""), context.get("album", ""))
+        # #1536: same for the recording's disambiguation on the filename.
+        template = with_track_disambiguation(
+            template, context.get("track_disambiguation", ""), context.get("title", ""))
     _template_has_disc = template_uses_disc_variable(template)
     full_path = apply_path_template(template, context)
 
@@ -1223,6 +1273,8 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             "_itunes_artist_id": _itunes_aid,
             # #1299: the one thing telling same-named releases apart.
             "disambiguation": str((album_context or {}).get("disambiguation") or "").strip(),
+            # #1536: the one thing telling same-titled recordings apart.
+            "track_disambiguation": str((track_info or {}).get("disambiguation") or "").strip(),
         }
         # A caller that KNOWS the disc count is authoritative: re-deriving it from
         # a live provider tracklist made the destination depend on whether that
@@ -1407,6 +1459,8 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         "atypes": atypes_value,
         "_artists_list": _artists,
         "_itunes_artist_id": _itunes_aid,
+        # #1536: recording disambiguation for the single filename.
+        "track_disambiguation": str((track_info or {}).get("disambiguation") or "").strip(),
     }
 
     folder_path, filename_base = get_file_path_from_template(template_context, "single_path")

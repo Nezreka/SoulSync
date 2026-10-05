@@ -116,6 +116,9 @@ def _normalize_match_track(track: Dict[str, Any], source: str, album: Dict[str, 
         "uri": track.get("uri", ""),
         "album": track_album,
         "source": track_source,
+        # #1536: recording disambiguation ("acoustic", "live") so the manual
+        # album-import flow can carry it to the filename/tag layers.
+        "disambiguation": str(track.get("disambiguation") or "").strip(),
     }
 
 
@@ -254,6 +257,11 @@ def build_album_import_context(
         "album_type": track_album_type,
         "release_date": track_album_release,
         "source": source,
+        # #1536: recording disambiguation ("acoustic", "live") carried from
+        # the search result so the filename template and tag writer can use
+        # it. Empty for non-MusicBrainz sources — same graceful-absent
+        # pattern as the album-level disambiguation below.
+        "disambiguation": str(track.get("disambiguation") or "").strip(),
     }
 
     normalized_album = {

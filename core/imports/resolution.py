@@ -251,6 +251,9 @@ def _build_single_import_context_payload(
         'album_id': album_id,
         'album_type': album_type,
         'release_date': release_date,
+        # #1536: recording disambiguation ("acoustic", "live") for the
+        # single-import filename/tag layers.
+        'disambiguation': str(_extract_lookup_value(track_data, 'disambiguation', default='') or '').strip(),
         '_source': source or '',
     }
 
