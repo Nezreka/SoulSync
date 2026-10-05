@@ -436,7 +436,9 @@ class MusicBrainzWorker:
                     artist_mbid=artist_mbid,
                     duration_ms=item.get('duration'))
                 if result and result.get('mbid'):
-                    self.mb_service.update_track_mbid(item_id, result['mbid'], 'matched')
+                    self.mb_service.update_track_mbid(
+                        item_id, result['mbid'], 'matched',
+                        recording_disambiguation=result.get('recording_disambiguation'))
                     self.stats['matched'] += 1
                     logger.info(f"Matched track '{item_name}' → MBID: {result['mbid']}")
                 else:

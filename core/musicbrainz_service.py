@@ -803,10 +803,14 @@ class MusicBrainzService:
         cached = self._check_cache('recording', track_name, cache_artist_name)
         if cached:
             logger.debug(f"Cache hit for recording '{track_name}'")
+            cached_metadata = cached.get('metadata')
             return {
                 'mbid': cached['musicbrainz_id'],
                 'title': track_name,
                 'confidence': cached['confidence'],
+                'recording_disambiguation': (
+                    cached_metadata.get('disambiguation') if isinstance(cached_metadata, dict) else None
+                ),
                 'cached': True
             }
 
@@ -867,6 +871,7 @@ class MusicBrainzService:
                     'mbid': mbid,
                     'title': mb_title,
                     'confidence': best_confidence,
+                    'recording_disambiguation': best_match.get('disambiguation'),
                     'cached': False
                 }
             else:
@@ -1448,8 +1453,13 @@ class MusicBrainzService:
             if conn:
                 conn.close()
     
-    def update_track_mbid(self, track_id: int, mbid: Optional[str], status: str):
-        """Update track with MusicBrainz recording ID"""
+    def update_track_mbid(self, track_id: int, mbid: Optional[str], status: str,
+                          recording_disambiguation: Optional[str] = None):
+        """Update track identity and any disambiguation supplied by MusicBrainz."""
+        clean_disambiguation = (
+            recording_disambiguation.strip() or None
+            if recording_disambiguation is not None else None
+        )
         conn = None
         try:
             conn = self.db._get_connection()
@@ -1458,10 +1468,14 @@ class MusicBrainzService:
             cursor.execute("""
                 UPDATE tracks
                 SET musicbrainz_recording_id = ?,
+                    recording_disambiguation = CASE
+                        WHEN musicbrainz_recording_id = ? AND ? IS NULL
+                        THEN recording_disambiguation ELSE ? END,
                     musicbrainz_last_attempted = ?,
                     musicbrainz_match_status = ?
                 WHERE id = ?
-            """, (mbid, datetime.now(), status, track_id))
+            """, (mbid, mbid, recording_disambiguation, clean_disambiguation,
+                  datetime.now(), status, track_id))
 
             conn.commit()
 

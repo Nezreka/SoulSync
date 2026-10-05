@@ -581,6 +581,7 @@ def test_get_album_resolves_release_group_mbid_to_release():
             {'position': 1, 'tracks': [
                 {'id': 't1', 'number': '1', 'position': 1, 'length': 50000,
                  'recording': {'id': 'rec-1', 'title': 'BLOOD.',
+                               'disambiguation': 'live',
                                'artist-credit': [{'name': 'Kendrick Lamar'}], 'length': 50000}},
             ]},
         ],
@@ -601,6 +602,7 @@ def test_get_album_resolves_release_group_mbid_to_release():
     assert album['name'] == 'DAMN.'
     assert len(album['tracks']) == 1
     assert album['tracks'][0]['name'] == 'BLOOD.'
+    assert album['tracks'][0]['disambiguation'] == 'live'
     assert 'release-group' in album['external_urls']['musicbrainz']
 
 
@@ -842,6 +844,17 @@ def test_recording_to_track_no_release_defaults_total_tracks_to_one():
     assert track.total_tracks == 1
 
 
+def test_recording_to_track_keeps_disambiguation_separate():
+    client = MusicBrainzSearchClient()
+    track = client._recording_to_track({
+        'id': 'rec-acoustic', 'title': 'Dear Maria, Count Me In',
+        'disambiguation': ' Connect Sets acoustic ', 'releases': [],
+    }, 'All Time Low')
+
+    assert track.name == 'Dear Maria, Count Me In'
+    assert track.disambiguation == 'Connect Sets acoustic'
+
+
 def test_pick_representative_release_prefers_official_with_media():
     """The release picker should skip stub releases (no media) and pick
     Official over Promotion status."""
@@ -887,6 +900,7 @@ def test_get_recording_flat_happy_path():
     client._client.get_recording.return_value = {
         'id': 'rec-abc',
         'title': 'Army of Me',
+        'disambiguation': 'live',
         'length': 234000,
         'artist-credit': [{'artist': {'name': 'Björk'}}],
         'releases': [{
@@ -904,6 +918,8 @@ def test_get_recording_flat_happy_path():
     assert track is not None
     assert track['id'] == 'rec-abc'
     assert track['name'] == 'Army of Me'
+    assert track['source'] == 'musicbrainz'
+    assert track['disambiguation'] == 'live'
     assert track['artists'] == ['Björk']  # flat list of strings, not Spotify-shaped objects
     assert track['album'] == 'Post'        # flat string, not nested dict
     assert track['duration_ms'] == 234000
@@ -947,6 +963,7 @@ def test_get_recording_flat_recording_without_release():
 
     assert track is not None
     assert track['name'] == 'Untitled Demo'
+    assert track['disambiguation'] == ''
     assert track['album'] == ''
     assert track['image_url'] == ''
     assert track['artists'] == ['Unknown']
@@ -1448,3 +1465,22 @@ def test_search_artists_leads_with_the_artist_the_query_means():
 
     # gotye scores 76, under the usual floor, and still leads
     assert [a.name for a in results] == ['Gotye', 'Somebody That I Used to Know']
+
+
+def test_fix_search_response_includes_recording_disambiguation(monkeypatch):
+    from flask import Flask
+
+    from api.source_playlists import search_musicbrainz_tracks
+    from core.musicbrainz_search import Track
+
+    client = MagicMock()
+    client.search_tracks.return_value = [Track(
+        id='rec-live', name='Song', artists=['Artist'], album='Album',
+        duration_ms=180000, popularity=0, disambiguation='live',
+    )]
+    monkeypatch.setattr('core.musicbrainz_search.MusicBrainzSearchClient', lambda: client)
+
+    with Flask(__name__).test_request_context('/api/musicbrainz/search_tracks?query=Song'):
+        response = search_musicbrainz_tracks()
+
+    assert response.get_json()['tracks'][0]['disambiguation'] == 'live'

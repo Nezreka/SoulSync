@@ -546,8 +546,10 @@ def convert_beatport_results_to_spotify_tracks(discovery_results):
                 'name': spotify_data['name'],
                 'artists': artists,
                 'album': spotify_data['album'],
-                'source': 'beatport'
+                'source': 'musicbrainz' if spotify_data.get('source') == 'musicbrainz' else 'beatport'
             }
+            if spotify_data.get('disambiguation'):
+                track['disambiguation'] = spotify_data['disambiguation']
             if spotify_data.get('track_number'):
                 track['track_number'] = spotify_data['track_number']
             if spotify_data.get('disc_number'):

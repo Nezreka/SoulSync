@@ -90,6 +90,32 @@ describe('FixModal', () => {
     expect(titles).toEqual(['Song', 'Song (Live)']);
   });
 
+  it('shows MusicBrainz recording notes on same-title Fix results', async () => {
+    responder = (url) =>
+      url.startsWith('/api/musicbrainz/search_tracks')
+        ? {
+            tracks: [
+              { id: 'rec-live', name: 'Song', disambiguation: 'live' },
+              { id: 'rec-acoustic', name: 'Song', disambiguation: 'acoustic' },
+            ],
+          }
+        : { tracks: [] };
+    stubFetch();
+    render(
+      <FixModal
+        config={SYNC_SOURCES.tidal}
+        sourceId="77"
+        row={ROW}
+        onClose={() => {}}
+        onFixed={() => {}}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText('Recording note: live')).toBeInTheDocument());
+    expect(screen.getByText('Recording note: acoustic')).toBeInTheDocument();
+    expect(document.querySelectorAll('.fix-result-title')).toHaveLength(2);
+  });
+
   it('the MBID lookup renders a single confirmable result; garbage is rejected', async () => {
     responder = (url) =>
       url.includes('/api/musicbrainz/recording/') ? { id: 'mb1', name: 'Exact' } : { tracks: [] };
