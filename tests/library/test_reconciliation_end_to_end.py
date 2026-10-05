@@ -15,7 +15,8 @@ from mutagen.flac import FLAC
 from core.library.reconciliation_evidence import ReconciliationEvidence
 from core.repair_jobs.base import JobContext
 from core.repair_jobs.library_reconciliation import (
-    LibraryReconciliationJob, _group_disc_folders, _normalize_slot, _suggest_filename,
+    LibraryReconciliationJob, _candidate_evidence, _group_disc_folders,
+    _normalize_slot, _suggest_filename,
 )
 from core.repair_worker import RepairWorker
 from database.music_database import MusicDatabase
@@ -38,6 +39,36 @@ class _Acoustid:
     def lookup_fingerprint_with_status(self, fingerprint, duration):
         self.lookups += 1
         return {'status': 'ok', 'recordings': [self.matches[fingerprint]]}
+
+
+def test_candidate_evidence_displays_the_acoustid_recording_that_supports_the_slot():
+    files = [{
+        'path': '/album/01 - Tautou.mp3',
+        'tags': {'title': 'Tautou', 'duration_ms': 102453},
+        'acoustid': {'recordings': [
+            {'mbid': 'play-id', 'title': 'Play Crack the Sky',
+             'artist': 'Brand New', 'score': 0.999},
+            {'mbid': 'tautou-id', 'title': 'Tautou',
+             'artist': 'Brand New', 'score': 0.999},
+        ]},
+    }]
+    slots = [{'title': 'Tautou', 'artist': 'Brand New',
+              'recording_mbid': 'tautou-id', 'duration_ms': 102453,
+              'track_number': 1, 'disc_number': 1}]
+    plan = {'pairs': [{
+        'file_index': 0, 'slot_index': 0, 'confidence': 'clear',
+        'reasons': ['AcoustID recording ID matches release slot'],
+        'duration_delta_ms': 0, 'ambiguity_reasons': [],
+    }], 'missing_slots': [], 'extra_files': []}
+
+    pair = _candidate_evidence(
+        files, (1, 1, 0, 'musicbrainz', 'release-id', slots, plan))['pairs'][0]
+
+    assert pair['audio_title'] == 'Tautou'
+    assert pair['audio_alternatives'] == [{
+        'mbid': 'play-id', 'title': 'Play Crack the Sky',
+        'artist': 'Brand New', 'score': 0.999,
+    }]
 
 
 def _album(db, path):

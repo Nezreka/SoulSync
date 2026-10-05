@@ -184,8 +184,32 @@ def _candidate_evidence(files: list[dict], scored: tuple) -> dict:
         file = files[pair['file_index']]
         slot = slots[pair['slot_index']]
         recordings = file['acoustid'].get('recordings') or []
-        top = max(recordings, key=lambda row: float(row.get('score') or 0),
-                  default={})
+        slot_mbid = str(slot.get('recording_mbid') or '')
+
+        def support_rank(recording):
+            score = float(recording.get('score') or 0)
+            eligible = score >= 0.80
+            mbid_match = bool(slot_mbid and recording.get('mbid') == slot_mbid)
+            title_match = _title_score(str(recording.get('title') or ''),
+                                       str(slot.get('title') or '')) >= 0.88
+            artist = str(recording.get('artist') or '')
+            slot_artist = str(slot.get('artist') or '')
+            artist_match = (not artist or not slot_artist or
+                            _title_score(artist, slot_artist) >= 0.75)
+            return (eligible and mbid_match, eligible and title_match and artist_match, score)
+
+        top = max(recordings, key=support_rank, default={})
+        alternatives = [
+            {'mbid': recording.get('mbid') or '',
+             'title': recording.get('title') or '',
+             'artist': recording.get('artist') or '',
+             'score': recording.get('score')}
+            for recording in recordings
+            if recording is not top and (
+                recording.get('mbid') != top.get('mbid') or
+                recording.get('title') != top.get('title') or
+                recording.get('artist') != top.get('artist'))
+        ]
         pairs.append({
             'file': os.path.basename(file['path']),
             'tag_title': file['tags'].get('title') or '',
@@ -193,6 +217,7 @@ def _candidate_evidence(files: list[dict], scored: tuple) -> dict:
             'audio_title': top.get('title') or '',
             'audio_artist': top.get('artist') or '',
             'audio_score': top.get('score'),
+            'audio_alternatives': alternatives,
             'slot_title': slot['title'],
             'slot_number': slot.get('track_number'),
             'disc_number': slot.get('disc_number'),

@@ -45,6 +45,19 @@ def _recording_id(slot: dict) -> str:
                or slot.get('recording_id') or '')
 
 
+def _recording_supports_slot(recording: dict, slot: dict) -> bool:
+    recording_mbid = str(recording.get('mbid') or '')
+    slot_mbid = _recording_id(slot)
+    if recording_mbid and slot_mbid and recording_mbid == slot_mbid:
+        return True
+    slot_title = str(slot.get('title') or slot.get('name') or '')
+    if _title_score(str(recording.get('title') or ''), slot_title) < 0.88:
+        return False
+    recording_artist = str(recording.get('artist') or '')
+    slot_artist = str(slot.get('artist') or '')
+    return not slot_artist or not recording_artist or _title_score(recording_artist, slot_artist) >= 0.75
+
+
 def _duration_delta_ms(file: dict, slot: dict) -> int | None:
     tags = file.get('tags') or {}
     file_duration = int(tags.get('duration_ms') or file.get('duration_ms') or 0)
@@ -68,7 +81,7 @@ def _duration_weight(delta_ms: int) -> int:
     return 0
 
 
-def _pair_weight(file: dict, slot: dict) -> tuple[int, list[str]]:
+def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None) -> tuple[int, list[str]]:
     tags = file.get('tags') or {}
     evidence = file.get('acoustid') or {}
     recordings = evidence.get('recordings') or []
@@ -86,6 +99,23 @@ def _pair_weight(file: dict, slot: dict) -> tuple[int, list[str]]:
         # A convincing fingerprint for another song must not become a match
         # merely because both the filename and embedded tags are wrong.
         return 0, []
+    current_delta = _duration_delta_ms(file, slot)
+    if current_delta is not None and current_delta > 30000 and slots:
+        # A tied AcoustID result can link one fingerprint to several recordings.
+        # If this slot is wildly wrong for the measured audio length while a
+        # different fingerprint-supported slot fits closely, do not let stale
+        # tags/filename/MBID consume the wrong slot. The joint assignment can
+        # then expose the real missing slot and duplicate/unassigned file.
+        better_supported_slot = any(
+            other is not slot
+            and (_duration_delta_ms(file, other) or 0) <= 3000
+            and any(_recording_supports_slot(recording, other)
+                    for recording in strong_recordings)
+            for other in slots
+            if _duration_delta_ms(file, other) is not None
+        )
+        if better_supported_slot:
+            return 0, []
     if evidence.get('status') == 'ok':
         for recording in recordings:
             score = float(recording.get('score') or 0)
@@ -94,11 +124,9 @@ def _pair_weight(file: dict, slot: dict) -> tuple[int, list[str]]:
             if _recording_id(slot) and recording.get('mbid') == _recording_id(slot):
                 fingerprint_weight = max(fingerprint_weight, int(10_000 * score))
                 reasons = ['AcoustID recording ID matches release slot']
-            elif _title_score(str(recording.get('title') or ''), slot_title) >= 0.88:
-                artist = str(recording.get('artist') or '')
-                if not slot_artist or not artist or _title_score(artist, slot_artist) >= 0.75:
-                    fingerprint_weight = max(fingerprint_weight, int(5_000 * score))
-                    reasons = ['AcoustID recording title matches release slot']
+            elif _recording_supports_slot(recording, slot):
+                fingerprint_weight = max(fingerprint_weight, int(5_000 * score))
+                reasons = ['AcoustID recording title matches release slot']
 
     tag_title = _title_score(str(tags.get('title') or ''), slot_title)
     filename_title = _title_score(_filename_title(str(file.get('path') or '')), slot_title)
@@ -136,7 +164,7 @@ def reconcile_folder(files: list[dict], slots: list[dict]) -> dict[str, Any]:
     if not files:
         return {'pairs': [], 'extra_files': [], 'competing_files': {},
                 'missing_slots': list(range(len(slots)))}
-    weighted = [[_pair_weight(file, slot) for slot in slots] for file in files]
+    weighted = [[_pair_weight(file, slot, slots) for slot in slots] for file in files]
     assigned = assign_max_weight([[weight for weight, _ in row] for row in weighted])
     pairs = []
     for file_index, slot_index in assigned:
@@ -144,7 +172,31 @@ def reconcile_folder(files: list[dict], slots: list[dict]) -> dict[str, Any]:
         evidence = files[file_index].get('acoustid') or {}
         # A top-scored fingerprint spanning different songs cannot authorize a
         # confident repair even when one candidate names the release slot.
-        ambiguous = fingerprint_is_ambiguous(evidence.get('recordings') or [])
+        recordings = evidence.get('recordings') or []
+        ambiguous_fingerprint = fingerprint_is_ambiguous(recordings)
+        slot = slots[slot_index]
+        tags = files[file_index].get('tags') or {}
+        top_score = max((float(recording.get('score') or 0)
+                         for recording in recordings), default=0)
+        top_supports_slot = any(
+            float(recording.get('score') or 0) >= top_score
+            and _recording_supports_slot(recording, slot)
+            for recording in recordings
+        )
+        corroborating_metadata = sum((
+            _title_score(str(tags.get('title') or ''), str(slot.get('title') or '')) >= 0.83,
+            _title_score(_filename_title(str(files[file_index].get('path') or '')),
+                         str(slot.get('title') or '')) >= 0.83,
+            bool(tags.get('mbid') and _recording_id(slot)
+                 and tags['mbid'] == _recording_id(slot)),
+        ))
+        assigned_duration_delta = _duration_delta_ms(files[file_index], slot)
+        fingerprint_context_resolves = (
+            ambiguous_fingerprint and top_supports_slot
+            and assigned_duration_delta is not None and assigned_duration_delta <= 1000
+            and corroborating_metadata >= 2
+        )
+        ambiguous = ambiguous_fingerprint and not fingerprint_context_resolves
         alternatives = sorted((w for j, (w, _) in enumerate(weighted[file_index])
                                if j != slot_index), reverse=True)
         close_alternative = bool(alternatives and alternatives[0] >= weight * 0.92)
@@ -157,7 +209,8 @@ def reconcile_folder(files: list[dict], slots: list[dict]) -> dict[str, Any]:
         )
         ambiguity_reasons = []
         if ambiguous:
-            ambiguity_reasons.append('AcoustID returned competing identities')
+            ambiguity_reasons.append(
+                'AcoustID returned competing identities not resolved by the other evidence')
         if close_alternative:
             ambiguity_reasons.append('another release track fits nearly as well')
         if competing_file:
@@ -165,7 +218,7 @@ def reconcile_folder(files: list[dict], slots: list[dict]) -> dict[str, Any]:
         pairs.append({
             'file_index': file_index, 'slot_index': slot_index,
             'score': weight, 'reasons': reasons,
-            'duration_delta_ms': _duration_delta_ms(files[file_index], slots[slot_index]),
+            'duration_delta_ms': assigned_duration_delta,
             'ambiguity_reasons': ambiguity_reasons,
             'confidence': 'ambiguous' if ambiguous or close_alternative or competing_file
                           else 'clear' if weight >= 4500 else 'likely',

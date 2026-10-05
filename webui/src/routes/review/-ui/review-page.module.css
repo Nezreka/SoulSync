@@ -455,9 +455,20 @@
   gap: 4px;
   color: #9fc4f7 !important;
 }
+.audioAlternatives {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  color: #d9b66f !important;
+}
 .audioLine .evidenceIcon {
   width: 13px;
   height: 13px;
+}
+.audioAlternatives .evidenceIcon {
+  width: 13px;
+  height: 13px;
+  margin-top: 1px;
 }
 .reason {
   color: #ffd59a;

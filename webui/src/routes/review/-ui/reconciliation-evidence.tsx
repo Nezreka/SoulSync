@@ -127,6 +127,10 @@ function TrackRows({ pairs }: { pairs: Data[] }) {
         const ambiguity = Array.isArray(pair.ambiguity_reasons)
           ? pair.ambiguity_reasons.map(label).filter(Boolean)
           : [];
+        const audioAlternatives = objects(pair.audio_alternatives);
+        const alternativeNames = audioAlternatives
+          .map((recording) => label(recording.title) || 'unnamed recording')
+          .slice(0, 2);
         const reasons = Array.isArray(pair.reasons) ? pair.reasons.map(label).filter(Boolean) : [];
         const localTitle = label(pair.tag_title) || label(pair.file) || 'Unknown file';
         const releaseTitle = label(pair.slot_title) || 'Unknown release track';
@@ -162,6 +166,20 @@ function TrackRows({ pairs }: { pairs: Data[] }) {
                   <span className={styles.audioLine}>
                     <EvidenceIcon name="audio" /> {label(pair.audio_title)}
                     {Boolean(pair.audio_score) && ` · ${percent(pair.audio_score)}`}
+                  </span>
+                )}
+                {audioAlternatives.length > 0 && (
+                  <span
+                    className={styles.audioAlternatives}
+                    title={audioAlternatives
+                      .map((recording) => audioSummary(recording) || 'Unnamed recording')
+                      .join('\n')}
+                  >
+                    <EvidenceIcon name="warning" />
+                    {tone === 'good' ? 'AcoustID alternate ruled out: ' : 'AcoustID also links '}
+                    {alternativeNames.join(', ')}
+                    {audioAlternatives.length > alternativeNames.length &&
+                      ` +${audioAlternatives.length - alternativeNames.length}`}
                   </span>
                 )}
               </div>

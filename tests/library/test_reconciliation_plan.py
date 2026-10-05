@@ -81,6 +81,64 @@ def test_duration_does_not_hide_two_equally_plausible_slots():
     assert pair['ambiguity_reasons'] == ['another release track fits nearly as well']
 
 
+def test_tied_acoustid_links_are_resolved_by_complete_album_evidence():
+    files = [
+        _file('Tautou', '/album/01 - Tautou.mp3', 102453,
+              {'mbid': 'play-id', 'title': 'Play Crack the Sky',
+               'artist': 'Brand New', 'score': 0.999}),
+        _file('Play Crack the Sky', '/album/11 - Play Crack the Sky.mp3', 327880,
+              {'mbid': 'play-id', 'title': 'Play Crack the Sky',
+               'artist': 'Brand New', 'score': 0.999}),
+    ]
+    files[0]['acoustid']['recordings'].append(
+        {'mbid': 'tautou-id', 'title': 'Tautou',
+         'artist': 'Brand New', 'score': 0.999})
+    files[1]['acoustid']['recordings'].append(
+        {'mbid': 'guernica-id', 'title': 'Guernica',
+         'artist': 'Brand New', 'score': 0.999})
+    slots = [
+        {'title': 'Tautou', 'artist': 'Brand New',
+         'recording_mbid': 'tautou-id', 'duration_ms': 102453},
+        {'title': 'Play Crack the Sky', 'artist': 'Brand New',
+         'recording_mbid': 'play-id', 'duration_ms': 327880},
+    ]
+
+    result = reconcile_folder(files, slots)
+
+    assert {(pair['file_index'], pair['slot_index']) for pair in result['pairs']} == {
+        (0, 0), (1, 1),
+    }
+    assert all(pair['confidence'] == 'clear' for pair in result['pairs'])
+    assert result['missing_slots'] == []
+    assert result['extra_files'] == []
+
+
+def test_actual_duplicate_leaves_the_wrongly_labelled_slot_missing():
+    tied = [
+        {'mbid': 'play-id', 'title': 'Play Crack the Sky',
+         'artist': 'Brand New', 'score': 0.999},
+        {'mbid': 'tautou-id', 'title': 'Tautou',
+         'artist': 'Brand New', 'score': 0.999},
+    ]
+    files = [
+        _file('Tautou', '/album/01 - Tautou.mp3', 327880, tied[0]),
+        _file('Play Crack the Sky', '/album/11 - Play Crack the Sky.mp3', 327880, tied[0]),
+    ]
+    files[0]['acoustid']['recordings'] = tied
+    slots = [
+        {'title': 'Tautou', 'artist': 'Brand New',
+         'recording_mbid': 'tautou-id', 'duration_ms': 102453},
+        {'title': 'Play Crack the Sky', 'artist': 'Brand New',
+         'recording_mbid': 'play-id', 'duration_ms': 327880},
+    ]
+
+    result = reconcile_folder(files, slots)
+
+    assert [(pair['file_index'], pair['slot_index']) for pair in result['pairs']] == [(1, 1)]
+    assert result['missing_slots'] == [0]
+    assert result['extra_files'] == [0]
+
+
 def test_ambiguous_acoustid_result_does_not_authorize_clear_repair():
     files = [_file('Mystery', '/album/01.flac', 200000,
                    {'mbid': 'one', 'title': 'Song One', 'artist': 'Artist', 'score': 0.9})]

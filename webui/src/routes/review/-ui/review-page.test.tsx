@@ -39,6 +39,14 @@ const finding = {
             audio_title: 'Laid to Rest',
             audio_artist: 'Lamb of God',
             audio_score: 0.98,
+            audio_alternatives: [
+              {
+                title: 'Hourglass',
+                artist: 'Lamb of God',
+                score: 0.98,
+                mbid: 'hourglass-id',
+              },
+            ],
             slot_title: 'Laid to Rest',
             slot_number: 1,
             disc_number: 1,
@@ -172,6 +180,7 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByText('AcoustID recording ID matches release slot')).toBeTruthy();
     expect(screen.getByText('Exact')).toBeTruthy();
     expect(screen.getByText(/Δ 0.01s/)).toBeTruthy();
+    expect(screen.getByText(/AcoustID alternate ruled out: Hourglass/)).toBeTruthy();
     expect(screen.getByText('1 confirmed match')).toBeTruthy();
     expect(screen.getByText(/Track comparisons were not saved/)).toBeTruthy();
     expect(screen.queryByText(/"release_id"/)).toBeNull();
