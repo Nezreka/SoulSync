@@ -270,6 +270,8 @@ def test_search_import_tracks_prefers_primary_source(monkeypatch):
             "image_url": "https://img.example/track.jpg",
             "track_number": 7,
             "source": "deezer",
+            # #1536: recording disambiguation passes through normalization.
+            "disambiguation": "",
         }
     ]
     assert deezer_client.calls == [("Song One", {"limit": 2})]
@@ -316,6 +318,8 @@ def test_search_import_tracks_falls_back_when_primary_has_no_results(monkeypatch
             "image_url": "",
             "track_number": 3,
             "source": "spotify",
+            # #1536: recording disambiguation passes through normalization.
+            "disambiguation": "",
         }
     ]
     assert deezer_client.calls == [("Song Two", {"limit": 2})]

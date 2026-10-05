@@ -7183,7 +7183,7 @@
                                                 <div class="form-group">
                                                     <label class="checkbox-label">
                                                         <input type="checkbox" id="auto-disambiguation" checked>
-                                                        Automatically add release disambiguation to the album folder
+                                                        Automatically add disambiguation to folder and filenames
                                                     </label>
                                                     <span class="info-icon" role="button" tabindex="0"
                                                         title="What's this?" onclick="toggleSettingHelp(this)"
@@ -7192,8 +7192,12 @@
                                                         release carries a MusicBrainz disambiguation (edition note)
                                                         and your template doesn't place
                                                         <code>$disambiguation</code> itself, it is added to the
-                                                        album folder automatically. This keeps same-named releases
-                                                        in their own folders — turn it off and your template is
+                                                        album folder automatically. When a recording carries its own
+                                                        disambiguation (version note, like &ldquo;acoustic&rdquo;)
+                                                        and your template doesn't place
+                                                        <code>$track_disambiguation</code> itself, it is added to the
+                                                        track filename automatically. This keeps same-named releases
+                                                        and same-titled recordings apart — turn it off and your template is
                                                         respected exactly as written.</small>
                                                 </div>
 
@@ -7214,8 +7218,12 @@
                                                         <code>$disambiguation</code> (the release's edition note, like
                                                         &ldquo;baby punk version&rdquo;; added to the album folder
                                                         automatically when your template leaves it out, unless
-                                                        &ldquo;Automatically add release disambiguation&rdquo;
-                                                        above is turned off). The
+                                                        &ldquo;Automatically add disambiguation&rdquo;
+                                                        above is turned off),
+                                                        <code>$track_disambiguation</code> (the recording's version
+                                                        note, like &ldquo;acoustic&rdquo;; added to the filename
+                                                        automatically when your template leaves it out, unless the
+                                                        same toggle above is turned off). The
                                                         three disc variables work in a folder segment as well as in the
                                                         filename and are empty on a single-disc album, so
                                                         <code>$albumartist/$album/Disc $discnum/$track - $title</code>
@@ -8337,7 +8345,7 @@
                                                                     onchange="toggleServiceTags(this, 'musicbrainz')">
                                                                 MusicBrainz
                                                             </label>
-                                                            <span class="tag-service-count">18 tags</span>
+                                                            <span class="tag-service-count">19 tags</span>
                                                         </div>
                                                         <div class="tag-service-body" style="display:none;">
                                                             <label class="checkbox-label"><input type="checkbox"
@@ -8352,6 +8360,9 @@
                                                             <label class="checkbox-label"><input type="checkbox"
                                                                     data-config="musicbrainz.tags.release_comment" checked>
                                                                 Release Comment</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="musicbrainz.tags.recording_comment" checked>
+                                                                Recording Comment</label>
                                                             <label class="checkbox-label"><input type="checkbox"
                                                                     data-config="musicbrainz.tags.release_group_id"
                                                                     checked> Release Group ID</label>

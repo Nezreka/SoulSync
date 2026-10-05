@@ -35,6 +35,10 @@ class Track:
     album_type: Optional[str] = None
     total_tracks: Optional[int] = None
     album_id: Optional[str] = None
+    # #1536: MusicBrainz recording disambiguation ("acoustic", "live", "demo").
+    # Tells same-titled recordings apart the way Album.disambiguation does
+    # for releases. Only MusicBrainz populates it; other sources leave it None.
+    disambiguation: Optional[str] = None
 
 
 @dataclass
@@ -720,6 +724,10 @@ class MusicBrainzSearchClient:
         if not releases:
             total_tracks = 1
 
+        # #1536: the recording's disambiguation ("Connect Sets acoustic") is
+        # what tells versioned recordings apart when titles are identical.
+        recording_disambiguation = (r.get('disambiguation') or '').strip() or None
+
         return Track(
             id=mbid,
             name=title,
@@ -733,6 +741,7 @@ class MusicBrainzSearchClient:
             album_type=album_type,
             total_tracks=total_tracks,
             album_id=album_id,
+            disambiguation=recording_disambiguation,
         )
 
     def search_tracks(self, query: str, limit: int = 10) -> List[Track]:
@@ -974,6 +983,9 @@ class MusicBrainzSearchClient:
                 'disc_number': 1,
                 'preview_url': None,
                 'popularity': 0,
+                # #1536: recording disambiguation ("acoustic", "live") so the
+                # single-import flow can carry it to the filename/tag layers.
+                'disambiguation': (rec.get('disambiguation') or '').strip(),
                 'external_urls': {'musicbrainz': f'https://musicbrainz.org/recording/{track_id}'},
             }
         except Exception as e:
@@ -1023,6 +1035,9 @@ class MusicBrainzSearchClient:
                 'album': album_name,
                 'duration_ms': rec.get('length') or 0,
                 'image_url': image_url or '',
+                # #1536: recording disambiguation so the Fix popup can tell
+                # versioned recordings apart ("acoustic", "live", "demo").
+                'disambiguation': (rec.get('disambiguation') or '').strip(),
                 'external_urls': {
                     'musicbrainz': f'https://musicbrainz.org/recording/{mbid}'
                 },

@@ -128,6 +128,7 @@ SOURCE_TAG_CONFIG = {
     "MUSICBRAINZ_ARTIST_ID": "musicbrainz.tags.artist_id",
     "MUSICBRAINZ_RELEASE_ID": "musicbrainz.tags.release_id",
     "MUSICBRAINZ_ALBUMCOMMENT": "musicbrainz.tags.release_comment",
+    "MUSICBRAINZ_TRACKCOMMENT": "musicbrainz.tags.recording_comment",
     "MUSICBRAINZ_RELEASEGROUPID": "musicbrainz.tags.release_group_id",
     "MUSICBRAINZ_ALBUMARTISTID": "musicbrainz.tags.album_artist_id",
     "MUSICBRAINZ_RELEASETRACKID": "musicbrainz.tags.release_track_id",
@@ -169,6 +170,7 @@ ID3_TAG_MAP = {
     "MUSICBRAINZ_ARTIST_ID": ("TXXX", "MusicBrainz Artist Id"),
     "MUSICBRAINZ_RELEASE_ID": ("TXXX", "MusicBrainz Album Id"),
     "MUSICBRAINZ_ALBUMCOMMENT": ("TXXX", "MusicBrainz Album Comment"),
+    "MUSICBRAINZ_TRACKCOMMENT": ("TXXX", "MusicBrainz Track Comment"),
     "MUSICBRAINZ_RELEASEGROUPID": ("TXXX", "MusicBrainz Release Group Id"),
     "MUSICBRAINZ_ALBUMARTISTID": ("TXXX", "MusicBrainz Album Artist Id"),
     "MUSICBRAINZ_RELEASETRACKID": ("TXXX", "MusicBrainz Release Track Id"),
@@ -195,6 +197,7 @@ MP4_TAG_MAP = {
     "MUSICBRAINZ_ARTIST_ID": "MusicBrainz Artist Id",
     "MUSICBRAINZ_RELEASE_ID": "MusicBrainz Album Id",
     "MUSICBRAINZ_ALBUMCOMMENT": "MusicBrainz Album Comment",
+    "MUSICBRAINZ_TRACKCOMMENT": "MusicBrainz Track Comment",
     "MUSICBRAINZ_RELEASEGROUPID": "MusicBrainz Release Group Id",
     "MUSICBRAINZ_ALBUMARTISTID": "MusicBrainz Album Artist Id",
     "MUSICBRAINZ_RELEASETRACKID": "MusicBrainz Release Track Id",
@@ -528,6 +531,12 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
             # the same artists ARTIST/ARTISTS do (#1425 did ARTISTS).
             pp["id_tags"].update(credit_tags(final_recording.get("artist-credit"),
                                              expected_names=metadata.get("_artists_list")))
+            # #1536: the recording's disambiguation ("acoustic", "live") —
+            # track-level mirror of MUSICBRAINZ_ALBUMCOMMENT. Already in the
+            # fetched recording dict; no extra lookup needed.
+            _recording_disambiguation = (final_recording.get("disambiguation") or "").strip()
+            if _recording_disambiguation:
+                pp["id_tags"]["MUSICBRAINZ_TRACKCOMMENT"] = _recording_disambiguation
 
     # Genre fallback chain: most MusicBrainz recordings don't carry genres at
     # the track level, but releases and artists usually do. If the recording

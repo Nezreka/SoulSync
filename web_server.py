@@ -14911,6 +14911,8 @@ def _apply_path_template(template: str, context: dict) -> str:
         'year': str(clean_context.get('year', '')),
         'quality': clean_context.get('quality', ''),
         'disambiguation': clean_context.get('disambiguation', ''),
+        # #1536: recording disambiguation, distinct from the album's $disambiguation.
+        'track_disambiguation': clean_context.get('track_disambiguation', ''),
     }
     for var_name, val in _bracket_map.items():
         result = result.replace('${' + var_name + '}', val)
@@ -14930,6 +14932,9 @@ def _apply_path_template(template: str, context: dict) -> str:
     result = result.replace('$artist', clean_context.get('artist', 'Unknown Artist'))
     result = result.replace('$album', clean_context.get('album', 'Unknown Album'))
     result = result.replace('$title', clean_context.get('title', 'Unknown Track'))
+    # $track_disambiguation must replace before $track: it starts with $track,
+    # so the shorter replace would otherwise eat its prefix.
+    result = result.replace('$track_disambiguation', clean_context.get('track_disambiguation', ''))
     # $cdnum must replace before $track to avoid conflict with variables that
     # start with "$c" — no such variable exists today but this ordering
     # mirrors the "longest first" rule used throughout this function.
