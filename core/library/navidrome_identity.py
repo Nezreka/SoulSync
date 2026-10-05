@@ -164,7 +164,14 @@ def validated_playlist_write(method):
         try:
             if not client.ensure_connection():
                 return False
-            if not tracks:
+            if not tracks and not (
+                # #1543: creating an EMPTY playlist is legal (new mirror
+                # with no library matches yet). Emptying an existing one
+                # via update is still refused — the method itself enforces
+                # that, and the sync service never sends empty updates.
+                method.__name__ == 'create_playlist'
+                and not bound.arguments.get('playlist_id')
+            ):
                 raise IdentityError('No validated matches; existing playlist left unchanged')
             playlist_id = bound.arguments.get('playlist_id')
             if not playlist_id:

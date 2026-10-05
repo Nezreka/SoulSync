@@ -730,11 +730,46 @@ class PlaylistSyncService:
                     logger.error("No active media client available for playlist sync")
                     sync_success = False
                 elif not matched_tracks and media_client.is_connected():
-                    # There is nothing safe to write, but these missing tracks
-                    # still need the wishlist step below. Never empty an existing
-                    # playlist just because this scan found no matches.
-                    logger.info("No library matches for %r; keeping the server playlist and processing missing tracks", playlist.name)
-                    sync_success = True
+                    # #1543: a zero-match scan must not wipe an EXISTING
+                    # server playlist — but a brand-new mirror has no server
+                    # playlist yet, and the first pipeline run should leave
+                    # one on the server. Only a mirror (strict prefixed sync
+                    # id) with no resolvable server playlist gets an empty
+                    # one created; everything else keeps the legacy skip.
+                    # Navidrome-only; other servers keep the legacy skip.
+                    from core.sync.mirrored_server_link import (
+                        mirrored_pk_from_sync_id,
+                    )
+                    _is_mirror = mirrored_pk_from_sync_id(
+                        getattr(playlist, 'id', '')) is not None
+                    _mirror_server_id = (
+                        self._resolve_mirrored_server_playlist_id(
+                            playlist, server_type, media_client, profile_id)
+                        if server_type == 'navidrome' and _is_mirror
+                        else 'legacy'
+                    )
+                    if _mirror_server_id is None:
+                        logger.info(
+                            "No library matches for %r and no server playlist "
+                            "exists; creating an empty one", playlist.name)
+                        _created = await asyncio.to_thread(
+                            media_client.create_playlist, playlist.name, [])
+                        if _created:
+                            # Link it so the next sync follows the server ID.
+                            self._resolve_mirrored_server_playlist_id(
+                                playlist, server_type, media_client, profile_id)
+                            sync_success = True
+                        else:
+                            logger.error(
+                                "Failed to create empty server playlist for %r",
+                                playlist.name)
+                            sync_success = False
+                    else:
+                        # There is nothing safe to write, but these missing tracks
+                        # still need the wishlist step below. Never empty an existing
+                        # playlist just because this scan found no matches.
+                        logger.info("No library matches for %r; keeping the server playlist and processing missing tracks", playlist.name)
+                        sync_success = True
                 else:
                     logger.info(
                         f"Syncing playlist '{playlist.name}' to {server_type.upper()} server "
