@@ -194,6 +194,7 @@ describe('the window contract', () => {
       'patchChatMessages',
       'playLibraryTrack',
       'refreshDiscoverInboxBadge',
+      'removeSelectedOriginEntries',
       'saveMyAccountToken',
       'setActiveSource',
       'switchBlocklistTab',
