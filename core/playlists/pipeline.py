@@ -173,12 +173,17 @@ def run_mirrored_playlist_pipeline(
         duration = int(time.time() - pipeline_start)
         # M13/M14: the final status reflects a failed/timed-out discovery
         # phase instead of claiming a clean success.
+        skipped = sync_summary.get('skipped', 0)
         if discovery_status == 'completed':
             final_log_line = f'Pipeline finished in {duration // 60}m {duration % 60}s'
             final_log_type = 'success'
         else:
             final_log_line = (f'Pipeline finished in {duration // 60}m {duration % 60}s '
                               f'— discovery {discovery_status}: {discovery_error}')
+            final_log_type = 'warning'
+        # #1549: surface unidentified tracks instead of claiming 100% clean.
+        if skipped > 0:
+            final_log_line += f' — {skipped} track{"s" if skipped != 1 else ""} need identification'
             final_log_type = 'warning'
         deps.update_progress(
             automation_id,

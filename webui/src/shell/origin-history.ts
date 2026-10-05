@@ -162,6 +162,8 @@ function _renderOriginEntries(): void {
                     <div class="library-history-entry-time">${escapeHtml(_originFormatTime(e.created_at))}</div>
                     <button class="lh-audit-btn origin-row-delete" title="Delete this file + entry"
                             onclick="deleteSelectedOriginEntries(${e.id})">Delete</button>
+                    <button class="lh-audit-btn origin-row-remove" title="Remove entry, keep the file"
+                            onclick="removeSelectedOriginEntries(${e.id})">Remove</button>
                 </div>
                 ${fname ? `<div class="library-history-entry-source"><span class="lh-prov-label">File:</span> ${escapeHtml(fname)}</div>` : ''}
             </div>
@@ -256,6 +258,36 @@ export async function deleteSelectedOriginEntries(singleId?: number): Promise<vo
     void _loadOriginEntries();
   } catch (err) {
     toast(`Delete failed: ${(err as Error).message}`, 'error');
+  }
+}
+
+export async function removeSelectedOriginEntries(singleId?: number): Promise<void> {
+  const ids = singleId !== undefined ? [singleId] : [..._originSelected];
+  if (!ids.length) return;
+  const what = ids.length === 1 ? 'this track' : `these ${ids.length} tracks`;
+  if (!confirm(`Remove ${what} from download origins? The audio file(s) stay on disk.`)) return;
+  try {
+    const resp = await fetch('/api/download-origins/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, delete_files: false }),
+    });
+    const data = (await resp.json()) as {
+      success?: boolean;
+      error?: string;
+      removed?: number;
+      errors?: unknown[];
+    };
+    if (!data.success) throw new Error(data.error || 'Remove failed');
+    toast(
+      `Removed ${data.removed} entr${data.removed === 1 ? 'y' : 'ies'} (files kept)`,
+      data.errors && data.errors.length ? 'warning' : 'success',
+    );
+    if (data.errors && data.errors.length) console.warn('Origin remove errors:', data.errors);
+    _originSelected = new Set();
+    void _loadOriginEntries();
+  } catch (err) {
+    toast(`Remove failed: ${(err as Error).message}`, 'error');
   }
 }
 
