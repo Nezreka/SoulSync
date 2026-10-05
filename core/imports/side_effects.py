@@ -629,12 +629,25 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                 cursor.execute("SELECT id FROM artists WHERE id = ?", (artist_id,))
                 if cursor.fetchone():
                     artist_id = _stable_soulsync_id(artist_name.lower().strip() + "::soulsync")
+                # #1504: stamp owner_profile_id only when the column exists —
+                # minimal test schemas / pre-migration DBs don't have it,
+                # and a missing column must not fail the whole insert.
+                try:
+                    _artist_cols = {c[1] for c in cursor.execute("PRAGMA table_info(artists)").fetchall()}
+                except Exception:
+                    _artist_cols = set()
+                _a_cols = ["id", "name", "genres", "thumb_url", "server_source"]
+                _a_vals = ["?", "?", "?", "?", "'soulsync'"]
+                _a_params: list = [artist_id, artist_name, genres_json, image_url]
+                if "owner_profile_id" in _artist_cols:
+                    _a_cols.append("owner_profile_id")
+                    _a_vals.append("?")
+                    _a_params.append(owner_pid)
+                _a_cols += ["created_at", "updated_at"]
+                _a_vals += ["CURRENT_TIMESTAMP", "CURRENT_TIMESTAMP"]
                 cursor.execute(
-                    """
-                    INSERT INTO artists (id, name, genres, thumb_url, server_source, owner_profile_id, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, 'soulsync', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """,
-                    (artist_id, artist_name, genres_json, image_url, owner_pid),
+                    f"INSERT INTO artists ({', '.join(_a_cols)}) VALUES ({', '.join(_a_vals)})",
+                    _a_params,
                 )
                 if artist_source_col and artist_source_id:
                     try:
@@ -698,13 +711,27 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                     # release its own stable id, so a third one can't collide.
                     _scope = group_id or "soulsync"
                     album_id = _stable_soulsync_id(f"{artist_name}::{album_name}::{_scope}".lower().strip())
+                # #1504: stamp owner_profile_id only when the column exists —
+                # minimal test schemas / pre-migration DBs don't have it,
+                # and a missing column must not fail the whole insert.
+                try:
+                    _album_cols = {c[1] for c in cursor.execute("PRAGMA table_info(albums)").fetchall()}
+                except Exception:
+                    _album_cols = set()
+                _al_cols = ["id", "artist_id", "title", "year", "thumb_url", "genres",
+                            "track_count", "duration", "server_source"]
+                _al_vals = ["?", "?", "?", "?", "?", "?", "?", "?", "'soulsync'"]
+                _al_params: list = [album_id, artist_id, album_name, year, image_url,
+                                    genres_json, total_tracks, album_total_duration_ms]
+                if "owner_profile_id" in _album_cols:
+                    _al_cols.append("owner_profile_id")
+                    _al_vals.append("?")
+                    _al_params.append(owner_pid)
+                _al_cols += ["created_at", "updated_at"]
+                _al_vals += ["CURRENT_TIMESTAMP", "CURRENT_TIMESTAMP"]
                 cursor.execute(
-                    """
-                    INSERT INTO albums (id, artist_id, title, year, thumb_url, genres, track_count,
-                                        duration, server_source, owner_profile_id, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """,
-                    (album_id, artist_id, album_name, year, image_url, genres_json, total_tracks, album_total_duration_ms, owner_pid),
+                    f"INSERT INTO albums ({', '.join(_al_cols)}) VALUES ({', '.join(_al_vals)})",
+                    _al_params,
                 )
                 if album_source_col and album_source_id:
                     try:
@@ -759,6 +786,10 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             has_retention_columns = {
                 "acquired_quality_json", "retention_json"
             }.issubset(track_columns)
+            # #1504: stamp owner_profile_id only when the column exists —
+            # minimal test schemas / pre-migration DBs don't have it,
+            # and a missing column must not fail the whole insert.
+            has_track_owner = "owner_profile_id" in track_columns
 
             cursor.execute("SELECT id FROM tracks WHERE file_path = ?", (final_path,))
             existing_track = cursor.fetchone()
@@ -785,39 +816,36 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                 # Retry the INSERT with a deterministic discriminator. The
                 # post-insert source-id UPDATE below reads `track_id`, so
                 # it follows the reminted id automatically.
+                # Build the track INSERT dynamically: retention columns and
+                # owner_profile_id are each included only when present.
+                _t_cols = ["id", "album_id", "artist_id", "title", "track_number",
+                           "duration", "file_path", "bitrate", "file_size", "track_artist",
+                           "musicbrainz_recording_id", "isrc", "quality_profile_id"]
+                _t_vals = ["?"] * 13
+                _t_params: list = list(base_values)
+                if has_retention_columns:
+                    _t_cols += ["acquired_quality_json", "retention_json"]
+                    _t_vals += ["?", "?"]
+                    _t_params += [acquired_quality_json, retention_json]
+                _t_cols.append("server_source")
+                _t_vals.append("'soulsync'")
+                if has_track_owner:
+                    _t_cols.append("owner_profile_id")
+                    _t_vals.append("?")
+                    _t_params.append(owner_pid)
+                _t_cols += ["created_at", "updated_at"]
+                _t_vals += ["CURRENT_TIMESTAMP", "CURRENT_TIMESTAMP"]
+                _t_sql = (f"INSERT INTO tracks ({', '.join(_t_cols)}) "
+                          f"VALUES ({', '.join(_t_vals)})")
                 for _collision_attempt in range(10):
                     try:
-                        if has_retention_columns:
-                            cursor.execute(
-                                """
-                                INSERT INTO tracks (id, album_id, artist_id, title, track_number,
-                                                    duration, file_path, bitrate, file_size, track_artist,
-                                                    musicbrainz_recording_id, isrc, quality_profile_id,
-                                                    acquired_quality_json, retention_json, server_source,
-                                                    owner_profile_id, created_at, updated_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                                        'soulsync', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                                """,
-                                base_values + (acquired_quality_json, retention_json, owner_pid),
-                            )
-                        else:
-                            cursor.execute(
-                                """
-                                INSERT INTO tracks (id, album_id, artist_id, title, track_number,
-                                                    duration, file_path, bitrate, file_size, track_artist,
-                                                    musicbrainz_recording_id, isrc, quality_profile_id, server_source,
-                                                    owner_profile_id, created_at, updated_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                                        'soulsync', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                                """,
-                                base_values + (owner_pid,),
-                            )
+                        _t_params[0] = track_id
+                        cursor.execute(_t_sql, _t_params)
                         break
                     except sqlite3.IntegrityError:
                         track_id = _stable_soulsync_id(
                             f"{final_path}::soulsync::{_collision_attempt + 1}"
                         )
-                        base_values = (track_id,) + base_values[1:]
                         logger.warning(
                             "[SoulSync Library] track id collision for %s — "
                             "reminted as %s",
