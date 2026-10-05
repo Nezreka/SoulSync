@@ -231,6 +231,48 @@ def test_a_series_book_gets_a_series_query():
     assert "The Stormlight Archive 3" in build_queries(book)
 
 
+def test_a_single_digit_volume_is_also_tried_zero_padded():
+    # Indexers match words: "Lights Out 3" never finds "Lights Out 03 - Game On".
+    book = dict(BOOK, series=[{"title": "Lights Out", "sequence": "3"}])
+    queries = build_queries(book)
+    assert queries.index("Lights Out 3") < queries.index("Lights Out 03")
+
+
+@pytest.mark.parametrize("sequence", ["12", "3.5", "1-3"])
+def test_other_volumes_are_not_padded(sequence):
+    book = dict(BOOK, series=[{"title": "Lights Out", "sequence": sequence}])
+    assert [q for q in build_queries(book) if q.startswith("Lights Out")] == [
+        f"Lights Out {sequence}"
+    ]
+
+
+@pytest.mark.parametrize("title", [
+    "Game On (Lights Out 3)",
+    "Game On [Lights Out 3]",
+    "Game On (Lights Out 3) (German edition)",
+])
+def test_a_trailing_bracketed_suffix_is_left_out_of_the_queries(title):
+    # Localised Audible stores append the series or edition to the title; the
+    # release is "Navessa Allen - Lights Out 03 - Game On (Ungekuerzt)".
+    book = {"title": title, "author_names": ["Navessa Allen"],
+            "series": [{"title": "Lights Out", "sequence": "3"}]}
+    assert build_queries(book) == [
+        "Navessa Allen Game On",
+        "Game On",
+        "Lights Out 3",
+        "Lights Out 03",
+    ]
+
+
+def test_a_title_that_is_only_brackets_is_kept():
+    assert build_queries({"title": "(Untitled)", "author_names": []}) == ["(Untitled)"]
+
+
+def test_brackets_inside_the_title_are_kept():
+    book = {"title": "The (Mostly) True Story", "author_names": []}
+    assert build_queries(book) == ["The (Mostly) True Story"]
+
+
 def test_queries_are_deduplicated():
     book = {"title": "Dune", "author_names": []}
     assert build_queries(book) == ["Dune"]
