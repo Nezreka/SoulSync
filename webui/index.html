@@ -3779,16 +3779,24 @@
                                                         as settings are saved.</small>
                                                 </div>
                                                 <div class="form-group">
-                                                    <label for="musicbrainz-request-interval">MusicBrainz request
-                                                        interval (seconds)</label>
-                                                    <input type="number" id="musicbrainz-request-interval" min="0"
-                                                        step="any" value="1.05"
-                                                        aria-describedby="musicbrainz-interval-help">
-                                                    <small class="settings-hint" id="musicbrainz-interval-help">Use 0.1
-                                                        for up to 10 requests/second on your server, or 0 for no delay.
+                                                    <label for="musicbrainz-rate-mode">MusicBrainz request rate</label>
+                                                    <select id="musicbrainz-rate-mode"
+                                                        onchange="updateMusicBrainzRateControls()"
+                                                        aria-describedby="musicbrainz-rate-help">
+                                                        <option value="fixed">Fixed limit</option>
+                                                        <option value="adaptive">No limit (adaptive)</option>
+                                                    </select>
+                                                    <label for="musicbrainz-request-rate">Maximum requests/second</label>
+                                                    <input type="number" id="musicbrainz-request-rate" min="0.001"
+                                                        step="any" value="1" aria-describedby="musicbrainz-rate-help">
+                                                    <small class="settings-hint" id="musicbrainz-rate-help">For a fixed
+                                                        limit, enter requests/second (for example, 10). With No limit
+                                                        (adaptive), SoulSync will try to find the maximum number of
+                                                        requests/second your server can handle. Only use this when you
+                                                        host the MusicBrainz server yourself and it has no other traffic.
                                                         Public MusicBrainz always keeps its rate limit. Environment
                                                         overrides take precedence over these fields. Your server needs
-                                                        search indexes; use its final URL without redirects.</small>
+                                                        search indexes; use its final URL.</small>
                                                 </div>
 
                                             </div>

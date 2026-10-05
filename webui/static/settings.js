@@ -8696,13 +8696,24 @@ async function runImageCacheClear() {
 // MUSICBRAINZ SERVER SETTINGS
 function loadMusicBrainzServerSettings(settings) {
     document.getElementById('musicbrainz-base-url').value = settings.musicbrainz?.base_url || '';
-    document.getElementById('musicbrainz-request-interval').value = settings.musicbrainz?.request_interval ?? 1.05;
+    const interval = Number(settings.musicbrainz?.request_interval ?? 1.05);
+    document.getElementById('musicbrainz-rate-mode').value = interval === 0 ? 'adaptive' : 'fixed';
+    document.getElementById('musicbrainz-request-rate').value = interval > 0
+        ? Number((1 / interval).toPrecision(6)) : 10;
+    updateMusicBrainzRateControls();
+}
+
+function updateMusicBrainzRateControls() {
+    document.getElementById('musicbrainz-request-rate').disabled =
+        document.getElementById('musicbrainz-rate-mode').value === 'adaptive';
 }
 
 function collectMusicBrainzServerSettings() {
     const base_url = document.getElementById('musicbrainz-base-url').value.trim();
-    const rawInterval = document.getElementById('musicbrainz-request-interval').value.trim();
-    const request_interval = rawInterval === '' ? 1.05 : Number(rawInterval);
+    const adaptive = document.getElementById('musicbrainz-rate-mode').value === 'adaptive';
+    const rawRate = document.getElementById('musicbrainz-request-rate').value.trim();
+    const request_rate = Number(rawRate);
+    let serverHost = 'musicbrainz.org';
     if (base_url) {
         let url;
         try { url = new URL(base_url); } catch (_) {
@@ -8711,10 +8722,15 @@ function collectMusicBrainzServerSettings() {
         if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
             throw new Error('Use a MusicBrainz HTTP(S) URL without credentials, query strings or fragments.');
         }
+        serverHost = url.hostname.toLowerCase().replace(/\.$/, '');
     }
-    if (!Number.isFinite(request_interval) || request_interval < 0) {
-        throw new Error('MusicBrainz request interval must be zero or a positive number of seconds.');
+    if (adaptive && (serverHost === 'musicbrainz.org' || serverHost.endsWith('.musicbrainz.org'))) {
+        throw new Error('No limit (adaptive) is only for a self-hosted MusicBrainz server.');
     }
+    if (!adaptive && (!rawRate || !Number.isFinite(request_rate) || request_rate <= 0)) {
+        throw new Error('MusicBrainz requests/second must be a positive number.');
+    }
+    const request_interval = adaptive ? 0 : 1 / request_rate;
     return { base_url, request_interval };
 }
 // END MUSICBRAINZ SERVER SETTINGS

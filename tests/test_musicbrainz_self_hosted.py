@@ -18,6 +18,7 @@ def isolated_config(monkeypatch):
     for key in ('BASE_URL', 'REQUEST_INTERVAL', 'MAX_RETRIES', 'READ_TIMEOUT', 'CONNECT_TIMEOUT'):
         monkeypatch.delenv('SOULSYNC_MUSICBRAINZ_' + key, raising=False)
     monkeypatch.setattr(mb, '_last_api_call_time', 0)
+    monkeypatch.setattr(mb, '_server_rate_states', {})
 
 
 def test_defaults():
@@ -348,7 +349,8 @@ def test_mbid_mismatch_detector_uses_client_pacing(monkeypatch, url, interval, e
     )
     client.session.get = Mock(return_value=response)
     intervals = []
-    monkeypatch.setattr(mb, '_wait_for_musicbrainz_slot', intervals.append)
+    monkeypatch.setattr(mb, '_wait_for_musicbrainz_slot',
+                        lambda interval, base_url: intervals.append(interval))
 
     class FakeConnection:
         def cursor(self):
@@ -381,3 +383,43 @@ def test_mbid_mismatch_detector_uses_client_pacing(monkeypatch, url, interval, e
     assert intervals == [expected_interval]
     assert client.session.get.call_count == 1
     context.sleep_or_stop.assert_not_called()
+
+
+@pytest.mark.parametrize('lookup_outcome', ['outage', 'mirror_404'])
+def test_mbid_scan_stops_retryably_without_false_missing_finding(monkeypatch, lookup_outcome):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from core.repair_jobs import mbid_mismatch_detector as detector
+    from core.repair_jobs.base import JobContext
+
+    monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_BASE_URL', 'http://mirror:5000')
+
+    def lookup(mbid, includes=None, raise_on_error=False):
+        assert raise_on_error is True
+        if lookup_outcome == 'outage':
+            response = requests.Response()
+            response.status_code = 503
+            raise requests.HTTPError('503 Service Unavailable', response=response)
+        return None
+
+    cursor = SimpleNamespace(execute=lambda *args: None,
+                             fetchall=lambda: [(1, 'Example', 'Artist', 'Album',
+                                                '/music/example.flac', None, None, 2)],
+                             close=lambda: None)
+    cursor.cursor = lambda: cursor
+    database = SimpleNamespace(_get_connection=lambda: cursor)
+    context = JobContext(db=database, transfer_folder='/music', config_manager=None,
+                         mb_client=SimpleNamespace(get_recording=lookup))
+    context.report_progress = Mock()
+    monkeypatch.setattr(detector, '_resolve_file_path', lambda *args, **kwargs: '/music/example.flac')
+    monkeypatch.setattr(detector, '_read_file_tags', lambda path: ('a' * 36, 'Example', 'flac'))
+    monkeypatch.setattr(detector.MbidMismatchDetectorJob, '_create_mismatch_finding',
+                        Mock(side_effect=AssertionError('false missing finding')))
+    monkeypatch.setattr(detector.MbidMismatchDetectorJob, '_scan_album_mbid_consistency',
+                        lambda *args: None)
+    result = detector.MbidMismatchDetectorJob().scan(context)
+
+    assert result.findings_created == 0
+    assert result.errors == 1
+    assert 'retry' in result.stopped_early.lower()
+    assert any('retry' in str(call).lower() for call in context.report_progress.call_args_list)
