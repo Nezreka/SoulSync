@@ -44,6 +44,15 @@ export function ListenBand() {
             <strong>Library Radio</strong>
             <span>Endless shuffle through your own collection — one click, infinite queue.</span>
           </span>
+          {/* Decorative equalizer bars (pure CSS, aria-hidden): aliveness for
+              the hero card, gated on reduce-effects / prefers-reduced-motion. */}
+          <span className="listen-eq" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+            <i />
+            <i />
+          </span>
           <span className="listen-hero-play">▶</span>
         </button>
         <button
