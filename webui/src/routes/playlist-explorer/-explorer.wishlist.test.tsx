@@ -105,11 +105,13 @@ describe('explorerWishlistFooter', () => {
     expect(explorerWishlistFooter(active)).toEqual({
       info: '2 releases · 47 tracks',
       submitText: 'Add 2 to Wishlist',
+      bothText: 'Wishlist + Watchlist',
       disabled: false,
     });
     expect(explorerWishlistFooter([])).toEqual({
       info: '0 releases · 0 tracks',
       submitText: 'Select releases',
+      bothText: 'Select releases',
       disabled: true,
     });
   });
