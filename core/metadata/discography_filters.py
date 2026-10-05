@@ -55,9 +55,11 @@ def _artist_credit_components(name: str) -> List[str]:
 
 from core.watchlist_scanner import (
     is_acoustic_version,
+    is_compilation_album,
     is_instrumental_version,
     is_live_version,
     is_remix_version,
+    matches_custom_exclude_terms,
 )
 
 
@@ -158,6 +160,248 @@ def load_global_content_filter_settings(config_manager: Any) -> Dict[str, Any]:
             'include_acoustic': False,
             'include_instrumentals': False,
         }
+
+
+def _normalize_artist_name(name: str) -> str:
+    """Fold an artist name for watchlist-row matching: strip diacritics
+    ("Étienne" ~ "Etienne"), casefold, trim. Watchlist rows store the name
+    as-added (source-dependent), so exact matching misses the messy
+    real-world variants. Used only as a fallback behind an exact match,
+    and only when exactly one row folds to the target — ambiguity yields
+    no label rather than the wrong artist's settings."""
+    import unicodedata
+
+    folded = unicodedata.normalize('NFKD', str(name or ''))
+    folded = ''.join(c for c in folded if not unicodedata.combining(c))
+    return folded.casefold().strip()
+
+
+def _watchlist_cfg_get(key: str, default: Any = None) -> Any:
+    """Read one watchlist config value, defensive against exotic config
+    managers (some test doubles only implement get_active_media_server)."""
+    try:
+        from core.settings import config_manager as _cfg
+    except Exception:
+        return default
+    try:
+        return _cfg.get(key, default)
+    except Exception:
+        return default
+
+
+def resolve_watchlist_content_settings(
+    db: Any,
+    artist_name: str,
+    profile_id: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    """#1550: effective watchlist filter preferences for an artist, or None.
+
+    Returns the settings dict the scanner would apply to this artist's
+    releases — the per-artist row, or the globals when
+    ``watchlist.global_override_enabled`` (same resolution as
+    ``WatchlistScanner._apply_global_watchlist_overrides``). Returns None
+    when the artist isn't watched at all (the scan never runs for them, so
+    there is no filter mismatch to explain) or when the lookup fails —
+    fail silent, never mislabel.
+
+    Split out from the reason computation so callers on a hot path (the
+    artist-page completion stream) resolve once per artist instead of once
+    per release.
+    """
+    if not artist_name:
+        return None
+    try:
+        if profile_id is None:
+            try:
+                from core.profile_context import get_current_profile_id
+
+                profile_id = get_current_profile_id() or 1
+            except Exception:
+                profile_id = 1
+        rows = db.get_watchlist_artists(profile_id=int(profile_id)) or []
+    except Exception:
+        return None
+
+    target_exact = artist_name.strip()
+    target_norm = _normalize_artist_name(artist_name)
+    artist_row = None
+    norm_candidates = []
+    for row in rows:
+        row_name = str(getattr(row, 'artist_name', '') or '')
+        if row_name.strip() == target_exact:
+            # Exact match wins outright — never let a folded collision
+            # override it.
+            artist_row = row
+            break
+        if _normalize_artist_name(row_name) == target_norm:
+            norm_candidates.append(row)
+    else:
+        # Exactly one folded match: safe to use. Zero, or several distinct
+        # rows folding together ("José" vs "Jose" as separate artists):
+        # ambiguous — yield no label rather than risk the WRONG artist's
+        # settings producing a wrong label.
+        if len(norm_candidates) == 1:
+            artist_row = norm_candidates[0]
+    if artist_row is None:
+        return None
+
+    # Same effective-preference resolution as
+    # WatchlistScanner._apply_global_watchlist_overrides: the global
+    # override wins when enabled, otherwise the artist's own row. All
+    # config reads go through _watchlist_cfg_get (defensive against exotic
+    # config managers); the adapter below feeds the shared loader.
+    override_enabled = bool(_watchlist_cfg_get('watchlist.global_override_enabled', False))
+    # Custom exclusion terms are global-only (the scan reads them from
+    # config per track); resolve once here so the hot path doesn't.
+    exclude_terms: list = []
+    try:
+        terms_str = _watchlist_cfg_get('watchlist.exclude_terms', '') or ''
+        exclude_terms = [t.strip() for t in str(terms_str).split(',') if t.strip()]
+    except Exception:
+        exclude_terms = []
+
+    class _CfgAdapter:
+        def get(self, key, default=None):
+            return _watchlist_cfg_get(key, default)
+
+    if override_enabled:
+        settings = load_global_content_filter_settings(_CfgAdapter())
+        settings['include_compilations'] = bool(
+            _watchlist_cfg_get('watchlist.global_include_compilations', False)
+        )
+        settings['include_albums'] = bool(_watchlist_cfg_get('watchlist.global_include_albums', True))
+        settings['include_eps'] = bool(_watchlist_cfg_get('watchlist.global_include_eps', True))
+        settings['include_singles'] = bool(_watchlist_cfg_get('watchlist.global_include_singles', True))
+        settings['exclude_terms'] = exclude_terms
+        return settings
+    settings = {
+        'include_live': bool(getattr(artist_row, 'include_live', False)),
+        'include_remixes': bool(getattr(artist_row, 'include_remixes', False)),
+        'include_acoustic': bool(getattr(artist_row, 'include_acoustic', False)),
+        'include_instrumentals': bool(getattr(artist_row, 'include_instrumentals', False)),
+        'include_compilations': bool(getattr(artist_row, 'include_compilations', False)),
+        # Release-type prefs default True (include) — the inverse of the
+        # content-type prefs — matching the scanner's getattr defaults.
+        'include_albums': bool(getattr(artist_row, 'include_albums', True)),
+        'include_eps': bool(getattr(artist_row, 'include_eps', True)),
+        'include_singles': bool(getattr(artist_row, 'include_singles', True)),
+        'exclude_terms': exclude_terms,
+    }
+    return settings
+
+
+def release_kind_for_scan(expected_tracks: Any) -> Optional[str]:
+    """#1550: which release-type bucket the SCANNER would put a release in.
+
+    Mirrors ``WatchlistScanner._should_include_release``: 7+ tracks ->
+    'albums', 4-6 -> 'eps', 1-3 -> 'singles'. Returns None when the count is
+    unknown (0/unparseable): the scan ``continue``s on empty track lists
+    before classifying, so an unknown count means the scan never reaches
+    the release-type gate — the caller must skip that gate rather than
+    guess a bucket.
+    """
+    try:
+        n = int(expected_tracks or 0)
+    except (TypeError, ValueError):
+        n = 0
+    if n >= 7:
+        return 'albums'
+    if n >= 4:
+        return 'eps'
+    if n >= 1:
+        return 'singles'
+    return None
+
+
+def content_exclusion_reason(
+    settings: Dict[str, Any],
+    track_name: str,
+    album_name: str,
+    release_kind: Optional[str],
+) -> Optional[str]:
+    """#1550: why the scanner would skip this release, or None.
+
+    Pure function over already-resolved settings. Check order mirrors the
+    scanner: the release-type gate (``_should_include_release``) runs
+    before any per-track filter, then compilation (the album-level gate in
+    ``_should_include_track``), then the track-level content-type filters,
+    then the user's custom exclusion terms (the scan's final gate).
+
+    ``release_kind`` is None when the track count is unknown — the
+    release-type gate is then skipped, not guessed.
+
+    ``track_name``/``album_name`` are the RELEASE's own titles: for a
+    single-track single that's exactly what the scanner judges; for a
+    multi-track release it yields the album-level verdict (release-type
+    gate + album-title-driven content gates), which is all that's
+    attributable at release granularity. Track-title-specific exclusions
+    on multi-track releases are unknowable here — fail silent, no label.
+
+    Reason codes: 'albums' | 'eps' | 'singles' | 'compilation' | 'live' |
+    'remix' | 'acoustic' | 'instrumental' | 'custom'.
+    """
+    if not settings:
+        return None
+    if release_kind == 'albums' and not settings.get('include_albums', True):
+        return 'albums'
+    if release_kind == 'eps' and not settings.get('include_eps', True):
+        return 'eps'
+    if release_kind == 'singles' and not settings.get('include_singles', True):
+        return 'singles'
+    if not settings.get('include_compilations', False) and is_compilation_album(album_name or ''):
+        return 'compilation'
+    reason = content_type_skip_reason(track_name or '', album_name or '', settings)
+    if reason:
+        return reason
+    exclude_terms = settings.get('exclude_terms') or []
+    if exclude_terms and matches_custom_exclude_terms(track_name or '', album_name or '', exclude_terms):
+        return 'custom'
+    return None
+
+
+def watchlist_exclusion_reason(
+    db: Any,
+    artist_name: str,
+    track_name: str,
+    album_name: str,
+    *,
+    release_kind: Optional[str],
+    profile_id: Optional[int] = None,
+) -> Optional[str]:
+    """#1550: would the watchlist scanner skip this track for THIS artist?
+
+    Convenience wrapper: resolves the artist's effective settings, then
+    computes the reason. ``release_kind`` is required (no guessing the
+    bucket) — use ``release_kind_for_scan`` to derive it. Callers on a hot
+    path should resolve once via ``resolve_watchlist_content_settings``
+    and reuse ``content_exclusion_reason``.
+    """
+    if not artist_name or not track_name:
+        return None
+    settings = resolve_watchlist_content_settings(db, artist_name, profile_id=profile_id)
+    return content_exclusion_reason(settings or {}, track_name, album_name, release_kind)
+
+
+def attach_watchlist_exclusion(
+    event: Dict[str, Any],
+    settings: Optional[Dict[str, Any]],
+    release_name: str,
+) -> Dict[str, Any]:
+    """#1550: stamp 'watchlist_excluded' onto a completion event dict.
+
+    Mutates ``event`` in place and returns it. When the release is missing
+    and settings are available the key is ALWAYS set — to the reason code,
+    or to None when no exclusion is attributable — so a later event for
+    the same release correctly clears a stale label instead of leaving it
+    stuck. Otherwise the event is returned untouched.
+    """
+    if not isinstance(event, dict) or event.get('status') != 'missing' or not settings:
+        return event
+    kind = release_kind_for_scan(event.get('expected_tracks'))
+    event['watchlist_excluded'] = content_exclusion_reason(
+        settings, release_name or '', release_name or '', kind
+    )
+    return event
 
 
 def track_already_owned(
@@ -282,4 +526,9 @@ __all__ = [
     'load_global_content_filter_settings',
     'track_already_owned',
     'owned_release_tracks',
+    'watchlist_exclusion_reason',
+    'resolve_watchlist_content_settings',
+    'release_kind_for_scan',
+    'content_exclusion_reason',
+    'attach_watchlist_exclusion',
 ]

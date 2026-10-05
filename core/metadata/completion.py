@@ -887,6 +887,20 @@ def iter_artist_discography_completion_events(
             logger.debug("Failed pre-fetching album source IDs: %s", _s_err)
 
     _loop_start = _time_metadata.perf_counter()
+    # #1550: resolve the artist's effective watchlist filter preferences ONCE
+    # for the whole stream (not per release — get_watchlist_artists is a full
+    # table scan). missing releases the scan would deliberately skip get
+    # labeled with the exclusion reason instead of a bare "missing".
+    _wl_content_settings = None
+    try:
+        from core.metadata.discography_filters import (
+            attach_watchlist_exclusion,
+            resolve_watchlist_content_settings,
+        )
+
+        _wl_content_settings = resolve_watchlist_content_settings(db, resolved_artist_name)
+    except Exception as _wl_err:
+        logger.debug("watchlist exclusion labels disabled: %s", _wl_err)
     for album in albums:
         try:
             completion_data = check_album_completion(
@@ -906,6 +920,15 @@ def iter_artist_discography_completion_events(
             )
             completion_data['type'] = 'album_completion'
             completion_data['container_type'] = 'albums'
+            if _wl_content_settings is not None:
+                try:
+                    attach_watchlist_exclusion(
+                        completion_data,
+                        _wl_content_settings,
+                        album.get('name', ''),
+                    )
+                except Exception as _exc1550a:
+                    logger.debug("watchlist exclusion label skipped: %s", _exc1550a)
             processed_count += 1
             completion_data['progress'] = round((processed_count / total_items) * 100, 1) if total_items else 100
             yield completion_data
@@ -936,6 +959,21 @@ def iter_artist_discography_completion_events(
             )
             completion_data['type'] = 'single_completion'
             completion_data['container_type'] = 'singles'
+            # #1550: a release the user's own watchlist filters exclude
+            # (e.g. a remix with include_remixes off, or singles with
+            # include_singles off) is deliberately skipped by the scan but
+            # shows here as bare "missing" — which reads as a broken
+            # scanner. label it with the exclusion reason so the user sees
+            # WHY the scan will never pick it up.
+            if _wl_content_settings is not None:
+                try:
+                    attach_watchlist_exclusion(
+                        completion_data,
+                        _wl_content_settings,
+                        single.get('name', ''),
+                    )
+                except Exception as _exc1550s:
+                    logger.debug("watchlist exclusion label skipped: %s", _exc1550s)
             processed_count += 1
             completion_data['progress'] = round((processed_count / total_items) * 100, 1) if total_items else 100
             yield completion_data
