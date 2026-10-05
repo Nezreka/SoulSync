@@ -54,6 +54,7 @@ def worker(tmp_path):
             last_error TEXT
         )
     """)
+    conn.execute("CREATE TABLE tracks (id INTEGER PRIMARY KEY, file_path TEXT)")
     conn.commit()
     w = RepairWorker.__new__(RepairWorker)
     w.db = _Db(conn)
@@ -196,3 +197,69 @@ def test_the_sweep_is_scoped_to_the_job_that_just_ran(worker, tmp_path):
     assert worker.retire_vanished_findings("audio_corruption_detector") == 1
     assert _row(worker, mine)["status"] == "resolved"
     assert _row(worker, theirs)["status"] == "pending"
+
+
+def test_orphan_finding_is_retired_after_file_enters_catalogue(worker, tmp_path):
+    track = tmp_path / "Artist" / "Album" / "01 - Song.flac"
+    track.parent.mkdir(parents=True)
+    track.write_bytes(b"audio")
+    fid = _add(worker, track, job_id="orphan_file_detector",
+               finding_type="orphan_file")
+
+    assert worker.retire_tracked_orphan_findings() == 0
+    worker.db._conn.execute(
+        "INSERT INTO tracks (file_path) VALUES (?)", ("/music/Artist/Album/01 - Song.flac",))
+    worker.db._conn.commit()
+
+    assert worker.retire_tracked_orphan_findings() == 1
+    assert tuple(_row(worker, fid)) == ("resolved", "already_tracked")
+    assert track.exists()
+    assert worker.retire_tracked_orphan_findings() == 0
+
+
+@pytest.mark.parametrize("action", ["delete", "staging"])
+def test_orphan_fix_never_changes_file_that_is_now_tracked(worker, tmp_path, action):
+    track = tmp_path / "Artist" / "Album" / "01 - Song.flac"
+    track.parent.mkdir(parents=True)
+    track.write_bytes(b"audio")
+    fid = _add(worker, track, job_id="orphan_file_detector",
+               finding_type="orphan_file")
+    worker.db._conn.execute(
+        "INSERT INTO tracks (file_path) VALUES (?)", ("/music/Artist/Album/01 - Song.flac",))
+    worker.db._conn.commit()
+
+    result = worker.fix_finding(fid, fix_action=action)
+
+    assert result["action"] == "already_tracked"
+    assert track.read_bytes() == b"audio"
+    assert tuple(_row(worker, fid)) == ("resolved", "already_tracked")
+
+
+def test_orphan_fix_fails_closed_when_catalogue_cannot_be_read(worker, tmp_path):
+    track = tmp_path / "Artist" / "Album" / "01 - Song.flac"
+    track.parent.mkdir(parents=True)
+    track.write_bytes(b"audio")
+    fid = _add(worker, track, job_id="orphan_file_detector",
+               finding_type="orphan_file")
+    worker.db._conn.execute("DROP TABLE tracks")
+
+    result = worker.fix_finding(fid, fix_action="delete")
+
+    assert result["success"] is False
+    assert track.read_bytes() == b"audio"
+    assert _row(worker, fid)["status"] == "pending"
+
+
+def test_untracked_orphan_can_still_be_moved_to_staging(worker, tmp_path):
+    track = tmp_path / "Artist" / "Album" / "01 - Untracked.flac"
+    track.parent.mkdir(parents=True)
+    track.write_bytes(b"audio")
+    fid = _add(worker, track, job_id="orphan_file_detector",
+               finding_type="orphan_file")
+    worker._resolve_path = lambda path: str(tmp_path / "Staging")
+
+    result = worker.fix_finding(fid, fix_action="staging")
+
+    assert result["action"] == "moved_to_staging"
+    assert (tmp_path / "Staging" / track.name).read_bytes() == b"audio"
+    assert not track.exists()
