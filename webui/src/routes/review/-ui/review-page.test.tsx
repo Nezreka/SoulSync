@@ -5,26 +5,58 @@ import { ReviewPage } from './review-page';
 
 const fetchMock = vi.fn();
 
+function reply(body: unknown, status = 200) {
+  return { ok: status < 400, status, json: async () => body };
+}
+
 const finding = {
   id: 7,
-  job_id: 'genre_cleanup',
-  finding_type: 'genre_cleanup',
-  severity: 'info',
+  job_id: 'library_reconciliation',
+  finding_type: 'reconciliation_unresolved',
+  severity: 'warning',
   status: 'pending',
-  title: 'Clean album genres',
-  description: 'Remove one unwanted tag',
-  file_path: '/music/Lamb of God/Ashes of the Wake/01.flac',
+  title: 'Choose release: Ashes of the Wake',
+  description: 'Multiple releases fit equally well.',
+  file_path: null,
   details: {
     album_title: 'Ashes of the Wake',
     artist_name: 'Lamb of God',
-    kept_genres: ['Metal'],
-    removed_genres: ['Other'],
+    album_folder: '/music/Lamb of God/Ashes of the Wake',
+    candidates: [
+      {
+        source: 'musicbrainz',
+        release_id: 'release-one',
+        matched: 1,
+        clear: 1,
+        total_slots: 1,
+        missing: [],
+        extra: [],
+        pairs: [
+          {
+            file: '01 - Laid to Rest.flac',
+            tag_title: 'Laid to Rest',
+            audio_title: 'Laid to Rest',
+            audio_artist: 'Lamb of God',
+            audio_score: 0.98,
+            slot_title: 'Laid to Rest',
+            slot_number: 1,
+            disc_number: 1,
+            confidence: 'clear',
+            reasons: ['AcoustID recording ID matches release slot'],
+          },
+        ],
+      },
+      { source: 'musicbrainz', release_id: 'release-two', matched: 1, clear: 1 },
+    ],
   },
   evidence_token: 'current-evidence',
 };
 
-function reply(body: unknown, status = 200) {
-  return { ok: status < 400, status, json: async () => body };
+function auxiliary(url: string) {
+  if (url === '/api/repair/finding-types') return reply({ types: [] });
+  if (url === '/api/repair/status') return reply({ current_job: null });
+  if (url === '/api/repair/history?limit=50') return reply({ runs: [] });
+  return null;
 }
 
 beforeEach(() => {
@@ -38,41 +70,43 @@ afterEach(() => {
   fetchMock.mockReset();
 });
 
-describe('review queue', () => {
-  it('selects the first case on the next queue page', async () => {
+describe('library reconciliation review queue', () => {
+  it('filters both APIs and lets the reader jump between pages', async () => {
     fetchMock.mockImplementation((url: string) => {
-      if (url === '/api/repair/finding-types') return Promise.resolve(reply({ types: [] }));
+      const common = auxiliary(url);
+      if (common) return Promise.resolve(common);
       if (url.startsWith('/api/repair/review-queue?')) {
-        const page = Number(new URL(url, 'http://localhost').searchParams.get('page'));
-        const album = page === 0 ? 'Ashes of the Wake' : 'OK Computer';
-        const caseId = page === 0 ? 'album:1:ashes' : 'album:1:ok';
+        const params = new URL(url, 'http://localhost').searchParams;
+        expect(params.get('job_id')).toBe('library_reconciliation');
+        const page = Number(params.get('page'));
         return Promise.resolve(
           reply({
             items: [
               {
-                case_id: caseId,
-                album,
-                artist: page === 0 ? 'Lamb of God' : 'Radiohead',
+                case_id: `album:1:${page}`,
+                album: `Album ${page + 1}`,
+                artist: 'Artist',
                 pending: 1,
                 priority: 1,
-                finding_types: ['genre_cleanup'],
+                finding_types: ['reconciliation_unresolved'],
                 error_count: 0,
               },
             ],
-            total: 2,
+            total: 3,
             page,
             limit: 1,
           }),
         );
       }
-      if (url.endsWith('/album%3A1%3Aashes') || url.endsWith('/album%3A1%3Aok')) {
-        const later = url.endsWith('/album%3A1%3Aok');
+      if (url.startsWith('/api/repair/review-queue/album%3A1%3A')) {
+        expect(url).toContain('?job_id=library_reconciliation');
+        const page = Number(url.match(/album%3A1%3A(\d+)/)?.[1] || 0);
         return Promise.resolve(
           reply({
-            case_id: later ? 'album:1:ok' : 'album:1:ashes',
-            album: later ? 'OK Computer' : 'Ashes of the Wake',
-            artist: later ? 'Radiohead' : 'Lamb of God',
-            folder: null,
+            case_id: `album:1:${page}`,
+            album: `Album ${page + 1}`,
+            artist: 'Artist',
+            folder: '/music/Album',
             count: 1,
             status: 'pending',
             items: [finding],
@@ -82,29 +116,93 @@ describe('review queue', () => {
       throw new Error(`Unexpected request: ${url}`);
     });
     render(<ReviewPage />);
-    await screen.findByRole('heading', { name: 'Ashes of the Wake' });
-    fireEvent.click(screen.getByRole('button', { name: /^Next$/ }));
-    await screen.findByRole('heading', { name: 'OK Computer' });
-    expect(window.location.search).toContain('album%3A1%3Aok');
+    await screen.findByRole('heading', { name: 'Album 1' });
+    expect(screen.getByText('Page 1 of 3')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Jump to page'), { target: { value: '2' } });
+    await screen.findByRole('heading', { name: 'Album 3' });
+    expect(screen.getByText('Page 3 of 3')).toBeTruthy();
+    expect(screen.getByText(/Album 3 of 3/)).toBeTruthy();
   });
 
-  it('queues the reconciliation scan from the review screen', async () => {
+  it('explains release comparisons without dumping JSON', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      const common = auxiliary(url);
+      if (common) return Promise.resolve(common);
+      if (url.startsWith('/api/repair/review-queue?'))
+        return Promise.resolve(
+          reply({
+            items: [
+              {
+                case_id: 'album:1:ashes',
+                album: 'Ashes of the Wake',
+                artist: 'Lamb of God',
+                pending: 1,
+                priority: 1,
+                finding_types: ['reconciliation_unresolved'],
+                error_count: 0,
+              },
+            ],
+            total: 1,
+            page: 0,
+            limit: 30,
+          }),
+        );
+      if (url.startsWith('/api/repair/review-queue/album%3A1%3Aashes?'))
+        return Promise.resolve(
+          reply({
+            case_id: 'album:1:ashes',
+            album: 'Ashes of the Wake',
+            artist: 'Lamb of God',
+            folder: '/music/Lamb of God/Ashes of the Wake',
+            count: 1,
+            status: 'pending',
+            items: [finding],
+          }),
+        );
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    render(<ReviewPage />);
+    await screen.findByRole('heading', { name: 'Compared releases' });
+    expect(screen.getByText('Candidate 1 · musicbrainz')).toBeTruthy();
+    expect(screen.getByText('Candidate 2 · musicbrainz')).toBeTruthy();
+    expect(screen.getByText('AcoustID recording ID matches release slot')).toBeTruthy();
+    expect(screen.getByText(/Track comparisons were not saved/)).toBeTruthy();
+    expect(screen.queryByText(/"release_id"/)).toBeNull();
+  });
+
+  it('shows why the last scan stopped and can queue a rerun', async () => {
     fetchMock.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === '/api/repair/history?limit=50')
+        return Promise.resolve(
+          reply({
+            runs: [
+              {
+                job_id: 'library_reconciliation',
+                status: 'stopped',
+                items_scanned: 2539,
+                error_text: 'AcoustID API error: status: error',
+              },
+            ],
+          }),
+        );
       if (url === '/api/repair/jobs/library_reconciliation/run') {
         expect(options?.method).toBe('POST');
         return Promise.resolve(reply({ success: true }));
       }
-      if (url === '/api/repair/finding-types') return Promise.resolve(reply({ types: [] }));
+      const common = auxiliary(url);
+      if (common) return Promise.resolve(common);
       if (url.startsWith('/api/repair/review-queue?'))
         return Promise.resolve(reply({ items: [], total: 0, page: 0, limit: 30 }));
       throw new Error(`Unexpected request: ${url}`);
     });
     render(<ReviewPage />);
+    await screen.findByText(/Last reconciliation stopped/);
+    expect(screen.getByText(/2539 files checked/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Scan library' }));
-    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('queued'));
+    await waitFor(() => expect(screen.getByText(/Library reconciliation was queued/)).toBeTruthy());
   });
 
-  it('shows evidence, applies the current finding, and advances to the next album', async () => {
+  it('pins the chosen release with its evidence token', async () => {
     let applied = false;
     fetchMock.mockImplementation((url: string, options?: RequestInit) => {
       if (url === '/api/repair/finding-types')
@@ -112,62 +210,49 @@ describe('review queue', () => {
           reply({
             types: [
               {
-                type: 'genre_cleanup',
-                label: 'Genre Cleanup',
-                verb: 'Apply Genres',
+                type: 'reconciliation_release',
+                label: 'Release Ambiguity',
+                verb: 'Choose Release',
                 fixable: true,
                 destructive: false,
               },
             ],
           }),
         );
+      const common = auxiliary(url);
+      if (common) return Promise.resolve(common);
       if (url.startsWith('/api/repair/review-queue?'))
         return Promise.resolve(
           reply({
             items: applied
-              ? [
-                  {
-                    case_id: 'album:1:next',
-                    album: 'OK Computer',
-                    artist: 'Radiohead',
-                    pending: 1,
-                    priority: 1,
-                    finding_types: ['missing_lyrics'],
-                    error_count: 0,
-                  },
-                ]
+              ? []
               : [
                   {
                     case_id: 'album:1:ashes',
                     album: 'Ashes of the Wake',
                     artist: 'Lamb of God',
                     pending: 1,
-                    priority: 2,
-                    finding_types: ['genre_cleanup'],
-                    error_count: 0,
-                  },
-                  {
-                    case_id: 'album:1:next',
-                    album: 'OK Computer',
-                    artist: 'Radiohead',
-                    pending: 1,
                     priority: 1,
-                    finding_types: ['missing_lyrics'],
+                    finding_types: ['reconciliation_release'],
                     error_count: 0,
                   },
                 ],
-            total: applied ? 1 : 2,
+            total: applied ? 0 : 1,
             page: 0,
             limit: 30,
           }),
         );
-      if (url.endsWith('/album%3A1%3Aashes/findings/7/apply')) {
+      if (url.includes('/findings/7/apply')) {
         const body = JSON.parse(options?.body as string) as Record<string, unknown>;
-        expect(body).toMatchObject({ action: 'fix', evidence_token: 'current-evidence' });
+        expect(body).toMatchObject({
+          action: 'fix',
+          fix_action: '1',
+          evidence_token: 'current-evidence',
+        });
         applied = true;
-        return Promise.resolve(reply({ success: true, message: 'Genres applied' }));
+        return Promise.resolve(reply({ success: true, message: 'Release pinned' }));
       }
-      if (url.endsWith('/album%3A1%3Aashes'))
+      if (url.startsWith('/api/repair/review-queue/album%3A1%3Aashes?'))
         return Promise.resolve(
           applied
             ? reply({ error: 'Review case not found' }, 404)
@@ -178,95 +263,14 @@ describe('review queue', () => {
                 folder: '/music/Lamb of God/Ashes of the Wake',
                 count: 1,
                 status: 'pending',
-                items: [finding],
+                items: [{ ...finding, finding_type: 'reconciliation_release' }],
               }),
         );
-      if (url.endsWith('/album%3A1%3Anext'))
-        return Promise.resolve(
-          reply({
-            case_id: 'album:1:next',
-            album: 'OK Computer',
-            artist: 'Radiohead',
-            folder: '/music/Radiohead/OK Computer',
-            count: 1,
-            status: 'pending',
-            items: [{ ...finding, id: 8, title: 'Missing lyrics', finding_type: 'missing_lyrics' }],
-          }),
-        );
       throw new Error(`Unexpected request: ${url}`);
     });
     render(<ReviewPage />);
-    await screen.findByText('Remove one unwanted tag');
-    expect(screen.getByText('Other')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Apply Genres' }));
-    await screen.findByText('Genres applied');
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'OK Computer' })).toBeTruthy());
-  });
-
-  it('keeps a failed repair on the current decision and shows the error', async () => {
-    fetchMock.mockImplementation((url: string) => {
-      if (url === '/api/repair/finding-types')
-        return Promise.resolve(
-          reply({
-            types: [
-              {
-                type: 'genre_cleanup',
-                label: 'Genre Cleanup',
-                verb: 'Apply Genres',
-                fixable: true,
-                destructive: false,
-              },
-            ],
-          }),
-        );
-      if (url.startsWith('/api/repair/review-queue?'))
-        return Promise.resolve(
-          reply({
-            items: [
-              {
-                case_id: 'album:1:ashes',
-                album: 'Ashes of the Wake',
-                artist: 'Lamb of God',
-                pending: 1,
-                priority: 2,
-                finding_types: ['genre_cleanup'],
-                error_count: 0,
-              },
-            ],
-            total: 1,
-            page: 0,
-            limit: 30,
-          }),
-        );
-      if (url.endsWith('/findings/7/apply'))
-        return Promise.resolve(
-          reply(
-            {
-              success: false,
-              error: 'File is locked',
-            },
-            400,
-          ),
-        );
-      if (url.endsWith('/album%3A1%3Aashes'))
-        return Promise.resolve(
-          reply({
-            case_id: 'album:1:ashes',
-            album: 'Ashes of the Wake',
-            artist: 'Lamb of God',
-            folder: null,
-            count: 1,
-            status: 'pending',
-            items: [finding],
-          }),
-        );
-      throw new Error(`Unexpected request: ${url}`);
-    });
-    render(<ReviewPage />);
-    await screen.findByText('Remove one unwanted tag');
-    fireEvent.click(screen.getByRole('button', { name: 'Apply Genres' }));
-    await screen.findByRole('alert');
-    expect(screen.getByRole('alert').textContent).toContain('File is locked');
-    expect(screen.getByText('Remove one unwanted tag')).toBeTruthy();
+    const buttons = await screen.findAllByRole('button', { name: 'Pin this release' });
+    fireEvent.click(buttons[1]);
+    await screen.findByText('Release pinned');
   });
 });

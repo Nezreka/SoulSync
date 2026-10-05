@@ -24,18 +24,22 @@ def evidence_token(row) -> str:
 
 
 def list_cases(db, *, status: str = 'pending', page: int = 0,
-               limit: int = 30, q: str = '') -> dict[str, Any]:
+               limit: int = 30, q: str = '', job_id: str = '') -> dict[str, Any]:
     page = max(0, int(page))
     limit = min(100, max(1, int(limit)))
     conn = db._get_connection()
     try:
         params: list[Any] = [status]
+        job_filter = ''
+        if job_id:
+            job_filter = 'AND job_id = ?'
+            params.append(job_id)
         search = ''
         if q.strip():
             search = "AND (title LIKE ? OR file_path LIKE ? OR details_json LIKE ?)"
             needle = f'%{q.strip()}%'
             params.extend([needle] * 3)
-        where = f"status = ? {search}"
+        where = f"status = ? {job_filter} {search}"
         total = conn.execute(
             f"SELECT COUNT(DISTINCT review_case_key) FROM repair_findings WHERE {where}",
             params,
@@ -56,11 +60,12 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
                    SUM(CASE WHEN last_error IS NOT NULL AND last_error != '' THEN 1 ELSE 0 END)
                        AS error_count
             FROM repair_findings
-            WHERE status = ? AND review_case_key IN (SELECT review_case_key FROM matching_cases)
+            WHERE status = ? {job_filter}
+              AND review_case_key IN (SELECT review_case_key FROM matching_cases)
             GROUP BY review_case_key
             ORDER BY priority ASC, error_count DESC, pending DESC, case_id ASC
             LIMIT ? OFFSET ?
-        """, [*params, status, limit, page * limit]).fetchall()
+        """, [*params, status, *([job_id] if job_id else []), limit, page * limit]).fetchall()
         return {
             'items': [{
                 'case_id': row[0], 'pending': row[1], 'priority': row[2],
@@ -74,7 +79,8 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
         conn.close()
 
 
-def get_case(db, case_id: str, *, status: str = 'pending') -> dict[str, Any] | None:
+def get_case(db, case_id: str, *, status: str = 'pending',
+             job_id: str = '') -> dict[str, Any] | None:
     conn = db._get_connection()
     try:
         rows = conn.execute(f"""
@@ -83,8 +89,9 @@ def get_case(db, case_id: str, *, status: str = 'pending') -> dict[str, Any] | N
                    user_action, created_at, updated_at, last_error
             FROM repair_findings
             WHERE review_case_key = ? AND status = ?
+              AND (? = '' OR job_id = ?)
             ORDER BY {_SEVERITY}, created_at, id
-        """, (case_id, status)).fetchall()
+        """, (case_id, status, job_id, job_id)).fetchall()
         if not rows:
             return None
         items = []

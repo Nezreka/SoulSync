@@ -16,6 +16,11 @@ from typing import Any
 
 from core.imports.staging import AUDIO_EXTENSIONS
 from core.repair_jobs.base import walk_library
+from utils.logging_config import get_logger
+
+
+logger = get_logger('library.reconciliation_evidence')
+_LOOKUP_RETRY_DELAYS = (1, 2, 4, 8)
 
 
 def folder_audio_path_digest(folder: str) -> str:
@@ -100,8 +105,14 @@ class ReconciliationEvidence:
             self.conn.execute('DELETE FROM reconcile_acoustid_results WHERE lookup_key = ?',
                               (key,))
 
-        result = self.client.lookup_fingerprint_with_status(fingerprint, duration)
-        self.metrics['lookups'] += 1
+        for delay in (*_LOOKUP_RETRY_DELAYS, None):
+            result = self.client.lookup_fingerprint_with_status(fingerprint, duration)
+            self.metrics['lookups'] += 1
+            if result.get('status') != 'error' or result.get('invalid_key') or delay is None:
+                break
+            logger.warning('AcoustID lookup failed; retrying in %ss: %s',
+                           delay, result.get('error') or 'unknown error')
+            time.sleep(delay)
         if result.get('status') in ('ok', 'no_match'):
             ttl = 30 * 86400 if result['status'] == 'ok' else 86400
             self.conn.execute('''

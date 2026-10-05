@@ -36,14 +36,15 @@ class _Database:
     def _get_connection(self):
         return self.conn
 
-    def add(self, finding_id, path, details, *, status='pending', kind='acoustid_mismatch'):
+    def add(self, finding_id, path, details, *, status='pending', kind='acoustid_mismatch',
+            job_id='acoustid_scanner'):
         self.conn.execute('''
             INSERT INTO repair_findings
             (id, job_id, finding_type, severity, status, file_path, title,
              details_json, created_at, updated_at, review_case_key)
-            VALUES (?, 'acoustid_scanner', ?, 'warning', ?, ?, ?, ?,
+            VALUES (?, ?, ?, 'warning', ?, ?, ?, ?,
                     '2026-10-05', '2026-10-05', ?)
-        ''', (finding_id, kind, status, path, f'Finding {finding_id}',
+        ''', (finding_id, job_id, kind, status, path, f'Finding {finding_id}',
               json.dumps(details), review_case_key(details, path, finding_id)))
         self.conn.commit()
 
@@ -91,6 +92,21 @@ def test_folder_groups_bad_tags_but_unnamed_rows_are_not_lost():
     assert searched['items'][0]['pending'] == 2
 
 
+def test_job_filter_excludes_other_findings_even_in_the_same_case():
+    db = _Database()
+    details = {'album_id': 10, 'album_title': 'Rated R'}
+    db.add(1, '/music/Rated R/01.flac', details, job_id='library_reconciliation',
+           kind='reconciliation_metadata')
+    db.add(2, '/music/Rated R/02.flac', details)
+    db.add(3, '/music/Other/01.flac', {'album_id': 11})
+    queue = list_cases(db, job_id='library_reconciliation')
+    assert queue['total'] == 1
+    assert queue['items'][0]['pending'] == 1
+    case = get_case(db, queue['items'][0]['case_id'], job_id='library_reconciliation')
+    assert [item['id'] for item in case['items']] == [1]
+    assert list_cases(db)['total'] == 2
+
+
 def test_stale_review_action_cannot_run_fix():
     db = _Database()
     db.add(1, '/music/A/01.flac', {'album_id': 5})
@@ -124,6 +140,8 @@ def test_review_http_api_returns_exact_case_and_rejects_stale_apply(monkeypatch)
 
     db = _Database()
     db.add(1, '/music/A/01.flac', {'album_id': 5, 'album_title': 'OK Computer'})
+    db.add(2, '/music/A/02.flac', {'album_id': 5, 'album_title': 'OK Computer'},
+           job_id='library_reconciliation', kind='reconciliation_metadata')
     worker = RepairWorker.__new__(RepairWorker)
     worker.db = db
     worker._review_apply_lock = threading.Lock()
@@ -135,8 +153,13 @@ def test_review_http_api_returns_exact_case_and_rejects_stale_apply(monkeypatch)
     queue = client.get('/api/repair/review-queue').json
     case_id = queue['items'][0]['case_id']
     detail = client.get(f'/api/repair/review-queue/{case_id}').json
-    assert detail['count'] == 1
+    assert detail['count'] == 2
     assert detail['album'] == 'OK Computer'
+    filtered = client.get('/api/repair/review-queue?job_id=library_reconciliation').json
+    assert filtered['items'][0]['pending'] == 1
+    filtered_detail = client.get(
+        f'/api/repair/review-queue/{case_id}?job_id=library_reconciliation').json
+    assert [item['id'] for item in filtered_detail['items']] == [2]
     response = client.post(f'/api/repair/review-queue/{case_id}/findings/1/apply',
                            json={'action': 'fix', 'evidence_token': 'old'})
     assert response.status_code == 409
@@ -181,5 +204,6 @@ def test_existing_findings_are_backfilled_into_exact_cases(tmp_path):
         assert row[0] == 'album:2:10'
         indexes = {row[1] for row in conn.execute('PRAGMA index_list(repair_findings)')}
         assert 'idx_rf_review_case' in indexes
+        assert 'idx_rf_review_job_case' in indexes
     finally:
         conn.close()

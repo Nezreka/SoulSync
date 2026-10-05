@@ -124,6 +124,14 @@
 .pagination {
   font-size: 12px;
   color: #abb2c4;
+  flex-wrap: wrap;
+}
+.pagination select {
+  color: #f5f5fa;
+  background: #272b3c;
+  border: 1px solid #4a4e63;
+  border-radius: 8px;
+  padding: 7px;
 }
 .pagination button,
 .nav button,
@@ -226,6 +234,116 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
+.reconciliationEvidence {
+  display: grid;
+  gap: 18px;
+  margin-top: 22px;
+}
+.evidenceColumns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.evidenceCard {
+  border: 1px solid #3b4053;
+  border-radius: 13px;
+  padding: 18px;
+  min-width: 0;
+}
+.evidenceCard h4 {
+  font-size: 16px;
+  margin: 0 0 14px;
+}
+.evidenceCard p {
+  color: #b6bed0;
+  line-height: 1.5;
+  margin: 8px 0;
+}
+.evidenceCard ol,
+.evidenceCard ul {
+  margin: 8px 0 0;
+  padding-left: 22px;
+}
+.factList {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+.factList div {
+  display: grid;
+  grid-template-columns: minmax(100px, 28%) minmax(0, 1fr);
+  gap: 12px;
+}
+.factList dt,
+.evidenceCard small,
+.muted {
+  color: #9ea7bb;
+}
+.factList dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.audioCandidates li,
+.releaseHeading > div {
+  display: grid;
+  gap: 3px;
+}
+.releaseCandidate {
+  border-top: 1px solid #3b4053;
+  padding-top: 15px;
+  margin-top: 15px;
+}
+.releaseHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.releaseHeading small {
+  overflow-wrap: anywhere;
+}
+.releaseHeading button {
+  background: #373055;
+  border: 1px solid #806eaf;
+  color: #f5f5fa;
+  border-radius: 9px;
+  padding: 8px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.comparisonScroll {
+  overflow-x: auto;
+  margin-top: 12px;
+}
+.comparisonTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.comparisonTable th,
+.comparisonTable td {
+  padding: 9px 10px;
+  border-bottom: 1px solid #35394a;
+  text-align: left;
+  vertical-align: top;
+  min-width: 125px;
+}
+.comparisonTable th {
+  color: #b8c1d5;
+  font-weight: 650;
+}
+.comparisonTable td:first-child {
+  overflow-wrap: anywhere;
+}
+.comparisonTable td small {
+  display: block;
+  margin-top: 3px;
+}
+.changeList li {
+  overflow-wrap: anywhere;
+  margin: 5px 0;
+}
 .actions {
   justify-content: flex-start;
   flex-wrap: wrap;
@@ -266,6 +384,14 @@
   border: 1px solid #538471;
   color: #dcffe9;
 }
+.scanStatus {
+  border: 1px solid #4b5168;
+  border-radius: 10px;
+  background: #222638;
+  color: #d7def0;
+  padding: 11px 14px;
+  margin-bottom: 18px;
+}
 .empty {
   color: #b0b8c9;
   padding: 40px;
@@ -283,6 +409,9 @@
     max-height: 210px;
   }
   .evidence {
+    grid-template-columns: 1fr;
+  }
+  .evidenceColumns {
     grid-template-columns: 1fr;
   }
   .header,

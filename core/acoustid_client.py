@@ -478,7 +478,7 @@ class AcoustIDClient:
                     'error': 'AcoustID is unavailable or no API key is configured'}
         try:
             import acoustid
-            data = acoustid.lookup(self.api_key, fingerprint, duration_s)
+            data = acoustid.lookup(self.api_key, fingerprint, duration_s, timeout=15)
             recordings = []
             by_mbid = {}
             for score, mbid, title, artist in acoustid.parse_lookup_result(data):
@@ -497,8 +497,14 @@ class AcoustIDClient:
         except acoustid.WebServiceError as exc:
             message = str(exc)
             low = message.lower()
+            error_code = getattr(exc, 'code', None)
             return {'status': 'error', 'recordings': [],
-                    'invalid_key': any(s in low for s in ('invalid', 'unknown', 'status: error')),
+                    # Some pyacoustid versions report *every* server-side
+                    # failure as bare "status: error". Only code 4 or an
+                    # explicit key message establishes an invalid key.
+                    'invalid_key': error_code == 4 or
+                    any(s in low for s in ('invalid api key', 'invalid client key')),
+                    'error_code': error_code,
                     'error': f'AcoustID API error: {message}'}
         except Exception as exc:
             logger.warning('AcoustID fingerprint lookup failed: %s', exc)

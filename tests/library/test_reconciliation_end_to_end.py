@@ -213,7 +213,8 @@ def test_audio_evidence_cache_survives_rename_but_retries_errors(tmp_path):
         cache.close()
 
 
-def test_audio_lookup_error_is_retried_after_cache_reopen(tmp_path):
+def test_audio_lookup_error_is_retried_after_cache_reopen(tmp_path, monkeypatch):
+    monkeypatch.setattr('core.library.reconciliation_evidence.time.sleep', lambda _delay: None)
     db = MusicDatabase(str(tmp_path / 'music.db'))
     path = tmp_path / 'Southbound.flac'
     path.write_bytes(b'fixture')
@@ -235,8 +236,34 @@ def test_audio_lookup_error_is_retried_after_cache_reopen(tmp_path):
         cache.close()
 
 
+def test_transient_audio_lookup_error_recovers_in_same_scan(tmp_path, monkeypatch):
+    monkeypatch.setattr('core.library.reconciliation_evidence.time.sleep', lambda _delay: None)
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    path = tmp_path / 'Lucky.flac'
+    path.write_bytes(b'fixture')
+    client = _Acoustid({path.name: {'mbid': 'lucky', 'title': 'Lucky',
+                                   'artist': 'Radiohead', 'score': 0.99}})
+    original = client.lookup_fingerprint_with_status
+    attempts = 0
+    def flaky(fingerprint, duration):
+        nonlocal attempts
+        attempts += 1
+        return ({'status': 'error', 'error': 'status: error'} if attempts == 1
+                else original(fingerprint, duration))
+    client.lookup_fingerprint_with_status = flaky
+    cache = ReconciliationEvidence(db, client)
+    try:
+        assert cache.identify(str(path))['status'] == 'ok'
+        assert attempts == 2
+        assert cache.identify(str(path))['status'] == 'ok'
+        assert attempts == 2
+    finally:
+        cache.close()
+
+
 def test_api_error_stops_full_scan_before_repeating_failed_requests(tmp_path, monkeypatch):
     import core.repair_jobs.library_reconciliation as module
+    monkeypatch.setattr('core.library.reconciliation_evidence.time.sleep', lambda _delay: None)
 
     root = tmp_path / 'music'
     root.mkdir()
@@ -492,7 +519,12 @@ def test_locked_release_with_better_fitting_edition_requires_release_review(tmp_
     assert finding['finding_type'] == 'reconciliation_release'
     assert finding['details']['locked_release'] == {
         'source': 'spotify', 'release_id': 'ashes-release'}
-    assert finding['details']['candidates'][0]['release_id'] == 'better-edition'
+    better = finding['details']['candidates'][0]
+    assert better['release_id'] == 'better-edition'
+    assert better['pairs'][0]['file'] == path.name
+    assert better['pairs'][0]['audio_title'] == 'Hourglass'
+    assert better['pairs'][0]['slot_title'] == 'Hourglass'
+    assert better['pairs'][0]['confidence'] == 'clear'
 
 
 def test_ambiguous_unassigned_audio_is_not_offered_for_quarantine(tmp_path, monkeypatch):

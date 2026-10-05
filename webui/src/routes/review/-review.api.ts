@@ -32,6 +32,21 @@ export interface ReviewCase {
   items: ReviewFinding[];
 }
 
+export interface ReconciliationScanStatus {
+  current_job: {
+    job_id: string;
+    progress?: { scanned: number; total: number; percent: number };
+  } | null;
+}
+
+export interface ReconciliationRun {
+  job_id: string;
+  status: string;
+  error_text?: string | null;
+  items_scanned: number;
+  finished_at?: string | null;
+}
+
 async function readJson<T>(response: Response): Promise<T> {
   const body = (await response.json()) as T & { error?: string };
   if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
@@ -39,13 +54,19 @@ async function readJson<T>(response: Response): Promise<T> {
 }
 
 export async function fetchReviewQueue(page = 0, q = ''): Promise<ReviewQueuePage> {
-  const params = new URLSearchParams({ page: String(page), q });
+  const params = new URLSearchParams({
+    page: String(page),
+    q,
+    job_id: 'library_reconciliation',
+  });
   return readJson<ReviewQueuePage>(await fetch(`/api/repair/review-queue?${params}`));
 }
 
 export async function fetchReviewCase(caseId: string): Promise<ReviewCase> {
   return readJson<ReviewCase>(
-    await fetch(`/api/repair/review-queue/${encodeURIComponent(caseId)}`),
+    await fetch(
+      `/api/repair/review-queue/${encodeURIComponent(caseId)}?job_id=library_reconciliation`,
+    ),
   );
 }
 
@@ -53,6 +74,17 @@ export async function runReconciliationScan(): Promise<void> {
   await readJson<{ success: boolean }>(
     await fetch('/api/repair/jobs/library_reconciliation/run', { method: 'POST' }),
   );
+}
+
+export async function fetchReconciliationScanStatus(): Promise<ReconciliationScanStatus> {
+  return readJson<ReconciliationScanStatus>(await fetch('/api/repair/status'));
+}
+
+export async function fetchLastReconciliationRun(): Promise<ReconciliationRun | null> {
+  const data = await readJson<{ runs: ReconciliationRun[] }>(
+    await fetch('/api/repair/history?limit=50'),
+  );
+  return data.runs.find((run) => run.job_id === 'library_reconciliation') || null;
 }
 
 export async function applyReviewDecision(

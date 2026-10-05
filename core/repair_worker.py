@@ -1593,12 +1593,13 @@ class RepairWorker:
     }
 
     def get_review_cases(self, *, status: str = 'pending', page: int = 0,
-                         limit: int = 30, q: str = '') -> dict:
+                         limit: int = 30, q: str = '', job_id: str = '') -> dict:
         return repair_review_queue.list_cases(
-            self.db, status=status, page=page, limit=limit, q=q)
+            self.db, status=status, page=page, limit=limit, q=q, job_id=job_id)
 
-    def get_review_case(self, case_id: str, *, status: str = 'pending') -> Optional[dict]:
-        return repair_review_queue.get_case(self.db, case_id, status=status)
+    def get_review_case(self, case_id: str, *, status: str = 'pending',
+                        job_id: str = '') -> Optional[dict]:
+        return repair_review_queue.get_case(self.db, case_id, status=status, job_id=job_id)
 
     def apply_review_decision(self, case_id: str, finding_id: int, *,
                               evidence_token: str, action: str,

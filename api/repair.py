@@ -67,7 +67,7 @@ def repair_review_queue_list():
         return jsonify(worker.get_review_cases(
             status=status, page=_safe_int(request.args.get('page')),
             limit=_safe_int(request.args.get('limit'), 30),
-            q=request.args.get('q') or ''))
+            q=request.args.get('q') or '', job_id=request.args.get('job_id') or ''))
     except Exception as exc:
         logger.error('Error loading review queue: %s', exc, exc_info=True)
         return jsonify({'error': 'Could not load review queue'}), 500
@@ -82,7 +82,8 @@ def repair_review_queue_case(case_id):
     if status not in ('pending', 'resolved', 'dismissed', 'auto_fixed'):
         return jsonify({'error': 'Invalid finding status'}), 400
     try:
-        case = worker.get_review_case(case_id, status=status)
+        case = worker.get_review_case(
+            case_id, status=status, job_id=request.args.get('job_id') or '')
         if case is None:
             return jsonify({'error': 'Review case not found'}), 404
         for item in case['items']:

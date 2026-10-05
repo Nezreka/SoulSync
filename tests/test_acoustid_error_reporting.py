@@ -110,7 +110,8 @@ def test_lookup_status_unavailable_without_key(tmp_path, monkeypatch):
 def test_reusable_fingerprint_lookup_keeps_best_candidate_per_recording(monkeypatch):
     c, fake = _client_with_fake_acoustid(monkeypatch)
     calls = []
-    fake.lookup = lambda key, fingerprint, duration: calls.append((key, fingerprint, duration)) or {}
+    fake.lookup = lambda key, fingerprint, duration, **_kwargs: calls.append(
+        (key, fingerprint, duration)) or {}
     fake.parse_lookup_result = lambda _data: [
         (0.80, 'mb-one', 'Lucky', 'Radiohead'),
         (0.97, 'mb-one', 'Lucky', 'Radiohead'),
@@ -123,14 +124,26 @@ def test_reusable_fingerprint_lookup_keeps_best_candidate_per_recording(monkeypa
     assert result['recordings'][0]['score'] == 0.97
 
 
-def test_reusable_fingerprint_lookup_surfaces_invalid_key(monkeypatch):
+def test_reusable_fingerprint_lookup_does_not_guess_invalid_key_from_generic_error(monkeypatch):
     c, fake = _client_with_fake_acoustid(monkeypatch)
-    def fail(*_args):
+    def fail(*_args, **_kwargs):
         raise fake.WebServiceError('status: error')
     fake.lookup = fail
     result = c.lookup_fingerprint_with_status('fingerprint', 260.0)
     assert result['status'] == 'error'
+    assert result['invalid_key'] is False
+
+
+def test_reusable_fingerprint_lookup_identifies_key_error_code(monkeypatch):
+    c, fake = _client_with_fake_acoustid(monkeypatch)
+    def fail(*_args, **_kwargs):
+        error = fake.WebServiceError('status: error')
+        error.code = 4
+        raise error
+    fake.lookup = fail
+    result = c.lookup_fingerprint_with_status('fingerprint', 260.0)
     assert result['invalid_key'] is True
+    assert result['error_code'] == 4
 
 
 # ── fingerprint_and_lookup keeps its dict-or-None contract ─────────────────

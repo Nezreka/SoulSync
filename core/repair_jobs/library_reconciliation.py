@@ -176,6 +176,55 @@ def _score_release_candidates(files: list[dict], candidates: list[tuple[str, str
     return scored
 
 
+def _candidate_evidence(files: list[dict], scored: tuple) -> dict:
+    """Keep the actual file-to-slot comparison behind a release decision."""
+    clear, matched, _extras, source, release_id, slots, plan = scored
+    pairs = []
+    for pair in plan['pairs']:
+        file = files[pair['file_index']]
+        slot = slots[pair['slot_index']]
+        recordings = file['acoustid'].get('recordings') or []
+        top = max(recordings, key=lambda row: float(row.get('score') or 0),
+                  default={})
+        pairs.append({
+            'file': os.path.basename(file['path']),
+            'tag_title': file['tags'].get('title') or '',
+            'audio_title': top.get('title') or '',
+            'audio_artist': top.get('artist') or '',
+            'audio_score': top.get('score'),
+            'slot_title': slot['title'],
+            'slot_number': slot.get('track_number'),
+            'disc_number': slot.get('disc_number'),
+            'confidence': pair['confidence'],
+            'reasons': pair['reasons'],
+        })
+    return {
+        'source': source, 'release_id': release_id,
+        'matched': matched, 'clear': clear, 'total_slots': len(slots),
+        'pairs': pairs,
+        'missing': [slots[index]['title'] for index in plan['missing_slots']],
+        'extra': [os.path.basename(files[index]['path'])
+                  for index in plan['extra_files']],
+    }
+
+
+def _checked_file_evidence(files: list[dict]) -> list[dict]:
+    checked = []
+    for file in files:
+        recordings = file['acoustid'].get('recordings') or []
+        top = max(recordings, key=lambda row: float(row.get('score') or 0),
+                  default={})
+        checked.append({
+            'file': os.path.basename(file['path']),
+            'tag_title': file['tags'].get('title') or '',
+            'audio_status': file['acoustid'].get('status'),
+            'audio_title': top.get('title') or '',
+            'audio_artist': top.get('artist') or '',
+            'audio_score': top.get('score'),
+        })
+    return checked
+
+
 def _emit_finding(context: JobContext, observed: set[tuple[str, str, str]], **finding):
     observed.add((finding['finding_type'], finding['entity_type'],
                   str(finding['entity_id'])))
@@ -444,6 +493,10 @@ class LibraryReconciliationJob(RepairJob):
                                  'artist_name': album.get('artist_name') if album else '',
                                  'album_folder': folder, 'file_count': len(files),
                                  'acoustid_statuses': [f['acoustid'].get('status') for f in files],
+                                 'checked_files': _checked_file_evidence(files),
+                                 'attempted_releases': [
+                                     {'source': source, 'release_id': release_id}
+                                     for source, release_id in candidates],
                                  'evidence_signature': _evidence_signature(files, candidates)}):
                         result.findings_created += 1
                     cache.checkpoint()
@@ -496,8 +549,7 @@ class LibraryReconciliationJob(RepairJob):
                                  'evidence_signature': _evidence_signature(
                                      files, [(row[3], row[4], row[0], row[1])
                                              for row in scored]),
-                                 'candidates': [{'source': row[3], 'release_id': row[4],
-                                                 'matched': row[1], 'clear': row[0]}
+                                 'candidates': [_candidate_evidence(files, row)
                                                 for row in scored[:6]]}):
                         result.findings_created += 1
                     cache.checkpoint()

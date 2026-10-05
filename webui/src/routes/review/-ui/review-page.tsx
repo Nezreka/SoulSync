@@ -1,79 +1,30 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { FindingTypeInfo } from '../../tools/-tools.groups';
 
 import {
   applyReviewDecision,
+  fetchLastReconciliationRun,
   fetchReviewCase,
   fetchReviewQueue,
+  fetchReconciliationScanStatus,
   runReconciliationScan,
+  type ReconciliationRun,
+  type ReconciliationScanStatus,
   type ReviewCase,
   type ReviewFinding,
   type ReviewQueuePage,
 } from '../-review.api';
 import { fetchFindingTypes } from '../../tools/-tools.api';
 import { findingTypeLabel } from '../../tools/-tools.core';
-import { FindingDetail } from '../../tools/-ui/finding-detail';
-import { useFindingPrompts } from '../../tools/-ui/finding-prompts';
+import { ReconciliationEvidence } from './reconciliation-evidence';
 import styles from './review-page.module.css';
 
 const requireChoice = new Set([
-  'orphan_file',
-  'dead_file',
-  'acoustid_mismatch',
-  'quality_upgrade',
-  'missing_discography_track',
-  'duplicate_tracks',
-  'suspect_album_tag',
   'reconciliation_extra',
   'reconciliation_intent',
   'reconciliation_release',
 ]);
-
-function value(value: unknown): string {
-  if (value === null || value === undefined) return '—';
-  if (Array.isArray(value)) return value.map(valueAsText).join(', ') || '—';
-  return valueAsText(value);
-}
-
-function valueAsText(value: unknown): string {
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-  return JSON.stringify(value);
-}
-
-function evidence(finding: ReviewFinding) {
-  const d = finding.details || {};
-  const audio = (
-    d.acoustid && typeof d.acoustid === 'object' && !Array.isArray(d.acoustid) ? d.acoustid : {}
-  ) as Record<string, unknown>;
-  const current = (
-    d.current_tags && typeof d.current_tags === 'object' && !Array.isArray(d.current_tags)
-      ? d.current_tags
-      : {}
-  ) as Record<string, unknown>;
-  return [
-    [
-      'Audio / AcoustID',
-      audio.status || d.acoustid_status || d.acoustid_title || d.matched_title || d.detected_title,
-    ],
-    [
-      'AcoustID candidates',
-      audio.recordings || d.candidates || d.acoustid_recordings || d.recording_mbids,
-    ],
-    ['Embedded tags', current.title || d.current_title || d.track_title || d.file_title || d.title],
-    ['Filename', finding.file_path?.split('/').pop()],
-    ['Folder', d.album_folder || finding.file_path?.split('/').slice(0, -1).join('/')],
-    ['Expected track', d.expected_title || d.canonical_title || d.source_title],
-    ['Expected album', d.album_title || d.album || d.album_name],
-    ['Duration', d.duration_ms || d.file_duration_ms || d.duration],
-    ['Recording MBID', d.musicbrainz_recording_id || d.recording_mbid],
-    ['Other matching files', d.competing_copies],
-    ['Proposed changes', d.changes],
-    ['Why this slot', d.match_reasons],
-  ] as const;
-}
 
 export function ReviewPage() {
   const [queue, setQueue] = useState<ReviewQueuePage | null>(null);
@@ -84,12 +35,60 @@ export function ReviewPage() {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [page, setPage] = useState(0);
   const [query, setQuery] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [catalog, setCatalog] = useState<Record<string, FindingTypeInfo>>({});
   const [busy, setBusy] = useState(false);
   const [scanBusy, setScanBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const prompts = useFindingPrompts();
+  const [scanStatus, setScanStatus] = useState<ReconciliationScanStatus | null>(null);
+  const [lastRun, setLastRun] = useState<ReconciliationRun | null>(null);
+  const wasScanning = useRef(false);
+
+  useEffect(() => {
+    let live = true;
+    void fetchLastReconciliationRun()
+      .then((run) => {
+        if (live) setLastRun(run);
+      })
+      .catch(() => undefined);
+    const poll = async () => {
+      try {
+        const status = await fetchReconciliationScanStatus();
+        if (!live) return;
+        setScanStatus(status);
+        const scanning = status.current_job?.job_id === 'library_reconciliation';
+        if (wasScanning.current && !scanning) {
+          void fetchLastReconciliationRun()
+            .then((run) => {
+              if (live) setLastRun(run);
+            })
+            .catch(() => undefined);
+        }
+        wasScanning.current = scanning;
+      } catch {
+        // Status is supporting context; a temporary poll failure should not
+        // hide the review queue or block a decision.
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 15000);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (searchInput !== query) {
+        setPage(0);
+        setCaseId('');
+        setQuery(searchInput);
+      }
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [searchInput, query]);
 
   const refreshQueue = useCallback(async () => {
     const result = await fetchReviewQueue(page, query);
@@ -158,6 +157,8 @@ export function ReviewPage() {
   const itemIndex =
     active && reviewCase ? reviewCase.items.findIndex((f) => f.id === active.id) : -1;
   const caseIndex = queue?.items.findIndex((item) => item.case_id === caseId) ?? -1;
+  const pageCount = queue ? Math.max(1, Math.ceil(queue.total / queue.limit)) : 1;
+  const albumNumber = queue && caseIndex >= 0 ? page * queue.limit + caseIndex + 1 : null;
   const typeInfo = active ? catalog[active.finding_type] : undefined;
   const canApply = Boolean(typeInfo?.fixable) && active?.finding_type !== 'suspect_album_tag';
   const suggested = canApply && active && !requireChoice.has(active.finding_type);
@@ -196,35 +197,14 @@ export function ReviewPage() {
 
   const act = async (finding: ReviewFinding, action: 'fix' | 'dismiss', override?: string) => {
     let fixAction: string | null = override || null;
-    if (action === 'fix' && !override) {
-      switch (finding.finding_type) {
-        case 'orphan_file':
-          fixAction = await prompts.promptOrphan();
-          break;
-        case 'dead_file':
-          fixAction = await prompts.promptDeadFile();
-          break;
-        case 'acoustid_mismatch': {
-          const d = finding.details || {};
-          fixAction = await prompts.promptAcoustid(
-            d.ambiguous && Array.isArray(d.candidates) ? (d.candidates as string[]) : undefined,
-          );
-          break;
-        }
-        case 'quality_upgrade':
-          fixAction = await prompts.promptQuality();
-          break;
-        case 'missing_discography_track':
-          fixAction = await prompts.promptBackfill(1);
-          break;
-        case 'reconciliation_extra':
-          fixAction = 'quarantine';
-          break;
-      }
-      if (requireChoice.has(finding.finding_type) && !fixAction) return;
-      if (fixAction === 'ignore' || fixAction === 'dismiss') action = 'dismiss';
+    if (action === 'fix' && finding.finding_type === 'reconciliation_extra') {
+      fixAction = 'quarantine';
     }
-    if (action === 'fix' && typeInfo?.destructive) {
+    if (action === 'fix' && requireChoice.has(finding.finding_type) && !fixAction) return;
+    if (
+      action === 'fix' &&
+      (typeInfo?.destructive || finding.finding_type === 'reconciliation_extra')
+    ) {
       const confirmed = window.showConfirmDialog
         ? await window.showConfirmDialog({
             title: 'Apply repair',
@@ -275,11 +255,19 @@ export function ReviewPage() {
             ← Library Maintenance
           </a>
           <h1>Review Queue</h1>
-          <p>Review one decision at a time with its album and file evidence.</p>
+          <p>Showing library reconciliation findings, one album at a time.</p>
         </div>
         <div className={styles.headerTools}>
-          <button type="button" disabled={scanBusy} onClick={() => void runScan()}>
-            {scanBusy ? 'Queuing…' : 'Scan library'}
+          <button
+            type="button"
+            disabled={scanBusy || scanStatus?.current_job?.job_id === 'library_reconciliation'}
+            onClick={() => void runScan()}
+          >
+            {scanBusy
+              ? 'Queuing…'
+              : scanStatus?.current_job?.job_id === 'library_reconciliation'
+                ? 'Scanning…'
+                : 'Scan library'}
           </button>
           <button type="button" onClick={() => void refresh()}>
             Refresh queue
@@ -300,18 +288,23 @@ export function ReviewPage() {
           {notice}
         </div>
       )}
+      {(scanStatus?.current_job?.job_id === 'library_reconciliation' || lastRun) && (
+        <div className={styles.scanStatus} role="status">
+          {scanStatus?.current_job?.job_id === 'library_reconciliation'
+            ? `Reconciliation running: ${scanStatus.current_job.progress?.scanned ?? 0} of ${scanStatus.current_job.progress?.total ?? '?'} folders (${scanStatus.current_job.progress?.percent ?? 0}%).`
+            : lastRun?.status === 'completed'
+              ? `Last reconciliation completed: ${lastRun.items_scanned} files checked.`
+              : `Last reconciliation ${lastRun?.status}: ${lastRun?.error_text || 'No reason recorded'}. ${lastRun?.items_scanned ?? 0} files checked; a rerun reuses cached fingerprints.`}
+        </div>
+      )}
 
       <div className={styles.workspace}>
         <aside className={styles.sidebar} aria-label="Albums needing review">
           <label htmlFor="review-search">Find album or track</label>
           <input
             id="review-search"
-            value={query}
-            onChange={(event) => {
-              setCaseId('');
-              setPage(0);
-              setQuery(event.target.value);
-            }}
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
             placeholder="Search findings"
           />
           <div className={styles.caseList}>
@@ -342,7 +335,23 @@ export function ReviewPage() {
             >
               Previous
             </button>
-            <span>Page {page + 1}</span>
+            <span>
+              Page {page + 1} of {pageCount}
+            </span>
+            <select
+              aria-label="Jump to page"
+              value={page}
+              onChange={(event) => {
+                setCaseId('');
+                setPage(Number(event.target.value));
+              }}
+            >
+              {Array.from({ length: pageCount }, (_, index) => (
+                <option key={index} value={index}>
+                  Page {index + 1}
+                </option>
+              ))}
+            </select>
             <button
               type="button"
               disabled={!queue || (page + 1) * queue.limit >= queue.total}
@@ -362,7 +371,7 @@ export function ReviewPage() {
               <div className={styles.albumHeader}>
                 <div>
                   <div className={styles.eyebrow}>
-                    Album {caseIndex >= 0 ? caseIndex + 1 : '—'}
+                    Album {albumNumber ?? '—'} of {queue?.total ?? '—'}
                     {' · '}
                     {reviewCase.count} open decision{reviewCase.count === 1 ? '' : 's'}
                   </div>
@@ -415,60 +424,18 @@ export function ReviewPage() {
                 </p>
               </section>
 
-              <div className={styles.evidence}>
-                <section>
-                  <h4>Evidence</h4>
-                  <dl>
-                    {evidence(active)
-                      .filter(([, v]) => v !== null && v !== undefined)
-                      .map(([label, raw]) => (
-                        <div key={label}>
-                          <dt>{label}</dt>
-                          <dd>{value(raw)}</dd>
-                        </div>
-                      ))}
-                  </dl>
-                </section>
-                <section>
-                  <h4>Finding details</h4>
-                  <FindingDetail
-                    finding={active}
-                    onKeepDuplicate={(_id, trackId) => {
-                      void act(active, 'fix', trackId);
-                    }}
-                    onApplyCoverArt={(_id, target) => {
-                      void act(active, 'fix', target);
-                    }}
-                  />
-                  {active.last_error && (
-                    <p className={styles.error}>Last attempt: {active.last_error}</p>
-                  )}
-                </section>
-              </div>
+              <ReconciliationEvidence
+                finding={active}
+                busy={busy}
+                onPin={
+                  active.finding_type === 'reconciliation_release'
+                    ? (index) => void act(active, 'fix', String(index))
+                    : undefined
+                }
+              />
 
               <div className={styles.actions}>
-                {active.finding_type === 'reconciliation_release' ? (
-                  Array.isArray(active.details?.candidates) ? (
-                    active.details.candidates.map((choice, index) => {
-                      const release = choice as {
-                        source?: string;
-                        release_id?: string;
-                        matched?: number;
-                      };
-                      return (
-                        <button
-                          type="button"
-                          key={`${release.source}-${release.release_id}`}
-                          disabled={busy}
-                          onClick={() => void act(active, 'fix', String(index))}
-                        >
-                          Pin {release.source} {release.release_id} ({release.matched ?? '?'}{' '}
-                          matched)
-                        </button>
-                      );
-                    })
-                  ) : null
-                ) : active.finding_type === 'reconciliation_intent' ? (
+                {active.finding_type === 'reconciliation_intent' ? (
                   <>
                     <button
                       type="button"
@@ -488,7 +455,7 @@ export function ReviewPage() {
                   </>
                 ) : (
                   canApply &&
-                  active.finding_type !== 'duplicate_tracks' && (
+                  active.finding_type !== 'reconciliation_release' && (
                     <button
                       type="button"
                       disabled={busy}
@@ -499,7 +466,9 @@ export function ReviewPage() {
                         ? 'Applying…'
                         : suggested
                           ? typeInfo?.verb || 'Apply repair'
-                          : 'Choose resolution'}
+                          : active.finding_type === 'reconciliation_extra'
+                            ? 'Quarantine file'
+                            : 'Choose resolution'}
                     </button>
                   )
                 )}
@@ -536,14 +505,13 @@ export function ReviewPage() {
             </>
           ) : queue && queue.total === 0 ? (
             <div className={styles.empty}>
-              No pending findings. Run a maintenance scan to check the library.
+              No pending library reconciliation findings. Run a scan to check the library.
             </div>
           ) : (
             <div className={styles.empty}>Select an album to review.</div>
           )}
         </section>
       </div>
-      {prompts.promptNode}
     </main>
   );
 }
