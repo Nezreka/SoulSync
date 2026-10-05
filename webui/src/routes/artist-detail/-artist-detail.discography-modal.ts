@@ -170,7 +170,7 @@ export function discogCardVisible(
   return true;
 }
 
-/** The footer line + submit label (826-840). asksFirst: a profile without
+/** The footer line + submit labels (826-840). asksFirst: a profile without
  * download rights, whose wishlist adds are requests. */
 export function discogFooter(
   selection: { tracks: number }[],
@@ -178,18 +178,26 @@ export function discogFooter(
 ): {
   info: string;
   submitText: string;
+  bothText: string;
   disabled: boolean;
 } {
   const releases = selection.length;
   const tracks = selection.reduce((sum, s) => sum + (s.tracks || 0), 0);
+  const submitText =
+    releases === 0
+      ? 'Select releases'
+      : asksFirst
+        ? `Request ${releases}`
+        : `Add ${releases} to Wishlist`;
   return {
     info: `${releases} release${releases !== 1 ? 's' : ''} · ${tracks} tracks`,
-    submitText:
+    submitText,
+    bothText:
       releases === 0
         ? 'Select releases'
         : asksFirst
-          ? `Request ${releases}`
-          : `Add ${releases} to Wishlist`,
+          ? `Request ${releases} + Watch`
+          : `Wishlist + Watchlist`,
     disabled: releases === 0,
   };
 }
@@ -271,12 +279,126 @@ export interface DiscogAlbumUpdate {
   [key: string]: unknown;
 }
 
+export interface FailedRelease {
+  album_id: unknown;
+  name: string;
+  source: string | null;
+  album_type?: string;
+  error: string;
+}
+
+export interface DiscogTotals {
+  total_added: number;
+  total_skipped: number;
+  failed_releases: FailedRelease[];
+}
+
+/**
+ * The "Future releases" section of the Download Discography modal: the
+ * per-artist watchlist settings the combined "Wishlist + Watchlist" button
+ * applies after the download stream finishes. Plain booleans, exactly like
+ * the watchlist page's config modal — the include_* columns have no
+ * "follow global" state (that tri-state exists only on auto_download_pref).
+ */
+export interface FutureReleases {
+  include_albums: boolean;
+  include_eps: boolean;
+  include_singles: boolean;
+  include_live: boolean;
+  include_remixes: boolean;
+  include_acoustic: boolean;
+  include_compilations: boolean;
+  include_instrumentals: boolean;
+  /** null = follow the global auto-download setting */
+  auto_download_pref: 'on' | 'off' | null;
+}
+
+/**
+ * One-time defaults for the Future releases section, taken from the
+ * download filter state the modal opened with: "I'm excluding live
+ * versions now" becomes "keep excluding them later". Independent after
+ * that — changing a download filter does not rewrite these.
+ */
+export function defaultFutureReleases(filters: DiscogFilters): FutureReleases {
+  return {
+    include_albums: filters.album,
+    include_eps: filters.ep,
+    include_singles: filters.single,
+    include_live: filters.live,
+    include_remixes: false,
+    include_acoustic: false,
+    include_compilations: filters.compilations,
+    include_instrumentals: false,
+    auto_download_pref: null,
+  };
+}
+
+/**
+ * Watch-then-configure, for the combined "Wishlist + Watchlist" button.
+ * Runs AFTER the download stream completes so a watchlist failure can never
+ * roll back queued downloads; each half reports its own outcome.
+ */
+export async function watchArtistWithSettings(
+  artistId: unknown,
+  artistName: string,
+  settings: FutureReleases,
+): Promise<{ watching: boolean; message: string }> {
+  const checkResponse = await fetch('/api/watchlist/check', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ artist_id: artistId }),
+  });
+  const checkData = await checkResponse.json();
+  if (!checkData.success) {
+    throw new Error(checkData.error || 'Failed to check watchlist status');
+  }
+  let watching = Boolean(checkData.is_watching);
+  let message = '';
+
+  if (!watching) {
+    const addResponse = await fetch('/api/watchlist/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ artist_id: artistId, artist_name: artistName }),
+    });
+    const addData = await addResponse.json();
+    if (!addData.success) throw new Error(addData.error || 'Failed to add to watchlist');
+    watching = true;
+    message = String(addData.message ?? '');
+    if (typeof window.updateWatchlistCount === 'function') window.updateWatchlistCount();
+  }
+
+  const configResponse = await fetch(
+    `/api/watchlist/artist/${encodeURIComponent(String(artistId))}/config`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        include_albums: settings.include_albums,
+        include_eps: settings.include_eps,
+        include_singles: settings.include_singles,
+        include_live: settings.include_live,
+        include_remixes: settings.include_remixes,
+        include_acoustic: settings.include_acoustic,
+        include_compilations: settings.include_compilations,
+        include_instrumentals: settings.include_instrumentals,
+        auto_download_pref: settings.auto_download_pref,
+      }),
+    },
+  );
+  const configData = await configResponse.json();
+  if (!configData.success) {
+    throw new Error(configData.error || 'Failed to save watchlist settings');
+  }
+  return { watching, message };
+}
+
 /** POST + NDJSON stream (936-986): per-album updates, then the completion line. */
 export async function streamDiscographyDownload(
   artistId: unknown,
   payload: DiscographyDownloadPayload,
   onAlbum: (update: DiscogAlbumUpdate) => void,
-  onComplete: (totals: { total_added: number; total_skipped: number }) => void,
+  onComplete: (totals: DiscogTotals) => void,
 ): Promise<void> {
   const response = await fetch(`/api/artist/${artistId}/download-discography`, {
     method: 'POST',
@@ -302,6 +424,7 @@ export async function streamDiscographyDownload(
           onComplete({
             total_added: data.total_added || 0,
             total_skipped: data.total_skipped || 0,
+            failed_releases: Array.isArray(data.failed_releases) ? data.failed_releases : [],
           });
         } else {
           onAlbum(data);

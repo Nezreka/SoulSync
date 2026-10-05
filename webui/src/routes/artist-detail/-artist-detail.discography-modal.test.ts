@@ -4,6 +4,7 @@ import type { DiscogRelease } from './-artist-detail.discography-modal';
 
 import {
   buildDiscographyPayload,
+  defaultFutureReleases,
   DISCOG_DEFAULT_FILTERS,
   discogCardView,
   discogCardVisible,
@@ -12,7 +13,22 @@ import {
   loadDiscographyForModal,
   releasesFromPageDiscography,
   streamDiscographyDownload,
+  watchArtistWithSettings,
+  type FutureReleases,
 } from './-artist-detail.discography-modal';
+
+/** Mirror of the modal's future-releases defaults for the watch-flow tests. */
+const WATCHLIST_ADD_DEFAULTS_FOR_TEST: FutureReleases = {
+  include_albums: true,
+  include_eps: true,
+  include_singles: true,
+  include_live: false,
+  include_remixes: false,
+  include_acoustic: false,
+  include_compilations: false,
+  include_instrumentals: false,
+  auto_download_pref: null,
+};
 
 /**
  * The Download Discography layer: the page's releases (gap cards included,
@@ -142,11 +158,13 @@ describe('cards and filters (#877)', () => {
     expect(discogFooter([{ tracks: 10 }, { tracks: 3 }])).toEqual({
       info: '2 releases · 13 tracks',
       submitText: 'Add 2 to Wishlist',
+      bothText: 'Wishlist + Watchlist',
       disabled: false,
     });
     expect(discogFooter([])).toEqual({
       info: '0 releases · 0 tracks',
       submitText: 'Select releases',
+      bothText: 'Select releases',
       disabled: true,
     });
   });
@@ -230,6 +248,198 @@ describe('the download stream', () => {
       complete,
     );
     expect(albums).toEqual([{ album_id: 'a1', status: 'done', tracks_added: 3 }]);
-    expect(complete).toHaveBeenCalledWith({ total_added: 3, total_skipped: 1 });
+    expect(complete).toHaveBeenCalledWith({
+      total_added: 3,
+      total_skipped: 1,
+      failed_releases: [],
+    });
+  });
+
+  it('carries failed releases through the completion line for retry', async () => {
+    const encoder = new TextEncoder();
+    const failed = [
+      { album_id: 'a9', name: 'Lost EP', source: 'deezer', error: 'Album not found' },
+    ];
+    const lines = [
+      '{"album_id":"a9","status":"error","message":"Album not found"}\n',
+      `{"status":"complete","total_added":0,"total_skipped":0,"failed_releases":${JSON.stringify(failed)}}\n`,
+    ];
+    let i = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async (_input: RequestInfo | URL, _init?: RequestInit) =>
+          new Response(
+            new ReadableStream({
+              pull(controller) {
+                if (i < lines.length) controller.enqueue(encoder.encode(lines[i++]));
+                else controller.close();
+              },
+            }),
+          ),
+      ),
+    );
+    const complete = vi.fn();
+    await streamDiscographyDownload(
+      'sp1',
+      { albums: [], artist_name: 'A', source: null },
+      () => {},
+      complete,
+    );
+    expect(complete).toHaveBeenCalledWith({
+      total_added: 0,
+      total_skipped: 0,
+      failed_releases: failed,
+    });
+  });
+
+  it('tolerates a completion line without failed_releases (older server)', async () => {
+    const encoder = new TextEncoder();
+    const lines = ['{"status":"complete","total_added":2,"total_skipped":0}\n'];
+    let i = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async (_input: RequestInfo | URL, _init?: RequestInit) =>
+          new Response(
+            new ReadableStream({
+              pull(controller) {
+                if (i < lines.length) controller.enqueue(encoder.encode(lines[i++]));
+                else controller.close();
+              },
+            }),
+          ),
+      ),
+    );
+    const complete = vi.fn();
+    await streamDiscographyDownload(
+      'sp1',
+      { albums: [], artist_name: 'A', source: null },
+      () => {},
+      complete,
+    );
+    expect(complete).toHaveBeenCalledWith({
+      total_added: 2,
+      total_skipped: 0,
+      failed_releases: [],
+    });
+  });
+});
+
+describe('discogFooter combined button', () => {
+  it('labels the combined button for download-capable profiles', () => {
+    const footer = discogFooter([{ tracks: 10 }, { tracks: 4 }]);
+    expect(footer.submitText).toBe('Add 2 to Wishlist');
+    expect(footer.bothText).toBe('Wishlist + Watchlist');
+    expect(footer.disabled).toBe(false);
+  });
+
+  it('labels the combined button for request-only profiles', () => {
+    const footer = discogFooter([{ tracks: 10 }], true);
+    expect(footer.submitText).toBe('Request 1');
+    expect(footer.bothText).toBe('Request 1 + Watch');
+  });
+
+  it('disables both buttons with nothing selected', () => {
+    const footer = discogFooter([]);
+    expect(footer.disabled).toBe(true);
+    expect(footer.submitText).toBe('Select releases');
+    expect(footer.bothText).toBe('Select releases');
+  });
+});
+
+describe('defaultFutureReleases', () => {
+  it('mirrors the download filters one time: exclude-now means exclude-later', () => {
+    const future = defaultFutureReleases({
+      ...DISCOG_DEFAULT_FILTERS,
+      live: false,
+      compilations: false,
+    });
+    expect(future).toEqual({
+      include_albums: true,
+      include_eps: true,
+      include_singles: true,
+      include_live: false,
+      include_remixes: false,
+      include_acoustic: false,
+      include_compilations: false,
+      include_instrumentals: false,
+      auto_download_pref: null,
+    });
+  });
+
+  it('maps category filters onto the release-type includes', () => {
+    const future = defaultFutureReleases({ ...DISCOG_DEFAULT_FILTERS, ep: false, single: false });
+    expect(future.include_albums).toBe(true);
+    expect(future.include_eps).toBe(false);
+    expect(future.include_singles).toBe(false);
+  });
+});
+
+describe('watchArtistWithSettings', () => {
+  const json = (body: unknown) => new Response(JSON.stringify(body));
+
+  it('adds then configures when not already watching', async () => {
+    const calls: { url: string; body: unknown }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const body = init?.body ? JSON.parse(String(init.body)) : null;
+        calls.push({ url, body });
+        if (url.endsWith('/api/watchlist/check'))
+          return json({ success: true, is_watching: false });
+        if (url.endsWith('/api/watchlist/add')) return json({ success: true, message: 'Added.' });
+        return json({ success: true });
+      }),
+    );
+    const { watching, message } = await watchArtistWithSettings('sp1', 'Artist', {
+      ...WATCHLIST_ADD_DEFAULTS_FOR_TEST,
+    });
+    expect(watching).toBe(true);
+    expect(message).toBe('Added.');
+    expect(calls.map((c) => c.url)).toEqual([
+      '/api/watchlist/check',
+      '/api/watchlist/add',
+      '/api/watchlist/artist/sp1/config',
+    ]);
+    const configBody = calls[2].body as Record<string, unknown>;
+    expect(configBody.include_albums).toBe(true);
+    expect(configBody.include_live).toBe(false);
+    expect(configBody.auto_download_pref).toBeNull();
+  });
+
+  it('skips the add when already watching, still applies settings', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.endsWith('/api/watchlist/check')) return json({ success: true, is_watching: true });
+        return json({ success: true });
+      }),
+    );
+    const { watching } = await watchArtistWithSettings('sp1', 'Artist', {
+      ...WATCHLIST_ADD_DEFAULTS_FOR_TEST,
+      include_remixes: true,
+    });
+    expect(watching).toBe(true);
+    expect(calls).toEqual(['/api/watchlist/check', '/api/watchlist/artist/sp1/config']);
+  });
+
+  it('throws when the check fails, before any write', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        calls.push(String(input));
+        return json({ success: false, error: 'nope' });
+      }),
+    );
+    await expect(
+      watchArtistWithSettings('sp1', 'Artist', WATCHLIST_ADD_DEFAULTS_FOR_TEST),
+    ).rejects.toThrow('nope');
+    expect(calls).toEqual(['/api/watchlist/check']);
   });
 });

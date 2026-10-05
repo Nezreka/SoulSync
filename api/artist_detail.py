@@ -2086,6 +2086,11 @@ def download_discography(artist_id):
         total_skipped_artist = 0
         total_skipped_filter = 0
         total_skipped_owned = 0
+        # Releases that failed resolution entirely ("Album not found", source
+        # errors, empty tracklists). Their tracks never reach the wishlist, so
+        # without this list they vanish silently. The completion line carries
+        # them back with everything the client needs to retry the release.
+        failed_releases = []
 
         def generate_ndjson():
             nonlocal total_added, total_skipped, total_skipped_artist, total_skipped_filter, total_skipped_owned
@@ -2105,6 +2110,13 @@ def download_discography(artist_id):
 
                     if not result.get('success'):
                         message = result.get('error') or 'Album not found'
+                        failed_releases.append({
+                            "album_id": album_id,
+                            "name": hint_album_name or album_id,
+                            "source": source_override,
+                            "album_type": entry.get('album_type') or '',
+                            "error": message,
+                        })
                         yield json.dumps({
                             "album_id": album_id,
                             "name": hint_album_name or album_id,
@@ -2131,6 +2143,13 @@ def download_discography(artist_id):
                     resolved_source = result.get('source') or source_override or 'unknown'
 
                     if not tracks:
+                        failed_releases.append({
+                            "album_id": album_id,
+                            "name": album_name,
+                            "source": source_override,
+                            "album_type": entry.get('album_type') or '',
+                            "error": "No tracks",
+                        })
                         yield json.dumps({
                             "album_id": album_id,
                             "name": album_name,
@@ -2266,6 +2285,13 @@ def download_discography(artist_id):
                     }) + '\n'
 
                 except Exception as album_err:
+                    failed_releases.append({
+                        "album_id": album_id,
+                        "name": hint_album_name or album_id,
+                        "source": source_override,
+                        "album_type": entry.get('album_type') or '',
+                        "error": str(album_err),
+                    })
                     yield json.dumps({
                         "album_id": album_id,
                         "name": hint_album_name or album_id,
@@ -2287,6 +2313,7 @@ def download_discography(artist_id):
                 "total_skipped_filter": total_skipped_filter,
                 "total_skipped_owned": total_skipped_owned,
                 "total_albums": len(album_entries),
+                "failed_releases": failed_releases,
             }) + '\n'
 
         # Response instead of app.response_class: identical class, no app import
