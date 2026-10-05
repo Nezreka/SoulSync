@@ -3821,7 +3821,12 @@ class RepairWorker:
             if updates:
                 conn.close()
                 conn = None
-                self.db.update_track_fields(int(entity_id), updates)
+                # Track primary keys are TEXT after the Plex/Jellyfin ID migration;
+                # Navidrome IDs can contain letters. The DB method accepts the ID
+                # as-is and reports when the track no longer exists.
+                update_result = self.db.update_track_fields(entity_id, updates)
+                if not update_result.get('success'):
+                    return update_result
 
             applied = list(updates.keys()) + list(direct_fields.keys())
             if applied:
