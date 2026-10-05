@@ -940,7 +940,7 @@ def reconcile_track_wishlist(
     from core.library2.wishlist_mirror import mirror_projected_tracks_wishlist
 
     stats = {"scanned": 0, "wanted": 0, "wishlisted": 0,
-             "added": 0, "pruned": 0, "refreshed": 0, "mirrored": 0, 'intent_repaired': 0}
+             "added": 0, "pruned": 0, "refreshed": 0, "mirrored": 0, 'intent_repaired': 0, 'intent_failed': 0}
     try:
         from core.library2.bootstrap import bootstrap_is_active
         pruning_allowed = not bootstrap_is_active(db)
@@ -959,8 +959,15 @@ def reconcile_track_wishlist(
                     conn.commit()
                     return stats
                 before = conn.total_changes
-                materialize_wishlist_row(conn, row['id'], profile_id=profile_id)
-                stats['intent_repaired'] += int(conn.total_changes > before)
+                conn.execute('SAVEPOINT wl_row')  # one bad row must not abort the queue
+                try:
+                    materialize_wishlist_row(conn, row['id'], profile_id=profile_id)
+                    stats['intent_repaired'] += int(conn.total_changes > before)
+                except Exception as exc:  # noqa: BLE001
+                    conn.execute('ROLLBACK TO wl_row')
+                    stats['intent_failed'] += 1
+                    logger.warning("wishlist row %s: intent not restored: %s", row['id'], exc)
+                conn.execute('RELEASE wl_row')
         recompute_stats = recompute_wanted(conn, profile_id=profile_id)
         conn.commit()
         from core.library2.validation import notify_changes

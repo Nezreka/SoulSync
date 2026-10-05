@@ -1407,8 +1407,8 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
         for key, ref_key in (('title', 'title'), ('artist', 'track_artist'), ('album', 'album_title'), ('album_artist', 'artist_name')):
             if reference.get(ref_key):
                 metadata[key] = reference[ref_key]
-        metadata.update(track_number=reference.get('track_number') or 0, total_tracks=reference.get('track_count'),
-                        disc_number=reference.get('disc_number') or 0, total_discs=reference.get('total_discs'))
+        metadata.update(track_number=reference.get('track_number') or metadata['track_number'], total_tracks=reference.get('track_count'),
+                        disc_number=reference.get('disc_number') or metadata['disc_number'], total_discs=reference.get('total_discs'))
 
     if album_ctx and album_ctx.get("release_date"):
         release_date = _normalize_release_date_tag(album_ctx.get("release_date"))

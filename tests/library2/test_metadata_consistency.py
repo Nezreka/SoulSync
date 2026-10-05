@@ -289,3 +289,33 @@ def test_retag_tool_persists_and_rechecks_without_writing_files(library):
     assert not LibraryRetagJob().scan(context).errors
     with closing(db._get_connection()) as conn:
         assert conn.execute('SELECT status FROM repair_findings').fetchone()[0] == 'resolved'
+
+
+def test_shared_position_across_editions_is_not_ambiguous(library):
+    from core.library2.reorganize_plan import plan_album_reorganize
+    from core.library2.retag import track_contexts
+    db, path, _ = library
+    with closing(db._get_connection()) as conn, conn:
+        conn.execute('INSERT INTO lib2_release_editions(id,release_group_id,track_count,disc_count) VALUES(2,1,16,1)')
+        conn.execute('INSERT INTO lib2_release_tracks(release_edition_id,recording_id,track_id,track_number,disc_number) VALUES(2,7,7,7,1)')
+        reference = track_contexts(conn, [7])[0]['db_data']
+        plan = plan_album_reorganize(conn, 1, build_final_path_fn=lambda c, *a, **k: (str(path), True),
+                                     transfer_dir=str(path.parent), resolve_file_path_fn=lambda p: p)
+    assert (reference['track_number'], reference['disc_number'], reference['edition_status']) == (7, 1, 'correct')
+    assert reference['track_count'] is None
+    assert plan['tracks'][0]['matched']
+    assert json.loads(observe(library)['tags_json'])['_validation']['checks']['track_number'] == 'correct'
+
+
+def test_revalidation_keeps_retag_finding_details(library):
+    db, path, _ = library
+    observe(library, {**read_tag_snapshot(str(path)), 'track_number': 3})
+    with closing(db._get_connection()) as conn, conn:
+        details = json.loads(conn.execute('SELECT details_json FROM repair_findings').fetchone()[0])
+        details.update(has_manual_conflict=True, manual_fields=['Title'], diff=[{'file_key': 'title'}], library_owner_id=1)
+        conn.execute('UPDATE repair_findings SET details_json=?', (json.dumps(details),))
+    observe(library, {**read_tag_snapshot(str(path)), 'track_number': 4})
+    with closing(db._get_connection()) as conn:
+        details = json.loads(conn.execute('SELECT details_json FROM repair_findings').fetchone()[0])
+    assert details['has_manual_conflict'] and details['manual_fields'] == ['Title'] and details['library_owner_id'] == 1
+    assert details['diff'] == [{'file_key': 'title'}] and 'track_number' in details['required_fields']

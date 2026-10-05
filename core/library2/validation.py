@@ -22,7 +22,13 @@ def edition_reference(conn, track_id, data):
         "SELECT rt.*, e.track_count, e.disc_count, e.title AS edition_title FROM lib2_release_tracks rt "
         "JOIN lib2_release_editions e ON e.id=rt.release_edition_id WHERE rt.track_id=?", (track_id,),
     ).fetchall()
-    if len(rows) > 1:
+    positions = {(r['track_number'], r['disc_number'] or 1) for r in rows}
+    discs = {r['disc_count'] for r in rows}
+    if len(rows) > 1 and len(positions) == 1 and rows[0]['track_number']:  # same slot on every edition
+        (track, disc), = positions
+        data.update(track_number=track, disc_number=disc, track_count=None,
+                    total_discs=discs.pop() if len(discs) == 1 else None, edition_status='correct')
+    elif len(rows) > 1:
         data.update(track_number=None, disc_number=None, track_count=None, total_discs=None, edition_status='unknown')
     elif rows:
         row = rows[0]
@@ -187,9 +193,10 @@ def persist_validation(conn, file_id, validation):
             conn.execute("UPDATE repair_findings SET status='resolved', user_action='validated', "
                          "resolved_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?", (finding['id'],))
         elif issues:
-            required = finding['details'].get('required_fields') or [k for k, v in finding['details']['validation']['checks'].items() if v in ('missing', 'mismatch')]
+            required = finding['details'].get('required_fields') or [k for k, v in (finding['details']['validation'].get('checks') or {}).items() if v in ('missing', 'mismatch')]
+            details = {**finding['details'], 'validation': validation, 'required_fields': sorted(set(required) | set(issues))}
             conn.execute('UPDATE repair_findings SET details_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-                         (json.dumps({'validation': validation, 'required_fields': list(set(required) | set(issues))}), finding['id']))
+                         (json.dumps(details), finding['id']))  # merge: keeps diff, manual flags, owner
     for finding in findings:
         if finding in current or finding.get('file_path') != file['path']:
             continue

@@ -15,7 +15,8 @@ here fires without an actual confirmed write already having happened.
 Reuse-first: the resolve-or-create semantics are exactly the ones
 ``core/library2/autolink.py`` already uses for the POST-download link step;
 this module runs the same resolver PRE-download/PRE-search. Wishlist database
-writes materialize on the same connection and roll back if monitoring fails.
+writes materialize on the same connection and roll back if monitoring fails;
+an unresolvable identity (ValueError) keeps the queue row without intent.
 The standalone compatibility adapter remains best-effort.
 
 Only the named TRACK becomes explicitly monitored/wanted here — this must
@@ -124,6 +125,8 @@ def materialize_wishlist_row(conn, row_id: int, *, profile_id: int = 1) -> Optio
     if info.get('source') == 'library_v2':
         return None  # A projection mirror must retain inherited intent, without pinning a track rule.
     data = json.loads(row['spotify_data'] or '{}')
+    if not isinstance(data, dict):
+        raise ValueError('Wishlist track payload is not an object')
     from core.library2.importer import _wishlist_provider
     from core.library2.provider_ids import provider_id_sql
     data.setdefault('id', str(row['spotify_track_id']).split('::', 1)[0])

@@ -186,3 +186,23 @@ def test_a_new_manual_add_during_clear_commits_after_clear_and_stays_monitored(d
             release.set()
         assert clear.result(timeout=10) and new.result(timeout=10)
     assert len(db.get_wishlist_tracks()) == 1 and state(db)[0]['monitored'] == state(db)[0]['wanted'] == 1
+
+
+def test_unresolvable_identity_keeps_the_add_and_does_not_abort_reconcile(db, monkeypatch):
+    from core.library2.monitor_sync import reconcile_track_wishlist
+    import core.library2.materialize as materialize
+    real = materialize.materialize_wishlist_row
+    def ambiguous(conn, row_id, **kwargs):
+        if json.loads(conn.execute('SELECT spotify_data FROM wishlist_tracks WHERE id=?', (row_id,)).fetchone()[0])['id'] == 'track-1':
+            raise ValueError('Wishlist identity matches multiple Library tracks')
+        return real(conn, row_id, **kwargs)
+    monkeypatch.setattr(materialize, 'materialize_wishlist_row', ambiguous)
+    assert db.add_to_wishlist_detailed(track())['status'] == 'created'
+    assert db.add_to_wishlist_detailed(track())['status'] != 'error'
+    with db._get_connection() as conn:
+        conn.execute('INSERT INTO wishlist_tracks(spotify_track_id,spotify_data,source_type,profile_id) VALUES(?,?,\'playlist\',1)',
+                     ('track-2::album-1', json.dumps(track(2))))
+        conn.commit()
+    result = reconcile_track_wishlist(db)
+    assert result['intent_failed'] == 1 and result['intent_repaired'] == 1
+    assert len(db.get_wishlist_tracks()) == 2 and len(state(db)) == 1

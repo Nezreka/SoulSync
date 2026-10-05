@@ -136,7 +136,7 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
             # edition) lost its disc tag on the clear-then-rewrite and floated
             # ungrouped above the disc sections in Jellyfin/Plex (Sokhi).
             from core.imports.track_number import normalize_disc_number
-            _disc_num = (metadata.get('disc_number') or 0) if context.get('_metadata_reference') else normalize_disc_number(metadata.get('disc_number'))
+            _disc_num = normalize_disc_number(metadata.get('disc_number'))
             disc_num_str = format_track_number_tag(_disc_num, metadata.get('total_discs'))
             write_multi = cfg.get("metadata_enhancement.tags.write_multi_artist", False)
             from core.metadata.multi_value import genre_values

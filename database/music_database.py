@@ -13330,7 +13330,14 @@ class MusicDatabase:
                 def commit_wishlist(row_id):
                     from core.library2.materialize import materialize_wishlist_row
                     from core.library2.validation import notify_changes
-                    materialize_wishlist_row(conn, row_id, profile_id=profile_id)
+                    # Unresolvable identity (ValueError) stays queued; reconcile retries it.
+                    conn.execute('SAVEPOINT wl_intent')
+                    try:
+                        materialize_wishlist_row(conn, row_id, profile_id=profile_id)
+                    except ValueError as exc:
+                        conn.execute('ROLLBACK TO wl_intent')
+                        logger.warning("Wishlist entry %s queued without Library intent: %s", row_id, exc)
+                    conn.execute('RELEASE wl_intent')
                     conn.commit()
                     notify_changes()
 

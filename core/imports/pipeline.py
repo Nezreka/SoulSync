@@ -2108,8 +2108,8 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
         reference = import_reference(context)
         if reference is not None:
             context['_metadata_reference'] = reference
-            album_info.update(track_number=reference.get('track_number') or 0, disc_number=reference.get('disc_number') or 0)
-            track_number = album_info['track_number']
+            album_info['track_number'] = track_number = reference.get('track_number') or track_number
+            album_info['disc_number'] = reference.get('disc_number') or album_info['disc_number']
 
         _enhance_source_info = get_import_track_info(context).get('source_info') or {}
         if isinstance(_enhance_source_info, str):

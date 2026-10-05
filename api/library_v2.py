@@ -4943,30 +4943,21 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             }), 409
         job_id = job["job_id"]
 
-        def _run():
+        def _linked_actionable():
+            from core.library2.status import _coerce_tags
+            from core.library2.validation import linked_findings
+            from core.library2.track_files import writable_file_rows
+            with closing(_conn()) as conn:
+                files = [dict(conn.execute('SELECT * FROM lib2_track_files WHERE id=?', (f['id'],)).fetchone())
+                         for f in writable_file_rows(conn, eid)]
+                findings = {f['id']: f for file in files for f in linked_findings(conn, file)}
+            safe_types = {'library_retag', 'track_number_mismatch', 'missing_cover_art', 'missing_lyrics', 'missing_replaygain', 'metadata_gap'}
+            missing = any(state == 'missing' for file in files
+                          for state in ((_coerce_tags(file.get('tags_json')).get('_validation') or {}).get('checks') or {}).values())
+            return [f for f in findings.values() if f['finding_type'] in safe_types], missing
+
+        def _enrich_album():
             enriched_from = None
-            try:
-                from core.library2.validation import linked_findings
-                from core.library2.track_files import writable_file_rows
-                with closing(_conn()) as conn:
-                    findings = {f['id']: f for file in writable_file_rows(conn, eid)
-                                for f in linked_findings(conn, dict(file))}
-                safe_types = {'library_retag', 'track_number_mismatch', 'missing_cover_art', 'missing_lyrics', 'missing_replaygain', 'metadata_gap'}
-                actionable = [f for f in findings.values() if f['finding_type'] in safe_types]
-                if actionable and repair_worker_getter:
-                    worker = repair_worker_getter()
-                    if worker is None:
-                        raise RuntimeError('Repair worker unavailable')
-                    results = [worker.fix_finding(f['id']) for f in actionable]
-                    failed = [r.get('error', 'Repair incomplete') for r in results if not r.get('success')]
-                    _job_registry.update(job_id, result={'written': sum(bool(r.get('success')) for r in results), 'remaining': len(failed)},
-                                         error='; '.join(failed) or None)
-                    _job_registry.finish(job_id)
-                    return
-            except Exception as exc:
-                _job_registry.update(job_id, error=str(exc))
-                _job_registry.finish(job_id)
-                return
             if album_id:
                 from core.library2.match_status import SERVICES
                 from core.library2.native_enrich import enrich_native_entity_for_service
@@ -4992,7 +4983,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         )
                     finally:
                         enrich_conn.close()
+            return enriched_from
+
+        def _run():
             try:
+                actionable, missing = _linked_actionable()
+                worker = repair_worker_getter() if actionable and repair_worker_getter else None
+                if actionable and repair_worker_getter and worker is None:
+                    raise RuntimeError('Repair worker unavailable')
+                # Missing fields need a provider re-query before any write or fix.
+                enriched_from = _enrich_album() if missing or not worker else None
+                if worker:
+                    results = [worker.fix_finding(f['id']) for f in actionable]
+                    failed = [r.get('error', 'Repair incomplete') for r in results if not r.get('success')]
+                    _job_registry.update(job_id, error='; '.join(failed) or None, result={
+                        'written': len(results) - len(failed), 'remaining': len(failed), 'enriched_from': enriched_from})
+                    return
                 from core.library2 import retag
                 stats = retag.write_tags(get_database(), [eid], embed_cover=True)
                 stats["enriched_from"] = enriched_from
