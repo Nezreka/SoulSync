@@ -11,9 +11,14 @@ from core.musicbrainz_client import (
 
 
 class _Response:
-    def __init__(self, payload=None, status_code=200):
+    def __init__(self, payload=None, status_code=200, headers=None):
         self._payload = payload or {}
         self.status_code = status_code
+        self.headers = headers or {}
+        self.url = None
+
+    def close(self):
+        pass
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -34,6 +39,7 @@ class _Session:
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
+        outcome.url = url
         return outcome
 
 
@@ -86,6 +92,108 @@ def test_musicbrainz_503_is_retried(monkeypatch):
 
     assert response.json() == {'releases': []}
     assert len(session.calls) == 2
+
+
+def test_retry_after_overrides_backoff_and_applies_to_other_callers(monkeypatch):
+    import core.musicbrainz_client as mb
+    monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_BASE_URL', 'http://mirror:5000')
+    monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_REQUEST_INTERVAL', '0.1')
+    monkeypatch.setattr(mb, '_server_rate_states', {})
+    monkeypatch.setattr(mb, '_last_api_call_time', 0)
+    clock = [100.0]
+    sleeps = []
+    from types import SimpleNamespace
+    monkeypatch.setattr(mb, 'time', SimpleNamespace(
+        monotonic=lambda: clock[0],
+        sleep=lambda delay: (sleeps.append(delay), clock.__setitem__(0, clock[0] + delay))))
+    session = _Session([_Response(status_code=503, headers={'Retry-After': '7'}), _Response({'artists': []})])
+    client = _client(session, retries=1)
+    client._get('/artist')
+    assert 7 in sleeps
+    assert mb._server_rate_states['http://mirror:5000/ws/2']['cooldown_until'] == 107
+
+
+def test_retry_after_http_date_is_parsed():
+    import core.musicbrainz_client as mb
+    from datetime import datetime, timedelta, timezone
+    from email.utils import format_datetime
+    future = datetime.now(timezone.utc) + timedelta(seconds=20)
+    delay = mb._retry_after_seconds(_Response(headers={'Retry-After': format_datetime(future)}))
+    assert 18 <= delay <= 20
+
+
+def test_merged_recording_redirect_stays_on_mirror(monkeypatch):
+    import core.musicbrainz_client as mb
+    monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_BASE_URL', 'http://mirror:5000')
+    monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_REQUEST_INTERVAL', '0.1')
+    monkeypatch.setattr(mb, '_wait_for_musicbrainz_slot', lambda *args: None)
+    session = _Session([
+        _Response(status_code=301, headers={'Location': '/ws/2/recording/canonical?fmt=json'}),
+        _Response({'id': 'canonical', 'title': 'Song'}),
+    ])
+    client = _client(session)
+    assert client.get_recording('merged', raise_on_error=True)['id'] == 'canonical'
+    assert len(session.calls) == 2
+    assert session.calls[1]['url'] == 'http://mirror:5000/ws/2/recording/canonical?fmt=json'
+
+
+def test_cross_server_recording_redirect_is_rejected(monkeypatch):
+    import core.musicbrainz_client as mb
+    monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_BASE_URL', 'http://mirror:5000')
+    monkeypatch.setattr(mb, '_wait_for_musicbrainz_slot', lambda *args: None)
+    session = _Session([_Response(status_code=301, headers={
+        'Location': 'https://musicbrainz.org/ws/2/recording/canonical?fmt=json'})])
+    client = _client(session)
+    with pytest.raises(requests.HTTPError, match='final base URL'):
+        client.get_recording('merged', raise_on_error=True)
+    assert len(session.calls) == 1
+
+
+def test_recording_lookup_raises_outage_but_returns_none_on_404(monkeypatch):
+    import core.musicbrainz_client as mb
+    monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_BASE_URL', 'http://mirror:5000')
+    monkeypatch.setattr(mb, '_wait_for_musicbrainz_slot', lambda *args: None)
+    client = _client(_Session([_Response(status_code=404)]))
+    assert client.get_recording('missing', raise_on_error=True) is None
+    client.session = _Session([_Response(status_code=503)])
+    with pytest.raises(requests.HTTPError):
+        client.get_recording('unavailable', raise_on_error=True)
+
+
+def test_adaptive_rate_grows_then_halves_on_overload(monkeypatch):
+    import core.musicbrainz_client as mb
+    monkeypatch.setattr(mb, '_server_rate_states', {})
+    clock = [100.0]
+    from types import SimpleNamespace
+    monkeypatch.setattr(mb, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+    server = 'http://mirror/ws/2'
+    mb._rate_state(server)
+    for n in range(80):
+        clock[0] = 100 + n / 8
+        mb._record_musicbrainz_result(server, 0, success=True)
+    clock[0] = 110.0
+    mb._record_musicbrainz_result(server, 0, success=True)
+    assert mb._server_rate_states[server]['rate'] == pytest.approx(11.5)
+    mb._record_musicbrainz_result(server, 0, retry_delay=4)
+    assert mb._server_rate_states[server]['rate'] == pytest.approx(5.75)
+    assert mb._server_rate_states[server]['cooldown_until'] == 114
+
+
+def test_adaptive_rate_slows_when_latency_climbs(monkeypatch):
+    import core.musicbrainz_client as mb
+    from types import SimpleNamespace
+    clock = [100.0]
+    monkeypatch.setattr(mb, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(mb, '_server_rate_states', {})
+    server = 'http://mirror/ws/2'
+    state = mb._rate_state(server)
+    state['best_p95'] = 0.05
+    for n in range(20):
+        clock[0] = 100 + n / 2
+        mb._record_musicbrainz_result(server, 0, success=True, latency=0.4)
+    clock[0] = 110.0
+    mb._record_musicbrainz_result(server, 0, success=True, latency=0.4)
+    assert state['rate'] == pytest.approx(7.0)
 
 
 # --- p5-mb-busy-negcache: a 200 OK "server busy" body is a transient failure ---
