@@ -578,6 +578,19 @@ def plausible_size(size_bytes: Optional[int], runtime_minutes: Optional[int]) ->
     return _MIN_BYTES_PER_MINUTE * minutes <= size <= _MAX_BYTES_PER_MINUTE * minutes
 
 
+_TRAILING_BRACKETS_RE = re.compile(r"\s*[\(\[][^\(\)\[\]]*[\)\]]\s*$")
+
+
+def _strip_trailing_brackets(title: str) -> str:
+    """Title without trailing "(...)" / "[...]" groups, unless nothing is left."""
+    stripped = title
+    while True:
+        shorter = _TRAILING_BRACKETS_RE.sub("", stripped)
+        if shorter == stripped or not shorter.strip():
+            return stripped.strip()
+        stripped = shorter
+
+
 def build_queries(book: Dict[str, Any]) -> List[str]:
     """Search strings to try for a book, most specific first.
 
@@ -586,9 +599,16 @@ def build_queries(book: Dict[str, Any]) -> List[str]:
     the relevance scoring re-checks the author afterwards anyway.
 
     Series entries get one extra query — a lot of releases are named
-    "Series 03 - Title" and never mention the book title on its own.
+    "Series 03 - Title" and never mention the book title on its own. A
+    single-digit volume is tried zero-padded as well: indexers match words, so
+    "Series 3" never finds "Series 03".
+
+    A trailing bracketed suffix is dropped from the title first. Localised
+    Audible stores put the series or edition there ("Game On (Lights Out 3)",
+    "Twisted Dreams (German edition)"), release names rarely do, and every word
+    of the query has to be in the release name for the indexer to return it.
     """
-    title = str(book.get("title") or "").strip()
+    title = _strip_trailing_brackets(str(book.get("title") or "").strip())
     if not title:
         return []
 
@@ -605,6 +625,8 @@ def build_queries(book: Dict[str, Any]) -> List[str]:
     queries.append(title)
     if series_title and sequence:
         queries.append(f"{series_title} {sequence}")
+        if sequence.isdigit() and len(sequence) == 1:
+            queries.append(f"{series_title} 0{sequence}")
 
     seen = set()
     unique = []
