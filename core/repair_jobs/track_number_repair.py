@@ -89,20 +89,23 @@ class TrackNumberRepairJob(RepairJob):
             'dry_run': dry_run,
         }
 
-        transfer = context.transfer_folder
-        if not os.path.isdir(transfer):
-            logger.warning("Transfer folder does not exist: %s", transfer)
+        from core.repair_jobs.base import all_library_roots
+        # #1504: walk every library root (shared + own), not just shared.
+        roots = all_library_roots(context)
+        if not roots:
+            logger.warning("No library roots exist to scan")
             return result
 
         # Collect album folders (directories containing audio files)
         album_folders: Dict[str, List[str]] = {}
-        for root, _dirs, files in walk_library(transfer):
-            if context.check_stop():
-                return result
-            for fname in files:
-                ext = os.path.splitext(fname)[1].lower()
-                if ext in AUDIO_EXTENSIONS:
-                    album_folders.setdefault(root, []).append(fname)
+        for lib_root in roots:
+            for root, _dirs, files in walk_library(lib_root):
+                if context.check_stop():
+                    return result
+                for fname in files:
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext in AUDIO_EXTENSIONS:
+                        album_folders.setdefault(root, []).append(fname)
 
         total = sum(len(fnames) for fnames in album_folders.values())
         if context.update_progress:
@@ -163,14 +166,14 @@ class TrackNumberRepairJob(RepairJob):
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
-        transfer = context.transfer_folder
-        if not os.path.isdir(transfer):
-            return 0
+        from core.repair_jobs.base import all_library_roots
+        # #1504: count across every library root.
         count = 0
-        for _root, _dirs, files in walk_library(transfer):
-            for fname in files:
-                if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
-                    count += 1
+        for lib_root in all_library_roots(context):
+            for _root, _dirs, files in walk_library(lib_root):
+                for fname in files:
+                    if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
+                        count += 1
         return count
 
     def _get_settings(self, context: JobContext) -> dict:

@@ -45,12 +45,17 @@ def relocate_mismatch_to_staging(
     move_file: Callable[[str, str], Any],
     drop_db_row: Callable[[], Any],
     exists: Callable[[str], bool],
+    owner_profile_id: Optional[int] = None,
 ) -> str:
     """Retag (best-effort) → move into staging → drop the stale DB row.
 
     Returns the staging destination path. Order matters: the DB row is dropped
     only AFTER a successful move, so a failed move (which raises) leaves the
     library entry intact rather than orphaning it.
+
+    #1504: when owner_profile_id is given, a sidecar JSON breadcrumb
+    (``<name>.soulsync-owner.json``) is written next to the staged file so
+    auto-import can restore ownership on the new library row.
     """
     if tag_updates:
         try:
@@ -61,6 +66,16 @@ def relocate_mismatch_to_staging(
 
     dest = staging_destination(staging_dir, os.path.basename(resolved_path), exists)
     move_file(resolved_path, dest)   # may raise → row NOT dropped (intentional)
+    if owner_profile_id:
+        try:
+            import json
+            sidecar = dest + ".soulsync-owner.json"
+            with open(sidecar, 'w', encoding='utf-8') as f:
+                json.dump({'owner_profile_id': int(owner_profile_id)}, f)
+        except Exception as exc:
+            # breadcrumb is best-effort; import still works without it
+            import logging
+            logging.getLogger(__name__).debug("owner breadcrumb write failed: %s", exc)
     drop_db_row()
     return dest
 
