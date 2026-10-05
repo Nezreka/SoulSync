@@ -340,6 +340,23 @@ export function FindingsSurface({
     onStatusChanged();
   }, [loadCounts, loadFindings, loadGroups, onStatusChanged]);
 
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const changed = () => {
+      timer ??= setTimeout(() => {
+        timer = undefined;
+        void loadCounts();
+        void loadGroups();
+        if (!selectedCount.current) void loadFindings();
+      }, 500);
+    };
+    window.addEventListener('ss:library-changed', changed);
+    return () => {
+      window.removeEventListener('ss:library-changed', changed);
+      clearTimeout(timer);
+    };
+  }, [loadCounts, loadGroups, loadFindings]);
+
   // a job finished: its findings only showed after a page refresh (#1386).
   // any change after the first render counts, even from no runs at all (a
   // fresh install's first job); the history arriving on open costs one

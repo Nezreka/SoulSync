@@ -108,7 +108,7 @@ def metadata_scan_status(file_row: Optional[Mapping[str, Any]]) -> str:
 
 
 def compute_metadata_gaps(file_row: Optional[Mapping[str, Any]]) -> List[str]:
-    """Return the EXPECTED_TAGS confirmed missing from the file's own tags.
+    """Return persisted missing or mismatched metadata and artwork fields.
 
     Only meaningful once the file has actually been read — call
     ``metadata_scan_status`` first. A track whose file was never scanned or
@@ -120,12 +120,12 @@ def compute_metadata_gaps(file_row: Optional[Mapping[str, Any]]) -> List[str]:
     """
     if not file_row:
         return []
-    # A non-empty missing-tag snapshot is unambiguous evidence of a real scan
-    # (the untouched schema default is always an empty list) — authoritative
-    # even before a path is resolved.
-    explicit_missing = _coerce_list(file_row.get("missing_tags_json"))
+    # Older snapshots contain only missing tags; new scans also compare references.
+    explicit_missing = _coerce_list(file_row.get("metadata_gaps_json"))
+    if explicit_missing is None:
+        explicit_missing = _coerce_list(file_row.get("missing_tags_json"))
     if explicit_missing:
-        return [tag for tag in EXPECTED_TAGS if tag in set(explicit_missing)]
+        return explicit_missing
     return []
 
 

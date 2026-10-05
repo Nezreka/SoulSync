@@ -135,7 +135,7 @@ class TrackNumberRepairJob(RepairJob):
                 if row.get("track_number") is not None
             ]
             editions = edition_tracks_by_album.get(album_id) or {}
-            if not group_tracks:
+            if not group_tracks and not editions:
                 result.skipped += len(album_subjects)
                 continue
             for subject in album_subjects:
@@ -164,6 +164,11 @@ class TrackNumberRepairJob(RepairJob):
                     result.skipped += 1
                     continue
                 try:
+                    from core.library2.tag_cache import observe_file_tags
+                    tags = observe_file_tags(context.db, subject['file_id'], resolved, context.config_manager, self.job_id)
+                    if tags.get('error'):
+                        result.errors += 1
+                        continue
                     finding = _check_single_track(
                         resolved, os.path.basename(resolved), api_tracks, similarity,
                     )
@@ -592,30 +597,8 @@ class TrackNumberRepairJob(RepairJob):
 # ======================================================================
 
 def _read_track_number_tag(audio) -> Tuple[Optional[int], Optional[int]]:
-    """Read track number and total from tags. Returns (track_num, total)."""
-    from mutagen.id3 import ID3
-    from mutagen.flac import FLAC
-    from mutagen.oggvorbis import OggVorbis
-    from mutagen.mp4 import MP4
-
-    try:
-        if hasattr(audio, 'tags') and audio.tags is not None:
-            if isinstance(audio.tags, ID3):
-                frames = audio.tags.getall('TRCK')
-                if frames and frames[0].text:
-                    return _parse_track_str(str(frames[0].text[0]))
-            elif isinstance(audio, (FLAC, OggVorbis)):
-                val = audio.get('tracknumber')
-                if val:
-                    return _parse_track_str(str(val[0]))
-            elif isinstance(audio, MP4):
-                val = audio.tags.get('trkn')
-                if val and val[0]:
-                    t = val[0]
-                    return (int(t[0]), int(t[1]) if t[1] else None)
-    except Exception as e:
-        logger.debug("Error reading track number tag: %s", e)
-    return None, None
+    from core.tag_writer import read_number_pair
+    return read_number_pair(audio)
 
 
 def _parse_track_str(s: str) -> Tuple[Optional[int], Optional[int]]:
@@ -630,30 +613,8 @@ def _parse_track_str(s: str) -> Tuple[Optional[int], Optional[int]]:
 
 
 def _read_disc_number_tag(audio) -> Tuple[Optional[int], Optional[int]]:
-    """Read disc number and total discs from tags. Returns (disc_num, total)."""
-    from mutagen.id3 import ID3
-    from mutagen.flac import FLAC
-    from mutagen.oggvorbis import OggVorbis
-    from mutagen.mp4 import MP4
-
-    try:
-        if hasattr(audio, 'tags') and audio.tags is not None:
-            if isinstance(audio.tags, ID3):
-                frames = audio.tags.getall('TPOS')
-                if frames and frames[0].text:
-                    return _parse_track_str(str(frames[0].text[0]))
-            elif isinstance(audio, (FLAC, OggVorbis)):
-                val = audio.get('discnumber')
-                if val:
-                    return _parse_track_str(str(val[0]))
-            elif isinstance(audio, MP4):
-                val = audio.tags.get('disk')
-                if val and val[0]:
-                    d = val[0]
-                    return (int(d[0]), int(d[1]) if d[1] else None)
-    except Exception as e:
-        logger.debug("Error reading disc number tag: %s", e)
-    return None, None
+    from core.tag_writer import read_number_pair
+    return read_number_pair(audio, 'disc')
 
 
 def _api_disc_count(api_tracks: List[Dict]) -> int:
@@ -1687,13 +1648,10 @@ def _api_tracks_for_subject(
 ) -> list[Dict[str, Any]]:
     """The tracklist a single file must be judged against (dd28-18).
 
-    With one edition (or none recorded) the release group's own list is the
-    right answer and behaviour is unchanged. With several, the file is judged
-    against the edition it actually belongs to — and if that cannot be
-    determined unambiguously, against nothing at all: writing a plausible-
-    looking wrong track number is worse than reporting no finding.
+    Prefer the owning edition even when it is the only one. Ambiguous
+    membership supplies no reference; only albums without editions use the group.
     """
-    if len(editions) <= 1:
+    if not editions:
         return group_tracks
     try:
         track_id = int(subject["track_id"])

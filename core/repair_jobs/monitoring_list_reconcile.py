@@ -21,7 +21,8 @@ class MonitoringListReconcileJob(RepairJob):
     help_text = (
         "Retries pending Watchlist/Wishlist mirror operations, reconciles "
         "artist monitoring with the Watchlist, and reasserts monitored missing "
-        "or upgrade-eligible tracks into the Wishlist. Explicit Library-v2 "
+        "or upgrade-eligible tracks into the Wishlist. Existing external Wishlist "
+        "entries first restore their concrete track monitoring. Explicit Library-v2 "
         "monitoring wins; imported/default artist flags follow the Watchlist. "
         "No files are changed.\n\n"
         "This is the single writer that puts wanted tracks into the Wishlist — "
@@ -116,8 +117,8 @@ class MonitoringListReconcileJob(RepairJob):
                     should_stop=lambda: context.check_stop() or context.wait_if_paused(),
                     progress=context.update_progress,
                 )
-                result.scanned += int(wishlist_stats["scanned"])
-                result.auto_fixed += int(wishlist_stats["mirrored"])
+                result.scanned += int(wishlist_stats["scanned"]) + int(wishlist_stats.get('intent_repaired', 0))
+                result.auto_fixed += int(wishlist_stats["mirrored"]) + int(wishlist_stats.get('intent_repaired', 0))
 
             with closing(context.db._get_connection()) as conn:
                 prune_done(conn, keep=settings["keep_done"])

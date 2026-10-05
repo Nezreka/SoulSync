@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from contextlib import closing
+import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.library2.sql_util import pick
@@ -210,6 +211,9 @@ def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
         "disc_number": row["disc_number"],
         "track_count": row["expected_track_count"] or row["track_count"],
     }
+    from core.library2.validation import edition_reference
+    edition_reference(conn, row['id'], data)
+    # Explicit user overrides still win over the edition's catalogue values.
     data["_manual_fields"] = _apply_overrides(conn, row, data)
     # ``build_tag_diff`` renders its Cover Art row from ``thumb_url``. Without
     # it the preview claimed "Cover Art: None → None, unchanged" for every lib2
@@ -296,7 +300,7 @@ def _annotate_manual(diff: List[Dict[str, Any]],
     return diff
 
 
-def tag_preview(contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def tag_preview(contexts: List[Dict[str, Any]], *, on_observation=None) -> List[Dict[str, Any]]:
     """Per-track diff of file tags vs a materialized lib2 snapshot. Never raises."""
     from core.library2.paths import resolve_lib2_path
     from core.tag_writer import build_tag_diff, read_file_tags
@@ -308,6 +312,7 @@ def tag_preview(contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             **pick(row, "title", "track_number", "album_id", "album_title", "album_type",
                    "file_path"),
         }
+        entry.update({key: row['db_data'].get(key) for key in ('title', 'track_number', 'album_title')})
         if not row["file_path"]:
             entry.update(error="No file", has_changes=False, diff=[])
             out.append(entry)
@@ -321,6 +326,11 @@ def tag_preview(contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             continue
         try:
             file_tags = read_file_tags(abs_path)
+            if on_observation:
+                from core.metadata.art_apply import folder_has_cover_sidecar
+                file_tags['cover_sidecar'] = folder_has_cover_sidecar(os.path.dirname(abs_path))
+                on_observation(row['file_id'], file_tags)
+                entry['validation'] = file_tags.get('_validation')
             if file_tags.get("error"):
                 entry.update(error=file_tags["error"], has_changes=False, diff=[])
                 out.append(entry)
@@ -393,13 +403,15 @@ def _album_cover_data(database, album_id: int) -> Optional[Tuple[bytes, str]]:
         return None
 
 
-def _persist_file_tags(database, file_id: int, file_tags: Dict[str, Any]) -> bool:
+def _persist_file_tags(database, file_id: int, file_tags: Dict[str, Any], config=None, source='retag') -> bool:
     """Persist one tag-cache result in a short transaction."""
     from core.library2.tag_cache import persist_tag_cache
 
     with closing(database._get_connection()) as conn:
-        persisted = persist_tag_cache(conn, int(file_id), file_tags)
+        persisted = persist_tag_cache(conn, int(file_id), file_tags, config, source=source)
         conn.commit()
+        from core.library2.validation import notify_changes
+        notify_changes([file_id])
         return persisted
 
 
@@ -474,7 +486,7 @@ def _release_manual_fields(db_data: Dict[str, Any], track_id: Any,
 
 def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
                force_cover: bool = False, overwrite_manual: Any = None,
-               progress=None) -> Dict[str, Any]:
+               progress=None, file_ids=None) -> Dict[str, Any]:
     """Write lib2 DB metadata into the files' tags.
 
     ``overwrite_manual`` releases fields a person set by hand back to the
@@ -497,11 +509,23 @@ def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
     from core.library2.paths import resolve_lib2_path
     from core.library2.tag_cache import read_tag_snapshot
     from core.tag_writer import build_tag_diff, read_file_tags, write_tags_to_file
+    from core.metadata.common import get_config_manager
+    embed_cover = embed_cover and bool(get_config_manager().get('metadata_enhancement.embed_album_art', True))
 
     stats: Dict[str, Any] = {"written": 0, "skipped": 0, "failed": 0, "errors": []}
     covers: Dict[int, Optional[Tuple[bytes, str]]] = {}
     with closing(database._get_connection()) as conn:
         rows = track_contexts(conn, track_ids)
+        if file_ids is not None:
+            selected = set(file_ids)
+            scoped = []
+            for row in rows:
+                files = [{'id': row['file_id'], 'path': row['file_path']}, *row['sibling_files']]
+                files = [f for f in files if f['id'] in selected]
+                if files:
+                    row.update(file_id=files[0]['id'], file_path=files[0]['path'], sibling_files=files[1:])
+                    scoped.append(row)
+            rows = scoped
     for i, row in enumerate(rows):
         if progress:
             progress("retag", i, len(rows))
@@ -515,7 +539,7 @@ def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
                                     "error": "File not found on disk"})
             continue
         try:
-            file_tags = read_file_tags(abs_path)
+            file_tags = read_tag_snapshot(abs_path)
             db_data = row["db_data"]
             _release_manual_fields(db_data, row["id"], overwrite_manual)
 

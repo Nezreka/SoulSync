@@ -20,14 +20,21 @@ export function useLibraryChanged(): void {
   const queryClient = useQueryClient();
 
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const onChanged = () => {
       // Invalidate rather than patch: Watch All touches an unknown number of
       // artists, so there is nothing local to apply.
-      void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      timer ??= setTimeout(() => {
+        timer = undefined;
+        void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      }, 500);
     };
 
     window.addEventListener(LIBRARY_CHANGED_EVENT, onChanged);
-    return () => window.removeEventListener(LIBRARY_CHANGED_EVENT, onChanged);
+    return () => {
+      window.removeEventListener(LIBRARY_CHANGED_EVENT, onChanged);
+      clearTimeout(timer);
+    };
   }, [queryClient]);
 }
 

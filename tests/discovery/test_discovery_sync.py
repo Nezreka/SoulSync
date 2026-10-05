@@ -74,7 +74,8 @@ class _FakeSyncService:
     def clear_progress_callback(self, playlist_name):
         self.cleared_callbacks.append(playlist_name)
 
-    async def sync_playlist(self, playlist, download_missing=False, profile_id=1, sync_mode='replace'):
+    async def sync_playlist(self, playlist, download_missing=False, profile_id=1, sync_mode='replace', user_initiated=False):
+        self.user_initiated = user_initiated
         if self._raise_on_sync:
             raise self._raise_on_sync
         return self._sync_result
@@ -243,6 +244,13 @@ def test_records_sync_history_for_new_sync(patched_db):
     assert history_calls[0]['playlist_id'] == 'p1'
     assert history_calls[0]['playlist_name'] == 'My Playlist'
     assert history_calls[0]['source_page'] == 'sync'
+
+
+@pytest.mark.parametrize('automation, explicit, expected', [(None, None, True), ('job', None, False), ('job', True, True), (None, False, False)])
+def test_sync_worker_forwards_manual_or_automatic_wishlist_intent(patched_db, automation, explicit, expected):
+    deps = _build_deps()
+    ds.run_sync_task('p1', 'Playlist', [_track()], automation_id=automation, user_initiated=explicit, deps=deps)
+    assert deps.sync_service.user_initiated is expected
 
 
 def test_resync_skips_history_record(patched_db):

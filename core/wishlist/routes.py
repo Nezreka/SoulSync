@@ -688,15 +688,14 @@ def clear_wishlist(runtime: WishlistRouteRuntime) -> tuple[Dict[str, Any], int]:
     """Clear the wishlist and cancel active wishlist batches."""
     try:
         service = get_wishlist_service()
-        # Capture exact Library-v2/provider identities before the rows vanish.
-        descriptors = _load_wishlist_descriptors(service, runtime.profile_id)
         success = service.clear_wishlist(profile_id=runtime.profile_id)
 
         if success:
-            _sync_user_wishlist_removal(runtime, service, descriptors)
             cancelled_count = 0
             with runtime.tasks_lock:
                 for _batch_id, batch_data in runtime.download_batches.items():
+                    if int(batch_data.get('profile_id') or 1) != int(runtime.profile_id):
+                        continue
                     if batch_data.get("playlist_id") == "wishlist" and batch_data.get("phase") not in (
                         "complete",
                         "error",

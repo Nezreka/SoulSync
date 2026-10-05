@@ -14,9 +14,9 @@ here fires without an actual confirmed write already having happened.
 
 Reuse-first: the resolve-or-create semantics are exactly the ones
 ``core/library2/autolink.py`` already uses for the POST-download link step;
-this module runs the same resolver PRE-download/PRE-search. Best-effort and
-strictly additive like autolink: part of the native catalogue cutover, never
-raises into the caller.
+this module runs the same resolver PRE-download/PRE-search. Wishlist database
+writes materialize on the same connection and roll back if monitoring fails.
+The standalone compatibility adapter remains best-effort.
 
 Only the named TRACK becomes explicitly monitored/wanted here — this must
 never silently expand into the whole artist's watchlist (that stays gated on
@@ -25,6 +25,7 @@ the artist bookmark / Artist Settings per §52.3).
 
 from __future__ import annotations
 
+import json
 from contextlib import closing
 from typing import Any, Dict, Optional
 
@@ -82,14 +83,16 @@ def materialize_track_intent(
     album_id = find_or_create_album(
         conn, artist_id, album_title or track_title,
         album_type=album_type, spotify_album_id=album_identity,
-        source=source)
+        source=source, monitored=0)
 
     track_id = find_or_create_track(
         conn, album_id, artist_id, track_title,
         track_number=track_number, spotify_track_id=track_identity,
-        disc_number=disc_number, source=source)
+        disc_number=disc_number, source=source, monitored=1 if int(profile_id) == 1 else 0)
+    if int(profile_id) == 1:
+        conn.execute('UPDATE lib2_tracks SET monitored=1 WHERE id=? AND monitored=0', (track_id,))
 
-    if explicit_profile_id is not None:
+    if explicit_profile_id is not None and int(profile_id) == 1:
         assign_quality_profile(conn, "tracks", track_id, int(explicit_profile_id))
 
     record_rule(conn, "track", track_id, True, provenance, profile_id=profile_id)
@@ -108,6 +111,58 @@ def _int_or_none(value: Any) -> Optional[int]:
         return int(value) if value else None
     except (TypeError, ValueError):
         return None
+
+
+def materialize_wishlist_row(conn, row_id: int, *, profile_id: int = 1) -> Optional[int]:
+    """Persist queue membership and track intent together; never mirror back into the queue."""
+    row = conn.execute('SELECT * FROM wishlist_tracks WHERE id=? AND profile_id=?', (row_id, profile_id)).fetchone()
+    if row is None:
+        return None
+    info = json.loads(row['source_info'] or '{}')
+    if not isinstance(info, dict):
+        info = {}
+    if info.get('source') == 'library_v2':
+        return None  # A projection mirror must retain inherited intent, without pinning a track rule.
+    data = json.loads(row['spotify_data'] or '{}')
+    from core.library2.importer import _wishlist_provider
+    from core.library2.provider_ids import provider_id_sql
+    data.setdefault('id', str(row['spotify_track_id']).split('::', 1)[0])
+    data['source'] = _wishlist_provider(data, info)
+    native_id = _int_or_none(info.get('lib2_track_id'))
+    track = conn.execute('SELECT * FROM lib2_tracks WHERE id=?', (native_id,)).fetchone() if native_id else None
+    if track is None and str(data.get('id') or '').startswith('lib2-track:'):
+        track = conn.execute('SELECT * FROM lib2_tracks WHERE stable_id=?', (data['id'].removeprefix('lib2-track:'),)).fetchone()
+    if track is None:
+        album = data.get('album') or {}
+        album_id = album.get('id') if isinstance(album, dict) else None
+        matches = conn.execute(f"SELECT t.* FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id "
+                               f"WHERE {provider_id_sql(data['source'], alias='t')}=?" +
+                               (f" AND {provider_id_sql(data['source'], alias='al')}=?" if album_id else ''),
+                               (str(data['id']), str(album_id)) if album_id else (str(data['id']),)).fetchall()
+        if len(matches) > 1:
+            raise ValueError('Wishlist identity matches multiple Library tracks; select the release edition')
+        track = matches[0] if matches else None
+    if track is None:
+        data.setdefault('name', 'Unknown Track')
+        data['artists'] = data.get('artists') or [{'name': 'Unknown Artist'}]
+        result = materialize_from_spotify_track(conn, data, profile_id=profile_id, explicit_profile_id=row['quality_profile_id'])
+        if result is None:
+            raise ValueError('Wishlist track cannot be linked to Library: missing title or artist')
+        track_id, album_id = result['track_id'], result['album_id']
+    else:
+        track_id, album_id = track['id'], track['album_id']
+        if int(profile_id) == 1:
+            conn.execute('UPDATE lib2_tracks SET monitored=1 WHERE id=? AND monitored=0', (track_id,))
+            if row['quality_profile_id'] is not None and (track['quality_profile_id'] != row['quality_profile_id'] or not track['quality_profile_explicit']):
+                assign_quality_profile(conn, 'tracks', track_id, int(row['quality_profile_id']))
+        rule = conn.execute("SELECT monitored FROM lib2_monitor_rules WHERE entity_type='track' AND entity_id=? AND profile_id=?", (track_id, profile_id)).fetchone()
+        if rule is None or not rule[0]:
+            record_rule(conn, 'track', track_id, True, PROVENANCE_WISHLIST, profile_id=profile_id)
+        recompute_wanted_for_entity(conn, 'track', track_id, profile_id=profile_id)
+    if info.get('lib2_track_id') != track_id or info.get('lib2_album_id') != album_id:
+        info.update(lib2_track_id=track_id, lib2_album_id=album_id)
+        conn.execute('UPDATE wishlist_tracks SET source_info=? WHERE id=?', (json.dumps(info), row_id))
+    return int(track_id)
 
 
 def materialize_from_spotify_track(
@@ -226,4 +281,5 @@ __all__ = [
     "materialize_from_spotify_track",
     "materialize_track_intent",
     "materialize_wishlist_intent",
+    "materialize_wishlist_row",
 ]

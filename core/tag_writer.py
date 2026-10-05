@@ -21,6 +21,26 @@ logger = logging.getLogger("tag_writer")
 SUPPORTED_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.oga', '.opus', '.m4a', '.mp4'}
 
 
+def read_number_pair(audio, kind='track') -> Tuple[Optional[int], Optional[int]]:
+    """Shared ID3/Vorbis/Opus/MP4 reader, including separate Vorbis totals."""
+    tags = getattr(audio, 'tags', None)
+    if tags is None:
+        return None, None
+    if isinstance(tags, ID3):
+        value = _id3_text(tags, 'TRCK' if kind == 'track' else 'TPOS')
+    elif isinstance(audio, MP4):
+        values = tags.get('trkn' if kind == 'track' else 'disk') or []
+        return tuple(int(v) or None for v in values[0][:2]) if values else (None, None)
+    else:
+        value = _vorbis_first(audio, kind + 'number')
+    parts = str(value or '').split('/')
+    number = _parse_track_num(parts[0])
+    total = _parse_track_num(parts[1]) if len(parts) > 1 else None
+    if not isinstance(tags, ID3):
+        total = _parse_track_num(_vorbis_first(audio, kind + 'total') or _vorbis_first(audio, 'total' + kind + 's')) or total
+    return number, total
+
+
 def read_file_tags(file_path: str) -> Dict[str, Any]:
     """
     Read current tags from an audio file. Returns a dict of tag values
@@ -143,6 +163,8 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
                     raw.decode('utf-8', 'ignore') if isinstance(raw, bytes) else str(raw)
                 )
 
+        result['track_number'], result['total_tracks'] = read_number_pair(audio)
+        result['disc_number'], result['total_discs'] = read_number_pair(audio, 'disc')
     except Exception as e:
         result['error'] = str(e)
 
@@ -358,6 +380,11 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
             'protected': protected,
         })
 
+    for key, db_key, label in (('total_tracks', 'track_count', 'Track total'), ('total_discs', 'total_discs', 'Disc total')):
+        actual, expected = file_tags.get(key), db_data.get(db_key)
+        diffs.append({'field': label, 'file_key': key, 'file_value': str(actual or ''), 'db_value': str(expected or ''),
+                      'changed': bool(actual and expected and actual != expected)})
+
     # Cover art — special row
     diffs.append({
         'field': 'Cover Art',
@@ -514,6 +541,16 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
             written = _write_mp4(audio, title, artist, album_artist, album,
                                  year, genre_str, track_num, total_tracks,
                                  disc_num, bpm, artists_list=artists_list)
+
+        total_discs = db_data.get('total_discs')
+        if disc_num is not None and total_discs:
+            if isinstance(audio.tags, ID3):
+                audio.tags.add(TPOS(encoding=3, text=[f'{disc_num}/{total_discs}']))
+            elif isinstance(audio, MP4):
+                audio['disk'] = [(disc_num, total_discs)]
+            else:
+                audio['disctotal'] = [str(total_discs)]
+                audio['totaldiscs'] = [str(total_discs)]
 
         # Embed already-known source IDs (Spotify / iTunes / MusicBrainz) from
         # db_data, reusing the canonical import-time frame writer — no API

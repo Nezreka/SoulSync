@@ -383,9 +383,12 @@ def test_native_track_number_scan_uses_missing_tracks_in_canonical_album_list(
         "VALUES(?,'Missing Canonical Track',2,1)",
         (existing["album_id"],),
     ).lastrowid
+    from core.library2.editions import backfill_editions
+    backfill_editions(conn.cursor())
     conn.commit()
     conn.close()
     captured = []
+    monkeypatch.setattr('core.library2.tag_cache.read_tag_snapshot', lambda _path: {'title': 'Owned', 'track_number': 1, 'error': None})
     monkeypatch.setattr(
         "core.library2.completeness.resolve_tracklist",
         lambda *_args, **_kwargs: None,
@@ -844,6 +847,7 @@ def test_cover_art_scanner_flags_v2_only_album(migrated_legacy_db, tmp_path, mon
     padding hazard is structurally impossible rather than merely handled. What is
     still worth pinning is the coverage it was protecting: a v2-only album is
     flagged, with its real artist id rather than a padded empty slot."""
+    monkeypatch.setattr('core.library2.tag_cache.read_tag_snapshot', lambda p: {'has_cover_art': False, 'cover_sidecar': False})
     from core.repair_jobs.missing_cover_art import MissingCoverArtJob
 
     legacy_db = migrated_legacy_db
@@ -916,6 +920,7 @@ def test_cover_art_scanner_covers_v2_album_on_unmigrated_legacy_schema(
     scan is now simply clean on such a schema — which is the outcome that half of the
     test was defending.
     """
+    monkeypatch.setattr('core.library2.tag_cache.read_tag_snapshot', lambda p: {'has_cover_art': False, 'cover_sidecar': False})
     from core.repair_jobs.missing_cover_art import MissingCoverArtJob
 
     _import(legacy_db)
@@ -1352,9 +1357,13 @@ def test_track_number_repair_reaches_v2_only_files(legacy_db, tmp_path, monkeypa
     audio = music / "01 - Song.flac"
     audio.write_bytes(b"audio")
     _add_v2_only_file(legacy_db, audio, title="Song")
+    from core.library2.editions import backfill_editions
+    with closing(legacy_db._get_connection()) as conn, conn:
+        backfill_editions(conn.cursor())
     transfer = tmp_path / "transfer"
     transfer.mkdir()
     inspected = []
+    monkeypatch.setattr('core.library2.tag_cache.read_tag_snapshot', lambda _path: {'title': 'Song', 'track_number': 1, 'error': None})
     monkeypatch.setattr(
         "core.library2.completeness.resolve_tracklist",
         lambda *_args, **_kwargs: None,

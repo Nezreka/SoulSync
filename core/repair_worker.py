@@ -1673,6 +1673,8 @@ class RepairWorker:
                         existing_id,
                     ))
                     conn.commit()
+                    from core.library2.validation import notify_changes
+                    notify_changes()
                     return False
                 if supersede:
                     continue
@@ -1710,6 +1712,8 @@ class RepairWorker:
             ))
             conn.commit()
             # getattr, not attribute access: tests build workers via __new__
+            from core.library2.validation import notify_changes
+            notify_changes()
             # (no __init__), and the emit must NEVER break a finding write.
             _emit = getattr(self, '_event_emit', None)
             if _emit:
@@ -2316,6 +2320,8 @@ class RepairWorker:
                 WHERE id = ?
             """, (action, finding_id))
             conn.commit()
+            from core.library2.validation import notify_changes
+            notify_changes()
             return cursor.rowcount > 0
         except Exception as e:
             logger.error("Error resolving finding %s: %s", finding_id, e)
@@ -2438,9 +2444,14 @@ class RepairWorker:
                             finding_id, job_id, finding_type,
                             sync_state.get('reason'),
                         )
-                    self.resolve_finding(
-                        finding_id, action=result.get('action', 'auto_fix'))
-                    self._set_finding_error(finding_id, None)
+                    from core.library2.validation import verify_finding_change
+                    verified = verify_finding_change(self.db, finding_type, entity_type, entity_id, file_path, details, self._config_manager)
+                    if verified is False:
+                        result.update(success=False, error='Repair is incomplete or could not be verified; finding remains pending')
+                        self._set_finding_error(finding_id, result['error'])
+                    else:
+                        self.resolve_finding(finding_id, action=result.get('action', 'auto_fix'))
+                        self._set_finding_error(finding_id, None)
             elif result.get('stale'):
                 # A finding about a vanished file can never succeed on retry.
                 # Retire it; the next scan will raise a fresh finding for the
@@ -3595,19 +3606,43 @@ class RepairWorker:
         if native_track_id is None:
             return {'success': False,
                     'error': 'No Library v2 track associated with this finding'}
+        validation = details.get('validation') or {}
+        if validation.get('checks', {}).get('edition') == 'unknown':
+            return {'success': False, 'error': 'Select the release edition in Re-identify before writing track numbers'}
         release = details.get('_fix_action') == 'overwrite_manual'
         from core.library2 import retag
 
         try:
+            if validation.get('checks', {}).get('artwork_database') == 'missing':
+                from core.library2.provider_adapters import fetch_artwork_url
+                reference = validation.get('reference') or {}
+                art = fetch_artwork_url('album', artist_name=reference.get('artist_name') or '', album_title=reference.get('album_title') or '')
+                if art:
+                    conn = self.db._get_connection()
+                    try:
+                        conn.execute("UPDATE lib2_albums SET image_url=? WHERE id=? AND COALESCE(art_locked,0)=0",
+                                     (art.url, validation['album_id']))
+                        conn.commit()
+                    finally:
+                        conn.close()
             stats = retag.write_tags(
                 self.db, [native_track_id],
-                embed_cover=False, overwrite_manual=release,
+                embed_cover=bool(validation), overwrite_manual=release,
+                file_ids=[validation['file_id']] if validation.get('file_id') else None,
             )
+            if validation.get('checks', {}).get('artwork_sidecar') == 'missing':
+                from core.metadata.art_apply import apply_art_to_album_files
+                resolved, _ = self._resolve_finding_path(entity_id, file_path)
+                reference = validation.get('reference') or {}
+                apply_art_to_album_files([resolved], {'album': reference.get('album_title'), 'artist': reference.get('artist_name')},
+                                         {'album_name': reference.get('album_title'), 'album_image_url': reference.get('thumb_url')})
+                from core.library2.scan import rescan_files
+                rescan_files(self.db, file_ids=[validation['file_id']])
         except Exception as exc:  # noqa: BLE001 - surface as a fix failure
             logger.error("Library re-tag apply failed for %s: %s",
                          entity_id, exc, exc_info=True)
             return {'success': False, 'error': str(exc)}
-        if not stats.get('written'):
+        if not stats.get('written') and not (validation and stats.get('skipped') and not stats.get('failed')):
             failure = (stats.get('errors') or [{}])[0]
             return {
                 'success': False,

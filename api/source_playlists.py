@@ -5239,6 +5239,7 @@ def _run_sync_task(
     playlist_image_url='',
     sync_mode=None,
     skip_wishlist_add=False,
+    user_initiated=None,
 ):
     # When a caller doesn't specify a mode — the mirrored auto-sync + Playlist
     # Pipeline (auto_sync_playlist), iTunes-link sync, Wing It — honor the user's
@@ -5262,6 +5263,7 @@ def _run_sync_task(
         _build_sync_deps(),
         sync_mode=sync_mode,
         skip_wishlist_add=skip_wishlist_add,
+        user_initiated=user_initiated,
     )
 
 

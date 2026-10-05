@@ -478,6 +478,13 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
       );
 
     case 'library_retag': {
+      if (d.validation && typeof d.validation === 'object' && 'checks' in d.validation) {
+        const checks = d.validation.checks;
+        if (checks && typeof checks === 'object')
+          return (
+            <DetailGrid rows={Object.entries(checks).map(([key, value]) => [key, text(value)])} />
+          );
+      }
       const retag = libraryRetagDetail(d);
       if (!retag.meta && !retag.coverOnly && !retag.tracks.length && !retag.unmatched.length) {
         return <div className="repair-finding-desc">No changes.</div>;
@@ -765,6 +772,14 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
     }
 
     case 'missing_cover_art': {
+      for (const [key, label] of [
+        ['db_missing', 'Database image'],
+        ['embed_missing', 'Embedded image'],
+        ['sidecar_missing', 'Cover file'],
+      ]) {
+        if (typeof d[key] === 'boolean')
+          pushIf(rows, d[key] ? 'Missing' : 'Present / not required', label);
+      }
       pushIf(rows, d.artist, 'Artist');
       pushIf(rows, d.album_title, 'Album');
       pushIf(rows, d.spotify_album_id, 'Spotify ID');

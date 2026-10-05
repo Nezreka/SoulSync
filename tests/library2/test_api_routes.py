@@ -2864,6 +2864,32 @@ def test_refresh_busts_full_artwork_and_thumbnails(api):
         assert not f.exists(), f"{f.name} must be invalidated by refresh"
 
 
+def test_artist_refresh_scans_all_albums_and_file_versions(api, monkeypatch, tmp_path):
+    from core.library2.scan import _file_rows_in_scope
+    client, db, ids = api
+    expected, scanned = set(), []
+    with _conn(db) as conn:
+        conn.execute('DELETE FROM lib2_track_files')
+        for track_id in (ids['album_track'], ids['single_track'], ids['ep_track'], ids['album_track']):
+            path = tmp_path / f'{track_id}-{len(expected)}.flac'
+            path.write_bytes(b'audio')
+            expected.add(conn.execute('INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)', (track_id, str(path))).lastrowid)
+        other = conn.execute("INSERT INTO lib2_artists(name) VALUES('Unrelated')").lastrowid
+        album = conn.execute("INSERT INTO lib2_albums(primary_artist_id,title) VALUES(?,'Other')", (other,)).lastrowid
+        track = conn.execute("INSERT INTO lib2_tracks(album_id,title) VALUES(?,'Other')", (album,)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id,path) VALUES(?,'unrelated.flac')", (track,))
+        conn.commit()
+    def scan(database, *, album_ids, **kwargs):
+        with closing(database._get_connection()) as conn:
+            scanned.extend(r['id'] for r in _file_rows_in_scope(conn, album_ids=album_ids))
+        return {'scanned': len(scanned), 'updated': 0}
+    monkeypatch.setattr('core.library2.scan.rescan_files', scan)
+    started = client.post(f"/api/library/v2/artists/{ids['artist']}/refresh").get_json()
+    result = _wait_for_job(client, started['job_id'])
+    assert result['error'] is None and set(scanned) == expected
+    assert result['result']['refreshed_albums'] == 3
+
+
 def test_refresh_reports_top_level_scan_failure_in_job(api, monkeypatch):
     client, _db, ids = api
 

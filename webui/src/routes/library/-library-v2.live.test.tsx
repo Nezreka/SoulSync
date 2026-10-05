@@ -5,7 +5,7 @@ import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { LIBRARY_V2_QUERY_KEY } from './-library-v2.api';
-import { useMaintenanceChanged } from './-library-v2.live';
+import { useMaintenanceChanged, useLibraryChanged } from './-library-v2.live';
 
 /**
  * "The AcoustID tool finished and the Check column still says Not scanned —
@@ -30,6 +30,21 @@ function frame(detail: Record<string, { status: string }>) {
 }
 
 describe('useMaintenanceChanged', () => {
+  it('updates during a running job and coalesces persisted batches', () => {
+    vi.useFakeTimers();
+    const client = new QueryClient();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const { unmount } = renderHook(() => useLibraryChanged(), { wrapper: wrapper(client) });
+    act(() => {
+      window.dispatchEvent(new CustomEvent('ss:library-changed'));
+      window.dispatchEvent(new CustomEvent('ss:library-changed'));
+    });
+    expect(invalidate).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(500));
+    expect(invalidate).toHaveBeenCalledOnce();
+    unmount();
+    vi.useRealTimers();
+  });
   it('refetches the library when a maintenance job finishes', () => {
     const client = new QueryClient();
     const invalidate = vi.spyOn(client, 'invalidateQueries');

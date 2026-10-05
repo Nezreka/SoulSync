@@ -538,8 +538,8 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
 
                             # Ensure track_number is valid
                             if not isinstance(track_number, int) or track_number < 1:
-                                logger.error(f"[Verification] Invalid track number ({track_number}), defaulting to 1")
-                                track_number = 1
+                                logger.warning(f"[Verification] Unknown track number ({track_number})")
+                                track_number = 0
 
                             # Get clean track name
                             clean_track_name = get_import_clean_title(context, default=original_search.get('title', 'Unknown Track'))
@@ -586,6 +586,10 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                             logger.info(f"[Verification] Created proper album_info - track_number: {track_number}, album: {album_info['album_name']}")
 
                             logger.info(f"[Post-Processing] Attempting metadata enhancement for: {found_file}")
+                            from core.library2.validation import import_reference
+                            reference = import_reference(context)
+                            if reference:
+                                context['_metadata_reference'] = reference
                             logger.warning(f"[Metadata Input] Verification worker - artist: '{artist_context.get('name', 'MISSING')}' (id: {artist_context.get('id', 'MISSING')})")
                             logger.warning(f"[Metadata Input] Verification worker - album: '{album_info.get('album_name', 'MISSING')}', track#: {album_info.get('track_number', 'MISSING')}, source: {album_info.get('source', 'unknown')}")
                             enhancement_success = deps.enhance_file_metadata(found_file, context, artist_context, album_info)
@@ -619,6 +623,14 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
             else:
                 logger.info("[Post-Processing] File already has metadata enhancement completed")
 
+            metadata_status = 'unknown'
+            if _found_file_matches_expected(found_file, expected_final_path):
+                try:
+                    from database.music_database import get_database
+                    from core.library2.validation import refresh_imported_metadata
+                    metadata_status = refresh_imported_metadata(get_database(), [found_file])
+                except Exception as exc:
+                    logger.warning('Final metadata read failed for %s: %s', found_file, exc)
             with tasks_lock:
                 if task_id in download_tasks:
                     track_info = download_tasks[task_id].get('track_info')
@@ -629,6 +641,7 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                     # genuinely published track would be kept on the wishlist
                     # and downloaded twice.
                     download_tasks[task_id].setdefault('final_file_path', found_file)
+                    download_tasks[task_id]['metadata_status'] = metadata_status
                     deps.mark_task_completed(task_id, track_info)
 
             # Clean up context now that both stream processor and verification worker are done

@@ -1382,15 +1382,15 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
 
     if album_info.get("is_album"):
         metadata["album"] = album_info.get("album_name", "Unknown Album")
-        metadata["track_number"] = album_info.get("track_number", 1)
-        metadata["total_tracks"] = album_ctx.get("total_tracks", 1) if album_ctx else 1
+        metadata["track_number"] = album_info.get("track_number", 0)
+        metadata["total_tracks"] = album_ctx.get("total_tracks") if album_ctx else None
         logger.info("[METADATA] Album track - track_number: %s, album: %s", metadata["track_number"], metadata["album"])
     else:
         if album_ctx and album_ctx.get("name"):
             logger.info("[SAFEGUARD] Using album context name instead of track title for album metadata")
             metadata["album"] = album_ctx["name"]
-            metadata["track_number"] = album_info.get("track_number", 1) if album_info else 1
-            metadata["total_tracks"] = album_ctx.get("total_tracks", 1)
+            metadata["track_number"] = album_info.get("track_number", 0) if album_info else 0
+            metadata["total_tracks"] = album_ctx.get("total_tracks")
         else:
             metadata["album"] = metadata["title"]
             metadata["track_number"] = 1
@@ -1402,6 +1402,13 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     # as disc-less and ungroup the track in Jellyfin/Plex).
     from core.imports.track_number import resolve_disc_for_track
     metadata["disc_number"] = resolve_disc_for_track(original_search, album_info)
+    reference = context.get('_metadata_reference')
+    if reference:
+        for key, ref_key in (('title', 'title'), ('artist', 'track_artist'), ('album', 'album_title'), ('album_artist', 'artist_name')):
+            if reference.get(ref_key):
+                metadata[key] = reference[ref_key]
+        metadata.update(track_number=reference.get('track_number') or 0, total_tracks=reference.get('track_count'),
+                        disc_number=reference.get('disc_number') or 0, total_discs=reference.get('total_discs'))
 
     if album_ctx and album_ctx.get("release_date"):
         release_date = _normalize_release_date_tag(album_ctx.get("release_date"))
@@ -1423,6 +1430,12 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
             first_image = album_ctx["images"][0]
             album_image = first_image.get("url") if isinstance(first_image, dict) else None
         metadata["album_art_url"] = album_image
+
+    if reference:
+        for key, ref_key in (('date', 'year'), ('genre', 'genres'), ('album_art_url', 'thumb_url')):
+            if reference.get(ref_key):
+                value = reference[ref_key]
+                metadata[key] = ', '.join(value) if isinstance(value, list) else str(value)
 
     logger.info(
         "[Metadata Summary] title='%s' | artist='%s' | album_artist='%s' | album='%s' | date=%s | track=%s/%s | disc=%s",

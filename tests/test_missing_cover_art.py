@@ -66,7 +66,10 @@ def _found(url='https://img/found', source='spotify'):
 def _make_db(*, album_image='', file_path=None, album_external_ids='{}'):
     from core.library2.schema import ensure_library_v2_schema
 
-    conn = sqlite3.connect(':memory:')
+    class SharedConnection(sqlite3.Connection):
+        def close(self):  # This fixture lends its one in-memory database to readers/writers.
+            pass
+    conn = sqlite3.connect(':memory:', factory=SharedConnection)
     conn.row_factory = sqlite3.Row
     ensure_library_v2_schema(conn)
     conn.execute(
@@ -110,6 +113,8 @@ def _patch_disk(monkeypatch, *, resolved, embedded, sidecar, record=None):
                         lambda p: (record.append(p) if record is not None else None) or embedded)
     monkeypatch.setattr('core.metadata.art_apply.folder_has_cover_sidecar',
                         lambda d: (record.append(d) if record is not None else None) or sidecar)
+    monkeypatch.setattr('core.library2.tag_cache.read_tag_snapshot',
+                        lambda p: (record.append(p) if record is not None else None) or {'has_cover_art': embedded, 'cover_sidecar': sidecar})
 
 
 def _patch_artwork(monkeypatch, album=None, artist=None, calls=None):
@@ -298,6 +303,7 @@ def test_unresolved_path_falls_back_to_raw_when_the_file_is_really_there(
     context = _make_context(conn)
     monkeypatch.setattr('core.library2.paths.resolve_lib2_path', lambda raw, **k: None)
     monkeypatch.setattr('core.metadata.art_apply.file_has_embedded_art', lambda p: True)
+    monkeypatch.setattr('core.library2.tag_cache.read_tag_snapshot', lambda p: {'has_cover_art': True, 'cover_sidecar': False})
     _patch_artwork(monkeypatch, album=None)   # real folder has no cover.jpg
 
     result = mca.MissingCoverArtJob().scan(context)

@@ -152,6 +152,37 @@ describe('library v2 LR badge (deep-dive B3)', () => {
 });
 
 describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () => {
+  it('keeps unknown references visible after a gap-free read', () => {
+    renderWithClient(
+      <TrackMetadataGapsCell
+        track={track({
+          metadata_gaps: [],
+          metadata_validation: { status: 'unknown', checks: { edition: 'unknown' } },
+        })}
+        onOpenTags={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'partly checked' })).toBeInTheDocument();
+    expect(screen.queryByText('Metadata ✓')).not.toBeInTheDocument();
+  });
+
+  it('opens details for an ambiguous edition without writing guessed numbers', () => {
+    const open = vi.fn();
+    renderWithClient(
+      <TrackMetadataGapsCell
+        track={track({
+          metadata_gaps: ['track_number'],
+          metadata_validation: {
+            status: 'issues',
+            checks: { edition: 'unknown', track_number: 'missing' },
+          },
+        })}
+        onOpenTags={open}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '1 issues' }));
+    expect(open).toHaveBeenCalledOnce();
+  });
   beforeEach(() => {
     window.showToast = vi.fn();
   });
@@ -160,7 +191,7 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
     delete (window as any).showToast;
   });
 
-  it('shows a scan-pending state instead of a false "tags ✓" for a never-scanned file', () => {
+  it('shows a scan-pending state instead of a false "Metadata ✓" for a never-scanned file', () => {
     renderWithClient(
       <TrackMetadataGapsCell
         track={track({ metadata_scan_status: 'pending', metadata_gaps: [] })}
@@ -182,18 +213,30 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
-  it('clicking "tags ✓" opens the tags tab instead of writing anything', () => {
+  it('clicking "Metadata ✓" opens the tags tab instead of writing anything', () => {
     const onOpenTags = vi.fn();
     renderWithClient(
       <TrackMetadataGapsCell
-        track={track({ metadata_scan_status: 'scanned', metadata_gaps: [] })}
+        track={track({
+          metadata_scan_status: 'scanned',
+          metadata_gaps: [],
+          metadata_validation: { status: 'correct', checks: {} },
+        })}
         onOpenTags={onOpenTags}
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'tags ✓' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Metadata ✓' }));
 
     expect(onOpenTags).toHaveBeenCalledOnce();
+  });
+
+  it('keeps an old presence-only snapshot partly checked', () => {
+    renderWithClient(
+      <TrackMetadataGapsCell track={track({ metadata_gaps: [] })} onOpenTags={vi.fn()} />,
+    );
+    expect(screen.getByRole('button', { name: 'partly checked' })).toBeInTheDocument();
+    expect(screen.queryByText('Metadata ✓')).not.toBeInTheDocument();
   });
 
   it('shows an exact present-versus-missing tag breakdown on hover or keyboard focus', async () => {
@@ -207,18 +250,18 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
       />,
     );
 
-    fireEvent.focus(screen.getByRole('button', { name: '2 tag gaps' }));
+    fireEvent.focus(screen.getByRole('button', { name: '2 issues' }));
 
     const tooltip = await screen.findByRole('tooltip');
     expect(tooltip.parentElement?.className).toContain('metadataTagsTooltipPositioner');
     expect(tooltip).toHaveTextContent('Present tags');
     expect(tooltip).toHaveTextContent('✓ Title');
-    expect(tooltip).toHaveTextContent('Missing tags');
+    expect(tooltip).toHaveTextContent('Metadata issues');
     expect(tooltip).toHaveTextContent('✗ Genre · ✗ Cover Art');
-    expect(tooltip).toHaveTextContent('Click to fetch the missing metadata');
+    expect(tooltip).toHaveTextContent('Click to repair the stored metadata findings');
   });
 
-  it('clicking "N tag gaps" re-fetches from providers then writes this track\'s tags, never claiming success optimistically', async () => {
+  it('clicking "N issues" re-fetches from providers then writes this track\'s tags, never claiming success optimistically', async () => {
     let requestedTrackId: string | undefined;
     server.use(
       http.post('/api/library/v2/tracks/:trackId/fill-tag-gaps', ({ params }) => {
@@ -247,7 +290,7 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
       />,
     );
 
-    const button = screen.getByRole('button', { name: '1 tag gaps' });
+    const button = screen.getByRole('button', { name: '1 issues' });
     fireEvent.click(button);
 
     await waitFor(() => expect(requestedTrackId).toBe('7'));
@@ -285,7 +328,7 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '1 tag gaps' }));
+    fireEvent.click(screen.getByRole('button', { name: '1 issues' }));
 
     await waitFor(() =>
       expect(window.showToast).toHaveBeenCalledWith(
@@ -295,7 +338,7 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
     );
   });
 
-  it('surfaces a failed tag write in the breakdown without claiming "tags ✓"', async () => {
+  it('surfaces a failed tag write in the breakdown without claiming "Metadata ✓"', async () => {
     server.use(
       http.post('/api/library/v2/tracks/:trackId/fill-tag-gaps', () =>
         HttpResponse.json({ success: true, job_id: 'retag-job-2' }),
@@ -314,13 +357,13 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '1 tag gaps' }));
+    fireEvent.click(screen.getByRole('button', { name: '1 issues' }));
 
     await waitFor(() =>
       expect(window.showToast).toHaveBeenCalledWith('File not found on disk', 'error'),
     );
-    fireEvent.focus(screen.getByRole('button', { name: '1 tag gaps' }));
+    fireEvent.focus(screen.getByRole('button', { name: '1 issues' }));
     expect(await screen.findByRole('tooltip')).toHaveTextContent('File not found on disk');
-    expect(screen.queryByRole('button', { name: 'tags ✓' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Metadata ✓' })).not.toBeInTheDocument();
   });
 });

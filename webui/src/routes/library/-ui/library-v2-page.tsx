@@ -901,6 +901,11 @@ function IconActionButton({
 function refreshSummary(result: LibraryV2JobState['result']): string {
   const count = (key: string) => Number(result?.[key] ?? 0) || 0;
   const parts = [`${count('scanned')} file${count('scanned') === 1 ? '' : 's'} scanned`];
+  if (result?.metadata_issues != null)
+    parts.push(
+      `${count('metadata_issues')} metadata issues`,
+      `${count('metadata_unknown')} incompletely checked`,
+    );
   if (count('path_repointed')) parts.push(`${count('path_repointed')} renamed file relinked`);
   if (count('recovered')) parts.push(`${count('recovered')} back`);
   if (count('missing_confirmed')) parts.push(`${count('missing_confirmed')} now missing`);
@@ -1226,6 +1231,15 @@ export function MatchChips({
  * raw AcoustID skip because it explains why the technical check was bypassed. */
 export function TrackCheckBadge({ file }: { file: LibraryV2TrackFile | null }) {
   if (!file) return <span className={styles.muted}>—</span>;
+  if (file.check_findings?.length)
+    return (
+      <span
+        className={styles.statusWarn}
+        title={file.check_findings.map((f) => f.last_error || f.title).join('\n')}
+      >
+        {file.check_findings.length} check issues
+      </span>
+    );
   const detail = file.pipeline_result?.acoustid_message;
   if (file.file_state === 'missing_confirmed' || file.file_state === 'deleted') {
     // Nothing can fingerprint a file that is not there. "Not scanned" here
@@ -9680,7 +9694,15 @@ function metadataTagBreakdown(gaps: string[]) {
   return { present, missing };
 }
 
-function MetadataTagsTooltip({ gaps, hint }: { gaps: string[]; hint: string }) {
+function MetadataTagsTooltip({
+  gaps,
+  hint,
+  checks,
+}: {
+  gaps: string[];
+  hint: string;
+  checks?: Record<string, string>;
+}) {
   const { present, missing } = metadataTagBreakdown(gaps);
   return (
     <Tooltip.Portal>
@@ -9690,7 +9712,17 @@ function MetadataTagsTooltip({ gaps, hint }: { gaps: string[]; hint: string }) {
         collisionPadding={8}
       >
         <Tooltip.Popup role="tooltip" className={styles.metadataTagsTooltip}>
-          {present.length > 0 ? (
+          {checks ? (
+            <div className={styles.metadataTagsTooltipGroup}>
+              <strong>Metadata checks</strong>
+              <span>
+                {Object.entries(checks)
+                  .map(([key, status]) => `${METADATA_TAG_LABELS[key] ?? key}: ${status}`)
+                  .join(' · ')}
+              </span>
+            </div>
+          ) : null}
+          {!checks && present.length > 0 ? (
             <div className={styles.metadataTagsTooltipGroup}>
               <strong>Present tags</strong>
               <span className={styles.metadataTagsPresent}>
@@ -9700,7 +9732,7 @@ function MetadataTagsTooltip({ gaps, hint }: { gaps: string[]; hint: string }) {
           ) : null}
           {missing.length > 0 ? (
             <div className={styles.metadataTagsTooltipGroup}>
-              <strong>Missing tags</strong>
+              <strong>Metadata issues</strong>
               <span className={styles.metadataTagsMissing}>
                 {missing.map((label) => `✗ ${label}`).join(' · ')}
               </span>
@@ -9765,6 +9797,7 @@ export function TrackMetadataGapsCell({
   });
 
   const scanStatus = track.metadata_scan_status ?? 'scanned';
+  const checks = track.metadata_validation?.checks;
   if (scanStatus === 'pending') {
     return (
       <span className={styles.muted} title="File not yet scanned for tags — run Refresh &amp; Scan">
@@ -9788,21 +9821,29 @@ export function TrackMetadataGapsCell({
         <Tooltip.Trigger
           type="button"
           delay={150}
-          className={styles.statusOk}
+          className={
+            track.metadata_validation?.status === 'correct' ? styles.statusOk : styles.muted
+          }
           onClick={(e) => {
             e.stopPropagation();
             onOpenTags();
           }}
         >
-          tags ✓
+          {track.metadata_validation?.status !== 'correct' ? 'partly checked' : 'Metadata ✓'}
         </Tooltip.Trigger>
-        <MetadataTagsTooltip gaps={track.metadata_gaps} hint="Click to inspect the file tags." />
+        <MetadataTagsTooltip
+          gaps={track.metadata_gaps}
+          checks={checks}
+          hint="Click to inspect the file tags."
+        />
       </Tooltip.Root>
     );
   }
   const hint = mutation.isError
     ? mutationErrorMessage(mutation.error, 'Write tags failed')
-    : 'Click to fetch the missing metadata and write these tags to the file.';
+    : checks?.edition === 'unknown'
+      ? 'Select the release in Re-identify before repairing track numbers.'
+      : 'Click to repair the stored metadata findings and verify the file again.';
   return (
     <Tooltip.Root>
       <Tooltip.Trigger
@@ -9812,12 +9853,13 @@ export function TrackMetadataGapsCell({
         disabled={mutation.isPending || !track.id}
         onClick={(e) => {
           e.stopPropagation();
-          mutation.mutate();
+          if (checks?.edition === 'unknown') onOpenTags();
+          else mutation.mutate();
         }}
       >
-        {mutation.isPending ? '…' : `${track.metadata_gaps.length} tag gaps`}
+        {mutation.isPending ? '…' : `${track.metadata_gaps.length} issues`}
       </Tooltip.Trigger>
-      <MetadataTagsTooltip gaps={track.metadata_gaps} hint={hint} />
+      <MetadataTagsTooltip gaps={track.metadata_gaps} checks={checks} hint={hint} />
     </Tooltip.Root>
   );
 }

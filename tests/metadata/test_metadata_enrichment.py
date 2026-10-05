@@ -634,7 +634,7 @@ def test_enhance_file_metadata_writes_tags_and_propagates_release_id(monkeypatch
     assert strip_calls == ["song.flac"]
     assert verify_calls == ["song.flac"]
     assert audio.clear_pictures_calls == 1
-    assert len(audio.save_calls) == 2
+    assert len(audio.save_calls) == 1
     assert album_info["musicbrainz_release_id"] == "mb-release-1"
     assert any(frame.kind == "TIT2" for frame in audio.tags.added)
     assert any(frame.kind == "TPE1" for frame in audio.tags.added)

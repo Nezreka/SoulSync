@@ -285,6 +285,15 @@ export function AdlRow({
         <span className={`adl-status-dot ${cls}`} />
         {label.spinner ? <span className="adl-spinner" /> : null}
         {label.text}
+        {dl.status === 'completed' && dl.metadata_status ? (
+          <span className="adl-quality-chip" title="Final file metadata validation">
+            {dl.metadata_status === 'correct'
+              ? 'Metadata ✓'
+              : dl.metadata_status === 'issues'
+                ? 'Metadata incomplete'
+                : 'Metadata partly checked'}
+          </span>
+        ) : null}
         {downloading ? ` ${Math.round(dl.progress || 0)}%` : ''}
         {speed ? <span className="adl-row-speed">{speed}</span> : null}
         {badge ? (

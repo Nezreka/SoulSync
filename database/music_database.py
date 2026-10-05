@@ -13327,6 +13327,12 @@ class MusicDatabase:
                 resolved_qp_id = self._resolve_quality_profile_id(
                     cursor, quality_profile_id
                 )
+                def commit_wishlist(row_id):
+                    from core.library2.materialize import materialize_wishlist_row
+                    from core.library2.validation import notify_changes
+                    materialize_wishlist_row(conn, row_id, profile_id=profile_id)
+                    conn.commit()
+                    notify_changes()
 
                 if not allow_duplicates:
                     cursor.execute("""
@@ -13379,7 +13385,7 @@ class MusicDatabase:
                                         f"UPDATE wishlist_tracks SET {', '.join(updates)} WHERE id=?",
                                         params,
                                     )
-                                    conn.commit()
+                                    commit_wishlist(existing['id'])
                                     logger.info(
                                         "Refreshed existing wishlist entry: '%s' by %s",
                                         track_name,
@@ -13389,6 +13395,7 @@ class MusicDatabase:
                                         "updated", existing['spotify_track_id'],
                                     )
                                 logger.info(f"Skipping duplicate wishlist entry: '{track_name}' by {artist_name} (already exists as ID: {existing['id']})")
+                                commit_wishlist(existing['id'])
                                 return self._wishlist_outcome(
                                     "skipped", existing['spotify_track_id'], reason="duplicate",
                                 )
@@ -13451,7 +13458,7 @@ class MusicDatabase:
                         f"UPDATE wishlist_tracks SET {', '.join(updates)} WHERE id=?",
                         params,
                     )
-                    conn.commit()
+                    commit_wishlist(existing['id'])
                     logger.debug(
                         "Wishlist entry already present; refreshed context for '%s'",
                         track_name,
@@ -13470,7 +13477,7 @@ class MusicDatabase:
                 """, (insert_track_id, spotify_json, failure_reason, source_type, source_json, profile_id,
                       resolved_qp_id))
 
-                conn.commit()
+                commit_wishlist(cursor.lastrowid)
 
                 logger.info(f"Added track to wishlist: '{track_name}' by {artist_name}")
                 return self._wishlist_outcome("created", insert_track_id)
@@ -14714,10 +14721,20 @@ class MusicDatabase:
             )
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                conn.execute('BEGIN IMMEDIATE')
                 cursor.execute(
-                    "SELECT spotify_track_id, spotify_data FROM wishlist_tracks WHERE profile_id = ?",
+                    "SELECT spotify_track_id, spotify_data, source_info FROM wishlist_tracks WHERE profile_id = ?",
                     (profile_id,))
                 rows = cursor.fetchall()
+                from core.library2.monitor_sync import _descriptor_lib2_track_ids
+                from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+                from core.library2.wanted import recompute_wanted
+                track_ids = _descriptor_lib2_track_ids(conn, [dict(row) for row in rows])
+                for track_id in track_ids:
+                    if int(profile_id) == 1:
+                        conn.execute('UPDATE lib2_tracks SET monitored=0 WHERE id=?', (track_id,))
+                    record_rule(conn, 'track', track_id, False, PROVENANCE_USER, profile_id=profile_id)
+                recompute_wanted(conn, profile_id=profile_id, track_ids=track_ids)
                 ignored = 0
                 for row in rows:
                     try:
@@ -14747,6 +14764,8 @@ class MusicDatabase:
                 cursor.execute("DELETE FROM wishlist_tracks WHERE profile_id = ?", (profile_id,))
                 cleared_count = cursor.rowcount
                 conn.commit()
+                from core.library2.validation import notify_changes
+                notify_changes()
                 logger.info(f"Cleared {cleared_count} tracks from wishlist (profile: {profile_id}); "
                             f"wrote {ignored} ignore-list entries")
             return True

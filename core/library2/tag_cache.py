@@ -30,6 +30,9 @@ def normalized_tag_snapshot(file_tags: Dict[str, Any]) -> Dict[str, Any]:
         "year": file_tags.get("year"),
         "genre": file_tags.get("genre"),
         "cover": bool(file_tags.get("has_cover_art")),
+        "total_tracks": file_tags.get("total_tracks"),
+        "total_discs": file_tags.get("total_discs"),
+        "cover_sidecar": file_tags.get("cover_sidecar"),
     }
     for k in (
         "lyrics",
@@ -43,7 +46,7 @@ def normalized_tag_snapshot(file_tags: Dict[str, Any]) -> Dict[str, Any]:
     return res
 
 
-def persist_tag_cache(conn, file_id: int, file_tags: Dict[str, Any]) -> bool:
+def persist_tag_cache(conn, file_id: int, file_tags: Dict[str, Any], config_manager=None, *, source='scan') -> bool:
     """Persist a successful read, or invalidate stale cache on read failure.
 
     JSON ``null`` is the explicit unknown sentinel for list caches. It makes
@@ -61,7 +64,16 @@ def persist_tag_cache(conn, file_id: int, file_tags: Dict[str, Any]) -> bool:
         return False
 
     snapshot = normalized_tag_snapshot(file_tags)
-    missing = [tag for tag in EXPECTED_TAGS if not _present(snapshot.get(tag))]
+    from core.library2.validation import validate_tags, persist_validation
+    from core.metadata.common import get_config_manager
+    config_manager = config_manager or get_config_manager()
+    validation = validate_tags(conn, file_id, file_tags, config_manager)
+    validation['source'] = source
+    file_tags['_validation'] = validation
+    snapshot['_validation'] = validation
+    missing = [tag for tag in EXPECTED_TAGS if not _present(snapshot.get(tag))
+               and (tag != 'cover' or config_manager.get('metadata_enhancement.embed_album_art', True))]
+    gaps = list(dict.fromkeys(missing + [k for k, v in validation['checks'].items() if v in ('missing', 'mismatch')]))
     conn.execute(
         """UPDATE lib2_track_files
               SET tags_json=?, missing_tags_json=?, metadata_gaps_json=?,
@@ -70,13 +82,14 @@ def persist_tag_cache(conn, file_id: int, file_tags: Dict[str, Any]) -> bool:
         (
             json.dumps(snapshot, sort_keys=True),
             json.dumps(missing),
-            json.dumps(missing),
+            json.dumps(gaps),
             int(file_id),
         ),
     )
     # a compilation track credited to "Various Artists" alone (A05)
     from core.library2.compilation_credits import heal_compilation_credit
     heal_compilation_credit(conn, int(file_id), file_tags)
+    persist_validation(conn, file_id, validation)
     return True
 
 
@@ -85,7 +98,11 @@ def read_tag_snapshot(path: str) -> Dict[str, Any]:
     from core.tag_writer import read_file_tags
 
     try:
-        return read_file_tags(path)
+        tags = read_file_tags(path)
+        from core.metadata.art_apply import folder_has_cover_sidecar
+        import os
+        tags['cover_sidecar'] = folder_has_cover_sidecar(os.path.dirname(path))
+        return tags
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc) or exc.__class__.__name__}
 
@@ -93,6 +110,17 @@ def read_tag_snapshot(path: str) -> Dict[str, Any]:
 def read_and_persist_tag_cache(conn, file_id: int, path: str) -> bool:
     """Read through the canonical tag engine and persist its snapshot."""
     return persist_tag_cache(conn, file_id, read_tag_snapshot(path))
+
+
+def observe_file_tags(database, file_id, path, config, source):
+    """Tools share the reader and persist before notifying either view."""
+    from contextlib import closing
+    from core.library2.validation import notify_changes
+    tags = read_tag_snapshot(path)
+    with closing(database._get_connection()) as conn, conn:
+        persist_tag_cache(conn, file_id, tags, config, source=source)
+    notify_changes([file_id])
+    return tags
 
 
 def _precache_max_workers(config_manager, default: int = 3) -> int:
@@ -155,8 +183,10 @@ def precache_tag_cache(database, config_manager, *, progress=None) -> Dict[str, 
         except Exception:  # noqa: BLE001
             return False
         try:
-            updated = read_and_persist_tag_cache(thread_conn, file_id, path)
+            updated = persist_tag_cache(thread_conn, file_id, read_tag_snapshot(path), config_manager, source='precache')
             thread_conn.commit()
+            from core.library2.validation import notify_changes
+            notify_changes([file_id])
             return updated
         except Exception as e:  # noqa: BLE001
             logger.debug("tag cache precache read failed (%s): %s", file_id, e)

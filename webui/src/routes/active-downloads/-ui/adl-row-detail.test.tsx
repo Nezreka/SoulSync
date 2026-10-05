@@ -177,6 +177,11 @@ describe('liveDetailLines', () => {
 // ── the row expansion ───────────────────────────────────────────────────────
 
 describe('AdlRow expansion (#1156)', () => {
+  it('separates a completed import from incomplete metadata', () => {
+    const view = render(<AdlRow dl={row({ status: 'completed', metadata_status: 'issues' })} />);
+    expect(view.getByText('Metadata incomplete')).toBeInTheDocument();
+    expect(view.queryByText('Metadata ✓')).not.toBeInTheDocument();
+  });
   it('an in-flight row expands to the live narration on click', () => {
     const { container } = render(
       <AdlRow

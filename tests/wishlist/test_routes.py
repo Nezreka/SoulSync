@@ -512,7 +512,7 @@ def test_remove_composite_reverse_syncs_only_requested_album(monkeypatch):
     assert [row["spotify_track_id"] for row in captured] == ["same::album-a"]
 
 
-def test_clear_wishlist_reverse_syncs_every_captured_descriptor(monkeypatch):
+def test_clear_wishlist_uses_atomic_database_demonitoring_without_a_second_reverse_sync(monkeypatch):
     tracks = [
         {"spotify_track_id": "track-1", "source_info": {"lib2_track_id": 1}},
         {"spotify_track_id": "track-2", "source_info": {"lib2_track_id": 2}},
@@ -531,7 +531,7 @@ def test_clear_wishlist_reverse_syncs_every_captured_descriptor(monkeypatch):
 
     assert status == 200
     assert payload["success"] is True
-    assert calls == [(db, tracks, 1)]
+    assert calls == []  # A late second demonitor could undo a concurrent new manual add.
 
 
 def test_remove_album_from_wishlist_matches_album_name():

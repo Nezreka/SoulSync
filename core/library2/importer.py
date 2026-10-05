@@ -2520,8 +2520,8 @@ def _wishlist_provider(payload: Dict[str, Any], source_info: Any) -> str:
     from core.metadata.registry import METADATA_SOURCE_PRIORITY
 
     known = set(METADATA_SOURCE_PRIORITY) | {"spotify"}
-    for raw in (payload.get("source"),
-                _parse_source_info(source_info).get("source")):
+    info = _parse_source_info(source_info)
+    for raw in (payload.get('source'), payload.get('provider'), info.get('metadata_source'), info.get('source')):
         provider = normalize_provider_name(raw)
         if provider in known:
             return provider

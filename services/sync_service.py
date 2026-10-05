@@ -11,6 +11,7 @@ from core.matching_engine import MusicMatchingEngine, MatchResult
 from core.discovery.wing_it import is_stub_id, should_wishlist_stub
 
 logger = get_logger("sync_service")
+_sync_user_initiated = contextvars.ContextVar('sync_user_initiated', default=False)
 
 # Per-artist track pool cap. High enough that no plausible artist hits it
 # (the largest catalogs in our test libraries sit in the low thousands), low
@@ -525,18 +526,20 @@ class PlaylistSyncService:
             profile_id=profile_id,
         )
 
-    async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None, sync_mode: str = 'replace') -> SyncResult:
+    async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None, sync_mode: str = 'replace', user_initiated: bool = False) -> SyncResult:
         # scoped to this task, not the shared instance (see _sync_profile_id).
         # the library scope rides along: "do we own this" is answered through
         # the profile's library, not the app account's (#1199)
         from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
         _profile_token = _sync_profile_id.set(profile_id)
+        _intent_token = _sync_user_initiated.set(user_initiated)
         _scope_token = set_library_scope(library_scope_for_profile(profile_id))
         try:
             return await self._sync_playlist(playlist, download_missing, profile_id, sync_mode)
         finally:
             reset_library_scope(_scope_token)
             _sync_profile_id.reset(_profile_token)
+            _sync_user_initiated.reset(_intent_token)
 
     async def _sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool, profile_id, sync_mode: str) -> SyncResult:
         # Check if THIS specific playlist is already syncing
@@ -949,6 +952,7 @@ class PlaylistSyncService:
                         'timestamp': datetime.now().isoformat()
                     },
                     profile_id=_sync_profile_id.get() or 1,
+                    user_initiated=_sync_user_initiated.get(),
                     quality_profile_id=(
                         original_track_data.get('quality_profile_id')
                         if isinstance(original_track_data, dict)

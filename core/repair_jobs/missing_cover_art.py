@@ -36,10 +36,8 @@ class MissingCoverArtJob(RepairJob):
 
         from core.library2.paths import resolve_lib2_path
         from core.library2.provider_adapters import fetch_artwork_url
-        from core.metadata.art_apply import (
-            file_has_embedded_art,
-            folder_has_cover_sidecar,
-        )
+        from core.library2.tag_cache import observe_file_tags
+        from core.library2.validation import artwork_checks
 
         result = JobResult()
         settings = self._get_settings(context)
@@ -52,10 +50,6 @@ class MissingCoverArtJob(RepairJob):
         if prefer_source:
             remaining = tuple(source for source in (source_order or ()) if source != prefer_source)
             source_order = (prefer_source, *remaining)
-        sidecar_enabled = bool(
-            context.config_manager.get("metadata_enhancement.cover_art_download", True)
-            if context.config_manager else True
-        )
         # hand-tagged: the user typed this release, a name search would give a
         # bootleg the studio cover
         albums = drop_hand_tagged(
@@ -69,13 +63,14 @@ class MissingCoverArtJob(RepairJob):
             resolved = raw_path if os.path.isfile(raw_path) else resolve_lib2_path(
                 raw_path, config_manager=context.config_manager,
             )
-            embedded = bool(resolved and file_has_embedded_art(resolved))
-            sidecar = bool(
-                resolved and folder_has_cover_sidecar(os.path.dirname(resolved))
-            )
-            db_missing = not str(subject.get("album_image") or "").strip()
-            embed_missing = bool(resolved and not embedded)
-            sidecar_missing = bool(resolved and sidecar_enabled and not sidecar)
+            tags = observe_file_tags(context.db, subject['file_id'], resolved, context.config_manager, self.job_id) if resolved else {}
+            if tags.get('error'):
+                result.errors += 1
+                continue
+            embedded, sidecar = bool(tags.get('has_cover_art')), bool(tags.get('cover_sidecar'))
+            checks = artwork_checks(str(subject.get('album_image') or '').strip(),
+                                    tags, context.config_manager or {})
+            db_missing, embed_missing, sidecar_missing = (checks[key] == 'missing' for key in ('artwork_database', 'cover', 'artwork_sidecar'))
             if not (db_missing or embed_missing or sidecar_missing):
                 result.skipped += 1
                 continue
@@ -116,7 +111,9 @@ class MissingCoverArtJob(RepairJob):
                 "artist_artwork_source": artist_result.source if artist_result else None,
                 "album_folder": os.path.dirname(raw_path) if raw_path else None,
                 "db_missing": db_missing,
+                "artwork_checks": checks,
                 "embed_missing": embed_missing,
+                "sidecar_missing": sidecar_missing,
                 "sidecar_from_embedded": sidecar_from_embedded,
                 "musicbrainz_release_id": (
                     subject.get("album_source_ids") or {}
@@ -131,11 +128,12 @@ class MissingCoverArtJob(RepairJob):
                     entity_type="album",
                     entity_id=f"lib2:{subject['album_id']}",
                     file_path=raw_path or None,
-                    title=f"Missing artwork: {subject.get('title') or 'Unknown'}",
+                    title=f"Artwork storage gaps: {subject.get('title') or 'Unknown'}",
                     description=(
                         f'Artwork for "{subject.get("title")}" by '
                         f'{subject.get("artist_name") or "Unknown"} can be repaired '
-                        f'from {details["artwork_source"]}.'
+                        f'from {details["artwork_source"]}. Missing: '
+                        + ', '.join(name for name, missing in (('database image', db_missing), ('embedded image', embed_missing), ('cover file', sidecar_missing)) if missing)
                     ),
                     details=details,
                 )

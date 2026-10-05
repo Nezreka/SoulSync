@@ -88,6 +88,7 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
                 _track_entry['track_number'] = md['track_number']
             if md.get('disc_number'):
                 _track_entry['disc_number'] = md['disc_number']
+            _track_entry.update({key: md[key] for key in ('source', 'provider', 'provider_ids', 'external_ids') if md.get(key)})
             tracks_json.append(_track_entry)
         else:
             # NOT discovered — try to include using available metadata so
@@ -308,7 +309,7 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
             sync_id, sync_name, tracks_json, auto_id,
             int(pl.get('profile_id') or 1), pl.get('image_url', ''),
         ),
-        kwargs={'skip_wishlist_add': skip_wishlist_add},
+        kwargs={'skip_wishlist_add': skip_wishlist_add, 'user_initiated': bool(config.get('_user_initiated'))},
         daemon=True,
         name=f'auto-sync-{playlist_id}',
     ).start()

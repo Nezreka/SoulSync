@@ -17,7 +17,7 @@ from .paths import library_relative_path
 from .sql_util import (
     intent_profile_id, monitored_sql, owner_clause, pick, scoped_monitored, scope_visibility_sql,
 )
-from .status import compute_metadata_gaps, file_status, metadata_scan_status, quality_tier
+from .status import compute_metadata_gaps, file_status, metadata_scan_status, quality_tier, _coerce_tags
 from .track_files import primary_order
 
 def _alpha_key(column: str) -> str:
@@ -298,7 +298,8 @@ def legacy_api_artists_page(conn, *, search_query: str = "", letter: str = "all"
     limit = max(1, min(int(limit), 500))
     offset = (page - 1) * limit
 
-    clauses = ["a.canonical_artist_id IS NULL", "a.legacy_artist_id IS NOT NULL"]
+    from core.library2.sql_util import library_artist_sql
+    clauses = ["a.canonical_artist_id IS NULL", "a.legacy_artist_id IS NOT NULL", library_artist_sql('a')]
     # Same rule as list_artists: a client on the legacy surface must not be
     # handed the whole house's catalogue either (E-03).
     _visible = scope_visibility_sql("artist", "va")
@@ -498,7 +499,8 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
     offset = (page - 1) * limit
     # §40: alias-member rows are folded into their canonical artist's entry
     # (get_artist merges their albums in) and never listed on their own.
-    clauses, params = ["a.canonical_artist_id IS NULL"], {}
+    from core.library2.sql_util import library_artist_sql
+    clauses, params = ["a.canonical_artist_id IS NULL", library_artist_sql('a')], {}
     # ...and, once directories exist, only the ones this library may see: a
     # file of ours hangs off it, or we have monitoring intent on it. Empty
     # while the scope is every library, so an install without own directories
@@ -1562,6 +1564,7 @@ def _serialize_track(
     provenance: Optional[Dict[str, Any]] = None,
     media_server_sources: Optional[List[str]] = None,
     linked_from: Any = _NOT_LOADED,
+    findings: Any = None,
 ) -> Dict[str, Any]:
     """Build a track dict with linked artists, primary file, and computed status."""
     if file_row is _NOT_LOADED:
@@ -1602,6 +1605,11 @@ def _serialize_track(
         ).fetchone()
         wanted = bool(wanted_row["wanted"]) if wanted_row else _scoped_flag(conn, "track", t)
     gaps = compute_metadata_gaps(file_row)
+    from core.library2.validation import finding_summary
+    findings = finding_summary(conn, file_row, findings)
+    validation = _coerce_tags(file_row.get('tags_json')).get('_validation', {}) if file_row else {}
+    gaps = list(dict.fromkeys(gaps + [f['title'] or f['finding_type'] for f in findings
+                                    if f['category'] == 'metadata' and (f['finding_type'] != 'library_retag' or not gaps)]))
     scan_status = metadata_scan_status(file_row)
     fstat = file_status(file_row, t["canonical_track_id"])
     if linked_from and fstat == "present":
@@ -1617,9 +1625,9 @@ def _serialize_track(
             prov = _download_provenance_for_path(
                 conn, file_row["path"], track=t, album=album, artists=artists
             )
-        bitrate = _bitrate_kbps(_first_present(file_row["bitrate"], prov.get("bitrate")))
-        sample_rate = _first_present(file_row["sample_rate"], prov.get("sample_rate"))
-        bit_depth = _first_present(file_row["bit_depth"], prov.get("bit_depth"))
+        bitrate = _bitrate_kbps(file_row["bitrate"])
+        sample_rate = file_row["sample_rate"]
+        bit_depth = file_row["bit_depth"]
         source = _first_present(file_row["source"], prov.get("source_service"))
         has_rg = False
         has_lyrics = False
@@ -1667,6 +1675,7 @@ def _serialize_track(
             # (AcoustID reason, quality-profile fallback) for the Info-tab
             # lifecycle section — populated by the autolink import callback.
             "acoustid_status": file_row["acoustid_status"],
+            "check_findings": [f for f in findings if f['category'] == 'check'],
             "pipeline_result": pipeline_result,
             "source": source,
             "file_state": file_row["file_state"],
@@ -1712,6 +1721,8 @@ def _serialize_track(
         "linked_from": linked_from or None,
         "metadata_gaps": gaps,
         "metadata_scan_status": scan_status,
+        "metadata_validation": validation,
+        "metadata_findings": [f for f in findings if f['category'] == 'metadata'],
         "media_server_sources": media_server_sources or [],
         "user_overrides": overrides,
     }
@@ -1769,6 +1780,8 @@ def _serialize_tracks(conn, tracks: List[Any], album=None) -> List[Dict[str, Any
         artists,
     )
     media_sources = _media_server_sources_many(conn, "track", track_ids)
+    from core.library2.validation import linked_findings_many
+    findings_by_file = linked_findings_many(conn, [*files.values(), *borrowed_files.values()])
     serialized = [
         _serialize_track(
             conn,
@@ -1782,6 +1795,7 @@ def _serialize_tracks(conn, tracks: List[Any], album=None) -> List[Dict[str, Any
             projection=projections[int(track["id"])],
             provenance=provenance.get(int(track["id"]), {}),
             media_server_sources=media_sources.get(int(track["id"]), []),
+            findings=findings_by_file.get((files.get(int(track['id'])) or _borrowed_row(links, borrowed_files, int(track['id'])) or {}).get('id'), []),
         )
         for track in tracks
     ]

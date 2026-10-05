@@ -2087,8 +2087,8 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                 logger.warning("No reliable compilation track number; preserving unknown position")
                 track_number = 0
             else:
-                logger.error(f"Invalid track number ({track_number}), defaulting to 1")
-                track_number = 1
+                logger.warning("Unknown track number; preserving unknown position")
+                track_number = 0
 
         logger.debug(f"FINAL track_number used for filename: {track_number}")
         album_info['track_number'] = track_number
@@ -2104,6 +2104,12 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
         if album_info.get('disc_number') != _resolved_disc:
             logger.info(f"[FIX] Updated album_info disc_number to {_resolved_disc} for consistent metadata")
         album_info['disc_number'] = _resolved_disc
+        from core.library2.validation import import_reference
+        reference = import_reference(context)
+        if reference is not None:
+            context['_metadata_reference'] = reference
+            album_info.update(track_number=reference.get('track_number') or 0, disc_number=reference.get('disc_number') or 0)
+            track_number = album_info['track_number']
 
         _enhance_source_info = get_import_track_info(context).get('source_info') or {}
         if isinstance(_enhance_source_info, str):
@@ -2163,7 +2169,7 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
             else:
                 logger.info("[Metadata Input] album_info: None (single track)")
             _enhance_started = time.time()
-            enhance_file_metadata(file_path, context, artist_context, album_info, runtime=metadata_runtime)
+            context['_metadata_enhanced'] = bool(enhance_file_metadata(file_path, context, artist_context, album_info, runtime=metadata_runtime))
             # The enhancement block is the pipeline's biggest variable cost
             # (external source lookups) and used to be a silent multi-minute
             # gap in the log — always say how long it took.
@@ -2980,7 +2986,8 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                     # task_id/batch_id while post-processing runs.  Keep the
                     # path on the task at the same point we mark it completed.
                     download_tasks[task_id]['final_file_path'] = expected_final_path
-                    download_tasks[task_id]['metadata_enhanced'] = True
+                    download_tasks[task_id]['metadata_enhanced'] = bool(context.get('_metadata_enhanced'))
+                    download_tasks[task_id]['metadata_status'] = context.get('_metadata_status', 'not_checked')
                     if context.get('_verification_status'):
                         download_tasks[task_id]['verification_status'] = context['_verification_status']
                     if context.get('_history_id'):

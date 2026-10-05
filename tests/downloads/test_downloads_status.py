@@ -999,3 +999,15 @@ def test_external_audiobook_progress_survives_music_timeout_and_serializes():
     row = next(item for item in unified['downloads'] if item['task_id'] == 'book')
     assert row['progress'] == 37.5
     assert row['status'] == 'downloading'
+
+
+def test_completed_live_and_history_rows_keep_separate_metadata_verdicts():
+    deps, _ = _build_deps()
+    download_tasks['t1'] = {'status': 'completed', 'track_info': {'title': 'New Track', 'artist': 'Artist'}, 'metadata_status': 'unknown'}
+    deps.get_persistent_download_history = lambda limit: [{'id': 1, 'title': 'Old Track', 'file_path': '/music/old.flac'}]
+    looked_up = []
+    deps.get_metadata_states = lambda paths: looked_up.extend(paths) or {'/music/old.flac': 'issues'}
+    rows = st.build_unified_downloads_response(20, deps)['downloads']
+    assert looked_up == ['/music/old.flac']
+    assert {r['task_id']: (r['status'], r['metadata_status']) for r in rows} == {
+        't1': ('completed', 'unknown'), 'history-1': ('completed', 'issues')}

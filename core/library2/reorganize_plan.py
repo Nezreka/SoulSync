@@ -249,14 +249,9 @@ def plan_album_reorganize(
     ) or "Unknown Artist"
 
     all_rows = _track_rows(conn, album_id)
-    all_tracks = [
-        _effective(conn, "track", r["id"], {
-            "id": r["id"], "title": r["title"],
-            "track_number": r["track_number"], "disc_number": r["disc_number"],
-            "file_path": r["file_path"],
-        })
-        for r in all_rows
-    ]
+    from core.library2.retag import track_contexts
+    references = {r['id']: r['db_data'] for r in track_contexts(conn, [r['id'] for r in all_rows])}
+    all_tracks = [{**references[r['id']], 'id': r['id'], 'file_path': r['file_path']} for r in all_rows]
     tracks = [t for t in all_tracks if t["file_path"]]
     common = {
         "source": None,
@@ -281,7 +276,7 @@ def plan_album_reorganize(
     # suppresses the shared path builder's own disc detection), moved disc 1 out
     # of `Disc 1/`, and moved it straight back the moment disc 2's first file
     # landed — the #1080 oscillation from the other direction.
-    total_discs = max((int(t["disc_number"] or 1) for t in all_tracks), default=1)
+    total_discs = max((int(t.get('total_discs') or t['disc_number'] or 1) for t in all_tracks), default=1)
     filing = _filing(album_row, album)
 
     planned: List[Dict[str, Any]] = []
@@ -316,10 +311,14 @@ def plan_album_reorganize(
         if not item["matched"]:
             planned.append(item)
             continue
+        if track.get('edition_status') == 'unknown' or not track.get('track_number'):
+            item.update(matched=False, reason='Unknown release position; select the release edition in Re-identify')
+            planned.append(item)
+            continue
 
         artists = _credited_artists(conn, track["id"]) or [artist_name]
         context = _build_post_process_context(
-            _as_provider_album({**album, "album_type": filing["type"]},
+            _as_provider_album({**album, "title": track['album_title'], "album_type": filing["type"]},
                                filing["total_tracks"] or release_tracks, total_discs),
             {
                 "id": "",
@@ -330,7 +329,7 @@ def plan_album_reorganize(
                 "artists": [{"name": a} for a in artists],
             },
             artist_name,
-            album_title,
+            track['album_title'],
             total_discs,
             local_title=title,
             local_year=(str(album["year"]) if album.get("year") else None),

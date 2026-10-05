@@ -152,7 +152,7 @@ def test_rescan_refreshes_tag_and_gap_cache_independently_of_quality(
     assert stats == _stats(scanned=1)
     assert json.loads(row["tags_json"])["title"] == "Album One"
     assert json.loads(row["missing_tags_json"]) == ["genre", "cover"]
-    assert json.loads(row["metadata_gaps_json"]) == ["genre", "cover"]
+    assert json.loads(row["metadata_gaps_json"]) == ["genre", "cover", "artwork_database", "artwork_sidecar"]
 
 
 def test_rescan_closes_snapshot_connection_before_file_io(

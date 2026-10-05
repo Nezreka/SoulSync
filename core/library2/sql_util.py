@@ -248,6 +248,21 @@ def entity_visible(conn: Any, entity_type: str, entity_id: int, *, scope=_AMBIEN
                         (int(entity_id),)).fetchone() is not None
 
 
+def library_artist_sql(alias: str) -> str:
+    """Library membership: live files or monitoring intent, across alias groups and credits."""
+    if not _VALID_IDENTIFIER.match(alias):
+        raise ValueError(f'Invalid alias: {alias!r}')
+    intent = intent_profile_id()
+    wanted = f"COALESCE(w.wanted, {monitored_sql('track', 't')})=1"
+    tracks = f"SELECT t.id FROM lib2_tracks t LEFT JOIN lib2_wanted_tracks w ON w.track_id=t.id AND w.profile_id={intent} WHERE {wanted}"
+    return (f"{alias}.id IN (SELECT COALESCE(va.canonical_artist_id,va.id) FROM lib2_artists va WHERE "
+            f"{owned_sql('artist', 'va')} OR {monitored_sql('artist', 'va')}=1 OR va.id IN ("
+            f"SELECT al.primary_artist_id FROM lib2_albums al JOIN lib2_tracks t ON t.album_id=al.id WHERE t.id IN ({tracks}) "
+            f"UNION SELECT ta.artist_id FROM lib2_track_artists ta WHERE ta.track_id IN ({tracks}) "
+            f"UNION SELECT al.primary_artist_id FROM lib2_albums al JOIN lib2_monitor_rules r ON r.entity_type='album' "
+            f"AND r.entity_id=al.id AND r.profile_id={intent} AND r.monitored=1))")
+
+
 def intent_profile_id(scope=_AMBIENT) -> int:
     """Whose monitoring/wanted state a query in this scope should read.
 
@@ -371,6 +386,6 @@ def scoped_primary_file_join(track_alias: str, file_alias: str, *, scope=_AMBIEN
             f" ORDER BY {primary_order('pf')} LIMIT 1)")
 
 
-__all__ = ["ANY_OWNER", "in_library_sql", "intent_profile_id", "monitored_sql", "owned_sql",
+__all__ = ["ANY_OWNER", "in_library_sql", "intent_profile_id", "library_artist_sql", "monitored_sql", "owned_sql",
            "owner_clause", "scoped_primary_file_join",
            "scope_visibility_sql", "scoped_monitored", "select_existing_ids"]

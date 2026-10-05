@@ -171,6 +171,7 @@ class StatusDeps:
     # ('unverified', 'force_imported') — no recency limit, so historical
     # entries are never buried by the general history tail cap.
     get_unverified_download_history: Optional[Callable[[], list[dict]]] = None
+    get_metadata_states: Optional[Callable] = None
 
 
 # _STREAMING_SOURCE_NAMES (imported above): the engine fallback below applies
@@ -457,6 +458,7 @@ def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: d
                 # 'verified' / 'unverified' / 'force_imported' — set by the
                 # import pipeline once post-processing finishes.
                 'verification_status': task.get('verification_status'),
+                'metadata_status': task.get('metadata_status'),
                 # Authenticated playback-queue polling needs the verified,
                 # imported file before it can turn a missing queue row into a
                 # playable library row. Never expose a staging path.
@@ -955,6 +957,7 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                 'progress': progress,
                 'error': task.get('error_message') or task.get('error'),
                 'verification_status': task.get('verification_status'),
+                'metadata_status': task.get('metadata_status'),
                 # library_history row id (set at import) so the Unverified review
                 # queue can act on a still-live completed task before it becomes
                 # a persistent-history row.
@@ -1041,6 +1044,14 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
     # until the batch drained. `limit` now bounds only the persistent-history
     # tail (handled above); live in-memory tasks are always returned in full
     # (they're already bounded by the 5-min cleanup automation).
+    if deps.get_metadata_states:
+        try:
+            states = deps.get_metadata_states([i['file_path'] for i in items if i.get('file_path')])
+            for item in items:
+                if item.get('file_path') in states:
+                    item['metadata_status'] = states[item['file_path']]
+        except Exception as exc:
+            logger.warning('Download metadata states unavailable: %s', exc)
     items.sort(key=lambda x: (x['priority'], -x['timestamp']))
 
     # Build batch summaries for the batch context panel

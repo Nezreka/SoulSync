@@ -661,10 +661,9 @@ def sync_wishlist_addition(
 ) -> Dict[str, int]:
     """Feature-gated, best-effort adapter for user-facing Wishlist adds (dd28-12).
 
-    Deliberately NOT hooked into ``db.add_to_wishlist`` itself: the mirror
-    outbox replays adds through that very method, and a reverse edge there
-    would feed the mirror its own output. Only genuine user/API-initiated adds
-    reach this adapter.
+    Database writes now materialize intent transactionally. This adapter
+    remains for callers that supply descriptors; projection mirrors bypass
+    materialization so inherited rules are not turned into explicit intent.
     """
     try:
         if not _is_admin_profile(profile_id) or not descriptors:
@@ -941,7 +940,7 @@ def reconcile_track_wishlist(
     from core.library2.wishlist_mirror import mirror_projected_tracks_wishlist
 
     stats = {"scanned": 0, "wanted": 0, "wishlisted": 0,
-             "added": 0, "pruned": 0, "refreshed": 0, "mirrored": 0}
+             "added": 0, "pruned": 0, "refreshed": 0, "mirrored": 0, 'intent_repaired': 0}
     try:
         from core.library2.bootstrap import bootstrap_is_active
         pruning_allowed = not bootstrap_is_active(db)
@@ -949,8 +948,23 @@ def reconcile_track_wishlist(
         logger.debug("bootstrap activity check unavailable: %s", exc)
         pruning_allowed = False
     with closing(db._get_connection()) as conn:
+        # Recover old external queue entries before deriving the prune set.
+        # Library-v2 outbox entries retain the authoritative Library decision.
+        conn.execute('BEGIN IMMEDIATE')
+        columns = {r[1] for r in conn.execute('PRAGMA table_info(wishlist_tracks)')}
+        if {'id', 'spotify_data', 'source_info', 'quality_profile_id', 'profile_id'} <= columns:
+            from core.library2.materialize import materialize_wishlist_row
+            for row in conn.execute('SELECT id FROM wishlist_tracks WHERE profile_id=?', (profile_id,)).fetchall():
+                if should_stop and should_stop():
+                    conn.commit()
+                    return stats
+                before = conn.total_changes
+                materialize_wishlist_row(conn, row['id'], profile_id=profile_id)
+                stats['intent_repaired'] += int(conn.total_changes > before)
         recompute_stats = recompute_wanted(conn, profile_id=profile_id)
         conn.commit()
+        from core.library2.validation import notify_changes
+        notify_changes()
         changed_set = set(recompute_stats.get("changed_track_ids") or [])
 
         wanted = wanted_track_ids(conn, profile_id=profile_id)

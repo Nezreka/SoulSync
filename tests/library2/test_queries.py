@@ -179,7 +179,7 @@ def test_list_artists_aggregate_sorts_choose_page_before_rollups(imported_conn):
     assert [artist["name"] for artist in by_tracks] == ["Drake"]
 
     artist_id = imported_conn.execute(
-        "INSERT INTO lib2_artists(name, sort_name) VALUES('Many Albums', 'Many Albums')"
+        "INSERT INTO lib2_artists(name, sort_name, monitored) VALUES('Many Albums', 'Many Albums', 1)"
     ).lastrowid
     for number in range(2):
         album_id = imported_conn.execute(
@@ -708,8 +708,8 @@ def test_album_detail_batches_legacy_download_provenance(imported_conn):
     track = next(item for item in album["tracks"] if item["title"] == "One Dance")
 
     assert track["file"]["source"] == "exact-source"
-    assert track["file"]["sample_rate"] == 96000
-    assert track["file"]["bit_depth"] == 24
+    assert track["file"]["sample_rate"] is None  # Download history is not a measured file property.
+    assert track["file"]["bit_depth"] is None
 
 
 def test_confirmed_missing_file_is_not_counted_as_present(imported_conn):

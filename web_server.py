@@ -563,6 +563,8 @@ from core.socketio_cors import (
 )
 _socketio_cors_origins = _resolve_socketio_cors_origins(config_manager)
 socketio = SocketIO(app, async_mode='threading', cors_allowed_origins=_socketio_cors_origins)
+from core.library2 import validation as _library_validation
+_library_validation._change_emitter = lambda payload: socketio.emit('library:changed', payload)
 
 # Wrap Socket.IO as well as Flask; set before serving any requests.
 from core.url_base import configure_url_base
@@ -16099,6 +16101,7 @@ def _build_status_deps():
         get_unverified_download_history=lambda: get_database().get_library_history_unverified(
             exclude_download_sources=('acoustid_scan',),
         ),
+        get_metadata_states=lambda paths: _library_validation.metadata_states(get_database(), paths),
     )
 
 
@@ -23472,6 +23475,7 @@ _register_library_v2_routes(
     get_database=get_database,
     config_get=lambda key, default=None: config_manager.get(key, default),
     config_manager=config_manager,
+    repair_worker_getter=lambda: repair_worker,
     profile_id_getter=get_current_profile_id,
     profile_page_allowed_getter=_library_v2_profile_page_allowed,
     acquisition_submission_adapter_getter=_library_v2_submission_adapter,

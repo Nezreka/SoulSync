@@ -517,6 +517,7 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False, pro
                 'all': False,
                 'skip_wishlist': bool(skip_wishlist),
                 'refresh_only': bool(refresh_only),
+                '_user_initiated': True,
                 'profile_id': int(profile_id),
                 '_automation_id': _playlist_pipeline_state_key(playlist_id, profile_id),
             },

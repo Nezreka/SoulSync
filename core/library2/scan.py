@@ -202,6 +202,7 @@ def _persist_present_observation(
     size: Optional[int] = None,
     tier: Optional[str] = None,
     conn=None,
+    source='scan',
 ) -> Dict[str, bool]:
     """Persist one completed file observation in a short transaction.
 
@@ -231,8 +232,10 @@ def _persist_present_observation(
                 WHERE id=? AND (missing_scan_count<>0 OR missing_since IS NOT NULL)""",
             (int(file_id),),
         )
-        persist_tag_cache(conn, int(file_id), file_tags)
+        persist_tag_cache(conn, int(file_id), file_tags, source=source)
         _persist_verification_observation(conn, int(file_id), file_tags)
+        if size is not None:
+            conn.execute('UPDATE lib2_track_files SET size=? WHERE id=?', (size, int(file_id)))
         if quality is not None:
             conn.execute(
                 """UPDATE lib2_track_files SET
@@ -268,6 +271,7 @@ def rescan_files(
     file_ids: Optional[List[int]] = None,
     progress: ProgressCb = None,
     manual: bool = False,
+    source='scan',
     on_presence_change: Optional[Callable[[List[int]], None]] = None,
 ) -> Dict[str, int]:
     """Probe the files in scope and persist their measured audio properties.
@@ -320,7 +324,7 @@ def rescan_files(
     total = len(rows)
     presence: List[int] = []
     _rescan_loop(database, rows, total, progress=progress, stats=stats,
-                 manual=manual, presence=presence)
+                 manual=manual, presence=presence, source=source)
     logger.info(
         "Library v2 file rescan: %(scanned)d probed, %(updated)d updated, "
         "%(missing)d paths absent, %(path_repointed)d repointed, "
@@ -380,11 +384,13 @@ def _flush_observations(database, pending, stats, presence=None) -> None:
                 stats["recovered"] += 1
                 if presence is not None and track_id:
                     presence.append(int(track_id))
+    from core.library2.validation import notify_changes
+    notify_changes([payload['file_id'] for _, _, payload in pending])
     pending.clear()
 
 
 def _rescan_loop(database, rows, total, *, progress, stats, manual: bool = False,
-                 presence=None) -> None:
+                 presence=None, source='scan') -> None:
     """The per-file body of :func:`rescan_files`, in three ordered phases.
 
     The order is the behaviour, not an implementation detail:
@@ -402,7 +408,7 @@ def _rescan_loop(database, rows, total, *, progress, stats, manual: bool = False
     ``_OBSERVATION_FLUSH_BATCH``).
     """
     unresolved = _probe_rows(database, rows, total, progress=progress, stats=stats,
-                             presence=presence)
+                             presence=presence, source=source)
     if not unresolved:
         return
     repointed, ambiguous, still_missing = _reconcile_drifted_paths(
@@ -413,13 +419,13 @@ def _rescan_loop(database, rows, total, *, progress, stats, manual: bool = False
         # size/quality/tag refresh as every other one, or "Refresh & Scan"
         # would fix the path and leave the metadata stale until the next run.
         _probe_rows(database, repointed, len(repointed), progress=None, stats=stats,
-                    presence=presence)
+                    presence=presence, source=source)
     _observe_missing(database, still_missing, stats=stats, manual=manual,
                      ambiguous=ambiguous, presence=presence)
 
 
 def _probe_rows(database, rows, total, *, progress, stats,
-                presence=None) -> List[Dict[str, Any]]:
+                presence=None, source='scan') -> List[Dict[str, Any]]:
     """Phase 1: measure every file that resolves; return the ones that do not."""
     from core.imports.file_ops import probe_audio_quality
     from core.library2.paths import resolve_lib2_path
@@ -445,7 +451,10 @@ def _probe_rows(database, rows, total, *, progress, stats,
         except Exception as e:  # noqa: BLE001
             logger.debug("probe failed (%s): %s", path, e)
             quality = None
-        size = None
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            size = None
         tier = None
         if quality is not None:
             try:
@@ -459,6 +468,7 @@ def _probe_rows(database, rows, total, *, progress, stats,
             "quality": quality,
             "size": size,
             "tier": tier,
+            "source": source,
         }))
     _flush_observations(database, pending, stats, presence)
     return unresolved

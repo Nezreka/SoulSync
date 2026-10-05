@@ -787,7 +787,7 @@ def test_scan_order_fallback_not_used_for_plain_download(tmp_path, monkeypatch):
     import_pipeline.post_process_matched_download("ctx-1", context, str(source_path), runtime)
 
     assert fallback_calls == []
-    assert library_calls[0]["track_number"] == 1
+    assert library_calls[0]["track_number"] == 0
 
 
 def test_unknown_compilation_track_number_does_not_claim_first_position(tmp_path, monkeypatch):

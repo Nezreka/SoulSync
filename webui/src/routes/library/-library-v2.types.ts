@@ -266,6 +266,7 @@ export interface LibraryV2LinkedFrom {
 }
 
 export interface LibraryV2TrackFile {
+  check_findings?: { id: number; title: string; last_error?: string | null }[];
   /** lib2_track_files row id — used to scope ADR-05 file-delete to a caller
    *  selection (B6 bulk delete from the track table). */
   file_id: number;
@@ -496,6 +497,13 @@ export interface LibraryV2Track {
    *  file's tags. Absent (older cached responses / test fixtures) is treated
    *  as 'scanned' for backward compatibility. */
   metadata_scan_status?: 'scanned' | 'pending' | 'unreadable';
+  metadata_validation?: { status: string; checks: Record<string, string>; checked_at?: string };
+  metadata_findings?: {
+    id: number;
+    title: string;
+    finding_type: string;
+    last_error?: string | null;
+  }[];
   /** Plex/Jellyfin/Navidrome instances that recognised this imported track. */
   media_server_sources?: string[];
   is_missing?: boolean;

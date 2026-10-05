@@ -437,6 +437,10 @@ def annotate_finding_details(
             details=payload,
             config_manager=config_manager,
         )
+        ids = links['direct_files']
+        owners = {row[0] for row in conn.execute(f"SELECT owner_profile_id FROM lib2_track_files WHERE id IN ({','.join('?' for _ in ids)})", ids)} if ids else set()
+        if len(owners) == 1:
+            payload.setdefault('library_owner_id', owners.pop())
     if any(links.values()):
         payload["library_v2"] = {
             "artist_id": links["artists"][0] if links["artists"] else None,
@@ -785,6 +789,8 @@ def sync_repair_change(
             changed_fields=sorted(changed_fields),
         )
         conn.commit()
+    from core.library2.validation import notify_changes
+    notify_changes(links['files'])
     return {
         "enabled": True,
         "reason": "synchronized",

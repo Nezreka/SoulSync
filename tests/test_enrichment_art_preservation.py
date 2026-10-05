@@ -101,7 +101,7 @@ def test_art_survives_when_source_metadata_missing(flac_path):
     # extract_source_metadata returns None -> early return path.
     assert _disk_art(flac_path) == _PNG
     result = _run(flac_path, metadata=None, embed_side_effect=lambda *a, **k: False)
-    assert result is True
+    assert result is False
     assert _disk_art(flac_path) == _PNG  # art preserved on disk
 
 

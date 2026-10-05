@@ -47,10 +47,14 @@ def _artist(conn, name, *, legacy_id, monitored=0, **columns):
     columns.setdefault("sort_name", name)
     cols = ", ".join(["name", "legacy_artist_id", "monitored", *columns])
     holes = ", ".join("?" for _ in range(len(columns) + 3))
-    return conn.execute(
+    artist_id = conn.execute(
         f"INSERT INTO lib2_artists({cols}) VALUES({holes})",
         (name, legacy_id, monitored, *columns.values()),
     ).lastrowid
+    album_id = conn.execute('INSERT INTO lib2_albums(primary_artist_id,title) VALUES(?,?)', (artist_id, name)).lastrowid
+    track_id = conn.execute('INSERT INTO lib2_tracks(album_id,title) VALUES(?,?)', (album_id, name)).lastrowid
+    conn.execute('INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)', (track_id, f'/music/{legacy_id}.flac'))
+    return artist_id
 
 
 def _watch(conn, name, *, profile_id, spotify=None, itunes=None):

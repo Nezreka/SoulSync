@@ -93,6 +93,11 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 logger.error("Could not load audio file with Mutagen: %s", file_path)
                 return False
 
+            metadata = extract_source_metadata(context, artist, album_info)
+            if not metadata:
+                logger.error("Could not extract source metadata; original tags retained.")
+                return False
+
             # Capture any embedded cover art BEFORE we clear it. The rewrite
             # below clears pictures/tags up front, but new art isn't fetched
             # until much later (and may fail / be unavailable / be disabled).
@@ -110,17 +115,6 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 audio_file.tags.clear()
             else:
                 audio_file.add_tags()
-
-            save_audio_file(audio_file, symbols)
-
-            metadata = extract_source_metadata(context, artist, album_info)
-            if not metadata:
-                logger.error("Could not extract source metadata, saving with cleared tags.")
-                # Don't destroy the original art just because we couldn't
-                # enrich the tags — put it back before saving.
-                restore_embedded_art(audio_file, symbols, art_snapshot)
-                save_audio_file(audio_file, symbols)
-                return True
 
             # Discord report (Netti93) — many album-dict construction
             # sites pass `total_tracks: 0` when source data is incomplete
@@ -142,8 +136,8 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
             # edition) lost its disc tag on the clear-then-rewrite and floated
             # ungrouped above the disc sections in Jellyfin/Plex (Sokhi).
             from core.imports.track_number import normalize_disc_number
-            _disc_num = normalize_disc_number(metadata.get('disc_number'))
-            disc_num_str = str(_disc_num)
+            _disc_num = (metadata.get('disc_number') or 0) if context.get('_metadata_reference') else normalize_disc_number(metadata.get('disc_number'))
+            disc_num_str = format_track_number_tag(_disc_num, metadata.get('total_discs'))
             write_multi = cfg.get("metadata_enhancement.tags.write_multi_artist", False)
             from core.metadata.multi_value import genre_values
             genres_out = genre_values(metadata.get("genre"), bool(write_multi))
@@ -211,7 +205,9 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 if _vorbis_total is not None:
                     audio_file["tracktotal"] = [_vorbis_total]
                     audio_file["totaltracks"] = [_vorbis_total]   # legacy readers
-                audio_file["discnumber"] = [disc_num_str]
+                audio_file["discnumber"] = [str(_disc_num)]
+                if metadata.get('total_discs'):
+                    audio_file['disctotal'] = audio_file['totaldiscs'] = [str(metadata['total_discs'])]
             elif isinstance(audio_file, symbols.MP4):
                 if metadata.get("title"):
                     audio_file["\xa9nam"] = [metadata["title"]]
@@ -228,7 +224,7 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 audio_file["trkn"] = [format_track_number_tuple(
                     metadata.get("track_number"), metadata.get("total_tracks")
                 )]
-                audio_file["disk"] = [(_disc_num, 0)]
+                audio_file["disk"] = [format_track_number_tuple(_disc_num, metadata.get('total_discs'))]
 
             from core.metadata.manual import is_manual_context, manual_cover_path, write_manual_marker
             if is_manual_context(context):
@@ -244,8 +240,9 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
             if album_info is not None and metadata.get("musicbrainz_release_id"):
                 album_info["musicbrainz_release_id"] = metadata["musicbrainz_release_id"]
 
-            if cfg.get("metadata_enhancement.embed_album_art", True):
-                embed_album_art_metadata(audio_file, metadata)
+            art_ok = not cfg.get("metadata_enhancement.embed_album_art", True)
+            if not art_ok:
+                art_ok = bool(embed_album_art_metadata(audio_file, metadata) or art_snapshot)
 
             quality = context.get("_audio_quality", "")
             if quality and cfg.get("metadata_enhancement.tags.quality_tag", True) is not False:
@@ -263,14 +260,15 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
             # new art was embedded — that path is unchanged.
             restore_embedded_art(audio_file, symbols, art_snapshot)
 
-            save_audio_file(audio_file, symbols)
+            if not save_audio_file(audio_file, symbols):
+                return False
 
             verified = verify_metadata_written(file_path)
             if verified:
                 logger.info("Metadata enhanced successfully.")
             else:
                 logger.info("Metadata saved but verification found issues (see above).")
-            return True
+            return bool(verified and art_ok)
         except Exception as exc:
             import traceback
 
@@ -280,19 +278,8 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
             logger.warning("[Metadata Debug] Artist: %s", artist.get("name", "MISSING") if artist else "None")
             logger.warning("[Metadata Debug] Album info: %s", album_info.get("album_name", "MISSING") if album_info else "None")
             logger.error("[Metadata Debug] Traceback:\n%s", traceback.format_exc())
-            # The file was saved with tags CLEARED up front (so stale tags never
-            # linger), then the failure-prone enrichment ran. By the time most
-            # failures hit — the external source-id embed / cover-art fetch — the
-            # core tags (album/artist/title/track from the matched context) are
-            # already on the in-memory object but NOT yet on disk; the on-disk
-            # file is still the cleared one. Persist the in-memory tags now (and
-            # restore the original art too, #764) so a mid-enrichment crash leaves
-            # a correctly-tagged file instead of an UNTAGGED one (Sokhi: tracks
-            # landing in Rockbox's 'untagged' bucket after a 'processing failed').
-            #
-            # Previously this save was gated on there being original art to
-            # restore, so an art-less file lost its tags entirely on any crash.
-            # Guarded so a failure here can't mask the original error.
+            # Keep available core tags and original art after a partial failure.
+            # The caller still receives failure and validates the final file.
             try:
                 if audio_file is not None:
                     if art_snapshot:

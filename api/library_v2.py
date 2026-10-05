@@ -252,6 +252,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                    Optional[Callable[..., Dict[str, Any]]] = None,
                                integrity_report_runner:
                                    Optional[Callable[..., Dict[str, Any]]] = None,
+                               repair_worker_getter: Optional[Callable[[], Any]] = None,
                                ) -> None:
     """Attach the Library v2 routes to ``app``.
 
@@ -4944,6 +4945,28 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
         def _run():
             enriched_from = None
+            try:
+                from core.library2.validation import linked_findings
+                from core.library2.track_files import writable_file_rows
+                with closing(_conn()) as conn:
+                    findings = {f['id']: f for file in writable_file_rows(conn, eid)
+                                for f in linked_findings(conn, dict(file))}
+                safe_types = {'library_retag', 'track_number_mismatch', 'missing_cover_art', 'missing_lyrics', 'missing_replaygain', 'metadata_gap'}
+                actionable = [f for f in findings.values() if f['finding_type'] in safe_types]
+                if actionable and repair_worker_getter:
+                    worker = repair_worker_getter()
+                    if worker is None:
+                        raise RuntimeError('Repair worker unavailable')
+                    results = [worker.fix_finding(f['id']) for f in actionable]
+                    failed = [r.get('error', 'Repair incomplete') for r in results if not r.get('success')]
+                    _job_registry.update(job_id, result={'written': sum(bool(r.get('success')) for r in results), 'remaining': len(failed)},
+                                         error='; '.join(failed) or None)
+                    _job_registry.finish(job_id)
+                    return
+            except Exception as exc:
+                _job_registry.update(job_id, error=str(exc))
+                _job_registry.finish(job_id)
+                return
             if album_id:
                 from core.library2.match_status import SERVICES
                 from core.library2.native_enrich import enrich_native_entity_for_service
@@ -5047,6 +5070,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     db, album_ids=album_ids, progress=_progress, manual=True,
                     on_presence_change=presence_changed.extend,
                 )
+                from core.library2.scan import _file_rows_in_scope
+                from core.library2.status import _coerce_tags
+                with closing(db._get_connection()) as conn:
+                    scoped_ids = [r['id'] for r in _file_rows_in_scope(conn, album_ids=album_ids)]
+                    states = []
+                    for start in range(0, len(scoped_ids), 500):
+                        ids = scoped_ids[start:start + 500]
+                        states.extend((_coerce_tags(r[0]).get('_validation') or {}).get('status', 'unknown') for r in conn.execute(
+                            f"SELECT tags_json FROM lib2_track_files WHERE id IN ({','.join('?' for _ in ids)})", ids))
+                    scan_stats.update(metadata_issues=states.count('issues'), metadata_unknown=states.count('unknown'))
                 # A scan is the moment we learn a file is gone or back, and
                 # acquisition is the consumer of exactly that. Handing it over
                 # here — scoped to the tracks that actually changed — is what

@@ -130,7 +130,7 @@ def test_native_path_update_repoints_same_stem_file_versions(
             "SELECT path FROM lib2_track_files WHERE track_id=? AND legacy_track_id IS NULL",
             (track_id,),
         ).fetchone()
-        assert secondary_row["path"] == "/library/Drake/Views/01 One Dance.opus"
+        assert secondary_row["path"].replace('\\', '/') == "/library/Drake/Views/01 One Dance.opus"
 
 
 def test_update_track_path_without_lib2_schema_fails_closed(monkeypatch, tmp_path):

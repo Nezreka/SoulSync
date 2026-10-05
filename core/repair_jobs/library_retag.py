@@ -124,7 +124,10 @@ class LibraryRetagJob(RepairJob):
                 contexts = retag.track_contexts(conn, batch)
             finally:
                 conn.close()
-            for entry in retag.tag_preview(contexts):
+            for row in contexts:
+                subject = by_track[row['id']]
+                row.update(file_id=subject.get('file_id'), file_path=subject['path'])
+            for entry in retag.tag_preview(contexts, on_observation=lambda fid, tags: retag._persist_file_tags(context.db, fid, tags, context.config_manager, self.job_id)):
                 done += 1
                 result.scanned += 1
                 subject = by_track.get(int(entry.get("track_id") or 0)) or {}
@@ -160,6 +163,7 @@ class LibraryRetagJob(RepairJob):
                             "artist": artist,
                             "album": entry.get("album_title"),
                             "diff": diff,
+                            "validation": entry.get('validation'),
                             "has_manual_conflict": bool(entry.get("has_manual_conflict")),
                             "manual_fields": manual_fields,
                         },

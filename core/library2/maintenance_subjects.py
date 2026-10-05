@@ -191,6 +191,10 @@ def active_album_subjects(
                        ar.external_ids AS artist_external_ids,
                        ar.image_url AS artist_image, ar.genres AS artist_genres,
                        ar.monitored AS artist_monitored,
+                       (SELECT fx.id FROM lib2_tracks tx JOIN lib2_track_files fx ON fx.track_id=tx.id
+                        WHERE tx.album_id=al.id AND COALESCE(fx.file_state,'active')='active'{owner}
+                        ORDER BY COALESCE(tx.disc_number,1), COALESCE(tx.track_number,2147483647), fx.id
+                        LIMIT 1) AS file_id,
                        (SELECT fx.path FROM lib2_tracks tx
                          JOIN lib2_track_files fx ON fx.track_id=tx.id
                         WHERE tx.album_id=al.id
@@ -247,6 +251,7 @@ def subject_details(subject: Mapping[str, Any]) -> Dict[str, Any]:
         linked[plural] = [int(value)] if value not in (None, "") else []
     return {
         "library_v2_native": True,
+        "library_owner_id": subject.get('owner_profile_id'),
         "library_v2": linked,
         "dedup_file": {
             "id": subject.get("file_id"),
