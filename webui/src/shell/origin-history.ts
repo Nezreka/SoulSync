@@ -265,8 +265,7 @@ export async function removeSelectedOriginEntries(singleId?: number): Promise<vo
   const ids = singleId !== undefined ? [singleId] : [..._originSelected];
   if (!ids.length) return;
   const what = ids.length === 1 ? 'this track' : `these ${ids.length} tracks`;
-  if (!confirm(`Remove ${what} from download origins? The audio file(s) stay on disk.`))
-    return;
+  if (!confirm(`Remove ${what} from download origins? The audio file(s) stay on disk.`)) return;
   try {
     const resp = await fetch('/api/download-origins/delete', {
       method: 'POST',
