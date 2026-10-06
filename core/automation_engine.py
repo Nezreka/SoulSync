@@ -1352,7 +1352,9 @@ class AutomationEngine:
             return
 
         auto = self.db.get_automation(automation_id)
-        if not auto or not auto.get('enabled'):
+        if not auto or (not auto.get('enabled') and not skip_delay):
+            # A disabled automation never runs on schedule, but an explicit
+            # manual Run Now (skip_delay=True) always executes it.
             return
 
         # Global per-side pause: a scheduled slot is skipped but the schedule
