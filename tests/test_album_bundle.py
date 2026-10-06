@@ -1873,3 +1873,45 @@ def test_music_size_limit_uses_album_duration_and_never_falls_back_to_oversized(
     fits = _Release('Artist Album FLAC', 400_000_000, seeders=5)
     assert pick_best_album_release([huge, fits], _flac_quality_guess, expected_duration_seconds=2700) is fits
     assert pick_best_album_release([huge], _flac_quality_guess, expected_duration_seconds=2700) is None
+
+
+def test_resolve_single_file_in_client_category_subfolder(tmp_path: Path) -> None:
+    """the download root is the client's Incoming folder and the audiobooks
+    category saves one level down. the file is at <root>/Audiobooks/<file>,
+    never <root>/<file>, so the bare basename lookup missed it."""
+    incoming = tmp_path / "Incoming"
+    (incoming / "Audiobooks").mkdir(parents=True)
+    book = incoming / "Audiobooks" / "Columbus Day (R.C. Bray).m4b"
+    book.write_bytes(b"fake-m4b")
+    cfg = _cfg({'download_source.torrent_download_path': str(incoming)})
+    reported = r"\\10.10.16.115\Media\Torrents\Incoming\Audiobooks\Columbus Day (R.C. Bray).m4b"
+    assert resolve_reported_save_path(reported, config_get=cfg) == str(book)
+
+
+def test_resolve_category_subfolder_beats_same_name_at_root(tmp_path: Path) -> None:
+    """parent + name is the more specific match: a same-named file at the
+    root (an older grab) must not win over the one in the reported folder,
+    even when the root copy is newer."""
+    import os
+    incoming = tmp_path / "Incoming"
+    (incoming / "Audiobooks").mkdir(parents=True)
+    book = incoming / "Audiobooks" / "Book.m4b"
+    book.write_bytes(b"right")
+    stale = incoming / "Book.m4b"
+    stale.write_bytes(b"wrong")
+    os.utime(book, (1_000_000, 1_000_000))
+    cfg = _cfg({'download_source.torrent_download_path': str(incoming)})
+    reported = r"\\NAS\Media\Incoming\Audiobooks\Book.m4b"
+    assert resolve_reported_save_path(reported, config_get=cfg) == str(book)
+
+
+def test_resolve_bare_basename_still_works_without_the_parent(tmp_path: Path) -> None:
+    """no category subfolder on this side: the bare name at the root still
+    resolves like before."""
+    incoming = tmp_path / "Incoming"
+    incoming.mkdir()
+    book = incoming / "Book.m4b"
+    book.write_bytes(b"x")
+    cfg = _cfg({'download_source.torrent_download_path': str(incoming)})
+    assert resolve_reported_save_path(r"\\NAS\Media\Whatever\Audiobooks\Book.m4b",
+                                      config_get=cfg) == str(book)

@@ -1320,12 +1320,23 @@ def resolve_reported_save_path(
     #    short/partial file. A remaining known limitation: Unicode
     #    normalization mismatches (NFC reported vs NFD on disk) fail closed
     #    here, like the directory check always did.
-    basename = Path(normalized).name
-    if basename:
+    #
+    #    the parent folder is tried first: a client category that saves into
+    #    its own subfolder ('audiobooks/Book.m4b') lands one level down, not
+    #    at the root. the longer tail is the more specific match, so it wins
+    #    over a same-named file sitting at the root.
+    tail_parts = [part for part in Path(normalized).parts
+                  if part not in ('', '.', '..') and '/' not in part]
+    tails = []
+    if len(tail_parts) >= 2:
+        tails.append(Path(tail_parts[-2]) / tail_parts[-1])
+    if tail_parts:
+        tails.append(Path(tail_parts[-1]))
+    for tail in tails:
         best: Optional[str] = None
         best_mtime = -1.0
         for root in _candidate_download_roots(config_get):
-            candidate = Path(root) / basename
+            candidate = Path(root) / tail
             if not (_exists(candidate) and _contains_expected(candidate)):
                 continue
             try:
