@@ -23557,6 +23557,12 @@ app.register_blueprint(_create_podcasts_blueprint())
 from api.audiobooks import create_audiobooks_blueprint as _create_audiobooks_blueprint
 app.register_blueprint(_create_audiobooks_blueprint())
 
+# Sidebar weather (api/sidebar_weather.py): opt-in Open-Meteo fetch with a
+# 30-min lazy cache. Blank weather.location = feature off.
+from api.sidebar_weather import configure as _cfg_sw, create_blueprint as _bp_sw
+_cfg_sw(config_manager=config_manager)
+app.register_blueprint(_bp_sw())
+
 # NOTE: the audiobook wishlist is NOT started here. It is drained by the shared
 # automation engine as the 'audiobook_process_wishlist' system automation, the same
 # way music and video drain theirs — so it can be paused, rescheduled or run by hand

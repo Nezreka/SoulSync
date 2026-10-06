@@ -116,6 +116,9 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='dashboard-premier.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='profiles.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='docs.css', v=static_v) }}">
+    <!-- Sidebar weather: time/temp/condition line, forecast popover, particle
+         scene. Additive — only #sidebar-weather-* selectors inside. -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='sidebar-weather.css', v=static_v) }}">
     <style id="soulsync-initial-appearance">
         :root {
             --accent-rgb: {{ initial_accent_rgb }};
@@ -327,6 +330,7 @@
                         </svg>
                     </button>
                 </div>
+                <!-- sidebar weather mounts here (#sidebar-weather-line) -->
             </div>
             <!-- Everything below the header scrolls as ONE block. The header used to
                  be a sticky child of the scrolling .sidebar, which put it in its own
@@ -9708,6 +9712,67 @@
                                             </div>
                                         </div>
                                     </div><!-- end Artwork Cache body -->
+
+                                    <!-- Sidebar Weather (collapsible tile) -->
+                                    <div class="settings-section-header collapsed" data-stg="advanced"
+                                        onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
+                                        role="button" tabindex="0" aria-expanded="false">
+                                        <span class="settings-section-arrow">&#9660;</span>
+                                        <h3>Sidebar Weather</h3>
+                                        <span class="settings-section-hint">Time, temp &amp; forecast line</span>
+                                    </div>
+                                    <div class="settings-section-body collapsed" data-stg="advanced">
+                                        <div class="settings-group" data-stg="advanced">
+
+                                            <div class="form-group">
+                                                <label>Location:</label>
+                                                <div style="display: flex; gap: 8px;">
+                                                    <input type="text" id="sw-location"
+                                                        placeholder="ZIP or city, e.g. 97501 or Medford">
+                                                    <button class="test-button"
+                                                        onclick="saveSidebarWeatherLocation()">Save</button>
+                                                    <button class="test-button"
+                                                        onclick="clearSidebarWeatherLocation()">Clear</button>
+                                                </div>
+                                                <div class="help-text">
+                                                    No API keys, no setup beyond this — the server looks up the
+                                                    location and fetches the forecast (Open-Meteo, cached 30 min).
+                                                    Clear to turn the feature off.
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label for="sw-enabled"
+                                                    style="display:flex;align-items:center;gap:8px;">
+                                                    <input type="checkbox" id="sw-enabled" checked
+                                                        onchange="toggleSidebarWeatherEnabled()">
+                                                    Show weather in the sidebar
+                                                </label>
+                                            </div>
+                                            <div class="help-text">
+                                                Master switch for the weather line, forecast popover and particle
+                                                scene. The scene also respects your OS "reduce motion" setting.
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label for="sw-celsius"
+                                                    style="display:flex;align-items:center;gap:8px;">
+                                                    <input type="checkbox" id="sw-celsius"
+                                                        onchange="saveSidebarWeatherUnits()">
+                                                    Use &deg;C instead of &deg;F
+                                                </label>
+                                            </div>
+                                            <div class="help-text">
+                                                Auto-detected from the location (&deg;F for US, &deg;C elsewhere) —
+                                                flip it here if you prefer the other.
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label>Status:</label>
+                                                <span id="sw-status" class="readonly-field">Loading...</span>
+                                            </div>
+                                        </div>
+                                    </div><!-- end Sidebar Weather body -->
 
                                     <div class="settings-experimental-break" data-stg="advanced" role="separator"
                                         aria-label="Experimental features">

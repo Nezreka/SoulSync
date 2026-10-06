@@ -1129,6 +1129,9 @@ function switchSettingsTab(tab) {
     if (tab === 'advanced' && typeof loadImageCacheStatus === 'function') {
         try { loadImageCacheStatus(); } catch (e) { }
     }
+    if (tab === 'advanced' && typeof loadSidebarWeatherSettings === 'function') {
+        try { loadSidebarWeatherSettings(); } catch (e) { }
+    }
     // First time the Downloads tab is shown, auto-probe source status so the
     // dots reflect real connection state without a manual "Test all sources".
     if (tab === 'downloads' && typeof autoTestSourcesOnce === 'function') {
@@ -8690,6 +8693,151 @@ async function runImageCacheClear() {
         _imgCacheStatus('Could not clear the cache: ' + e.message, 'error');
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Clear cache'; }
+    }
+}
+
+// == SIDEBAR WEATHER (Advanced tab)               ==
+// Opt-in weather line / forecast popover / particle scene in the sidebar.
+// No API keys: the server geocodes the location once and caches Open-Meteo
+// snapshots for 30 minutes.
+
+async function _swApi(method, path, body) {
+    const resp = await fetch('/api/weather' + path, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return resp.json();
+}
+
+function _swStatus(text) {
+    const el = document.getElementById('sw-status');
+    if (el) el.textContent = text;
+}
+
+function _swRebootSidebar() {
+    // the shell bundle exports bootSidebarWeather on window; re-run it so the
+    // sidebar line/popover/scene pick up the change without a page reload
+    if (typeof window.bootSidebarWeather === 'function') {
+        try {
+            // bootSidebarWeather is async: a .catch keeps a rejected promise
+            // from surfacing as an unhandled rejection
+            Promise.resolve(window.bootSidebarWeather()).catch(function (e) {
+                console.warn('sidebar weather re-boot failed', e);
+            });
+        } catch (e) {
+            console.warn('sidebar weather re-boot failed', e);
+        }
+    } else {
+        console.warn('sidebar weather re-boot skipped: bootSidebarWeather is not on window');
+    }
+}
+
+async function loadSidebarWeatherSettings() {
+    try {
+        const data = await _swApi('GET', '');
+        // GET /api/weather always answers success:true. A missing snapshot just
+        // means no forecast is cached yet — the sidebar stays empty until then.
+        if (!data || data.success !== true) {
+            _swStatus('Could not load weather settings');
+            return;
+        }
+        const loc = document.getElementById('sw-location');
+        if (loc && document.activeElement !== loc) loc.value = data.location ? data.location.query || '' : '';
+        const en = document.getElementById('sw-enabled');
+        if (en) en.checked = data.enabled !== false;
+        const c = document.getElementById('sw-celsius');
+        if (c) c.checked = data.units === 'celsius';
+        if (data.location && data.snapshot) {
+            const cur = data.snapshot.current;
+            const t = cur && typeof cur.temp === 'number' ? Math.round(cur.temp) : null;
+            const unit = data.units === 'celsius' ? '°C' : '°F';
+            _swStatus(t === null
+                ? `${data.location.name} — waiting for first forecast`
+                : `${data.location.name} — ${t}${unit}, updated ${data.snapshot.fetched_at || 'recently'}`);
+        } else if (data.location) {
+            // enabled=false also yields a null snapshot — say so instead of
+            // implying a fetch failure
+            _swStatus(data.enabled === false
+                ? `${data.location.name} — weather display off`
+                : `${data.location.name} — forecast unavailable right now`);
+        } else {
+            _swStatus('Off — set a location to turn it on');
+        }
+    } catch (e) {
+        console.error('sidebar weather settings failed', e);
+        _swStatus('Could not load weather settings');
+    }
+}
+
+async function saveSidebarWeatherLocation() {
+    const input = document.getElementById('sw-location');
+    const location = input ? input.value.trim() : '';
+    if (!location) {
+        if (typeof showToast === 'function') showToast('Enter a ZIP or city first', 'error');
+        return;
+    }
+    try {
+        const data = await _swApi('PUT', '/location', { location });
+        if (data.success) {
+            if (typeof showToast === 'function') showToast(`Weather location set to ${data.location.name}`, 'success');
+            loadSidebarWeatherSettings();
+            _swRebootSidebar();
+        } else if (typeof showToast === 'function') {
+            showToast(data.error || 'Could not resolve that location', 'error');
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Could not save location: ' + e.message, 'error');
+    }
+}
+
+async function clearSidebarWeatherLocation() {
+    try {
+        const data = await _swApi('PUT', '/location', { location: '' });
+        if (data.success) {
+            if (typeof showToast === 'function') showToast('Sidebar weather turned off', 'success');
+            const input = document.getElementById('sw-location');
+            if (input) input.value = '';
+            loadSidebarWeatherSettings();
+            _swRebootSidebar();
+        } else if (typeof showToast === 'function') {
+            showToast(data.error || 'Could not clear the location', 'error');
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Could not clear location: ' + e.message, 'error');
+    }
+}
+
+async function toggleSidebarWeatherEnabled() {
+    const el = document.getElementById('sw-enabled');
+    const enabled = el ? el.checked : true;
+    try {
+        const data = await _swApi('PUT', '/display', { enabled });
+        if (data.success) {
+            if (typeof showToast === 'function') showToast(enabled ? 'Sidebar weather on' : 'Sidebar weather off', 'success');
+            _swRebootSidebar();
+        } else if (typeof showToast === 'function') {
+            showToast(data.error || 'Could not update the setting', 'error');
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Could not update the setting: ' + e.message, 'error');
+    }
+}
+
+async function saveSidebarWeatherUnits() {
+    const el = document.getElementById('sw-celsius');
+    const use_celsius = el ? el.checked : false;
+    try {
+        const data = await _swApi('PUT', '/units', { use_celsius });
+        if (data.success) {
+            if (typeof showToast === 'function') showToast(`Using °${use_celsius ? 'C' : 'F'}`, 'success');
+            loadSidebarWeatherSettings();
+            _swRebootSidebar();
+        } else if (typeof showToast === 'function') {
+            showToast(data.error || 'Could not update units', 'error');
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Could not update units: ' + e.message, 'error');
     }
 }
 
