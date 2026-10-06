@@ -48,7 +48,7 @@ class _FakeDB:
 
     def add_to_wishlist(self, payload, *, source_type="album", source_info=None,
                         user_initiated=False, profile_id=1, quality_profile_id=None,
-                        raise_on_error=False):
+                        raise_on_error=False, failure_reason=None):
         self.added.append(payload.get("id"))
         return True
 

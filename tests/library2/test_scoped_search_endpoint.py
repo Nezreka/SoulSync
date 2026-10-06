@@ -30,7 +30,7 @@ class FakeDB:
 
     def add_to_wishlist(self, payload, source_type="unknown", source_info=None,
                         user_initiated=False, profile_id=1, quality_profile_id=None,
-                        raise_on_error=False):
+                        raise_on_error=False, failure_reason=None):
         self.wishlist_adds.append({"id": payload.get("id"), "profile_id": profile_id})
         return True
 

@@ -280,7 +280,13 @@ def _execute_op(db, op: str, data: Dict[str, Any], profile_id: int,
         # approved instead of waiting for an approval nobody is asked for.
         payload = data.get("payload") or {}
         approved = profile_asks_first(db, profile_id)
+        # Why the row is there, not the default "Download failed": nothing was
+        # tried yet when the catalogue asks for a missing track or an upgrade.
+        evaluation = (data.get("source_info") or {}).get("quality_evaluation")
+        reason = {"upgrade_candidate": "Quality upgrade wanted",
+                  "unknown": "Checking for a quality upgrade"}.get(evaluation, "Missing from library")
         db.add_to_wishlist(payload,
+                           failure_reason=reason,
                            source_type=data.get("source_type", "album"),
                            source_info=data.get("source_info") or {},
                            user_initiated=user_initiated,

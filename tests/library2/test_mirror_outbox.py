@@ -34,14 +34,15 @@ class FlakyDB:
 
     def add_to_wishlist(self, payload, source_type="unknown", source_info=None,
                         user_initiated=False, profile_id=1, quality_profile_id=None,
-                        raise_on_error=False):
+                        raise_on_error=False, failure_reason="Download failed"):
         if self.fail_adds:
             if raise_on_error:
                 raise RuntimeError("legacy db locked")
             return False
         self.adds.append({"id": payload.get("id"), "profile_id": profile_id,
                           "user_initiated": user_initiated,
-                          "quality_profile_id": quality_profile_id})
+                          "quality_profile_id": quality_profile_id,
+                          "failure_reason": failure_reason})
         return True
 
     def remove_from_wishlist(self, track_id, profile_id=1, raise_on_error=False):
@@ -106,6 +107,8 @@ def test_enqueue_and_drain_happy_path(db):
     assert (result["done"], result["failed"]) == (1, 0)
     assert flaky.adds and flaky.adds[0]["profile_id"] == 7
     assert flaky.adds[0]["user_initiated"] is True
+    # nothing was downloaded yet, so nothing "failed"
+    assert flaky.adds[0]["failure_reason"] == "Missing from library"
     assert _outbox_rows(conn)[0]["status"] == "done"
 
 
