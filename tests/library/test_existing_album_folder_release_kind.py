@@ -162,3 +162,13 @@ def test_blank_record_type_falls_through_to_album_type(tmp_path):
     # A populated record_type wins over a conflicting album_type.
     db = _BothColumnsDb(tracks, record_type="single", album_type="album")
     assert _resolve(tmp_path, db, incoming_album_type="single") == os.path.normpath(folder)
+
+
+def test_single_and_ep_share_a_folder(tmp_path):
+    # spotify calls eps 'single', deezer/itunes call them 'ep'. same release,
+    # so it must not split into a second folder.
+    folder, tracks = _existing_album_folder(tmp_path)
+    db = _Db(tracks, album_type="ep")
+    assert _resolve(tmp_path, db, incoming_album_type="single") == os.path.normpath(folder)
+    db_single = _Db(tracks, album_type="single")
+    assert _resolve(tmp_path, db_single, incoming_album_type="ep") == os.path.normpath(folder)

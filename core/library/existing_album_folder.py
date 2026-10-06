@@ -92,6 +92,8 @@ _RELEASE_KIND_MAP = {
     "compilations": "compilation",
 }
 
+_SHORT_RELEASE_KINDS = frozenset({"single", "ep"})
+
 
 def _normalize_release_kind(value: Any) -> str:
     """Map a raw album_type to a canonical release kind, or "" when unknown."""
@@ -111,6 +113,13 @@ def _release_kinds_compatible(incoming: Any, stored: Any) -> bool:
     incoming_kind = _normalize_release_kind(incoming)
     stored_kind = _normalize_release_kind(stored)
     if not incoming_kind or not stored_kind:
+        return True
+    # single and ep are one class here. spotify files every ep under
+    # album_type 'single' while deezer/itunes write 'ep' for the same release,
+    # and record_type is fill-only, so the row keeps whichever source got there
+    # first. treating them as a mismatch flipped owned eps to missing and
+    # re-downloaded them.
+    if incoming_kind in _SHORT_RELEASE_KINDS and stored_kind in _SHORT_RELEASE_KINDS:
         return True
     return incoming_kind == stored_kind
 

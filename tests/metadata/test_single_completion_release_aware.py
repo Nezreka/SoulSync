@@ -430,3 +430,45 @@ def test_ep_branch_unknown_card_count_trusts_known_single_row(tmp_path):
     card = _single_card(total_tracks=0)
     result = _check(db, card, candidates, tracks)
     assert result["status"] == "completed"
+
+
+def _spotify_ep_library(tmp_path, record_type):
+    # spotify files eps under album_type 'single'; deezer/itunes enrichment
+    # writes 'ep' for the same release. record_type is fill-only, so either
+    # can be on the row.
+    return _build_library(tmp_path, [{
+        "title": "Southern Air B-Sides",
+        "year": 2012,
+        "track_count": 5,
+        "record_type": record_type,
+        "deezer_id": None,
+        "tracks": ["Song A", "Song B", "Song C", "Song D", "Song E"],
+    }])
+
+
+def _spotify_ep_card():
+    return _single_card(id="SP-EP-1", name="Southern Air B-Sides",
+                        total_tracks=5, album_type="single", year=2012)
+
+
+def test_spotify_single_typed_ep_owned_when_row_says_ep(tmp_path):
+    """an owned ep must stay owned when the card says 'single' (spotify) and
+    the row says 'ep' (deezer/itunes enrichment)."""
+    db, candidates, tracks = _spotify_ep_library(tmp_path, "ep")
+    result = _check(db, _spotify_ep_card(), candidates, tracks, source="spotify")
+    assert result["status"] == "completed"
+
+
+def test_spotify_single_typed_ep_download_sees_owned_tracks(tmp_path):
+    """download discography agrees with the page: the ep's tracks count as
+    owned, so they are not grabbed again."""
+    from core.metadata.discography_filters import owned_release_tracks
+
+    db, candidates, tracks = _spotify_ep_library(tmp_path, "ep")
+    owned = owned_release_tracks(
+        db, "Southern Air B-Sides", ARTIST, release_date="2012",
+        expected_tracks=5, server_source="test",
+        candidate_albums=candidates, candidate_tracks=tracks,
+        metadata_source="spotify", card_source_id="SP-EP-1",
+        card_album_type="single")
+    assert len(owned) == 5
