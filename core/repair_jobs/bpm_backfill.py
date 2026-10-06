@@ -153,8 +153,8 @@ class BpmBackfillJob(RepairJob):
                     local_path = file_path if os.path.exists(file_path) else resolve_lib2_path(
                         file_path, config_manager=context.config_manager)
                     if local_path:
-                        from core.sample.analyze import analyze_track
-                        analysis = analyze_track(local_path)
+                        from core.sample.isolated import analyze_track_isolated
+                        analysis = analyze_track_isolated(local_path)
                         bpm_val = analysis.get('bpm')
                         if bpm_val and float(bpm_val) > 0:
                             bpm_value = round(float(bpm_val), 1)

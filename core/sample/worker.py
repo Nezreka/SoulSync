@@ -153,7 +153,7 @@ def track_source(track_id: int) -> tuple:
 
 def _process_one(track_id: int) -> None:
     from . import store
-    from .analyze import ANALYZER_VERSION, analyze_track
+    from .isolated import analyze_track_isolated
 
     if store.is_current(track_id):
         return
@@ -164,7 +164,7 @@ def _process_one(track_id: int) -> None:
     if not path:
         raise RuntimeError(unreachable_message(stored))
     t0 = time.perf_counter()
-    result = analyze_track(path)
+    result = analyze_track_isolated(path)
     store.save_analysis(track_id, result, source_sig=store.source_signature(path))
     logger.info(
         "Analyzed track %s: %.1f BPM, %d onsets, %.1fs (%.1fs)", track_id, result["bpm"], len(result["onsets"]), result["duration_s"], time.perf_counter() - t0
