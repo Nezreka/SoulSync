@@ -13201,6 +13201,12 @@ class MusicDatabase:
             r'\s*\(remastered?\)',
             r'\s*\(anniversary\s*edition?\)',
             r'\s*\(.*version\)',
+            # Release-kind markers, not different recordings: "X (Single)" is
+            # the single release of X (SeadogsBooty: file imports titled
+            # "Ocean Avenue (Single)" must match the "Ocean Avenue" card).
+            r'\s*\(single\)',
+            r'\s*\[single\]',
+            r'\s*-\s*single\s*$',
             r'\s*-\s*deluxe\s*edition?',
             r'\s*-\s*platinum\s*edition?',
             r'\s+deluxe\s*edition?$',

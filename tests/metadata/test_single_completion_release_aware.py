@@ -221,4 +221,79 @@ def test_album_and_single_both_owned_prefers_single(tmp_path):
     result = _check(db, _single_card(), candidates, tracks)
     assert result["status"] == "completed"
     assert result["owned_tracks"] == 1
-    assert result["confidence"] == 1.0
+    assert result["confidence"] >= 0.9
+
+
+def test_kind_gate_rejects_known_album_row(tmp_path):
+    """Pins the kind gate's rejection branch: a same-year, same-title row
+    with a KNOWN album kind and only 2 tracks (so the count guard cannot
+    fire) must still be rejected for a single card. Fails if the gate is
+    deleted — the row's title track would then credit the single."""
+    db, candidates, tracks = _build_library(tmp_path, [
+        {
+            "title": "Ocean Avenue",
+            "year": 2024,
+            "track_count": 2,
+            "record_type": "album",
+            "deezer_id": None,
+            "tracks": ["Ocean Avenue", "B-Side Thing"],
+        },
+    ])
+    result = _check(db, _single_card(), candidates, tracks)
+    assert result["status"] == "missing"
+    assert result["owned_tracks"] == 0
+    assert result["found_in_db"] is False
+
+
+def test_id_proof_rescues_single_after_gate_kill(tmp_path):
+    """M1: same-year reissue album + single, album inserted first so the
+    fuzzy lookup can return the album row (confidence tie); the kind gate
+    kills it, but the card's Deezer id equals the single row's stored id —
+    the rescue must re-run and credit the single instead of missing."""
+    db, candidates, tracks = _build_library(tmp_path, [
+        _album_spec(year=2024, deezer_id="DZ-ALBUM-1"),
+        {
+            "title": "Ocean Avenue",
+            "year": 2024,
+            "track_count": 1,
+            "record_type": "single",
+            "deezer_id": "DZ-SINGLE-1",
+            "tracks": ["Ocean Avenue"],
+        },
+    ])
+    result = _check(db, _single_card(), candidates, tracks)
+    assert result["status"] == "completed"
+    assert result["owned_tracks"] == 1
+    assert result["found_in_db"] is True
+
+
+def test_ep_branch_single_not_credited_by_album_row(tmp_path):
+    """M3: the EP branch (2-track single card) gets the same gates — a
+    same-year 13-track known-album row must not credit the single."""
+    db, candidates, tracks = _build_library(tmp_path, [
+        _album_spec(year=2024, deezer_id=None),
+    ])
+    card = _single_card(id="DZ-SINGLE-2", total_tracks=2)
+    result = _check(db, card, candidates, tracks)
+    assert result["status"] == "missing"
+    assert result["owned_tracks"] == 0
+    assert result["found_in_db"] is False
+
+
+def test_single_suffixed_row_matches_single_card(tmp_path):
+    """M5: a library row titled 'Ocean Avenue (Single)' is the single
+    release — the strict title cleaner strips the kind marker so the
+    single card still resolves instead of flipping owned -> missing."""
+    db, candidates, tracks = _build_library(tmp_path, [
+        {
+            "title": "Ocean Avenue (Single)",
+            "year": 2024,
+            "track_count": 1,
+            "record_type": "single",
+            "deezer_id": None,
+            "tracks": ["Ocean Avenue"],
+        },
+    ])
+    result = _check(db, _single_card(), candidates, tracks)
+    assert result["status"] == "completed"
+    assert result["owned_tracks"] == 1

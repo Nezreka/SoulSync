@@ -191,9 +191,17 @@ def _row_album_type(db: Any, album_id: Any) -> str:
             row = conn.execute(
                 f"SELECT {col} FROM albums WHERE id = ?", (str(album_id),),
             ).fetchone()
-            if row and row[0]:
-                return str(row[0]).strip()
+            # Strip before the truthiness check: a whitespace-only value is
+            # unknown and must fall through to the next column, not return "".
+            val = str(row[0]).strip() if row and row[0] else ""
+            if val:
+                return val
         except Exception as e:
+            # Fail-open by design (pinned by
+            # test_db_without_the_column_falls_back_to_file_tags): any
+            # unreadable kind — missing column on legacy DBs, dead
+            # connection, locked DB — keeps today's reuse instead of
+            # splitting folders or breaking an import.
             logger.debug("%s lookup for album %s failed: %s", col, album_id, e)
         finally:
             if conn is not None:

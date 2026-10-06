@@ -61,6 +61,7 @@ from core.watchlist_scanner import (
     is_remix_version,
     matches_custom_exclude_terms,
 )
+from core.library.existing_album_folder import _release_kinds_compatible
 
 
 def track_artist_matches(track_artists: Any, requested_artist_name: str) -> bool:
@@ -459,6 +460,32 @@ def track_already_owned(
     return bool(match) and confidence >= confidence_threshold
 
 
+def _stored_release_kind_for_gate(db: Any, album_id: Any) -> str:
+    """The library row's known release kind, '' when unknown.
+
+    Mirrors completion._stored_release_kind: ``record_type`` first (the
+    populated column), legacy ``album_type`` as fallback — queried
+    separately so a missing column can't hide the other.
+    """
+    for col in ("record_type", "album_type"):
+        try:
+            conn = db._get_connection()
+            try:
+                row = conn.execute(
+                    f"SELECT {col} FROM albums WHERE id = ?", (str(album_id),)
+                ).fetchone()
+            finally:
+                try:
+                    conn.close()
+                except Exception:  # noqa: S110 - cleanup only
+                    pass
+        except Exception:
+            continue
+        if row and row[0]:
+            return str(row[0]).strip().lower()
+    return ""
+
+
 def owned_release_tracks(
     db: Any,
     album_name: str,
@@ -470,6 +497,7 @@ def owned_release_tracks(
     candidate_tracks: Optional[List[Any]] = None,
     metadata_source: Optional[str] = None,
     card_source_id: Optional[str] = None,
+    card_album_type: Optional[str] = None,
 ) -> Optional[List[Any]]:
     """the library's tracks for THIS release, found the way the artist page
     finds it (check_album_exists_with_completeness, strict, year-gated).
@@ -486,6 +514,12 @@ def owned_release_tracks(
     exemption (and its ID-conflict guard) applies here exactly as on the
     artist page — the downloader's ownership check never disagrees with
     what the page shows.
+
+    `card_album_type` carries the card's release kind ('single', 'ep',
+    'album', ...). For single cards the same release-kind gate + track-count
+    guard as the artist page apply: a known album-kind row (or a 4+ track
+    row) is never this single's release — without it the page says missing
+    while the downloader skips the single's tracks as owned.
 
     [] when the release isn't in the library. None when the lookup failed:
     the caller falls back to the artist-wide check, since a redundant skip is
@@ -511,6 +545,16 @@ def owned_release_tracks(
         return None
     if db_album is None:
         return []
+    if (card_album_type or '').strip().lower() == 'single':
+        _kind = _stored_release_kind_for_gate(db, getattr(db_album, 'id', None))
+        if not _release_kinds_compatible('single', _kind):
+            return []
+        # Count guard scaled to the card's own size, like the artist page:
+        # a single-shaped card (<=3 tracks) is never a 4+ track row; a
+        # larger card is never a row larger than itself.
+        _row_tc = getattr(db_album, 'track_count', None) or 0
+        if _row_tc > max(expected_tracks or 0, 3):
+            return []
     album_id = getattr(db_album, 'id', None)
     if candidate_tracks is not None:
         return [t for t in candidate_tracks if getattr(t, 'album_id', None) == album_id]

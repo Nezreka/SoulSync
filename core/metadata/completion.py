@@ -700,6 +700,9 @@ def check_single_completion(
                 db_album = None
 
             # #1071 identity proof — same rescue as the album path.
+            # (Rescue success is certain proof of the release, so the gates
+            # below skip proven rows.)
+            id_proven = False
             if db_album is None:
                 _proven = _library_album_by_source_id(
                     db, source_chain[0] if source_chain else None,
@@ -708,6 +711,7 @@ def check_single_completion(
                 if _proven is not None:
                     db_album = _proven
                     confidence = 1.0
+                    id_proven = True
                     try:
                         owned_tracks, expected_tracks, is_complete, formats = db.check_album_completeness(
                             _proven.id, total_tracks if total_tracks > 0 else None,
@@ -715,21 +719,70 @@ def check_single_completion(
                     except TypeError:
                         owned_tracks, expected_tracks, is_complete, formats = db.check_album_completeness(
                             _proven.id, total_tracks if total_tracks > 0 else None)
+
+            # Single-type cards (2-3 track singles reach this branch): the
+            # same release-kind gate + track-count guard as the 1-track path.
+            # A single is never satisfied by a known album-kind row or a 4+
+            # track row — the reported bug shape, one branch over. Unknown
+            # kinds/counts stay lenient. EP-type cards keep today's behavior.
+            if db_album is not None and not id_proven and album_type == 'single':
+                _ep_stored_kind = _stored_release_kind(db, getattr(db_album, 'id', None))
+                _ep_killed = False
+                if not _release_kinds_compatible('single', _ep_stored_kind):
+                    logger.debug(
+                        "Single '%s': library row '%s' is a known %s, not the single — missing",
+                        single_name, getattr(db_album, 'title', '?'),
+                        _ep_stored_kind or 'unknown')
+                    _ep_killed = True
                 else:
-                    # EP is not in the library at all — mark missing immediately without
-                    # making expensive external HTTP calls to count tracks on an unowned EP.
-                    return {
-                        "id": single_id,
-                        "name": single_name,
-                        "status": "missing",
-                        "owned_tracks": 0,
-                        "expected_tracks": total_tracks or 0,
-                        "completion_percentage": 0,
-                        "confidence": 0.0,
-                        "found_in_db": False,
-                        "type": album_type,
-                        "formats": [],
-                    }
+                    # Count guard, scaled to the card's own size: a
+                    # single-shaped card (<=3 tracks) is never a 4+ track
+                    # row; a larger card is never a row larger than itself.
+                    # Unknown counts stay lenient.
+                    _ep_row_tc = getattr(db_album, 'track_count', None) or 0
+                    if _ep_row_tc > max(total_tracks or 0, 3):
+                        logger.debug(
+                            "Single '%s': library row '%s' has %s tracks — not the single",
+                            single_name, getattr(db_album, 'title', '?'),
+                            getattr(db_album, 'track_count', '?'))
+                        _ep_killed = True
+                if _ep_killed:
+                    # Gate killed the fuzzy match — re-run the #1071 rescue
+                    # before giving up (same tie-break hazard as the 1-track
+                    # path).
+                    _proven = _library_album_by_source_id(
+                        db, source_chain[0] if source_chain else None,
+                        single_id, candidate_albums,
+                        id_map_cache=album_source_ids_cache)
+                    if _proven is not None:
+                        db_album = _proven
+                        confidence = 1.0
+                        id_proven = True
+                        try:
+                            owned_tracks, expected_tracks, is_complete, formats = db.check_album_completeness(
+                                _proven.id, total_tracks if total_tracks > 0 else None,
+                                completeness_cache=completeness_cache)
+                        except TypeError:
+                            owned_tracks, expected_tracks, is_complete, formats = db.check_album_completeness(
+                                _proven.id, total_tracks if total_tracks > 0 else None)
+                    else:
+                        db_album = None
+
+            if db_album is None:
+                # EP is not in the library at all — mark missing immediately without
+                # making expensive external HTTP calls to count tracks on an unowned EP.
+                return {
+                    "id": single_id,
+                    "name": single_name,
+                    "status": "missing",
+                    "owned_tracks": 0,
+                    "expected_tracks": total_tracks or 0,
+                    "completion_percentage": 0,
+                    "confidence": 0.0,
+                    "found_in_db": False,
+                    "type": album_type,
+                    "formats": [],
+                }
 
             if total_tracks == 0:
                 card_source = source_chain[0] if source_chain else None
@@ -831,18 +884,24 @@ def check_single_completion(
                     )
 
                 id_proven = False
-                if db_album is None:
-                    # #1071 identity proof — same rescue as the EP path: the
-                    # card's provider id equaling a library row's stored id
-                    # for that source is certain proof of the same release.
+
+                def _run_id_rescue():
+                    # #1071 identity proof — the card's provider id equaling
+                    # a library row's stored id for that source is certain
+                    # proof of the same release. Returns (row, confidence,
+                    # proven).
                     _proven = _library_album_by_source_id(
                         db, source_chain[0] if source_chain else None,
                         single_id, candidate_albums,
                         id_map_cache=album_source_ids_cache)
                     if _proven is not None:
-                        db_album = _proven
-                        album_confidence = 1.0
-                        id_proven = True
+                        return _proven, 1.0, True
+                    return None, None, False
+
+                if db_album is None:
+                    _proven, _conf, _ok = _run_id_rescue()
+                    if _ok:
+                        db_album, album_confidence, id_proven = _proven, _conf, True
 
                 if db_album is not None and not id_proven:
                     _stored_kind = _stored_release_kind(db, getattr(db_album, 'id', None))
@@ -865,6 +924,14 @@ def check_single_completion(
                             single_name, getattr(db_album, 'title', '?'),
                             getattr(db_album, 'track_count', '?'))
                         db_album = None
+                    if db_album is None:
+                        # The gate killed the fuzzy match — but the id proof
+                        # is the stronger signal (a same-year reissue album +
+                        # single can tie at confidence 1.0 with the album
+                        # returned first). Re-run the rescue before giving up.
+                        _proven, _conf, _ok = _run_id_rescue()
+                        if _ok:
+                            db_album, album_confidence, id_proven = _proven, _conf, True
 
                 if db_album is not None:
                     # Owned only if the single's track is ON THAT RELEASE —

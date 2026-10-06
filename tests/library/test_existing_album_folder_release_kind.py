@@ -64,7 +64,7 @@ def test_single_does_not_reuse_album_folder(tmp_path):
     folder, tracks = _existing_album_folder(tmp_path)
     db = _Db(tracks, album_type="album")
     assert _resolve(tmp_path, db, incoming_album_type="single") is None
-    assert os.path.normpath(folder)  # sanity: the folder exists
+    assert os.path.isdir(folder)  # sanity: the album folder really exists
 
 
 def test_album_does_not_reuse_single_folder(tmp_path):
@@ -132,3 +132,33 @@ def test_kind_gate_reads_record_type_in_production(tmp_path):
     _folder, tracks = _existing_album_folder(tmp_path)
     db = _ProductionDb(tracks)
     assert _resolve(tmp_path, db, incoming_album_type="single") is None
+
+
+class _BothColumnsDb(_Db):
+    """An older enriched DB carrying BOTH columns: a NULL/blank record_type
+    must fall through to album_type; a populated record_type wins."""
+
+    def __init__(self, tracks, record_type, album_type):
+        super().__init__(tracks, album_type)
+        self._record_type = record_type
+
+    def _get_connection(self):
+        conn = sqlite3.connect(":memory:")
+        conn.execute(
+            "CREATE TABLE albums (id TEXT, musicbrainz_release_id TEXT, "
+            "record_type TEXT, album_type TEXT)")
+        conn.execute(
+            "INSERT INTO albums VALUES ('1', NULL, ?, ?)",
+            (self._record_type, self._album_type))
+        return conn
+
+
+def test_blank_record_type_falls_through_to_album_type(tmp_path):
+    folder, tracks = _existing_album_folder(tmp_path)
+    # record_type NULL/empty/whitespace -> the legacy album_type decides.
+    for blank in (None, "", "   "):
+        db = _BothColumnsDb(tracks, record_type=blank, album_type="album")
+        assert _resolve(tmp_path, db, incoming_album_type="single") is None
+    # A populated record_type wins over a conflicting album_type.
+    db = _BothColumnsDb(tracks, record_type="single", album_type="album")
+    assert _resolve(tmp_path, db, incoming_album_type="single") == os.path.normpath(folder)

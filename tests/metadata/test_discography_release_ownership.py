@@ -211,3 +211,48 @@ def test_owned_release_tracks_deezer_conflicting_id_still_missing(tmp_path):
         candidate_albums=candidates,
         metadata_source='deezer', card_source_id='DZ-375062')
     assert tracks == []
+
+
+def _single_vs_album_library(tmp_path):
+    """Library holds a same-year, same-title KNOWN-album row (the shape the
+    artist page's kind gate rejects for a single card)."""
+    from database.music_database import MusicDatabase
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    with db._get_connection() as conn:
+        conn.execute("INSERT INTO artists (id, name, server_source) VALUES ('AR1', 'Yellowcard', 'test')")
+        conn.execute(
+            "INSERT INTO albums (id, artist_id, title, year, track_count, record_type, server_source) "
+            "VALUES ('AL1', 'AR1', 'Ocean Avenue', 2024, 13, 'album', 'test')")
+        conn.execute(
+            "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, server_source) "
+            "VALUES ('T1', 'AL1', 'AR1', 'Ocean Avenue', 1, '/m/t1.flac', 'test')")
+        conn.commit()
+    return db
+
+
+def test_owned_release_tracks_single_card_rejects_album_row(tmp_path):
+    """M2: the downloader agrees with the artist page — a single card's
+    modal check applies the same kind gate, so the known album row yields
+    [] instead of the album's tracks (which the page would then refuse to
+    queue: a dead end)."""
+    db = _single_vs_album_library(tmp_path)
+    candidates = db.get_candidate_albums_for_artist('Yellowcard', server_source='test')
+    tracks = df.owned_release_tracks(
+        db, 'Ocean Avenue', 'Yellowcard', 1, '2024', 'test',
+        candidate_albums=candidates,
+        metadata_source='deezer', card_source_id='DZ-SINGLE-1',
+        card_album_type='single')
+    assert tracks == []
+
+
+def test_owned_release_tracks_album_card_unaffected_by_gate(tmp_path):
+    """The kind gate is single-cards only — an album card against the same
+    library row still resolves its tracks."""
+    db = _single_vs_album_library(tmp_path)
+    candidates = db.get_candidate_albums_for_artist('Yellowcard', server_source='test')
+    tracks = df.owned_release_tracks(
+        db, 'Ocean Avenue', 'Yellowcard', 13, '2024', 'test',
+        candidate_albums=candidates,
+        metadata_source='deezer', card_source_id='DZ-ALBUM-1',
+        card_album_type='album')
+    assert tracks is not None and len(tracks) == 1
