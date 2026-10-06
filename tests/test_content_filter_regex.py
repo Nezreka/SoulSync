@@ -133,3 +133,10 @@ def test_detect_content_type_still_catches_other_categories():
     assert _detect_content_type("Director's Commentary", "Album") == "commentary"
     assert _detect_content_type("Spoken Word Poem", "") == "spoken_word"
     assert _detect_content_type("A Cappella Version", "") == "acappella"
+
+
+def test_detect_content_type_keeps_musical_interludes_and_introductions():
+    # The fix deletes the file: an album interlude or a classical
+    # "Introduction and Allegro" is music, not an interview or spoken word.
+    assert _detect_content_type("Rich (Interlude)", "To Pimp a Butterfly") is None
+    assert _detect_content_type("Introduction and Allegro", "Ravel: Chamber Works") is None
