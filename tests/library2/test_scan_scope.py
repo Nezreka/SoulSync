@@ -329,6 +329,7 @@ def test_root_health_requires_every_configured_library_mount(tmp_path):
 
     healthy = tmp_path / "music-a"
     healthy.mkdir()
+    (healthy / "Unrelated").mkdir()
 
     class _Config:
         roots = [str(healthy)]
@@ -341,6 +342,53 @@ def test_root_health_requires_every_configured_library_mount(tmp_path):
     assert missing_path_root_is_healthy("/remote/Artist/song.flac", config)
     config.roots.append(str(tmp_path / "offline-mount"))
     assert not missing_path_root_is_healthy("/remote/Artist/song.flac", config)
+
+
+def test_an_empty_mount_point_is_not_a_healthy_root(tmp_path):
+    """An unmounted NFS/SMB share leaves its mount point behind as an empty
+    directory. Calling that healthy confirmed the whole library missing."""
+    from core.library2.paths import missing_path_root_is_healthy
+
+    mount = tmp_path / "music"
+    mount.mkdir()
+
+    class _Config:
+        def get(self, key, default=None):
+            return [str(mount)]
+
+    song = str(mount / "Artist" / "Album" / "song.flac")
+    assert not missing_path_root_is_healthy(song, _Config())
+    (mount / "Other").mkdir()
+    assert missing_path_root_is_healthy(song, _Config())
+
+
+def test_a_mass_disappearance_is_an_outage_not_deletions(tmp_path, monkeypatch):
+    from core.library2 import scan
+
+    conn = row_conn(str(tmp_path / "lib2.db"))
+    ensure_library_v2_schema(conn)
+    conn.execute("INSERT INTO lib2_artists(name) VALUES('A')")
+    conn.execute("INSERT INTO lib2_albums(primary_artist_id, title) VALUES(1,'B')")
+    for i in range(scan.MASS_MISSING_MIN):
+        conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(1,?,?)",
+                     (f"T{i}", i + 1))
+        conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?,?)",
+                     (i + 1, f"/m/{i}.flac"))
+    conn.commit()
+    db_path = str(tmp_path / "lib2.db")
+
+    class _Shim:
+        def _get_connection(self):
+            return row_conn(db_path)
+
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path",
+                        lambda _path, config_manager=None: None)
+    monkeypatch.setattr("core.library2.paths.missing_path_root_is_healthy",
+                        lambda _path: True)
+    stats = scan.rescan_files(_Shim(), manual=True)
+
+    assert stats["mass_missing_deferred"] == scan.MASS_MISSING_MIN
+    assert conn.execute("SELECT DISTINCT file_state FROM lib2_track_files").fetchall()[0][0] == "active"
 
 
 def _tags(**overrides):

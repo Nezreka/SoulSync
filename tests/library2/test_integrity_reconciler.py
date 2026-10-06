@@ -218,6 +218,7 @@ def test_findings_are_bounded_but_counts_cover_full_scan(tmp_path):
     conn = _connection()
     for index in range(3):
         _track(conn, tmp_path / f"missing-{index}.flac")
+    (tmp_path / "still-mounted").mkdir()  # an empty root reads as an unmounted share
     conn.commit()
 
     report = build_integrity_report(

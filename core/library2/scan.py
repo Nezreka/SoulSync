@@ -34,6 +34,12 @@ logger = get_logger("library2.scan")
 
 ProgressCb = Optional[Callable[[str, int, int], None]]
 MISSING_CONFIRMATION_SCANS = 2
+#: A pass that loses at least this many files AND this share of everything it
+#: looked at is treated as storage trouble, not as deletions: an NFS/SMB share
+#: that dropped behind a mount point that still exists looks exactly like this,
+#: and confirming it would queue the whole library for re-download.
+MASS_MISSING_MIN = 50
+MASS_MISSING_SHARE = 0.25
 
 
 def _file_rows_in_scope(
@@ -545,6 +551,14 @@ def _observe_missing(database, rows, *, stats, manual: bool, ambiguous,
     """Phase 3: what survived the drift check is genuinely absent."""
     from core.library2.paths import missing_path_root_is_healthy
 
+    mass = (len(rows) >= MASS_MISSING_MIN
+            and len(rows) > MASS_MISSING_SHARE * (stats["scanned"] + len(rows)))
+    if mass:
+        stats["mass_missing_deferred"] = len(rows)
+        logger.warning(
+            "Library v2 scan: %d of %d files unreachable at once - treating it as "
+            "a storage outage, no file is marked missing", len(rows),
+            stats["scanned"] + len(rows))
     pending: list = []
     for row in rows:
         stats["missing"] += 1
@@ -553,7 +567,7 @@ def _observe_missing(database, rows, *, stats, manual: bool, ambiguous,
         # makes absence credible; on an unmounted library nothing advances.
         pending.append(("missing", row.get("track_id"), {
             "file_id": row["id"],
-            "root_healthy": missing_path_root_is_healthy(row["path"]),
+            "root_healthy": not mass and missing_path_root_is_healthy(row["path"]),
             "allow_confirm": int(row["id"]) not in ambiguous,
             "force_confirm": bool(manual),
         }))

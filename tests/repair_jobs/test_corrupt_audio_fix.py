@@ -98,7 +98,7 @@ def test_a_quarantined_corrupt_file_can_be_restored(tmp_path: Path):
 
 def test_a_file_that_is_already_gone_is_still_queued(tmp_path: Path):
     transfer = tmp_path / 'Transfer'
-    transfer.mkdir()
+    (transfer / 'Other Artist').mkdir(parents=True)  # mounted: not an empty mount point
     gone = transfer / 'gone.flac'
     db, track = _track(tmp_path, gone)
 

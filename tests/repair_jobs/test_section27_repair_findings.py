@@ -118,7 +118,8 @@ def test_a_single_edition_album_is_unchanged(two_edition_conn):
         """
     )
     editions, of_track = _edition_tracklists(two_edition_conn, 1)
-    group_tracks = [{"lib2_track_id": 101, "name": "Song 1", "track_number": 1}]
+    group_tracks = [{"lib2_track_id": 101, "name": "Song 1", "track_number": 1,
+                     "disc_number": 1}]
 
     assert _api_tracks_for_subject(
         {"track_id": 101}, group_tracks, editions, of_track,

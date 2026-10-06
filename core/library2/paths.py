@@ -105,9 +105,22 @@ def resolve_lib2_ancestor(file_path: Any, config_manager: Any = None) -> Optiona
         # ``/music``, ``/tmp``, ``/`` -- and would then call an unmounted share
         # "reachable", which is the exact failure the missing lifecycle's
         # health check exists to prevent (dd28-19).
-        if resolved and os.path.isdir(resolved) and _inside_any(resolved, bases):
+        # A folder below a root proves the storage is mounted; the root itself
+        # only when it is not an empty mount point.
+        if resolved and os.path.isdir(resolved) and _inside_any(resolved, bases) and (
+                os.path.abspath(resolved) not in bases or _populated(resolved)):
             return resolved
     return None
+
+
+def _populated(path: str) -> bool:
+    """An empty directory is what an unmounted share's mount point looks like,
+    so it is no evidence that the storage behind it is reachable."""
+    try:
+        with os.scandir(path) as entries:
+            return any(True for _ in entries)
+    except OSError:
+        return False
 
 
 def _library_base_dirs(config_manager: Any = None) -> list:
@@ -252,12 +265,14 @@ def missing_path_root_is_healthy(file_path: Any, config_manager: Any = None) -> 
     if not isinstance(file_path, str) or not file_path:
         return False
     parent = os.path.dirname(file_path) if os.path.isabs(file_path) else ""
-    if parent and os.path.isdir(parent):
+    if parent and os.path.isdir(parent) and (
+            os.path.abspath(parent) not in _configured_library_roots(config_manager)
+            or _populated(parent)):
         return True
     if resolve_lib2_ancestor(file_path, config_manager):
         return True
     roots = _configured_library_roots(config_manager)
-    return bool(roots) and all(os.path.isdir(root) for root in roots)
+    return bool(roots) and all(os.path.isdir(root) and _populated(root) for root in roots)
 
 
 __all__ = [
