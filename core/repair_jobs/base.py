@@ -191,6 +191,20 @@ def not_locked_sql(cursor, table: str, alias: str = '') -> str:
     return f" AND COALESCE({col}, 0) = 0"
 
 
+
+# a discover playlist leaves one or two loose tracks per artist. that's not
+# the user asking for the artist, so jobs that fill a whole discography or
+# album need a stronger sign (#1572). the watchlist is the deliberate one.
+
+def watchlist_artist_names(cursor) -> set:
+    """casefolded names of every watched artist, any profile. no table (old
+    schema, test double) means nobody is watched"""
+    try:
+        cursor.execute("SELECT artist_name FROM watchlist_artists")
+        return {str(r[0]).strip().casefold() for r in cursor.fetchall() if r[0]}
+    except Exception:  # noqa: BLE001
+        return set()
+
 @dataclass
 class JobResult:
     """Result of a single job scan run."""

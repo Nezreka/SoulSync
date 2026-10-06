@@ -6,6 +6,10 @@ import uuid
 
 class _DummyConfigManager:
     def get(self, key, default=None):
+        # these fixtures own one or two tracks per album to test grouping and
+        # counting; the #1572 min-owned gate has its own tests
+        if key == 'repair.jobs.album_completeness.settings':
+            return {'min_owned_tracks': 0}
         return default
 
     def get_active_media_server(self):

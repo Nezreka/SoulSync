@@ -11,7 +11,7 @@ from core.metadata_service import (
     get_source_priority,
 )
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, watchlist_artist_names
 from core.worker_utils import set_album_api_track_count
 from utils.logging_config import get_logger
 
@@ -39,7 +39,10 @@ class AlbumCompletenessJob(RepairJob):
         '(skips singles and EPs)\n'
         '- Min Completion %: Only flag albums where you already have at least this percentage '
         'of tracks (e.g. 30% skips albums where you only have 1 track from a playlist import, '
-        'but catches albums where a download partially failed)'
+        'but catches albums where a download partially failed)\n'
+        '- Min Owned Tracks: Skip albums you own fewer tracks of than this, so a track or two '
+        'from a playlist doesn\'t make an album incomplete. Watchlist artists are always '
+        'checked. 0 checks every album (default: 3)'
     )
     icon = 'repair-icon-completeness'
     default_enabled = False
@@ -47,6 +50,8 @@ class AlbumCompletenessJob(RepairJob):
     default_settings = {
         'min_tracks_for_check': 3,
         'min_completion_pct': 0,
+        # one or two playlist grabs are not an album the user is collecting (#1572)
+        'min_owned_tracks': 3,
     }
     auto_fix = False
 
@@ -56,6 +61,8 @@ class AlbumCompletenessJob(RepairJob):
         settings = self._get_settings(context)
         min_tracks = settings.get('min_tracks_for_check', 3)
         min_completion_pct = settings.get('min_completion_pct', 0)
+        min_owned_tracks = int(settings.get('min_owned_tracks', 3) or 0)
+        watched = set()
         primary_source = self._get_primary_source()
 
         # Fetch all albums with ANY external source ID — not just Spotify.
@@ -178,6 +185,8 @@ class AlbumCompletenessJob(RepairJob):
                 GROUP BY al.id
             """)
             raw_rows = cursor.fetchall()
+            if min_owned_tracks > 0:
+                watched = watchlist_artist_names(cursor)
             column_index = {
                 alias: idx
                 for idx, (_, alias) in enumerate(select_cols)
@@ -336,6 +345,13 @@ class AlbumCompletenessJob(RepairJob):
             )
             if actual_count == 0 and effective_raw_local_count == 0:
                 result.skipped += 1
+                continue
+
+            if (min_owned_tracks > 0 and actual_count < min_owned_tracks
+                    and str(artist_name or '').strip().casefold() not in watched):
+                result.skipped += 1
+                if context.update_progress and (i + 1) % 5 == 0:
+                    context.update_progress(i + 1, total)
                 continue
 
             if min_completion_pct > 0 and expected_total > 0:
