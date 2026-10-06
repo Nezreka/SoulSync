@@ -36,15 +36,15 @@ def _album_with_two_editions(conn) -> tuple[int, dict]:
             id INTEGER PRIMARY KEY, album_id INT, title TEXT,
             track_number INT, disc_number INT);
         CREATE TABLE lib2_release_editions(
-            id INTEGER PRIMARY KEY, release_group_id INT, is_default INT);
+            id INTEGER PRIMARY KEY, release_group_id INT, is_default INT, track_count INT);
         CREATE TABLE lib2_release_tracks(
             id INTEGER PRIMARY KEY, release_edition_id INT, track_id INT,
             title_override TEXT, track_number INT, disc_number INT);
         """
     )
     album_id = 1
-    conn.execute("INSERT INTO lib2_release_editions VALUES(10, 1, 1)")  # standard
-    conn.execute("INSERT INTO lib2_release_editions VALUES(20, 1, 0)")  # deluxe
+    conn.execute("INSERT INTO lib2_release_editions VALUES(10, 1, 1, 12)")  # standard
+    conn.execute("INSERT INTO lib2_release_editions VALUES(20, 1, 0, 16)")  # deluxe
     ids = {}
     for number in range(1, 13):  # standard pressing: 12 tracks
         track_id = 100 + number
@@ -108,11 +108,11 @@ def test_a_single_edition_album_is_unchanged(two_edition_conn):
             id INTEGER PRIMARY KEY, album_id INT, title TEXT,
             track_number INT, disc_number INT);
         CREATE TABLE lib2_release_editions(
-            id INTEGER PRIMARY KEY, release_group_id INT, is_default INT);
+            id INTEGER PRIMARY KEY, release_group_id INT, is_default INT, track_count INT);
         CREATE TABLE lib2_release_tracks(
             id INTEGER PRIMARY KEY, release_edition_id INT, track_id INT,
             title_override TEXT, track_number INT, disc_number INT);
-        INSERT INTO lib2_release_editions VALUES(10, 1, 1);
+        INSERT INTO lib2_release_editions VALUES(10, 1, 1, 1);
         INSERT INTO lib2_tracks VALUES(101, 1, 'Song 1', 1, 1);
         INSERT INTO lib2_release_tracks VALUES(1, 10, 101, NULL, 1, 1);
         """

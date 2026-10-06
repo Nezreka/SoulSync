@@ -4026,6 +4026,28 @@ class RepairWorker:
         if native_track_id is not None:
             conn = self.db._get_connection()
             try:
+                from core.repair_jobs.track_number_repair import (
+                    _api_tracks_for_subject, _complete_group_tracklist, _edition_tracklists,
+                )
+                track = conn.execute('SELECT album_id FROM lib2_tracks WHERE id=?', (native_track_id,)).fetchone()
+                if track is None:
+                    return {'success': False, 'error': 'Library-v2 track no longer exists'}
+                editions, membership = _edition_tracklists(conn, track['album_id'])
+                group = [] if editions else _complete_group_tracklist(conn, track['album_id'])
+                tracks = _api_tracks_for_subject({'track_id': native_track_id}, group, editions, membership)
+                reference = next((t for t in tracks if t['lib2_track_id'] == native_track_id), None)
+                if reference is None:
+                    return {'success': False, 'retryable': True,
+                            'error': 'Complete, unambiguous release tracklist unavailable; retry after the catalogue is populated.'}
+                disc = reference['disc_number']
+                total = sum(t['disc_number'] == disc for t in tracks)
+                if (int(correct_num) != reference['track_number']
+                        or details.get('total_tracks') not in (None, 0, total)
+                        or details.get('disc_number') not in (None, disc)
+                        or details.get('total_discs') not in (None, 0, len({t['disc_number'] for t in tracks}))):
+                    return {'success': False, 'retryable': True,
+                            'error': 'Release numbering changed; rerun Track Number Repair before applying this finding.'}
+                details = {**details, 'total_tracks': total}
                 cursor = conn.execute(
                     "UPDATE lib2_tracks SET track_number=?, updated_at=CURRENT_TIMESTAMP "
                     "WHERE id=?",

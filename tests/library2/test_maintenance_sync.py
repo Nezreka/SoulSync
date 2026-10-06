@@ -380,9 +380,11 @@ def test_native_track_number_scan_uses_missing_tracks_in_canonical_album_list(
     )
     missing = conn.execute(
         "INSERT INTO lib2_tracks(album_id,title,track_number,disc_number) "
-        "VALUES(?,'Missing Canonical Track',2,1)",
+        "VALUES(?,'Missing Canonical Track',3,1)",
         (existing["album_id"],),
     ).lastrowid
+    conn.execute('UPDATE lib2_albums SET expected_track_count=3 WHERE id=?', (existing['album_id'],))
+    conn.execute('UPDATE lib2_release_editions SET track_count=3 WHERE release_group_id=?', (existing['album_id'],))
     from core.library2.editions import backfill_editions
     backfill_editions(conn.cursor())
     conn.commit()
@@ -428,6 +430,10 @@ def test_native_track_number_fix_updates_the_catalogue(legacy_db, tmp_path):
         "UPDATE lib2_track_files SET path=? WHERE id=?",
         (str(original), native["file_id"]),
     )
+    # The release edition, independently of the stale group position, says 2.
+    conn.execute('UPDATE lib2_release_tracks SET track_number=CASE WHEN track_id=? THEN 2 ELSE 1 END '
+                 'WHERE release_edition_id=(SELECT release_edition_id FROM lib2_release_tracks WHERE track_id=?)',
+                 (native['track_id'], native['track_id']))
     conn.commit()
     conn.close()
     worker = RepairWorker(legacy_db, transfer_folder=str(tmp_path))
@@ -1360,7 +1366,10 @@ def test_track_number_repair_reaches_v2_only_files(legacy_db, tmp_path, monkeypa
     _add_v2_only_file(legacy_db, audio, title="Song")
     from core.library2.editions import backfill_editions
     with closing(legacy_db._get_connection()) as conn, conn:
+        conn.execute("UPDATE lib2_tracks SET track_number=3,disc_number=1 WHERE title='Song'")
         backfill_editions(conn.cursor())
+        conn.execute('UPDATE lib2_release_editions SET track_count=3 WHERE release_group_id='
+                     '(SELECT album_id FROM lib2_tracks WHERE title=\'Song\')')
     transfer = tmp_path / "transfer"
     transfer.mkdir()
     inspected = []

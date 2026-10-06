@@ -95,12 +95,13 @@ def test_correct_ddtt_file_is_not_flagged(tmp_path):
     assert plan is None
 
 
-def test_legacy_whole_album_total_is_not_flagged(tmp_path):
-    """Files the OLD job repaired carry '13/40' (whole-album total). Accepted —
-    otherwise the fix would re-flag every previously-repaired library."""
+def test_legacy_whole_album_total_is_corrected_per_disc(tmp_path):
+    """A confirmed full release lets old whole-album totals converge per disc."""
     f = tmp_path / "0213 - Thirteen Lights.flac"
     _make_flac(f, {'title': 'Thirteen Lights', 'tracknumber': '13/40', 'discnumber': '2/3'})
-    assert _plan_track_repair(str(f), f.name, _box_set_tracklist(), 0.8) is None
+    plan = _plan_track_repair(str(f), f.name, _box_set_tracklist(), 0.8)
+    assert not plan['tag_ok'] and plan['disc_total'] == 14
+    assert plan['new_basename'] is None
 
 
 # ── the mangler is dead: repairs rebuild DDTT, never splice digits ───────────
@@ -113,7 +114,7 @@ def test_wrong_ddtt_prefix_is_rebuilt_not_spliced(tmp_path):
     plan = _plan_track_repair(str(f), f.name, _box_set_tracklist(), 0.8)
     assert plan is not None
     assert plan['new_basename'] == "0213 - Thirteen Lights"
-    assert plan['tag_ok'] is True          # the tag itself was fine
+    assert plan['tag_ok'] is False         # the old whole-album total needs correction
     assert plan['correct_disc'] == 2 and plan['correct_num'] == 13
 
 
@@ -169,10 +170,10 @@ def test_single_disc_all_01_bug_is_still_detected(tmp_path):
         str(tmp_path), sorted(p.name for p in tmp_path.iterdir()),
         anomaly_threshold=3, context=_ctx(findings, tmp_path),
         scan_state={'album_tracks_cache': {}, 'title_similarity': 0.8, 'dry_run': True})
-    # Alpha (track 1) is correct; Beta -> 2 and Gamma -> 3 get findings
-    assert len(findings) == 2
+    # All totals are missing; Beta and Gamma also need their positions fixed.
+    assert len(findings) == 3
     fixed = {f['details']['correct_track_num'] for f in findings}
-    assert fixed == {2, 3}
+    assert fixed == {1, 2, 3}
     # and the proposed renames are plain 2-digit track prefixes
     changes = "\n".join("\n".join(f['details']['changes']) for f in findings)
     assert "02 - Beta Song.flac" in changes and "03 - Gamma Song.flac" in changes

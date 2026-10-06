@@ -115,17 +115,12 @@ class TrackNumberRepairJob(RepairJob):
                         "Canonical tracklist resolution failed for album %s: %s",
                         album_id, exc,
                     )
-                canonical_by_album[album_id] = [dict(row) for row in conn.execute(
-                    """SELECT id AS lib2_track_id, title AS name,
-                              track_number, COALESCE(disc_number, 1) AS disc_number
-                         FROM lib2_tracks WHERE album_id=?
-                     ORDER BY COALESCE(disc_number, 1), track_number, id""",
-                    (album_id,),
-                ).fetchall()]
                 edition_tracks, track_edition = _edition_tracklists(conn, album_id)
                 if edition_tracks:
                     edition_tracks_by_album[album_id] = edition_tracks
                     edition_of_track.update(track_edition)
+                else:
+                    canonical_by_album[album_id] = _complete_group_tracklist(conn, album_id)
         finally:
             conn.close()
 
@@ -958,13 +953,16 @@ def _plan_track_repair(file_path: str, filename: str, api_tracks: List[Dict],
     if correct_num is None:
         return None
     correct_disc = _api_disc_of(matched_track)
-    # tag totals are PER DISC ('13/20'), matching standard tagging — the old
-    # whole-album total is also accepted below so files it wrote stay quiet
+    # Totals are per disc, and every stored alias must agree with that total.
     disc_total = sum(1 for t in api_tracks if _api_disc_of(t) == correct_disc)
 
     current_num, current_total = _read_track_number_tag(audio)
+    stored_totals = [values[0] for key in ('tracktotal', 'totaltracks') if (values := audio.get(key))]
+    if (values := audio.get('tracknumber')) and '/' in str(values[0]):
+        stored_totals.append(str(values[0]).split('/')[1])
     tag_ok = (current_num == correct_num
-              and current_total in (None, disc_total, len(api_tracks)))
+              and current_total == disc_total
+              and all(str(total) == str(disc_total) for total in stored_totals))
     # #1075: per-disc track numbers are meaningless without disc tags — a
     # repair that writes "track 10 of 11" onto a disc-tagless file in a
     # 3-disc folder just manufactures a duplicate track number. On multi-disc
@@ -1067,13 +1065,16 @@ def _fix_track_number_tag(file_path: str, correct_num: int, total: int) -> bool:
             logger.error("Cannot re-open file for tag fix: %s", file_path)
             return False
 
-        track_str = f"{correct_num}/{total}"
+        from core.metadata.track_number_format import format_track_number_tag
+        track_str = format_track_number_tag(correct_num, total)
 
         if isinstance(audio.tags, ID3):
             audio.tags.delall('TRCK')
             audio.tags.add(TRCK(encoding=3, text=[track_str]))
         elif isinstance(audio, (FLAC, OggVorbis)):
             audio['tracknumber'] = [track_str]
+            if total:
+                audio['tracktotal'] = audio['totaltracks'] = [str(total)]
         elif isinstance(audio, MP4):
             audio['trkn'] = [(correct_num, total)]
         else:
@@ -1607,37 +1608,66 @@ def _restore_sidecar(moved_audio: str, original_audio: str) -> None:
 def _edition_tracklists(
     conn: Any, album_id: int,
 ) -> tuple[Dict[int, list[Dict[str, Any]]], Dict[int, list[int]]]:
-    """Per-edition tracklists for one release group, plus a track→editions map.
+    """Complete edition lists and membership, retaining empty/incomplete editions.
 
-    dd28-18: ``lib2_albums`` is the release *group*; the concrete numbering of a
-    given pressing lives in ``lib2_release_tracks``. Returns ``({}, {})`` when
-    the album has no edition rows yet, so callers fall back to the group view
-    (which is correct for a single-edition album).
+    Their presence prevents falling back to the release-group union. Membership
+    must include incomplete editions too, so ambiguity never becomes a guess.
     """
     rows = conn.execute(
-        """SELECT rt.release_edition_id AS edition_id,
+        """SELECT e.id AS edition_id, e.track_count AS expected_count,
                   rt.track_id AS lib2_track_id,
                   COALESCE(rt.title_override, t.title) AS name,
                   rt.track_number,
                   COALESCE(rt.disc_number, 1) AS disc_number
-             FROM lib2_release_tracks rt
-             JOIN lib2_release_editions e ON e.id = rt.release_edition_id
+             FROM lib2_release_editions e
+             LEFT JOIN lib2_release_tracks rt ON e.id = rt.release_edition_id
              LEFT JOIN lib2_tracks t ON t.id = rt.track_id
-            WHERE e.release_group_id = ? AND rt.track_id IS NOT NULL
+            WHERE e.release_group_id = ?
             ORDER BY rt.release_edition_id, COALESCE(rt.disc_number, 1),
                      rt.track_number, rt.id""",
         (int(album_id),),
     ).fetchall()
     by_edition: Dict[int, list[Dict[str, Any]]] = {}
     of_track: Dict[int, list[int]] = {}
+    expected = {}
     for row in rows:
         entry = dict(row)
         edition_id = int(entry.pop("edition_id"))
-        if entry.get("track_number") is None:
-            continue
+        expected[edition_id] = entry.pop("expected_count")
         by_edition.setdefault(edition_id, []).append(entry)
-        of_track.setdefault(int(entry["lib2_track_id"]), []).append(edition_id)
+        if entry.get("lib2_track_id") is not None:
+            of_track.setdefault(int(entry["lib2_track_id"]), []).append(edition_id)
+    for edition_id, tracks in by_edition.items():
+        if (any(t.get('lib2_track_id') is None for t in tracks)
+                or not _complete_tracklist(tracks, expected[edition_id])):
+            by_edition[edition_id] = []
     return by_edition, of_track
+
+
+def _complete_tracklist(tracks, expected):
+    """A known total and every numbered slot are required before counting rows."""
+    if not expected or len(tracks) != expected:
+        return False
+    by_disc = {}
+    for track in tracks:
+        by_disc.setdefault(track.get('disc_number') or 1, []).append(track.get('track_number'))
+    return (set(by_disc) == set(range(1, len(by_disc) + 1))
+            and all(set(numbers) == set(range(1, len(numbers) + 1)) for numbers in by_disc.values()))
+
+
+def _complete_group_tracklist(conn, album_id):
+    """Without editions, only a complete, current provider snapshot is evidence."""
+    from core.library2.completeness import _album_tracklist_context, _snapshot_tracks, _from_a_known_release_id
+    from core.library2.provider_snapshots import get_latest_provider_snapshot
+    context = _album_tracklist_context(conn, album_id)
+    snapshot = get_latest_provider_snapshot(conn, entity_type='album', entity_id=album_id, scope='tracklist')
+    reference = _snapshot_tracks(snapshot, context[1]) if context else None
+    if not reference or not _from_a_known_release_id(context[2], snapshot.provider, snapshot.provider_entity_id):
+        return []
+    tracks = [dict(row) for row in conn.execute(
+        'SELECT id AS lib2_track_id, title AS name, track_number, COALESCE(disc_number,1) AS disc_number '
+        'FROM lib2_tracks WHERE album_id=? ORDER BY disc_number, track_number, id', (album_id,))]
+    return tracks if _complete_tracklist(tracks, len(reference)) else []
 
 
 def _api_tracks_for_subject(

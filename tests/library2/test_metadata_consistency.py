@@ -205,6 +205,152 @@ def test_retag_fixes_separate_total_and_verifies_it(library):
         assert conn.execute('SELECT status FROM repair_findings').fetchone()[0] == 'resolved'
 
 
+def test_track_number_repair_synchronizes_vorbis_totals(library):
+    from core.repair_jobs.track_number_repair import _fix_track_number_tag
+    from core.tag_writer import read_number_pair
+    _, path, _ = library
+    audio = FLAC(path)
+    audio['tracknumber'], audio['tracktotal'], audio['totaltracks'] = ['3/1'], ['1'], ['1']
+    audio.save()
+    assert _fix_track_number_tag(str(path), 7, 13)
+    audio = FLAC(path)
+    assert read_number_pair(audio) == (7, 13)
+    assert audio['tracktotal'] == audio['totaltracks'] == ['13']
+
+
+@pytest.mark.parametrize('dry_run', [True, False])
+@pytest.mark.parametrize('state', ['partial', 'unknown_count', 'empty_edition', 'no_edition'])
+def test_number_scan_waits_for_complete_catalogue(library, monkeypatch, dry_run, state):
+    from core.repair_jobs.base import JobContext
+    from core.repair_jobs.track_number_repair import TrackNumberRepairJob
+    db, path, cfg = library
+    audio = FLAC(path)
+    audio['tracknumber'] = ['3']
+    audio.save()
+    with closing(db._get_connection()) as conn, conn:
+        if state == 'partial':
+            conn.execute('DELETE FROM lib2_release_tracks WHERE track_id<>7')
+        elif state == 'unknown_count':
+            conn.execute('UPDATE lib2_release_editions SET track_count=NULL')
+        else:
+            conn.execute('DELETE FROM lib2_release_tracks')
+            if state == 'no_edition':
+                conn.execute('DELETE FROM lib2_release_editions')
+    def unavailable(*args):
+        raise RuntimeError('Provider unavailable')
+    monkeypatch.setattr('core.library2.completeness.resolve_tracklist', unavailable)
+    job = TrackNumberRepairJob()
+    monkeypatch.setattr(job, '_get_settings', lambda _: {'dry_run': dry_run})
+    findings, before = [], path.read_bytes()
+    context = JobContext(db=db, transfer_folder=str(path.parent), config_manager=cfg,
+                         create_finding=lambda **kw: findings.append(kw) or True)
+    result = job.scan(context)
+    assert not findings and result.auto_fixed == 0
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize('stale_total', [False, True])
+def test_number_approval_rechecks_catalogue_before_any_write(library, stale_total):
+    from core.repair_worker import RepairWorker
+    db, path, cfg = library
+    before = path.read_bytes()
+    with closing(db._get_connection()) as conn, conn:
+        conn.execute('UPDATE lib2_tracks SET track_number=3 WHERE id=7')
+        if not stale_total:
+            conn.execute('UPDATE lib2_release_editions SET track_count=NULL')
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db, worker._config_manager, worker.transfer_folder = db, cfg, str(path.parent)
+    result = worker._fix_track_number('track', 'lib2:7', str(path), {
+        'correct_track_num': 7, 'total_tracks': 1 if stale_total else 13, 'tag_ok': False,
+    })
+    assert not result['success'] and result['retryable']
+    assert path.read_bytes() == before
+    with closing(db._get_connection()) as conn:
+        assert conn.execute('SELECT track_number FROM lib2_tracks WHERE id=7').fetchone()[0] == 3
+
+
+def test_number_scan_retries_after_catalogue_becomes_complete(library, monkeypatch):
+    from core.repair_jobs.base import JobContext
+    from core.repair_jobs.track_number_repair import TrackNumberRepairJob
+    db, path, cfg = library
+    audio = FLAC(path)
+    audio['tracknumber'], audio['tracktotal'] = ['3'], ['1']
+    audio.save()
+    with closing(db._get_connection()) as conn, conn:
+        conn.execute('DELETE FROM lib2_release_tracks WHERE track_id<>7')
+    findings = []
+    context = JobContext(db=db, transfer_folder=str(path.parent), config_manager=cfg,
+                         create_finding=lambda **kw: findings.append(kw) or True)
+    monkeypatch.setattr('core.library2.completeness.resolve_tracklist', lambda *args: None)
+    job = TrackNumberRepairJob()
+    job.scan(context)
+    assert not findings
+    with closing(db._get_connection()) as conn, conn:
+        conn.execute('INSERT INTO lib2_release_tracks(release_edition_id,recording_id,track_id,track_number,disc_number) '
+                     'SELECT 1,id,id,track_number,disc_number FROM lib2_tracks WHERE id<>7')
+    job.scan(context)
+    assert len(findings) == 1
+    assert findings[0]['details']['correct_track_num'] == 7
+    assert findings[0]['details']['total_tracks'] == 13
+
+
+@pytest.mark.parametrize('number,total,legacy_total', [
+    ('7', None, None), ('7/1', '13', '13'), ('7/13', '13', '1'),
+])
+def test_number_scan_detects_missing_or_conflicting_totals(library, number, total, legacy_total):
+    from core.repair_jobs.track_number_repair import _check_single_track, _edition_tracklists
+    db, path, _ = library
+    audio = FLAC(path)
+    audio['tracknumber'] = [number]
+    for key, value in [('tracktotal', total), ('totaltracks', legacy_total)]:
+        if value is None:
+            audio.pop(key, None)
+        else:
+            audio[key] = [value]
+    audio.save()
+    with closing(db._get_connection()) as conn:
+        editions, _ = _edition_tracklists(conn, 1)
+    finding = _check_single_track(str(path), path.name, editions[1], .8)
+    assert finding and not finding['details']['tag_ok']
+    assert finding['details']['total_tracks'] == 13
+
+
+@pytest.mark.parametrize('complete', [False, True])
+@pytest.mark.parametrize('known_release', [False, True])
+def test_group_fallback_requires_complete_provider_snapshot(library, complete, known_release):
+    from core.library2.completeness import _album_tracklist_context
+    from core.library2.provider_adapters import TRACKLIST_PARSER_VERSION
+    from core.library2.provider_snapshots import record_provider_snapshot
+    from core.repair_jobs.track_number_repair import _complete_group_tracklist
+    db, _, _ = library
+    with closing(db._get_connection()) as conn, conn:
+        conn.execute('DELETE FROM lib2_release_tracks')
+        conn.execute('DELETE FROM lib2_release_editions')
+        if known_release:
+            conn.execute("UPDATE lib2_albums SET spotify_id='release-id'")
+        _, reference, _ = _album_tracklist_context(conn, 1)
+        record_provider_snapshot(conn, provider='spotify', entity_type='album', entity_id=1,
+            scope='tracklist', parser_version=TRACKLIST_PARSER_VERSION, is_complete=complete,
+            provider_entity_id='release-id',
+            payload={'reference': reference, 'tracks': [{'title': f'Track {i}', 'track_number': i} for i in range(1,14)]})
+        assert len(_complete_group_tracklist(conn, 1)) == (13 if complete and known_release else 0)
+
+
+def test_number_approval_writes_and_verifies_complete_reference(library):
+    from core.repair_worker import RepairWorker
+    db, path, cfg = library
+    audio = FLAC(path)
+    audio['tracknumber'], audio['tracktotal'], audio['totaltracks'] = ['3/1'], ['1'], ['1']
+    audio.save()
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db, worker._config_manager, worker.transfer_folder = db, cfg, str(path.parent)
+    result = worker._fix_track_number('track', 'lib2:7', str(path), {
+        'correct_track_num': 7, 'total_tracks': 13, 'tag_ok': False,
+    })
+    assert result['success']
+    assert json.loads(observe(library)['metadata_gaps_json']) == []
+
+
 def test_findings_are_visible_only_in_their_own_library(library):
     db, _, _ = library
     row = observe(library)
