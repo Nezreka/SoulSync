@@ -96,8 +96,10 @@ def test_core_tags_survive_when_art_step_raises_on_artless_file(flac_path):
 
 
 def test_core_tags_written_on_happy_path_artless_file(flac_path):
+    # The tags land; the result still says the file is not fully enriched,
+    # because embedding cover art is on and none could be embedded.
     result = _run(flac_path, metadata=dict(_CORE), embed_side_effect=lambda *a, **k: False)
-    assert result is True
+    assert result is False
     f = FLAC(flac_path)
     assert f.get("album") == ["Parachutes"]
     assert f.get("artist") == ["Coldplay"]
