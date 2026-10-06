@@ -388,3 +388,58 @@ def test_1416_membership_nonempty_rotated_out_track_expires(real_db):
                             profile_id=thomas)
     real_db.candidates = [_cand(1, ctx='Thomas Mix')]
     assert _expired_ids(real_db) == {1}
+
+
+# ── matched-id membership: the provider credits the artist differently ──────
+
+def test_scan_still_in_playlist_by_matched_id_protected():
+    # real shape from a discover weekly mirror: the mirror row says
+    # "Good Times Ahead", the deezer match (and so the download) says "GTA".
+    # artist|title misses, the matched id must still protect it.
+    cand = _cand(1, ctx="Discover Weekly", created=OLD)
+    cand.update(artist_name="GTA", title="Little Bit of This (feat. Vince Staples)",
+                source_track_id="132123164")
+    db = _DB(
+        [cand],
+        mirrored=[_mirror(7, "Discover Weekly")],
+        mirror_tracks={7: [{
+            'artist_name': 'Good Times Ahead',
+            'track_name': 'Little Bit of This (feat. Vince Staples)',
+            'source_track_id': '1K0VQGwAHUSavDdPZ2aTAY',
+            'extra_data': '{"matched_data": {"id": "132123164"}, '
+                          '"spotify_hint": {"id": "1K0VQGwAHUSavDdPZ2aTAY"}}',
+        }]},
+    )
+    findings = []
+    ExpiredDownloadCleanerJob().scan(_ctx(db, {'playlist_retention': '1w'}, findings))
+    assert findings == []
+
+
+def test_scan_rotated_out_track_with_unrelated_id_still_expires():
+    # the id check only adds protection for a real id hit; a rotated-out
+    # track whose id is nowhere in the list still expires.
+    cand = _cand(1, ctx="Discover Weekly", created=OLD)
+    cand.update(source_track_id="999")
+    db = _DB(
+        [cand],
+        mirrored=[_mirror(7, "Discover Weekly")],
+        mirror_tracks={7: [{'artist_name': 'Other', 'track_name': 'Song',
+                            'source_track_id': 'abc',
+                            'extra_data': '{"matched_data": {"id": "123"}}'}]},
+    )
+    findings = []
+    res = ExpiredDownloadCleanerJob().scan(_ctx(db, {'playlist_retention': '1w'}, findings))
+    assert res.findings_created == 1
+
+
+def test_origin_cleanup_candidates_carry_source_track_id(tmp_path):
+    from database.music_database import MusicDatabase
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    with db._get_connection() as conn:
+        conn.execute(
+            "INSERT INTO library_history (event_type, title, artist_name, file_path, "
+            "origin, origin_context, source_track_id) "
+            "VALUES ('download', 'T', 'A', '/m/t.flac', 'playlist', 'Mix', '132123164')")
+        conn.commit()
+    rows = db.get_origin_cleanup_candidates()
+    assert rows and rows[0]['source_track_id'] == '132123164'

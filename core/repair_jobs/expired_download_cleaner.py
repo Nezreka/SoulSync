@@ -15,6 +15,7 @@ uses (resolve path → remove file → drop track row → drop history row).
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import datetime, timezone
 from typing import Optional
@@ -33,6 +34,35 @@ from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.expired_download_cleaner")
+
+
+# id keys live in the same set as the artist|title keys. a title key always
+# has a '|', an id key never does, so the two can't collide.
+_ID_KEY = 'id:'
+
+
+def _mirror_track_ids(track: dict) -> list:
+    """every provider id a mirror track is known by: its own source id plus
+    the ids discovery matched it to. the download records the MATCHED id, so
+    matching on artist|title alone misses a track whose artist the matched
+    provider credits differently."""
+    ids = []
+    sid = str(track.get('source_track_id') or '').strip()
+    if sid:
+        ids.append(sid)
+    raw = track.get('extra_data')
+    try:
+        extra = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        extra = None
+    if isinstance(extra, dict):
+        for k in ('matched_data', 'spotify_hint'):
+            sub = extra.get(k)
+            if isinstance(sub, dict):
+                mid = str(sub.get('id') or '').strip()
+                if mid:
+                    ids.append(mid)
+    return ids
 
 
 def _deletion_rationale(entry, min_plays, curated_keys) -> str:
@@ -318,6 +348,7 @@ class ExpiredDownloadCleanerJob(RepairJob):
             key = normalize_track_key(t.get('artist_name'), t.get('track_name'))
             if key:
                 keys.add(key)
+            keys.update(_ID_KEY + tid for tid in _mirror_track_ids(t))
         return keys
 
     def _protection_facts(self, context: JobContext):
@@ -492,10 +523,14 @@ class ExpiredDownloadCleanerJob(RepairJob):
                     c['protected'] = False
                 else:
                     key = normalize_track_key(c.get('artist_name'), c.get('title'))
+                    tid = str(c.get('source_track_id') or '').strip()
                     c['protected'] = bool(
                         not key  # unidentifiable track — cannot prove it left
                         or entry['unreadable']  # membership unknown — keep old behavior
                         or key in entry['keys']  # still in the playlist's track list
+                        # same track by id: the provider can credit the artist
+                        # differently ("GTA" vs "Good Times Ahead")
+                        or (tid and _ID_KEY + tid in entry['keys'])
                     )
             else:
                 c['protected'] = bool(

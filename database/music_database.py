@@ -22123,14 +22123,15 @@ class MusicDatabase:
             cursor.execute("""
                 SELECT lh.id, lh.origin, lh.origin_context, lh.created_at,
                        lh.file_path, lh.title, lh.artist_name,
-                       t.play_count AS play_count
+                       t.play_count AS play_count, lh.source_track_id
                 FROM library_history lh
                 LEFT JOIN tracks t ON t.file_path = lh.file_path
                 WHERE lh.event_type = 'download'
                   AND lh.origin IN ('watchlist', 'playlist')
             """)
             cols = ['id', 'origin', 'origin_context', 'created_at',
-                    'file_path', 'title', 'artist_name', 'play_count']
+                    'file_path', 'title', 'artist_name', 'play_count',
+                    'source_track_id']
             rows = [dict(zip(cols, row, strict=True)) for row in cursor.fetchall()]
 
             # Only pay for the fallback map when the exact join actually missed.
