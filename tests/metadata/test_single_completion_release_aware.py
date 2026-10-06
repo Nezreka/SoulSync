@@ -375,3 +375,58 @@ def test_ep_branch_unknown_card_count_stays_lenient(tmp_path):
     card = _single_card(total_tracks=0)
     result = _check(db, card, candidates, tracks)
     assert result["status"] == "completed"
+
+
+def test_single_card_with_single_suffix_matches_plain_row(tmp_path):
+    """Major B (round 3): the card direction. A card titled
+    'Ocean Avenue (Single)' must match the library's plain-titled single
+    row — the release lookup stripped the marker, but the track check
+    didn't, vetoing the 1.0-confidence release match. The old code
+    returned missing here."""
+    db, candidates, tracks = _build_library(tmp_path, [
+        {
+            "title": "Ocean Avenue",
+            "year": 2024,
+            "track_count": 1,
+            "record_type": "single",
+            "deezer_id": None,
+            "tracks": ["Ocean Avenue"],
+        },
+    ])
+    card = _single_card(name="Ocean Avenue (Single)")
+    result = _check(db, card, candidates, tracks)
+    assert result["status"] == "completed"
+    assert result["owned_tracks"] == 1
+
+
+def test_ep_branch_unknown_card_count_rejects_album_shaped_row(tmp_path):
+    """Major A (round 3): an unknown-count single card plus an unenriched
+    13-track album row must stay missing. The old code skipped the count
+    guard for unknown card sizes, and the 0.6-edition completeness rule
+    then blessed the album row as the single — the reported symptom, one
+    branch over."""
+    db, candidates, tracks = _build_library(
+        tmp_path, [_album_spec(deezer_id=None, record_type=None)])
+    card = _single_card(total_tracks=0)
+    result = _check(db, card, candidates, tracks)
+    assert result["status"] == "missing"
+    assert result["owned_tracks"] == 0
+
+
+def test_ep_branch_unknown_card_count_trusts_known_single_row(tmp_path):
+    """Major A boundary: a 13-track row positively known as a single (the
+    #1289 13-track-single shape) is still trusted when the card count is
+    unknown — the album-shaped rejection only fires on unknown kinds."""
+    db, candidates, tracks = _build_library(tmp_path, [
+        {
+            "title": "Ocean Avenue",
+            "year": 2024,
+            "track_count": 13,
+            "record_type": "single",
+            "deezer_id": None,
+            "tracks": ["Ocean Avenue"] + [f"B{i}" for i in range(2, 14)],
+        },
+    ])
+    card = _single_card(total_tracks=0)
+    result = _check(db, card, candidates, tracks)
+    assert result["status"] == "completed"

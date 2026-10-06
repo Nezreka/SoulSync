@@ -195,7 +195,7 @@ def _row_album_type(db: Any, album_id: Any) -> str:
             # unknown and must fall through to the next column, not return "".
             val = str(row[0]).strip() if row and row[0] else ""
             if val:
-                return val
+                return val.lower()
         except Exception as e:
             # Fail-open by design (pinned by
             # test_db_without_the_column_falls_back_to_file_tags): any

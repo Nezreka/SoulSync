@@ -563,9 +563,10 @@ def owned_release_tracks(
         else:
             # Count guard scaled to the card's own size, like the artist page:
             # a single-shaped card (<=3 tracks) is never a 4+ track row; a
-            # larger card is never a row larger than itself.
+            # larger card is never a row larger than itself. Unknown card
+            # sizes stay lenient, exactly like the page.
             _row_tc = getattr(db_album, 'track_count', None) or 0
-            if _row_tc > max(expected_tracks or 0, 3):
+            if (expected_tracks or 0) > 0 and _row_tc > max(expected_tracks or 0, 3):
                 _gate_killed = True
         if _gate_killed:
             # The gate killed the fuzzy match — but the #1071 id proof is
@@ -585,7 +586,6 @@ def owned_release_tracks(
                     "owned_release_tracks: single '%s' matched only a known %s row — "
                     "not in library", album_name, _kind or 'unknown')
                 return []
-    album_id = getattr(db_album, 'id', None)
     album_id = getattr(db_album, 'id', None)
     if candidate_tracks is not None:
         return [t for t in candidate_tracks if getattr(t, 'album_id', None) == album_id]

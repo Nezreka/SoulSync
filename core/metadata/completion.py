@@ -12,6 +12,7 @@ from core.metadata.lookup import MetadataLookupOptions
 # rule the import folder-reuse fix uses: a known single-vs-album mismatch is
 # never the same release; unknown on either side stays lenient.
 from core.library.existing_album_folder import _release_kinds_compatible
+from database.music_database import strip_single_kind_suffix
 from utils.logging_config import get_logger
 
 logger = get_logger("metadata.completion")
@@ -742,13 +743,27 @@ def check_single_completion(
                     # Count guard, scaled to the card's own size: a
                     # single-shaped card (<=3 tracks) is never a 4+ track
                     # row; a larger card is never a row larger than itself.
-                    # An UNKNOWN card size stays lenient — only a known
-                    # single-shaped card rejects bigger rows. Unknown row
-                    # counts stay lenient too.
+                    # Unknown row counts stay lenient. An unknown CARD size
+                    # stays lenient for EP-shaped rows — but a single is
+                    # never an album-shaped row (>6 tracks, the codebase EP
+                    # cutoff), even when the card can't be sized: without
+                    # this, unknown count + unknown kind lets the
+                    # 0.6-edition completeness rule bless the album row as
+                    # the single — the reported bug, one branch over. A row
+                    # positively known as a single is still trusted (the
+                    # #1289 12-track-single shape).
                     _ep_row_tc = getattr(db_album, 'track_count', None) or 0
                     if total_tracks > 0 and _ep_row_tc > max(total_tracks, 3):
                         logger.debug(
                             "Single '%s': library row '%s' has %s tracks — not the single",
+                            single_name, getattr(db_album, 'title', '?'),
+                            getattr(db_album, 'track_count', '?'))
+                        _ep_killed = True
+                    elif (total_tracks == 0 and _ep_row_tc > 6
+                            and _ep_stored_kind != 'single'):
+                        logger.debug(
+                            "Single '%s': library row '%s' has %s tracks and the card "
+                            "size is unknown — not the single",
                             single_name, getattr(db_album, 'title', '?'),
                             getattr(db_album, 'track_count', '?'))
                         _ep_killed = True
@@ -953,8 +968,18 @@ def check_single_completion(
                         except Exception:
                             release_tracks = []
                     if release_tracks:
+                        # The card name may carry the release-kind marker the
+                        # library file tags don't ("Ocean Avenue (Single)" vs
+                        # "Ocean Avenue") — strip it with the same single-kind
+                        # stripper the release lookup uses, or the track check
+                        # vetoes the 1.0-confidence release match. Single cards
+                        # only: an album/EP card keeps its literal title.
+                        _lookup_title = (
+                            strip_single_kind_suffix(single_name)
+                            if album_type == 'single' else single_name
+                        )
                         db_track, confidence = db.check_track_exists(
-                            title=single_name,
+                            title=_lookup_title,
                             artist=artist_name,
                             confidence_threshold=0.7,
                             server_source=active_server,

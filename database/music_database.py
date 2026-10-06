@@ -96,6 +96,34 @@ def _row_value(row, column: str, default=None):
     return default if value is None else value
 
 
+# Release-kind markers: "X (Single)" is the single release of X, not a
+# different recording (SeadogsBooty: a library file tagged "Ocean Avenue
+# (Single)" must match the "Ocean Avenue" card, and the card titled
+# "Ocean Avenue (Single)" must match a plain "Ocean Avenue" file tag).
+# End-anchored: the marker is a suffix, never mid-title. "(Single Edit)"
+# is deliberately NOT stripped — a single edit can be a different cut,
+# like the radio-edit markers the track cleaner keeps.
+_SINGLE_KIND_SUFFIX_PATTERNS = (
+    r'\s*\(single\)$',
+    r'\s*\[single\]$',
+    r'\s*-\s*single\s*$',
+)
+
+
+def strip_single_kind_suffix(title: str) -> str:
+    """Remove a trailing release-kind marker ("(Single)", "[Single]", "- Single").
+
+    Single-card lookups only: a "(Single)"-titled row IS the single release,
+    but it is not the album/EP of the same name, so album/EP cards must not
+    strip. Shared by the album-title cleaner (release matching) and the
+    single-completion track check (the card name is the release title there).
+    """
+    cleaned = title or ''
+    for pattern in _SINGLE_KIND_SUFFIX_PATTERNS:
+        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
+
+
 def _deezer_id_conflicts_with_card(db, candidate_album_id, card_source_id) -> bool:
     """Does the library candidate carry a stored Deezer id that conflicts with the card's?
 
@@ -13222,19 +13250,16 @@ class MusicDatabase:
             r'\s*-\s+\w+\s+edition\s*$',
         ]
 
-        if strip_single_kind:
-            # Release-kind markers, not different recordings: "X (Single)" is
-            # the single release of X (SeadogsBooty: file imports titled
-            # "Ocean Avenue (Single)" must match the "Ocean Avenue" card).
-            # End-anchored: the marker is a suffix, never mid-title.
-            patterns += [
-                r'\s*\(single\)$',
-                r'\s*\[single\]$',
-                r'\s*-\s*single\s*$',
-            ]
-
         for pattern in patterns:
             cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+
+        if strip_single_kind:
+            # Release-kind markers, not different recordings — shared with
+            # strip_single_kind_suffix so the row direction and the card
+            # direction strip the exact same markers. Runs after the edition
+            # patterns, so stacked suffixes ("X (Single) (Deluxe Edition)")
+            # still fully strip.
+            cleaned = strip_single_kind_suffix(cleaned)
 
         return cleaned.strip()
     
