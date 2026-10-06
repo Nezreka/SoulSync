@@ -102,14 +102,24 @@ describe('library route (live)', () => {
     delete window.showLibraryDownloadsSection;
   });
 
+  // The album route loads lazily; under a full-suite run that alone outlasts
+  // the 1 s default of findBy/waitFor.
   it('browses the library by album and opens one (A07)', async () => {
     const { router } = renderRoute(['/library?section=albums&albumSort=year_desc']);
-    fireEvent.click(await screen.findByRole('button', { name: 'Open Selected Ambient Works' }));
+    fireEvent.click(
+      await screen.findByRole(
+        'button',
+        { name: 'Open Selected Ambient Works' },
+        { timeout: 10_000 },
+      ),
+    );
     expect(
       requested.some((u) => u.includes('library/v2/albums') && u.includes('sort=year_desc')),
     ).toBe(true);
-    await waitFor(() => expect(router.state.location.search).toMatchObject({ album: 7 }));
-  });
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ album: 7 }), {
+      timeout: 10_000,
+    });
+  }, 30_000);
 
   it('is owned by React', () => {
     expect(getShellRouteByPageId('library')?.kind).toBe('react');
