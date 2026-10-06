@@ -39,9 +39,13 @@
   align-items: center;
   gap: 7px;
   padding: 8px 18px;
-  border: 1px solid rgba(30, 215, 96, 0.45);
+  border: 1px solid rgba(var(--accent-light-rgb), 0.45);
   border-radius: 999px;
-  background: linear-gradient(135deg, rgba(30, 215, 96, 0.18) 0%, rgba(16, 185, 129, 0.1) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-light-rgb), 0.18) 0%,
+    rgba(16, 185, 129, 0.1) 100%
+  );
   color: #34d399;
   font-family: inherit;
   font-size: 0.84rem;
@@ -50,18 +54,18 @@
   white-space: nowrap;
   transition: all 0.24s cubic-bezier(0.16, 1, 0.3, 1);
   box-shadow:
-    0 0 20px rgba(30, 215, 96, 0.2),
+    0 0 20px rgba(var(--accent-light-rgb), 0.2),
     inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .statsYearButton:hover {
-  background: linear-gradient(135deg, #1ed760 0%, #10b981 100%);
-  border-color: #1ed760;
+  background: linear-gradient(135deg, var(--accent-light) 0%, #10b981 100%);
+  border-color: var(--accent-light);
   color: #04160b;
   transform: translateY(-1px) scale(1.03);
   box-shadow:
-    0 6px 24px rgba(30, 215, 96, 0.45),
-    0 0 35px rgba(30, 215, 96, 0.3);
+    0 6px 24px rgba(var(--accent-light-rgb), 0.45),
+    0 0 35px rgba(var(--accent-light-rgb), 0.3);
 }
 
 .statsYearButton:active {

@@ -14,7 +14,7 @@
     --dsc-text-primary: #ffffff;
     --dsc-text-secondary: rgba(255, 255, 255, 0.7);
     --dsc-text-muted: rgba(255, 255, 255, 0.45);
-    --dsc-accent-spotify: #1db954;
+    --dsc-accent-spotify: var(--accent);
     --dsc-accent-deezer: #a238ff;
     --dsc-shadow-card: 0 12px 32px rgba(0, 0, 0, 0.45);
     --dsc-shadow-glow: 0 16px 40px rgba(var(--accent-rgb), 0.22);

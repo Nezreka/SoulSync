@@ -9005,14 +9005,14 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 /* Spotify-green download CTA (intentional brand color). */
 .btn--download {
-    background: linear-gradient(135deg, #1db954, #1ed760);
+    background: linear-gradient(135deg, var(--accent), var(--accent-light));
     color: #fff;
-    border: 1px solid rgba(29, 185, 84, 0.3);
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
 }
 .btn--download:hover:not(:disabled) {
-    background: linear-gradient(135deg, #1ed760, #1db954);
+    background: linear-gradient(135deg, var(--accent-light), var(--accent));
     transform: translateY(-1px);
-    box-shadow: 0 8px 24px rgba(29, 185, 84, 0.4);
+    box-shadow: 0 8px 24px rgba(var(--accent-rgb), 0.4);
 }
 
 /* Amber "caution" color (e.g. bulk fix-all). */
@@ -10401,7 +10401,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .gauge-budget-fill {
     height: 100%;
     border-radius: 2px;
-    background: linear-gradient(90deg, rgba(29, 185, 84, 0.7), #1DB954);
+    background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.7), var(--accent));
     transition: width 0.8s ease;
 }
 
@@ -10995,8 +10995,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .backup-list-version {
     font-size: 10px;
-    color: var(--accent-primary, #1db954);
-    background: rgba(29, 185, 84, 0.12);
+    color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.12);
     padding: 1px 6px;
     border-radius: 4px;
     font-weight: 600;
@@ -23902,10 +23902,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 .wishlist-artist-download-btn {
     flex: none; width: 30px; height: 28px; border-radius: 8px; cursor: pointer;
-    border: 1px solid rgba(29,185,84,0.35); background: rgba(29,185,84,0.12);
-    color: #1db954; font-size: 14px; line-height: 1;
+    border: 1px solid rgba(var(--accent-rgb), 0.35); background: rgba(var(--accent-rgb), 0.12);
+    color: var(--accent); font-size: 14px; line-height: 1;
 }
-.wishlist-artist-download-btn:hover { background: rgba(29,185,84,0.28); }
+.wishlist-artist-download-btn:hover { background: rgba(var(--accent-rgb), 0.28); }
 .wishlist-delete-artist-btn { flex: none; }
 
 .wishlist-load-more-btn {
@@ -38318,7 +38318,7 @@ div.artist-hero-badge {
     white-space: nowrap;
     text-shadow: 0 1px 2px rgba(0,0,0,0.5);
 }
-.ya-why-chip.ya-why-genre { background: rgba(29,185,84,0.6); border-color: rgba(29,185,84,0.45); }
+.ya-why-chip.ya-why-genre { background: rgba(var(--accent-rgb), 0.6); border-color: rgba(var(--accent-rgb), 0.45); }
 .ya-why-chip.ya-why-obscure { background: rgba(124,92,224,0.6); border-color: rgba(150,118,240,0.45); }
 .ya-why-chip.ya-why-consensus { background: rgba(0,0,0,0.62); }
 .ya-why-chip.ya-why-explore { background: rgba(255,152,0,0.55); border-color: rgba(255,167,38,0.45); }
@@ -38371,8 +38371,8 @@ div.artist-hero-badge {
     position: absolute; top: 50%; left: 30%; z-index: 2;
     width: 22px; height: 22px; border-radius: 50%;
     transform: translate(-50%, -50%);
-    background: #1DB954; color: #1DB954;
-    box-shadow: 0 0 9px 0 #1DB954, inset 0 0 0 2px rgba(255,255,255,0.5);
+    background: var(--accent); color: var(--accent);
+    box-shadow: 0 0 9px 0 var(--accent), inset 0 0 0 2px rgba(255,255,255,0.5);
     pointer-events: none;  /* the track captures the pointer; the orb is purely visual */
     will-change: left, top;
 }
@@ -39159,7 +39159,7 @@ div.artist-hero-badge {
 .artweb-lens-btn.active { background: rgba(255,255,255,0.14); color: #fff; }
 /* Toolbar toggle buttons (Path, Filter) when engaged */
 #artist-web-container .artmap-tool-btn.active {
-    background: rgba(29,185,84,0.28); border-color: rgba(29,185,84,0.5); color: #fff;
+    background: rgba(var(--accent-rgb), 0.28); border-color: rgba(var(--accent-rgb), 0.5); color: #fff;
 }
 .artist-map-toolbar {
     display: flex; align-items: center; justify-content: space-between;
@@ -40591,7 +40591,7 @@ div.artist-hero-badge {
     width: 15px;
     height: 15px;
     cursor: pointer;
-    accent-color: #1db954;
+    accent-color: var(--accent);
 }
 
 /* #1296 the play overlay anchors to its thumb on every row that has one. scoped
@@ -40647,7 +40647,7 @@ div.artist-hero-badge {
     width: 15px;
     height: 15px;
     cursor: pointer;
-    accent-color: #1db954;
+    accent-color: var(--accent);
 }
 
 .mix-sel-count {
@@ -48317,11 +48317,11 @@ div.artist-hero-badge {
     width: 44px;
     height: 44px;
     background: linear-gradient(135deg,
-            rgba(29, 185, 84, 0.12) 0%,
+            rgba(var(--accent-rgb), 0.12) 0%,
             rgba(100, 80, 220, 0.18) 100%);
     backdrop-filter: blur(20px) saturate(1.4);
     -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border: 1.5px solid rgba(29, 185, 84, 0.25);
+    border: 1.5px solid rgba(var(--accent-rgb), 0.25);
     border-radius: 50%;
     cursor: pointer;
     display: flex;
@@ -48329,19 +48329,19 @@ div.artist-hero-badge {
     justify-content: center;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     box-shadow:
-        0 4px 16px rgba(29, 185, 84, 0.15),
+        0 4px 16px rgba(var(--accent-rgb), 0.15),
         0 2px 8px rgba(0, 0, 0, 0.15),
         inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .soulid-button:hover {
     background: linear-gradient(135deg,
-            rgba(29, 185, 84, 0.18) 0%,
+            rgba(var(--accent-rgb), 0.18) 0%,
             rgba(100, 80, 220, 0.25) 100%);
-    border-color: rgba(29, 185, 84, 0.4);
+    border-color: rgba(var(--accent-rgb), 0.4);
     transform: scale(1.05);
     box-shadow:
-        0 6px 20px rgba(29, 185, 84, 0.25),
+        0 6px 20px rgba(var(--accent-rgb), 0.25),
         0 3px 12px rgba(0, 0, 0, 0.2),
         inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
@@ -48369,7 +48369,7 @@ div.artist-hero-badge {
     width: 44px;
     height: 44px;
     border: 3px solid transparent;
-    border-top-color: rgba(29, 185, 84, 0.8);
+    border-top-color: rgba(var(--accent-rgb), 0.8);
     border-right-color: rgba(100, 80, 220, 0.5);
     border-radius: 50%;
     opacity: 0;
@@ -48386,13 +48386,13 @@ div.artist-hero-badge {
 .soulid-button.active {
     animation: rainbow-glow 3s linear infinite;
     background: linear-gradient(135deg,
-            rgba(29, 185, 84, 0.22) 0%,
+            rgba(var(--accent-rgb), 0.22) 0%,
             rgba(100, 80, 220, 0.28) 100%);
 }
 
 .soulid-button.active .soulid-logo {
     opacity: 1;
-    filter: drop-shadow(0 0 8px rgba(29, 185, 84, 0.6));
+    filter: drop-shadow(0 0 8px rgba(var(--accent-rgb), 0.6));
 }
 
 /* Complete/Idle State */
@@ -48442,12 +48442,12 @@ div.artist-hero-badge {
             rgba(20, 20, 20, 0.99) 100%);
     backdrop-filter: blur(40px) saturate(1.6);
     -webkit-backdrop-filter: blur(40px) saturate(1.6);
-    border: 1px solid rgba(29, 185, 84, 0.3);
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
     border-radius: 16px;
     padding: 16px 18px;
     box-shadow:
         0 12px 40px rgba(0, 0, 0, 0.5),
-        0 6px 20px rgba(29, 185, 84, 0.15),
+        0 6px 20px rgba(var(--accent-rgb), 0.15),
         inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
@@ -48455,7 +48455,7 @@ div.artist-hero-badge {
     font-family: 'SF Pro Display', -apple-system, sans-serif;
     font-size: 13px;
     font-weight: 600;
-    color: rgba(29, 185, 84, 0.95);
+    color: rgba(var(--accent-rgb), 0.95);
     letter-spacing: -0.2px;
     margin-bottom: 12px;
     padding-bottom: 10px;
@@ -48484,7 +48484,7 @@ div.artist-hero-badge {
     height: 0;
     border-left: 6px solid transparent;
     border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(29, 185, 84, 0.3);
+    border-bottom: 8px solid rgba(var(--accent-rgb), 0.3);
 }
 
 .soulid-tooltip-content::after {
@@ -54435,10 +54435,10 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 /* Combined "Wishlist + Watchlist" button: green accent to read as the
    watchlist-flavored action next to the standard submit. */
 .discog-both-btn {
-    background: linear-gradient(135deg, #1DB954, rgba(29,185,84,0.65));
+    background: linear-gradient(135deg, var(--accent), rgba(var(--accent-rgb), 0.65));
     min-width: 0;
 }
-.discog-both-btn:hover { filter: brightness(1.15); box-shadow: 0 4px 16px rgba(29,185,84,0.35); }
+.discog-both-btn:hover { filter: brightness(1.15); box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.35); }
 
 /* Future releases section (Download Discography modal) */
 .discog-future {
@@ -54546,7 +54546,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 }
 .watchadd-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: rgba(255,255,255,0.4); margin-bottom: 2px; }
 .watchadd-opt { display: flex; align-items: center; gap: 8px; font-size: 13px; color: rgba(255,255,255,0.8); cursor: pointer; }
-.watchadd-opt input[type="checkbox"] { accent-color: #1DB954; width: 15px; height: 15px; cursor: pointer; }
+.watchadd-opt input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
 .watchadd-download { margin-top: 10px; }
 .watchadd-select {
     background: rgba(255,255,255,0.06); color: #fff; border: 1px solid rgba(255,255,255,0.12);
@@ -78330,7 +78330,7 @@ body.max-performance .dash-card::after {
 }
 .em-btn:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.28); }
 .em-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.em-btn--go { background: rgba(29,185,84,0.2); border-color: rgba(29,185,84,0.5); }
+.em-btn--go { background: rgba(var(--accent-rgb), 0.2); border-color: rgba(var(--accent-rgb), 0.5); }
 .em-btn--sm { padding: 5px 10px; font-size: 12px; }
 .em-btn--ghost { background: transparent; border-color: rgba(255,255,255,0.18); color: rgba(255,255,255,0.7); }
 .em-btn--ghost:hover:not(:disabled) { background: rgba(255,255,255,0.08); }
@@ -82515,8 +82515,8 @@ body.max-performance {
     background: rgba(255,255,255,0.07);
     border-radius: 16px; transition: border-radius .16s ease, background .16s ease;
 }
-.chat-guild:hover { border-radius: 14px; background: rgba(29,185,84,0.5); }
-.chat-guild--on { border-radius: 14px; background: rgba(29,185,84,0.72); }
+.chat-guild:hover { border-radius: 14px; background: rgba(var(--accent-rgb), 0.5); }
+.chat-guild--on { border-radius: 14px; background: rgba(var(--accent-rgb), 0.72); }
 /* the white pill Discord slides in on the active/hovered server */
 .chat-guild::before {
     content: ''; position: absolute; left: -11px; top: 50%; transform: translateY(-50%);
@@ -82542,8 +82542,8 @@ body.max-performance {
 .chat-guild-wrap:hover .chat-guild-leave { opacity: 1; }
 .chat-guild-leave:hover { background: #ef4444; }
 .chat-guild-sep { width: 32px; height: 2px; border-radius: 1px; background: rgba(255,255,255,0.1); flex: 0 0 auto; }
-.chat-guild--add { background: rgba(255,255,255,0.05); color: #1db954; font-size: 22px; font-weight: 400; }
-.chat-guild--add:hover { background: rgba(29,185,84,0.22); }
+.chat-guild--add { background: rgba(255,255,255,0.05); color: var(--accent); font-size: 22px; font-weight: 400; }
+.chat-guild--add:hover { background: rgba(var(--accent-rgb), 0.22); }
 
 /* ── channel sidebar ── */
 .chat-side { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
@@ -82626,7 +82626,7 @@ body.max-performance {
 }
 .chat-userpanel-av {
     width: 32px; height: 32px; border-radius: 50%; flex: 0 0 auto;
-    background: rgba(29,185,84,0.28); color: #1db954;
+    background: rgba(var(--accent-rgb), 0.28); color: var(--accent);
     display: flex; align-items: center; justify-content: center;
     font-size: 13px; font-weight: 800;
 }
@@ -82664,17 +82664,17 @@ body.max-performance {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .chat-side-item:hover { background: rgba(255,255,255,0.07); color: #fff; }
-.chat-side-item--on { background: rgba(29,185,84,0.16); color: #1db954; }
+.chat-side-item--on { background: rgba(var(--accent-rgb), 0.16); color: var(--accent); }
 .chat-side-dot {
     flex: none; width: 8px; height: 8px; border-radius: 50%;
-    background: #1db954; margin-left: auto;
+    background: var(--accent); margin-left: auto;
 }
 .chat-side-none { font-size: 12.5px; color: rgba(255,255,255,0.35); padding: 6px 10px; }
 /* rooms rail: a row = the room button + a hover-revealed leave × */
 .chat-side-room { position: relative; display: flex; align-items: center; border-radius: 9px; }
 .chat-side-room .chat-side-item { flex: 1; min-width: 0; }
-.chat-side-room.chat-side-item--on { background: rgba(29,185,84,0.16); }
-.chat-side-room.chat-side-item--on .chat-side-item { color: #1db954; background: transparent; }
+.chat-side-room.chat-side-item--on { background: rgba(var(--accent-rgb), 0.16); }
+.chat-side-room.chat-side-item--on .chat-side-item { color: var(--accent); background: transparent; }
 .chat-side-leave {
     flex: none; width: 22px; height: 22px; margin-right: 4px; border-radius: 6px;
     border: none; background: transparent; color: rgba(255,255,255,0.35);
@@ -82683,7 +82683,7 @@ body.max-performance {
 .chat-side-room:hover .chat-side-leave { opacity: 1; }
 .chat-side-leave:hover { background: rgba(239,68,68,0.35); color: #fff; }
 .chat-side-add { color: rgba(255,255,255,0.45); font-weight: 700; }
-.chat-side-add:hover { color: #1db954; }
+.chat-side-add:hover { color: var(--accent); }
 /* room browser modal */
 .chat-rooms-modal { width: min(460px, 92vw); }
 .chat-rooms-list {
@@ -82702,25 +82702,25 @@ body.max-performance {
 .chat-room-count { flex: none; font-size: 11.5px; color: rgba(255,255,255,0.4); }
 .chat-room-joined {
     flex: none; font-size: 10.5px; font-weight: 800; text-transform: uppercase;
-    letter-spacing: 0.04em; color: #1db954;
+    letter-spacing: 0.04em; color: var(--accent);
 }
 .chat-room-join {
     flex: none; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 700;
-    border: 1px solid rgba(29,185,84,0.4); background: rgba(29,185,84,0.14);
-    color: #1db954; cursor: pointer;
+    border: 1px solid rgba(var(--accent-rgb), 0.4); background: rgba(var(--accent-rgb), 0.14);
+    color: var(--accent); cursor: pointer;
 }
-.chat-room-join:hover { background: rgba(29,185,84,0.3); }
+.chat-room-join:hover { background: rgba(var(--accent-rgb), 0.3); }
 /* user list: search + sections + presence */
 .chat-user-search {
     width: 100%; padding: 7px 10px; margin-bottom: 8px; border-radius: 9px;
     border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.25);
     color: #fff; font-size: 12.5px;
 }
-.chat-user-search:focus { outline: none; border-color: rgba(29,185,84,0.5); }
+.chat-user-search:focus { outline: none; border-color: rgba(var(--accent-rgb), 0.5); }
 .chat-users-label--sub { margin-top: 12px; color: rgba(255,255,255,0.35); }
 .chat-user-dot {
     flex: none; width: 7px; height: 7px; border-radius: 50%;
-    background: #1db954; opacity: 0.75;
+    background: var(--accent); opacity: 0.75;
 }
 .chat-user--self .chat-user-dot { background: #7c5cff; }
 .chat-user--ignored { opacity: 0.45; }
@@ -82750,7 +82750,7 @@ body.max-performance {
     flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .chat-browse-meta { flex: none; font-size: 11.5px; color: rgba(255,255,255,0.4); }
-.chat-browse-row input[type="checkbox"] { flex: none; accent-color: #1db954; }
+.chat-browse-row input[type="checkbox"] { flex: none; accent-color: var(--accent); }
 /* history search (room head) + results banner */
 .chat-head-search { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
 .chat-head-search .chat-filter-btn { margin-left: 0; }
@@ -82764,11 +82764,11 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     width: 190px; padding: 5px 10px; border-radius: 999px; font-size: 12.5px;
     border: 1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.3); color: #fff;
 }
-.chat-head-search-in:focus { outline: none; border-color: rgba(29,185,84,0.5); }
+.chat-head-search-in:focus { outline: none; border-color: rgba(var(--accent-rgb), 0.5); }
 .chat-search-banner {
     position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 12px;
     padding: 8px 12px; margin-bottom: 8px; border-radius: 10px;
-    background: rgba(29,185,84,0.1); border: 1px solid rgba(29,185,84,0.25);
+    background: rgba(var(--accent-rgb), 0.1); border: 1px solid rgba(var(--accent-rgb), 0.25);
     color: #d9ffe9; font-size: 13px; font-weight: 600;
 }
 .chat-search-banner .chat-filter-btn { margin-left: auto; }
@@ -82792,7 +82792,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-msg { padding: 5px 0; display: grid; grid-template-columns: auto auto 1fr; gap: 10px; align-items: baseline; }
 .chat-msg-user {
     border: none; background: transparent; padding: 0; cursor: pointer;
-    font-size: 13.5px; font-weight: 800; color: #1db954;
+    font-size: 13.5px; font-weight: 800; color: var(--accent);
 }
 .chat-msg--self .chat-msg-user { color: #58a6ff; }
 .chat-msg-user:hover { text-decoration: underline; }
@@ -82838,11 +82838,11 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     flex: 1; padding: 11px 14px; border-radius: 10px; font-size: 14px; color: #fff;
     background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
 }
-.chat-input:focus { outline: none; border-color: rgba(29,185,84,0.6); background: rgba(255,255,255,0.09); }
+.chat-input:focus { outline: none; border-color: rgba(var(--accent-rgb), 0.6); background: rgba(255,255,255,0.09); }
 .chat-input:disabled { opacity: 0.55; cursor: not-allowed; }
 .chat-send-btn {
     padding: 11px 20px; border-radius: 10px; border: none; cursor: pointer;
-    background: #1db954; color: #06130a; font-size: 14px; font-weight: 800;
+    background: var(--accent); color: #06130a; font-size: 14px; font-weight: 800;
 }
 .chat-send-btn:hover { filter: brightness(1.08); }
 .chat-composer--locked .chat-send-btn { opacity: 0.4; cursor: not-allowed; }
@@ -82896,7 +82896,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     width: 100%; height: 100%; object-fit: cover; display: block;
 }
 .chat-avpick:hover { border-color: rgba(255,255,255,0.4); transform: translateY(-1px); }
-.chat-avpick--on { border-color: #1db954; box-shadow: 0 0 0 2px rgba(29,185,84,0.25); }
+.chat-avpick--on { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25); }
 .chat-avpick--none { font-weight: 700; }
 
 /* Discord-style member row: avatar w/ presence dot + name over an activity line */
@@ -82906,7 +82906,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     display: flex; align-items: center; justify-content: center;
     font-size: 11px; font-weight: 800; color: rgba(255,255,255,0.75);
 }
-.chat-user--self .chat-user-av { background: rgba(29,185,84,0.28); color: #1db954; }
+.chat-user--self .chat-user-av { background: rgba(var(--accent-rgb), 0.28); color: var(--accent); }
 .chat-user-av .chat-user-dot {
     position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px;
     margin: 0; border-radius: 50%; background: #3ba55d; border: 2.5px solid #16161a;
@@ -83096,7 +83096,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 }
 
 /* ── The Arcade (chat P3) ────────────────────────────────────────────────
-   Games take over the message column. Accent is the same #1db954 the rest of
+   Games take over the message column. Accent is the same var(--accent) the rest of
    chat uses; the board is deliberately desaturated so the green reads as
    "your turn" and nothing else competes with it.
 
@@ -83110,10 +83110,10 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     position: relative; overflow: hidden;
     border-radius: 16px; padding: 22px 24px; margin-bottom: 18px;
     background:
-        radial-gradient(90% 140% at 0% 0%, rgba(29,185,84,0.18), transparent 55%),
+        radial-gradient(90% 140% at 0% 0%, rgba(var(--accent-rgb), 0.18), transparent 55%),
         radial-gradient(70% 120% at 100% 100%, rgba(255,213,79,0.08), transparent 60%),
         rgba(255,255,255,0.025);
-    border: 1px solid rgba(29,185,84,0.25);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
 }
 .chat-arc-hero-title {
@@ -83147,7 +83147,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 }
 .chat-arc-hero-turn {
     margin-top: 12px; display: inline-block; padding: 4px 11px; border-radius: 20px;
-    background: rgba(29,185,84,0.18); color: #1db954; font-size: 12px; font-weight: 800;
+    background: rgba(var(--accent-rgb), 0.18); color: var(--accent); font-size: 12px; font-weight: 800;
 }
 
 /* game picker — tiles rather than a row of look-alike buttons */
@@ -83196,7 +83196,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-arc-tilefoot { font-size: 12px; color: rgba(255,255,255,0.4); margin-bottom: 4px; }
 .chat-arc-inline {
     border: none; background: none; padding: 0; cursor: pointer; font: inherit;
-    color: #1db954; text-decoration: underline dotted rgba(29,185,84,0.5);
+    color: var(--accent); text-decoration: underline dotted rgba(var(--accent-rgb), 0.5);
     text-underline-offset: 2px;
 }
 .chat-arc-blank {
@@ -83233,8 +83233,8 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0,0,0,0.3);
 }
 .chat-arc-card--mine {
-    border-color: rgba(29,185,84,0.35);
-    box-shadow: inset 3px 0 0 rgba(29,185,84,0.55);
+    border-color: rgba(var(--accent-rgb), 0.35);
+    box-shadow: inset 3px 0 0 rgba(var(--accent-rgb), 0.55);
 }
 .chat-arc-card-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .chat-arc-card-sub { font-size: 12px; color: rgba(255,255,255,0.45); }
@@ -83245,7 +83245,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     display: inline-flex; align-items: center; gap: 6px;
     font-size: 14px; font-weight: 700; color: rgba(255,255,255,0.8);
 }
-.chat-arc-who--turn { color: #1db954; }
+.chat-arc-who--turn { color: var(--accent); }
 .chat-arc-who-dot { font-size: 17px; line-height: 1; }
 
 .chat-arc-badge {
@@ -83253,7 +83253,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     font-size: 11px; font-weight: 700;
     background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.6);
 }
-.chat-arc-badge--you { background: rgba(29,185,84,0.18); color: #1db954; }
+.chat-arc-badge--you { background: rgba(var(--accent-rgb), 0.18); color: var(--accent); }
 .chat-arc-badge--open { background: rgba(88,166,255,0.16); color: #8ab4f8; }
 .chat-arc-badge--stale { background: rgba(255,193,7,0.15); color: #ffc107; }
 .chat-arc-badge--bad { background: rgba(244,67,54,0.15); color: #ff6b5e; }
@@ -83265,8 +83265,8 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     color: rgba(255,255,255,0.85);
 }
 .chat-arc-btn:hover { background: rgba(255,255,255,0.1); }
-.chat-arc-btn--go { background: #1db954; border-color: #1db954; color: #06130a; }
-.chat-arc-btn--go:hover { filter: brightness(1.08); background: #1db954; }
+.chat-arc-btn--go { background: var(--accent); border-color: var(--accent); color: #06130a; }
+.chat-arc-btn--go:hover { filter: brightness(1.08); background: var(--accent); }
 .chat-arc-btn--bad { border-color: rgba(244,67,54,0.4); color: #ff6b5e; }
 .chat-arc-btn--slim { padding: 4px 9px; font-size: 12px; }
 
@@ -83294,17 +83294,17 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-arc-sq--light { background: #6f7c86; }
 .chat-arc-sq--dark { background: #46525c; }
 .chat-arc-sq--last { box-shadow: inset 0 0 0 100px rgba(255,193,7,0.16); }
-.chat-arc-sq--sel { box-shadow: inset 0 0 0 3px #1db954; }
+.chat-arc-sq--sel { box-shadow: inset 0 0 0 3px var(--accent); }
 .chat-arc-sq--check { box-shadow: inset 0 0 0 100px rgba(244,67,54,0.35); }
 /* A legal empty square gets a dot; a legal capture gets a ring, so the two
    read differently at a glance the way they do on every chess site. */
 .chat-arc-sq--dest::after {
     content: ''; position: absolute; width: 28%; height: 28%; border-radius: 50%;
-    background: rgba(29,185,84,0.55);
+    background: rgba(var(--accent-rgb), 0.55);
 }
 .chat-arc-sq--take::after {
     content: ''; position: absolute; inset: 6%; border-radius: 50%;
-    border: 4px solid rgba(29,185,84,0.6);
+    border: 4px solid rgba(var(--accent-rgb), 0.6);
 }
 .chat-arc-pc {
     font-size: clamp(20px, 6.2vw, 44px); line-height: 1; position: relative; z-index: 1;
@@ -83326,7 +83326,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-arc-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .chat-arc-promo {
     display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-    background: rgba(29,185,84,0.1); border: 1px solid rgba(29,185,84,0.3);
+    background: rgba(var(--accent-rgb), 0.1); border: 1px solid rgba(var(--accent-rgb), 0.3);
     border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: 700;
 }
 .chat-arc-promobtn {
@@ -83349,7 +83349,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 
 /* acknowledgement line — derived, no extra round trip */
 .chat-arc-ack { font-size: 12px; color: rgba(255,255,255,0.45); }
-.chat-arc-ack--seen { color: #1db954; }
+.chat-arc-ack--seen { color: var(--accent); }
 
 /* ── slot machine (arcade P10) ── */
 .chat-slot-wrap {
@@ -83379,7 +83379,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-slot-verdict--win { color: #ffd54f; text-shadow: 0 0 18px rgba(255,213,79,0.5); }
 .chat-slot-bank { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .chat-slot-balance {
-    font-size: 26px; font-weight: 800; color: #1db954; font-variant-numeric: tabular-nums;
+    font-size: 26px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums;
 }
 .chat-slot-banklabel { font-size: 11px; color: rgba(255,255,255,0.4); }
 .chat-slot-stakes { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
@@ -83393,7 +83393,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     display: grid; grid-template-columns: auto auto 1fr auto; gap: 8px;
     align-items: center; font-size: 13px; color: rgba(255,255,255,0.7);
 }
-.chat-slot-payrow b { color: #1db954; font-variant-numeric: tabular-nums; }
+.chat-slot-payrow b { color: var(--accent); font-variant-numeric: tabular-nums; }
 .chat-slot-paytwo { text-align: right; opacity: 0.65; }
 @media (max-width: 560px) { .chat-slot-pays { grid-template-columns: 1fr; } }
 
@@ -83415,7 +83415,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 }
 .chat-bs-cell--ship { background: rgba(255,255,255,0.32); }
 .chat-bs-cell--fire { cursor: crosshair; }
-.chat-bs-cell--fire:hover { background: rgba(29,185,84,0.55); }
+.chat-bs-cell--fire:hover { background: rgba(var(--accent-rgb), 0.55); }
 .chat-bs-cell--miss::after {
     content: ''; position: absolute; inset: 34%; border-radius: 50%;
     background: rgba(255,255,255,0.4);
@@ -83431,7 +83431,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.55);
 }
 .chat-bs-ship b { color: rgba(255,255,255,0.8); }
-.chat-bs-ship--set { background: rgba(29,185,84,0.16); color: #1db954; }
+.chat-bs-ship--set { background: rgba(var(--accent-rgb), 0.16); color: var(--accent); }
 .chat-bs-ship--next { box-shadow: 0 0 0 1px rgba(255,255,255,0.35); color: #fff; }
 
 /* ── room ballot (arcade P5) ── */
@@ -83451,7 +83451,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-arc-ballotbar {
     height: 6px; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden;
 }
-.chat-arc-ballotbar i { display: block; height: 100%; background: #1db954; }
+.chat-arc-ballotbar i { display: block; height: 100%; background: var(--accent); }
 .chat-arc-ballotn {
     font-size: 11px; color: rgba(255,255,255,0.5); font-variant-numeric: tabular-nums;
 }
@@ -83555,7 +83555,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     border-bottom: 1px solid rgba(255,255,255,0.04);
 }
 .chat-arc-ladrow:last-of-type { border-bottom: none; }
-.chat-arc-ladrow--me { color: #1db954; font-weight: 700; }
+.chat-arc-ladrow--me { color: var(--accent); font-weight: 700; }
 .chat-arc-ladno { color: rgba(255,255,255,0.35); text-align: right; }
 /* the podium: gold, silver, bronze — rank readable before any number is */
 .chat-arc-ladrow:nth-of-type(1) .chat-arc-ladno { color: #ffd54f; font-weight: 800; }
@@ -83574,10 +83574,10 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-arc-reveal-btn {
     display: flex; align-items: center; gap: 8px; width: 100%; cursor: pointer;
     border-radius: 8px; padding: 8px 11px; font-size: 12px; font-weight: 700;
-    border: 1px dashed rgba(29,185,84,0.35); background: rgba(29,185,84,0.07);
-    color: #1db954; text-align: left;
+    border: 1px dashed rgba(var(--accent-rgb), 0.35); background: rgba(var(--accent-rgb), 0.07);
+    color: var(--accent); text-align: left;
 }
-.chat-arc-reveal-btn:hover { background: rgba(29,185,84,0.13); }
+.chat-arc-reveal-btn:hover { background: rgba(var(--accent-rgb), 0.13); }
 .chat-arc-reveal-caret { margin-left: auto; }
 .chat-arc-rawnote {
     font-size: 11px; color: rgba(255,255,255,0.45); line-height: 1.5; padding: 8px 4px 4px;
@@ -83594,10 +83594,10 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     white-space: pre-wrap; word-break: break-all; color: rgba(255,255,255,0.75);
 }
-.chat-arc-rawwho { flex: none; color: #1db954; font-weight: 700; }
+.chat-arc-rawwho { flex: none; color: var(--accent); font-weight: 700; }
 
 /* a game in the sidebar where it is your move */
-.chat-thread--turn { color: #1db954; }
+.chat-thread--turn { color: var(--accent); }
 
 /* message-this-user links (chat P4) — any surface can render one */
 .chat-user-link {
@@ -83605,7 +83605,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     color: inherit; font: inherit; text-decoration: underline dotted rgba(255,255,255,0.35);
     text-underline-offset: 2px;
 }
-.chat-user-link:hover { color: #1db954; text-decoration-color: #1db954; }
+.chat-user-link:hover { color: var(--accent); text-decoration-color: var(--accent); }
 
 /* rich chat (richchat P2): formatting, spoilers, toolbar, emoji picker */
 .chat-msg-text code.chat-code {
@@ -83616,7 +83616,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-msg-text .chat-link { color: #58a6ff; word-break: break-all; }
 .chat-msg-text .chat-link:hover { text-decoration: underline; }
 .chat-quote {
-    display: inline-block; border-left: 3px solid rgba(29,185,84,0.6);
+    display: inline-block; border-left: 3px solid rgba(var(--accent-rgb), 0.6);
     padding-left: 10px; color: rgba(255,255,255,0.6); font-style: italic;
 }
 .chat-spoiler {
@@ -83658,7 +83658,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     color: rgba(255,255,255,0.75); border-radius: 999px; padding: 2px 10px;
     font-size: 11.5px; font-weight: 700; cursor: pointer; white-space: nowrap;
 }
-.chat-embed-chip:hover { background: rgba(29,185,84,0.16); color: #1db954; border-color: rgba(29,185,84,0.4); }
+.chat-embed-chip:hover { background: rgba(var(--accent-rgb), 0.16); color: var(--accent); border-color: rgba(var(--accent-rgb), 0.4); }
 .chat-embed-img {
     display: block; max-width: min(420px, 100%); max-height: 340px;
     border-radius: 10px; margin: 6px 0; object-fit: contain;
@@ -83683,7 +83683,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     font-size: 11.5px; font-weight: 700; padding: 4px 12px; cursor: pointer; white-space: nowrap;
 }
 .chat-filter-btn:hover { color: #fff; background: rgba(255,255,255,0.1); }
-.chat-filter-btn--on { color: #1db954; border-color: rgba(29,185,84,0.45); background: rgba(29,185,84,0.12); }
+.chat-filter-btn--on { color: var(--accent); border-color: rgba(var(--accent-rgb), 0.45); background: rgba(var(--accent-rgb), 0.12); }
 .chat-hidden-note {
     text-align: center; font-size: 11.5px; color: rgba(255,255,255,0.35); padding: 8px 0;
 }
@@ -83765,7 +83765,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     background: rgba(255,255,255,0.04); aspect-ratio: 4 / 3;
 }
 .chat-gif-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.chat-gif-cell:hover { outline: 2px solid #1db954; }
+.chat-gif-cell:hover { outline: 2px solid var(--accent); }
 .chat-gif-hint {
     grid-column: 1 / -1; text-align: center; padding: 24px 0;
     font-size: 13px; color: rgba(255,255,255,0.4);
@@ -83846,7 +83846,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-jump-pill {
     position: absolute; left: 50%; transform: translateX(-50%); bottom: 104px; z-index: 25;
     border: none; border-radius: 999px; padding: 7px 16px; cursor: pointer;
-    background: #1db954; color: #06130a; font-size: 12.5px; font-weight: 800;
+    background: var(--accent); color: #06130a; font-size: 12.5px; font-weight: 800;
     box-shadow: 0 6px 18px rgba(0,0,0,0.45);
 }
 .chat-jump-pill:hover { filter: brightness(1.08); }
@@ -83880,7 +83880,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     font-size: 12px; cursor: pointer;
 }
 .chat-line:hover .chat-line-reply { display: inline-block; }
-.chat-line-reply:hover { color: #1db954; border-color: rgba(29,185,84,0.45); }
+.chat-line-reply:hover { color: var(--accent); border-color: rgba(var(--accent-rgb), 0.45); }
 /* The table-stake selector above the game tiles. */
 .chat-arc-stakes { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
     margin: 4px 0 10px; }
@@ -83986,7 +83986,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     width: 100%; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; color: #fff;
     background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
 }
-.art-picker-url:focus { outline: none; border-color: rgba(29,185,84,0.6); }
+.art-picker-url:focus { outline: none; border-color: rgba(var(--accent-rgb), 0.6); }
 .art-picker-custom-slot .art-picker-tile { max-width: 180px; }
 .art-picker-custom-err { font-size: 12.5px; color: #f0a05a; }
 
@@ -83994,7 +83994,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .art-picker-tile--current { cursor: default; opacity: 0.95; }
 .art-picker-tile--current:hover { transform: none; }
 .art-picker-badge--current {
-    background: rgba(29,185,84,0.85) !important; color: #06130a !important;
+    background: rgba(var(--accent-rgb), 0.85) !important; color: #06130a !important;
     font-weight: 800;
 }
 
@@ -84009,7 +84009,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     transition: border-color .15s ease, background .15s ease;
 }
 .chat-composer-panel:focus-within {
-    border-color: rgba(29,185,84,0.45); background: rgba(255,255,255,0.055);
+    border-color: rgba(var(--accent-rgb), 0.45); background: rgba(255,255,255,0.055);
 }
 .chat-toolbar {
     position: static; display: flex; gap: 2px; align-items: center;
@@ -84040,7 +84040,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-send-fab {
     flex: none; width: 34px; height: 34px; margin: 0 2px 2px 4px; border: none;
     border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
-    background: #1db954; color: #06130a; cursor: pointer;
+    background: var(--accent); color: #06130a; cursor: pointer;
     transition: transform .1s ease, filter .15s ease;
 }
 .chat-send-fab svg { width: 16px; height: 16px; margin: 1px 1px 0 -1px; }
@@ -85185,7 +85185,7 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     display: flex; flex-direction: column; gap: 8px; margin-top: 18px;
 }
 .artweb-btn-primary { /* Play radio, 8004 */
-    background: #1db954; border: none; color: #0b0b0f;
+    background: var(--accent); border: none; color: #0b0b0f;
     border-radius: 10px; padding: 10px; font-size: 13px; font-weight: 800;
     cursor: pointer;
 }
