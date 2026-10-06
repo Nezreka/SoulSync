@@ -19,6 +19,8 @@ source are skipped, never flagged.
 
 from __future__ import annotations
 
+import json
+
 from typing import Any, Dict, Optional
 
 from core.repair_jobs import register_job
@@ -45,6 +47,15 @@ def _art_from_details(details: Dict[str, Any]) -> Optional[str]:
             art = art.replace(small, "600x600bb")
         return art
     return None
+
+
+def _cached_ms(subject: dict):
+    """The file length the tag cache recorded, or None when never read."""
+    try:
+        value = json.loads(subject.get("tags_json") or "{}").get("duration_ms")
+        return None if value is None else int(value)
+    except (TypeError, ValueError, AttributeError):
+        return None
 
 
 @register_job
@@ -122,6 +133,31 @@ class ShortPreviewTrackJob(RepairJob):
             resolved = file_path
         return probe_decoded_duration(resolved) if resolved else 0.0
 
+    def _file_ms(self, subject: dict, context: JobContext) -> int:
+        """File length from the tag cache; a file scanned before the cache
+        carried it is read once (header only) and the answer remembered."""
+        cached = _cached_ms(subject)
+        if cached is not None:
+            return cached
+        from core.library2.paths import resolve_lib2_path
+        try:
+            from mutagen import File as MutagenFile
+            resolved = resolve_lib2_path(subject.get("path"), context.config_manager)
+            audio = MutagenFile(resolved) if resolved else None
+            length = int(audio.info.length * 1000) if audio and audio.info else None
+        except Exception:  # noqa: BLE001 - unreadable: the decode path decides
+            length = None
+        if length is not None:
+            conn = context.db._get_connection()
+            try:
+                conn.execute("UPDATE lib2_track_files SET tags_json=json_set(CASE WHEN json_valid(tags_json) "
+                             "THEN tags_json ELSE '{}' END,'$.duration_ms',?) WHERE id=?",
+                             (length, subject["file_id"]))
+                conn.commit()
+            finally:
+                conn.close()
+        return length or 0
+
     def _setting_int(self, context: JobContext, key: str, default: int) -> int:
         try:
             return int(self._setting_raw(context, key, default) or default)
@@ -147,7 +183,10 @@ class ShortPreviewTrackJob(RepairJob):
             for subject in scoped_file_subjects(context, active_file_subjects(
                 context.db, context.config_manager,
             )):
-                duration = subject.get("duration") or 0
+                # The FILE's length: lib2_tracks.duration is the catalogue's
+                # expected length, so a 30 s preview of a 238 s track was never
+                # even looked at.
+                duration = self._file_ms(subject, context)
                 if duration > max_dur_ms or (duration <= 0 and not verify_zero):
                     continue
                 file_path = str(subject["path"])
@@ -320,11 +359,9 @@ class ShortPreviewTrackJob(RepairJob):
             verify_zero = self._setting_bool(context, "verify_zero_length", True)
             from core.library2.maintenance_subjects import active_file_subjects
 
-            return sum(
-                1 for subject in scoped_file_subjects(context, active_file_subjects(
-                    context.db, context.config_manager,
-                )) if int(subject.get("duration") or 0) <= max_dur_ms
-                and (verify_zero or int(subject.get("duration") or 0) > 0)
-            )
+            # Cached lengths only (an unknown one may be short): no file I/O here.
+            lengths = (_cached_ms(subject) for subject in scoped_file_subjects(
+                context, active_file_subjects(context.db, context.config_manager)))
+            return sum(1 for ms in lengths if ms is None or (ms <= max_dur_ms and (verify_zero or ms > 0)))
         except Exception:
             return 0

@@ -35,6 +35,7 @@ def normalized_tag_snapshot(file_tags: Dict[str, Any]) -> Dict[str, Any]:
         "cover_sidecar": file_tags.get("cover_sidecar"),
     }
     for k in (
+        "duration_ms",
         "lyrics",
         "replaygain_track_gain",
         "replaygain_track_peak",

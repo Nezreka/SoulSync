@@ -35,16 +35,18 @@ def _seed(db: MusicDatabase):
 
 
 def _track(db, tid: int, duration_ms, path, spotify_id=None):
+    """``duration_ms`` is the FILE's length (tag cache); the catalogue always
+    expects a full song, which is exactly what a preview disagrees with."""
     conn = db._get_connection()
     conn.execute(
         "INSERT INTO lib2_tracks(id, album_id, title, duration, spotify_id) "
-        "VALUES(?, 1, ?, ?, ?)",
-        (tid, f"Track {tid}", duration_ms, spotify_id),
+        "VALUES(?, 1, ?, 238000, ?)",
+        (tid, f"Track {tid}", spotify_id),
     )
     conn.execute(
-        "INSERT INTO lib2_track_files(track_id, path, format, is_primary) "
-        "VALUES(?, ?, ?, 1)",
-        (tid, path, Path(path).suffix.lstrip('.').lower()),
+        "INSERT INTO lib2_track_files(track_id, path, format, is_primary, tags_json) "
+        "VALUES(?, ?, ?, 1, json_object('duration_ms', ?))",
+        (tid, path, Path(path).suffix.lstrip('.').lower(), duration_ms),
     )
     conn.commit()
     conn.close()
@@ -257,3 +259,21 @@ def test_verify_zero_off_keeps_the_old_stored_duration_behavior(tmp_path: Path):
     )
     res = ShortPreviewTrackJob().scan(ctx)
     assert res.scanned == 1     # only the 28s row; the zero-duration row is excluded
+
+
+def test_an_uncached_file_length_is_read_once_and_remembered(tmp_path: Path, monkeypatch):
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    _seed(db)
+    clip = tmp_path / 'clip.flac'
+    clip.write_bytes(b'fake flac')
+    _track(db, 1, None, str(clip), spotify_id='sp_long')
+    monkeypatch.setattr('core.library2.paths.resolve_lib2_path', lambda p, *_a: p)
+    monkeypatch.setattr('mutagen.File', lambda p: type('A', (), {'info': type('I', (), {'length': 3.0})()})())
+
+    findings = []
+    ShortPreviewTrackJob().scan(_ctx(db, findings, _FakeSpotify()))
+
+    assert [f['entity_id'] for f in findings] == ['lib2:1']
+    conn = db._get_connection()
+    assert conn.execute("SELECT json_extract(tags_json,'$.duration_ms') FROM lib2_track_files").fetchone()[0] == 3000
+    conn.close()

@@ -1037,7 +1037,8 @@ def test_preview_scanner_covers_v2_only_file(legacy_db, tmp_path, monkeypatch):
     audio.write_bytes(b"audio")
     track_id, file_id = _add_v2_only_file(legacy_db, audio, title="Clip")
     conn = legacy_db._get_connection()
-    conn.execute("UPDATE lib2_tracks SET duration=25000 WHERE id=?", (track_id,))
+    conn.execute("UPDATE lib2_track_files SET tags_json=json_object('duration_ms', 25000) "
+                 "WHERE id=?", (file_id,))
     conn.commit()
     conn.close()
     monkeypatch.setattr(

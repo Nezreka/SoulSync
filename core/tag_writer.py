@@ -85,6 +85,9 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
             return result
 
         result['format'] = ext.lstrip('.').upper()
+        length = getattr(getattr(audio, 'info', None), 'length', None)
+        if length:
+            result['duration_ms'] = int(length * 1000)
 
         if isinstance(audio.tags, ID3):
             # MP3
