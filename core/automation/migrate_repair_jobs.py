@@ -53,6 +53,21 @@ def _find_system_automation(database, profile_id: int, job_id: str,
     return matches[0] if matches else None
 
 
+def set_system_job_enabled(database, engine, job_id: str, enabled: bool,
+                           action_type: str = "run_repair_job") -> bool:
+    """Mirror a Tools toggle onto the job's system automation and (re)arm or
+    cancel its timer now. Flipping only the row left an enabled job unscheduled
+    until the next restart, and a timer that fired while it was off never
+    re-armed. Returns whether a row was found."""
+    auto = _find_system_automation(database, 1, job_id, action_type)
+    if not auto:
+        return False
+    database.update_automation(auto["id"], enabled=1 if enabled else 0)
+    if engine is not None:
+        (engine.schedule_automation if enabled else engine.cancel_automation)(auto["id"])
+    return True
+
+
 def _validate_interval(value, job_id: str) -> float | None:
     """Validate an interval_hours value. Returns float hours or None if invalid."""
     try:
