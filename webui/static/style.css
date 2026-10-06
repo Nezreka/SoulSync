@@ -11597,7 +11597,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 .library-history-entry.lh-expanded .lh-expand-btn {
     transform: rotate(180deg);
-    color: var(--accent-color, #1db954);
+    color: var(--accent);
 }
 
 .library-history-entry-source {
@@ -24361,7 +24361,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .config-msrc-btn.active {
     background: rgba(255, 255, 255, 0.1);
-    border-color: var(--accent-color, #1DB954);
+    border-color: var(--accent);
     color: #fff;
 }
 
@@ -26174,7 +26174,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .approve-quarantine-inline-btn {
-    background: var(--accent-color, #1db954);
+    background: var(--accent);
     color: #ffffff;
     border: none;
     border-radius: 6px;
@@ -39401,7 +39401,7 @@ div.artist-hero-badge {
     width: 36px; height: 20px; border-radius: 10px; border: none; cursor: pointer;
     background: rgba(255,255,255,0.12); position: relative; transition: background 0.2s; flex-shrink: 0;
 }
-.ya-source-toggle.on { background: var(--accent, #7c6af7); }
+.ya-source-toggle.on { background: var(--accent); }
 .ya-source-toggle::after {
     content: ''; position: absolute; top: 3px; left: 3px;
     width: 14px; height: 14px; border-radius: 50%; background: #fff;
@@ -39411,7 +39411,7 @@ div.artist-hero-badge {
 .ya-sources-footer { display: flex; justify-content: flex-end; gap: 10px; }
 .ya-sources-save-btn {
     padding: 9px 20px; border-radius: 10px; font-size: 13px; font-weight: 600;
-    background: var(--accent, #7c6af7); color: #fff; border: none; cursor: pointer;
+    background: var(--accent); color: #fff; border: none; cursor: pointer;
     transition: opacity 0.2s;
 }
 .ya-sources-save-btn:hover { opacity: 0.85; }
@@ -50184,7 +50184,7 @@ div.artist-hero-badge {
 
 .profile-settings-help {
     font-size: 12px;
-    color: var(--text-muted, #9ca3af);
+    color: #9ca3af;
     margin: -4px 0 10px;
     line-height: 1.4;
 }
@@ -56775,7 +56775,7 @@ tr.tag-diff-same {
 .mcache-stat-pill-value {
     font-size: 18px;
     font-weight: 600;
-    color: var(--accent, #6d5dfc);
+    color: var(--accent);
 }
 
 /* Tabs */
@@ -57056,7 +57056,7 @@ tr.tag-diff-same {
 .mcache-empty-title {
     font-size: 18px;
     font-weight: 600;
-    background: linear-gradient(135deg, var(--accent, #6d5dfc), rgba(var(--accent-rgb, 109, 93, 252), 0.5));
+    background: linear-gradient(135deg, var(--accent), rgba(var(--accent-rgb, 109, 93, 252), 0.5));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -57101,7 +57101,7 @@ tr.tag-diff-same {
 .mcache-page-btn.active {
     background: rgba(var(--accent-rgb, 109, 93, 252), 0.2);
     border-color: rgba(var(--accent-rgb, 109, 93, 252), 0.3);
-    color: var(--accent, #6d5dfc);
+    color: var(--accent);
 }
 
 .mcache-page-btn:disabled {
@@ -57494,7 +57494,7 @@ tr.tag-diff-same {
 }
 
 .repair-master-toggle input:checked + .repair-toggle-slider {
-    background: var(--accent-color, #6366f1);
+    background: var(--accent);
 }
 
 .repair-master-toggle input:checked + .repair-toggle-slider::after {
@@ -57915,7 +57915,7 @@ tr.tag-diff-same {
 
 .repair-setting-input[type="checkbox"] {
     width: auto;
-    accent-color: var(--accent-color, #6366f1);
+    accent-color: var(--accent);
 }
 
 /* Native <option> popups don't inherit the translucent select background, so
@@ -57929,7 +57929,7 @@ tr.tag-diff-same {
     margin-top: 10px;
     /* Same story: the button must not be the thing that widens the panel. */
     max-width: 100%;
-    background: var(--accent-color, #6366f1);
+    background: var(--accent);
     color: #fff;
     border: none;
     border-radius: 6px;
@@ -59706,7 +59706,7 @@ tr.tag-diff-same {
     flex-shrink: 0;
 }
 .repair-finding-select input[type="checkbox"] {
-    accent-color: var(--accent-color, #6366f1);
+    accent-color: var(--accent);
 }
 
 .repair-finding-content {
@@ -60251,9 +60251,9 @@ tr.tag-diff-same {
     transition: all 0.2s ease;
 }
 .repair-page-btn.active {
-    background: var(--accent-color, #6366f1);
+    background: var(--accent);
     color: #fff;
-    border-color: var(--accent-color, #6366f1);
+    border-color: var(--accent);
 }
 .repair-page-btn:hover:not(.active) {
     background: rgba(255, 255, 255, 0.12);
@@ -60333,7 +60333,7 @@ tr.tag-diff-same {
 }
 .repair-history-status.running {
     background: rgba(var(--accent-rgb, 99, 102, 241), 0.12);
-    color: var(--accent-color, #6366f1);
+    color: var(--accent);
 }
 .repair-history-duration {
     font-size: 11px;
@@ -61844,7 +61844,7 @@ tr.tag-diff-same {
    actually stateful - but loses the 12px bloom, which is the detail that dated
    it. A tight 1px shadow reads as a raised pill instead of a glowing button. */
 .stg-tab.active {
-    background: var(--accent-color, #1db954);
+    background: var(--accent);
     color: #fff;
     font-weight: 600;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
@@ -61923,7 +61923,7 @@ tr.tag-diff-same {
     transition: border-color 0.2s;
 }
 .stg-row-control input:focus {
-    border-color: var(--accent-color, #1db954);
+    border-color: var(--accent);
     outline: none;
 }
 .stg-row-control select {
@@ -61938,7 +61938,7 @@ tr.tag-diff-same {
     min-width: 160px;
 }
 .stg-row-control select:focus {
-    border-color: var(--accent-color, #1db954);
+    border-color: var(--accent);
     outline: none;
 }
 
@@ -61973,7 +61973,7 @@ tr.tag-diff-same {
 }
 .stg-service.expanded .stg-service-chevron {
     transform: rotate(90deg);
-    color: var(--accent-color, #1db954);
+    color: var(--accent);
 }
 .stg-service.expanded .stg-service-name {
     color: #fff;
@@ -62033,8 +62033,8 @@ tr.tag-diff-same {
     box-shadow: none;
 }
 .stg-btn-primary {
-    background: var(--accent-color, #1db954);
-    border-color: var(--accent-color, #1db954);
+    background: var(--accent);
+    border-color: var(--accent);
     color: #fff;
     font-weight: 500;
 }
@@ -62076,7 +62076,7 @@ tr.tag-diff-same {
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
 }
 .stg-toggle input:checked + .stg-toggle-track {
-    background: var(--accent-color, #1db954);
+    background: var(--accent);
 }
 .stg-toggle input:checked + .stg-toggle-track::after {
     transform: translateX(18px);
@@ -63007,7 +63007,7 @@ tr.tag-diff-same {
     transition: all 0.15s;
 }
 .hybrid-arrow-btn:hover {
-    color: var(--accent-color, #1db954);
+    color: var(--accent);
     background: rgba(255, 255, 255, 0.06);
 }
 .hybrid-source-icon {
@@ -63154,7 +63154,7 @@ tr.tag-diff-same {
     transition: transform 0.25s;
 }
 .hybrid-source-toggle input:checked + .toggle-track {
-    background: var(--accent-color, #1db954);
+    background: var(--accent);
 }
 .hybrid-source-toggle input:checked + .toggle-track::after {
     transform: translateX(16px);
@@ -63260,7 +63260,7 @@ tr.tag-diff-same {
 }
 #settings-page .stg-service.expanded > .stg-service-header > .stg-service-chevron {
     transform: rotate(90deg);
-    color: var(--accent-color, #1db954);
+    color: var(--accent);
 }
 
 /* Collapsible body */
@@ -73739,7 +73739,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
 }
 .dash-band-tab.active {
     color: #fff;
-    border-bottom-color: var(--accent-color, #a97bff);
+    border-bottom-color: var(--accent);
 }
 .dash-rail-head {
     display: flex;
@@ -78129,7 +78129,7 @@ body.max-performance .dash-card::after {
 .em-worker-name { color: #eee; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .em-worker-sub { font-size: 10.5px; color: rgba(255,255,255,0.4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .em-rail-cov { display: block; height: 3px; border-radius: 999px; background: rgba(255,255,255,0.1); overflow: hidden; margin-top: 2px; }
-.em-rail-cov-fill { display: block; height: 100%; border-radius: 999px; background: color-mix(in srgb, var(--accent, #4ade80) 70%, transparent); background: rgb(var(--accent-rgb)); transition: width 0.5s cubic-bezier(0.4,0,0.2,1); }
+.em-rail-cov-fill { display: block; height: 100%; border-radius: 999px; background: color-mix(in srgb, var(--accent) 70%, transparent); background: rgb(var(--accent-rgb)); transition: width 0.5s cubic-bezier(0.4,0,0.2,1); }
 .em-dot { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; background: #555; }
 .em-dot--running { background: #1db954; box-shadow: 0 0 8px #1db954; }
 .em-dot--idle { background: #4a90d9; }
@@ -84614,7 +84614,7 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
    label releases rendered as 300px stacked artist-detail cards.
    ========================================================================= */
 .label-detail-page .label-detail-container { padding: 22px 28px 60px; max-width: 1500px; margin: 0 auto; }
-.label-detail-page .label-detail-back { background: rgba(255,255,255,0.06); color: var(--text-secondary,#9aa0aa);
+.label-detail-page .label-detail-back { background: rgba(255,255,255,0.06); color: var(--text-secondary);
     border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 7px 14px; cursor: pointer;
     font-size: 13px; margin-bottom: 20px; }
 .label-detail-page .label-detail-back:hover { background: rgba(255,255,255,0.12); color: #fff; }
@@ -84626,28 +84626,28 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 .label-detail-page .label-detail-hero-main { flex: 1 1 260px; min-width: 0; }
 .label-detail-page .label-detail-eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: 11px;
     font-weight: 700; color: rgb(var(--accent-light-rgb,52,211,120)); margin-bottom: 6px; }
-.label-detail-page .label-detail-name { font-size: 32px; font-weight: 800; margin: 0; color: var(--text-primary,#fff);
+.label-detail-page .label-detail-name { font-size: 32px; font-weight: 800; margin: 0; color: var(--text-primary);
     line-height: 1.1; overflow: hidden; text-overflow: ellipsis; }
-.label-detail-page .label-detail-meta { color: var(--text-secondary,#9aa0aa); font-size: 13px; margin-top: 8px; }
+.label-detail-page .label-detail-meta { color: var(--text-secondary); font-size: 13px; margin-top: 8px; }
 .label-detail-page .label-detail-hero-actions { display: flex; flex-direction: column; gap: 12px; align-items: flex-end; }
 .label-detail-page .label-detail-backlog { display: flex; align-items: center; gap: 8px; }
-.label-detail-page .label-detail-backlog-label { font-size: 12px; color: var(--text-secondary,#8a909a); }
+.label-detail-page .label-detail-backlog-label { font-size: 12px; color: #8a909a; }
 .label-detail-page .label-detail-seg { display: inline-flex; background: rgba(255,255,255,0.05);
     border: 1px solid rgba(255,255,255,0.08); border-radius: 999px; padding: 2px; }
-.label-detail-page .label-detail-seg button { border: none; background: transparent; color: var(--text-secondary,#9aa0aa);
+.label-detail-page .label-detail-seg button { border: none; background: transparent; color: var(--text-secondary);
     font-size: 12px; padding: 4px 12px; border-radius: 999px; cursor: pointer; }
 .label-detail-page .label-detail-seg button.active { background: rgb(var(--accent-rgb,29,185,84)); color: #fff; }
 .label-detail-page .label-detail-toolbar { display: flex; align-items: center; justify-content: space-between;
     gap: 14px; margin: 26px 0 18px; flex-wrap: wrap; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 20px; }
 .label-detail-page .label-detail-filters { display: flex; gap: 8px; }
-.label-detail-page .label-detail-filters button { background: rgba(255,255,255,0.05); color: var(--text-secondary,#9aa0aa);
+.label-detail-page .label-detail-filters button { background: rgba(255,255,255,0.05); color: var(--text-secondary);
     border: 1px solid rgba(255,255,255,0.08); border-radius: 999px; padding: 7px 16px; cursor: pointer; font-size: 13px; font-weight: 600; }
 .label-detail-page .label-detail-filters button:hover { color: #fff; }
 .label-detail-page .label-detail-filters button.active { background: rgba(var(--accent-rgb,29,185,84),0.9); color: #fff; border-color: transparent; }
 .label-detail-page .label-detail-filters button span { opacity: .7; font-size: 12px; margin-left: 2px; }
-.label-detail-page .label-detail-sort { background: rgba(255,255,255,0.05); color: var(--text-primary,#eaecef);
+.label-detail-page .label-detail-sort { background: rgba(255,255,255,0.05); color: #eaecef;
     border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 7px 12px; font-size: 13px; cursor: pointer; }
-.label-detail-page .label-detail-status { color: var(--text-secondary,#9aa0aa); padding: 40px 0; text-align: center; font-size: 15px; }
+.label-detail-page .label-detail-status { color: var(--text-secondary); padding: 40px 0; text-align: center; font-size: 15px; }
 .label-detail-page .label-release-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(170px,1fr)); gap: 20px; align-items: start; }
 /* The .album-card square/overlay treatment is scoped to #artist-detail-page
    in style.css; bring the SAME container override here so label cards are
@@ -86526,7 +86526,7 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 .np-queue-item-play > span { display: block; }
 .np-queue-item-move { min-width: 36px; min-height: 36px; border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
 .np-queue-item-move:disabled { opacity: .3; cursor: default; }
-.np-queue-item-play:focus-visible, .np-queue-item-move:focus-visible, .np-queue-item-remove:focus-visible { outline: 2px solid var(--accent, #a78bfa); outline-offset: 2px; }
+.np-queue-item-play:focus-visible, .np-queue-item-move:focus-visible, .np-queue-item-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .np-queue-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* Keep queue metadata and actions in explicit slots; the arrows must not create

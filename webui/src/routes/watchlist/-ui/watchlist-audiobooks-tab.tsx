@@ -99,7 +99,7 @@ export function WatchlistAudiobooksTab({ searchFilter = '' }: WatchlistAudiobook
   if (loading) {
     return (
       <div className={styles.podcastsTabContainer}>
-        <p style={{ color: 'var(--text-secondary, #9aa0aa)' }}>Loading followed authors…</p>
+        <p style={{ color: 'var(--text-secondary)' }}>Loading followed authors…</p>
       </div>
     );
   }
@@ -107,7 +107,7 @@ export function WatchlistAudiobooksTab({ searchFilter = '' }: WatchlistAudiobook
   if (authors.length === 0) {
     return (
       <div className="watchlist-page-empty" style={{ padding: '40px 0', textAlign: 'center' }}>
-        <p style={{ color: 'var(--text-secondary, #9aa0aa)' }}>
+        <p style={{ color: 'var(--text-secondary)' }}>
           You are not following any authors yet. Open an author from the audiobooks page and use the
           watchlist button to have their next release picked up automatically.
         </p>
@@ -130,7 +130,7 @@ export function WatchlistAudiobooksTab({ searchFilter = '' }: WatchlistAudiobook
           flexWrap: 'wrap',
         }}
       >
-        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary, #9aa0aa)' }}>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>
           Checked once a day. Only books published after you followed an author are picked up.
         </p>
         <button
@@ -144,14 +144,14 @@ export function WatchlistAudiobooksTab({ searchFilter = '' }: WatchlistAudiobook
       </div>
 
       {notice && (
-        <p style={{ margin: '0 0 12px', fontSize: 12.5, color: 'var(--text-secondary, #9aa0aa)' }}>
+        <p style={{ margin: '0 0 12px', fontSize: 12.5, color: 'var(--text-secondary)' }}>
           {notice}
         </p>
       )}
 
       {filtered.length === 0 ? (
         <div className="watchlist-page-empty" style={{ padding: '40px 0' }}>
-          <p style={{ color: 'var(--text-secondary, #9aa0aa)' }}>
+          <p style={{ color: 'var(--text-secondary)' }}>
             No authors match &quot;{searchFilter}&quot;
           </p>
         </div>

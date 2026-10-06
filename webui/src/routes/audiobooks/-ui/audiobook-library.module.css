@@ -37,7 +37,7 @@
   cursor: default;
 }
 .modal :is(button, a, input, select, summary):focus-visible {
-  outline: 2px solid var(--accent, #d2ba8c);
+  outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
 .header {
@@ -111,7 +111,7 @@
   background: #a5af95;
 }
 .activeDot {
-  background: var(--accent, #d2ba8c);
+  background: var(--accent);
   box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.1);
 }
 .root {

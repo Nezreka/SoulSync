@@ -2666,7 +2666,7 @@ function buildArtSourceList() {
     if (!container) return;
     container.innerHTML = '';
     if (!_artVisualOrder.length) {
-        container.innerHTML = '<div style="padding:10px;color:var(--text-secondary,#888);font-size:13px;">No connected art sources available.</div>';
+        container.innerHTML = '<div style="padding:10px;color:#888;font-size:13px;">No connected art sources available.</div>';
         return;
     }
     const enabledOrder = getArtOrder();

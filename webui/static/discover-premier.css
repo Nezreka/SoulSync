@@ -149,7 +149,7 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--accent-color, #1db954);
+    background: var(--accent);
     box-shadow: 0 0 10px rgba(var(--accent-rgb, 29, 185, 84), 0.8);
 }
 
@@ -272,7 +272,7 @@
 .hero-pop-meter > span:nth-child(5) { height: 100%; }
 
 .hero-pop-meter > span.on {
-    background: var(--accent-color, #1db954);
+    background: var(--accent);
 }
 
 .discover-hero .hero-genres {
@@ -335,7 +335,7 @@
     display: inline-flex !important;
     align-items: center !important;
     gap: 8px !important;
-    background: var(--accent-color, #1db954) !important;
+    background: var(--accent) !important;
     color: #05130a !important;
     font-size: 0.92rem !important;
     font-weight: 700 !important;
@@ -439,8 +439,8 @@
 
 .hero-indicator.active .hero-indicator-dot {
     width: 22px !important;
-    background: var(--accent-color, #1db954) !important;
-    box-shadow: 0 0 12px var(--accent-color, #1db954) !important;
+    background: var(--accent) !important;
+    box-shadow: 0 0 12px var(--accent) !important;
 }
 
 .hero-indicator:hover .hero-indicator-dot {
@@ -482,7 +482,7 @@
     opacity: 1;
     filter: none;
     transform: scale(1.08);
-    box-shadow: 0 0 0 2px rgba(10, 13, 20, 0.9), 0 0 0 4px var(--accent-color, #1db954);
+    box-shadow: 0 0 0 2px rgba(10, 13, 20, 0.9), 0 0 0 4px var(--accent);
 }
 
 .hero-indicator:focus-visible {
@@ -768,7 +768,7 @@
     width: 44px !important;
     height: 44px !important;
     border-radius: 50% !important;
-    background: var(--accent-color, #1db954) !important;
+    background: var(--accent) !important;
     color: #000000 !important;
     border: none !important;
     display: flex !important;
@@ -1098,7 +1098,7 @@
 .recommended-card-watchlist-btn.watching,
 .recommended-card-watchlist-btn.active {
     opacity: 1 !important;
-    color: var(--accent, #1db954) !important;
+    color: var(--accent) !important;
     border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.4) !important;
     background: rgba(var(--accent-rgb, 29, 185, 84), 0.18) !important;
     box-shadow: 0 0 12px rgba(var(--accent-rgb, 29, 185, 84), 0.3) !important;
@@ -1172,7 +1172,7 @@
     color: #fff;
     background:
         radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.28), transparent 55%),
-        linear-gradient(145deg, var(--accent-color, #1db954), #0c5a2b) !important;
+        linear-gradient(145deg, var(--accent), #0c5a2b) !important;
 }
 
 .discover-station-play {
@@ -1186,7 +1186,7 @@
     padding: 0;
     border: none;
     border-radius: 50%;
-    background: var(--accent-color, #1db954);
+    background: var(--accent);
     color: #05130a;
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
     cursor: pointer;
@@ -2568,7 +2568,7 @@
 .dsc-week-bar {
     width: min(100%, 18px);
     border-radius: 4px 4px 1px 1px;
-    background: var(--accent-color, #1db954);
+    background: var(--accent);
     opacity: 0.85;
     transition: opacity 160ms ease;
 }
@@ -2697,7 +2697,7 @@
 }
 
 .dsc-gap-fill.played {
-    background: var(--accent-color, #1db954);
+    background: var(--accent);
 }
 
 .dsc-gap .dsc-pulse-actions {
@@ -2970,7 +2970,7 @@
     padding: 0;
     border: none;
     border-radius: 50%;
-    background: var(--accent-color, #1db954);
+    background: var(--accent);
     color: #05130a;
     box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
     cursor: pointer;

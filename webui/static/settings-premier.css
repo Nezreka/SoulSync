@@ -44,10 +44,10 @@
     box-shadow: none !important; transition: color 120ms, border-color 120ms;
 }
 #settings-page .stg-tab:hover { color: var(--stg-text-primary) !important; }
-#settings-page .stg-tab.active { color: var(--stg-text-primary) !important; border-bottom-color: var(--accent-color, #1db954) !important; }
+#settings-page .stg-tab.active { color: var(--stg-text-primary) !important; border-bottom-color: var(--accent) !important; }
 #settings-page .stg-tab-badge { display: inline-flex; width: 16px; height: 16px; background: none; box-shadow: none; }
 #settings-page .stg-tab-badge svg { width: 16px; height: 16px; fill: currentColor; opacity: .75; }
-#settings-page .stg-tab.active .stg-tab-badge { color: var(--accent-color, #1db954); }
+#settings-page .stg-tab.active .stg-tab-badge { color: var(--accent); }
 #settings-page .stg-detail-pane { width: 100%; min-width: 0; }
 #settings-page .settings-nav-row {
     display: flex !important; flex-direction: row !important; align-items: center; justify-content: space-between;
@@ -61,7 +61,7 @@
 #settings-page .save-button {
     display: inline-flex; align-items: center; justify-content: center; gap: 8px;
     border: 1px solid rgba(var(--accent-rgb,29,185,84),.35); border-radius: 9px;
-    background: var(--accent-color,#1db954); color: #07190e; padding: 11px 18px;
+    background: var(--accent); color: #07190e; padding: 11px 18px;
     font-size: 13px; font-weight: 700; white-space: nowrap; cursor: pointer; box-shadow: none;
 }
 #settings-page .save-button:disabled { opacity: .5; cursor: wait; }
@@ -104,10 +104,10 @@
     border: 1px solid rgba(255,255,255,.14); background-color: rgba(0,0,0,.18);
     color: var(--stg-text-primary); padding: 10px 12px; font: inherit; font-size: 13px;
 }
-#settings-page input[type="checkbox"] { accent-color: var(--accent-color,#1db954); }
+#settings-page input[type="checkbox"] { accent-color: var(--accent); }
 #settings-page button:focus-visible, #settings-page input:focus-visible,
 #settings-page select:focus-visible, #settings-page textarea:focus-visible {
-    outline: 2px solid var(--accent-color,#1db954) !important; outline-offset: 3px;
+    outline: 2px solid var(--accent) !important; outline-offset: 3px;
 }
 #settings-page .svc-tile-row { display: grid !important; grid-template-columns: repeat(auto-fill,minmax(120px,1fr)); gap: 10px; }
 #settings-page .svc-tile { border-radius: 12px; box-shadow: none; }

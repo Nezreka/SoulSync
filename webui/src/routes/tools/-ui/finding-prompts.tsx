@@ -472,7 +472,7 @@ function WitnessMeDialog({
           padding: '28px',
           maxWidth: '480px',
           width: '90%',
-          color: 'var(--text-primary, #fff)',
+          color: 'var(--text-primary)',
           fontFamily: 'inherit',
         }}
       >
@@ -505,8 +505,8 @@ function WitnessMeDialog({
             padding: '10px',
             border: '1px solid #555',
             borderRadius: '6px',
-            background: 'var(--bg-primary, #111)',
-            color: 'var(--text-primary, #fff)',
+            background: '#111',
+            color: 'var(--text-primary)',
             fontSize: '1em',
             margin: '8px 0 16px',
             boxSizing: 'border-box',
@@ -522,7 +522,7 @@ function WitnessMeDialog({
               border: '1px solid #555',
               borderRadius: '6px',
               background: 'transparent',
-              color: 'var(--text-primary, #fff)',
+              color: 'var(--text-primary)',
               cursor: 'pointer',
               fontSize: '0.9em',
             }}

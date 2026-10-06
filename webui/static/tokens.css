@@ -18,10 +18,15 @@
        Defaults only. The inline <style id="soulsync-initial-appearance"> in
        index.html sets the user's accent before first paint, and init.js
        (applyAccentColor) overwrites it at runtime — both on :root. The rgb
-       triplets are comma-separated so rgba(var(--accent-rgb), a) works. */
+       triplets are comma-separated so rgba(var(--accent-rgb), a) works.
+       --accent / --accent-light resolve on :root: an element that scopes its
+       own --accent-rgb must also set --accent if it wants it to follow. */
     --accent-rgb: 29, 185, 84;
     --accent-light-rgb: 30, 215, 96;
     --accent-neon-rgb: 34, 255, 107;
+    --accent: rgb(var(--accent-rgb));
+    --accent-light: rgb(var(--accent-light-rgb));
+    --accent-color: var(--accent);
 
     /* ── White-alpha ramp ───────────────────────────────────────────── */
     --white-a02: rgba(255, 255, 255, 0.02);
@@ -53,6 +58,13 @@
     --text-1: #fff;
     --text-2: var(--white-a70);
     --text-3: var(--white-a50);
+
+    /* Names that older rules already reference. Values match the fallbacks
+       most of those rules shipped with; the odd ones out now use literals. */
+    --text-primary: #fff;
+    --text-secondary: #9aa0aa;
+    --text-muted: var(--text-3);
+    --bg-primary: #0b0b0f;
 
     /* ── Status ─────────────────────────────────────────────────────── */
     --danger-rgb: 239, 68, 68;
