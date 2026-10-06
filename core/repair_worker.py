@@ -3309,7 +3309,8 @@ class RepairWorker:
         # number the tags don't have whenever the file was missing.)
         if entity_id:
             try:
-                self.db.update_track_fields(int(entity_id), {'track_number': int(correct_num)})
+                # track ids are TEXT (navidrome ids carry letters), never cast (#1574)
+                self.db.update_track_fields(entity_id, {'track_number': int(correct_num)})
             except Exception as e:
                 logger.debug("DB track number update failed for entity %s: %s", entity_id, e)
 
@@ -5656,10 +5657,9 @@ class RepairWorker:
                 # it can MISS for media-server libraries whose stored file_path differs
                 # from the resolved path we just moved, which is exactly the #978
                 # population (so without this the file moves but the DB stays stale).
-                try:
-                    tid = int(entity_id) if entity_id not in (None, '') else None
-                except (TypeError, ValueError):
-                    tid = None
+                # TEXT ids (navidrome) fell back to the path match, which misses
+                # exactly the rows this exists for (#1574)
+                tid = str(entity_id) if entity_id not in (None, '') else None
                 if tid is not None:
                     cursor.execute("UPDATE tracks SET file_path = ? WHERE id = ?", (dst, tid))
                 if tid is None or cursor.rowcount == 0:
