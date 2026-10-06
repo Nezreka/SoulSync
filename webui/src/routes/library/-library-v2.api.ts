@@ -1801,7 +1801,7 @@ export function libraryV2ImportStatusQueryOptions(refetchIntervalMs = 1000) {
       if (!state) return false;
       if (
         state.running ||
-        state.artwork_cache.running ||
+        state.artwork_cache?.running ||
         state.bootstrap?.status === 'running' ||
         state.bootstrap?.status === 'pending'
       ) {

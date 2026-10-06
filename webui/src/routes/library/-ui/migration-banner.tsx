@@ -15,7 +15,15 @@ import styles from './migration-banner.module.css';
  */
 export function MigrationBanner() {
   const queryClient = useQueryClient();
-  const status = useQuery({ ...libraryV2ImportStatusQueryOptions(30_000), retry: false });
+  const status = useQuery({
+    ...libraryV2ImportStatusQueryOptions(),
+    retry: false,
+    // its own cadence: only an upgrade that is under way or stuck needs watching
+    refetchInterval: (query) =>
+      ['pending', 'running', 'failed'].includes(query.state.data?.bootstrap?.status ?? '')
+        ? 30_000
+        : false,
+  });
   const retry = useMutation({
     mutationFn: () => startLibraryV2Import(false, false),
     onSettled: () =>
