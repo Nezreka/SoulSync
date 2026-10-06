@@ -17,7 +17,7 @@
     --dsc-accent-spotify: #1db954;
     --dsc-accent-deezer: #a238ff;
     --dsc-shadow-card: 0 12px 32px rgba(0, 0, 0, 0.45);
-    --dsc-shadow-glow: 0 16px 40px rgba(var(--accent-rgb, 29, 185, 84), 0.22);
+    --dsc-shadow-glow: 0 16px 40px rgba(var(--accent-rgb), 0.22);
     
     position: relative;
     width: 100%;
@@ -36,7 +36,7 @@
     left: 10%;
     right: 10%;
     height: 600px;
-    background: radial-gradient(ellipse at 50% 0%, rgba(var(--discover-glow-rgb, var(--accent-rgb, 29, 185, 84)), 0.22) 0%, rgba(var(--discover-glow-rgb, 162, 56, 255), 0.08) 45%, transparent 75%);
+    background: radial-gradient(ellipse at 50% 0%, rgba(var(--discover-glow-rgb, var(--accent-rgb)), 0.22) 0%, rgba(var(--discover-glow-rgb, 162, 56, 255), 0.08) 45%, transparent 75%);
     pointer-events: none;
     z-index: 0;
     filter: blur(60px);
@@ -150,7 +150,7 @@
     height: 8px;
     border-radius: 50%;
     background: var(--accent);
-    box-shadow: 0 0 10px rgba(var(--accent-rgb, 29, 185, 84), 0.8);
+    box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.8);
 }
 
 .discover-hero-count {
@@ -299,7 +299,7 @@
     border-radius: 0;
     background: none;
     font-size: inherit;
-    color: rgba(var(--accent-light-rgb, 30, 215, 96), 0.95);
+    color: rgba(var(--accent-light-rgb), 0.95);
     font-weight: 600;
 }
 
@@ -344,13 +344,13 @@
     border-radius: 9999px !important;
     border: none !important;
     cursor: pointer !important;
-    box-shadow: 0 8px 24px rgba(var(--accent-rgb, 29, 185, 84), 0.45) !important;
+    box-shadow: 0 8px 24px rgba(var(--accent-rgb), 0.45) !important;
     transition: all 180ms cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
 .discover-hero-button.primary:hover {
     transform: scale(1.04) translateY(-1px) !important;
-    box-shadow: 0 12px 32px rgba(var(--accent-rgb, 29, 185, 84), 0.6) !important;
+    box-shadow: 0 12px 32px rgba(var(--accent-rgb), 0.6) !important;
     background: #22c55e !important;
     color: #000000 !important;
 }
@@ -486,7 +486,7 @@
 }
 
 .hero-indicator:focus-visible {
-    outline: 2px solid rgba(var(--accent-rgb, 29, 185, 84), 0.9) !important;
+    outline: 2px solid rgba(var(--accent-rgb), 0.9) !important;
     outline-offset: 2px !important;
 }
 
@@ -669,7 +669,7 @@
 
 .dsc-nav-chip:focus-visible,
 .dsc-nav-layout:focus-visible {
-    outline: 2px solid rgba(var(--accent-rgb, 29, 185, 84), 0.9);
+    outline: 2px solid rgba(var(--accent-rgb), 0.9);
     outline-offset: 2px;
 }
 
@@ -791,7 +791,7 @@
 
 .mix-card-play:hover {
     transform: translateY(-2px) scale(1.08) !important;
-    box-shadow: 0 10px 24px rgba(var(--accent-rgb, 29, 185, 84), 0.55) !important;
+    box-shadow: 0 10px 24px rgba(var(--accent-rgb), 0.55) !important;
     background: #22c55e !important;
 }
 
@@ -1099,9 +1099,9 @@
 .recommended-card-watchlist-btn.active {
     opacity: 1 !important;
     color: var(--accent) !important;
-    border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.4) !important;
-    background: rgba(var(--accent-rgb, 29, 185, 84), 0.18) !important;
-    box-shadow: 0 0 12px rgba(var(--accent-rgb, 29, 185, 84), 0.3) !important;
+    border-color: rgba(var(--accent-rgb), 0.4) !important;
+    background: rgba(var(--accent-rgb), 0.18) !important;
+    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.3) !important;
 }
 
 .recommended-card-watchlist-btn .sr-only,
@@ -1150,7 +1150,7 @@
 
 /* library radio leads the row, so it wears the accent */
 .discover-station-card.discover-station-card--library {
-    background: linear-gradient(160deg, rgba(var(--accent-rgb, 29, 185, 84), 0.16), rgba(22, 27, 38, 0.6) 70%) !important;
+    background: linear-gradient(160deg, rgba(var(--accent-rgb), 0.16), rgba(22, 27, 38, 0.6) 70%) !important;
 }
 
 .discover-station-art-wrap {
@@ -1208,7 +1208,7 @@
 
 .discover-station-play:focus-visible,
 .discover-station-open:focus-visible {
-    outline: 2px solid rgba(var(--accent-rgb, 29, 185, 84), 0.9);
+    outline: 2px solid rgba(var(--accent-rgb), 0.9);
     outline-offset: 2px;
 }
 
@@ -2166,7 +2166,7 @@
 }
 
 .discover-inbox-icon:focus-visible {
-    outline: 2px solid rgba(var(--accent-rgb, 29, 185, 84), 0.9);
+    outline: 2px solid rgba(var(--accent-rgb), 0.9);
     outline-offset: 1px;
 }
 
@@ -2183,7 +2183,7 @@
     font-weight: 800;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: rgb(var(--accent-light-rgb, 30, 215, 96));
+    color: rgb(var(--accent-light-rgb));
 }
 
 .discover-inbox-date-day {
@@ -2468,7 +2468,7 @@
 }
 
 .dsc-pulse-btn:focus-visible {
-    outline: 2px solid rgba(var(--accent-rgb, 29, 185, 84), 0.9);
+    outline: 2px solid rgba(var(--accent-rgb), 0.9);
     outline-offset: 2px;
 }
 
@@ -2531,8 +2531,8 @@
 }
 
 .dsc-week-change.up {
-    color: rgb(var(--accent-light-rgb, 30, 215, 96));
-    background: rgba(var(--accent-rgb, 29, 185, 84), 0.14);
+    color: rgb(var(--accent-light-rgb));
+    background: rgba(var(--accent-rgb), 0.14);
 }
 
 .dsc-week-sub {
@@ -2643,7 +2643,7 @@
     display: flex;
     flex-direction: column;
     background:
-        radial-gradient(circle at 100% 0%, rgba(var(--accent-rgb, 29, 185, 84), 0.16), transparent 55%),
+        radial-gradient(circle at 100% 0%, rgba(var(--accent-rgb), 0.16), transparent 55%),
         linear-gradient(145deg, rgba(24, 29, 40, 0.9), rgba(13, 16, 23, 0.95));
 }
 
@@ -2989,7 +2989,7 @@
 .dsc-quick-open:focus-visible,
 .dsc-quick-play:focus-visible,
 .dsc-quick-tile--flow:focus-visible {
-    outline: 2px solid rgba(var(--accent-rgb, 29, 185, 84), 0.9);
+    outline: 2px solid rgba(var(--accent-rgb), 0.9);
     outline-offset: 2px;
 }
 
@@ -3241,7 +3241,7 @@
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: rgb(var(--accent-light-rgb, 30, 215, 96));
+    color: rgb(var(--accent-light-rgb));
 }
 
 .dsc-now-title {
@@ -3330,7 +3330,7 @@ a.dsc-now-artist:hover {
 
 /* ── 17. Promo banners: one thing advertised, big, over a moving background ─ */
 .dsc-promo {
-    --promo-rgb: var(--accent-rgb, 29, 185, 84);
+    --promo-rgb: var(--accent-rgb);
     position: relative;
     overflow: hidden;
     height: clamp(280px, 26vw, 360px);
@@ -3512,7 +3512,7 @@ a.dsc-now-artist:hover {
 }
 
 .dsc-promo-video-toggle:focus-visible {
-    outline: 2px solid rgba(var(--accent-rgb, 29, 185, 84), 0.9);
+    outline: 2px solid rgba(var(--accent-rgb), 0.9);
     outline-offset: 2px;
 }
 

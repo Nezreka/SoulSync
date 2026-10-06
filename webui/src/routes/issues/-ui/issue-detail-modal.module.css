@@ -1158,7 +1158,7 @@
   font: inherit;
   font-size: 12.5px;
   font-weight: 600;
-  color: rgb(var(--accent-rgb, 29, 185, 84));
+  color: rgb(var(--accent-rgb));
   cursor: pointer;
 }
 
@@ -1203,8 +1203,8 @@
   gap: 12px;
   padding: 12px 14px;
   border-radius: 12px;
-  background: rgba(var(--accent-rgb, 29, 185, 84), 0.08);
-  border: 1px solid rgba(var(--accent-rgb, 29, 185, 84), 0.22);
+  background: rgba(var(--accent-rgb), 0.08);
+  border: 1px solid rgba(var(--accent-rgb), 0.22);
   font-size: 13.5px;
   color: #fff;
 }
@@ -1320,7 +1320,7 @@
 }
 
 .threadReply:focus {
-  border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.55);
+  border-color: rgba(var(--accent-rgb), 0.55);
 }
 
 .threadFooter {
