@@ -1169,9 +1169,7 @@ export function MatchChips({
         const details = [
           s.external_id ? `id: ${s.external_id}` : 'no id',
           s.last_attempted ? `last: ${s.last_attempted.slice(0, 16).replace('T', ' ')}` : null,
-          s.library_v2_entity_id != null
-            ? 'click to (re)match'
-            : null,
+          s.library_v2_entity_id != null ? 'click to (re)match' : null,
           matchOriginLabel(s.match_origin),
         ]
           .filter(Boolean)
@@ -4145,7 +4143,11 @@ export function UnifiedFileRemovalDialog({
         }
       } else {
         const operation = await deleteLibraryV2Files(
-          entity, eid, physical.preview_token, fileIds, noRedownload,
+          entity,
+          eid,
+          physical.preview_token,
+          fileIds,
+          noRedownload,
         );
         if (operation.status !== 'completed') {
           throw new Error(

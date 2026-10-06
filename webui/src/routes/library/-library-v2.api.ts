@@ -354,12 +354,15 @@ export async function clearLibraryV2EntityMatch(input: {
 }): Promise<void> {
   if (input.library_v2_entity_id == null) throw new Error('No matchable entity id');
   await lib2Json(
-    apiClient.delete(`library/v2/${input.entity_type}s/${input.library_v2_entity_id}/manual-match`, {
-      json: {
-        service: input.service,
-        ...(input.watchlist_row_id ? { watchlist_row_id: input.watchlist_row_id } : {}),
+    apiClient.delete(
+      `library/v2/${input.entity_type}s/${input.library_v2_entity_id}/manual-match`,
+      {
+        json: {
+          service: input.service,
+          ...(input.watchlist_row_id ? { watchlist_row_id: input.watchlist_row_id } : {}),
+        },
       },
-    }),
+    ),
     'Clear match failed',
   );
 }
@@ -966,7 +969,10 @@ export async function removeLibraryV2FileRecords(
     operation?: LibraryV2FileDeleteOperation;
   }>(
     apiClient.post(`library/v2/${entity}/${id}/file-remove`, {
-      json: { ...(fileIds?.length ? { file_ids: fileIds } : {}), ...(unmonitor ? { unmonitor } : {}) },
+      json: {
+        ...(fileIds?.length ? { file_ids: fileIds } : {}),
+        ...(unmonitor ? { unmonitor } : {}),
+      },
     }),
   );
   if (!payload.success || !payload.operation) {
