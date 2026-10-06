@@ -412,14 +412,18 @@ def test_torrent_finalize_single_file_m4b_is_not_music_audio(tmp_path: Path, mon
     assert 'No audio files' in row['error']
 
 
-def test_audio_from_single_file_takes_audio_directly_and_absolute(tmp_path: Path) -> None:
+def test_audio_from_single_file_takes_audio_directly_and_absolute(tmp_path: Path, monkeypatch) -> None:
     """A resolved audio file is taken as-is, always as an absolute path —
-    downstream stages persist these paths and do real file IO on them."""
+    downstream stages persist these paths and do real file IO on them. The
+    input here is deliberately RELATIVE (relative config roots like
+    './downloads' are supported), so the test fails if the .resolve() ever
+    goes missing."""
     from core.download_plugins.torrent import _audio_from_single_file
-    song = tmp_path / 'song.mp3'
+    monkeypatch.chdir(tmp_path)
+    song = Path('song.mp3')
     song.write_bytes(b'ID3')
     out = _audio_from_single_file(song)
-    assert out == [song.resolve()]
+    assert out == [(tmp_path / 'song.mp3').resolve()]
     assert out[0].is_absolute()
 
 
@@ -491,6 +495,26 @@ def test_collect_album_audio_extracts_a_resolved_single_archive(tmp_path: Path, 
         'get': staticmethod(lambda key, default=None: str(real_root)
                             if key == 'download_source.torrent_download_path' else default)})())
     files, _scope = _collect_album_audio(r'\\NAS\Media\Audiobooks', 'Album.zip', None)
+    assert [p.name for p in files] == ['track.mp3']
+
+
+def test_collect_album_audio_content_path_archive_falls_through_to_save_path(tmp_path: Path, monkeypatch) -> None:
+    """A content_path naming an archive (not audio) is NOT taken directly —
+    it falls through to the save_path walk, which extracts before collecting."""
+    import zipfile
+
+    from core.download_plugins import album_bundle as ab
+    from core.download_plugins.torrent import _collect_album_audio
+    real_root = tmp_path / 'real'
+    real_root.mkdir()
+    archive = real_root / 'Album.zip'
+    with zipfile.ZipFile(archive, 'w') as zf:
+        zf.writestr('track.mp3', b'ID3')
+    monkeypatch.setattr(ab, 'config_manager', type('C', (), {
+        'get': staticmethod(lambda key, default=None: str(real_root)
+                            if key == 'download_source.torrent_download_path' else default)})())
+    files, _scope = _collect_album_audio(r'\\NAS\Media\Audiobooks', 'Album.zip',
+                                        r'\\NAS\Media\Audiobooks\Album.zip')
     assert [p.name for p in files] == ['track.mp3']
 
 

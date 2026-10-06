@@ -536,8 +536,9 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
 
     def _finalize_download(self, download_id: str, save_path: Optional[str],
                            torrent_name: Optional[str] = None) -> None:
-        """Adapter said complete. Walk the directory + pick the
-        first audio file as the canonical ``file_path``."""
+        """Adapter said complete. Resolve the client-reported path, then walk
+        the directory — or take a resolved single file directly — and pick
+        the first audio file as the canonical ``file_path``."""
         if not save_path:
             self._mark_error(download_id, "Torrent completed but no save_path reported")
             return
@@ -1057,8 +1058,8 @@ def _collect_album_audio(
             # No content_path from this client: the resolver handed back the
             # single FILE itself. Same direct handling as the content_path
             # branch — including archives, which extract before collecting.
-            resolved = _audio_from_single_file(walk_root)
-            return resolved, str(walk_root)
+            single_files = _audio_from_single_file(walk_root)
+            return single_files, str(walk_root)
         if torrent_name and (walk_root / torrent_name).is_dir():
             # is_dir, not exists: a single-FILE torrent's name points at the
             # file itself, and the audio walker only walks directories.

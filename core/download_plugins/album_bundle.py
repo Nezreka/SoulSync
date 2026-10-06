@@ -1297,6 +1297,12 @@ def resolve_reported_save_path(
                 continue
             if normalized == frm or normalized.startswith(frm + '/'):
                 rest = normalized[len(frm):].lstrip('/')
+                if '..' in Path(rest).parts:
+                    # A client-reported path must never escape the mapping
+                    # target. The old directory-only gates rejected file
+                    # escapes implicitly; the file-aware steps reject them
+                    # explicitly instead.
+                    continue
                 candidate = str(Path(to) / rest) if rest else to
                 if _exists(candidate) and _contains_expected(candidate):
                     return candidate
@@ -1307,7 +1313,13 @@ def resolve_reported_save_path(
     #    download that just finished, not a stale copy from an earlier grab
     #    via another source (single-file audiobooks reuse the uploader's
     #    canonical filename across sources, and usenet roots sort before
-    #    torrent roots).
+    #    torrent roots). Exact ties keep config order, and anything that
+    #    bumps a stale file's mtime (retag jobs, media-server sidecars, a
+    #    concurrent grab still being written) can skew the pick toward it —
+    #    bounded consequence: the completeness gate stages, never imports, a
+    #    short/partial file. A remaining known limitation: Unicode
+    #    normalization mismatches (NFC reported vs NFD on disk) fail closed
+    #    here, like the directory check always did.
     basename = Path(normalized).name
     if basename:
         best: Optional[str] = None

@@ -287,6 +287,14 @@ def test_a_readable_but_empty_folder_is_not_blamed_on_mapping(tmp_path):
     assert 'no audio' in message.lower()
 
 
+def test_a_readable_file_without_audio_is_not_blamed_on_mapping(tmp_path):
+    book = tmp_path / 'track.txt'
+    book.write_bytes(b'x')
+    message = _no_audio_diagnosis('/data/downloads/rel', str(book))
+    assert 'path_mappings' not in message
+    assert 'no audio' in message.lower()
+
+
 def test_the_diagnosis_names_both_paths_when_they_differ(tmp_path):
     message = _no_audio_diagnosis('/data/downloads/rel', tmp_path)
     assert '/data/downloads/rel' in message

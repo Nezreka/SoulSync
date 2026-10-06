@@ -845,6 +845,45 @@ def test_resolve_basename_fallback_prefers_newest_across_roots(tmp_path: Path) -
     assert resolved == str(fresh)
 
 
+def test_resolve_basename_fallback_tie_keeps_config_order(tmp_path: Path) -> None:
+    """Exact mtime ties are deterministic: the first root in config order wins."""
+    import os
+
+    a = tmp_path / 'a'
+    b = tmp_path / 'b'
+    a.mkdir()
+    b.mkdir()
+    fa = a / 'Book.m4b'
+    fb = b / 'Book.m4b'
+    fa.write_bytes(b'x')
+    fb.write_bytes(b'x')
+    stamp = 1_700_000_000.0
+    os.utime(fa, (stamp, stamp))
+    os.utime(fb, (stamp, stamp))
+    cfg = _cfg({'download_source.usenet_download_path': str(a),
+                'download_source.torrent_download_path': str(b)})
+    assert resolve_reported_save_path(r'\\NAS\Media\Book.m4b', config_get=cfg) == str(fa)
+
+
+def test_resolve_mapping_rejects_dotdot_escape(tmp_path: Path) -> None:
+    """A client-reported path must never escape the mapping target via '..'.
+    The old directory-only gates rejected file escapes implicitly; the
+    file-aware steps reject them explicitly instead."""
+    target = tmp_path / 'mapped'
+    target.mkdir()
+    outside = tmp_path / 'secret.mp3'
+    outside.write_bytes(b'ID3')
+    cfg = _cfg({'download_source.path_mappings': [
+        {'from': '/data/dl', 'to': str(target)},
+    ]})
+    reported = '/data/dl/../../secret.mp3'
+    resolved = resolve_reported_save_path(reported, config_get=cfg)
+    # Fail-closed: the reported path comes back unchanged, never the file
+    # outside the mapping target.
+    assert resolved == reported
+    assert Path(resolved) != outside
+
+
 
 # ---------------------------------------------------------------------------
 # poll_album_download — lifted poll loop for both torrent + usenet plugins.
