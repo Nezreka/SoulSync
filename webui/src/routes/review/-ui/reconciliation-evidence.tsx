@@ -235,7 +235,7 @@ function TrackGroups({ pairs }: { pairs: Data[] }) {
 
 function EvidenceSummary({ details }: { details: Data }) {
   const candidate = objects(details.candidates)[0];
-  if (!Object.keys(candidate).length) return null;
+  if (!candidate) return null;
   const pairs = objects(candidate.pairs);
   const matched = count(candidate.matched);
   const total = count(candidate.total_slots) || pairs.length;

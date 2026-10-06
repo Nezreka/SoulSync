@@ -218,6 +218,67 @@ describe('library reconciliation review queue', () => {
     await waitFor(() => expect(screen.getByText(/Library reconciliation was queued/)).toBeTruthy());
   });
 
+  it('renders findings that do not have release candidates', async () => {
+    const noCandidateFinding = {
+      ...finding,
+      title: 'Mixed albums: loose files',
+      details: {
+        album_title: 'Loose files',
+        album_folder: '/music/Loose files',
+        file_count: 2,
+        checked_files: [
+          {
+            file: '01 - One.flac',
+            tag_title: 'One',
+            audio_status: 'no_match',
+          },
+        ],
+      },
+    };
+    fetchMock.mockImplementation((url: string) => {
+      const common = auxiliary(url);
+      if (common) return Promise.resolve(common);
+      if (url.startsWith('/api/repair/review-queue?'))
+        return Promise.resolve(
+          reply({
+            items: [
+              {
+                case_id: 'folder:1:loose',
+                album: 'Loose files',
+                artist: null,
+                pending: 1,
+                priority: 1,
+                finding_types: ['reconciliation_unresolved'],
+                error_count: 0,
+              },
+            ],
+            total: 1,
+            page: 0,
+            limit: 30,
+          }),
+        );
+      if (url.startsWith('/api/repair/review-queue/folder%3A1%3Aloose?'))
+        return Promise.resolve(
+          reply({
+            case_id: 'folder:1:loose',
+            album: 'Loose files',
+            artist: null,
+            folder: '/music/Loose files',
+            count: 1,
+            status: 'pending',
+            items: [noCandidateFinding],
+          }),
+        );
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(<ReviewPage />);
+
+    await screen.findByRole('heading', { name: 'Loose files' });
+    expect(screen.getByText('Technical evidence')).toBeTruthy();
+    expect(screen.queryByLabelText('Evidence summary')).toBeNull();
+  });
+
   it('pins the chosen release with its evidence token', async () => {
     let applied = false;
     fetchMock.mockImplementation((url: string, options?: RequestInit) => {
