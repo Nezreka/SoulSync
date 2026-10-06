@@ -453,3 +453,32 @@ def test_clients_without_content_path_still_use_save_path_and_name(monkeypatch, 
 
     out = plugin.download_album_to_staging('Album', 'Artist', str(tmp_path / 'staging'))
     assert out['success'] is True, out['error']
+
+
+def test_a_single_file_torrent_without_content_path_resolves_its_file(monkeypatch, tmp_path):
+    """No content_path from the client AND the save path needs remapping
+    (the audiobook report): the resolver hands back the single file itself,
+    which stages directly — the shared root is never walked, so another
+    torrent's audio can't leak in."""
+    import core.download_plugins.album_bundle as ab
+    import core.torrent_clients.base as base
+
+    real_root = tmp_path / 'real-downloads'
+    real_root.mkdir()
+    mine = real_root / 'Artist - Song.mp3'
+    mine.write_bytes(b'x')
+    (real_root / 'AAA-someone-elses-download.mp3').write_bytes(b'y')
+    monkeypatch.setattr(ab, 'config_manager', type('C', (), {
+        'get': staticmethod(lambda key, default=None: str(real_root)
+                            if key == 'download_source.torrent_download_path' else default)})())
+
+    status = SimpleNamespace(name='Artist - Song.mp3', content_path=None)
+    plugin, _removed = _plugin_with(monkeypatch,
+                                    poll_result=r'\\NAS\Media\Torrents\Incoming\Audiobooks',
+                                    status_after=status)
+    monkeypatch.setattr(base, 'add_torrent_smart', _async_return('hash'))
+
+    out = plugin.download_album_to_staging('Album', 'Artist', str(tmp_path / 'staging'))
+    assert out['success'] is True, out['error']
+    assert len(out['files']) == 1
+    assert Path(out['files'][0]).name == 'Artist - Song.mp3'

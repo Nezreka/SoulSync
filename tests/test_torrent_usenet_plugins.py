@@ -338,6 +338,162 @@ def test_torrent_finalize_single_file_torrent_still_walks_the_save_dir(tmp_path:
     assert row['file_path'].endswith('Artist - Song.mp3')
 
 
+def test_torrent_finalize_single_file_torrent_via_remapped_path(tmp_path: Path, monkeypatch) -> None:
+    """Single-file torrent whose client path needs remapping (the audiobook
+    report, Oct 2026): qBittorrent's save dir is a UNC path this container
+    can't read, the file itself is visible under the configured download
+    root. The resolver hands back the file itself, and finalize must take it
+    directly — walking its parent (the shared download root) would donate
+    other torrents' audio, and the directory-only walker finds nothing in a
+    file."""
+    from core.download_plugins import album_bundle as ab
+    real_root = tmp_path / 'real'
+    real_root.mkdir()
+    mine = real_root / 'Artist - Song.mp3'
+    mine.write_bytes(b'ID3')
+    # Another torrent's file in the same shared root, sorting FIRST: the old
+    # code walked the whole root and would grab this instead of our file.
+    (real_root / 'AAA-other.mp3').write_bytes(b'ID3')
+    monkeypatch.setattr(ab, 'config_manager', type('C', (), {
+        'get': staticmethod(lambda key, default=None: str(real_root)
+                            if key == 'download_source.torrent_download_path' else default)})())
+    plugin = TorrentDownloadPlugin()
+    plugin.active_downloads['dl-1'] = _inflight_row()
+    plugin._finalize_download(
+        'dl-1',
+        r'\\10.10.16.115\Media\Torrents\Incoming\Audiobooks',
+        torrent_name='Artist - Song.mp3',
+    )
+    row = plugin.active_downloads['dl-1']
+    assert row['state'] == 'Completed, Succeeded'
+    assert row['file_path'] == str(mine)
+
+
+def test_torrent_finalize_single_file_archive_via_remapped_path(tmp_path: Path, monkeypatch) -> None:
+    """A single-FILE archive torrent whose client path needs remapping: the
+    archive extracts (in place, as the old shared-root walk did) and its
+    audio is collected — never a hard 'No audio files' failure."""
+    import zipfile
+
+    from core.download_plugins import album_bundle as ab
+    real_root = tmp_path / 'real'
+    real_root.mkdir()
+    archive = real_root / 'Album.zip'
+    with zipfile.ZipFile(archive, 'w') as zf:
+        zf.writestr('track.mp3', b'ID3')
+    monkeypatch.setattr(ab, 'config_manager', type('C', (), {
+        'get': staticmethod(lambda key, default=None: str(real_root)
+                            if key == 'download_source.torrent_download_path' else default)})())
+    plugin = TorrentDownloadPlugin()
+    plugin.active_downloads['dl-1'] = _inflight_row()
+    plugin._finalize_download('dl-1', r'\\NAS\Media\Audiobooks', torrent_name='Album.zip')
+    row = plugin.active_downloads['dl-1']
+    assert row['state'] == 'Completed, Succeeded'
+    assert row['file_path'].endswith('track.mp3')
+
+
+def test_torrent_finalize_single_file_m4b_is_not_music_audio(tmp_path: Path, monkeypatch) -> None:
+    """Documents current scope: the MUSIC track flow does not treat .m4b as
+    audio — parity with the directory walker, which never matched it either.
+    Single-file audiobooks go through the audiobook flow, which keeps its own
+    extension set. Widening .m4b here is a separate product decision."""
+    from core.download_plugins import album_bundle as ab
+    real_root = tmp_path / 'real'
+    real_root.mkdir()
+    (real_root / 'Book.m4b').write_bytes(b'fake-m4b')
+    monkeypatch.setattr(ab, 'config_manager', type('C', (), {
+        'get': staticmethod(lambda key, default=None: str(real_root)
+                            if key == 'download_source.torrent_download_path' else default)})())
+    plugin = TorrentDownloadPlugin()
+    plugin.active_downloads['dl-1'] = _inflight_row()
+    plugin._finalize_download('dl-1', r'\\NAS\Media\Audiobooks', torrent_name='Book.m4b')
+    row = plugin.active_downloads['dl-1']
+    assert row['state'] == 'Completed, Errored'
+    assert 'No audio files' in row['error']
+
+
+def test_audio_from_single_file_takes_audio_directly_and_absolute(tmp_path: Path) -> None:
+    """A resolved audio file is taken as-is, always as an absolute path —
+    downstream stages persist these paths and do real file IO on them."""
+    from core.download_plugins.torrent import _audio_from_single_file
+    song = tmp_path / 'song.mp3'
+    song.write_bytes(b'ID3')
+    out = _audio_from_single_file(song)
+    assert out == [song.resolve()]
+    assert out[0].is_absolute()
+
+
+def test_audio_from_single_file_extracts_archives(tmp_path: Path) -> None:
+    """A single-file archive extracts (in place, like the old shared-root
+    walk) and the extraction is walked."""
+    import zipfile
+
+    from core.download_plugins.torrent import _audio_from_single_file
+    archive = tmp_path / 'album.zip'
+    with zipfile.ZipFile(archive, 'w') as zf:
+        zf.writestr('track.flac', b'fLaC')
+    out = _audio_from_single_file(archive)
+    assert len(out) == 1
+    assert out[0].name == 'track.flac'
+    assert out[0].is_absolute()
+
+
+def test_audio_from_single_file_rejects_non_audio(tmp_path: Path) -> None:
+    from core.download_plugins.torrent import _audio_from_single_file
+    notes = tmp_path / 'notes.txt'
+    notes.write_bytes(b'not audio')
+    assert _audio_from_single_file(notes) == []
+
+
+def test_collect_album_audio_walks_a_resolved_directory(tmp_path: Path) -> None:
+    """The ordinary multi-file case is unchanged: the resolved folder walks."""
+    from core.download_plugins.torrent import _collect_album_audio
+    release = tmp_path / 'release'
+    release.mkdir()
+    (release / 'track.mp3').write_bytes(b'ID3')
+    files, scope = _collect_album_audio(str(release), 'release', None)
+    assert [p.name for p in files] == ['track.mp3']
+    assert scope == str(release)
+
+
+def test_collect_album_audio_takes_a_resolved_single_file(tmp_path: Path, monkeypatch) -> None:
+    """No content_path from the client (not qBittorrent): the resolver hands
+    back the single file itself, which is taken directly — its parent (the
+    shared root) is never walked."""
+    from core.download_plugins import album_bundle as ab
+    from core.download_plugins.torrent import _collect_album_audio
+    real_root = tmp_path / 'real'
+    real_root.mkdir()
+    song = real_root / 'Artist - Song.mp3'
+    song.write_bytes(b'ID3')
+    (real_root / 'AAA-other.mp3').write_bytes(b'ID3')  # another torrent's file; never walked
+    monkeypatch.setattr(ab, 'config_manager', type('C', (), {
+        'get': staticmethod(lambda key, default=None: str(real_root)
+                            if key == 'download_source.torrent_download_path' else default)})())
+    files, scope = _collect_album_audio(r'\\NAS\Media\Audiobooks', 'Artist - Song.mp3', None)
+    assert files == [song.resolve()]
+    assert scope == str(song)
+
+
+def test_collect_album_audio_extracts_a_resolved_single_archive(tmp_path: Path, monkeypatch) -> None:
+    """A resolved single-file archive extracts before collecting — the old
+    shared-root walk did this implicitly; the direct-file path must too."""
+    import zipfile
+
+    from core.download_plugins import album_bundle as ab
+    from core.download_plugins.torrent import _collect_album_audio
+    real_root = tmp_path / 'real'
+    real_root.mkdir()
+    archive = real_root / 'Album.zip'
+    with zipfile.ZipFile(archive, 'w') as zf:
+        zf.writestr('track.mp3', b'ID3')
+    monkeypatch.setattr(ab, 'config_manager', type('C', (), {
+        'get': staticmethod(lambda key, default=None: str(real_root)
+                            if key == 'download_source.torrent_download_path' else default)})())
+    files, _scope = _collect_album_audio(r'\\NAS\Media\Audiobooks', 'Album.zip', None)
+    assert [p.name for p in files] == ['track.mp3']
+
+
 def test_torrent_finalize_rescues_a_wrong_reported_mount(tmp_path: Path, monkeypatch) -> None:
     """TheHomeGuy: qBittorrent reports '/downloads' (its container view); a
     same-named dir exists here but is empty, while the release actually
