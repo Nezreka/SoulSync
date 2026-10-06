@@ -493,6 +493,30 @@ def test_wishlist_removal_demonitors_by_embedded_lib2_id(imported_conn):
     assert dict(rule) == {"monitored": 0, "provenance": PROVENANCE_USER}
 
 
+def test_wishlist_removal_keeps_an_owned_track_monitored_for_upgrades(imported_conn):
+    """A wish is not ownership: an upgrade candidate the user drops from the
+    Wishlist keeps its monitoring, the missing one is unmonitored and its now
+    empty single stops being monitored."""
+    conn = imported_conn
+    artist = _add_artist(conn, "Owner", monitored=0)
+    owned = _add_track(conn, artist, "Owned", spotify_id="owned-sp", with_file=True)
+    wish = _add_track(conn, artist, "Wish", spotify_id="wish-sp",
+                      provenance=PROVENANCE_WISHLIST)
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    result = demonitor_lib2_tracks_for_removed_wishlist(db, [
+        {"spotify_track_id": "owned-sp", "source_info": {"lib2_track_id": owned}},
+        {"spotify_track_id": "wish-sp", "source_info": {"lib2_track_id": wish}},
+    ])
+
+    assert (result["kept_owned"], result["demonitored"], result["albums_released"]) == (1, 1, 1)
+    states = dict(conn.execute(
+        "SELECT t.title, t.monitored || '/' || al.monitored FROM lib2_tracks t "
+        "JOIN lib2_albums al ON al.id=t.album_id WHERE t.id IN (?,?)", (owned, wish)))
+    assert states == {"Owned": "1/1", "Wish": "0/0"}
+
+
 def test_wishlist_removal_matches_provider_payload_without_lib2_context(imported_conn):
     conn = imported_conn
     artist = _add_artist(conn, "Provider Artist", monitored=0)

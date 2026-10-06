@@ -769,7 +769,13 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
     page = max(1, int(page))
     limit = max(1, min(int(limit), 500))
     album_monitored = monitored_sql("album", "al")
-    clauses = [f"(al.origin='library' OR {album_monitored}=1)"]
+    # Same membership as the artist list: a live file, or monitoring intent on
+    # the release or one of its tracks. An empty release a cleared wish left
+    # behind is not part of the library any more.
+    from core.library2.sql_util import intent_profile_id, owned_sql
+    clauses = [f"({owned_sql('album', 'al')} OR {album_monitored}=1 OR EXISTS ("
+               "SELECT 1 FROM lib2_tracks wt JOIN lib2_wanted_tracks ww ON ww.track_id=wt.id "
+               f"AND ww.profile_id={intent_profile_id()} AND ww.wanted=1 WHERE wt.album_id=al.id))"]
     visible = scope_visibility_sql("album", "al")
     if visible:
         clauses.append(visible)

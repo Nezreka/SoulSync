@@ -439,59 +439,87 @@ def _completed_outbox_count(conn: Any, outbox_ids: Sequence[int]) -> int:
     return int(row[0]) if row else 0
 
 
+def release_removed_wishes(conn: Any, track_ids: Sequence[int], *,
+                           profile_id: int = 1) -> Dict[str, int]:
+    """Apply "the user dropped these wishes" to monitoring. Does not commit.
+
+    A wish is not ownership: a track with a live file keeps its monitoring, so
+    a quality upgrade stays possible (the ignore-list written with the removal
+    keeps it out of the queue meanwhile). Tracks without a file are explicitly
+    unmonitored, and a release left with no file and nothing wanted is
+    released too, unless the user or "monitor new releases" asked for it.
+    """
+    from core.library2.monitor_rules import (
+        PROVENANCE_CASCADE, PROVENANCE_NEW_RELEASE, PROVENANCE_USER, record_rule,
+    )
+    from core.library2.sql_util import owned_sql
+    from core.library2.wanted import entity_track_ids, recompute_wanted
+
+    ids = sorted({int(t) for t in track_ids or ()})
+    stats = {"matched": len(ids), "demonitored": 0, "kept_owned": 0, "albums_released": 0}
+    if not ids:
+        return stats
+    marks = ",".join("?" for _ in ids)
+    owned = {row[0] for row in conn.execute(
+        f"SELECT t.id FROM lib2_tracks t WHERE t.id IN ({marks}) AND {owned_sql('track', 't')}",
+        ids)}
+    stats["kept_owned"] = len(owned)
+    for track_id in (t for t in ids if t not in owned):
+        if int(profile_id) == 1:
+            conn.execute("UPDATE lib2_tracks SET monitored=0, updated_at=CURRENT_TIMESTAMP "
+                         "WHERE id=?", (track_id,))
+        record_rule(conn, "track", track_id, False, PROVENANCE_USER, profile_id=profile_id)
+        stats["demonitored"] += 1
+    recompute_wanted(conn, profile_id=profile_id, track_ids=ids)
+    albums = [row[0] for row in conn.execute(
+        f"""SELECT DISTINCT al.id FROM lib2_albums al
+              JOIN lib2_tracks t ON t.album_id=al.id AND t.id IN ({marks})
+              LEFT JOIN lib2_monitor_rules r ON r.entity_type='album'
+                   AND r.entity_id=al.id AND r.profile_id=?
+             WHERE COALESCE(r.provenance,'') NOT IN (?, ?)
+               AND NOT {owned_sql('album', 'al')}
+               AND NOT EXISTS (SELECT 1 FROM lib2_tracks wt JOIN lib2_wanted_tracks w
+                                   ON w.track_id=wt.id AND w.profile_id=? AND w.wanted=1
+                                WHERE wt.album_id=al.id)""",
+        [*ids, int(profile_id), PROVENANCE_USER, PROVENANCE_NEW_RELEASE, int(profile_id)])]
+    for album_id in albums:
+        if int(profile_id) == 1:
+            conn.execute("UPDATE lib2_albums SET monitored=0, updated_at=CURRENT_TIMESTAMP "
+                         "WHERE id=?", (album_id,))
+        record_rule(conn, "album", album_id, False, PROVENANCE_CASCADE, profile_id=profile_id)
+        recompute_wanted(conn, profile_id=profile_id,
+                         track_ids=entity_track_ids(conn, "album", album_id))
+    stats["albums_released"] = len(albums)
+    return stats
+
+
 def demonitor_lib2_tracks_for_removed_wishlist(
     db: Any,
     descriptors: Sequence[Mapping[str, Any]],
     *,
     profile_id: int = 1,
 ) -> Dict[str, int]:
-    """Apply a user-facing Wishlist removal as explicit track unmonitoring.
+    """Apply a user-facing Wishlist removal (see :func:`release_removed_wishes`).
 
     The caller must capture descriptors before deleting the Wishlist rows.
     Successful-download cleanup calls the database layer directly and never
-    invokes this function, so a downloaded track remains monitored for future
-    cutoff upgrades.
+    invokes this function.
     """
-    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
-    from core.library2.wanted import recompute_wanted
-
     with closing(db._get_connection()) as conn:
         track_ids = _descriptor_lib2_track_ids(conn, descriptors)
         if not track_ids:
             return {"matched": 0, "demonitored": 0, "tracks_mirrored": 0}
-        marks = ",".join("?" for _ in track_ids)
-        cur = conn.execute(
-            f"UPDATE lib2_tracks SET monitored=0, updated_at=CURRENT_TIMESTAMP "
-            f"WHERE id IN ({marks}) AND monitored=1",
-            track_ids,
-        )
-        demonitored = int(cur.rowcount)
-        for track_id in track_ids:
-            record_rule(
-                conn, "track", track_id, False, PROVENANCE_USER,
-                profile_id=profile_id,
-            )
-        recompute_wanted(conn, profile_id=profile_id, track_ids=track_ids)
+        stats = release_removed_wishes(conn, track_ids, profile_id=profile_id)
         from core.library2.mirror_outbox import drain, enqueue_projected_tracks
         outbox_ids = enqueue_projected_tracks(
-            conn,
-            track_ids,
-            profile_id=profile_id,
-            user_initiated=False,
+            conn, track_ids, profile_id=profile_id, user_initiated=False,
         )
         conn.commit()
         if outbox_ids:
             drain(db)
-        mirrored = _completed_outbox_count(conn, outbox_ids)
-        logger.info(
-            "wishlist→library demonitor: %d matched, %d demonitored, %d mirrors",
-            len(track_ids), demonitored, mirrored,
-        )
-        return {
-            "matched": len(track_ids),
-            "demonitored": demonitored,
-            "tracks_mirrored": mirrored,
-        }
+        stats["tracks_mirrored"] = _completed_outbox_count(conn, outbox_ids)
+        logger.info("wishlist→library release: %s", stats)
+        return stats
 
 
 def monitor_lib2_tracks_for_added_wishlist(

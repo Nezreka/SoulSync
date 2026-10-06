@@ -2096,6 +2096,38 @@ def test_database_only_file_remove_keeps_disk_file_and_reprojects_wanted(api, tm
         ).fetchone()[0] == 1
 
 
+def test_dont_download_again_unmonitors_what_was_removed(api, tmp_path):
+    """The removal dialog's opt-out: without it a monitored track that loses its
+    file is Wanted again (and re-downloaded); with it the track is unmonitored."""
+    client, db, ids = api
+    path = tmp_path / "keep.flac"
+    path.write_bytes(b"audio")
+    with _conn(db) as conn:
+        file_id = conn.execute(
+            "UPDATE lib2_track_files SET path=? WHERE track_id=? RETURNING id",
+            (str(path), ids["album_track"]),
+        ).fetchone()[0]
+        conn.commit()
+    client.post(f"/api/library/v2/tracks/{ids['album_track']}/monitor", json={"monitored": True})
+
+    response = client.post(
+        f"/api/library/v2/albums/{ids['views']}/file-remove",
+        json={"file_ids": [file_id], "unmonitor": True},
+    )
+
+    assert response.status_code == 200
+    with _conn(db) as conn:
+        assert conn.execute(
+            "SELECT wanted FROM lib2_wanted_tracks WHERE track_id=? AND profile_id=1",
+            (ids["album_track"],),
+        ).fetchone()[0] == 0
+        assert tuple(conn.execute(
+            "SELECT monitored, provenance FROM lib2_monitor_rules "
+            "WHERE entity_type='track' AND entity_id=? AND profile_id=1",
+            (ids["album_track"],),
+        ).fetchone()) == (0, "user_explicit")
+
+
 def test_track_files_endpoint_lists_every_owned_file_paginated(api):
     """C2: Manage Track Files "Files" tab — flat, paginated list of every
     physical file this artist owns, independent of the duplicates endpoint."""

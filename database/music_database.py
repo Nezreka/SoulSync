@@ -14733,15 +14733,12 @@ class MusicDatabase:
                     "SELECT spotify_track_id, spotify_data, source_info FROM wishlist_tracks WHERE profile_id = ?",
                     (profile_id,))
                 rows = cursor.fetchall()
-                from core.library2.monitor_sync import _descriptor_lib2_track_ids
-                from core.library2.monitor_rules import PROVENANCE_USER, record_rule
-                from core.library2.wanted import recompute_wanted
-                track_ids = _descriptor_lib2_track_ids(conn, [dict(row) for row in rows])
-                for track_id in track_ids:
-                    if int(profile_id) == 1:
-                        conn.execute('UPDATE lib2_tracks SET monitored=0 WHERE id=?', (track_id,))
-                    record_rule(conn, 'track', track_id, False, PROVENANCE_USER, profile_id=profile_id)
-                recompute_wanted(conn, profile_id=profile_id, track_ids=track_ids)
+                from core.library2.monitor_sync import (
+                    _descriptor_lib2_track_ids, release_removed_wishes,
+                )
+                release_removed_wishes(
+                    conn, _descriptor_lib2_track_ids(conn, [dict(row) for row in rows]),
+                    profile_id=profile_id)
                 ignored = 0
                 for row in rows:
                     try:

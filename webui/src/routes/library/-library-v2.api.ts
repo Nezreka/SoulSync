@@ -994,6 +994,7 @@ export async function removeLibraryV2FileRecords(
   entity: 'artists' | 'albums',
   id: number,
   fileIds?: number[],
+  unmonitor = false,
 ): Promise<LibraryV2FileDeleteOperation> {
   const payload = await readJson<{
     success: boolean;
@@ -1001,7 +1002,7 @@ export async function removeLibraryV2FileRecords(
     operation?: LibraryV2FileDeleteOperation;
   }>(
     apiClient.post(`library/v2/${entity}/${id}/file-remove`, {
-      json: fileIds?.length ? { file_ids: fileIds } : {},
+      json: { ...(fileIds?.length ? { file_ids: fileIds } : {}), ...(unmonitor ? { unmonitor } : {}) },
     }),
   );
   if (!payload.success || !payload.operation) {
@@ -1029,6 +1030,7 @@ export async function deleteLibraryV2Files(
   id: number,
   previewToken: string,
   fileIds?: number[],
+  unmonitor = false,
 ): Promise<LibraryV2FileDeleteOperation> {
   const payload = await readJson<{
     success: boolean;
@@ -1039,6 +1041,7 @@ export async function deleteLibraryV2Files(
       json: {
         preview_token: previewToken,
         ...(fileIds?.length ? { file_ids: fileIds } : {}),
+        ...(unmonitor ? { unmonitor } : {}),
       },
     }),
   );

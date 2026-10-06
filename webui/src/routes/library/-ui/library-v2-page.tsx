@@ -4113,6 +4113,7 @@ export function UnifiedFileRemovalDialog({
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<'database_only' | 'permanent'>('database_only');
   const [confirmed, setConfirmed] = useState(false);
+  const [noRedownload, setNoRedownload] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revealedPaths, setRevealedPaths] = useState<Set<string>>(() => new Set());
@@ -4139,13 +4140,15 @@ export function UnifiedFileRemovalDialog({
     try {
       if (mode === 'database_only') {
         if (physical.file_count > 0) {
-          await removeLibraryV2FileRecords(entity, eid, fileIds);
+          await removeLibraryV2FileRecords(entity, eid, fileIds, noRedownload);
         }
         if (removeWholeEntity) {
           await deleteLibraryV2Entity(entity, eid);
         }
       } else {
-        const operation = await deleteLibraryV2Files(entity, eid, physical.preview_token, fileIds);
+        const operation = await deleteLibraryV2Files(
+          entity, eid, physical.preview_token, fileIds, noRedownload,
+        );
         if (operation.status !== 'completed') {
           throw new Error(
             `Permanent deletion was ${operation.status}; the library entry was kept for review.`,
@@ -4172,8 +4175,8 @@ export function UnifiedFileRemovalDialog({
   return (
     <ModalShell title={heading} className={styles.fileRemovalDialog} onClose={onCancel}>
       <p>
-        Choose what should happen to <strong>{subject}</strong>. Monitoring and Wanted state are
-        recalculated after the file records change.
+        Choose what should happen to <strong>{subject}</strong>. Monitored tracks that lose their
+        file are downloaded again unless you tick &quot;Don&apos;t download again&quot;.
       </p>
       {preview.isLoading ? <p className={styles.muted}>Building file summary…</p> : null}
       {preview.isError ? (
@@ -4318,6 +4321,15 @@ export function UnifiedFileRemovalDialog({
           with the rest.
         </div>
       ) : null}
+      <label className={styles.fileDeleteConfirm}>
+        <input
+          type="checkbox"
+          checked={noRedownload}
+          disabled={busy}
+          onChange={(event) => setNoRedownload(event.target.checked)}
+        />
+        Don&apos;t download again (unmonitor what is removed)
+      </label>
       {mode === 'permanent' ? (
         <label className={styles.fileDeleteConfirm}>
           <input

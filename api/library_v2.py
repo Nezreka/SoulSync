@@ -2982,10 +2982,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     @_route("/api/library/v2/<entity>/<int:eid>/monitor", methods=["POST"])
     def lib2_set_monitored(entity, eid):
+        return _apply_monitor(
+            entity, eid, bool((request.get_json(silent=True) or {}).get("monitored", True)))
+
+    def _apply_monitor(entity, eid, monitored: bool):
+        """A direct user (un)monitor of one entity, with its cascade and mirrors."""
         table = _MONITOR_TABLES.get(entity)
         if not table:
             return _fail("Unknown entity")
-        monitored = bool((request.get_json(silent=True) or {}).get("monitored", True))
         db = get_database()
         with closing(db._get_connection()) as conn:
             cur = conn.cursor()
@@ -4168,10 +4172,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 actor="user",
                 actor_profile_id=_profile(),
             )
+            _unmonitor_after_removal(body, entity, eid, file_ids, operation)
             _reproject_after_file_removal(operation.get("track_ids") or [])
             return jsonify({"success": True, "operation": operation})
         except FileDeleteError as exc:
             return _fail(str(exc), exc.status)
+
+    def _unmonitor_after_removal(body, entity, eid, file_ids, operation) -> None:
+        """"Don't download again": unmonitor what was removed before the
+        re-projection could turn it into Wanted. The whole entity for an
+        artist/album removal, only the affected tracks for a file selection."""
+        if body.get("unmonitor") is not True:
+            return
+        targets = ([(entity, eid)] if file_ids is None else
+                   [("tracks", t) for t in sorted(set(operation.get("track_ids") or []))])
+        for kind, target in targets:
+            _apply_monitor(kind, int(target), False)
 
     def _reproject_after_file_removal(track_ids: List[int]) -> None:
         """A removed file can turn a monitored track into Wanted again."""
@@ -4220,6 +4236,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 actor="user",
                 actor_profile_id=_profile(),
             )
+            _unmonitor_after_removal(body, entity, eid, file_ids, operation)
             _reproject_after_file_removal(operation.get("track_ids") or [])
             return jsonify({"success": True, "operation": operation})
         except FileDeleteError as exc:
