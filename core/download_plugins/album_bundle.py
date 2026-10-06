@@ -1187,16 +1187,31 @@ def resolve_reported_save_path(
     "No audio files found" even though the files are physically present —
     the classic arr-stack remote-path mismatch.
 
+    Single-FILE torrents are first-class here, not a directory edge case:
+    qBittorrent's ``content_path`` for one names the file itself (the
+    standard shape for audiobook downloads, e.g.
+    ``\\\\NAS\\Media\\...\\Columbus Day (R.C. Bray).m4b``). Steps 1–3 accept
+    an existing file as readily as a directory; step 4 synthesizes
+    ``<root>/<expect_name>`` and returns the file itself when that names one.
+
     Resolution order:
-      1. The reported path verbatim, if it's a readable directory here
-         (deployments that mirror the client's mount paths).
+      1. The reported path verbatim, if it's a readable directory or file
+         here (deployments that mirror the client's mount paths).
       2. Explicit prefix mappings from ``download_source.usenet_path_mappings``
          — a list of ``{"from": "...", "to": "..."}`` (Sonarr/Radarr-style
          remote path mapping) for non-shared / oddly-mounted layouts.
-      3. Basename fallback: a same-named folder under a known SoulSync
-         download root. Zero-config for the standard shared-volume setup —
-         the album folder shows up under SoulSync's own ``./downloads``
-         mount with the same name the client reported.
+      3. Basename fallback: a same-named folder or file under a known
+         SoulSync download root. Zero-config for the standard shared-volume
+         setup — the album folder shows up under SoulSync's own
+         ``./downloads`` mount with the same name the client reported. When
+         several roots hold the name, the most recently written one wins:
+         that is the download that just finished, not a stale copy from an
+         earlier grab via another source (single-file audiobooks reuse the
+         uploader's canonical filename across sources).
+      4. The roots themselves: when the expected name is known and names a
+         single FILE under a root, the file itself is returned — never the
+         whole root, which would let callers walk every other download in
+         the shared folder against this job.
 
     Returns the best resolved path, or ``reported_path`` unchanged when
     nothing better is found (so the caller's existing "no audio" error still
@@ -1213,6 +1228,21 @@ def resolve_reported_save_path(
         except OSError:
             return False
 
+    def _is_file(candidate) -> bool:
+        try:
+            return Path(candidate).is_file()
+        except OSError:
+            return False
+
+    def _exists(candidate) -> bool:
+        """A candidate this process can actually hand to a caller: an
+        existing directory OR an existing file. The directory-only gates
+        this replaces meant a single-FILE torrent's path could never
+        resolve — the reported path came back unchanged and the audio
+        walker reported "No audio files in the download" for a file that
+        was sitting right there."""
+        return _is_dir(candidate) or _is_file(candidate)
+
     def _contains_expected(candidate) -> bool:
         """When the caller told us WHAT should be inside (the torrent/job
         name), an existing-but-content-less directory is the WRONG mount,
@@ -1220,17 +1250,34 @@ def resolve_reported_save_path(
         container's '/downloads', a directory by that name happened to
         exist in SoulSync's namespace too, and the verbatim short-circuit
         accepted it — SoulSync then watched an empty folder instead of the
-        configured one that actually had the files."""
+        configured one that actually had the files.
+
+        For a single-FILE candidate the expected name IS the filename:
+        qBittorrent names a single-file torrent after its file, so the
+        check is a name comparison rather than a directory listing.
+
+        The expected name is client-reported, so only its final component
+        is ever used — a name carrying path components ("a/../../b") must
+        not escape the candidate or the download root it is joined onto.
+        Matching stays exact and case-sensitive, like the directory check
+        always was; a renamed file simply fails closed to the caller's
+        "no audio" error."""
         if not expect_name:
             return True
+        wanted = Path(expect_name).name
+        if not wanted:
+            return False
         try:
-            return (Path(candidate) / expect_name).exists()
+            p = Path(candidate)
+            if p.is_file():
+                return p.name == wanted
+            return (p / wanted).exists()
         except OSError:
             return False
 
     # 1. Reported path is directly readable — mounts already line up.
     #    Verbatim acceptance requires the expected content when known.
-    if _is_dir(reported_path) and _contains_expected(reported_path):
+    if _exists(reported_path) and _contains_expected(reported_path):
         return reported_path
 
     normalized = str(reported_path).replace('\\', '/')
@@ -1250,26 +1297,73 @@ def resolve_reported_save_path(
                 continue
             if normalized == frm or normalized.startswith(frm + '/'):
                 rest = normalized[len(frm):].lstrip('/')
+                if '..' in Path(rest).parts:
+                    # A client-reported path must never escape the mapping
+                    # target. The old directory-only gates rejected file
+                    # escapes implicitly; the file-aware steps reject them
+                    # explicitly instead.
+                    continue
                 candidate = str(Path(to) / rest) if rest else to
-                if _is_dir(candidate) and _contains_expected(candidate):
+                if _exists(candidate) and _contains_expected(candidate):
                     return candidate
 
     # 3. Basename fallback under known download roots — covers the standard
-    #    shared-volume layout with zero configuration.
-    basename = Path(normalized).name
-    if basename:
+    #    shared-volume layout with zero configuration. When several roots
+    #    hold the name, the most recently written one wins: that is the
+    #    download that just finished, not a stale copy from an earlier grab
+    #    via another source (single-file audiobooks reuse the uploader's
+    #    canonical filename across sources, and usenet roots sort before
+    #    torrent roots). Exact ties keep config order, and anything that
+    #    bumps a stale file's mtime (retag jobs, media-server sidecars, a
+    #    concurrent grab still being written) can skew the pick toward it —
+    #    bounded consequence: the completeness gate stages, never imports, a
+    #    short/partial file. A remaining known limitation: Unicode
+    #    normalization mismatches (NFC reported vs NFD on disk) fail closed
+    #    here, like the directory check always did.
+    #
+    #    the parent folder is tried first: a client category that saves into
+    #    its own subfolder ('audiobooks/Book.m4b') lands one level down, not
+    #    at the root. the longer tail is the more specific match, so it wins
+    #    over a same-named file sitting at the root.
+    tail_parts = [part for part in Path(normalized).parts
+                  if part not in ('', '.', '..') and '/' not in part]
+    tails = []
+    if len(tail_parts) >= 2:
+        tails.append(Path(tail_parts[-2]) / tail_parts[-1])
+    if tail_parts:
+        tails.append(Path(tail_parts[-1]))
+    for tail in tails:
+        best: Optional[str] = None
+        best_mtime = -1.0
         for root in _candidate_download_roots(config_get):
-            candidate = Path(root) / basename
-            if _is_dir(candidate) and _contains_expected(candidate):
-                return str(candidate)
+            candidate = Path(root) / tail
+            if not (_exists(candidate) and _contains_expected(candidate)):
+                continue
+            try:
+                mtime = candidate.stat().st_mtime
+            except OSError:
+                mtime = -1.0
+            if best is None or mtime > best_mtime:
+                best, best_mtime = str(candidate), mtime
+        if best is not None:
+            return best
 
     # 4. The roots THEMSELVES. A torrent client reports its save DIRECTORY
     #    (e.g. '/downloads'), not a per-release folder — in the shared-mount
     #    setup the release lands as '<SoulSync download root>/<name>', so the
     #    right resolution of '/downloads' is simply our own configured root.
+    #    When the expected name is a single FILE under the root, hand back
+    #    the file itself: callers walk whatever they are handed, and the
+    #    whole root would donate every other download in the shared folder
+    #    to this job's scan. The name is basenamed first (see above) so it
+    #    can never escape the root.
     if expect_name:
+        wanted = Path(expect_name).name
         for root in _candidate_download_roots(config_get):
             if _is_dir(root) and _contains_expected(root):
+                target = Path(root) / wanted
+                if _is_file(target):
+                    return str(target)
                 return str(root)
 
     # Nothing verifiably better — hand back the reported path unchanged so

@@ -57,7 +57,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.settings import config_manager
-from core.archive_pipeline import AUDIO_EXTENSIONS, collect_audio_after_extraction
+from core.archive_pipeline import (
+    AUDIO_EXTENSIONS,
+    collect_audio_after_extraction,
+    extract_archive,
+    is_archive,
+    walk_audio_files,
+)
 from core.download_plugins.album_bundle import (
     TransientMissCounter,
     copy_audio_files_atomically,
@@ -530,8 +536,9 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
 
     def _finalize_download(self, download_id: str, save_path: Optional[str],
                            torrent_name: Optional[str] = None) -> None:
-        """Adapter said complete. Walk the directory + pick the
-        first audio file as the canonical ``file_path``."""
+        """Adapter said complete. Resolve the client-reported path, then walk
+        the directory — or take a resolved single file directly — and pick
+        the first audio file as the canonical ``file_path``."""
         if not save_path:
             self._mark_error(download_id, "Torrent completed but no save_path reported")
             return
@@ -549,15 +556,27 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         # download root from donating the "first audio file" of some OTHER
         # torrent that happens to live there.
         walk_root = Path(local_path)
-        if torrent_name and (walk_root / torrent_name).is_dir():
-            # is_dir, not exists: a single-FILE torrent's name points at the
-            # file itself, and the audio walker only walks directories.
-            walk_root = walk_root / torrent_name
-        try:
-            audio_files = collect_audio_after_extraction(walk_root)
-        except Exception as e:
-            self._mark_error(download_id, f"Post-extract walk failed: {e}")
-            return
+        if walk_root.is_file():
+            # A single-FILE torrent whose client path needed remapping: the
+            # resolver handed back the file itself. Take it directly (archives
+            # extract first) — the audio walker only walks directories, and
+            # walking the file's parent (usually the shared download root)
+            # would pick up every other torrent's audio instead.
+            try:
+                audio_files = _audio_from_single_file(walk_root)
+            except Exception as e:
+                self._mark_error(download_id, f"Post-extract walk failed: {e}")
+                return
+        else:
+            if torrent_name and (walk_root / torrent_name).is_dir():
+                # is_dir, not exists: a single-FILE torrent's name points at the
+                # file itself, and the audio walker only walks directories.
+                walk_root = walk_root / torrent_name
+            try:
+                audio_files = collect_audio_after_extraction(walk_root)
+            except Exception as e:
+                self._mark_error(download_id, f"Post-extract walk failed: {e}")
+                return
         if not audio_files:
             suffix = f" (resolved: {local_path})" if local_path != save_path else ""
             self._mark_error(download_id, f"No audio files found in {save_path}{suffix}")
@@ -927,50 +946,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         except Exception:   # noqa: BLE001 - the name is an assist, not a requirement
             torrent_name = None
 
-        # content_path is qBittorrent's absolute path to THIS torrent's own
-        # file or folder, and it is the reliable answer to "which of the
-        # things in the shared download dir is mine" — the release's on-disk
-        # folder often differs from the torrent's display NAME, which is what
-        # the save_path + name walk below assumes. The video side has resolved
-        # completed torrents this way for a while; the music album flow never
-        # adopted it, and that is the "completed and seeding in qBittorrent,
-        # but SoulSync says No audio files found" half of #1139.
-        walk_root = None
-        single_file = None
-        if content_path:
-            resolved_content = resolve_reported_save_path(content_path)
-            candidate = Path(resolved_content)
-            if candidate.is_dir():
-                walk_root = candidate
-                logger.info("[Torrent album] Using client content_path %r -> %r",
-                            content_path, str(walk_root))
-            elif candidate.is_file() and candidate.suffix.lower() in AUDIO_EXTENSIONS:
-                # A single-FILE torrent. Deliberately NOT walking its parent:
-                # for these the parent is usually the shared download root, and
-                # walking it would stage every other torrent's audio too. We
-                # already know exactly which file is ours.
-                single_file = candidate
-                logger.info("[Torrent album] Single-file torrent via content_path -> %r",
-                            str(candidate))
-            # A single non-audio file (an archive) falls through to the
-            # save_path walk below, which extracts before collecting.
-
-        local_path = resolve_reported_save_path(save_path, expect_name=torrent_name)
-        if local_path != save_path:
-            logger.info("[Torrent album] Resolved client path %r -> %r", save_path, local_path)
-        if walk_root is None:
-            walk_root = Path(local_path)
-            if torrent_name and (walk_root / torrent_name).is_dir():
-                # is_dir, not exists: a single-FILE torrent's name points at the
-                # file itself, and the audio walker only walks directories.
-                walk_root = walk_root / torrent_name
         try:
-            # single_file is set only when content_path named ONE audio file:
-            # we already know exactly which file is ours, and walking its
-            # parent (usually the shared download root) would stage every
-            # other torrent's audio with it.
-            audio_files = ([single_file] if single_file
-                           else collect_audio_after_extraction(walk_root))
+            audio_files, scope = _collect_album_audio(save_path, torrent_name, content_path)
         except Exception as e:
             result['error'] = f'Failed to walk audio files: {e}'
             result['fallback'] = True
@@ -980,7 +957,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             # reads identically whether the release genuinely has none or the
             # path simply isn't reachable from this process — and the second is
             # a remote-path-mapping problem the user can actually fix.
-            result['error'] = _no_audio_diagnosis(save_path, walk_root)
+            result['error'] = _no_audio_diagnosis(save_path, scope)
             # The bits may well be on disk, so per-track can still succeed
             # where this bundle could not.
             result['fallback'] = True
@@ -1004,6 +981,118 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
 # ---------------------------------------------------------------------------
 
 
+def _audio_from_single_file(path: Path) -> List[Path]:
+    """Audio files for a download that resolved to ONE file, not a folder.
+
+    A single-FILE torrent's resolved path names the file itself. Audio files
+    are taken directly; single-file ARCHIVES are extracted and the extraction
+    walked; anything else yields nothing. Always returns absolute paths,
+    matching ``walk_audio_files`` — downstream stages persist these paths and
+    do real file IO on them.
+
+    an archive unpacks into its own folder next to it, never into its parent.
+    the parent is usually the shared download root, and walking it would hand
+    this job every other download's audio.
+    """
+    resolved = Path(path).resolve()
+    if resolved.suffix.lower() in AUDIO_EXTENSIONS:
+        return [resolved]
+    if is_archive(resolved):
+        extracted = extract_archive(resolved, extract_to=_archive_extract_dir(resolved))
+        if extracted is not None:
+            return walk_audio_files(Path(extracted))
+    return []
+
+
+_ARCHIVE_SUFFIXES = ('.tar.gz', '.tar.bz2', '.tar.xz', '.tgz', '.tar', '.zip', '.rar', '.7z')
+
+
+def _archive_extract_dir(archive: Path) -> Path:
+    """'<dir>/Album.tar.gz' -> '<dir>/Album'. falls back to '<name>.extracted'
+    when the stem would be empty or is the archive itself."""
+    name = archive.name
+    stem = name
+    for suffix in _ARCHIVE_SUFFIXES:
+        if name.lower().endswith(suffix):
+            stem = name[:-len(suffix)]
+            break
+    if not stem or stem == name:
+        stem = name + '.extracted'
+    return archive.parent / stem
+
+
+def _collect_album_audio(
+    save_path: Optional[str],
+    torrent_name: Optional[str],
+    content_path: Optional[str],
+) -> Tuple[List[Path], str]:
+    """Resolve the client's paths for an album torrent and collect this
+    release's audio files.
+
+    ``content_path`` (qBittorrent's path to THIS torrent's own file/folder)
+    is preferred — it is the reliable answer to "which of the things in the
+    shared download dir is mine". Otherwise the save path is resolved against
+    the torrent name. A resolved single FILE is taken directly (archives
+    extracted first): walking its parent — usually the shared download root —
+    would stage every other torrent's audio, and the directory walker finds
+    nothing in a file.
+
+    Returns ``(audio_files, scope)`` where ``scope`` is the path actually
+    consulted (walked directory or single file), for the no-audio diagnosis.
+    Raises whatever the walk/extraction raises; the caller reports it.
+    """
+    # content_path is qBittorrent's absolute path to THIS torrent's own
+    # file or folder, and it is the reliable answer to "which of the
+    # things in the shared download dir is mine" — the release's on-disk
+    # folder often differs from the torrent's display NAME, which is what
+    # the save_path + name walk below assumes. The video side has resolved
+    # completed torrents this way for a while; the music album flow never
+    # adopted it, and that is the "completed and seeding in qBittorrent,
+    # but SoulSync says No audio files found" half of #1139.
+    walk_root = None
+    single_file = None
+    if content_path:
+        resolved_content = resolve_reported_save_path(content_path)
+        candidate = Path(resolved_content)
+        if candidate.is_dir():
+            walk_root = candidate
+            logger.info("[Torrent album] Using client content_path %r -> %r",
+                        content_path, str(walk_root))
+        elif candidate.is_file() and candidate.suffix.lower() in AUDIO_EXTENSIONS:
+            # A single-FILE torrent. Deliberately NOT walking its parent:
+            # for these the parent is usually the shared download root, and
+            # walking it would stage every other torrent's audio too. We
+            # already know exactly which file is ours.
+            single_file = candidate
+            logger.info("[Torrent album] Single-file torrent via content_path -> %r",
+                        str(candidate))
+        # A single non-audio file (an archive) falls through to the
+        # save_path walk below, which extracts before collecting.
+
+    local_path = resolve_reported_save_path(save_path, expect_name=torrent_name)
+    if local_path != save_path:
+        logger.info("[Torrent album] Resolved client path %r -> %r", save_path, local_path)
+    if walk_root is None:
+        walk_root = Path(local_path)
+        if walk_root.is_file():
+            # No content_path from this client: the resolver handed back the
+            # single FILE itself. Same direct handling as the content_path
+            # branch — including archives, which extract before collecting.
+            single_files = _audio_from_single_file(walk_root)
+            return single_files, str(walk_root)
+        if torrent_name and (walk_root / torrent_name).is_dir():
+            # is_dir, not exists: a single-FILE torrent's name points at the
+            # file itself, and the audio walker only walks directories.
+            walk_root = walk_root / torrent_name
+    if single_file is not None:
+        # single_file is set only when content_path named ONE audio file:
+        # we already know exactly which file is ours, and walking its
+        # parent (usually the shared download root) would stage every
+        # other torrent's audio with it.
+        return [single_file.resolve()], str(single_file)
+    return collect_audio_after_extraction(walk_root), str(walk_root)
+
+
 def _no_audio_diagnosis(reported_path: str, walk_root) -> str:
     """Explain WHY an apparently-successful torrent staged nothing (#1139).
 
@@ -1021,9 +1110,10 @@ def _no_audio_diagnosis(reported_path: str, walk_root) -> str:
     """
     root = Path(walk_root)
     try:
-        reachable = root.is_dir()
+        is_file = root.is_file()
+        reachable = is_file or root.is_dir()
     except OSError:
-        reachable = False
+        is_file, reachable = False, False
     where = f'{reported_path}' + (f' (resolved: {root})' if str(root) != reported_path else '')
     if not reachable:
         return (
@@ -1032,6 +1122,8 @@ def _no_audio_diagnosis(reported_path: str, walk_root) -> str:
             f'(download_source.path_mappings) pointing the client\'s completed-download '
             f'directory at the one SoulSync sees.'
         )
+    if is_file:
+        return f'No audio files found in {where} (the file is readable but holds no audio)'
     return f'No audio files found in {where} (the folder is readable but holds no audio)'
 
 
