@@ -363,6 +363,10 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1) -> List[int]:
         hand_tagged = {r[0] for r in conn.execute("SELECT path_key FROM manual_metadata_files")}
     except Exception:  # noqa: BLE001 - old schema: nothing is hand-tagged
         hand_tagged = set()
+    from core.library2.quality_eval import evaluate_file, profile_targets
+    from core.library2.track_files import primary_file_rows
+    primaries = primary_file_rows(conn, [int(row["id"]) for row in rows])
+    targets_by_profile: Dict[Any, tuple] = {}
     candidates = set()
     for row in rows:
         if row["path"] in protected or _hand_tagged(conn, row["path"], hand_tagged):
@@ -371,7 +375,20 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1) -> List[int]:
             profile = effective_track_profile(conn, int(row["id"]))
         except (LookupError, ValueError):
             continue
-        if is_upgrade_policy(profile.get("upgrade_policy")):
+        if not is_upgrade_policy(profile.get("upgrade_policy")):
+            continue
+        # Same verdict the payload reaches, from the stored quality columns:
+        # a file that already meets its cutoff is no candidate (unknown is).
+        try:
+            key = (profile.get("id"), profile.get("ranked_targets"), profile.get("upgrade_policy"),
+                   profile.get("upgrade_cutoff_index"))
+            if key not in targets_by_profile:
+                targets_by_profile[key] = profile_targets(profile)
+            targets, policy, cutoff = targets_by_profile[key]
+            verdict = evaluate_file(primaries.get(int(row["id"])), targets, policy, cutoff)
+        except Exception:  # noqa: BLE001 - let the payload's own check decide
+            verdict = {"upgrade_candidate": None}
+        if verdict.get("upgrade_candidate") is not False:
             candidates.add(int(row["id"]))
     return sorted(candidates)
 

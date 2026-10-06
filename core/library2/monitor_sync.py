@@ -904,6 +904,23 @@ def reconcile_artist_watchlist(
         return stats
 
 
+def _tracks_without_file(conn, track_ids: Sequence[int]) -> set:
+    """Tracks with no usable file in the caller's library (same rule as the
+    Wishlist payload's ``has_file``)."""
+    from core.library2.sql_util import owner_clause
+    owned = set()
+    ids = list(track_ids)
+    for start in range(0, len(ids), 500):
+        chunk = ids[start:start + 500]
+        owned.update(r[0] for r in conn.execute(
+            f"""SELECT DISTINCT tf.track_id FROM lib2_track_files tf
+                 WHERE tf.track_id IN ({','.join('?' for _ in chunk)})
+                   AND tf.path IS NOT NULL AND tf.path <> ''
+                   AND COALESCE(tf.file_state,'active') NOT IN ('missing_confirmed','deleted')
+                   {owner_clause(column='tf.owner_profile_id')}""", chunk))
+    return set(ids) - owned
+
+
 def shared_intent_profiles(conn, profile_id: int) -> tuple:
     """Whose Wishlist rows a library's intent covers: the profile itself, and
     for the shared (admin) library every profile without a library of its own."""
@@ -981,7 +998,9 @@ def reconcile_track_wishlist(
     Wishlist row costs a search, a wrongly pruned one costs the download.
     """
     from core.library2.wanted import recompute_wanted, wanted_track_ids
-    from core.library2.wishlist_mirror import mirror_projected_tracks_wishlist
+    from core.library2.wishlist_mirror import (
+        mirror_projected_tracks_wishlist, upgrade_candidate_track_ids,
+    )
 
     stats = {"scanned": 0, "wanted": 0, "wishlisted": 0,
              "added": 0, "pruned": 0, "refreshed": 0, "mirrored": 0, 'intent_repaired': 0, 'intent_failed': 0}
@@ -1056,7 +1075,12 @@ def reconcile_track_wishlist(
         #     target, etc.) would otherwise go stale until the track happens
         #     to leave and re-enter `wanted`, without re-touching every
         #     genuinely-unchanged row.
-        adds = [t for t in wanted if t not in wishlisted_set]
+        # A wanted track that has its file and is no upgrade candidate is
+        # simply owned; mirroring it only to learn that cost ~66 s per hourly
+        # run on a 200k-track library.
+        queueable = _tracks_without_file(conn, wanted) | set(
+            upgrade_candidate_track_ids(conn, profile_id=profile_id))
+        adds = [t for t in wanted if t not in wishlisted_set and t in queueable]
         refresh = [t for t in wanted if t in wishlisted_set and t in changed_set]
         stats["added"] = len(adds)
         stats["refreshed"] = len(refresh)

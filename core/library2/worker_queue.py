@@ -16,6 +16,7 @@ workers' own backoff, so they cannot turn into a tight catalogue-wide retry loop
 
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, Mapping, Optional
 
 from core.library2.provider_attempts import DEFAULT_RETRY_AFTER_DAYS
@@ -123,17 +124,38 @@ def _pending_sql(entity_type: str, retry_statuses: tuple = _RETRYABLE,
                {universe}
              ORDER BY e.id
         """
+    # Driven from the due index (CROSS JOIN pins the order): the planner
+    # otherwise walked every album/artist to find the few failed attempts.
+    source = _sources(service)[entity_type].replace(
+        "FROM lib2_", "FROM lib2_provider_attempts a CROSS JOIN lib2_", 1)
     return f"""
-        {_sources(service)[entity_type]}
-          JOIN lib2_provider_attempts a
-                 ON a.entity_type = :entity AND a.entity_id = e.id
-                AND a.service = :service
-         WHERE a.status IN ({_retryable_sql(retry_statuses)})
+        {source}
+         WHERE a.entity_type = :entity AND a.entity_id = e.id
+           AND a.service = :service
+           AND a.status IN ({_retryable_sql(retry_statuses)})
            AND a.last_attempted_at <= datetime('now', :window)
            {owned}
            {universe}
          ORDER BY a.last_attempted_at, e.id
     """
+
+
+#: An exhausted "never attempted" half answers None by walking every entity
+#: (0.5 s per worker tick on 400k tracks). Remember that it was empty while
+#: nothing that could change the answer moved: the attempt count (a reset or a
+#: retry deletes rows) and the newest entity id. The TTL covers an existing row
+#: becoming owned, which neither number shows.
+_NEW_IDLE: Dict[tuple, tuple] = {}
+_NEW_IDLE_TTL = 600.0
+_NEW_IDLE_RECHECK = 30.0
+
+
+def _new_fingerprint(conn, entity_type: str, service: str) -> tuple:
+    return (
+        conn.execute("SELECT COUNT(*) FROM lib2_provider_attempts "
+                     "WHERE entity_type=? AND service=?", (entity_type, service)).fetchone()[0],
+        conn.execute(f"SELECT MAX(id) FROM {_TABLES[entity_type]}").fetchone()[0],
+    )
 
 
 def _params(entity_type: str, service: str, retry_after_days: int) -> Dict[str, Any]:
@@ -192,11 +214,25 @@ def next_pending(
     # artists, albums, tracks) before 4-6 (their expired retries), so a freshly
     # imported album was never queued behind a backlog of artist retries. Asking
     # per entity type instead inverted that; only the loop nesting says so.
+    key = str(service).strip().lower()
     for phase in _PHASES:
         for entity_type in order:
+            memo = fingerprint = None
+            db_file = conn.execute("PRAGMA database_list").fetchone()[2] if phase == "new" else ""
+            if db_file:  # in-memory databases share no identity to memoise on
+                memo = (db_file, key, entity_type, require_provider_id)
+                seen = _NEW_IDLE.get(memo)
+                age = time.monotonic() - seen[1] if seen else None
+                if age is not None and age < _NEW_IDLE_RECHECK:
+                    continue
+                fingerprint = _new_fingerprint(conn, entity_type, key)
+                if age is not None and age < _NEW_IDLE_TTL and seen[0] == fingerprint:
+                    continue
             row = _fetch(conn, entity_type, service, retry_after_days,
                          retry_statuses, require_provider_id, phase)
             if row is None:
+                if memo:
+                    _NEW_IDLE[memo] = (fingerprint, time.monotonic())
                 continue
             item: Dict[str, Any] = {
                 "type": overrides.get(entity_type, entity_type),

@@ -83,27 +83,44 @@ def _table_exists(conn: Any, name: str) -> bool:
     ).fetchone() is not None
 
 
-def _known_index_paths(conn: Any) -> set[str]:
-    paths: set[str] = set()
-    if _table_exists(conn, "lib2_track_files"):
-        rows = conn.execute(
-            """SELECT path FROM lib2_track_files
-                 WHERE path IS NOT NULL AND path<>''
-                   AND COALESCE(file_state,'active') NOT IN ('missing_confirmed','deleted')"""
-        ).fetchall()
+class _IndexedPaths:
+    """Membership test for "is this one of the library's indexed files?".
+
+    Asked per grab, so each question reads only the rows that share the file
+    name and resolves just those. Building the full set resolved every file of
+    the library on every monitor tick (15 s), with or without open grabs.
+    """
+
+    def __init__(self, conn: Any) -> None:
+        self._conn, self._cache = conn, {}
+
+    def __contains__(self, normalized: Any) -> bool:
+        normalized = str(normalized or "")
+        if normalized not in self._cache:
+            self._cache[normalized] = self._lookup(normalized)
+        return self._cache[normalized]
+
+    def _lookup(self, normalized: str) -> bool:
+        name = normalized.rsplit("/", 1)[-1]
+        if not name or not _table_exists(self._conn, "lib2_track_files"):
+            return False
         from core.library2.paths import resolve_lib2_path
 
-        for row in rows:
-            if not row[0]:
-                continue
-            paths.add(_normalized_path(row[0]))
-            resolved = resolve_lib2_path(row[0])
-            if resolved:
-                paths.add(_normalized_path(resolved))
-    return paths
+        pattern = "%" + name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        rows = self._conn.execute(
+            """SELECT path FROM lib2_track_files
+                WHERE (path LIKE ? ESCAPE '\\' OR path = ?)
+                  AND COALESCE(file_state,'active') NOT IN ('missing_confirmed','deleted')""",
+            (pattern, normalized),
+        ).fetchall()
+        return any(
+            _normalized_path(row[0]) == normalized
+            or _normalized_path(resolve_lib2_path(row[0]) or "") == normalized
+            for row in rows if row[0]
+        )
 
 
-def _path_is_indexed(path: Any, known_paths: set[str]) -> bool:
+def _path_is_indexed(path: Any, known_paths: Any) -> bool:
     normalized = _normalized_path(path)
     if not normalized:
         return False
@@ -276,7 +293,7 @@ def _analyse_row(
     matched_contexts: Sequence[Mapping[str, Any]],
     client_observations: Mapping[str, Mapping[str, Any]],
     quarantine_markers: Mapping[str, str],
-    known_paths: set[str],
+    known_paths: Any,
     now: float,
     evidence_ttl_seconds: int,
 ) -> ReconciliationDecision:
@@ -581,7 +598,7 @@ def reconcile_persistent_grabs(
         if isinstance(value, Mapping)
     }
     quarantine = _quarantine_markers(quarantine_entries)
-    known_paths = _known_index_paths(conn)
+    known_paths = _IndexedPaths(conn)
 
     has_imports = _table_exists(conn, "acquisition_imports")
     import_join = (

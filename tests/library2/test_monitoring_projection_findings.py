@@ -97,7 +97,9 @@ def test_upgrade_scan_resolves_live_profile_when_projection_is_stale(imported_co
     from core.library2.wanted import PROJECTION_VERSION
 
     conn = imported_conn
-    track_id = conn.execute("SELECT id FROM lib2_tracks LIMIT 1").fetchone()[0]
+    track_id = conn.execute(  # the MP3 below must be the primary file
+        "SELECT id FROM lib2_tracks t WHERE NOT EXISTS ("
+        "SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id) LIMIT 1").fetchone()[0]
     path = str(tmp_path / "Song.mp3")
     open(path, "wb").close()
     conn.execute(
@@ -114,7 +116,7 @@ def test_upgrade_scan_resolves_live_profile_when_projection_is_stale(imported_co
     upgrading = conn.execute(
         """INSERT INTO quality_profiles(name, upgrade_policy, upgrade_cutoff_index,
                ranked_targets, is_default)
-           VALUES('Upgrade until top', 'until_top', 0, '[]', 0)"""
+           VALUES('Upgrade until top', 'until_top', 0, '[{"label": "FLAC", "format": "flac"}]', 0)"""
     ).lastrowid
 
     conn.execute("UPDATE quality_profiles SET is_default=0")
@@ -146,7 +148,9 @@ def test_upgrade_scan_honours_explicit_track_profile(imported_conn, tmp_path):
     from core.library2.wanted import PROJECTION_VERSION
 
     conn = imported_conn
-    track_id = conn.execute("SELECT id FROM lib2_tracks LIMIT 1").fetchone()[0]
+    track_id = conn.execute(  # the MP3 below must be the primary file
+        "SELECT id FROM lib2_tracks t WHERE NOT EXISTS ("
+        "SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id) LIMIT 1").fetchone()[0]
     path = str(tmp_path / "Song2.mp3")
     open(path, "wb").close()
     conn.execute(
@@ -157,7 +161,7 @@ def test_upgrade_scan_honours_explicit_track_profile(imported_conn, tmp_path):
     upgrading = conn.execute(
         """INSERT INTO quality_profiles(name, upgrade_policy, upgrade_cutoff_index,
                ranked_targets, is_default)
-           VALUES('Upgrade fallback', 'until_cutoff', 0, '[]', 0)"""
+           VALUES('Upgrade fallback', 'until_cutoff', 0, '[{"label": "FLAC", "format": "flac"}]', 0)"""
     ).lastrowid
     conn.execute(
         "UPDATE lib2_tracks SET quality_profile_id=?, quality_profile_explicit=1 "
@@ -187,7 +191,9 @@ def test_a_wishlist_addition_monitors_the_matching_lib2_track(imported_conn, leg
     from core.library2.monitor_sync import monitor_lib2_tracks_for_added_wishlist
 
     conn = imported_conn
-    track_id = conn.execute("SELECT id FROM lib2_tracks LIMIT 1").fetchone()[0]
+    track_id = conn.execute(  # the MP3 below must be the primary file
+        "SELECT id FROM lib2_tracks t WHERE NOT EXISTS ("
+        "SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id) LIMIT 1").fetchone()[0]
     conn.execute("UPDATE lib2_tracks SET monitored=0 WHERE id=?", (track_id,))
     conn.commit()
 
@@ -216,7 +222,9 @@ def test_the_forward_edge_is_admin_only(imported_conn, legacy_db):
     from core.library2.monitor_sync import sync_wishlist_addition
 
     conn = imported_conn
-    track_id = conn.execute("SELECT id FROM lib2_tracks LIMIT 1").fetchone()[0]
+    track_id = conn.execute(  # the MP3 below must be the primary file
+        "SELECT id FROM lib2_tracks t WHERE NOT EXISTS ("
+        "SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id) LIMIT 1").fetchone()[0]
     conn.execute("UPDATE lib2_tracks SET monitored=0 WHERE id=?", (track_id,))
     conn.commit()
 
