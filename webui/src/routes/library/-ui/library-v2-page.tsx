@@ -11945,8 +11945,10 @@ export function GlobalAutomaticSearchButton() {
       if (error) throw new Error(error);
       upgradesQueued = true;
       setMessage('Upgrades queued · starting Wishlist processing…');
-      const started = await processWishlist();
-      setMessage(`${started} Missing tracks and quality upgrades are queued.`);
+      await processWishlist();
+      setMessage(
+        'Missing tracks and quality upgrades are queued; Wishlist processing has started.',
+      );
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
     } catch (e) {
       const detail = e instanceof Error ? e.message : 'Automatic Search failed';

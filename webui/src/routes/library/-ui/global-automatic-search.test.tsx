@@ -80,7 +80,7 @@ describe('Library v2 global Automatic Search', () => {
 
     expect(
       await screen.findByText(
-        'Wishlist processing started. Missing tracks and quality upgrades are queued.',
+        'Missing tracks and quality upgrades are queued; Wishlist processing has started.',
       ),
     ).toBeInTheDocument();
     await waitFor(() =>
