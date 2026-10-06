@@ -121,6 +121,32 @@ def record_deleted_entry(deleted_root: str, dest_path: str, original_path: str,
         logger.warning("record_deleted_entry failed for %s: %s", dest_path, exc)
 
 
+def quarantine_mover(transfer_folder: str, source: str):
+    """An ``unlink`` for the delete journal that moves the file into the
+    deleted-files folder instead: it keeps its path relative to the transfer
+    folder (or its name, for files outside it), is recorded in the manifest so
+    it can be restored, and ages out with ``library.deleted_keep_days``. A
+    failed move raises, which the journal records as a failed item."""
+    def _move(path: str) -> None:
+        deleted_root = deleted_quarantine_root(transfer_folder)
+        try:
+            rel = os.path.relpath(path, transfer_folder)
+        except ValueError:
+            rel = os.path.basename(path)
+        if rel.startswith('..') or os.path.isabs(rel):
+            rel = os.path.basename(path)
+        dest = os.path.join(deleted_root, rel)
+        base, ext = os.path.splitext(dest)
+        n = 1
+        while os.path.exists(dest):
+            dest = f"{base}_{n}{ext}"
+            n += 1
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.move(path, dest)
+        record_deleted_entry(deleted_root, dest, path, source)
+    return _move
+
+
 def _resolve_id(transfer_folder: str, entry_id: str) -> Optional[Tuple[str, str, str]]:
     """(root, rel, abs_path) for an id, or None when the id is malformed,
     escapes its root, or names a root that does not exist."""

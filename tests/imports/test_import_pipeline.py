@@ -485,6 +485,8 @@ def _wire_post_process_common(monkeypatch, tmp_path, target_path, *, track_numbe
         }.get(key, default)
     ))
     monkeypatch.setattr(import_pipeline, "normalize_import_context", lambda context: context)
+    monkeypatch.setattr(import_pipeline, "transfer_root_for_context",
+                        lambda context: str(tmp_path / "Transfer"))
     monkeypatch.setattr(import_pipeline, "get_import_track_info", lambda context: {})
     monkeypatch.setattr(import_pipeline, "get_import_original_search", lambda context: {"title": "Track", "album": "Album"})
     monkeypatch.setattr(import_pipeline, "get_import_context_artist", lambda context: {"name": "Artist"})
@@ -637,6 +639,8 @@ def test_verified_cross_format_upgrade_retires_exactly_the_previous_file(
     assert not old_path.exists()
     assert not source_path.exists()
     assert context["_replaced_file_paths"] == [str(old_path)]
+    # replaced, not destroyed: the old file waits in the deleted-files folder
+    assert list((tmp_path / "Transfer" / ".deleted").rglob("track.mp3"))
 
 
 def test_cross_format_upgrade_rolls_back_when_previous_file_cannot_be_retired(
@@ -660,14 +664,10 @@ def test_cross_format_upgrade_rolls_back_when_previous_file_cannot_be_retired(
 
     import os
     monkeypatch.setattr(import_pipeline, "safe_move_file", os.replace)
-    real_remove = os.remove
+    def fail_old_retirement(path, _reason, _context):
+        raise OSError("library read-only")
 
-    def fail_old_retirement(path):
-        if path == str(old_path):
-            raise OSError("library read-only")
-        real_remove(path)
-
-    monkeypatch.setattr(import_pipeline.os, "remove", fail_old_retirement)
+    monkeypatch.setattr(import_pipeline, "_retire_replaced_library_file", fail_old_retirement)
     context = {
         "track_info": {"source_info": {"upgrade_check": True, "lib2_track_id": 9}},
         "original_search_result": {"title": "Track", "album": "Album"},

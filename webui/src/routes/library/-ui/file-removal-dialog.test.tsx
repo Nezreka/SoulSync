@@ -145,11 +145,11 @@ describe('unified Library v2 file-removal dialog', () => {
       title: 'Views',
     });
 
-    fireEvent.click(await screen.findByRole('radio', { name: /Permanently delete files/ }));
-    const submit = screen.getByRole('button', { name: 'Permanently delete' });
+    fireEvent.click(await screen.findByRole('radio', { name: /Delete files/ }));
+    const submit = screen.getByRole('button', { name: 'Delete files' });
     expect(submit).toBeDisabled();
     fireEvent.click(
-      screen.getByRole('checkbox', { name: /I understand this permanently deletes/ }),
+      screen.getByRole('checkbox', { name: /I understand this removes the selected files/ }),
     );
     fireEvent.click(submit);
 
@@ -180,8 +180,8 @@ describe('unified Library v2 file-removal dialog', () => {
     );
     const { onDone } = renderDialog();
 
-    expect(await screen.findByText(/Permanent deletion is blocked for 1/)).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: /Permanently delete files/ })).toBeDisabled();
+    expect(await screen.findByText(/Deleting is blocked for 1/)).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /Delete files/ })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Remove from library database' }));
     await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
   });
@@ -199,7 +199,7 @@ describe('unified Library v2 file-removal dialog', () => {
     renderDialog();
 
     expect(await screen.findByText(/already gone from disk/i)).toBeInTheDocument();
-    expect(screen.queryByText(/Permanent deletion is blocked/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Deleting is blocked/i)).not.toBeInTheDocument();
   });
 
   it('names the setting to fix when a path really is outside the library', async () => {

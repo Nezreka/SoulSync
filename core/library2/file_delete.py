@@ -865,6 +865,7 @@ def delete_entity_files(
     unlink: Callable[[str], None] = os.unlink,
     actor: str = "user",
     actor_profile_id: Optional[int] = None,
+    mode: str = "permanent",
 ) -> Dict[str, Any]:
     """Execute an ADR-05 delete after revalidating the exact preview.
 
@@ -906,7 +907,7 @@ def delete_entity_files(
             """INSERT INTO lib2_file_delete_operations(
                    id, entity_type, entity_id, preview_token, status,
                    file_count, total_size, mode, actor, actor_profile_id)
-               VALUES(?,?,?,?, 'planned', ?,?, 'permanent', ?,?)""",
+               VALUES(?,?,?,?, 'planned', ?,?, ?, ?,?)""",
             (
                 operation_id,
                 entity,
@@ -914,6 +915,7 @@ def delete_entity_files(
                 preview_token,
                 preview["file_count"],
                 preview["total_size"],
+                mode,
                 str(actor or "user"),
                 actor_profile_id,
             ),

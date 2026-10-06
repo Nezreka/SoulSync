@@ -402,39 +402,6 @@ def _path_mapping_hint(config_manager) -> str:
     return 'Check Settings -> Library -> Music Paths so SoulSync can map this path.'
 
 
-def _quarantine_mover(transfer_folder, source):
-    """An ``unlink`` for the delete journal that moves the file into the
-    deleted-files quarantine instead of deleting it.
-
-    The file keeps its path relative to the transfer folder (or its name, for
-    files outside it) and is recorded in the quarantine manifest, so the
-    deleted-files manager can restore it and library.deleted_keep_days ages it
-    out like any other removal. A failed move raises, which the journal
-    records as a failed item.
-    """
-    def _move(path):
-        from core.library.deleted_quarantine import record_deleted_entry
-        from core.repair_jobs.base import deleted_quarantine_root
-
-        deleted_root = deleted_quarantine_root(transfer_folder)
-        try:
-            rel = os.path.relpath(path, transfer_folder)
-        except ValueError:
-            rel = os.path.basename(path)
-        if rel.startswith('..') or os.path.isabs(rel):
-            rel = os.path.basename(path)
-        dest = os.path.join(deleted_root, rel)
-        base, ext = os.path.splitext(dest)
-        n = 1
-        while os.path.exists(dest):
-            dest = f"{base}_{n}{ext}"
-            n += 1
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        shutil.move(path, dest)
-        record_deleted_entry(deleted_root, dest, path, source)
-    return _move
-
-
 class RepairWorker:
     """Multi-job background maintenance worker.
 
@@ -3483,7 +3450,7 @@ class RepairWorker:
 
     def _remove_native_repair_file(self, file_path: str, details: dict,
                                    *, reason: str = 'maintenance',
-                                   quarantine: bool = False) -> dict:
+                                   quarantine: bool = True) -> dict:
         """Physically remove one reviewed native file; DB lifecycle follows
         through ``sync_repair_change`` after this handler succeeds.
 
@@ -3495,8 +3462,9 @@ class RepairWorker:
         becomes the journal's actor (``repair:<reason>``), which is how the
         History tells an unattended delete from one a person clicked.
 
-        ``quarantine`` moves the file into the deleted-files folder instead of
-        unlinking it (restorable until retention clears it), same journal.
+        Every repair delete goes to the deleted-files folder (restorable until
+        retention clears it), as Lidarr's recycle bin does; ``quarantine=False``
+        is the explicit opt-out for a caller that must unlink.
         """
         target = file_path or details.get('original_path') or details.get('file_path')
         if not target:
@@ -3547,6 +3515,7 @@ class RepairWorker:
                     'the real file.'
                 ),
             }
+        from core.library.deleted_quarantine import quarantine_mover
         from core.library2.file_delete import delete_files_journaled
 
         entity_type, entity_id = self._delete_journal_subject([target, resolved])
@@ -3558,7 +3527,7 @@ class RepairWorker:
                 entity_id=entity_id,
                 actor=f'repair:{reason}',
                 config_manager=self._config_manager,
-                **({'unlink': _quarantine_mover(self.transfer_folder, reason),
+                **({'unlink': quarantine_mover(self.transfer_folder, reason),
                     'mode': 'quarantine'} if quarantine else {}),
                 # Containment for this path was already decided, one line
                 # above, by the rule that knows whether the resolver guessed.
@@ -3650,7 +3619,7 @@ class RepairWorker:
         return {'success': True, 'action': 'applied_tags', 'message': message}
 
     def _fix_uncatalogued_bad_file(self, file_path, details, *, reason: str,
-                                   noun: str, quarantine: bool = False) -> dict:
+                                   noun: str, quarantine: bool = True) -> dict:
         """Apply a delete-and-re-download finding that names a FILE, not a track.
 
         The corruption detector walks the library folders as well as the

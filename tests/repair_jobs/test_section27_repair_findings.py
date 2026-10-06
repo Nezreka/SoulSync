@@ -162,9 +162,10 @@ class _Worker:
     _other_usable_lib2_files = RepairWorker._other_usable_lib2_files
     _delete_journal_subject = RepairWorker._delete_journal_subject
 
-    def __init__(self, config_manager=None, db=None):
+    def __init__(self, config_manager=None, db=None, transfer_folder=None):
         self._config_manager = config_manager
         self.db = db
+        self.transfer_folder = transfer_folder
 
 
 @pytest.fixture
@@ -198,7 +199,7 @@ def test_a_deleted_file_reports_a_real_delete(tmp_path, journal_db):
     target = tmp_path / "song.flac"
     target.write_bytes(b"x")
     worker = _Worker(config_manager=SimpleNamespace(get=lambda *a, **k: []),
-                     db=journal_db)
+                     db=journal_db, transfer_folder=str(tmp_path / "Transfer"))
 
     result = worker._remove_native_repair_file(str(target), {})
 
@@ -207,6 +208,8 @@ def test_a_deleted_file_reports_a_real_delete(tmp_path, journal_db):
     assert result['resolved_path'] == str(target)
     assert result['delete_operation_id'], 'the delete must be on the record'
     assert not target.exists()
+    # a repair delete is restorable: it waits in the deleted-files folder
+    assert list((tmp_path / "Transfer" / ".deleted").rglob("song.flac"))
 
 
 def test_an_already_absent_file_under_a_healthy_root_is_not_an_error(

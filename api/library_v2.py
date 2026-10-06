@@ -4116,6 +4116,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 or not all(isinstance(v, int) for v in file_ids)
             ):
                 raise FileDeleteError("file_ids must be a list of integers")
+            from core.imports.paths import docker_resolve_path
+            from core.library.deleted_quarantine import quarantine_mover
+            # Into the deleted-files folder, restorable until retention clears it.
+            transfer = docker_resolve_path(config_get("soulseek.transfer_path", "./Transfer"))
             operation = delete_entity_files(
                 get_database(),
                 entity=entity,
@@ -4124,6 +4128,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 file_ids=file_ids,
                 actor="user",
                 actor_profile_id=_profile(),
+                unlink=quarantine_mover(transfer, "library_delete"),
+                mode="quarantine",
             )
             _unmonitor_after_removal(body, entity, eid, file_ids, operation)
             _reproject_after_file_removal(operation.get("track_ids") or [])

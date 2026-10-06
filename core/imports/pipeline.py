@@ -109,6 +109,14 @@ __all__ = [
 ]
 
 
+def _retire_replaced_library_file(path: str, reason: str, context) -> None:
+    """A library file an import supersedes goes to the deleted-files folder of
+    the library it belongs to (restorable until retention clears it), like
+    every other removal. Raises like ``os.remove`` when it cannot be moved."""
+    from core.library.deleted_quarantine import quarantine_mover
+    quarantine_mover(transfer_root_for_context(context), reason)(path)
+
+
 def _audio_length_seconds(path: str) -> float:
     """Best-effort real length of an audio file: mutagen's header first, then
     an ffmpeg decode when the header reads 0 (HiFi's fragmented FLAC does).
@@ -2447,7 +2455,7 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
             )
             if not same_upgrade_path and os.path.exists(_upgrade_old_local):
                 try:
-                    os.remove(_upgrade_old_local)
+                    _retire_replaced_library_file(_upgrade_old_local, 'upgrade', context)
                 except OSError as retirement_error:
                     # Keep the known-good file and restore the candidate to
                     # staging when a cross-extension retirement cannot finish.
@@ -2476,7 +2484,7 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                 _recorded_enhance_path)
             if os.path.normpath(original_enhance_path) != os.path.normpath(final_path) and os.path.exists(original_enhance_path):
                 try:
-                    os.remove(original_enhance_path)
+                    _retire_replaced_library_file(original_enhance_path, 'enhance', context)
                     # dd28-08: the new file lands at a DIFFERENT path (new
                     # extension), so the catalog row for the old one has to be
                     # retired explicitly — autolink keys on (track_id, path)
@@ -3006,13 +3014,13 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                     lib_track_id = redownload_ctx.get('library_track_id')
                     if redownload_ctx.get('delete_old_file') and old_path and os.path.exists(old_path):
                         if os.path.normpath(old_path) != os.path.normpath(expected_final_path):
-                            os.remove(old_path)
+                            _retire_replaced_library_file(old_path, 'redownload', context)
                             # dd28-08: the redownload hook used to update only
                             # the LEGACY tracks.file_path, leaving the lib2 row
                             # pointing at the file it had just deleted.
                             _record_replaced_file_path(context, old_path)
                             _retire_lib2_path_after_redownload(old_path, expected_final_path)
-                            logger.info(f"[Redownload] Deleted old file: {old_path}")
+                            logger.info(f"[Redownload] Moved old file to the deleted folder: {old_path}")
                     # Guarded on `old_path`, because that is what the repoint
                     # matches on — the row is keyed by the path we stored, not
                     # by the track id the old legacy UPDATE used. Report the

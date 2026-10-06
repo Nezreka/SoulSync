@@ -119,7 +119,8 @@ def api(tmp_path):
     # non-admin id to probe the rejection path.
     db.active_profile = 1
     db.library_page_allowed = True
-    db.config = {"features.library_v2": True}
+    db.config = {"features.library_v2": True,
+                 "soulseek.transfer_path": str(tmp_path / "Transfer")}
     db.acquisition_search_adapters = []
     db.acquisition_submission_adapters = {}
     db.configured_match_services = None
@@ -2048,7 +2049,10 @@ def test_physical_file_delete_preview_is_separate_and_root_safe(api, tmp_path, m
     ).get_json()
     assert executed["success"] is True
     assert executed["operation"]["status"] == "completed"
+    assert executed["operation"]["mode"] == "quarantine"
     assert not path.exists()
+    # restorable: the file waits in the deleted-files folder
+    assert list((tmp_path / "Transfer" / ".deleted").rglob(path.name))
     with _conn(db) as conn:
         assert conn.execute(
             "SELECT file_state FROM lib2_track_files WHERE track_id=?",

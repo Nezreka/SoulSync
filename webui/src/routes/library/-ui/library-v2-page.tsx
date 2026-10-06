@@ -4149,7 +4149,7 @@ export function UnifiedFileRemovalDialog({
         );
         if (operation.status !== 'completed') {
           throw new Error(
-            `Permanent deletion was ${operation.status}; the library entry was kept for review.`,
+            `Deleting the files ${operation.status}; the library entry was kept for review.`,
           );
         }
         if (removeWholeEntity) {
@@ -4299,14 +4299,17 @@ export function UnifiedFileRemovalDialog({
             onChange={() => setMode('permanent')}
           />
           <span>
-            <strong>Permanently delete files</strong>
-            <small>Remove the library records and delete the corresponding disk files.</small>
+            <strong>Delete files</strong>
+            <small>
+              Remove the library records and move the files to the deleted-files folder, where they
+              can be restored until it is emptied.
+            </small>
           </span>
         </label>
       </div>
       {physical && physical.unsafe_count > 0 ? (
         <div className={styles.mutationError} role="alert">
-          Permanent deletion is blocked for {physical.unsafe_count} file
+          Deleting is blocked for {physical.unsafe_count} file
           {physical.unsafe_count === 1 ? '' : 's'} that {physical.unsafe_count === 1 ? 'is' : 'are'}{' '}
           outside your library folders, or whose storage is not reachable right now. Check Settings
           → Music Library Paths, or use database-only removal.
@@ -4336,7 +4339,7 @@ export function UnifiedFileRemovalDialog({
             disabled={!physicalReady || busy}
             onChange={(event) => setConfirmed(event.target.checked)}
           />
-          I understand this permanently deletes the selected files from disk.
+          I understand this removes the selected files from the library folders.
         </label>
       ) : null}
       {error ? (
@@ -4357,7 +4360,7 @@ export function UnifiedFileRemovalDialog({
           {busy
             ? 'Working…'
             : mode === 'permanent'
-              ? 'Permanently delete'
+              ? 'Delete files'
               : 'Remove from library database'}
         </button>
       </div>

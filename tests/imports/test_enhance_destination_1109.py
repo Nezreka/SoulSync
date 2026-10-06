@@ -301,8 +301,8 @@ def test_the_decision_and_the_delete_both_use_the_resolved_path():
     # `original_enhance_path` holds the RESOLVED path — the guard compares it...
     assert "if os.path.normpath(original_enhance_path) != os.path.normpath(final_path)" in src
     # ...and the removal acts on the same value, never the raw recorded one.
-    assert "os.remove(original_enhance_path)" in src
-    assert "os.remove(_recorded_enhance_path)" not in src, (
+    assert "_retire_replaced_library_file(original_enhance_path," in src
+    assert "_retire_replaced_library_file(_recorded_enhance_path," not in src, (
         "deleting the RECORDED path would delete whatever happens to sit at "
         "that location rather than the file we actually resolved")
 
