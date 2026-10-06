@@ -12377,7 +12377,7 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None, completeness_cache: Optional[Dict[Any, Any]] = None, candidate_tracks: Optional[List[Any]] = None, metadata_source: Optional[str] = None, card_source_id: Optional[str] = None) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
+    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None, completeness_cache: Optional[Dict[Any, Any]] = None, candidate_tracks: Optional[List[Any]] = None, metadata_source: Optional[str] = None, card_source_id: Optional[str] = None, strip_single_kind: bool = False) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
         """
         Check if an album exists in the database with completeness information.
         Enhanced to handle edition matching (standard <-> deluxe variants).
@@ -12397,7 +12397,7 @@ class MusicDatabase:
         """
         try:
             # Try enhanced edition-aware matching first with expected track count for Smart Edition Matching
-            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source, candidate_albums=candidate_albums, strict_discography_match=strict_discography_match, expected_year=expected_year, metadata_source=metadata_source, card_source_id=card_source_id)
+            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source, candidate_albums=candidate_albums, strict_discography_match=strict_discography_match, expected_year=expected_year, metadata_source=metadata_source, card_source_id=card_source_id, strip_single_kind=strip_single_kind)
 
             if not album:
                 return None, 0.0, 0, 0, False, []
@@ -12414,7 +12414,7 @@ class MusicDatabase:
             logger.error(f"Error checking album existence with completeness for '{title}' by '{artist}': {e}")
             return None, 0.0, 0, 0, False, []
     
-    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None, metadata_source: Optional[str] = None, card_source_id: Optional[str] = None) -> Tuple[Optional[DatabaseAlbum], float]:
+    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None, metadata_source: Optional[str] = None, card_source_id: Optional[str] = None, strip_single_kind: bool = False) -> Tuple[Optional[DatabaseAlbum], float]:
         """
         Enhanced album existence check that handles edition variants.
         Matches standard albums with deluxe/platinum/special editions and vice versa.
@@ -12464,7 +12464,7 @@ class MusicDatabase:
                                 logger.debug(f"  Year gate skipped for single exact-title candidate '{title}' (deezer card, #1289)")
                 for album in candidate_albums:
                     ey = None if album is gate_exempt else expected_year
-                    confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=ey)
+                    confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=ey, strip_single_kind=strip_single_kind)
                     if confidence > best_confidence:
                         best_confidence = confidence
                         best_match = album
@@ -12497,7 +12497,7 @@ class MusicDatabase:
 
                     # Score each potential match with Smart Edition Matching
                     for album in albums:
-                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year)
+                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year, strip_single_kind=strip_single_kind)
                         logger.debug(f"  '{album.title}' confidence: {confidence:.3f}")
 
                         if confidence > best_confidence:
@@ -12533,7 +12533,7 @@ class MusicDatabase:
                             logger.debug(f"  Found {len(artist_albums)} total albums for artist fallback")
 
                         for album in artist_albums:
-                            confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year)
+                            confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year, strip_single_kind=strip_single_kind)
                             if confidence > best_confidence:
                                 best_confidence = confidence
                                 best_match = album
@@ -12552,7 +12552,7 @@ class MusicDatabase:
                 try:
                     title_only_albums = self.search_albums(title=title, artist="", limit=20, server_source=server_source)
                     for album in title_only_albums:
-                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year)
+                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year, strip_single_kind=strip_single_kind)
                         # Slightly penalize cross-artist matches to prefer same-artist when possible
                         if confidence > best_confidence:
                             best_confidence = confidence
@@ -12689,7 +12689,7 @@ class MusicDatabase:
             return False
         return abs(ey - ay) > tolerance
 
-    def _calculate_album_confidence(self, search_title: str, search_artist: str, db_album: DatabaseAlbum, expected_track_count: Optional[int] = None, strict_discography_match: bool = False, expected_year=None) -> float:
+    def _calculate_album_confidence(self, search_title: str, search_artist: str, db_album: DatabaseAlbum, expected_track_count: Optional[int] = None, strict_discography_match: bool = False, expected_year=None, strip_single_kind: bool = False) -> float:
         """Calculate confidence score for album match with Smart Edition Matching"""
         try:
             # Simple confidence based on string similarity
@@ -12698,8 +12698,8 @@ class MusicDatabase:
             artist_similarity = self._string_similarity(search_artist.lower(), db_artist.lower())
 
             # Also try with cleaned versions (removing edition markers)
-            clean_search_title = self._clean_album_title_for_comparison(search_title)
-            clean_db_title = self._clean_album_title_for_comparison(db_album.title)
+            clean_search_title = self._clean_album_title_for_comparison(search_title, strip_single_kind=strip_single_kind)
+            clean_db_title = self._clean_album_title_for_comparison(db_album.title, strip_single_kind=strip_single_kind)
             clean_title_similarity = self._string_similarity(clean_search_title, clean_db_title)
 
             # Also try with normalized versions (handling diacritics) - fixes #101
@@ -12718,6 +12718,7 @@ class MusicDatabase:
                 normalized_title_similarity,
                 expected_track_count,
                 db_album.track_count,
+                strip_single_kind=strip_single_kind,
             ):
                 logger.debug("  Strict discography match rejected: '%s' -> '%s'", search_title, db_album.title)
                 return 0.0
@@ -12783,6 +12784,7 @@ class MusicDatabase:
         normalized_title_similarity: float,
         expected_track_count: Optional[int],
         db_track_count: Optional[int],
+        strip_single_kind: bool = False,
     ) -> bool:
         """Guard artist-page owned status against generic soundtrack false positives.
 
@@ -12796,8 +12798,8 @@ class MusicDatabase:
         if normalized_search_title and normalized_db_title and normalized_search_title == normalized_db_title:
             return True
 
-        clean_search_title = self._normalize_for_comparison(self._clean_album_title_for_comparison(search_title))
-        clean_db_title = self._normalize_for_comparison(self._clean_album_title_for_comparison(db_title))
+        clean_search_title = self._normalize_for_comparison(self._clean_album_title_for_comparison(search_title, strip_single_kind=strip_single_kind))
+        clean_db_title = self._normalize_for_comparison(self._clean_album_title_for_comparison(db_title, strip_single_kind=strip_single_kind))
         if clean_search_title and clean_db_title and clean_search_title == clean_db_title:
             return True
 
@@ -13188,8 +13190,16 @@ class MusicDatabase:
 
         return cleaned
     
-    def _clean_album_title_for_comparison(self, title: str) -> str:
-        """Clean album title by removing edition markers for comparison"""
+    def _clean_album_title_for_comparison(self, title: str, strip_single_kind: bool = False) -> str:
+        """Clean album title by removing edition markers for comparison.
+
+        `strip_single_kind`: also strip release-kind markers ("(Single)",
+        "[Single]", "- Single" suffixes). Only set for single-card lookups —
+        a "(Single)"-titled row IS the single release, but it is not the
+        album/EP of the same name, so album/EP cards must not strip.
+        Known residual: "(Single Edit)" is not stripped (a single edit is a
+        different cut, like the radio-edit markers the track cleaner keeps).
+        """
         cleaned = title.lower()
 
         # Remove common edition patterns (specific first, then generic catch-alls)
@@ -13201,12 +13211,6 @@ class MusicDatabase:
             r'\s*\(remastered?\)',
             r'\s*\(anniversary\s*edition?\)',
             r'\s*\(.*version\)',
-            # Release-kind markers, not different recordings: "X (Single)" is
-            # the single release of X (SeadogsBooty: file imports titled
-            # "Ocean Avenue (Single)" must match the "Ocean Avenue" card).
-            r'\s*\(single\)',
-            r'\s*\[single\]',
-            r'\s*-\s*single\s*$',
             r'\s*-\s*deluxe\s*edition?',
             r'\s*-\s*platinum\s*edition?',
             r'\s+deluxe\s*edition?$',
@@ -13217,6 +13221,17 @@ class MusicDatabase:
             r'\s*\[[^\]]*\bedition\b[^\]]*\]',
             r'\s*-\s+\w+\s+edition\s*$',
         ]
+
+        if strip_single_kind:
+            # Release-kind markers, not different recordings: "X (Single)" is
+            # the single release of X (SeadogsBooty: file imports titled
+            # "Ocean Avenue (Single)" must match the "Ocean Avenue" card).
+            # End-anchored: the marker is a suffix, never mid-title.
+            patterns += [
+                r'\s*\(single\)$',
+                r'\s*\[single\]$',
+                r'\s*-\s*single\s*$',
+            ]
 
         for pattern in patterns:
             cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)

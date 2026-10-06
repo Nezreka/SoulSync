@@ -251,8 +251,11 @@ def _stored_release_kind(db: Any, album_id: Any) -> str:
                     pass
         except Exception:
             continue
-        if row and row[0]:
-            return str(row[0]).strip().lower()
+        # Strip before the truthiness check: a whitespace-only value is
+        # unknown and must fall through to the next column, not return "".
+        val = str(row[0]).strip() if row and row[0] else ""
+        if val:
+            return val.lower()
     return ""
 
 
@@ -682,6 +685,7 @@ def check_single_completion(
                         candidate_tracks=candidate_tracks,
                         metadata_source=source_override,
                         card_source_id=single_id,
+                        strip_single_kind=(album_type == 'single'),
                     )
                 except TypeError:
                     db_album, confidence, owned_tracks, expected_tracks, is_complete, formats = db.check_album_exists_with_completeness(
@@ -738,9 +742,11 @@ def check_single_completion(
                     # Count guard, scaled to the card's own size: a
                     # single-shaped card (<=3 tracks) is never a 4+ track
                     # row; a larger card is never a row larger than itself.
-                    # Unknown counts stay lenient.
+                    # An UNKNOWN card size stays lenient — only a known
+                    # single-shaped card rejects bigger rows. Unknown row
+                    # counts stay lenient too.
                     _ep_row_tc = getattr(db_album, 'track_count', None) or 0
-                    if _ep_row_tc > max(total_tracks or 0, 3):
+                    if total_tracks > 0 and _ep_row_tc > max(total_tracks, 3):
                         logger.debug(
                             "Single '%s': library row '%s' has %s tracks — not the single",
                             single_name, getattr(db_album, 'title', '?'),
@@ -870,6 +876,7 @@ def check_single_completion(
                         candidate_tracks=candidate_tracks,
                         metadata_source=source_override,
                         card_source_id=single_id,
+                        strip_single_kind=(album_type == 'single'),
                     )
                 except TypeError:
                     db_album, album_confidence, _o, _e, _c, _f = db.check_album_exists_with_completeness(

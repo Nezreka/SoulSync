@@ -245,7 +245,7 @@ def test_kind_gate_rejects_known_album_row(tmp_path):
     assert result["found_in_db"] is False
 
 
-def test_id_proof_rescues_single_after_gate_kill(tmp_path):
+def test_id_proof_rescues_single_after_gate_kill(tmp_path, caplog):
     """M1: same-year reissue album + single, album inserted first so the
     fuzzy lookup can return the album row (confidence tie); the kind gate
     kills it, but the card's Deezer id equals the single row's stored id —
@@ -261,7 +261,13 @@ def test_id_proof_rescues_single_after_gate_kill(tmp_path):
             "tracks": ["Ocean Avenue"],
         },
     ])
-    result = _check(db, _single_card(), candidates, tracks)
+    with caplog.at_level("DEBUG", logger="soulsync"):
+        result = _check(db, _single_card(), candidates, tracks)
+    # Pin the premise: the test only exercises the rescue re-run if the
+    # fuzzy lookup actually returned the album row and the gate killed it.
+    # (If the tie ever breaks the other way, this fails loudly instead of
+    # passing as silent theater.)
+    assert any("not the single" in m for m in caplog.messages)
     assert result["status"] == "completed"
     assert result["owned_tracks"] == 1
     assert result["found_in_db"] is True
@@ -269,9 +275,17 @@ def test_id_proof_rescues_single_after_gate_kill(tmp_path):
 
 def test_ep_branch_single_not_credited_by_album_row(tmp_path):
     """M3: the EP branch (2-track single card) gets the same gates — a
-    same-year 13-track known-album row must not credit the single."""
+    same-year 2-track known-album row (count guard cannot fire) must not
+    credit the single. Fails if the EP kind gate is deleted."""
     db, candidates, tracks = _build_library(tmp_path, [
-        _album_spec(year=2024, deezer_id=None),
+        {
+            "title": "Ocean Avenue",
+            "year": 2024,
+            "track_count": 2,
+            "record_type": "album",
+            "deezer_id": None,
+            "tracks": ["Ocean Avenue", "B-Side Thing"],
+        },
     ])
     card = _single_card(id="DZ-SINGLE-2", total_tracks=2)
     result = _check(db, card, candidates, tracks)
@@ -297,3 +311,67 @@ def test_single_suffixed_row_matches_single_card(tmp_path):
     result = _check(db, _single_card(), candidates, tracks)
     assert result["status"] == "completed"
     assert result["owned_tracks"] == 1
+
+
+def _single_row_library(tmp_path):
+    """Library holds only the 1-track '(Single)'-titled single row."""
+    return _build_library(tmp_path, [
+        {
+            "title": "Ocean Avenue (Single)",
+            "year": 2024,
+            "track_count": 1,
+            "record_type": "single",
+            "deezer_id": None,
+            "tracks": ["Ocean Avenue"],
+        },
+    ])
+
+
+def test_album_card_does_not_match_single_suffixed_row(tmp_path):
+    """R3: the (Single) stripping is single-card-only — an album card must
+    NOT resolve a '(Single)'-titled row (missing, not partial)."""
+    from core.metadata.completion import check_album_completion
+    db, candidates, tracks = _single_row_library(tmp_path)
+    card = {"id": "DZ-ALBUM-1", "name": "Ocean Avenue", "total_tracks": 13,
+            "album_type": "album", "year": 2024}
+    result = check_album_completion(
+        db, card, ARTIST, source_override="deezer", source_chain=["deezer"],
+        candidate_albums=candidates, candidate_tracks=tracks)
+    assert result["status"] == "missing"
+
+
+def test_ep_card_does_not_match_single_row(tmp_path):
+    """R3: EP cards don't strip either — a 5-track EP card vs the 1-track
+    single row stays missing (was partial with the shared cleaner)."""
+    db, candidates, tracks = _single_row_library(tmp_path)
+    card = _single_card(id="DZ-EP-1", total_tracks=5, album_type="ep")
+    result = _check(db, card, candidates, tracks)
+    assert result["status"] == "missing"
+
+
+def test_one_track_ep_card_does_not_match_single_row(tmp_path):
+    """R3 sharpest edge: a 1-track EP card vs the single row was false
+    'completed' with the shared cleaner — must stay missing."""
+    db, candidates, tracks = _single_row_library(tmp_path)
+    card = _single_card(id="DZ-EP-1", total_tracks=1, album_type="ep")
+    result = _check(db, card, candidates, tracks)
+    assert result["status"] == "missing"
+
+
+def test_ep_branch_unknown_card_count_stays_lenient(tmp_path):
+    """M-C: when the card's own track count is unknown (0), the EP count
+    guard stays lenient — a genuinely-owned 4-track row still credits
+    instead of missing."""
+    db, candidates, tracks = _build_library(tmp_path, [
+        {
+            "title": "Ocean Avenue",
+            "year": 2024,
+            "track_count": 4,
+            "record_type": None,
+            "deezer_id": None,
+            "tracks": ["Ocean Avenue", "B2", "B3", "B4"],
+        },
+    ])
+    card = _single_card(total_tracks=0)
+    result = _check(db, card, candidates, tracks)
+    assert result["status"] == "completed"

@@ -214,18 +214,22 @@ def test_owned_release_tracks_deezer_conflicting_id_still_missing(tmp_path):
 
 
 def _single_vs_album_library(tmp_path):
-    """Library holds a same-year, same-title KNOWN-album row (the shape the
-    artist page's kind gate rejects for a single card)."""
+    """Library holds a same-year, same-title KNOWN-album row with only 2
+    tracks — the count guard cannot fire, so the kind gate is what must
+    reject it for a single card."""
     from database.music_database import MusicDatabase
     db = MusicDatabase(str(tmp_path / "m.db"))
     with db._get_connection() as conn:
         conn.execute("INSERT INTO artists (id, name, server_source) VALUES ('AR1', 'Yellowcard', 'test')")
         conn.execute(
             "INSERT INTO albums (id, artist_id, title, year, track_count, record_type, server_source) "
-            "VALUES ('AL1', 'AR1', 'Ocean Avenue', 2024, 13, 'album', 'test')")
+            "VALUES ('AL1', 'AR1', 'Ocean Avenue', 2024, 2, 'album', 'test')")
         conn.execute(
             "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, server_source) "
             "VALUES ('T1', 'AL1', 'AR1', 'Ocean Avenue', 1, '/m/t1.flac', 'test')")
+        conn.execute(
+            "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, server_source) "
+            "VALUES ('T2', 'AL1', 'AR1', 'B-Side Thing', 2, '/m/t2.flac', 'test')")
         conn.commit()
     return db
 
@@ -251,8 +255,47 @@ def test_owned_release_tracks_album_card_unaffected_by_gate(tmp_path):
     db = _single_vs_album_library(tmp_path)
     candidates = db.get_candidate_albums_for_artist('Yellowcard', server_source='test')
     tracks = df.owned_release_tracks(
-        db, 'Ocean Avenue', 'Yellowcard', 13, '2024', 'test',
+        db, 'Ocean Avenue', 'Yellowcard', 2, '2024', 'test',
         candidate_albums=candidates,
         metadata_source='deezer', card_source_id='DZ-ALBUM-1',
         card_album_type='album')
-    assert tracks is not None and len(tracks) == 1
+    assert tracks is not None and len(tracks) == 2
+
+
+def _album_and_single_library(tmp_path):
+    """Library holds BOTH the same-year album row (inserted first, so a
+    confidence tie returns it) and the true single row carrying the card's
+    Deezer id."""
+    from database.music_database import MusicDatabase
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    with db._get_connection() as conn:
+        conn.execute("INSERT INTO artists (id, name, server_source) VALUES ('AR1', 'Yellowcard', 'test')")
+        conn.execute(
+            "INSERT INTO albums (id, artist_id, title, year, track_count, record_type, deezer_id, server_source) "
+            "VALUES ('AL0', 'AR1', 'Ocean Avenue', 2024, 13, 'album', 'DZ-ALBUM-1', 'test')")
+        conn.execute(
+            "INSERT INTO albums (id, artist_id, title, year, track_count, record_type, deezer_id, server_source) "
+            "VALUES ('AL1', 'AR1', 'Ocean Avenue', 2024, 1, 'single', 'DZ-SINGLE-1', 'test')")
+        conn.execute(
+            "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, server_source) "
+            "VALUES ('T0', 'AL0', 'AR1', 'Ocean Avenue', 1, '/m/a1.flac', 'test')")
+        conn.execute(
+            "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, server_source) "
+            "VALUES ('T1', 'AL1', 'AR1', 'Ocean Avenue', 1, '/m/s1.flac', 'test')")
+        conn.commit()
+    return db
+
+
+def test_owned_release_tracks_rescues_single_after_gate_kill(tmp_path):
+    """M-D: the modal gets the page's second chance — the kind gate kills
+    the album row, but the card's Deezer id proves the single row, so the
+    modal returns the single's tracks instead of [] (which would re-queue
+    an owned single for download)."""
+    db = _album_and_single_library(tmp_path)
+    candidates = db.get_candidate_albums_for_artist('Yellowcard', server_source='test')
+    tracks = df.owned_release_tracks(
+        db, 'Ocean Avenue', 'Yellowcard', 1, '2024', 'test',
+        candidate_albums=candidates,
+        metadata_source='deezer', card_source_id='DZ-SINGLE-1',
+        card_album_type='single')
+    assert tracks is not None and [t.file_path for t in tracks] == ['/m/s1.flac']
