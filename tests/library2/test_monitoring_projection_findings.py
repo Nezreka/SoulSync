@@ -237,3 +237,17 @@ def test_the_forward_edge_is_admin_only(imported_conn, legacy_db):
     assert conn.execute(
         "SELECT monitored FROM lib2_tracks WHERE id=?", (track_id,)
     ).fetchone()[0] == 0
+
+
+def test_a_media_server_bitrate_in_bps_is_judged_in_kbps():
+    """Jellyfin reports bps; 128000 must not satisfy an MP3 320 kbps target."""
+    from core.library2.quality_eval import audio_quality_from_file, evaluate_file, profile_targets
+
+    targets, policy, cutoff = profile_targets({
+        "id": 9, "upgrade_policy": "acceptable", "upgrade_cutoff_index": 0,
+        "ranked_targets": '[{"label": "MP3 320", "format": "mp3", "min_bitrate": 320}]'})
+    assert audio_quality_from_file({"format": "mp3", "bitrate": 128000}).bitrate == 128
+    assert evaluate_file({"format": "mp3", "bitrate": 128000}, targets, policy, cutoff)[
+        "upgrade_candidate"] is True
+    assert evaluate_file({"format": "mp3", "bitrate": 320}, targets, policy, cutoff)[
+        "upgrade_candidate"] is False

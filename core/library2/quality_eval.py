@@ -166,9 +166,14 @@ def audio_quality_from_file(file_row: Optional[Dict[str, Any]]):
         return None
     try:
         from core.quality.model import AudioQuality
+        # Media servers report bps (Jellyfin) where the probe stores kbps; the
+        # targets speak kbps, so a 128000 "bitrate" met every 320 kbps target.
+        bitrate = file_row.get("bitrate")
+        if bitrate and float(bitrate) > 10000:
+            bitrate = int(round(float(bitrate) / 1000))
         return AudioQuality(
             format=str(file_row.get("format") or "unknown").lower(),
-            bitrate=file_row.get("bitrate"),
+            bitrate=bitrate,
             sample_rate=file_row.get("sample_rate"),
             bit_depth=file_row.get("bit_depth"),
         )
