@@ -71,22 +71,12 @@ def register_routes(bp):
         # scheduler honors the toggle. Without this a disabled video job keeps
         # running on its schedule.
         try:
-            from web_server import get_database
-            import json
-            db = get_database()
-            for a in db.get_automations(1) or []:
-                if a.get("owned_by") != "system:repair_job":
-                    continue
-                if a.get("action_type") != "video_run_repair_job":
-                    continue
-                acfg = a.get("action_config") or "{}"
-                if isinstance(acfg, str):
-                    acfg = json.loads(acfg)
-                if acfg.get("job_id") == job_id:
-                    db.update_automation(a["id"], enabled=1 if enabled else 0)
-                    break
+            import web_server
+            from core.automation.migrate_repair_jobs import set_system_job_enabled
+            set_system_job_enabled(web_server.get_database(), web_server.automation_engine,
+                                   job_id, enabled, "video_run_repair_job")
         except Exception:
-            pass
+            logger.debug("Could not bridge video job toggle for %s", job_id, exc_info=True)
         return jsonify({"job_id": job_id, "enabled": enabled})
 
     @bp.route("/repair/jobs/<job_id>/settings", methods=["PUT"])

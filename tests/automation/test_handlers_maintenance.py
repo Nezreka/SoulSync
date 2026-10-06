@@ -344,6 +344,19 @@ class TestRunRepairJob:
         assert result['status'] == 'error'
         assert calls == []
 
+    def test_a_saved_automation_keeps_working_across_a_job_rename(self):
+        calls, run = self._record()
+        result = auto_run_repair_job({'job_id': 'lib2_wishlist_reconcile'},
+                                     _build_deps(run_repair_job_now=run))
+        assert calls == [('monitoring_list_reconcile', {'respect_enabled': True})]
+        assert result['status'] == 'completed'
+
+    def test_a_retired_job_is_skipped_not_failed(self):
+        calls, run = self._record()
+        result = auto_run_repair_job({'job_id': 'quality_upgrade_scan'},
+                                     _build_deps(run_repair_job_now=run))
+        assert result['status'] == 'skipped' and calls == []
+
     def test_the_block_lists_every_registered_job(self):
         from core.automation.blocks import blocks_for_scope
         from core.repair_jobs import get_all_jobs

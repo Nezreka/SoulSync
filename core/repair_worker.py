@@ -737,9 +737,9 @@ class RepairWorker:
         # truth for scheduling; the legacy config remains for the worker's
         # respect_enabled check on manual/Run Now paths.
         try:
-            auto_id = self._get_job_automation_id(job_id)
-            if auto_id:
-                self.db.update_automation(auto_id, enabled=1 if enabled else 0)
+            from core.automation.migrate_repair_jobs import set_system_job_enabled
+            set_system_job_enabled(self.db, getattr(self, '_automation_engine', None),
+                                   job_id, enabled)
         except Exception as e:
             logger.debug("Could not bridge job toggle to automation for %s: %s", job_id, e)
         # Turning a job OFF must also stop it if it's mid-run — otherwise the toggle
@@ -888,15 +888,6 @@ class RepairWorker:
         except Exception as e:
             logger.debug("Could not scan system automations: %s", e)
         return result
-
-    def _get_job_automation_id(self, job_id: str) -> Optional[int]:
-        """Return the system automation ID for a repair job, if seeded.
-
-        Deprecated: use _get_system_automations_by_job() for batch lookups.
-        Kept for backward compatibility.
-        """
-        auto = self._get_system_automations_by_job().get(job_id)
-        return auto["automation_id"] if auto else None
 
     def _get_pending_count_by_job(self) -> dict:
         """Return ``{job_id: pending_count}`` for every job that has
