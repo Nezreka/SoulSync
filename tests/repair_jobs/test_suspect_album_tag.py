@@ -210,21 +210,31 @@ def test_skips_compilation_if_artist_is_various():
     assert len(findings) == 0
 
 
-def test_flags_lone_track_when_full_release_has_many_tracks():
-    row = _row_dict(
-        album_title="Ordinary Album",
-        thumb_url="http://art.jpg",
-        full_track_count=12,  # Expected full release is 12 tracks, but we only have 1
-        artist_name="Coldplay",
-        track_title="Yellow",
-    )
+def test_one_wished_track_of_a_big_album_alone_is_not_suspect():
+    """The Wishlist case: one track of a 12-track album, cover present."""
+    row = _row_dict(album_title="Ordinary Album", thumb_url="http://art.jpg",
+                    full_track_count=12, artist_name="Coldplay", track_title="Yellow")
     ctx, findings = _context([row])
-    result = SuspectAlbumTagDetector().scan(ctx)
+    assert SuspectAlbumTagDetector().scan(ctx).findings_created == 0
 
-    assert result.findings_created == 1
-    f = findings[0]
-    assert any("only 1 of 12 tracks locally owned" in r for r in f["details"]["reasons"])
-    assert f["details"]["reidentify_query"] == "Yellow Coldplay"
+
+def test_lone_track_of_a_big_album_corroborates_another_signal():
+    row = _row_dict(album_title="Ordinary Album", thumb_url=None,
+                    full_track_count=12, artist_name="Coldplay", track_title="Yellow")
+    ctx, findings = _context([row])
+    SuspectAlbumTagDetector().scan(ctx)
+    assert findings[0]["details"]["reasons"] == ["no cover art", "only 1 of 12 tracks locally owned"]
+    assert findings[0]["details"]["reidentify_query"] == "Yellow Coldplay"
+
+
+def test_singles_and_an_artists_own_greatest_hits_are_not_suspects():
+    single = _row_dict(album_title="Yellow", thumb_url=None, artist_name="Coldplay")
+    single["album_type"] = "single"
+    hits = _row_dict(album_id=2, album_title="Greatest Hits", thumb_url="http://art.jpg",
+                     full_track_count=17, artist_name="Queen", track_id=101)
+    hits["album_artist_name"] = "Queen"
+    ctx, findings = _context([single, hits])
+    assert SuspectAlbumTagDetector().scan(ctx).findings_created == 0
 
 
 def test_normal_single_with_art_not_flagged():
