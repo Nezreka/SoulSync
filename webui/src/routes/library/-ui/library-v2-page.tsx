@@ -1169,7 +1169,7 @@ export function MatchChips({
         const details = [
           s.external_id ? `id: ${s.external_id}` : 'no id',
           s.last_attempted ? `last: ${s.last_attempted.slice(0, 16).replace('T', ' ')}` : null,
-          s.legacy_entity_id != null || s.library_v2_entity_id != null
+          s.library_v2_entity_id != null
             ? 'click to (re)match'
             : null,
           matchOriginLabel(s.match_origin),
@@ -1190,7 +1190,7 @@ export function MatchChips({
               className={`${styles.matchChip} ${abbreviated ? styles.trackMatchChip : ''} ${matchChipClass(s.status)}`}
               title={canWrite ? tip : 'Library changes require the admin profile'}
               data-requires-write=""
-              disabled={!canWrite || (s.legacy_entity_id == null && s.library_v2_entity_id == null)}
+              disabled={!canWrite || s.library_v2_entity_id == null}
               onClick={() => {
                 if (canWrite) setActive(s);
               }}
@@ -1212,7 +1212,7 @@ export function MatchChips({
           </span>
         );
       })}
-      {active && (active.legacy_entity_id != null || active.library_v2_entity_id != null) ? (
+      {active && active.library_v2_entity_id != null ? (
         <ManualMatchModal
           entityType={entityType}
           entityName={entityName}
@@ -1392,7 +1392,6 @@ function ManualMatchModal({
       const resultService = result.provider || service.service;
       return manualMatchLibraryV2Entity({
         entity_type: entityType,
-        legacy_entity_id: service.legacy_entity_id as number | string,
         library_v2_entity_id: service.library_v2_entity_id,
         service: resultService,
         service_id: result.id,
@@ -1413,7 +1412,6 @@ function ManualMatchModal({
       if (!canWrite) throw new Error('Library changes require the admin profile');
       return clearLibraryV2EntityMatch({
         entity_type: entityType,
-        legacy_entity_id: service.legacy_entity_id as number | string,
         library_v2_entity_id: service.library_v2_entity_id,
         service: service.service,
         ...(entityType === 'artist' &&

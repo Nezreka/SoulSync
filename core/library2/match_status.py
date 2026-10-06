@@ -455,3 +455,45 @@ __all__ = [
     "provider_id_owner",
     "set_library_v2_match",
 ]
+
+
+class WatchlistMismatch(ValueError):
+    """The supplied Watchlist row belongs to another artist."""
+
+
+def apply_manual_match(conn: Any, entity_type: str, entity_id: int, service: str,
+                       service_id: Optional[str], *, actor: str,
+                       watchlist_row_id: Any = None) -> None:
+    """A user's manual match (``service_id`` None clears it), uncommitted.
+
+    steal=True: a deliberate match MOVES an id another entity holds -- the
+    automated matcher's mistakes are what someone comes here to correct.
+    """
+    set_library_v2_match(conn, entity_type, entity_id, service, service_id,
+                         actor=actor, steal=True)
+    canonical = _canonical(entity_type)
+    # #758: a manual ALBUM match also pins and locks that release; clearing the
+    # match lifts a pin it made.
+    from core.metadata.canonical_version import should_pin_manual_canonical
+    if should_pin_manual_canonical(canonical, service):
+        from core.library2.editions import pin_album_release
+        pin_album_release(conn, entity_id, service, service_id)
+    if watchlist_row_id is None:
+        return
+    # Artist settings reuse the Watchlist: keep an identity-checked row in sync.
+    if canonical != "artist":
+        raise ValueError("Watchlist sync is only valid for artists")
+    from core.library2.artist_settings import WATCHLIST_PROVIDER_FIELDS
+    column = WATCHLIST_PROVIDER_FIELDS.get(service)
+    if not column:
+        raise ValueError(f"Watchlist does not support provider {service!r}")
+    artist = conn.execute("SELECT name FROM lib2_artists WHERE id=?", (entity_id,)).fetchone()
+    watchlist = conn.execute("SELECT id, artist_name FROM watchlist_artists WHERE id=?",
+                             (int(watchlist_row_id),)).fetchone()
+    if not artist or not watchlist or str(artist["name"] or "").casefold() \
+            != str(watchlist["artist_name"] or "").casefold():
+        raise WatchlistMismatch("Watchlist artist does not match this Library v2 artist")
+    if column not in {row[1] for row in conn.execute("PRAGMA table_info(watchlist_artists)")}:
+        raise ValueError(f"Watchlist column {column!r} is unavailable")
+    conn.execute(f"UPDATE watchlist_artists SET {column}=? WHERE id=?",
+                 (service_id, int(watchlist_row_id)))

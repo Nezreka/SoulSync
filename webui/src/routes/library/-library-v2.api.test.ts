@@ -398,7 +398,7 @@ describe('library v2 match-status api', () => {
     expect(bundle.tracks).toHaveProperty('100');
   });
 
-  it('searches a provider and applies a manual match via the legacy endpoint', async () => {
+  it('searches a provider and applies a manual match', async () => {
     server.use(
       http.post('/api/library/search-service', async ({ request }) => {
         expect(await request.json()).toEqual({
@@ -408,13 +408,8 @@ describe('library v2 match-status api', () => {
         });
         return HttpResponse.json({ success: true, results: [{ id: 'dz1', name: 'Views' }] });
       }),
-      http.put('/api/library/manual-match', async ({ request }) => {
-        expect(await request.json()).toEqual({
-          entity_type: 'album',
-          entity_id: '01MoTj8w4VkVtgdPOijUUE',
-          service: 'deezer',
-          service_id: 'dz1',
-        });
+      http.put('/api/library/v2/albums/5/manual-match', async ({ request }) => {
+        expect(await request.json()).toEqual({ service: 'deezer', service_id: 'dz1' });
         return HttpResponse.json({ success: true });
       }),
     );
@@ -427,14 +422,14 @@ describe('library v2 match-status api', () => {
     await expect(
       manualMatchLibraryV2Entity({
         entity_type: 'album',
-        legacy_entity_id: '01MoTj8w4VkVtgdPOijUUE',
+        library_v2_entity_id: 5,
         service: 'deezer',
         service_id: 'dz1',
       }),
     ).resolves.toBeUndefined();
   });
 
-  it('applies and clears matches for lib2-native entities without a legacy id', async () => {
+  it('applies and clears matches through the Library v2 route', async () => {
     server.use(
       http.put('/api/library/v2/artists/77/manual-match', async ({ request }) => {
         expect(await request.json()).toEqual({ service: 'spotify', service_id: 'sp-native' });
@@ -449,7 +444,6 @@ describe('library v2 match-status api', () => {
     await expect(
       manualMatchLibraryV2Entity({
         entity_type: 'artist',
-        legacy_entity_id: null,
         library_v2_entity_id: 77,
         service: 'spotify',
         service_id: 'sp-native',
@@ -458,7 +452,6 @@ describe('library v2 match-status api', () => {
     await expect(
       clearLibraryV2EntityMatch({
         entity_type: 'artist',
-        legacy_entity_id: null,
         library_v2_entity_id: 77,
         service: 'spotify',
       }),
@@ -494,11 +487,11 @@ describe('library v2 match-status api', () => {
 
   it('syncs manual/clear artist matches with the Watchlist row when supplied', async () => {
     server.use(
-      http.put('/api/library/manual-match', async ({ request }) => {
+      http.put('/api/library/v2/artists/42/manual-match', async ({ request }) => {
         expect(await request.json()).toMatchObject({ watchlist_row_id: 11, service_id: 'sp2' });
         return HttpResponse.json({ success: true });
       }),
-      http.put('/api/library/clear-match', async ({ request }) => {
+      http.delete('/api/library/v2/artists/42/manual-match', async ({ request }) => {
         expect(await request.json()).toMatchObject({ watchlist_row_id: 11, service: 'spotify' });
         return HttpResponse.json({ success: true });
       }),
@@ -506,14 +499,14 @@ describe('library v2 match-status api', () => {
 
     await manualMatchLibraryV2Entity({
       entity_type: 'artist',
-      legacy_entity_id: 42,
+      library_v2_entity_id: 42,
       service: 'spotify',
       service_id: 'sp2',
       watchlist_row_id: 11,
     });
     await clearLibraryV2EntityMatch({
       entity_type: 'artist',
-      legacy_entity_id: 42,
+      library_v2_entity_id: 42,
       service: 'spotify',
       watchlist_row_id: 11,
     });

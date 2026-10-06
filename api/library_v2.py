@@ -2234,62 +2234,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return _fail("service and service_id are required")
         conn = _conn()
         try:
-            from core.library2.match_status import set_library_v2_match
-            # steal=True: this is a deliberate user match. If another entity
-            # holds the id (the automated matcher's mistakes are exactly what
-            # someone comes here to correct), MOVE it rather than refusing —
-            # the invariant stays "one provider release, one local entity".
-            set_library_v2_match(
-                conn, entity_type, entity_id, service,
-                service_id if request.method == "PUT" else None,
-                actor=f"profile:{_profile()}",
-                steal=True,
-            )
-            # #758: a manual ALBUM match also pins and locks that release, so
-            # the resolver and every tool reading the pin keep the user's
-            # edition; clearing the match lifts a pin it made.
-            from core.metadata.canonical_version import should_pin_manual_canonical
-            if should_pin_manual_canonical(
-                    "album" if entity_type in ("album", "albums") else entity_type, service):
-                from core.library2.editions import pin_album_release
-                pin_album_release(
-                    conn, entity_id, service,
-                    service_id if request.method == "PUT" else None)
-
-            # Artist settings deliberately reuse the legacy Watchlist.  Keep a
-            # supplied, identity-checked row in sync just like the legacy match
-            # endpoint does.
-            watchlist_row_id = body.get("watchlist_row_id")
-            if watchlist_row_id is not None:
-                if entity_type not in ("artist", "artists"):
-                    raise ValueError("Watchlist sync is only valid for artists")
-                from core.library2.artist_settings import WATCHLIST_PROVIDER_FIELDS
-                column = WATCHLIST_PROVIDER_FIELDS.get(service)
-                if not column:
-                    raise ValueError(
-                        f"Watchlist does not support provider {service!r}"
-                    )
-                artist = conn.execute(
-                    "SELECT name FROM lib2_artists WHERE id=?", (entity_id,)
-                ).fetchone()
-                watchlist = conn.execute(
-                    "SELECT id, artist_name FROM watchlist_artists WHERE id=?",
-                    (int(watchlist_row_id),),
-                ).fetchone()
-                if not artist or not watchlist or str(artist["name"] or "").casefold() \
-                        != str(watchlist["artist_name"] or "").casefold():
-                    return _fail("Watchlist artist does not match this Library v2 artist", 409)
-                columns = {
-                    row[1] for row in conn.execute("PRAGMA table_info(watchlist_artists)")
-                }
-                if column not in columns:
-                    raise ValueError(f"Watchlist column {column!r} is unavailable")
-                conn.execute(
-                    f"UPDATE watchlist_artists SET {column}=? WHERE id=?",
-                    (service_id if request.method == "PUT" else None,
-                     int(watchlist_row_id)),
-                )
+            from core.library2.match_status import WatchlistMismatch, apply_manual_match
+            apply_manual_match(conn, entity_type, entity_id, service,
+                               service_id if request.method == "PUT" else None,
+                               actor=f"profile:{_profile()}",
+                               watchlist_row_id=body.get("watchlist_row_id"))
             conn.commit()
+        except WatchlistMismatch as exc:
+            conn.rollback()
+            return _fail(str(exc), 409)
         except LookupError as exc:
             conn.rollback()
             return _fail(str(exc), 404)

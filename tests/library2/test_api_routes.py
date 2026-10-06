@@ -4277,8 +4277,11 @@ def test_the_library_can_be_browsed_by_album(api):
     client, db, ids = api
     conn = _conn(db)
     conn.execute("UPDATE lib2_albums SET origin='library', year=2016 WHERE id=?", (ids["views"],))
-    conn.execute("UPDATE lib2_albums SET origin='library', year=2015 WHERE id=?", (ids["ep"],))
-    conn.execute("UPDATE lib2_albums SET origin='discography' WHERE id=?", (ids["single"],))
+    # Membership is a file or monitor intent, not the row's origin: the EP has
+    # no file but is wanted; the single has neither.
+    conn.execute("UPDATE lib2_albums SET origin='library', year=2015, monitored=1 WHERE id=?",
+                 (ids["ep"],))
+    conn.execute("UPDATE lib2_albums SET origin='library', monitored=0 WHERE id=?", (ids["single"],))
     conn.commit()
     conn.close()
 
@@ -4290,3 +4293,21 @@ def test_the_library_can_be_browsed_by_album(api):
     assert [a["title"] for a in client.get(
         "/api/library/v2/albums?sort=title&search=ep").get_json()["albums"]] == ["Best EP"]
     assert client.get("/api/library/v2/albums?limit=0").status_code == 400
+
+
+def test_the_artist_detail_match_writes_the_library_v2_row(api):
+    """H4: the artist-detail views hand Library v2 ids to /api/library/manual-match;
+    writing them into the frozen legacy tables matched a stranger's row."""
+    import json
+    from core.library2.match_status import apply_manual_match
+    _client, db, ids = api
+    conn = _conn(db)
+    apply_manual_match(conn, "album", ids["views"], "deezer", "dz-album", actor="profile:1")
+    conn.commit()
+    stored = json.loads(conn.execute(
+        "SELECT external_ids FROM lib2_albums WHERE id=?", (ids["views"],)).fetchone()[0])
+    apply_manual_match(conn, "album", ids["views"], "deezer", None, actor="profile:1")
+    cleared = json.loads(conn.execute(
+        "SELECT external_ids FROM lib2_albums WHERE id=?", (ids["views"],)).fetchone()[0])
+    conn.close()
+    assert stored["deezer"] == "dz-album" and "deezer" not in cleared

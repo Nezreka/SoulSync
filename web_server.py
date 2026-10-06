@@ -340,7 +340,7 @@ _MIGRATION_BLOCKED_ENDPOINTS = frozenset({
     'delete_download_origins', 'write_artist_image_to_disk',
     'set_album_art', 'set_artist_art', 'enhance_artist_quality',
     'reorganize_album_files', 'reorganize_all_artist_albums',
-    'library_enrich_entity',
+    'library_enrich_entity', 'library_manual_match', 'library_clear_match',
     'download_selected_candidate', 'manual_search_for_task',
     'request_media_scan', 'download_discography',
     'library_import_existing_track_for_missing_slot',
@@ -10970,232 +10970,66 @@ _SERVICE_ID_COLUMNS = {
     'jiosaavn': {'artist': 'jiosaavn_id', 'album': 'jiosaavn_id', 'track': 'jiosaavn_id'},
 }
 
-_WATCHLIST_PROVIDER_COLUMNS = {
-    'spotify': 'spotify_artist_id',
-    'itunes': 'itunes_artist_id',
-    'deezer': 'deezer_artist_id',
-    'discogs': 'discogs_artist_id',
-    'amazon': 'amazon_artist_id',
-    'musicbrainz': 'musicbrainz_artist_id',
-}
-
-
-def _watchlist_row_matches_legacy_artist(cursor, watchlist_row_id, artist_id):
-    """Fail closed before syncing a Library-v2 Settings provider change.
-
-    The combined Settings UI knows the concrete watchlist row. The public
-    legacy matcher historically knows only the legacy library artist id. This
-    guard accepts the bridge only when the rows already share a provider id or
-    the same normalized name; an arbitrary row id cannot be updated.
+def _library_match_request(clear: bool):
+    """Manual match / clear for the artist-detail views. Their ids are Library
+    v2 ids, so the write goes through the same path as the v2 route; the
+    legacy tables are frozen since the cutover and a write there matched a
+    stranger's row (or nothing) while the UI said "Matched".
+    Body: { entity_type, entity_id, service, service_id?, artist_id?, watchlist_row_id? }
     """
-    artist = cursor.execute(
-        f"""SELECT name, {_ARTIST_IDS_SQL}
-              FROM lib2_artists WHERE id=?""",
-        (artist_id,),
-    ).fetchone()
-    watchlist = cursor.execute(
-        """SELECT artist_name, spotify_artist_id, itunes_artist_id,
-                  deezer_artist_id, discogs_artist_id, amazon_artist_id,
-                  musicbrainz_artist_id
-             FROM watchlist_artists WHERE id=?""",
-        (watchlist_row_id,),
-    ).fetchone()
-    if not artist or not watchlist:
-        return False
-    if str(artist[0] or '').strip().casefold() == str(watchlist[0] or '').strip().casefold():
-        return True
-    return any(
-        left not in (None, '') and str(left) == str(right)
-        for left, right in zip(artist[1:], watchlist[1:], strict=True)
-    )
+    from core.library2.match_status import WatchlistMismatch, apply_manual_match
+    data = request.get_json(silent=True) or {}
+    entity_type, entity_id, service = data.get('entity_type'), data.get('entity_id'), data.get('service')
+    service_id = None if clear else data.get('service_id')
+    if not all([entity_type, entity_id, service]) or not (clear or service_id):
+        return jsonify({"success": False, "error": "entity_type, entity_id, service"
+                        + ("" if clear else " and service_id") + " are required"}), 400
+    database = get_database()
+    conn = database._get_connection()
+    try:
+        apply_manual_match(conn, entity_type, int(entity_id), str(service).lower(), service_id,
+                           actor=f"profile:{get_current_profile_id()}",
+                           watchlist_row_id=data.get('watchlist_row_id'))
+        conn.commit()
+    except WatchlistMismatch as e:
+        conn.rollback()
+        return jsonify({"success": False, "error": str(e)}), 409
+    except LookupError as e:
+        conn.rollback()
+        return jsonify({"success": False, "error": str(e)}), 404
+    except (TypeError, ValueError) as e:
+        conn.rollback()
+        return jsonify({"success": False, "error": str(e)}), 400
+    finally:
+        conn.close()
+
+    artist_id = (data.get('artist_id', entity_id) if entity_type == 'artist'
+                 else _get_artist_id_for_entity(database, entity_type, entity_id))
+    updated = database.get_artist_full_detail(artist_id)
+    if updated.get('success'):
+        if updated.get('artist', {}).get('thumb_url'):
+            updated['artist']['thumb_url'] = fix_artist_image_url(updated['artist']['thumb_url'])
+        for album in updated.get('albums', []):
+            if album.get('thumb_url'):
+                album['thumb_url'] = fix_artist_image_url(album['thumb_url'])
+    return jsonify({
+        "success": True,
+        "message": (f"Cleared {service} match for {entity_type}" if clear
+                    else f"Manually matched {entity_type} to {service} ID: {service_id}"),
+        "updated_data": updated if updated.get('success') else None,
+    })
+
 
 @app.route('/api/library/manual-match', methods=['PUT'])
+@admin_only
 def library_manual_match():
-    """Manually set a service ID for an entity.
-    Body: { entity_type: str, entity_id: str, service: str, service_id: str, artist_id: str }
-    """
-    try:
-        data = request.get_json()
-        entity_type = data.get('entity_type')
-        entity_id = data.get('entity_id')
-        service = data.get('service')
-        service_id = data.get('service_id')
-        watchlist_row_id = data.get('watchlist_row_id')
+    return _library_match_request(clear=False)
 
-        if not all([entity_type, entity_id, service, service_id]):
-            return jsonify({"success": False, "error": "entity_type, entity_id, service, and service_id are required"}), 400
-
-        id_col = _SERVICE_ID_COLUMNS.get(service, {}).get(entity_type)
-        if not id_col:
-            return jsonify({"success": False, "error": "Invalid service/entity_type combination"}), 400
-
-        status_col = f"{service}_match_status"
-        attempted_col = f"{service}_last_attempted"
-        table = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}[entity_type]
-
-        database = get_database()
-        with database._get_connection() as conn:
-            cursor = conn.cursor()
-            if watchlist_row_id is not None:
-                if entity_type != 'artist' or service not in _WATCHLIST_PROVIDER_COLUMNS:
-                    return jsonify({"success": False, "error": "Watchlist sync is only supported for artist providers"}), 400
-                try:
-                    watchlist_row_id = int(watchlist_row_id)
-                except (TypeError, ValueError):
-                    return jsonify({"success": False, "error": "watchlist_row_id must be an integer"}), 400
-                if not _watchlist_row_matches_legacy_artist(cursor, watchlist_row_id, entity_id):
-                    return jsonify({"success": False, "error": "Watchlist artist does not match this library artist"}), 409
-                watchlist_col = _WATCHLIST_PROVIDER_COLUMNS[service]
-                duplicate = cursor.execute(
-                    f"SELECT artist_name FROM watchlist_artists WHERE {watchlist_col}=? AND id<>?",
-                    (service_id, watchlist_row_id),
-                ).fetchone()
-                if duplicate:
-                    return jsonify({
-                        "success": False,
-                        "error": f"Another watchlist artist ('{duplicate[0]}') already has this {service} ID",
-                    }), 409
-            cursor.execute(f"""
-                UPDATE {table}
-                SET {id_col} = ?, {status_col} = 'matched', {attempted_col} = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (service_id, entity_id))
-            if cursor.rowcount == 0:
-                return jsonify({"success": False, "error": "Entity not found"}), 404
-            from core.enrichment.match_provenance import record_manual_match
-            record_manual_match(
-                conn,
-                entity_type=entity_type,
-                entity_id=entity_id,
-                service=service,
-                external_id=service_id,
-                actor=f"profile:{get_current_profile_id()}",
-            )
-            if watchlist_row_id is not None:
-                cursor.execute(
-                    f"""UPDATE watchlist_artists
-                           SET {_WATCHLIST_PROVIDER_COLUMNS[service]}=?,
-                               updated_at=CURRENT_TIMESTAMP
-                         WHERE id=?""",
-                    (service_id, watchlist_row_id),
-                )
-            conn.commit()
-
-        # #758 — a manual ALBUM match also pins (and LOCKS) the canonical album
-        # version to the chosen release, so the auto resolve job and every tool
-        # that reads the canonical pin (track-number repair, reorganize,
-        # missing-tracks) honor the user's edition instead of re-resolving back
-        # to the deluxe. The lock survives future enrichment/resolution cycles.
-        try:
-            from core.metadata.canonical_version import should_pin_manual_canonical
-            if should_pin_manual_canonical(entity_type, service):
-                database.set_album_canonical(entity_id, service, service_id, 1.0, locked=True)
-        except Exception as e:
-            logger.warning("Manual canonical pin failed for album %s: %s", entity_id, e)
-
-        # Re-fetch fresh data
-        artist_id = data.get('artist_id', entity_id)
-        if entity_type != 'artist':
-            artist_id = _get_artist_id_for_entity(database, entity_type, entity_id)
-
-        updated = database.get_artist_full_detail(artist_id)
-        if updated.get('success'):
-            if updated.get('artist', {}).get('thumb_url'):
-                updated['artist']['thumb_url'] = fix_artist_image_url(updated['artist']['thumb_url'])
-            for album in updated.get('albums', []):
-                if album.get('thumb_url'):
-                    album['thumb_url'] = fix_artist_image_url(album['thumb_url'])
-
-        return jsonify({
-            "success": True,
-            "message": f"Manually matched {entity_type} to {service} ID: {service_id}",
-            "updated_data": updated if updated.get('success') else None
-        })
-
-    except Exception as e:
-        logger.error(f"Error manual matching: {e}")
 
 @app.route('/api/library/clear-match', methods=['PUT'])
 @admin_only
 def library_clear_match():
-    """Clear a service ID match for an entity, reverting it to not_found.
-    Body: { entity_type: str, entity_id: str, service: str }
-    """
-    try:
-        data = request.get_json()
-        entity_type = data.get('entity_type')
-        entity_id = data.get('entity_id')
-        service = data.get('service')
-        watchlist_row_id = data.get('watchlist_row_id')
-
-        if not all([entity_type, entity_id, service]):
-            return jsonify({"success": False, "error": "entity_type, entity_id, and service are required"}), 400
-
-        id_col = _SERVICE_ID_COLUMNS.get(service, {}).get(entity_type)
-        if not id_col:
-            return jsonify({"success": False, "error": "Invalid service/entity_type combination"}), 400
-
-        status_col = f"{service}_match_status"
-        attempted_col = f"{service}_last_attempted"
-        table = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}.get(entity_type)
-        if not table:
-            return jsonify({"success": False, "error": "Invalid entity_type"}), 400
-
-        database = get_database()
-        with database._get_connection() as conn:
-            cursor = conn.cursor()
-            if watchlist_row_id is not None:
-                if entity_type != 'artist' or service not in _WATCHLIST_PROVIDER_COLUMNS:
-                    return jsonify({"success": False, "error": "Watchlist sync is only supported for artist providers"}), 400
-                try:
-                    watchlist_row_id = int(watchlist_row_id)
-                except (TypeError, ValueError):
-                    return jsonify({"success": False, "error": "watchlist_row_id must be an integer"}), 400
-                if not _watchlist_row_matches_legacy_artist(cursor, watchlist_row_id, entity_id):
-                    return jsonify({"success": False, "error": "Watchlist artist does not match this library artist"}), 409
-            cursor.execute(f"""
-                UPDATE {table}
-                SET {id_col} = NULL, {status_col} = 'not_found', {attempted_col} = NULL
-                WHERE id = ?
-            """, (entity_id,))
-            if cursor.rowcount == 0:
-                return jsonify({"success": False, "error": "Entity not found"}), 404
-            if watchlist_row_id is not None:
-                cursor.execute(
-                    f"""UPDATE watchlist_artists
-                           SET {_WATCHLIST_PROVIDER_COLUMNS[service]}=NULL,
-                               updated_at=CURRENT_TIMESTAMP
-                         WHERE id=?""",
-                    (watchlist_row_id,),
-                )
-            conn.commit()
-
-        # Re-fetch fresh data
-        artist_id = data.get('artist_id', entity_id)
-        if entity_type != 'artist':
-            artist_id = _get_artist_id_for_entity(database, entity_type, entity_id)
-
-        updated = database.get_artist_full_detail(artist_id)
-        if updated.get('success'):
-            if updated.get('artist', {}).get('thumb_url'):
-                updated['artist']['thumb_url'] = fix_artist_image_url(updated['artist']['thumb_url'])
-            for album in updated.get('albums', []):
-                if album.get('thumb_url'):
-                    album['thumb_url'] = fix_artist_image_url(album['thumb_url'])
-
-        return jsonify({
-            "success": True,
-            "message": f"Cleared {service} match for {entity_type}",
-            "updated_data": updated if updated.get('success') else None
-        })
-
-    except Exception as e:
-        logger.error(f"Error clearing match: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-        import traceback
-        traceback.print_exc()
-        return jsonify({"success": False, "error": str(e)}), 500
+    return _library_match_request(clear=True)
 
 
 @app.route('/api/library/album/<album_id>/import-existing-track', methods=['POST'])

@@ -16,7 +16,8 @@ function service(overrides: Partial<LibraryV2MatchService> = {}): LibraryV2Match
     status: 'matched',
     external_id: 'sp1',
     last_attempted: null,
-    legacy_entity_id: 5,
+    legacy_entity_id: null,
+    library_v2_entity_id: 5,
     available: true,
     match_origin: 'manual',
     ...overrides,
@@ -232,7 +233,7 @@ describe('library v2 match chips (deep-dive A8)', () => {
           results: [{ id: 'it-artist-1', name: 'Drake', provider: 'itunes' }],
         }),
       ),
-      http.put('/api/library/manual-match', async ({ request }) => {
+      http.put('/api/library/v2/artists/5/manual-match', async ({ request }) => {
         submitted = (await request.json()) as Record<string, unknown>;
         return HttpResponse.json({ success: true });
       }),
@@ -252,8 +253,6 @@ describe('library v2 match chips (deep-dive A8)', () => {
 
     await waitFor(() =>
       expect(submitted).toMatchObject({
-        entity_type: 'artist',
-        entity_id: 5,
         service: 'itunes',
         service_id: 'it-artist-1',
         watchlist_row_id: 11,
