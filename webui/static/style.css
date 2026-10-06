@@ -1,11 +1,8 @@
 /* SoulSync WebUI - Replicating PyQt6 GUI Styling */
 
-/* Accent Color Variables — overridden by JS when user picks a custom accent */
+/* Design tokens (accent, surfaces, radius, motion, z-index…) live in
+   tokens.css, which loads before this file. */
 :root {
-    --accent-rgb: 29, 185, 84;
-    --accent-light-rgb: 30, 215, 96;
-    --accent-neon-rgb: 34, 255, 107;
-
     /* Sidebar width (#1155). One definition, because three other things line
        themselves up against it and two of them live OUTSIDE the sidebar: the
        audio visualiser is position:fixed at its right edge (deliberately, to
@@ -62258,9 +62255,9 @@ tr.tag-diff-same {
 
 /* ── Settings page layout override — transform old layout ── */
 
-/* One number for the whole page. The nav row and the columns MUST agree or the
-   tabs and the content below them line up differently. */
-:root { --settings-max-width: 1400px; }
+/* One number for the whole page: --settings-max-width (tokens.css). The nav
+   row and the columns MUST agree or the tabs and the content below them line
+   up differently. */
 
 /* Center everything in a single column */
 #settings-page .settings-content {
