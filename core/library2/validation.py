@@ -246,9 +246,17 @@ def finding_verified(conn, finding, files):
             if any(checks.get(k) not in ('correct', 'not_required') for k in ('artwork_database', 'cover', 'artwork_sidecar')):
                 return False
         elif kind == 'track_number_mismatch':
-            if any(checks.get(k) != 'correct' for k in ('track_number', 'disc_number')) or checks.get('total_tracks') == 'mismatch':
+            # Judge only what the fix wrote: requiring a correct disc tag the
+            # fix never touches kept every disc-less file's finding open forever.
+            details = finding.get('details') or {}
+            wrote = {'disc_number': not details.get('disc_ok', True) and details.get('disc_number'),
+                     'total_tracks': details.get('total_tracks')}
+            if checks.get('track_number') != 'correct' or any(
+                    v and checks.get(k) in ('missing', 'mismatch') for k, v in wrote.items()):
                 return False
-            if (finding.get('details') or {}).get('total_tracks') and checks.get('total_tracks') != 'correct':
+            # A finding that only corrects the total needs it positively confirmed.
+            if wrote['total_tracks'] and details.get('current_track_num') == details.get(
+                    'correct_track_num') and checks.get('total_tracks') != 'correct':
                 return False
             target = finding.get('details', {}).get('new_filename')
             if target:

@@ -176,6 +176,22 @@ def test_unknown_reference_total_does_not_retire_an_old_total_finding(library):
         assert conn.execute('SELECT status FROM repair_findings').fetchone()[0] == 'pending'
 
 
+def test_a_fixed_track_number_resolves_on_a_file_without_disc_tag(library):
+    """H8: the fix writes the track number; demanding a disc tag it never
+    writes, or a reference total nobody knows, kept the finding open forever."""
+    db, path, _ = library
+    audio = FLAC(path)
+    del audio['discnumber']
+    audio.save()
+    with closing(db._get_connection()) as conn, conn:
+        conn.execute('UPDATE lib2_release_editions SET track_count=NULL')
+        conn.execute('UPDATE lib2_albums SET expected_track_count=NULL')
+        conn.execute("INSERT INTO repair_findings(job_id,finding_type,entity_type,entity_id,file_path,title,details_json) VALUES('track_number_repair','track_number_mismatch','track','lib2:7',?,'Wrong number','{\"current_track_num\":3,\"correct_track_num\":7,\"total_tracks\":13,\"tag_ok\":false,\"disc_ok\":true}')", (str(path),))
+    observe(library)
+    with closing(db._get_connection()) as conn:
+        assert conn.execute('SELECT status FROM repair_findings').fetchone()[0] == 'resolved'
+
+
 def test_retag_fixes_separate_total_and_verifies_it(library):
     from core.library2.retag import write_tags
     db, path, _ = library
