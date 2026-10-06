@@ -64,6 +64,7 @@ import {
   setActiveSource,
   switchServiceSwitchTab,
 } from './service-switch';
+import { bootSidebarWeather, initSidebarWeather } from './sidebar-weather';
 import { closeTrackDetail, openTrackDetail } from './track-detail';
 import {
   closeWatchlistHistoryModal,
@@ -130,7 +131,12 @@ export const SHELL_WINDOW_EXPORTS = {
   patchChatMessages,
   // the Discover inbox badge (sept 26)
   refreshDiscoverInboxBadge,
+  // the sidebar weather line + particle scene (oct 6)
+  initSidebarWeather,
+  // re-runnable boot, called from settings.js after a location/enabled change
+  bootSidebarWeather,
 } as const;
 
 Object.assign(window, SHELL_WINDOW_EXPORTS);
 startDiscoverInboxBadge();
+initSidebarWeather();

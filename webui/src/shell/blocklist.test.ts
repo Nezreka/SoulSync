@@ -170,6 +170,7 @@ describe('the window contract', () => {
       '_mlmSourceDebounce',
       '_updateSidebarLibraryBreadcrumb',
       'blockFromSearch',
+      'bootSidebarWeather',
       'clearArtistDetailPageState',
       'closeBlocklistModal',
       'closeDownloadOriginsModal',
@@ -180,6 +181,7 @@ describe('the window contract', () => {
       'connectMyAccount',
       'deleteSelectedOriginEntries',
       'disconnectMyAccount',
+      'initSidebarWeather',
       'navigateToArtistDetail',
       'onBlocklistSearchInput',
       'openBlocklistModal',
@@ -208,5 +210,6 @@ describe('the window contract', () => {
     ]);
     // importing the entry assigned them
     expect(window.openBlocklistModal).toBe(SHELL_WINDOW_EXPORTS.openBlocklistModal);
+    expect(window.bootSidebarWeather).toBe(SHELL_WINDOW_EXPORTS.bootSidebarWeather);
   });
 });

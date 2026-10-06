@@ -575,6 +575,10 @@ declare global {
     onBlocklistSearchInput?: () => void;
     blockFromSearch?: (payloadEnc: string) => Promise<void>;
     unblockEntry?: (id: number) => Promise<void>;
+    /** src/shell/sidebar-weather.ts: the weather line + particle scene (oct 6). */
+    initSidebarWeather?: () => void;
+    /** re-runnable weather boot, called from settings.js after a location/enabled change. */
+    bootSidebarWeather?: () => Promise<void>;
     /** shared-helpers.js html escaper (also re-declared by downloads.js) */
     escapeHtml?: (text: unknown) => string;
     /** init.js - the active profile, or null before profiles load */
