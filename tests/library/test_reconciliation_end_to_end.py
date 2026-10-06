@@ -16,7 +16,7 @@ from core.library.reconciliation_evidence import ReconciliationEvidence
 from core.repair_jobs.base import JobContext
 from core.repair_jobs.library_reconciliation import (
     LibraryReconciliationJob, _candidate_evidence, _candidate_shape, _group_disc_folders,
-    _normalize_slot, _suggest_filename,
+    _normalize_slot, _same_recording_copies, _suggest_filename,
 )
 from core.repair_worker import RepairWorker
 from database.music_database import MusicDatabase
@@ -88,9 +88,100 @@ def test_candidate_shape_sorts_numbered_and_unnumbered_missing_slots():
     shape = _candidate_shape((0, 0, 0, 'musicbrainz', 'release', slots, plan))
 
     assert shape[2] == (
-        (1, False, 2, 'numbered'),
-        (1, True, 0, 'unnumbered'),
+        (1, False, 2, 'numbered', ''),
+        (1, True, 0, 'unnumbered', ''),
     )
+
+
+def test_musicbrainz_slot_keeps_recording_disambiguation():
+    slot = _normalize_slot({
+        'id': 'recording-id', 'name': 'Song',
+        'disambiguation': 'Connect Sets acoustic',
+    }, 'musicbrainz')
+
+    assert slot['recording_disambiguation'] == 'Connect Sets acoustic'
+
+
+def test_same_audio_is_not_a_duplicate_across_recording_versions():
+    files = [
+        {
+            'path': '/album/01 - Luv (sic), Part 5.flac',
+            'tags': {'title': 'Luv (sic), Part 5', 'duration_ms': 300000},
+            'db': {'title': 'Luv (sic), Part 5',
+                   'recording_disambiguation': 'vocal version'},
+            'acoustid': {'fingerprint_key': 'shared', 'recordings': []},
+        },
+        {
+            'path': '/album/02 - Luv (sic), Part 5 (Instrumental).flac',
+            'tags': {'title': 'Luv (sic), Part 5 (Instrumental)',
+                     'duration_ms': 300000},
+            'db': {'title': 'Luv (sic), Part 5',
+                   'recording_disambiguation': 'instrumental'},
+            'acoustid': {'fingerprint_key': 'shared', 'recordings': []},
+        },
+    ]
+
+    assert _same_recording_copies(files, [0, 1]) is False
+
+
+def test_same_audio_is_not_a_duplicate_across_live_years():
+    files = [
+        {
+            'path': '/album/01 - Song (Live 1977).flac',
+            'tags': {'title': 'Song (Live 1977)', 'duration_ms': 300000},
+            'db': {'title': 'Song (Live 1977)', 'recording_disambiguation': None},
+            'acoustid': {'fingerprint_key': 'shared', 'recordings': []},
+        },
+        {
+            'path': '/album/02 - Song (Live 1978).flac',
+            'tags': {'title': 'Song (Live 1978)', 'duration_ms': 300000},
+            'db': {'title': 'Song (Live 1978)', 'recording_disambiguation': None},
+            'acoustid': {'fingerprint_key': 'shared', 'recordings': []},
+        },
+    ]
+
+    assert _same_recording_copies(files, [0, 1]) is False
+
+
+def test_same_audio_is_not_a_duplicate_across_named_remixes():
+    files = [
+        {
+            'path': '/album/01 - Song (Foo Remix).flac',
+            'tags': {'title': 'Song (Foo Remix)', 'duration_ms': 300000},
+            'db': {'title': 'Song', 'recording_disambiguation': 'Foo remix'},
+            'acoustid': {'fingerprint_key': 'shared', 'recordings': []},
+        },
+        {
+            'path': '/album/02 - Song (Bar Remix).flac',
+            'tags': {'title': 'Song (Bar Remix)', 'duration_ms': 300000},
+            'db': {'title': 'Song', 'recording_disambiguation': 'Bar remix'},
+            'acoustid': {'fingerprint_key': 'shared', 'recordings': []},
+        },
+    ]
+
+    assert _same_recording_copies(files, [0, 1]) is False
+
+
+def test_scan_ignores_watchlist_removal_snapshots(tmp_path, monkeypatch):
+    import core.repair_jobs.library_reconciliation as module
+
+    root = tmp_path / 'music'
+    archive = root / '.watchlist-removal-20261005-deadbeef' / 'Artist' / 'Album'
+    archive.mkdir(parents=True)
+    path = archive / '01 - Archived.flac'
+    path.write_bytes(b'archived audio')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    client = _Acoustid({path.name: {
+        'mbid': 'archived-id', 'title': 'Archived', 'artist': 'Artist', 'score': 0.99,
+    }})
+    monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
+    context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
+                         acoustid_client=client)
+
+    result = LibraryReconciliationJob().scan(context)
+
+    assert result.scanned == 0
+    assert client.fingerprints == client.lookups == 0
 
 
 def _album(db, path):
@@ -167,7 +258,7 @@ def test_scan_review_intent_and_exact_missing_request(tmp_path, monkeypatch):
     path.write_bytes(b'audio fixture')
     db = MusicDatabase(str(tmp_path / 'music.db'))
     _album(db, path)
-    worker = RepairWorker(database=db)
+    worker = RepairWorker(database=db, transfer_folder=str(root))
     client = _Acoustid({path.name: {
         'mbid': 'laid-mbid', 'title': 'Laid to Rest',
         'artist': 'Lamb of God', 'score': 0.98,
@@ -665,7 +756,7 @@ def test_release_discovery_samples_distinct_files_not_three_ids_from_first_file(
     assert candidates == [('musicbrainz', 'shared-release')]
 
 
-def test_wrong_audio_with_pinned_release_yields_extra_and_missing_intent(tmp_path, monkeypatch):
+def test_wrong_audio_defers_completion_intent_until_assignment_is_settled(tmp_path, monkeypatch):
     import core.repair_jobs.library_reconciliation as module
 
     root = tmp_path / 'music'
@@ -697,7 +788,7 @@ def test_wrong_audio_with_pinned_release_yields_extra_and_missing_intent(tmp_pat
     case_id = worker.get_review_cases()['items'][0]['case_id']
     findings = worker.get_review_case(case_id)['items']
     assert {finding['finding_type'] for finding in findings} == {
-        'reconciliation_extra', 'reconciliation_intent'}
+        'reconciliation_extra'}
     assert path.exists()  # scanning never edits a file
     extra = next(finding for finding in findings if finding['finding_type'] == 'reconciliation_extra')
     assert worker.fix_finding(extra['id'], fix_action='quarantine')['success'] is False
@@ -778,22 +869,22 @@ def test_locked_release_with_better_fitting_edition_requires_release_review(tmp_
     assert better['pairs'][0]['ambiguity_reasons'] == []
 
 
-def test_ambiguous_unassigned_audio_is_not_offered_for_quarantine(tmp_path, monkeypatch):
+def test_ambiguous_assignment_persists_reasons_and_is_not_offered_for_quarantine(
+        tmp_path, monkeypatch):
     import core.repair_jobs.library_reconciliation as module
 
     root = tmp_path / 'music'
     root.mkdir()
     path = root / '01 - Laid to Rest.flac'
-    untracked_copy = root / 'copy - Laid to Rest.flac'
     path.write_bytes(b'audio fixture')
-    untracked_copy.write_bytes(b'untracked audio fixture')
     db = MusicDatabase(str(tmp_path / 'music.db'))
     _album(db, path)
     worker = RepairWorker(database=db)
     client = _Acoustid({})
     client.lookup_fingerprint_with_status = lambda *_args: {
         'status': 'ok', 'recordings': [
-            {'mbid': 'one', 'title': 'Southbound', 'artist': 'Thin Lizzy', 'score': 0.99},
+            {'mbid': 'laid-id', 'title': 'Laid to Rest',
+             'artist': 'Lamb of God', 'score': 0.99},
             {'mbid': 'two', 'title': 'Another Song', 'artist': 'Other', 'score': 0.99},
         ],
     }
@@ -805,14 +896,18 @@ def test_ambiguous_unassigned_audio_is_not_offered_for_quarantine(tmp_path, monk
     })
     monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args: [
         {'id': 'laid-id', 'name': 'Laid to Rest', 'track_number': 1,
-         'disc_number': 1, 'duration_ms': 200000},
+         'disc_number': 1, 'duration_ms': 204000},
     ])
     context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
                          acoustid_client=client, create_finding=worker._create_finding)
     LibraryReconciliationJob().scan(context)
     case_id = worker.get_review_cases()['items'][0]['case_id']
     findings = worker.get_review_case(case_id)['items']
-    assert any(item['finding_type'] == 'reconciliation_unresolved' for item in findings)
+    unresolved = next(item for item in findings
+                      if item['finding_type'] == 'reconciliation_unresolved'
+                      and item['title'].startswith('Confirm:'))
+    assert unresolved['details']['ambiguity_reasons'] == [
+        'AcoustID returned competing identities not resolved by the other evidence']
     assert all(item['finding_type'] != 'reconciliation_extra' for item in findings)
 
 
@@ -837,7 +932,7 @@ def test_competing_audio_copies_become_one_keeper_decision(tmp_path, monkeypatch
             (id, album_id, artist_id, title, track_number, file_path)
             VALUES (3, 10, 1, 'Hourglass', 1, ?)""", (str(third),))
         conn.commit()
-    worker = RepairWorker(database=db)
+    worker = RepairWorker(database=db, transfer_folder=str(root))
     client = _Acoustid({path.name: {'mbid': 'hourglass-id', 'title': 'Hourglass',
                                    'artist': 'Lamb of God', 'score': 0.99}
                         for path in (first, second, third)})
@@ -897,6 +992,7 @@ def test_audio_backed_retag_writes_real_flac_and_track_row(tmp_path, monkeypatch
     monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
     monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args: [
         {'id': 'hourglass-id', 'name': 'Hourglass',
+         'disambiguation': 'alternate studio recording',
          'artists': [{'name': 'Lamb of God'}],
          'track_number': 2, 'disc_number': 1, 'duration_ms': 200000},
     ])
@@ -911,6 +1007,8 @@ def test_audio_backed_retag_writes_real_flac_and_track_row(tmp_path, monkeypatch
     assert finding['finding_type'] == 'reconciliation_metadata'
     assert finding['details']['changes']['title']['new'] == 'Hourglass'
     assert finding['details']['changes']['musicbrainz_recording_id']['new'] == 'hourglass-id'
+    assert finding['details']['changes']['library_recording_disambiguation']['new'] == \
+        'alternate studio recording'
     assert finding['details']['changes']['filename']['new'] == '02 - Hourglass.flac'
     assert db.set_album_canonical(10, 'musicbrainz', 'different-release', 0.9, locked=True)
     stale = worker.apply_review_decision(case_id, finding['id'],
@@ -918,6 +1016,17 @@ def test_audio_backed_retag_writes_real_flac_and_track_row(tmp_path, monkeypatch
     assert stale['success'] is False and 'rescan' in stale['error']
     assert FLAC(str(path))['title'][0] == 'Laid to Rest'
     assert db.set_album_canonical(10, 'musicbrainz', 'ashes-mb-release', 0.9, locked=True)
+    finding = worker.get_review_case(case_id)['items'][0]
+    with db._get_connection() as conn:
+        conn.execute("UPDATE tracks SET recording_disambiguation = 'changed after scan' "
+                     "WHERE id = 1")
+        conn.commit()
+    stale_identity = worker.apply_review_decision(
+        case_id, finding['id'], evidence_token=finding['evidence_token'], action='fix')
+    assert stale_identity['success'] is False and 'rescan' in stale_identity['error']
+    with db._get_connection() as conn:
+        conn.execute('UPDATE tracks SET recording_disambiguation = NULL WHERE id = 1')
+        conn.commit()
     finding = worker.get_review_case(case_id)['items'][0]
     target_path = root / '02 - Hourglass.flac'
     target_path.write_bytes(b'collision')
@@ -933,9 +1042,11 @@ def test_audio_backed_retag_writes_real_flac_and_track_row(tmp_path, monkeypatch
     assert not path.exists()
     assert FLAC(str(target_path))['title'][0] == 'Hourglass'
     with db._get_connection() as conn:
-        row = conn.execute('''SELECT title, track_number, musicbrainz_recording_id, file_path
+        row = conn.execute('''SELECT title, track_number, musicbrainz_recording_id,
+                                     recording_disambiguation, file_path
                               FROM tracks WHERE id = 1''').fetchone()
-    assert tuple(row) == ('Hourglass', 2, 'hourglass-id', str(target_path))
+    assert tuple(row) == ('Hourglass', 2, 'hourglass-id',
+                          'alternate studio recording', str(target_path))
 
 
 def test_exact_release_title_repairs_rated_r_album_and_file_tags(tmp_path, monkeypatch):

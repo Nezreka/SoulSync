@@ -48,6 +48,8 @@ const finding = {
               },
             ],
             slot_title: 'Laid to Rest',
+            local_recording_disambiguation: 'acoustic',
+            slot_recording_disambiguation: 'acoustic',
             slot_number: 1,
             disc_number: 1,
             slot_duration_ms: 240010,
@@ -181,6 +183,7 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByText('Exact')).toBeTruthy();
     expect(screen.getByText(/Δ 0.01s/)).toBeTruthy();
     expect(screen.getByText(/AcoustID alternate ruled out: Hourglass/)).toBeTruthy();
+    expect(screen.getAllByText('Recording: acoustic')).toHaveLength(2);
     expect(screen.getByText('1 confirmed match')).toBeTruthy();
     expect(screen.getByText(/Track comparisons were not saved/)).toBeTruthy();
     expect(screen.queryByText(/"release_id"/)).toBeNull();

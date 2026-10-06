@@ -141,6 +141,8 @@ function TrackRows({ pairs }: { pairs: Data[] }) {
         const reasons = Array.isArray(pair.reasons) ? pair.reasons.map(label).filter(Boolean) : [];
         const localTitle = label(pair.tag_title) || label(pair.file) || 'Unknown file';
         const releaseTitle = label(pair.slot_title) || 'Unknown release track';
+        const localDisambiguation = label(pair.local_recording_disambiguation);
+        const slotDisambiguation = label(pair.slot_recording_disambiguation);
         return (
           <article
             className={styles.trackRow}
@@ -164,6 +166,7 @@ function TrackRows({ pairs }: { pairs: Data[] }) {
                 {label(pair.file) && label(pair.file) !== localTitle && (
                   <span>{label(pair.file)}</span>
                 )}
+                {localDisambiguation && <span>Recording: {localDisambiguation}</span>}
                 {playlists.length > 0 && (
                   <span className={styles.playlistLine}>Playlist: {playlists.join(', ')}</span>
                 )}
@@ -172,6 +175,7 @@ function TrackRows({ pairs }: { pairs: Data[] }) {
               <div>
                 <small>Release</small>
                 <strong>{releaseTitle}</strong>
+                {slotDisambiguation && <span>Recording: {slotDisambiguation}</span>}
                 {Boolean(pair.audio_title) && (
                   <span className={styles.audioLine}>
                     <EvidenceIcon name="audio" /> {label(pair.audio_title)}
@@ -322,6 +326,9 @@ function DuplicateCopies({
               <div>
                 <strong>{path.split('/').pop() || label(copy.title) || 'Unknown file'}</strong>
                 <small>{path}</small>
+                {Boolean(copy.recording_disambiguation) && (
+                  <span>Recording: {label(copy.recording_disambiguation)}</span>
+                )}
                 {playlists.length > 0 && <span>Playlist: {playlists.join(', ')}</span>}
               </div>
               {onKeepCopy && trackId && (
@@ -580,6 +587,8 @@ function Facts({ finding, details }: { finding: ReviewFinding; details: Data }) 
   const tags = object(details.current_tags);
   const currentTitle = label(tags.title || details.current_title);
   const expectedTitle = label(details.expected_title);
+  const currentDisambiguation = label(details.current_recording_disambiguation);
+  const expectedDisambiguation = label(details.expected_recording_disambiguation);
   const folder = label(details.album_folder);
   return (
     <div className={styles.evidenceColumns}>
@@ -596,6 +605,12 @@ function Facts({ finding, details }: { finding: ReviewFinding; details: Data }) 
             <div>
               <dt>Title</dt>
               <dd>{currentTitle}</dd>
+            </div>
+          )}
+          {currentDisambiguation && (
+            <div>
+              <dt>Recording</dt>
+              <dd>{currentDisambiguation}</dd>
             </div>
           )}
           {Boolean(tags.artist) && (
@@ -643,6 +658,12 @@ function Facts({ finding, details }: { finding: ReviewFinding; details: Data }) 
             <div>
               <dt>Track</dt>
               <dd>{expectedTitle}</dd>
+            </div>
+          )}
+          {expectedDisambiguation && (
+            <div>
+              <dt>Recording</dt>
+              <dd>{expectedDisambiguation}</dd>
             </div>
           )}
           {Boolean(details.source) && (

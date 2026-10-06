@@ -149,6 +149,109 @@ def test_ambiguous_acoustid_result_does_not_authorize_clear_repair():
     assert pairs[0]['confidence'] == 'ambiguous'
 
 
+def test_unrelated_acoustid_link_does_not_override_complete_album_evidence():
+    files = [_file(
+        'Lay Your Hands on Me', '/album/01 - Lay Your Hands on Me.flac', 357170,
+        {'mbid': 'album-id', 'title': 'Lay Your Hands on Me',
+         'artist': 'Bon Jovi', 'score': 0.99},
+    )]
+    files[0]['tags']['mbid'] = 'album-id'
+    files[0]['acoustid']['recordings'].append(
+        {'mbid': 'bad-link', 'title': 'Different Song',
+         'artist': 'Other Artist', 'score': 0.99})
+    slots = [{
+        'title': 'Lay Your Hands on Me', 'artist': 'Bon Jovi',
+        'recording_mbid': 'album-id', 'duration_ms': 358900,
+    }]
+
+    pair = reconcile_folder(files, slots)['pairs'][0]
+
+    assert pair['confidence'] == 'clear'
+    assert pair['duration_delta_ms'] == 1730
+    assert pair['ambiguity_reasons'] == []
+
+
+def test_acoustid_link_that_fits_another_release_slot_remains_ambiguous():
+    files = [_file(
+        'First Song', '/album/01 - First Song.flac', 200000,
+        {'mbid': 'first-id', 'title': 'First Song', 'artist': 'Artist', 'score': 0.99},
+    )]
+    files[0]['tags']['mbid'] = 'first-id'
+    files[0]['acoustid']['recordings'].append(
+        {'mbid': 'second-id', 'title': 'Second Song', 'artist': 'Artist', 'score': 0.99})
+    slots = [
+        {'title': 'First Song', 'artist': 'Artist',
+         'recording_mbid': 'first-id', 'duration_ms': 200000},
+        {'title': 'Second Song', 'artist': 'Artist',
+         'recording_mbid': 'second-id', 'duration_ms': 201000},
+    ]
+
+    pair = reconcile_folder(files, slots)['pairs'][0]
+
+    assert pair['confidence'] == 'ambiguous'
+    assert pair['ambiguity_reasons'] == [
+        'AcoustID returned competing identities not resolved by the other evidence']
+
+
+def test_recording_disambiguation_separates_same_titled_versions():
+    file = _file('Song', '/album/01 - Song.flac', 200000)
+    file['db'] = {'title': 'Song', 'recording_disambiguation': 'instrumental'}
+    file['acoustid'] = {'status': 'ok', 'recordings': [
+        {'mbid': 'vocal-id', 'title': 'Song', 'artist': 'Artist', 'score': 0.99},
+    ]}
+    slot = {'title': 'Song', 'recording_mbid': 'vocal-id', 'duration_ms': 200000,
+            'recording_disambiguation': 'vocal version'}
+
+    result = reconcile_folder([file], [slot])
+
+    assert result['pairs'] == []
+    assert result['extra_files'] == [0]
+    assert result['missing_slots'] == [0]
+
+
+def test_recording_disambiguation_separates_differently_named_remixes():
+    file = _file('Song', '/album/01 - Song.flac', 200000)
+    file['db'] = {'title': 'Song', 'recording_disambiguation': 'Foo remix'}
+    file['acoustid'] = {'status': 'ok', 'recordings': [
+        {'mbid': 'bar-id', 'title': 'Song', 'artist': 'Artist', 'score': 0.99},
+    ]}
+    slot = {'title': 'Song', 'recording_mbid': 'bar-id', 'duration_ms': 200000,
+            'recording_disambiguation': 'Bar remix'}
+
+    result = reconcile_folder([file], [slot])
+
+    assert result['pairs'] == []
+    assert result['extra_files'] == [0]
+    assert result['missing_slots'] == [0]
+
+
+def test_unknown_recording_disambiguation_remains_explicit_identity_evidence():
+    file = _file('Song', '/album/01 - Song.flac', 200000)
+    file['db'] = {'title': 'Song', 'recording_disambiguation': 'first studio take'}
+    file['acoustid'] = {'status': 'ok', 'recordings': [
+        {'mbid': 'other-id', 'title': 'Song', 'artist': 'Artist', 'score': 0.99},
+    ]}
+    slot = {'title': 'Song', 'recording_mbid': 'other-id', 'duration_ms': 200000,
+            'recording_disambiguation': 'second studio take'}
+
+    result = reconcile_folder([file], [slot])
+
+    assert result['pairs'] == []
+    assert result['extra_files'] == [0]
+    assert result['missing_slots'] == [0]
+
+
+def test_recording_disambiguation_corroborates_same_titled_version():
+    file = _file('Song', '/album/01 - Song.flac', 200000)
+    file['db'] = {'title': 'Song', 'recording_disambiguation': 'acoustic'}
+    slot = {'title': 'Song', 'duration_ms': 200000,
+            'recording_disambiguation': 'acoustic'}
+
+    pair = reconcile_folder([file], [slot])['pairs'][0]
+
+    assert 'recording disambiguation agrees' in pair['reasons']
+
+
 def test_wrong_audio_is_extra_and_intended_slot_is_missing():
     files = [_file('Southbound', '/album/01 - Southbound.flac', 200000,
                    {'mbid': 'wrong', 'title': 'Different Song',

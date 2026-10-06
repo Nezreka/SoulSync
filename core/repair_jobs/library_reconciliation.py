@@ -20,7 +20,9 @@ from core.imports.staging import AUDIO_EXTENSIONS
 from core.library.path_resolver import resolve_library_file_path
 from core.library_reorganize import _safe_filename
 from core.library.reconciliation_evidence import ReconciliationEvidence, folder_audio_path_digest
-from core.library.reconciliation_plan import reconcile_folder, _title_score
+from core.library.reconciliation_plan import (
+    reconcile_folder, _title_score, file_version_markers,
+)
 from core.library.retag_planner import plan_track
 from core.matching.audio_verification import fingerprint_is_ambiguous, normalize
 from core.metadata.album_tracks import get_album_for_source, get_album_tracks_for_source
@@ -39,6 +41,7 @@ _SOURCES = {
 }
 _DISC_FOLDER = re.compile(r'^(?:cd|disc|disk|volume|vol)\s*[-_. ]*\d+\b', re.I)
 _NUMBERED_FILENAME = re.compile(r'^(\d{1,4})(\s*[-_.]\s*|\s+)(.+)$')
+_WATCHLIST_REMOVAL_PREFIX = '.watchlist-removal-'
 
 
 def _suggest_filename(path: str, slot: dict) -> str:
@@ -169,6 +172,10 @@ def _normalize_slot(item: dict, source: str) -> dict:
         'duration_ms': positive_int(item.get('duration_ms'), 0),
         'source_track_id': item.get('id') or '',
         'recording_mbid': item.get('id') if source == 'musicbrainz' else '',
+        'recording_disambiguation': (
+            str(item.get('disambiguation') or '').strip()
+            if source == 'musicbrainz' else ''
+        ),
     }
 
 
@@ -256,6 +263,10 @@ def _candidate_evidence(files: list[dict], scored: tuple) -> dict:
                                          for recording in recordings),
             'audio_alternatives': alternatives,
             'slot_title': slot['title'],
+            'slot_recording_disambiguation':
+            slot.get('recording_disambiguation') or '',
+            'local_recording_disambiguation':
+            (file.get('db') or {}).get('recording_disambiguation') or '',
             'slot_number': slot.get('track_number'),
             'disc_number': slot.get('disc_number'),
             'slot_duration_ms': slot.get('duration_ms') or 0,
@@ -282,7 +293,8 @@ def _candidate_shape(scored: tuple) -> tuple:
     def slot_shape(slot: dict) -> tuple:
         track_number = slot.get('track_number')
         return (slot.get('disc_number') or 1, track_number is None,
-                track_number or 0, normalize(slot.get('title') or ''))
+                track_number or 0, normalize(slot.get('title') or ''),
+                normalize(slot.get('recording_disambiguation') or ''))
 
     pairs = tuple(sorted(
         (pair['file_index'], *slot_shape(slots[pair['slot_index']]))
@@ -297,6 +309,35 @@ def _same_recording_copies(files: list[dict], indexes: list[int]) -> bool:
     """Require shared strong audio identity and compatible lengths."""
     if len(indexes) < 2:
         return False
+    version_sets = {file_version_markers(files[index]) for index in indexes}
+    if len(version_sets) != 1:
+        return False
+    identity_titles = []
+    for index in indexes:
+        file = files[index]
+        row = file.get('db') or {}
+        title = ((file.get('tags') or {}).get('title') or row.get('title') or
+                 os.path.splitext(os.path.basename(file.get('path') or ''))[0])
+        disambiguation = str(row.get('recording_disambiguation') or '').strip()
+        identity_titles.append(
+            f'{title} ({disambiguation})' if disambiguation else str(title)
+        )
+    if any(_title_score(left, right) < 0.83
+           for offset, left in enumerate(identity_titles)
+           for right in identity_titles[offset + 1:]):
+        return False
+    if any(version_sets) or any(
+            (files[index].get('db') or {}).get('recording_disambiguation')
+            for index in indexes):
+        literal_titles = {
+            re.sub(r'\s+', ' ', re.sub(r'[^\w\s]+', ' ', title.casefold())).strip()
+            for title in identity_titles
+        }
+        if len(literal_titles) != 1:
+            # Category parity (both say "remix" or "live") is insufficient:
+            # named remixes and performances from different years remain
+            # separate recordings even when a bad external ID links them.
+            return False
     evidence = [files[index].get('acoustid') or {} for index in indexes]
     fingerprint_keys = [item.get('fingerprint_key') for item in evidence]
     if all(fingerprint_keys) and len(set(fingerprint_keys)) == 1:
@@ -327,6 +368,7 @@ def _duplicate_copy(file: dict) -> dict:
         'bitrate': row.get('bitrate') or 0,
         'duration': row.get('duration') or 0,
         'track_number': row.get('track_number'),
+        'recording_disambiguation': row.get('recording_disambiguation') or '',
         'playlists': list(file.get('playlists') or []),
     }
 
@@ -394,6 +436,11 @@ class LibraryReconciliationJob(RepairJob):
                 canonical += ', al.canonical_locked'
             owner = ', al.owner_profile_id' if 'owner_profile_id' in columns else ''
             locked = ', t.metadata_locked' if 'metadata_locked' in track_columns else ''
+            recording_disambiguation = (
+                ', t.recording_disambiguation'
+                if 'recording_disambiguation' in track_columns
+                else ', NULL AS recording_disambiguation'
+            )
             size = ', t.file_size' if 'file_size' in track_columns else ''
             bitrate = ', t.bitrate' if 'bitrate' in track_columns else ''
             artist = ', ar.name AS artist_name' if 'artists' in {
@@ -403,7 +450,8 @@ class LibraryReconciliationJob(RepairJob):
             cursor = conn.execute(f'''
                 SELECT t.id, t.file_path, t.title, t.album_id, t.track_number,
                        t.disc_number, t.duration, t.musicbrainz_recording_id,
-                       al.title AS album_title{artist}{canonical}{owner}{locked}{size}{bitrate}{extras}
+                       al.title AS album_title{artist}{canonical}{owner}{locked}{size}{bitrate}
+                       {recording_disambiguation}{extras}
                 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
                 {artist_join}
                 WHERE t.file_path IS NOT NULL AND t.file_path != ''
@@ -556,7 +604,12 @@ class LibraryReconciliationJob(RepairJob):
         for root in roots:
             if not os.path.isdir(root):
                 continue
-            for dirpath, _dirs, filenames in walk_library(root):
+            for dirpath, dirs, filenames in walk_library(root):
+                # Watchlist-removal snapshots are recovery material outside
+                # the active library. Auditing them manufactures duplicate,
+                # extra and unresolved findings for files awaiting deletion.
+                dirs[:] = [name for name in dirs
+                           if not name.casefold().startswith(_WATCHLIST_REMOVAL_PREFIX)]
                 for name in filenames:
                     if os.path.splitext(name)[1].lower() in AUDIO_EXTENSIONS:
                         folders[dirpath].append(os.path.join(dirpath, name))
@@ -822,6 +875,11 @@ class LibraryReconciliationJob(RepairJob):
                             details={**common, 'current_tags': tags, 'acoustid': file['acoustid'],
                                      'fingerprint_key': file['acoustid'].get('fingerprint_key'),
                                      'expected_title': slot['title'], 'match_reasons': pair['reasons'],
+                                     'ambiguity_reasons': pair.get('ambiguity_reasons') or [],
+                                     'expected_recording_disambiguation':
+                                     slot.get('recording_disambiguation') or '',
+                                     'current_recording_disambiguation':
+                                     (file.get('db') or {}).get('recording_disambiguation') or '',
                                      'confidence': pair['confidence'],
                                      'playlists': list(file.get('playlists') or [])}):
                             result.findings_created += 1
@@ -846,6 +904,10 @@ class LibraryReconciliationJob(RepairJob):
                                           float(recording.get('score') or 0) >= 0.90
                                           for recording in
                                           file['acoustid'].get('recordings') or []) else '')
+                    confirmed_disambiguation = (
+                        slot.get('recording_disambiguation') or ''
+                        if confirmed_mbid else ''
+                    )
                     if confirmed_mbid and tags.get('mbid') != confirmed_mbid:
                         changed['musicbrainz_recording_id'] = {
                             'old': tags.get('mbid') or '', 'new': confirmed_mbid}
@@ -867,6 +929,18 @@ class LibraryReconciliationJob(RepairJob):
                         changed['library_recording_mbid'] = {
                             'old': row.get('musicbrainz_recording_id') or '',
                             'new': confirmed_mbid}
+                    if row and confirmed_mbid:
+                        current_disambiguation = row.get('recording_disambiguation') or ''
+                        next_disambiguation = confirmed_disambiguation or None
+                        mbid_changed = row.get('musicbrainz_recording_id') != confirmed_mbid
+                        if ((confirmed_disambiguation and
+                             current_disambiguation != confirmed_disambiguation) or
+                                (mbid_changed and current_disambiguation)):
+                            db_updates['recording_disambiguation'] = next_disambiguation
+                            changed['library_recording_disambiguation'] = {
+                                'old': current_disambiguation,
+                                'new': confirmed_disambiguation,
+                            }
                     target_path = _suggest_filename(file['path'], slot) if file.get('db') else ''
                     if target_path:
                         changed['filename'] = {'old': os.path.basename(file['path']),
@@ -897,13 +971,18 @@ class LibraryReconciliationJob(RepairJob):
                                'expected_artist': slot['artist'],
                                'expected_duration_ms': slot['duration_ms'],
                                'recording_mbid': slot['recording_mbid'],
+                               'expected_recording_disambiguation':
+                               slot.get('recording_disambiguation') or '',
+                               'current_recording_disambiguation':
+                               row.get('recording_disambiguation') or '',
                                'current_title': tags.get('title'),
                                'current_album': tags.get('album'),
                                'current_tags': tags, 'acoustid': file['acoustid'],
                                'current_library_metadata': {
                                    key: row.get(key) for key in
                                    ('title', 'track_number', 'disc_number',
-                                    'musicbrainz_recording_id')},
+                                    'musicbrainz_recording_id',
+                                    'recording_disambiguation')},
                                'fingerprint_key': file['acoustid'].get('fingerprint_key'),
                                'size_bytes': file['size_bytes'], 'mtime_ns': file['mtime_ns'],
                                'match_reasons': pair['reasons'],
@@ -978,7 +1057,11 @@ class LibraryReconciliationJob(RepairJob):
                         result.findings_created += 1
 
                 missing = [slots[i] for i in plan['missing_slots']]
-                if missing and album_id is not None:
+                assignment_settled = (
+                    not plan['extra_files'] and
+                    all(pair['confidence'] != 'ambiguous' for pair in plan['pairs'])
+                )
+                if missing and album_id is not None and assignment_settled:
                     saved_intent = intents.get(str(album_id))
                     scope = (saved_intent[0] if saved_intent and
                              saved_intent[1:] == (source, release_id) else '')

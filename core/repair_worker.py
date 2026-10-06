@@ -3863,7 +3863,7 @@ class RepairWorker:
         album_title = details.get('db_album_title')
         target_path = details.get('target_path') or ''
         allowed_track_fields = {'title', 'track_number', 'disc_number',
-                                'musicbrainz_recording_id'}
+                                'musicbrainz_recording_id', 'recording_disambiguation'}
         if not isinstance(db_track_updates, dict) or not set(db_track_updates) <= allowed_track_fields:
             return {'success': False, 'error': 'Invalid library track metadata proposal'}
         if not track_id or not (db_data or db_track_updates or album_title or target_path):
@@ -3883,14 +3883,16 @@ class RepairWorker:
                                                                             'metadata_locked') else '0')
             row = cursor.execute(
                 f'''SELECT file_path, {locked}, title, track_number, disc_number,
-                           musicbrainz_recording_id FROM tracks WHERE id = ?''',
+                           musicbrainz_recording_id, recording_disambiguation
+                    FROM tracks WHERE id = ?''',
                 (track_id,)).fetchone()
             if not row or row[1]:
                 return {'success': False, 'error': 'Track is missing or metadata is locked'}
             stored = row[0]
             scanned_db = details.get('current_library_metadata') or {}
             current_db = dict(zip(('title', 'track_number', 'disc_number',
-                                   'musicbrainz_recording_id'), row[2:6], strict=True))
+                                   'musicbrainz_recording_id',
+                                   'recording_disambiguation'), row[2:7], strict=True))
             if any(current_db.get(key) != scanned_db.get(key)
                    for key in db_track_updates if key in scanned_db):
                 return {'success': False, 'error': 'Track metadata changed; rescan before applying'}

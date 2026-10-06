@@ -45,6 +45,54 @@ def _recording_id(slot: dict) -> str:
                or slot.get('recording_id') or '')
 
 
+def _disambiguation_markers(value: object) -> frozenset[str]:
+    """Treat a MusicBrainz recording comment as qualifier evidence.
+
+    Recording disambiguation is plain text (``Connect Sets acoustic``,
+    ``instrumental``), while :func:`recording_version_markers` deliberately
+    inspects only qualifier text. Wrapping it keeps ordinary words out of the
+    version vocabulary and reuses the same conservative marker rules as title
+    matching.
+    """
+    text = str(value or '').strip()
+    return recording_version_markers(f'({text})') if text else frozenset()
+
+
+def _identity_text(value: object) -> str:
+    folded = re.sub(r'[^\w\s]+', ' ', str(value or '').casefold())
+    return re.sub(r'\s+', ' ', folded).strip()
+
+
+def file_version_markers(file: dict) -> frozenset[str]:
+    """Known performance/version markers from independent local layers."""
+    tags = file.get('tags') or {}
+    row = file.get('db') or {}
+    markers = set(recording_version_markers(str(tags.get('title') or '')))
+    markers.update(recording_version_markers(_filename_title(str(file.get('path') or ''))))
+    markers.update(recording_version_markers(str(row.get('title') or '')))
+    markers.update(_disambiguation_markers(row.get('recording_disambiguation')))
+    return frozenset(markers)
+
+
+def slot_version_markers(slot: dict) -> frozenset[str]:
+    markers = set(recording_version_markers(
+        str(slot.get('title') or slot.get('name') or '')))
+    markers.update(_disambiguation_markers(slot.get('recording_disambiguation')))
+    return frozenset(markers)
+
+
+def versions_compatible(file: dict, slot: dict) -> bool:
+    """Require symmetric version evidence, including stored MB comments."""
+    if file_version_markers(file) != slot_version_markers(slot):
+        return False
+    file_disambiguation = str(
+        (file.get('db') or {}).get('recording_disambiguation') or '').strip()
+    slot_disambiguation = str(slot.get('recording_disambiguation') or '').strip()
+    return not (file_disambiguation and slot_disambiguation) or (
+        _identity_text(file_disambiguation) == _identity_text(slot_disambiguation)
+    )
+
+
 def _recording_supports_slot(recording: dict, slot: dict) -> bool:
     recording_mbid = str(recording.get('mbid') or '')
     slot_mbid = _recording_id(slot)
@@ -91,6 +139,23 @@ def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None) -> tup
     fingerprint_weight = 0
     strong_recordings = [recording for recording in recordings
                          if float(recording.get('score') or 0) >= 0.90]
+    if not versions_compatible(file, slot):
+        local_versions = file_version_markers(file)
+        local_disambiguation = str(
+            (file.get('db') or {}).get('recording_disambiguation') or '').strip()
+        exact_audio_identity = bool(
+            _recording_id(slot) and any(
+                recording.get('mbid') == _recording_id(slot)
+                and float(recording.get('score') or 0) >= 0.90
+                for recording in strong_recordings
+            )
+        )
+        # Explicit local version evidence is a hard boundary. When the local
+        # title is bare, an exact high-score recording MBID may supply the
+        # missing version identity and safely populate the newly stored MB
+        # disambiguation field.
+        if local_versions or local_disambiguation or not exact_audio_identity:
+            return 0, []
     if strong_recordings and all(
         recording.get('mbid') != _recording_id(slot)
         and _title_score(str(recording.get('title') or ''), slot_title) < 0.83
@@ -143,6 +208,13 @@ def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None) -> tup
     if tags.get('mbid') and _recording_id(slot) and tags['mbid'] == _recording_id(slot):
         weight += 300 if fingerprint_weight else 1200
         reasons.append('embedded recording ID agrees')
+    row = file.get('db') or {}
+    file_disambiguation = str(row.get('recording_disambiguation') or '').strip()
+    slot_disambiguation = str(slot.get('recording_disambiguation') or '').strip()
+    if (file_disambiguation and slot_disambiguation and
+            _identity_text(file_disambiguation) == _identity_text(slot_disambiguation)):
+        weight += 300
+        reasons.append('recording disambiguation agrees')
 
     delta = _duration_delta_ms(file, slot)
     if delta is not None:
@@ -191,9 +263,25 @@ def reconcile_folder(files: list[dict], slots: list[dict]) -> dict[str, Any]:
                  and tags['mbid'] == _recording_id(slot)),
         ))
         assigned_duration_delta = _duration_delta_ms(files[file_index], slot)
+        top_recordings = [
+            recording for recording in recordings
+            if float(recording.get('score') or 0) >= top_score
+        ]
+        competing_release_slot = any(
+            not _recording_supports_slot(recording, slot)
+            and any(
+                other_index != slot_index
+                and _recording_supports_slot(recording, other)
+                and ((_duration_delta_ms(files[file_index], other) is None) or
+                     _duration_delta_ms(files[file_index], other) <= 15000)
+                for other_index, other in enumerate(slots)
+            )
+            for recording in top_recordings
+        )
         fingerprint_context_resolves = (
             ambiguous_fingerprint and top_supports_slot
-            and assigned_duration_delta is not None and assigned_duration_delta <= 1000
+            and not competing_release_slot
+            and assigned_duration_delta is not None and assigned_duration_delta <= 3000
             and corroborating_metadata >= 2
         )
         ambiguous = ambiguous_fingerprint and not fingerprint_context_resolves
