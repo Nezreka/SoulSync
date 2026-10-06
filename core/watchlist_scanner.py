@@ -25,6 +25,14 @@ from core.metadata_service import (
 from core.metadata.artwork import usable_image_url
 from core.wishlist_service import get_wishlist_service
 from core.matching_engine import MusicMatchingEngine
+from core.edition_grouping import (
+    EDITION_PREFERENCE_ALL,
+    EDITION_PREFERENCE_ONE_COMPLETE,
+    EDITION_PREFERENCE_ONE_STANDARD,
+    EDITION_PREFERENCE_VALUES,
+    edition_group_key,
+    reduce_edition_group,
+)
 from utils.logging_config import get_logger
 
 
@@ -524,6 +532,93 @@ def _extid_match_is_owned(wanted_album: str, library_album: str, allow_duplicate
     if not wanted_album or not library_album:
         return True   # nothing to compare -> conservative: treat as owned (prior behaviour)
     return _albums_likely_match(wanted_album, library_album)
+
+
+def _resolve_edition_preference(explicit_value=None) -> str:
+    """Validate a ``watchlist.edition_preference`` value.
+
+    Anything outside {"all", "one_standard", "one_complete"} — including
+    None and non-strings — falls back to "all" (today's behaviour). The
+    feature is fully opt-in: nobody's existing setup changes.
+    """
+    if isinstance(explicit_value, str) and explicit_value in EDITION_PREFERENCE_VALUES:
+        return explicit_value
+    if explicit_value is not None:
+        return EDITION_PREFERENCE_ALL
+    try:
+        from core.settings import config_manager
+        value = config_manager.get('watchlist.edition_preference', EDITION_PREFERENCE_ALL)
+    except Exception:
+        return EDITION_PREFERENCE_ALL
+    if isinstance(value, str) and value in EDITION_PREFERENCE_VALUES:
+        return value
+    return EDITION_PREFERENCE_ALL
+
+
+def _resolve_prefer_explicit_edition() -> bool:
+    """Read ``watchlist.prefer_explicit_edition`` (bool, default True).
+
+    This is the EDITION tie-break for #1450 — unrelated to
+    ``content_filter.prefer_explicit``, which re-ranks Soulseek download
+    candidates and never selects between editions.
+    """
+    try:
+        from core.settings import config_manager
+        value = config_manager.get('watchlist.prefer_explicit_edition', True)
+    except Exception:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() not in ('0', 'false', 'no', 'off', '')
+    return bool(value)
+
+
+def _group_albums_by_edition(albums):
+    """Group a provider album list into edition groups for #1450.
+
+    Provider order is preserved both across groups (first-seen order)
+    and within them, so the reduction's provider-order tie-break and all
+    downstream behaviour stay deterministic. Albums with no usable name
+    each get their own group (never fused).
+    """
+    groups = []
+    index_by_key = {}
+    for album in albums or []:
+        name = getattr(album, 'name', '') or ''
+        key = edition_group_key(name) if isinstance(name, str) else ''
+        if not key:
+            groups.append([album])
+            continue
+        if key in index_by_key:
+            groups[index_by_key[key]].append(album)
+        else:
+            index_by_key[key] = len(groups)
+            groups.append([album])
+    return groups
+
+
+def _edition_explicit_flag(album_data, tracks) -> bool:
+    """Best-effort explicit flag for one edition (album-level, then tracks).
+
+    Feeds the explicit tie-break in ``reduce_edition_group``. Providers
+    don't reliably set an album-level flag, so fall back to "any track
+    flagged explicit" — an edition containing explicit tracks is the
+    explicit edition.
+    """
+    try:
+        if isinstance(album_data, dict):
+            if album_data.get('explicit'):
+                return True
+        elif getattr(album_data, 'explicit', False):
+            return True
+        for track in tracks or []:
+            if isinstance(track, dict):
+                if track.get('explicit'):
+                    return True
+            elif getattr(track, 'explicit', False):
+                return True
+    except Exception:
+        return False
+    return False
 
 
 @dataclass
@@ -1208,6 +1303,186 @@ class WatchlistScanner:
             artist.include_compilations = g_compilations
             artist.include_instrumentals = g_instrumentals
 
+    def _resolve_edition_unit(self, album_unit, album_fetcher, *,
+                              edition_preference=EDITION_PREFERENCE_ALL,
+                              prefer_explicit_edition=True):
+        """Fetch an edition unit and return the (album, album_data, tracks) to process.
+
+        A unit is one provider album for "all", or one edition group for
+        one_standard/one_complete. Track counts only exist after each
+        edition's track list is fetched, so the pick is deferred here:
+        every edition in the group is fetched, then reduce_edition_group
+        keeps a single edition and only it runs the normal per-track flow.
+
+        Returns None when no edition yielded usable track data (same
+        skip conditions as the old per-album code: fetch failure, no
+        tracks, placeholder tracks).
+        """
+        try:
+            if edition_preference == EDITION_PREFERENCE_ALL or len(album_unit) <= 1:
+                album = album_unit[0]
+                try:
+                    album_data = album_fetcher(album.id, getattr(album, 'name', ''))
+                except Exception as e:
+                    logger.warning("Error checking album %s: %s", getattr(album, 'name', '?'), e)
+                    return None
+                tracks = self._extract_track_items(album_data)
+                if not album_data or not tracks:
+                    logger.debug(
+                        "Skipping album %s (id=%s): no track data returned",
+                        getattr(album, 'name', '?'), getattr(album, 'id', '?'),
+                    )
+                    return None
+                return (album, album_data, tracks)
+
+            candidates = []
+            for album in album_unit:
+                album_name = getattr(album, 'name', '?')
+                try:
+                    album_data = album_fetcher(album.id, getattr(album, 'name', ''))
+                except Exception as e:
+                    logger.warning("Error checking album %s: %s", album_name, e)
+                    continue
+                tracks = self._extract_track_items(album_data)
+                if not album_data or not tracks:
+                    logger.debug(
+                        "Skipping album %s (id=%s): no track data returned",
+                        album_name, getattr(album, 'id', '?'),
+                    )
+                    continue
+                if self._has_placeholder_tracks(tracks):
+                    logger.info("Skipping album with placeholder tracks: %s", album_name)
+                    continue
+                candidates.append({
+                    'album': album,
+                    'album_data': album_data,
+                    'tracks': tracks,
+                    'track_count': len(tracks),
+                    'explicit': _edition_explicit_flag(album_data, tracks),
+                })
+            if not candidates:
+                return None
+            if len(candidates) == 1:
+                picked = candidates[0]
+            else:
+                picked = reduce_edition_group(
+                    candidates, edition_preference,
+                    prefer_explicit=prefer_explicit_edition,
+                )[0]
+                logger.info(
+                    "#1450 %s: picked '%s' (%d tracks) from %d editions",
+                    edition_preference,
+                    getattr(picked['album'], 'name', '?'),
+                    picked['track_count'], len(candidates),
+                )
+            return (picked['album'], picked['album_data'], picked['tracks'])
+        except Exception as e:
+            logger.warning("Error resolving edition unit: %s", e)
+            return None
+
+    def _edition_group_owned_by_library(self, tracks, album_name) -> bool:
+        """#1450 one_standard: does the library already own an edition of this group?
+
+        Probed with TODAY's per-track ownership semantics (explicit
+        ``edition_preference="all"``): if any track of the picked edition
+        is not missing from the library, the group counts as owned and the
+        whole group is skipped — never an extras-only folder.
+        """
+        for track in tracks or []:
+            if not self.is_track_missing_from_library(
+                track, album_name=album_name,
+                edition_preference=EDITION_PREFERENCE_ALL,
+            ):
+                return True
+        return False
+
+    def _is_track_missing_one_complete(self, track, active_server) -> bool:
+        """#1450 one_complete per-track semantics.
+
+        The picked edition must queue COMPLETE: the fuzzy same-album skip
+        is bypassed for non-exact matches, so a reissue's shared tracks
+        are still wishlisted. Only EXACT external-ID matches (library row
+        or download provenance with the file on disk) count as owned —
+        true duplicates are still skipped, and the album gate is
+        deliberately not applied: an exact recording hit is a duplicate
+        whichever edition it's filed under.
+
+        This branch only runs when ``wishlist.allow_duplicate_tracks`` is
+        on (see the call site): with duplicates off, the wider fuzzy
+        match of today's logic is the ownership test, so a library row
+        without external IDs still counts as owned.
+        """
+        try:
+            from core.library.track_identity import (
+                extract_external_ids,
+                find_library_track_by_external_id,
+                find_provenance_by_external_id,
+            )
+            import os as _os_local
+            from core.downloads.atomic_album_publish import contains_staging_segment
+            try:
+                _source_hint = get_primary_source()
+            except Exception:
+                _source_hint = None
+            source_ids = extract_external_ids(track, source_hint=_source_hint)
+            if source_ids:
+                matched = find_library_track_by_external_id(
+                    self.database,
+                    external_ids=source_ids,
+                    server_source=active_server,
+                )
+                if matched is not None:
+                    matched_path = (matched.get('file_path') if isinstance(matched, dict)
+                                    else getattr(matched, 'file_path', '')) or ''
+                    # #1289: a row whose file is still in atomic-publish
+                    # staging is not ownership — the file is quarantined and
+                    # may never publish, so the watchlist must keep asking.
+                    if contains_staging_segment(matched_path):
+                        logger.info(
+                            "[EditionPref:one_complete] ignoring staged library row — "
+                            "not published yet, keeping the request"
+                        )
+                    else:
+                        logger.info(
+                            "[EditionPref:one_complete] exact external-ID duplicate — skipping: "
+                            "'%s' (matched on: %s)",
+                            track.get('name', 'Unknown') if isinstance(track, dict)
+                            else getattr(track, 'name', 'Unknown'),
+                            ', '.join(sorted(source_ids.keys())),
+                        )
+                        return False
+                prov = find_provenance_by_external_id(
+                    self.database, external_ids=source_ids,
+                )
+                if prov is not None:
+                    prov_path = prov.get('file_path')
+                    if (prov_path and _os_local.path.exists(prov_path)
+                            and not contains_staging_segment(prov_path)):
+                        logger.info(
+                            "[EditionPref:one_complete] exact provenance duplicate — skipping"
+                        )
+                        return False
+        except sqlite3.Error as db_err:
+            # Fail CLOSED (mirrors the H11 rule at the bottom of
+            # is_track_missing_from_library): an infrastructure failure —
+            # locked DB, I/O error — means we cannot prove the track is
+            # missing. Treat it as present for this scan (it is rechecked
+            # on the next one) rather than wishlisting — and re-downloading
+            # — an owned track.
+            track_name = (track.get('name', 'Unknown') if isinstance(track, dict)
+                          else getattr(track, 'name', 'Unknown'))
+            logger.warning(
+                "[EditionPref:one_complete] library probe failed for '%s' (%s) — "
+                "treating as present this scan", track_name, db_err,
+            )
+            return False
+        except Exception as ext_id_err:
+            logger.debug(
+                "External-ID match probe failed (one_complete, treating as missing): %s",
+                ext_id_err,
+            )
+        return True
+
     def scan_watchlist_profile(
         self,
         profile_id: int,
@@ -1419,6 +1694,17 @@ class WatchlistScanner:
             album_delay,
         )
 
+        # #1450: one-edition-per-album. Read ONCE per scan, not per album.
+        # Default "all" is today's behaviour — the feature is fully opt-in,
+        # so an unset/invalid value changes nothing for existing setups.
+        edition_preference = _resolve_edition_preference()
+        prefer_explicit_edition = _resolve_prefer_explicit_edition()
+        if edition_preference != EDITION_PREFERENCE_ALL:
+            logger.info(
+                "Edition preference for this scan: %s (prefer_explicit_edition=%s)",
+                edition_preference, prefer_explicit_edition,
+            )
+
         for i, artist in enumerate(watchlist_artists):
             if cancel_check and cancel_check():
                 logger.info("Watchlist scan cancelled after %s/%s artists", i, len(watchlist_artists))
@@ -1477,6 +1763,19 @@ class WatchlistScanner:
                     artist_image_url = discography_result.image_url or self.get_artist_image_url(artist) or ''
                     album_fetcher = lambda album_id, album_name='', source=source: self._get_album_data_for_source(source, album_id, album_name)
 
+                # #1450: one-edition-per-album. Track counts only exist after
+                # each album's track list is fetched, so the grouping happens
+                # here but the pick is deferred into the album loop below
+                # (see _resolve_edition_unit): each edition's tracks are
+                # fetched, then reduce_edition_group keeps a single edition
+                # and only it runs the normal per-track flow. For "all" each
+                # unit is one album, so the loop below behaves exactly as
+                # before.
+                if edition_preference != EDITION_PREFERENCE_ALL:
+                    album_units = _group_albums_by_edition(albums)
+                else:
+                    album_units = [[album] for album in albums]
+
                 absolute_index = artist_index_offset + i + 1
                 if scan_state is not None:
                     scan_state.update({
@@ -1503,7 +1802,7 @@ class WatchlistScanner:
                 if scan_state is not None:
                     scan_state.update({
                         'current_phase': 'checking_albums',
-                        'albums_to_check': len(albums),
+                        'albums_to_check': len(album_units),
                         'albums_checked': 0,
                     })
 
@@ -1512,7 +1811,7 @@ class WatchlistScanner:
 
                 artist_was_cancelled = False
                 albums_processed = 0
-                for album_index, album in enumerate(albums):
+                for album_index, album_unit in enumerate(album_units):
                     # The album loop had no cancel point at all, so a cancel
                     # could only land between ARTISTS. An artist with thirty
                     # albums is thirty fetches and thirty sleeps first, and a
@@ -1521,7 +1820,7 @@ class WatchlistScanner:
                         artist_was_cancelled = True
                         logger.info(
                             "Cancel received while checking albums for %s (%s of %s)",
-                            artist.artist_name, album_index, len(albums),
+                            artist.artist_name, album_index, len(album_units),
                         )
                         break
                     # H8: count only albums actually attempted — the cancel
@@ -1529,11 +1828,14 @@ class WatchlistScanner:
                     # untouched, and the result must report the real count.
                     albums_processed += 1
                     try:
-                        album_data = album_fetcher(album.id, getattr(album, 'name', ''))
-                        tracks = self._extract_track_items(album_data)
-                        if not album_data or not tracks:
-                            logger.debug("Skipping album %s (id=%s): no track data returned", album.name, album.id)
+                        picked = self._resolve_edition_unit(
+                            album_unit, album_fetcher,
+                            edition_preference=edition_preference,
+                            prefer_explicit_edition=prefer_explicit_edition,
+                        )
+                        if picked is None:
                             continue
+                        album, album_data, tracks = picked
 
                         album_name = getattr(album, 'name', '')
                         if isinstance(album_data, dict):
@@ -1560,6 +1862,20 @@ class WatchlistScanner:
                                 getattr(artist, 'include_singles', True))
                             continue
 
+                        if edition_preference == EDITION_PREFERENCE_ONE_STANDARD and \
+                                self._edition_group_owned_by_library(tracks, album_name):
+                            # The library already owns an edition of this
+                            # group (probed with today's per-track ownership
+                            # semantics): one_standard wants the standard
+                            # edition only, so there is nothing to do — skip
+                            # the whole group instead of wishlisting an
+                            # extras-only folder.
+                            logger.info(
+                                "#1450 one_standard: library already owns an edition of '%s' — skipping group",
+                                album_name,
+                            )
+                            continue
+
                         album_image_url = ''
                         album_images = []
                         if isinstance(album_data, dict):
@@ -1576,7 +1892,7 @@ class WatchlistScanner:
                                 'albums_checked': album_index + 1,
                                 'current_album': album_name,
                                 'current_album_image_url': album_image_url,
-                                'current_phase': f'checking_album_{album_index + 1}_of_{len(albums)}',
+                                'current_phase': f'checking_album_{album_index + 1}_of_{len(album_units)}',
                             })
 
                         _emit(
@@ -1584,7 +1900,7 @@ class WatchlistScanner:
                             artist_name=artist.artist_name,
                             album_name=album_name,
                             album_index=album_index + 1,
-                            total_albums=len(albums),
+                            total_albums=len(album_units),
                             album_image_url=album_image_url,
                         )
 
@@ -1596,7 +1912,10 @@ class WatchlistScanner:
                             if scan_state is not None:
                                 scan_state['current_track_name'] = track_name
 
-                            if self.is_track_missing_from_library(track, album_name=album_name):
+                            if self.is_track_missing_from_library(
+                                track, album_name=album_name,
+                                edition_preference=edition_preference,
+                            ):
                                 artist_new_tracks += 1
                                 if scan_state is not None:
                                     scan_state['tracks_found_this_scan'] += 1
@@ -1644,11 +1963,12 @@ class WatchlistScanner:
                                         if len(scan_state['recent_wishlist_additions']) > 10:
                                             scan_state['recent_wishlist_additions'].pop()
 
-                        if album_index < len(albums) - 1:
+                        if album_index < len(album_units) - 1:
                             time.sleep(album_delay)
 
                     except Exception as e:
-                        logger.warning("Error checking album %s: %s", album.name, e)
+                        _unit_name = getattr(album_unit[0], 'name', '?') if album_unit else '?'
+                        logger.warning("Error checking album %s: %s", _unit_name, e)
                         continue
 
                 # H8: a cancelled artist is NOT fully scanned — stamping the
@@ -2413,10 +2733,21 @@ class WatchlistScanner:
             logger.warning(f"Error checking track content type inclusion: {e}")
             return True  # Default to including on error
 
-    def is_track_missing_from_library(self, track, album_name: str = None) -> bool:
+    def is_track_missing_from_library(self, track, album_name: str = None,
+                                      edition_preference: str = None) -> bool:
         """
         Check if a track is missing from the local library.
         Uses the same matching logic as the download missing tracks modals.
+
+        edition_preference: #1450 one-edition-per-album. The scan loop
+        passes the once-per-scan value. "one_complete" bypasses the fuzzy
+        same-album skip so the picked edition queues complete (only exact
+        external-ID matches count as owned) — but only when duplicates are
+        allowed; with duplicates off it falls through to today's logic,
+        which treats any fuzzy title/artist/album match as owned.
+        "one_standard" and "all"
+        use today's logic — the one_standard group-skip lives in the
+        scan loop, where the edition's full track list is available.
         """
         try:
             # Handle both dict and object track formats
@@ -2447,6 +2778,24 @@ class WatchlistScanner:
             from core.settings import config_manager
             active_server = config_manager.get_active_media_server()
             allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
+
+            # #1450: one_complete redefines per-track ownership — the picked
+            # edition must queue COMPLETE, so the fuzzy same-album skip is
+            # bypassed and only exact external-ID matches count as owned.
+            # "all" and "one_standard" fall through to today's logic,
+            # byte-for-byte (the one_standard group-skip lives in the scan
+            # loop, where the edition's full track list is available).
+            # With allow_duplicates OFF the exact-ID-only branch must NOT
+            # run: today's logic treats any fuzzy title/artist/album match
+            # as owned (no external IDs needed), and the narrower branch
+            # would re-wishlist — and re-download — an owned track whose
+            # library row simply lacks external IDs (local imports, rows
+            # predating ID backfill), since add_to_wishlist_detailed dedupes
+            # by provider track ID only and standard/deluxe IDs differ.
+            if (allow_duplicates
+                    and _resolve_edition_preference(edition_preference)
+                    == EDITION_PREFERENCE_ONE_COMPLETE):
+                return self._is_track_missing_one_complete(track, active_server)
 
             # Provider-neutral external-ID short-circuit: before doing
             # title+artist+album fuzzy comparison, ask the library if any

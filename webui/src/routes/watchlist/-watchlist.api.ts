@@ -130,10 +130,33 @@ export async function fetchWatchlistGlobalConfig(): Promise<WatchlistGlobalConfi
     const payload = await readJson<WatchlistGlobalConfigResponse>(
       apiClient.get('watchlist/global-config'),
     );
-    return payload.success ? (payload.config ?? null) : null;
+    if (!payload.success || !payload.config) return null;
+    return withEditionDefaults(payload.config);
   } catch {
     return null;
   }
+}
+
+/** The three edition-preference values the backend accepts (#1450). */
+export const EDITION_PREFERENCES = ['all', 'one_standard', 'one_complete'] as const;
+
+/**
+ * #1450: merge a server config object over the new keys' defaults, so a
+ * stale server (or a cached row from before the keys existed) still yields
+ * a complete WatchlistGlobalConfig. A stored value outside the enum renders
+ * as "all" rather than leaving the pill group with nothing selected.
+ */
+export function withEditionDefaults(config: WatchlistGlobalConfig): WatchlistGlobalConfig {
+  const rawPreference = (config as { edition_preference?: unknown }).edition_preference;
+  return {
+    ...config,
+    edition_preference:
+      typeof rawPreference === 'string' &&
+      (EDITION_PREFERENCES as readonly string[]).includes(rawPreference)
+        ? (rawPreference as (typeof EDITION_PREFERENCES)[number])
+        : 'all',
+    prefer_explicit_edition: config.prefer_explicit_edition ?? true,
+  };
 }
 
 export async function fetchWatchlistLabels(): Promise<WatchlistLabel[]> {
@@ -257,7 +280,9 @@ export async function saveWatchlistGlobalConfig(
     // message rather than a generic one, it is the only way the user learns why.
     throw new Error(payload.error || 'Failed to save global watchlist settings');
   }
-  return payload.config ?? config;
+  // The save echo carries the stored row; run the same defaults pass so an
+  // old server's echo can't strip the new keys out of the cached config.
+  return withEditionDefaults(payload.config ?? config);
 }
 
 export async function fetchWatchlistArtistConfig(

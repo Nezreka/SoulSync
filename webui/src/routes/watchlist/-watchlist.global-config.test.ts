@@ -74,3 +74,52 @@ describe('includeEverythingChecked / setAllIncludes', () => {
     expect(start.include_live).toBe(false);
   });
 });
+
+describe('#1450 edition preference defaults', () => {
+  it('EMPTY_GLOBAL_CONFIG carries the new keys at their server defaults', () => {
+    expect(EMPTY_GLOBAL_CONFIG.edition_preference).toBe('all');
+    expect(EMPTY_GLOBAL_CONFIG.prefer_explicit_edition).toBe(true);
+  });
+
+  it('setAllIncludes leaves the edition keys untouched', () => {
+    const on = setAllIncludes(
+      {
+        ...EMPTY_GLOBAL_CONFIG,
+        edition_preference: 'one_standard',
+        prefer_explicit_edition: false,
+      },
+      true,
+    );
+    expect(on.edition_preference).toBe('one_standard');
+    expect(on.prefer_explicit_edition).toBe(false);
+  });
+});
+
+describe('#1450 withEditionDefaults', () => {
+  it('fills the new keys for a stale server response that predates them', async () => {
+    const { withEditionDefaults } = await import('./-watchlist.api');
+    const merged = withEditionDefaults({
+      ...EMPTY_GLOBAL_CONFIG,
+      edition_preference: undefined as never,
+      prefer_explicit_edition: undefined as never,
+    });
+    expect(merged.edition_preference).toBe('all');
+    expect(merged.prefer_explicit_edition).toBe(true);
+  });
+
+  it('keeps the server values and coerces an out-of-enum value to "all"', async () => {
+    const { withEditionDefaults } = await import('./-watchlist.api');
+    const kept = withEditionDefaults({
+      ...EMPTY_GLOBAL_CONFIG,
+      edition_preference: 'one_complete',
+      prefer_explicit_edition: false,
+    });
+    expect(kept.edition_preference).toBe('one_complete');
+    expect(kept.prefer_explicit_edition).toBe(false);
+    const coerced = withEditionDefaults({
+      ...EMPTY_GLOBAL_CONFIG,
+      edition_preference: 'bogus' as never,
+    });
+    expect(coerced.edition_preference).toBe('all');
+  });
+});

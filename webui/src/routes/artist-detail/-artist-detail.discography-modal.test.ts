@@ -443,3 +443,71 @@ describe('watchArtistWithSettings', () => {
     expect(calls).toEqual(['/api/watchlist/check']);
   });
 });
+
+describe('#1450 edition_preferred pre-checks', () => {
+  const base: DiscogRelease = { id: 'n1', name: 'Nevermind', _type: 'album' };
+
+  it('pre-checks only the preferred edition; others stay visible but unchecked', () => {
+    const preferred = discogCardView({ ...base, edition_preferred: true }, {});
+    const other = discogCardView(
+      { ...base, id: 'n2', name: 'Nevermind (Deluxe)', edition_preferred: false },
+      {},
+    );
+    expect(preferred.checkedByDefault).toBe(true);
+    expect(other.checkedByDefault).toBe(false);
+  });
+
+  it('an owned preferred edition is still not pre-checked', () => {
+    const view = discogCardView(
+      { ...base, edition_preferred: true },
+      { albums: [{ id: 'n1', status: 'completed' }] },
+    );
+    expect(view.checkedByDefault).toBe(false);
+  });
+
+  it('a missing flag reads as preferred (gap-fill cards, stale responses)', () => {
+    const view = discogCardView({ ...base, edition_preferred: undefined }, {});
+    expect(view.checkedByDefault).toBe(true);
+  });
+
+  it('releasesFromPageDiscography carries the backend flag through', () => {
+    const releases = releasesFromPageDiscography({
+      albums: [
+        { id: 'n1', name: 'Nevermind', edition_preferred: true },
+        { id: 'n2', name: 'Nevermind (Deluxe)', edition_preferred: false },
+      ],
+    } as never);
+    expect(releases.map((r) => r.edition_preferred)).toEqual([true, false]);
+  });
+
+  it('the supersede list unchecks the base card the gap edition overturned', () => {
+    // #1450 finding 2: under one_complete the base response stamped the
+    // standard true, then the combined group picked the gap deluxe. The page
+    // threads edition_superseded into the modal; the base card must flip off.
+    const releases = releasesFromPageDiscography(
+      {
+        albums: [
+          { id: 'b1', name: 'Album', edition_preferred: true },
+          { id: 'g1', name: 'Album (Deluxe)', edition_preferred: true, _gap_source: 'deezer' },
+          { id: 'n1', name: 'Nevermind', edition_preferred: true },
+        ],
+      } as never,
+      new Set(['b1']),
+    );
+    const byId = Object.fromEntries(releases.map((r) => [r.id, r]));
+    expect(byId.b1.edition_preferred).toBe(false);
+    expect(discogCardView(byId.b1, {}).checkedByDefault).toBe(false);
+    // the winning gap card and unrelated cards are untouched
+    expect(discogCardView(byId.g1, {}).checkedByDefault).toBe(true);
+    expect(discogCardView(byId.n1, {}).checkedByDefault).toBe(true);
+  });
+
+  it('a superseded owned card stays unchecked, like any owned card', () => {
+    const [release] = releasesFromPageDiscography(
+      { albums: [{ id: 'b1', name: 'Album', edition_preferred: true }] } as never,
+      new Set(['b1']),
+    );
+    const view = discogCardView(release, { albums: [{ id: 'b1', status: 'completed' }] });
+    expect(view.checkedByDefault).toBe(false);
+  });
+});

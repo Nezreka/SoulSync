@@ -86,6 +86,7 @@ export function DiscographyModal({
   artistName,
   artistImage,
   discography,
+  editionSuperseded,
   onClose,
   watchlistIdentity = null,
 }: {
@@ -94,6 +95,11 @@ export function DiscographyModal({
   artistImage: string;
   /** what the page is showing: the modal lists exactly these */
   discography: Discography;
+  /**
+   * #1450: base-release ids whose edition_preferred stamp the combined
+   * base+gap edition group overturned; those cards' pre-checks flip off.
+   */
+  editionSuperseded?: Set<unknown>;
   onClose: () => void;
   /** canonical identity for the watchlist add; null hides the combined button */
   watchlistIdentity?: { id: unknown; name: string } | null;
@@ -117,25 +123,27 @@ export function DiscographyModal({
   useEffect(() => {
     let cancelled = false;
     window.showToast?.('Loading discography...', 'info');
-    void loadDiscographyForModal(libraryArtistId, artistName, discography).then((result) => {
-      if (cancelled) return;
-      if (!result) {
-        window.showToast?.(
-          'No discography found. Try searching this artist from the Search page instead.',
-          'error',
-        );
-        onClose();
-        return;
-      }
-      setData(result);
-      // Unowned releases come pre-checked. The library path has no completion
-      // cache (that belonged to the OLD search page), so everything starts on.
-      const next = new Set<string>();
-      for (const release of result.releases) {
-        if (discogCardView(release, {}).checkedByDefault) next.add(String(release.id));
-      }
-      setChecked(next);
-    });
+    void loadDiscographyForModal(libraryArtistId, artistName, discography, editionSuperseded).then(
+      (result) => {
+        if (cancelled) return;
+        if (!result) {
+          window.showToast?.(
+            'No discography found. Try searching this artist from the Search page instead.',
+            'error',
+          );
+          onClose();
+          return;
+        }
+        setData(result);
+        // Unowned releases come pre-checked. The library path has no completion
+        // cache (that belonged to the OLD search page), so everything starts on.
+        const next = new Set<string>();
+        for (const release of result.releases) {
+          if (discogCardView(release, {}).checkedByDefault) next.add(String(release.id));
+        }
+        setChecked(next);
+      },
+    );
     return () => {
       cancelled = true;
     };
