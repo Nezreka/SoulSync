@@ -1,5 +1,6 @@
-"""Profile-scoped monitoring derivation: one user profile's watchlist/wishlist
-must not leak into another profile's Library v2 view."""
+"""Profile-scoped monitoring derivation: the shared library carries the
+watchlist/wishlist intent of every profile without a library of its own; an own
+library's lists never leak into the shared view."""
 
 from __future__ import annotations
 
@@ -50,7 +51,7 @@ def _seed_lib2(conn):
     return drake, adele
 
 
-def test_profile_scope_filters_monitoring(imported_conn):
+def test_shared_library_carries_every_shared_profiles_intent(imported_conn):
     conn = imported_conn
     _seed_legacy_monitor_tables(conn)
     drake, adele = _seed_lib2(conn)
@@ -61,13 +62,25 @@ def test_profile_scope_filters_monitoring(imported_conn):
 
     monitored = {r["name"]: r["monitored"] for r in conn.execute(
         "SELECT name, monitored FROM lib2_artists WHERE id IN (?,?)", (drake, adele))}
-    assert monitored["Drake"] == 1
-    assert monitored["Adele"] == 0  # profile 2's watchlist must not leak
+    assert monitored == {"Drake": 1, "Adele": 1}
 
     tracks = {r["spotify_id"]: r["monitored"] for r in conn.execute(
         "SELECT spotify_id, monitored FROM lib2_tracks WHERE spotify_id IN ('sp-t1','sp-t2')")}
-    assert tracks["sp-t1"] == 1
-    assert tracks["sp-t2"] == 0  # profile 2's wishlist must not leak
+    assert tracks == {"sp-t1": 1, "sp-t2": 1}
+
+
+def test_an_own_library_profile_never_leaks_into_the_shared_view(imported_conn, monkeypatch):
+    conn = imported_conn
+    _seed_legacy_monitor_tables(conn)
+    drake, adele = _seed_lib2(conn)
+    monkeypatch.setattr("core.library_scope.own_library_ids", lambda: [2])
+
+    apply_monitoring_from_watchlist_wishlist(conn.cursor(), profile_id=1)
+    conn.commit()
+
+    monitored = {r["name"]: r["monitored"] for r in conn.execute(
+        "SELECT name, monitored FROM lib2_artists WHERE id IN (?,?)", (drake, adele))}
+    assert monitored == {"Drake": 1, "Adele": 0}
 
 
 def test_no_profile_defaults_to_admin(imported_conn):
@@ -81,8 +94,7 @@ def test_no_profile_defaults_to_admin(imported_conn):
 
     monitored = {r["name"]: r["monitored"] for r in conn.execute(
         "SELECT name, monitored FROM lib2_artists WHERE id IN (?,?)", (drake, adele))}
-    assert monitored["Drake"] == 1
-    assert monitored["Adele"] == 0
+    assert monitored == {"Drake": 1, "Adele": 1}
 
 
 def test_monitoring_helper_rejects_nonadmin_profile(imported_conn):
@@ -93,7 +105,7 @@ def test_monitoring_helper_rejects_nonadmin_profile(imported_conn):
         apply_monitoring_from_watchlist_wishlist(conn.cursor(), profile_id=2)
 
 
-def test_import_without_profile_uses_admin_only(legacy_db):
+def test_import_without_profile_uses_the_shared_profiles(legacy_db):
     conn = legacy_db._get_connection()
     conn.execute(
         "INSERT INTO artists(id, name, spotify_artist_id) "
@@ -119,7 +131,7 @@ def test_import_without_profile_uses_admin_only(legacy_db):
             "SELECT name, monitored FROM lib2_artists WHERE name IN ('Drake', 'Adele')")
     }
     conn.close()
-    assert monitored == {"Drake": 1, "Adele": 0}
+    assert monitored == {"Drake": 1, "Adele": 1}
 
 
 # ---------------------------------------------------------------------------

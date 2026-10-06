@@ -468,6 +468,85 @@ def fold_duplicate_track_rows(conn: Any) -> Dict[str, int]:
     return stats
 
 
+def _active_server() -> Optional[str]:
+    try:
+        from core.settings import config_manager
+        return config_manager.get_active_media_server()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def fold_shared_file_tracks(conn: Any) -> Dict[str, int]:
+    """One file, one track. Idempotent; does not commit.
+
+    The legacy library kept a row set per media server and only ever showed the
+    active one; ``clear_server_data`` deliberately spared the others. A library
+    that once lived on another server therefore imports the same files twice.
+    The active server's track keeps the file, the other row is merged into it
+    (media mappings move over), and a release left without files folds into
+    the survivor's release like any pristine twin.
+    """
+    from core.library2.mb_reconcile import _fold_duplicate
+
+    active = _active_server() or ""
+    cursor = conn.cursor()
+    stats = {"shared_files_folded": 0, "server_albums_folded": 0}
+    rows = conn.execute(
+        """SELECT f.id AS file_id, f.path, t.id AS track_id, t.album_id,
+                  COALESCE(t.server_source, '') AS server_source
+             FROM lib2_track_files f JOIN lib2_tracks t ON t.id = f.track_id
+            WHERE COALESCE(f.file_state, 'active') <> 'deleted' AND f.path IN (
+                  SELECT path FROM lib2_track_files
+                   WHERE COALESCE(file_state, 'active') <> 'deleted'
+                   GROUP BY path HAVING COUNT(DISTINCT track_id) > 1)"""
+    ).fetchall()
+    groups: Dict[str, List[Any]] = {}
+    for row in rows:
+        groups.setdefault(row["path"], []).append(row)
+    emptied: Dict[int, int] = {}
+    for members in groups.values():
+        members.sort(key=lambda r: (r["server_source"] != active, int(r["track_id"])))
+        keep = members[0]
+        for dup in members[1:]:
+            if dup["track_id"] == keep["track_id"]:
+                continue
+            cursor.execute("DELETE FROM lib2_track_files WHERE id=?", (dup["file_id"],))
+            cursor.execute(
+                "UPDATE OR IGNORE lib2_media_server_mappings SET entity_id=? "
+                "WHERE entity_type='track' AND entity_id=?", (keep["track_id"], dup["track_id"]))
+            if not conn.execute("SELECT 1 FROM lib2_track_files WHERE track_id=?",
+                                (dup["track_id"],)).fetchone():
+                cursor.execute("DELETE FROM lib2_media_server_mappings "
+                               "WHERE entity_type='track' AND entity_id=?", (dup["track_id"],))
+                _delete_placeholder_track(cursor, int(dup["track_id"]))
+            stats["shared_files_folded"] += 1
+            if dup["album_id"] != keep["album_id"]:
+                emptied[int(dup["album_id"])] = int(keep["album_id"])
+    for dup_album, keep_album in emptied.items():
+        artist = conn.execute("SELECT primary_artist_id FROM lib2_albums WHERE id=?",
+                              (keep_album,)).fetchone()
+        albums = {a["id"]: a for a in _album_rows_for_artist(conn, artist[0])} if artist else {}
+        duplicate, survivor = albums.get(dup_album), albums.get(keep_album)
+        if survivor and duplicate and not duplicate["file_rows"]:
+            cursor.execute(
+                "UPDATE OR IGNORE lib2_media_server_mappings SET entity_id=? "
+                "WHERE entity_type='album' AND entity_id=?", (keep_album, dup_album))
+            # A wish hung on the twin moves over; only a same-title leftover dies.
+            from core.library2.recording_links import normalize_title
+            have = {normalize_title(r[0]) for r in conn.execute(
+                "SELECT title FROM lib2_tracks WHERE album_id=?", (keep_album,))}
+            for track_id, title in conn.execute(
+                    "SELECT id, title FROM lib2_tracks WHERE album_id=?", (dup_album,)).fetchall():
+                if normalize_title(title) not in have:
+                    cursor.execute("UPDATE lib2_tracks SET album_id=? WHERE id=?",
+                                   (keep_album, track_id))
+            _fold_duplicate(cursor, survivor, duplicate)
+            stats["server_albums_folded"] += 1
+    if any(stats.values()):
+        logger.info("Shared-file tracks folded: %s", stats)
+    return stats
+
+
 def _delete_placeholder_track(cursor: Any, track_id: int) -> None:
     """Remove a fileless, legacy-unbound duplicate row and what hangs off it.
 
@@ -618,6 +697,8 @@ def repair_duplicate_artists(database: Any) -> Dict[str, Any]:
                 )
             touched_artists.add(int(survivor["id"]))
 
+        # One file, one track first: it is what empties a stale server's twin.
+        stats.update(fold_shared_file_tracks(conn))
         # Merged artists first (their re-homed albums are twins that did not
         # exist a moment ago), then every other artist a twin scan finds — the
         # album pass is not a merge follow-up, it is its own repair.

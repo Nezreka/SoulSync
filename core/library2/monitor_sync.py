@@ -904,6 +904,21 @@ def reconcile_artist_watchlist(
         return stats
 
 
+def shared_intent_profiles(conn, profile_id: int) -> tuple:
+    """Whose Wishlist rows a library's intent covers: the profile itself, and
+    for the shared (admin) library every profile without a library of its own."""
+    from core.library2 import ADMIN_PROFILE_ID
+    if int(profile_id) != ADMIN_PROFILE_ID:
+        return (int(profile_id),)
+    try:
+        from core.library_scope import own_library_ids
+        own = {int(pid) for pid in own_library_ids()}
+        ids = tuple(int(r[0]) for r in conn.execute("SELECT id FROM profiles") if int(r[0]) not in own)
+    except Exception:  # noqa: BLE001 - no profiles table (fresh/test DB)
+        ids = ()
+    return ids or (ADMIN_PROFILE_ID,)
+
+
 def _wishlisted_lib2_track_ids(conn, *, profile_id: int) -> List[int]:
     """lib2 track ids currently represented in the legacy Wishlist.
 
@@ -924,9 +939,10 @@ def _wishlisted_lib2_track_ids(conn, *, profile_id: int) -> List[int]:
         selected = [name for name in wanted_columns if name in columns]
         if "spotify_track_id" not in selected:
             return []
+        profiles = shared_intent_profiles(conn, profile_id)
         rows = conn.execute(
-            f"SELECT {', '.join(selected)} FROM wishlist_tracks WHERE profile_id=?",
-            (int(profile_id),),
+            f"SELECT {', '.join(selected)} FROM wishlist_tracks "
+            f"WHERE profile_id IN ({','.join('?' for _ in profiles)})", profiles,
         ).fetchall()
     except Exception:  # noqa: BLE001 — table absent (fresh install / test DB)
         return []

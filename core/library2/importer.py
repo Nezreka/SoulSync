@@ -1675,10 +1675,11 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         ):
             # Through the alias registry: a merge moved this release onto the
             # surviving artist, and the legacy row still names the folded one.
+            # An album whose artist row is gone keeps its files under the
+            # placeholder Fix Unknown Artists re-files from tags.
             lib2_artist = canonical_artists.resolve(
-                resolver.get_legacy(row["artist_id"]))
-            if lib2_artist is None:
-                continue  # orphan album with no artist; skip
+                resolver.get_legacy(row["artist_id"])
+            ) or resolver.get_or_create_by_name("Unknown Artist")
             # actual track rows for single-detection
             actual = actual_track_counts.get(_legacy_key(row["id"]), 0)
             track_count = _pick(row, "track_count")
@@ -1953,6 +1954,25 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             }
         else:
             dirty_credit_album_ids = set(imported_album_ids)
+        placeholder_albums: Dict[int, int] = {}
+
+        def _placeholder_album(legacy_artist_id: Any) -> int:
+            artist = canonical_artists.resolve(resolver.get_legacy(legacy_artist_id)) \
+                or resolver.get_or_create_by_name("Unknown Artist")
+            if artist not in placeholder_albums:
+                found = cursor.execute(
+                    "SELECT id FROM lib2_albums WHERE primary_artist_id=? AND title='Unknown Album'",
+                    (artist,)).fetchone()
+                if found is None:
+                    found = (cursor.execute(
+                        "INSERT INTO lib2_albums(primary_artist_id, title, album_type, monitored, "
+                        "quality_profile_id) VALUES(?, 'Unknown Album', 'album', 0, ?)",
+                        (artist, default_profile_id)).lastrowid,)
+                    cursor.execute("INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, "
+                                   "role) VALUES(?,?,'primary')", (found[0], artist))
+                placeholder_albums[artist] = int(found[0])
+            return placeholder_albums[artist]
+
         for i, row in enumerate(
             _legacy_rows(conn, "tracks", track_projection,
                          after_rowid=track_from or 0)
@@ -1960,7 +1980,13 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         ):
             album_id = album_map.get(_legacy_key(row["album_id"]))
             if album_id is None:
-                continue
+                # A track whose album row is gone: without a file it is a stale
+                # server entry, with one it is the user's music and must not
+                # silently become an orphan on disk.
+                if not _pick(row, "file_path"):
+                    continue
+                album_id = _placeholder_album(_pick(row, "artist_id"))
+                stats["orphaned_tracks_rescued"] = stats.get("orphaned_tracks_rescued", 0) + 1
             title = row["title"]
             tfields = (
                 album_id, title, _pick(row, "track_number"),
@@ -2630,6 +2656,7 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
     # foreign-namespace wishlist row used to attach to the wrong library row.
     album_by_provider: Dict[Tuple[int, str, str], int] = {}
     album_by_identity: Dict[Tuple[int, str, str], int] = {}
+    album_by_title: Dict[Tuple[int, str], int] = {}
     for album_row in cursor.execute(
         "SELECT id, primary_artist_id, title, album_type, spotify_id, external_ids "
         "FROM lib2_albums"
@@ -2641,6 +2668,7 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
         album_by_identity[
             (artist_id, release_title_key(album_row["title"]), album_row["album_type"])
         ] = album_id
+        album_by_title.setdefault((artist_id, release_title_key(album_row["title"])), album_id)
     track_by_provider: Dict[Tuple[int, str, str], int] = {}
     for track_row in cursor.execute(
         "SELECT id, album_id, spotify_id, external_ids FROM lib2_tracks "
@@ -2671,6 +2699,11 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
         album_provider_id = album.get("id")
         total_tracks = int(album.get("total_tracks") or 1)
         album_type = _album_type_from_payload(album, total_tracks)
+        # A sparse legacy payload (no type, no track count) only GUESSES a single;
+        # it must neither mint a twin of the owned album nor retype it.
+        typed = bool(album.get("album_type") or album.get("type") or album.get("total_tracks"))
+        if not typed:
+            album_type = "album" if album.get("name") else "single"
         release_date = album.get("release_date")
         try:
             year = int(str(release_date)[:4]) if release_date else None
@@ -2712,7 +2745,8 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
         if album_id is None:
             album_id = album_by_identity.get(
                 (artist_id, release_title_key(album_title), album_type)
-            )
+            ) or (None if typed else album_by_title.get(
+                (artist_id, release_title_key(album_title))))
 
         album_spotify, album_external = _provider_id_fields(
             provider, album_provider_id)
@@ -2733,7 +2767,9 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
             cursor.execute(
                 """
                 UPDATE lib2_albums
-                   SET title=?, album_type=?, release_date=?, year=?,
+                   SET title=COALESCE(NULLIF(?, ''), title),
+                       album_type=COALESCE(?, album_type),
+                       release_date=COALESCE(?, release_date), year=COALESCE(?, year),
                        spotify_id=COALESCE(NULLIF(spotify_id, ''), ?),
                        -- new ids as the base, the stored ones patched over the
                        -- top: adopt what is missing, never overwrite what is there
@@ -2744,8 +2780,9 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
                        updated_at=CURRENT_TIMESTAMP
                  WHERE id=?
                 """,
-                (album_title, album_type, release_date, year, album_spotify,
-                 album_external, album_image, total_tracks, total_tracks, album_id),
+                (album_title, album_type if typed else None, release_date, year,
+                 album_spotify, album_external, album_image, total_tracks,
+                 total_tracks, album_id),
             )
         album_by_identity[
             (artist_id, release_title_key(album_title), album_type)
@@ -3058,7 +3095,13 @@ def _profile_filter(cursor, table: str, profile_id: Optional[int]) -> Tuple[str,
         raise ValueError(
             f"Library v2 legacy scope is admin-only: got profile_id={profile_id}, "
             f"expected {ADMIN_PROFILE_ID}")
-    return "profile_id = ?", (effective_profile_id,)
+    # The shared library carries the intent of every profile without a library
+    # of its own; an own library's lists are imported under its own profile.
+    from core.library_scope import own_library_ids
+    own = tuple(sorted(int(pid) for pid in own_library_ids()))
+    if not own:
+        return "", ()
+    return f"profile_id NOT IN ({','.join('?' for _ in own)})", own
 
 
 def _int_or_none(value: Any) -> Optional[int]:

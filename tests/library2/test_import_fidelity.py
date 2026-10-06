@@ -235,3 +235,47 @@ class TestSoulId:
         ).fetchone()
         assert row["soul_id"] == "soul_abc"
         assert row["soul_id_path"] == "canonical"
+
+
+def test_a_track_whose_album_row_is_gone_keeps_its_file(legacy_db):
+    """A dangling legacy album reference used to drop the track silently, which
+    left the user's file an orphan on disk. It lands on the placeholder release
+    Fix Unknown Artists re-files from tags; a fileless one is stale and goes."""
+    from core.library2.importer import import_legacy_library
+
+    conn = legacy_db._get_connection()
+    conn.execute("INSERT INTO tracks VALUES(200,999,1,'Lost',1,1,'/m/lost.flac',1,1,NULL)")
+    conn.execute("INSERT INTO tracks VALUES(201,999,1,'Stale',2,1,NULL,1,1,NULL)")
+    conn.commit()
+    conn.close()
+
+    stats = import_legacy_library(legacy_db)
+
+    conn = legacy_db._get_connection()
+    rows = conn.execute(
+        "SELECT al.title, t.title FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id "
+        "WHERE t.title IN ('Lost','Stale')").fetchall()
+    conn.close()
+    assert stats["orphaned_tracks_rescued"] == 1
+    assert [tuple(r) for r in rows] == [("Unknown Album", "Lost")]
+
+
+def test_a_sparse_wish_joins_the_owned_album_instead_of_minting_a_single(legacy_db):
+    from core.library2.importer import import_legacy_library
+
+    conn = legacy_db._get_connection()
+    conn.execute("CREATE TABLE wishlist_tracks(id INTEGER PRIMARY KEY, spotify_track_id TEXT, "
+                 "spotify_data TEXT, source_type TEXT, date_added TEXT, profile_id INTEGER DEFAULT 1)")
+    conn.execute("INSERT INTO wishlist_tracks(spotify_track_id, spotify_data) VALUES('w', ?)",
+                 (json.dumps({"id": "w", "name": "Feel No Ways", "artists": [{"name": "Drake"}],
+                              "album": {"name": "Views"}}),))
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db)
+
+    conn = legacy_db._get_connection()
+    albums = conn.execute("SELECT title, album_type, year FROM lib2_albums WHERE title='Views'"
+                          ).fetchall()
+    conn.close()
+    assert [tuple(r) for r in albums] == [("Views", "album", 2016)]

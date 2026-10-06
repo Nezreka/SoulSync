@@ -721,6 +721,9 @@ def run_deferred_backfills(database: Any, *,
                 on_batch=checkpointer.batch_committed,
                 should_stop=should_stop,
             )
+            # Installs migrated before one-file-one-track also converge here.
+            from core.library2.dedup_repair import fold_shared_file_tracks
+            stats["shared_files"] = fold_shared_file_tracks(conn)
             conn.commit()
     finally:
         ticker.stop()

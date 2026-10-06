@@ -375,3 +375,34 @@ def test_sanitize_parks_unresolvable_numeric_id(repair_db):
     assert row["spotify_id"] is None
     # Value survives for value-based matching, but under no provider's name.
     assert json.loads(row["external_ids"])["legacy_unknown"] == "777000111"
+
+
+def test_a_file_imported_under_two_servers_keeps_one_track(repair_db, monkeypatch):
+    """The legacy library kept a row set per media server; a library that once
+    lived on another server imports every file twice. The active server's track
+    keeps the file, the stale twin release folds into it and a wish that hung on
+    the twin moves over instead of dying with it."""
+    legacy_db, conn = repair_db
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    artist = _artist(conn, "Two Servers")
+    live = _album(conn, artist, "Same Album")
+    stale = _album(conn, artist, "Same Album")
+    for album, server in ((live, "plex"), (stale, "jellyfin")):
+        track = conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, track_number, server_source) "
+            "VALUES(?, 'Song', 1, ?)", (album, server)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, '/m/song.flac')",
+                     (track,))
+    conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?, 'Wish', 2)",
+                 (stale,))
+    conn.commit()
+
+    stats = repair_duplicate_artists(legacy_db)
+
+    assert (stats["shared_files_folded"], stats["server_albums_folded"]) == (1, 1)
+    assert conn.execute("SELECT COUNT(*) FROM lib2_albums WHERE id IN (?,?)",
+                        (live, stale)).fetchone()[0] == 1
+    assert sorted(r[0] for r in conn.execute(
+        "SELECT title FROM lib2_tracks WHERE album_id=?", (live,))) == ["Song", "Wish"]
+    assert conn.execute("SELECT COUNT(*) FROM lib2_track_files WHERE path='/m/song.flac'"
+                        ).fetchone()[0] == 1
