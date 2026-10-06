@@ -59,13 +59,38 @@ def read_inventory(client, page_size=500):
     raise IdentityError('Navidrome inventory exceeded its safety limit')
 
 
+def _tail(path):
+    """artist/album/file, the part of a path every mount agrees on. soulsync
+    writes rows in its own view (/Media/Music/...) while navidrome reports
+    its own (/music/...), so a raw compare never matched those rows (#1571)."""
+    parts = [p for p in path.split('/') if p]
+    return '/'.join(parts[-3:]).casefold() if len(parts) >= 3 else ''
+
+
 def _by_path(songs):
     paths = defaultdict(list)
     for sid, song in songs.items():
         path = _path(song.get('path'))
         if path:
             paths[path].append(sid)
+            tail = _tail(path)
+            if tail:
+                paths[('tail', tail)].append(sid)
     return paths
+
+
+def _live_candidates(paths, stored_path):
+    """Live song ids at a stored path: the exact path first, then the same
+    artist/album/file under another mount. Callers still require exactly one
+    and the same recording, so a tail shared by two songs resolves nothing."""
+    path = _path(stored_path)
+    if not path:
+        return []
+    exact = paths.get(path)
+    if exact:
+        return exact
+    tail = _tail(path)
+    return paths.get(('tail', tail), []) if tail else []
 
 
 def _same_recording(old, song):
@@ -90,8 +115,7 @@ def resolve_tracks(tracks, songs, db):
             with db._get_connection() as conn:
                 row = conn.execute("SELECT file_path,title,duration FROM tracks WHERE id=? AND server_source='navidrome'", (sid,)).fetchone()
             old = dict(row) if row else {}
-            path = _path(old.get('file_path'))
-            candidates = paths.get(path, [])
+            candidates = _live_candidates(paths, old.get('file_path'))
             if len(candidates) != 1 or not _same_recording(old, songs[candidates[0]]):
                 raise IdentityError(f'Cannot safely resolve Navidrome song {sid}; playlist left unchanged. Run a library scan.')
             sid = candidates[0]
@@ -123,7 +147,7 @@ def repair_rekeyed_tracks(db, songs):
         for old_id, old in by_id.items():
             if old_id in songs:
                 continue
-            candidates = paths.get(_path(old['file_path']), [])
+            candidates = _live_candidates(paths, old['file_path'])
             if len(candidates) != 1 or candidates[0] not in by_id:
                 continue
             new_id = candidates[0]
