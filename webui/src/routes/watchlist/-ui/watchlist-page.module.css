@@ -327,9 +327,9 @@
   font-weight: 600;
   padding: 2px 7px;
   border-radius: 6px;
-  background: rgba(29, 185, 84, 0.15);
+  background: rgba(var(--success-rgb), 0.15);
   color: #26d462;
-  border: 1px solid rgba(29, 185, 84, 0.3);
+  border: 1px solid rgba(var(--success-rgb), 0.3);
 }
 
 .podcastBadgeMuted {

@@ -38329,7 +38329,7 @@ div.artist-hero-badge {
     font-size: 11px; font-weight: 700;
     box-shadow: 0 2px 6px rgba(0,0,0,0.45);
 }
-.discover-album-badge.owned { background: #1DB954; color: #000; }
+.discover-album-badge.owned { background: var(--success); color: #000; }
 .discover-album-badge.missing {
     background: rgba(0,0,0,0.55); color: rgba(255,255,255,0.85);
     border: 1px solid rgba(255,255,255,0.2);
@@ -40291,7 +40291,7 @@ div.artist-hero-badge {
 }
 
 .spotify-library-card-badge.owned {
-    background: rgba(29, 185, 84, 0.85);
+    background: rgba(var(--success-rgb), 0.85);
     color: #fff;
 }
 
@@ -42798,7 +42798,7 @@ div.artist-hero-badge {
 }
 
 .enh-video-done {
-    background: rgba(29, 185, 84, 0.85);
+    background: rgba(var(--success-rgb), 0.85);
     color: #fff;
 }
 
@@ -56460,7 +56460,7 @@ tr.tag-diff-same {
 .tag-preview-no-changes {
     text-align: center;
     padding: 16px;
-    color: rgba(29, 185, 84, 0.6);
+    color: rgba(var(--success-rgb), 0.6);
     font-size: 13px;
     border-top: 1px solid rgba(255, 255, 255, 0.04);
     margin-top: 8px;
@@ -66374,9 +66374,9 @@ tr.tag-diff-same {
     border-radius: 4px;
     white-space: nowrap;
     flex-shrink: 0;
-    color: rgb(29, 185, 84);
-    background: rgba(29, 185, 84, 0.12);
-    border: 1px solid rgba(29, 185, 84, 0.28);
+    color: var(--success);
+    background: rgba(var(--success-rgb), 0.12);
+    border: 1px solid rgba(var(--success-rgb), 0.28);
 }
 
 /* Confidence badge on matched tracks */
@@ -78281,7 +78281,7 @@ body.max-performance .dash-card::after {
 .em-rail-cov { display: block; height: 3px; border-radius: 999px; background: rgba(255,255,255,0.1); overflow: hidden; margin-top: 2px; }
 .em-rail-cov-fill { display: block; height: 100%; border-radius: 999px; background: color-mix(in srgb, var(--accent) 70%, transparent); background: rgb(var(--accent-rgb)); transition: width 0.5s cubic-bezier(0.4,0,0.2,1); }
 .em-dot { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; background: #555; }
-.em-dot--running { background: #1db954; box-shadow: 0 0 8px #1db954; }
+.em-dot--running { background: var(--success); box-shadow: 0 0 8px var(--success); }
 .em-dot--idle { background: #4a90d9; }
 .em-dot--paused { background: #e0a93b; }
 .em-dot--ratelimited { background: #e05b5b; box-shadow: 0 0 8px #e05b5b; }
@@ -78309,7 +78309,7 @@ body.max-performance .dash-card::after {
     padding: 4px 11px; border-radius: 999px; font-size: 11px; font-weight: 700;
     text-transform: uppercase; letter-spacing: 0.4px;
 }
-.em-pill--running { background: rgba(29,185,84,0.18); color: #4ade80; }
+.em-pill--running { background: rgba(var(--success-rgb), 0.18); color: var(--success); }
 .em-pill--idle { background: rgba(74,144,217,0.18); color: #7fb5ec; }
 .em-pill--paused { background: rgba(224,169,59,0.18); color: #f0c060; }
 .em-pill--ratelimited { background: rgba(224,91,91,0.2); color: #ff8b8b; }
