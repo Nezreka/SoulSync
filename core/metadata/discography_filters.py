@@ -61,6 +61,10 @@ from core.watchlist_scanner import (
     is_remix_version,
     matches_custom_exclude_terms,
 )
+from core.library.existing_album_folder import _release_kinds_compatible
+from utils.logging_config import get_logger
+
+logger = get_logger("metadata.discography_filters")
 
 
 def track_artist_matches(track_artists: Any, requested_artist_name: str) -> bool:
@@ -459,6 +463,35 @@ def track_already_owned(
     return bool(match) and confidence >= confidence_threshold
 
 
+def _stored_release_kind_for_gate(db: Any, album_id: Any) -> str:
+    """The library row's known release kind, '' when unknown.
+
+    Mirrors completion._stored_release_kind: ``record_type`` first (the
+    populated column), legacy ``album_type`` as fallback — queried
+    separately so a missing column can't hide the other.
+    """
+    for col in ("record_type", "album_type"):
+        try:
+            conn = db._get_connection()
+            try:
+                row = conn.execute(
+                    f"SELECT {col} FROM albums WHERE id = ?", (str(album_id),)
+                ).fetchone()
+            finally:
+                try:
+                    conn.close()
+                except Exception:  # noqa: S110 - cleanup only
+                    pass
+        except Exception:
+            continue
+        # Strip before the truthiness check: a whitespace-only value is
+        # unknown and must fall through to the next column, not return "".
+        val = str(row[0]).strip() if row and row[0] else ""
+        if val:
+            return val.lower()
+    return ""
+
+
 def owned_release_tracks(
     db: Any,
     album_name: str,
@@ -470,6 +503,7 @@ def owned_release_tracks(
     candidate_tracks: Optional[List[Any]] = None,
     metadata_source: Optional[str] = None,
     card_source_id: Optional[str] = None,
+    card_album_type: Optional[str] = None,
 ) -> Optional[List[Any]]:
     """the library's tracks for THIS release, found the way the artist page
     finds it (check_album_exists_with_completeness, strict, year-gated).
@@ -487,6 +521,12 @@ def owned_release_tracks(
     artist page — the downloader's ownership check never disagrees with
     what the page shows.
 
+    `card_album_type` carries the card's release kind ('single', 'ep',
+    'album', ...). For single cards the same release-kind gate + track-count
+    guard as the artist page apply: a known album-kind row (or a 4+ track
+    row) is never this single's release — without it the page says missing
+    while the downloader skips the single's tracks as owned.
+
     [] when the release isn't in the library. None when the lookup failed:
     the caller falls back to the artist-wide check, since a redundant skip is
     cheaper than re-downloading a whole discography.
@@ -494,6 +534,9 @@ def owned_release_tracks(
     year = None
     if release_date and str(release_date)[:4].isdigit():
         year = int(str(release_date)[:4])
+    # Normalized once: the kind gate, the count guard and the single-kind
+    # title stripping all key off the same value.
+    _card_kind = (card_album_type or '').strip().lower()
     try:
         db_album, _confidence, *_rest = db.check_album_exists_with_completeness(
             title=album_name,
@@ -506,11 +549,43 @@ def owned_release_tracks(
             expected_year=year,
             metadata_source=metadata_source,
             card_source_id=card_source_id,
+            strip_single_kind=(_card_kind == 'single'),
         )
     except Exception:
         return None
     if db_album is None:
         return []
+    if _card_kind == 'single':
+        _kind = _stored_release_kind_for_gate(db, getattr(db_album, 'id', None))
+        _gate_killed = False
+        if not _release_kinds_compatible('single', _kind):
+            _gate_killed = True
+        else:
+            # Count guard scaled to the card's own size, like the artist page:
+            # a single-shaped card (<=3 tracks) is never a 4+ track row; a
+            # larger card is never a row larger than itself. Unknown card
+            # sizes stay lenient, exactly like the page.
+            _row_tc = getattr(db_album, 'track_count', None) or 0
+            if (expected_tracks or 0) > 0 and _row_tc > max(expected_tracks or 0, 3):
+                _gate_killed = True
+        if _gate_killed:
+            # The gate killed the fuzzy match — but the #1071 id proof is
+            # the stronger signal, same second chance as the artist page.
+            # (Lazy import: completion imports this module lazily.)
+            from core.metadata.completion import _library_album_by_source_id
+            _rescued = _library_album_by_source_id(
+                db, metadata_source, card_source_id, candidate_albums)
+            if _rescued is not None:
+                logger.debug(
+                    "owned_release_tracks: gate rejected '%s' but the card's %s id "
+                    "proves the release — using the rescued row",
+                    album_name, metadata_source)
+                db_album = _rescued
+            else:
+                logger.debug(
+                    "owned_release_tracks: single '%s' matched only a known %s row — "
+                    "not in library", album_name, _kind or 'unknown')
+                return []
     album_id = getattr(db_album, 'id', None)
     if candidate_tracks is not None:
         return [t for t in candidate_tracks if getattr(t, 'album_id', None) == album_id]

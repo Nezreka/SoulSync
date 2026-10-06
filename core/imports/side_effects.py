@@ -94,6 +94,7 @@ _SOULSYNC_FILLABLE_COLUMNS = {
                           "itunes_artist_id", "deezer_id", "discogs_id", "soul_id",
                           "hifi_artist_id"}),
     "albums": frozenset({"thumb_url", "genres", "year", "track_count", "duration",
+                         "record_type",
                          "spotify_album_id", "itunes_album_id", "deezer_id",
                          "discogs_id", "soul_id", "hifi_album_id"}),
 }
@@ -520,6 +521,23 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         if not album_name:
             album_name = track_info.get("name", "Unknown")
 
+        # #1562: the release kind the download pipeline already carries
+        # (post_processing stamps album_info['record_type']). Before this,
+        # the import wrote no kind at all — record_type was only backfilled
+        # by the enrichment sweep, so freshly imported releases were
+        # kind-blind (and the single/album gates lenient-always) until the
+        # workers ran. album_type is the fallback; '' stays unknown.
+        _import_record_type = ""
+        if isinstance(album_info, dict):
+            _import_record_type = (
+                album_info.get("record_type") or album_info.get("album_type") or ""
+            )
+        if not _import_record_type:
+            _import_record_type = (
+                album_ctx.get("record_type") or album_ctx.get("album_type") or ""
+            )
+        _import_record_type = str(_import_record_type).strip().lower()
+
         track_name = get_import_clean_title(
             context,
             album_info=album_info,
@@ -719,6 +737,9 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                         "year": year,
                         "track_count": total_tracks,
                         "duration": album_total_duration_ms,
+                        # Fill-only: never overwrites a kind the enrichment
+                        # workers already wrote.
+                        "record_type": _import_record_type,
                     },
                 )
                 if album_source_col and album_source_id:
@@ -747,6 +768,12 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                     _al_cols.append("owner_profile_id")
                     _al_vals.append("?")
                     _al_params.append(owner_pid)
+                # #1562: stamp the kind at import time (same PRAGMA guard as
+                # owner_profile_id — minimal test schemas may lack it).
+                if "record_type" in _album_cols:
+                    _al_cols.append("record_type")
+                    _al_vals.append("?")
+                    _al_params.append(_import_record_type or None)
                 _al_cols += ["created_at", "updated_at"]
                 _al_vals += ["CURRENT_TIMESTAMP", "CURRENT_TIMESTAMP"]
                 cursor.execute(

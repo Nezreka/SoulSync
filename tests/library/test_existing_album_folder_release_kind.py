@@ -64,7 +64,7 @@ def test_single_does_not_reuse_album_folder(tmp_path):
     folder, tracks = _existing_album_folder(tmp_path)
     db = _Db(tracks, album_type="album")
     assert _resolve(tmp_path, db, incoming_album_type="single") is None
-    assert os.path.normpath(folder)  # sanity: the folder exists
+    assert os.path.isdir(folder)  # sanity: the album folder really exists
 
 
 def test_album_does_not_reuse_single_folder(tmp_path):
@@ -111,3 +111,64 @@ def test_compile_normalizes_to_compilation(tmp_path):
     assert _resolve(tmp_path, db, incoming_album_type="compilation") == os.path.normpath(folder)
     # incoming single vs stored compilation -> different -> refuse
     assert _resolve(tmp_path, db, incoming_album_type="single") is None
+
+
+class _ProductionDb(_Db):
+    """Mirrors a real production DB: the albums table carries record_type
+    (populated by the enrichment workers) and has NO album_type column at
+    all. The kind gate must read the live column."""
+
+    def _get_connection(self):
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE albums (id TEXT, musicbrainz_release_id TEXT, record_type TEXT)")
+        conn.execute("INSERT INTO albums VALUES ('1', NULL, 'album')")
+        return conn
+
+
+def test_kind_gate_reads_record_type_in_production(tmp_path):
+    # The album_type column is never written by current code; without the
+    # record_type fallback the gate below would be lenient and reuse the
+    # album folder for the single.
+    _folder, tracks = _existing_album_folder(tmp_path)
+    db = _ProductionDb(tracks)
+    assert _resolve(tmp_path, db, incoming_album_type="single") is None
+
+
+class _BothColumnsDb(_Db):
+    """An older enriched DB carrying BOTH columns: a NULL/blank record_type
+    must fall through to album_type; a populated record_type wins."""
+
+    def __init__(self, tracks, record_type, album_type):
+        super().__init__(tracks, album_type)
+        self._record_type = record_type
+
+    def _get_connection(self):
+        conn = sqlite3.connect(":memory:")
+        conn.execute(
+            "CREATE TABLE albums (id TEXT, musicbrainz_release_id TEXT, "
+            "record_type TEXT, album_type TEXT)")
+        conn.execute(
+            "INSERT INTO albums VALUES ('1', NULL, ?, ?)",
+            (self._record_type, self._album_type))
+        return conn
+
+
+def test_blank_record_type_falls_through_to_album_type(tmp_path):
+    folder, tracks = _existing_album_folder(tmp_path)
+    # record_type NULL/empty/whitespace -> the legacy album_type decides.
+    for blank in (None, "", "   "):
+        db = _BothColumnsDb(tracks, record_type=blank, album_type="album")
+        assert _resolve(tmp_path, db, incoming_album_type="single") is None
+    # A populated record_type wins over a conflicting album_type.
+    db = _BothColumnsDb(tracks, record_type="single", album_type="album")
+    assert _resolve(tmp_path, db, incoming_album_type="single") == os.path.normpath(folder)
+
+
+def test_single_and_ep_share_a_folder(tmp_path):
+    # spotify calls eps 'single', deezer/itunes call them 'ep'. same release,
+    # so it must not split into a second folder.
+    folder, tracks = _existing_album_folder(tmp_path)
+    db = _Db(tracks, album_type="ep")
+    assert _resolve(tmp_path, db, incoming_album_type="single") == os.path.normpath(folder)
+    db_single = _Db(tracks, album_type="single")
+    assert _resolve(tmp_path, db_single, incoming_album_type="ep") == os.path.normpath(folder)
