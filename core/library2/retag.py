@@ -340,6 +340,19 @@ def tag_preview(contexts: List[Dict[str, Any]], *, on_observation=None) -> List[
                 row["db_data"].get("_manual_fields") or {},
             )
             changed = [d for d in diff if d.get("changed")]
+            # The write reaches every sibling file (dd28-38), so the preview
+            # must show what it would change there too, labelled by file.
+            for sibling in row.get("sibling_files") or []:
+                sibling_path = resolve_lib2_path(sibling["path"])
+                sibling_tags = read_file_tags(sibling_path) if sibling_path else {}
+                if sibling_tags.get("error") or not sibling_tags:
+                    continue
+                name = os.path.basename(sibling_path)
+                changed += [
+                    {**d, "field": f"{d['field']} ({name})", "file_id": sibling["id"]}
+                    for d in _annotate_manual(build_tag_diff(sibling_tags, row["db_data"]),
+                                              row["db_data"].get("_manual_fields") or {})
+                    if d.get("changed")]
             entry.update(
                 diff=changed,
                 has_changes=bool(changed),

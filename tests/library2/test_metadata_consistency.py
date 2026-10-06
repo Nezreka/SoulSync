@@ -335,3 +335,25 @@ def test_revalidation_keeps_retag_finding_details(library):
         details = json.loads(conn.execute('SELECT details_json FROM repair_findings').fetchone()[0])
     assert details['has_manual_conflict'] and details['manual_fields'] == ['Title'] and details['library_owner_id'] == 1
     assert details['diff'] == [{'file_key': 'title'}] and 'track_number' in details['required_fields']
+
+
+def test_tag_preview_shows_what_the_write_changes_in_a_sibling_file(library):
+    """L5: Write Tags reaches every file of the track; a wrong title in the
+    second copy was overwritten without ever appearing in the preview."""
+    from core.library2.retag import tag_preview, track_contexts
+    db, path, _ = library
+    sibling = path.with_name('07 - Track 7 (copy).flac')
+    sibling.write_bytes(path.read_bytes())
+    audio = FLAC(sibling)
+    audio['title'] = ['Wrong Title']
+    audio.save()
+    with closing(db._get_connection()) as conn, conn:
+        conn.execute("INSERT INTO lib2_track_files(id,track_id,path,format,is_primary) "
+                     "VALUES(2,7,?,'flac',0)", (str(sibling),))
+        preview = tag_preview(track_contexts(conn, [7]))
+
+    rows = preview[0]['diff']
+    # whichever copy the trigger made primary, the wrong title is on screen and
+    # the other file's rows say which file they are about
+    assert any(row.get('file_value') == 'Wrong Title' for row in rows)
+    assert any(row['field'].endswith('.flac)') and row.get('file_id') for row in rows)
