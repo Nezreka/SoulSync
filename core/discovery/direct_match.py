@@ -14,6 +14,7 @@ normal search runs, so this can never do worse than before.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from utils.logging_config import get_logger
@@ -23,6 +24,7 @@ logger = get_logger("discovery.direct_match")
 # mirror sources whose source_track_id is that service's own track id
 _DEEZER_SOURCES = frozenset({"deezer"})
 _SPOTIFY_SOURCES = frozenset({"spotify", "spotify_public"})
+_SPOTIFY_ID_RE = re.compile(r"[A-Za-z0-9]{22}")
 
 
 def direct_source_match(
@@ -68,7 +70,8 @@ def _deezer_track(client: Any, track_id: str) -> Optional[Any]:
 def _spotify_track(client: Any, track_id: str) -> Optional[Any]:
     from core.spotify_client import Track as SpotifyTrack
 
-    if client is None:
+    # a spotify id is 22 base62 chars; a placeholder like "mirrored_12" isn't
+    if client is None or not _SPOTIFY_ID_RE.fullmatch(track_id):
         return None
     # allow_fallback=False: a spotify id must never be looked up in another
     # catalogue, where it could collide with a different track

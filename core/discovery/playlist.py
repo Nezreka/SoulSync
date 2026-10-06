@@ -191,10 +191,23 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                 artist_name = track.get('artist_name', '')
                 duration_ms = track.get('duration_ms', 0)
 
+                # same service on both ends (#1566): the mirror already has this
+                # track's own id, so fetch it. it runs before the cache because a
+                # cached name match may be a stale wrong version, and the id is
+                # the track. a failed lookup leaves it empty and the old path runs.
+                from core.discovery.direct_match import direct_source_match
+                direct_track = direct_source_match(
+                    source, discovery_source, use_spotify, track.get('source_track_id'),
+                    spotify_client=deps.spotify_client, fallback_client=itunes_client_instance)
+                if direct_track:
+                    logger.info(f"DIRECT [{i+1}/{len(undiscovered_tracks)}]: {track_name} → "
+                                f"{getattr(direct_track, 'name', '?')} (by {source} id)")
+
                 # Step 1: Check discovery cache
                 cache_key = deps.get_discovery_cache_key(track_name, artist_name)
                 try:
-                    cached_match = db.get_discovery_cache_match(cache_key[0], cache_key[1], discovery_source)
+                    cached_match = None if direct_track else db.get_discovery_cache_match(
+                        cache_key[0], cache_key[1], discovery_source)
                     if cached_match and deps.validate_discovery_cache_artist(artist_name, cached_match):
                         extra_data = {
                             'discovered': True,
@@ -246,17 +259,8 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                     logger.debug("canonical search-query add failed: %s", _cq_err)
 
                 # Step 3: Search and score
-                # same service on both ends (#1566): the mirror already has
-                # this track's own id, so fetch it instead of searching. a
-                # failed lookup leaves best_match empty and the search runs.
-                from core.discovery.direct_match import direct_source_match
-                best_match = direct_source_match(
-                    source, discovery_source, use_spotify, track.get('source_track_id'),
-                    spotify_client=deps.spotify_client, fallback_client=itunes_client_instance)
-                best_confidence = 1.0 if best_match else 0.0
-                if best_match:
-                    logger.info(f"DIRECT [{i+1}/{len(undiscovered_tracks)}]: {track_name} → "
-                                f"{getattr(best_match, 'name', '?')} (by {source} id)")
+                best_match = direct_track
+                best_confidence = 1.0 if direct_track else 0.0
                 min_confidence = 0.7
 
                 # deezer's free text can leave the original out entirely

@@ -157,3 +157,76 @@ def test_a_failed_lookup_still_searches():
     dp.run_playlist_discovery_worker([_playlist('p1', source='deezer')], deps=deps)
 
     assert deezer.search_calls   # the old path ran
+
+
+def test_spotify_placeholder_ids_never_cost_a_lookup():
+    client = _Spotify()
+    assert direct_source_match('spotify', 'spotify', True, 'mirrored_12', spotify_client=client) is None
+    assert client.lookups == []
+
+
+# ── the id beats a cached name match (it may be a stale wrong version) ───────
+
+STALE = {'id': '136340812', 'name': "How Far I'll Go (Reprise)",
+         'artists': ["Auli'i Cravalho"], 'album': {'name': 'Moana'}}
+
+
+def test_automation_identification_prefers_the_id_over_the_cache():
+    deezer = _Deezer()
+    track = dict(_track(track_id=7, name="How Far I'll Go", artist="Auli'i Cravalho"),
+                 source_track_id='136340808')
+    deps = _build_deps(tracks_by_playlist={'p1': [track]}, spotify_auth=False,
+                       discovery_source='deezer', fallback_source='deezer', cache_match=STALE)
+    deps.get_metadata_fallback_client = lambda: deezer
+
+    dp.run_playlist_discovery_worker([_playlist('p1', source='deezer')], deps=deps)
+
+    assert _written(deps)['matched_data']['id'] == '136340808'
+    # and the cache entry is refreshed with the right track
+    assert deps._db.cache_saves and deps._db.cache_saves[0][3] == 1.0
+
+
+# ── the manual Identify button runs the youtube-style worker ─────────────────
+
+def _identify_state(states, source, track_id):
+    from tests.discovery.test_discovery_youtube import _seed_state
+    track = {'name': "How Far I'll Go", 'artists': ["Auli'i Cravalho"], 'duration_ms': 163000,
+             'id': track_id, 'db_track_id': 7}
+    _seed_state('mirrored_5', states, tracks=[track])
+    states['mirrored_5']['playlist']['source'] = source
+
+
+def test_identify_button_matches_a_deezer_mirror_by_id():
+    from core.discovery import youtube as dy
+    from tests.discovery.test_discovery_youtube import _build_deps as yt_deps
+
+    states = {}
+    _identify_state(states, 'deezer', '136340808')
+    deezer = _Deezer()
+    deps = yt_deps(states=states, spotify_auth=False, discovery_source='deezer', cache_match=STALE)
+    deps.get_metadata_fallback_client = lambda: deezer
+
+    dy.run_youtube_discovery_worker('mirrored_5', deps)
+
+    result = states['mirrored_5']['discovery_results'][0]
+    assert result['status'] == 'Found'
+    assert result['matched_data']['id'] == '136340808'
+    assert deezer.search_calls == []
+
+
+def test_identify_button_ignores_ids_outside_a_mirror():
+    # a real youtube playlist's track id is a video id, never a deezer one
+    from core.discovery import youtube as dy
+    from tests.discovery.test_discovery_youtube import _build_deps as yt_deps, _seed_state
+
+    states = {}
+    _seed_state('yt_1', states, tracks=[{'name': 'Song', 'artists': ['A'], 'duration_ms': 0,
+                                         'id': '136340808'}])
+    states['yt_1']['playlist']['source'] = 'deezer'
+    deezer = _Deezer()
+    deps = yt_deps(states=states, spotify_auth=False, discovery_source='deezer')
+    deps.get_metadata_fallback_client = lambda: deezer
+
+    dy.run_youtube_discovery_worker('yt_1', deps)
+
+    assert deezer.lookups == []
