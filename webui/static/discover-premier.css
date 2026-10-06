@@ -6,18 +6,7 @@
 
 /* ── 1. Discover Canvas & Dynamic Ambient Environment ────────────────────── */
 .discover-container {
-    --dsc-bg-deep: #0a0d14;
-    --dsc-bg-card: rgba(22, 27, 38, 0.62);
-    --dsc-bg-card-hover: rgba(28, 34, 48, 0.85);
-    --dsc-border-glass: 1px solid rgba(255, 255, 255, 0.08);
-    --dsc-border-hover: 1px solid rgba(255, 255, 255, 0.16);
-    --dsc-text-primary: #ffffff;
-    --dsc-text-secondary: rgba(255, 255, 255, 0.7);
     --dsc-text-muted: rgba(255, 255, 255, 0.45);
-    --dsc-accent-spotify: var(--accent);
-    --dsc-accent-deezer: #a238ff;
-    --dsc-shadow-card: 0 12px 32px rgba(0, 0, 0, 0.45);
-    --dsc-shadow-glow: 0 16px 40px rgba(var(--accent-rgb), 0.22);
     
     position: relative;
     width: 100%;
