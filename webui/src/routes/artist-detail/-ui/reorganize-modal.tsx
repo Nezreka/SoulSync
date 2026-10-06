@@ -416,7 +416,7 @@ export function ReorganizeAllModal({
               maxHeight: 200,
               overflowY: 'auto',
               marginTop: 6,
-              border: '1px solid rgba(255,255,255,0.08)',
+              border: '1px solid var(--white-a08)',
               borderRadius: 8,
               padding: '6px 10px',
             }}
@@ -426,13 +426,13 @@ export function ReorganizeAllModal({
                 style={{
                   padding: '4px 0',
                   fontSize: '0.88em',
-                  color: 'rgba(255,255,255,0.7)',
-                  borderBottom: i < albums.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+                  color: 'var(--white-a70)',
+                  borderBottom: i < albums.length - 1 ? '1px solid var(--white-a04)' : 'none',
                 }}
                 key={String(a.id)}
               >
                 {String(a.title || '')}{' '}
-                <span style={{ color: 'rgba(255,255,255,0.3)' }}>
+                <span style={{ color: 'var(--white-a30)' }}>
                   ({a.tracks ? a.tracks.length : '?'} tracks)
                 </span>
               </div>

@@ -192,13 +192,17 @@ export function WatchlistLinkedProviders({ profileId, artistId, payload }: Props
           </div>
           <div className="wl-linked-search-results">
             {searchState === 'searching' ? (
-              <div style={{ padding: 12, color: '#888', textAlign: 'center' }}>Searching...</div>
+              <div style={{ padding: 12, color: 'var(--text-3)', textAlign: 'center' }}>
+                Searching...
+              </div>
             ) : null}
             {searchState === 'error' ? (
-              <div style={{ padding: 12, color: '#f44', textAlign: 'center' }}>Search error</div>
+              <div style={{ padding: 12, color: 'var(--danger)', textAlign: 'center' }}>
+                Search error
+              </div>
             ) : null}
             {searchState === 'idle' && results?.length === 0 ? (
-              <div style={{ padding: 12, color: '#888', textAlign: 'center' }}>
+              <div style={{ padding: 12, color: 'var(--text-3)', textAlign: 'center' }}>
                 No artists found
               </div>
             ) : null}

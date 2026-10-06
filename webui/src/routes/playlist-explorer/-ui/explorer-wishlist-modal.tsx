@@ -263,9 +263,9 @@ export function ExplorerWishlistModal({
                       {state.status === 'waiting' ? (
                         <div className="discog-spinner" />
                       ) : state.status === 'done' ? (
-                        <span style={{ color: '#4CAF50' }}>✓</span>
+                        <span style={{ color: 'var(--success)' }}>✓</span>
                       ) : (
-                        <span style={{ color: '#ff4757' }}>✗</span>
+                        <span style={{ color: 'var(--danger)' }}>✗</span>
                       )}
                     </div>
                   </div>

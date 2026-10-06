@@ -324,7 +324,7 @@ export function ArtWebPathCard({ rows, onDone, onCameraTo }: ArtWebPathCardProps
               className="artweb-path-dot"
               style={{
                 background: row.color,
-                boxShadow: `0 0 0 ${row.tag ? '2px rgba(255,255,255,0.5)' : '0'}`,
+                boxShadow: `0 0 0 ${row.tag ? '2px var(--white-a50)' : '0'}`,
               }}
             />
             <span className="artweb-path-name" style={{ fontWeight: row.tag ? 800 : 600 }}>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 
 import type { BasicAlbum, BasicResult, BasicTrack, DownloadTarget } from '../-basic.types';
 
@@ -297,9 +297,7 @@ function Art({ seed, album = false }: { seed: string; album?: boolean }) {
     <div
       className={`${styles.art}${album ? ` ${styles.artAlbum}` : ''}`}
       aria-hidden="true"
-      style={{
-        background: `radial-gradient(120% 90% at 20% 15%, ${light}, transparent 60%), linear-gradient(145deg, ${dark}, #111218)`,
-      }}
+      style={{ '--art-light': light, '--art-dark': dark } as CSSProperties}
     />
   );
 }

@@ -274,7 +274,7 @@ export function BuildPlaylistSection({
                 />
                 <p
                   id="build-playlist-results-subtitle"
-                  style={{ margin: '4px 0 0 0', color: '#999', fontSize: 13 }}
+                  style={{ margin: '4px 0 0 0', color: 'var(--white-a60)', fontSize: 13 }}
                 >
                   {resultSubtitle ?? bpResultSubtitle(selected)}
                 </p>

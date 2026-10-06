@@ -129,14 +129,14 @@ function JobHelpOverlay({ job, onClose }: { job: RepairJob; onClose: () => void 
           {job.enabled ? (
             <span
               className="repair-flow-badge"
-              style={{ background: 'rgba(74,222,128,0.12)', color: '#4ade80' }}
+              style={{ background: 'rgba(var(--success-rgb), 0.12)', color: 'var(--success)' }}
             >
               Enabled
             </span>
           ) : (
             <span
               className="repair-flow-badge"
-              style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.4)' }}
+              style={{ background: 'var(--white-a06)', color: 'var(--white-a40)' }}
             >
               Disabled
             </span>
