@@ -238,12 +238,14 @@ class _WorkerConfig:
         return default
 
 
-def _worker(database, config):
+def _worker(database, config, transfer_folder):
     from core.repair_worker import RepairWorker
 
     worker = RepairWorker.__new__(RepairWorker)
     worker.db = database
     worker._config_manager = config
+    # repair deletes go to the deleted-files folder under the transfer folder
+    worker.transfer_folder = str(transfer_folder)
     return worker
 
 
@@ -257,7 +259,7 @@ def test_a_maintenance_delete_lands_in_the_same_journal(
     target.write_bytes(b"audio")
     album_id, _ = _album_with_file(imported_conn, target)
 
-    result = _worker(legacy_db, _WorkerConfig([str(root)]))._remove_native_repair_file(
+    result = _worker(legacy_db, _WorkerConfig([str(root)]), tmp_path / "Transfer")._remove_native_repair_file(
         str(target), {}, reason="corrupt_audio",
     )
 
@@ -283,7 +285,7 @@ def test_a_maintenance_delete_of_an_unknown_file_still_journals(
     stray = root / "stray.flac"
     stray.write_bytes(b"audio")
 
-    result = _worker(legacy_db, _WorkerConfig([str(root)]))._remove_native_repair_file(
+    result = _worker(legacy_db, _WorkerConfig([str(root)]), tmp_path / "Transfer")._remove_native_repair_file(
         str(stray), {}, reason="orphan_file",
     )
 
@@ -308,7 +310,7 @@ def test_the_maintenance_path_deletes_exactly_what_it_deleted_before(
     outside.write_bytes(b"audio")
     _album_with_file(imported_conn, outside)
 
-    result = _worker(legacy_db, _WorkerConfig([]))._remove_native_repair_file(
+    result = _worker(legacy_db, _WorkerConfig([]), tmp_path / "Transfer")._remove_native_repair_file(
         str(outside), {}, reason="corrupt_audio",
     )
 
@@ -326,7 +328,7 @@ def test_deleting_an_orphan_file_is_journalled_too(
     root.mkdir()
     orphan = root / "nobody-knows-me.flac"
     orphan.write_bytes(b"audio")
-    worker = _worker(legacy_db, _WorkerConfig([str(root)]))
+    worker = _worker(legacy_db, _WorkerConfig([str(root)]), tmp_path / "Transfer")
     worker.transfer_folder = str(root)
 
     result = worker._fix_orphan_file(
@@ -351,7 +353,7 @@ def test_the_lossy_converters_seam_journals_the_original_it_replaces(
     original.write_bytes(b"audio")
     album_id, _ = _album_with_file(imported_conn, original)
 
-    result = _worker(legacy_db, _WorkerConfig([str(root)]))._remove_native_repair_file(
+    result = _worker(legacy_db, _WorkerConfig([str(root)]), tmp_path / "Transfer")._remove_native_repair_file(
         str(original), {}, reason="lossy_converter",
     )
 
