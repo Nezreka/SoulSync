@@ -57,6 +57,12 @@ interface Props {
   canDelete?: boolean;
   /** A source match changed; the page re-reads the artist. */
   onMatchesChanged?: () => void;
+  /**
+   * #1450: base-release ids whose edition_preferred stamp the combined
+   * base+gap edition group overturned; passed to the Download Discography
+   * modal so those cards' pre-checks flip off.
+   */
+  editionSuperseded?: Set<unknown>;
 }
 
 /**
@@ -153,6 +159,7 @@ export function ArtistHero({
   canFixMatches = false,
   canDelete = false,
   onMatchesChanged,
+  editionSuperseded,
 }: Props) {
   const [deleting, setDeleting] = useState(false);
   /**
@@ -315,6 +322,7 @@ export function ArtistHero({
           artistName={String(artist.name || '')}
           artistImage={appliedPhoto || image.primary || ''}
           discography={discography}
+          editionSuperseded={editionSuperseded}
           onClose={() => setDownloadingDiscog(false)}
           watchlistIdentity={watchlist ? { id: watchlist.id, name: watchlist.name } : null}
         />

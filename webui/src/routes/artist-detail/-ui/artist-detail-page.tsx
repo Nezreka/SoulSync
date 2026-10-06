@@ -485,6 +485,8 @@ export function ArtistDetailPage() {
           void query.refetch();
           enhancedState.reload();
         }}
+        // #1450: base ids superseded by gap editions, for the modal pre-checks
+        editionSuperseded={gapFill.editionSuperseded}
       />
 
       <div className="artist-detail-content">

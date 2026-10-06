@@ -26,6 +26,10 @@ export interface DiscogRelease {
   explicit?: boolean;
   album_type?: string;
   _type: string;
+  /** #1450: stamped by the backend (GET /api/artist-detail). The modal
+   *  pre-checks only preferred editions; a missing flag reads as preferred
+   *  (gap-fill cards and stale responses predate it). */
+  edition_preferred?: boolean;
   /** Gap-fill releases resolve from THEIR source (#1067). */
   _gap_source?: string | null;
 }
@@ -43,8 +47,17 @@ export interface DiscogModalData {
  * page (discord, SeadogsBooty: deezer page showed 2 EPs, the download pulled
  * musicbrainz's Underground fan club EPs). now it lists exactly what the page
  * rendered, gap cards included with their own source.
+ *
+ * #1450: `editionSuperseded` holds base-release ids whose edition_preferred
+ * stamp the combined base+gap edition group overturned. Those cards get
+ * edition_preferred=false here, so discogCardView's
+ * `edition_preferred !== false && !isOwned` pre-check flips them off while
+ * genuinely flag-less cards (stale responses) keep reading as preferred.
  */
-export function releasesFromPageDiscography(discography: Discography): DiscogRelease[] {
+export function releasesFromPageDiscography(
+  discography: Discography,
+  editionSuperseded?: Set<unknown>,
+): DiscogRelease[] {
   const releases: DiscogRelease[] = [];
   for (const [bucket, type] of [
     ['albums', 'album'],
@@ -52,14 +65,16 @@ export function releasesFromPageDiscography(discography: Discography): DiscogRel
     ['singles', 'single'],
   ] as const) {
     for (const release of discography[bucket] ?? []) {
-      releases.push({
+      const entry: DiscogRelease = {
         ...release,
         name: release.name || release.title || 'Unknown Release',
         image_url: release.image_url || undefined,
         total_tracks: Number(release.track_count) || Number(release._gap_track_count) || undefined,
         _type: type,
         _gap_source: (release._gap_source as string | undefined) || undefined,
-      });
+      };
+      if (editionSuperseded?.has(release.id)) entry.edition_preferred = false;
+      releases.push(entry);
     }
   }
   return releases;
@@ -73,8 +88,9 @@ export async function loadDiscographyForModal(
   libraryArtistId: unknown,
   artistName: string,
   pageDiscography: Discography,
+  editionSuperseded?: Set<unknown>,
 ): Promise<DiscogModalData | null> {
-  const releases = releasesFromPageDiscography(pageDiscography);
+  const releases = releasesFromPageDiscography(pageDiscography, editionSuperseded);
   if (releases.length === 0) return null;
 
   let metadataArtistId: string | null = null;
@@ -100,7 +116,9 @@ export interface DiscogCardView {
   tracks: number;
   statusClass: '' | 'owned' | 'partial';
   statusIcon: '' | '✓' | '◐';
-  /** Unowned releases come pre-checked (767). */
+  /** #1450: unowned releases come pre-checked (767) ONLY when the backend
+   *  marks them the preferred edition (edition_preferred !== false);
+   *  the other editions of the same album stay visible and hand-checkable. */
   checkedByDefault: boolean;
   isLive: boolean;
   isCompilation: boolean;
@@ -122,13 +140,18 @@ export function discogCardView(
   const isOwned = status === 'completed';
   const isPartial = status === 'partial' || status === 'nearly_complete';
   const flags = classifyReleaseContent(release as never);
+  // #1450: the backend stamps edition_preferred on every release it serves
+  // ("all" stamps true everywhere, preserving today's behaviour). A missing
+  // flag (gap-fill cards, stale responses) reads as preferred so those
+  // releases keep today's pre-check.
+  const editionPreferred = release.edition_preferred !== false;
   return {
     albumName: release.name || release.title || '',
     year: release.release_date ? release.release_date.substring(0, 4) : '',
     tracks: release.total_tracks || release.track_count || 0,
     statusClass: isOwned ? 'owned' : isPartial ? 'partial' : '',
     statusIcon: isOwned ? '✓' : isPartial ? '◐' : '',
-    checkedByDefault: !isOwned,
+    checkedByDefault: editionPreferred && !isOwned,
     isLive: flags.isLive,
     isCompilation: flags.isCompilation,
     isFeatured: flags.isFeatured,

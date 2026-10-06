@@ -9,6 +9,7 @@ import {
 } from './-artist-detail.completion';
 import {
   dedupeGaps,
+  gapEditionSupersededFromResponse,
   gapFillEnabled,
   type GapRelease,
   gapFillUrl,
@@ -22,6 +23,12 @@ export interface GapFillState {
   toggle: () => void;
   /** Already deduped against what the page renders. */
   releases: GapRelease[];
+  /**
+   * #1450: base-release ids whose edition_preferred stamp the combined
+   * base+gap edition group overturned. Threaded into the Download
+   * Discography modal so those cards' pre-checks flip off.
+   */
+  editionSuperseded: Set<unknown>;
 }
 
 /**
@@ -45,6 +52,8 @@ export function useGapFill(
   const [enabled, setEnabled] = useState(gapFillEnabled);
   const [releases, setReleases] = useState<GapRelease[]>([]);
   const releasesRef = useRef<GapRelease[]>([]);
+  // #1450: base ids superseded by gap editions; reset per load like releases.
+  const [editionSuperseded, setEditionSuperseded] = useState<Set<unknown>>(new Set());
 
   // Read through a ref so the ownership stream does not have to re-run every
   // time the base discography's ownership settles.
@@ -61,6 +70,7 @@ export function useGapFill(
   useEffect(() => {
     releasesRef.current = [];
     setReleases([]);
+    setEditionSuperseded(new Set());
     if (!enabled || !artistId) return;
 
     const controller = new AbortController();
@@ -76,6 +86,7 @@ export function useGapFill(
       if (fresh.length === 0) return;
       releasesRef.current = fresh;
       setReleases(fresh);
+      setEditionSuperseded(gapEditionSupersededFromResponse(data));
 
       await streamGapOwnership(artistName ?? '', fresh, controller.signal, (next) => {
         releasesRef.current = next;
@@ -91,7 +102,7 @@ export function useGapFill(
     return () => controller.abort();
   }, [enabled, artistId, artistName, baseSource]);
 
-  return { enabled, toggle, releases };
+  return { enabled, toggle, releases, editionSuperseded };
 }
 
 /**
