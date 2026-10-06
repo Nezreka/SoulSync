@@ -906,6 +906,9 @@ def fix_discovery_pool_track():
                 album_obj['image_url'] = image_url
                 album_obj['images'] = [{'url': image_url}]
 
+        # the search endpoint says where the result came from (spotify falls
+        # back to deezer/itunes); old clients that don't send it were spotify
+        source = _picked_source(spotify_track)
         matched_data = {
             'id': spotify_track.get('id', ''),
             'name': spotify_track.get('name', ''),
@@ -913,14 +916,14 @@ def fix_discovery_pool_track():
             'album': album_obj,
             'duration_ms': spotify_track.get('duration_ms', 0),
             'image_url': image_url,
-            'source': 'spotify',
+            'source': source,
         }
 
         # Update the mirrored track's extra_data (merges, so a wing-it track keeps its
         # wing_it_fallback flag — that + manual_match is how the Wing It Pool lists resolved guesses).
         extra_data = {
             'discovered': True,
-            'provider': 'spotify',
+            'provider': source,
             'confidence': 1.0,
             'matched_data': matched_data,
             'manual_match': True,
@@ -981,6 +984,11 @@ def delete_discovery_pool_cache_entry(entry_id):
         logger.error(f"Error deleting discovery cache entry: {e}")
         return jsonify({"error": str(e)}), 500
 
+def _picked_source(track) -> str:
+    source = str((track or {}).get('source') or '').strip().lower()
+    return source or 'spotify'
+
+
 @bp.route('/api/discovery-pool/rematch', methods=['POST'])
 def rematch_discovery_pool_track():
     """Replace a discovery cache entry with a new match chosen by the user."""
@@ -1020,16 +1028,18 @@ def rematch_discovery_pool_track():
             'album': album_obj,
             'duration_ms': spotify_track.get('duration_ms', 0),
             'image_url': image_url,
-            'source': 'spotify',
+            'source': _picked_source(spotify_track),
         }
 
-        # Save to discovery cache
+        # Save to discovery cache. keyed by the ACTIVE discovery source like
+        # the fix endpoint and the lookup, or a deezer user's rematch was
+        # saved under 'spotify' and never read back (#1565).
         normalized_title = _matching_engine().normalize_string(original_title) if original_title else ''
         normalized_artist = _matching_engine().normalize_string(original_artist) if original_artist else ''
         database.save_discovery_cache_match(
             normalized_title=normalized_title,
             normalized_artist=normalized_artist,
-            provider='spotify',
+            provider=_get_active_discovery_source(),
             confidence=1.0,
             matched_data=matched_data,
             original_title=original_title,

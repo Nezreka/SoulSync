@@ -9128,7 +9128,10 @@ def reidentify_search():
             limit = max(1, min(50, int(request.args.get('limit', 25))))
         except (TypeError, ValueError):
             limit = 25
-        rows = search_release_candidates(source, query, limit=limit)
+        rows = search_release_candidates(
+            source, query, limit=limit,
+            title=(request.args.get('title') or '').strip(),
+            artist=(request.args.get('artist') or '').strip())
         return jsonify({"success": True, "source": source, "results": rows})
     except Exception as e:
         logger.error(f"Re-identify search error: {e}")

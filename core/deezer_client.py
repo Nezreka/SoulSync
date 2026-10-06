@@ -364,6 +364,40 @@ class Playlist:
     total_tracks: int
 
 
+
+# _title_rank buckets, best first. a different song by the artist ranks after
+# a different version so the worker's own title check still sees it like
+# before; a different version alone is never returned.
+_EXACT_TITLE, _SAME_SONG, _OTHER_VERSION, _OTHER_SONG = 0, 1, 2, 3
+
+
+def _title_key(title: str) -> str:
+    from core.text.title_match import _fold
+    return ' '.join(re.findall(r'[a-z0-9]+', _fold(title or '')))
+
+
+def _base_title_key(title: str) -> str:
+    # brackets first, then the " - ..." tail, so a dash inside the brackets
+    # ("Get Lucky (Radio Edit - feat. X)") can't cut the title short
+    base = re.sub(r'[\(\[][^\)\]]*[\)\]]', ' ', title or '')
+    base = re.split(r'\s[-–—]\s', base, maxsplit=1)[0]
+    base = re.sub(r'\b(feat|ft|featuring)\b.*$', ' ', base, flags=re.IGNORECASE)
+    return _title_key(base)
+
+
+def _title_rank(wanted: str, got: str) -> int:
+    """how close a deezer title is to the one asked for. version markers come
+    from the same table the musicbrainz recording match gates on: live, remix,
+    reprise, acoustic, karaoke... are a different recording, radio edit and
+    remastered are not."""
+    from core.text.title_match import recording_version_markers
+    if _title_key(wanted) == _title_key(got):
+        return _EXACT_TITLE
+    same_base = _base_title_key(wanted) == _base_title_key(got)
+    if recording_version_markers(wanted) != recording_version_markers(got):
+        return _OTHER_VERSION if same_base else _OTHER_SONG
+    return _SAME_SONG if same_base else _OTHER_SONG
+
 class DeezerClient:
     """
     Deezer API client for music metadata and playlist access.
@@ -1502,14 +1536,14 @@ class DeezerClient:
         """
         try:
             query = self._build_advanced_query(track=track_title, artist=artist_name)
-            result = self._pick_track_by_artist(self._search_track_raw(query), artist_name)
+            result = self._pick_track_by_artist(self._search_track_raw(query), artist_name, track_title)
 
             # the exact-title phrase can miss a title deezer spells a bit
             # differently, so one plain search before calling it not found
             if result is None:
                 fallback = ' '.join(p for p in (artist_name, track_title) if p)
                 if fallback and fallback != query:
-                    result = self._pick_track_by_artist(self._search_track_raw(fallback), artist_name)
+                    result = self._pick_track_by_artist(self._search_track_raw(fallback), artist_name, track_title)
 
             if result is not None:
                 # Cache the track entity
@@ -1548,20 +1582,36 @@ class DeezerClient:
         return data.get('data') or []
 
     @staticmethod
-    def _pick_track_by_artist(results: List[Dict[str, Any]], artist_name: str) -> Optional[Dict[str, Any]]:
-        """first result by the artist we asked for. deezer only gives the
+    def _pick_track_by_artist(results: List[Dict[str, Any]], artist_name: str,
+                              track_title: str = '') -> Optional[Dict[str, Any]]:
+        """the best result by the artist we asked for. deezer only gives the
         primary artist, so a collab credit ("daft punk & pharrell") matches on
-        any of its names. no artist asked for means the top result, like before"""
+        any of its names. no artist asked for means the top result, like before.
+
+        deezer lists every release of a song under the same artist, so the
+        first hit by the artist is often a live cut or a reprise (#1565). with
+        a title, the exact title wins, then the same song with harmless extras
+        ("feat. X", "Remastered"). when every hit by the artist is a different
+        version (live, remix, reprise, ...) the request didn't name, nothing
+        comes back, so the caller can try its next search instead."""
         if not results:
             return None
         if not artist_name:
             return results[0]
         wanted = [artist_name] + split_artist_credit(artist_name)
-        for result in results:
-            got = (result.get('artist') or {}).get('name') or ''
-            if any(artist_name_matches(name, got) for name in wanted):
-                return result
-        return None
+        by_artist = [r for r in results
+                     if any(artist_name_matches(name, (r.get('artist') or {}).get('name') or '')
+                            for name in wanted)]
+        if not by_artist:
+            return None
+        if not track_title:
+            return by_artist[0]
+        ranked = sorted(enumerate(by_artist),
+                        key=lambda p: (_title_rank(track_title, p[1].get('title') or ''), p[0]))
+        best = ranked[0][1]
+        if _title_rank(track_title, best.get('title') or '') == _OTHER_VERSION:
+            return None
+        return best
 
     @rate_limited
     def get_album_raw(self, album_id: int) -> Optional[Dict[str, Any]]:

@@ -144,6 +144,23 @@ def search_spotify():
         logger.error(f"Error searching Spotify: {e}")
         return jsonify({"error": str(e)}), 500
 
+_SPOTIFY_ID_RE = re.compile(r'[A-Za-z0-9]{22}')
+
+
+def _is_spotify_id(track_id) -> bool:
+    """spotify ids are 22 base62 chars. deezer, itunes and discogs ids are
+    numbers, so a fallback result can't pass for a spotify one."""
+    return bool(_SPOTIFY_ID_RE.fullmatch(str(track_id or '')))
+
+
+def _spotify_fallback_source() -> str:
+    try:
+        name = _spotify_client()._fallback_source
+    except Exception:  # noqa: BLE001 - same default the client uses
+        name = None
+    return name if isinstance(name, str) and name else 'deezer'
+
+
 @bp.route('/api/spotify/search_tracks', methods=['GET'])
 def search_spotify_tracks():
     """Search for tracks on Spotify - used by discovery fix modal"""
@@ -187,6 +204,10 @@ def search_spotify_tracks():
                 expected_artist=artist_q,
             )
 
+        # spotify falls back to the configured metadata source when its api
+        # errors, so say where each result really came from. the fix modal
+        # saves it, instead of stamping a deezer id as spotify (#1565).
+        fallback_name = 'hydrabase' if use_hydrabase else _spotify_fallback_source()
         tracks_dict = [{
             'id': t.id,
             'name': t.name,
@@ -194,6 +215,7 @@ def search_spotify_tracks():
             'album': t.album,
             'duration_ms': t.duration_ms,
             'image_url': getattr(t, 'image_url', None),
+            'source': 'spotify' if _is_spotify_id(t.id) else fallback_name,
         } for t in tracks]
 
         return jsonify({'tracks': tracks_dict})

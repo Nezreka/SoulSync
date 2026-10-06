@@ -37,9 +37,8 @@ export function ReidentifyModal({
 }) {
   const [sources, setSources] = useState<ReidentifySource[] | null>(null);
   const [source, setSource] = useState<string | null>(null);
-  const [query, setQuery] = useState(
-    initialQuery?.trim() || `${trackTitle || ''} ${artistName || ''}`.trim(),
-  );
+  const defaultQuery = `${trackTitle || ''} ${artistName || ''}`.trim();
+  const [query, setQuery] = useState(initialQuery?.trim() || defaultQuery);
   const [state, setState] = useState<
     | { kind: 'idle' }
     | { kind: 'loading' }
@@ -55,7 +54,12 @@ export function ReidentifyModal({
     setSelected(null);
     setState({ kind: 'loading' });
     try {
-      const rows = await reidentifySearchRequest(activeSource, value.trim());
+      // untouched default query: search for the track itself, not the words
+      const track =
+        value.trim() === defaultQuery && trackTitle
+          ? { title: trackTitle, artist: artistName || '' }
+          : undefined;
+      const rows = await reidentifySearchRequest(activeSource, value.trim(), track);
       if (rows.length === 0) {
         setState({
           kind: 'empty',

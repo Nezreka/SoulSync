@@ -250,12 +250,17 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                 best_confidence = 0.0
                 min_confidence = 0.7
 
+                # deezer's free text can leave the original out entirely
+                # (#1565), so its first query also asks search_song
+                from core.metadata.song_search import with_song_first_pass
+                _source = with_song_first_pass(itunes_client_instance, track_name, artist_name)
+
                 for search_query in search_queries:
                     try:
                         if use_spotify:
                             results = deps.spotify_client.search_tracks(search_query, limit=10)
                         else:
-                            results = itunes_client_instance.search_tracks(search_query, limit=10)
+                            results = _source.search_tracks(search_query, limit=10)
                         if not results:
                             continue
 

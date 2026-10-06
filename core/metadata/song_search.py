@@ -58,3 +58,49 @@ def search_song(client: Any, title: str, artist: str = "", limit: int = 20) -> L
         return _merge(scoped, client.search_tracks(query, limit=limit))
 
     return client.search_tracks(query, limit=limit)
+
+
+class _SongFirstPass:
+    """a deezer client whose FIRST search_tracks call also runs search_song.
+
+    the discovery loops search free-text queries ("Auli'i Cravalho How Far
+    I'll Go") and score what comes back. deezer's free text ranks karaoke,
+    key-shifted and reprise tracks above the original and can leave the
+    original out entirely, so with no duration to rule the reprise out it
+    won (#1565). the first call merges in search_song's field-scoped results,
+    which carry the original, and the scorer picks as before. later calls
+    pass straight through, so the loop's other queries cost nothing extra.
+    """
+
+    def __init__(self, client: Any, title: str, artist: str):
+        self._client = client
+        self._title = title
+        self._artist = artist
+        self._done = False
+
+    def search_tracks(self, query, limit: int = 10, **kwargs):
+        plain = self._client.search_tracks(query, limit=limit, **kwargs)
+        if self._done:
+            return plain
+        self._done = True
+        try:
+            songs = search_song(self._client, self._title, self._artist, limit=25)
+        except Exception as e:  # the plain results still stand
+            logger.debug("song first pass failed for %r: %s", self._title, e)
+            songs = []
+        return _merge(songs, plain)
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+
+def with_song_first_pass(client: Any, title: str, artist: str = "") -> Any:
+    """``client`` for one track's discovery search, deezer wrapped so the
+    original recording is in the candidates. any other source, or no title,
+    comes back unchanged."""
+    from core.deezer_client import DeezerClient
+
+    title = (title or "").strip()
+    if not title or not isinstance(client, DeezerClient):
+        return client
+    return _SongFirstPass(client, title, (artist or "").strip())

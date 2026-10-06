@@ -109,11 +109,18 @@ def search_release_candidates(
     *,
     limit: int = 25,
     client_factory: Optional[Callable[[str], Any]] = None,
+    title: str = "",
+    artist: str = "",
 ) -> List[Dict[str, Any]]:
     """Search ``source`` for tracks matching ``query`` → normalized display rows.
 
     Returns ``[]`` (never raises) when the source has no client or errors — the UI
-    just shows an empty tab. Rows keep duplicate releases; the UI groups them."""
+    just shows an empty tab. Rows keep duplicate releases; the UI groups them.
+
+    ``title``/``artist``: the track the modal opened for, sent while the query is
+    still the default. then the source's own song search runs instead of free
+    text: deezer's free text left "How Far I'll Go" out under karaoke and the
+    reprise, its field-scoped search lists it first (#1565)."""
     query = (query or "").strip()
     if not query:
         return []
@@ -125,7 +132,11 @@ def search_release_candidates(
     if client is None or not hasattr(client, "search_tracks"):
         return []
     try:
-        results = client.search_tracks(query, limit=limit)
+        if (title or "").strip():
+            from core.metadata.song_search import search_song
+            results = search_song(client, title, artist, limit=limit)
+        else:
+            results = client.search_tracks(query, limit=limit)
     except TypeError:
         results = client.search_tracks(query)   # clients with no limit kwarg
     except Exception:

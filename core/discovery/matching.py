@@ -76,12 +76,15 @@ def match_mb_track(
 
     best_match: Any = None
     best_confidence = 0.0
+    # deezer's free text can leave the original out entirely (#1565)
+    from core.metadata.song_search import with_song_first_pass
+    source = with_song_first_pass(itunes_client, title, artist)
     for query in queries:
         try:
             if use_spotify:
                 results = spotify_client.search_tracks(query, limit=10)
             else:
-                results = itunes_client.search_tracks(query, limit=10)
+                results = source.search_tracks(query, limit=10)
         except Exception as exc:
             logger.debug(f"search failed for query={query!r}: {exc}")
             continue
