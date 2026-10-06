@@ -21,6 +21,7 @@ from utils.logging_config import get_logger
 
 logger = get_logger('library.reconciliation_evidence')
 _LOOKUP_RETRY_DELAYS = (1, 2, 4, 8)
+_LOOKUP_CIRCUIT_THRESHOLD = 3
 
 
 def folder_audio_path_digest(folder: str) -> str:
@@ -42,6 +43,7 @@ class ReconciliationEvidence:
         self.metrics = {'fingerprints': 0, 'fingerprint_hits': 0,
                         'lookups': 0, 'lookup_hits': 0}
         self.lookup_error = None
+        self.consecutive_lookup_errors = 0
         self.conn.executescript('''
             CREATE TABLE IF NOT EXISTS reconcile_file_fingerprints (
                 file_path TEXT PRIMARY KEY, size_bytes INTEGER NOT NULL,
@@ -106,9 +108,9 @@ class ReconciliationEvidence:
             self.conn.execute('DELETE FROM reconcile_acoustid_results WHERE lookup_key = ?',
                               (key,))
 
-        # One exhausted service failure is enough to stop new requests for
-        # this run. Cached evidence remains usable, so the reconciliation job
-        # can still finish the rest of the library without hammering AcoustID.
+        # Consecutive exhausted service failures stop new requests for this
+        # run. Cached evidence remains usable, so the reconciliation job can
+        # still finish without hammering AcoustID during a real outage.
         if self.lookup_error is not None:
             return {**self.lookup_error, 'fingerprint_key': key, 'deferred': True}
 
@@ -121,11 +123,15 @@ class ReconciliationEvidence:
                            delay, result.get('error') or 'unknown error')
             time.sleep(delay)
         if result.get('status') in ('ok', 'no_match'):
+            self.consecutive_lookup_errors = 0
             ttl = 30 * 86400 if result['status'] == 'ok' else 86400
             self.conn.execute('''
                 INSERT OR REPLACE INTO reconcile_acoustid_results
                     (lookup_key, result_json, expires_at) VALUES (?, ?, ?)
             ''', (key, json.dumps(result), int(time.time()) + ttl))
         elif result.get('status') == 'error':
-            self.lookup_error = dict(result)
+            self.consecutive_lookup_errors += 1
+            if (result.get('invalid_key') or
+                    self.consecutive_lookup_errors >= _LOOKUP_CIRCUIT_THRESHOLD):
+                self.lookup_error = dict(result)
         return {**result, 'fingerprint_key': key}

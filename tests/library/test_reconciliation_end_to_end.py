@@ -440,10 +440,10 @@ def test_exhausted_audio_lookup_opens_circuit_but_cached_evidence_remains_availa
         tmp_path, monkeypatch):
     monkeypatch.setattr('core.library.reconciliation_evidence.time.sleep', lambda _delay: None)
     db = MusicDatabase(str(tmp_path / 'music.db'))
-    failed = tmp_path / 'Failed.flac'
+    failed = [tmp_path / f'Failed {index}.flac' for index in range(3)]
     deferred = tmp_path / 'Deferred.flac'
     cached = tmp_path / 'Cached.flac'
-    for path in (failed, deferred, cached):
+    for path in (*failed, deferred, cached):
         path.write_bytes(b'fixture')
     client = _Acoustid({cached.name: {'mbid': 'cached', 'title': 'Cached',
                                      'artist': 'Artist', 'score': 0.99}})
@@ -458,13 +458,16 @@ def test_exhausted_audio_lookup_opens_circuit_but_cached_evidence_remains_availa
             return {'status': 'error', 'recordings': [], 'error': 'AcoustID unavailable'}
 
         client.lookup_fingerprint_with_status = unavailable
-        assert cache.identify(str(failed))['status'] == 'error'
+        for path in failed:
+            result = cache.identify(str(path))
+            assert result['status'] == 'error'
+            assert 'deferred' not in result
         deferred_result = cache.identify(str(deferred))
         assert deferred_result['status'] == 'error'
         assert deferred_result['deferred'] is True
-        assert calls == 5
+        assert calls == 15
         assert cache.identify(str(cached))['status'] == 'ok'
-        assert calls == 5
+        assert calls == 15
     finally:
         cache.close()
 
