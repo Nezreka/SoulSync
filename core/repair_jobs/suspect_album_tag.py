@@ -1,12 +1,14 @@
 """Suspect Album Tag Detector — finds tracks that are probably filed under the
 wrong album due to bad embedded tags (e.g. a Daughtry song filed under "Hitzone 43").
 
-Detection signals (any one is sufficient):
+Detection signals (singles are never suspects):
   1. The album has exactly 1 locally-owned track AND the album has no cover art.
   2. The album name matches a known compilation / sampler pattern (case-insensitive)
-     BUT the track's artist is NOT "Various Artists" or "Various".
+     BUT the track's artist is NOT "Various Artists" or "Various" -- an artist's
+     own "Greatest Hits" excepted.
   3. The album has exactly 1 locally-owned track AND the DB track_count field says
-     the real release has more than 3 tracks (i.e. a lone track inside a big album).
+     the real release has more than 3 tracks. Only together with another signal:
+     one wished-for track of a big album is the normal Wishlist case.
 
 The fix action is "reidentify" — the existing Re-identify modal handles the actual fix.
 This job only DETECTS and emits findings; it never modifies files itself.
@@ -26,6 +28,12 @@ _COMPILATION_PATTERNS = re.compile(
     r'best\s+of|greatest\s+hits?|ultimate\s+collection|the\s+collection|'
     r'essential\s+hits?|playlist|soundtrack|ost|karaoke|tribute\s+to|'
     r'years\s+of\s+hits?|summer\s+hits?|chart\s+hits?)\b',
+    re.IGNORECASE,
+)
+
+# The artist's own compilation: suspect only when filed under somebody else.
+_ARTIST_COMPILATION = re.compile(
+    r'\b(best\s+of|greatest\s+hits?|ultimate\s+collection|the\s+collection|essential\s+hits?)\b',
     re.IGNORECASE,
 )
 
@@ -56,7 +64,9 @@ class SuspectAlbumTagDetector(RepairJob):
         '- The album has only 1 of your tracks AND no cover art\n'
         '- The album name matches a known compilation pattern (Hitzone, Now, Vol., '
         'Greatest Hits, etc.) but the artist is not "Various Artists"\n'
-        '- The album has only 1 of your tracks AND the original release has 4+ tracks\n\n'
+        '- The album has only 1 of your tracks AND the original release has 4+ tracks '
+        '(only together with another signal)\n'
+        '- Singles and an artist\'s own "Greatest Hits" are never flagged\n\n'
         'For each finding, click Re-identify to search for the correct album and '
         'let SoulSync re-file the track automatically.\n\n'
         'Settings:\n'
@@ -137,6 +147,7 @@ class SuspectAlbumTagDetector(RepairJob):
                     al.id          AS album_id,
                     al.title       AS album_title,
                     al.image_url   AS thumb_url,
+                    al.album_type  AS album_type,
                     COALESCE(al.expected_track_count, al.track_count) AS full_track_count,
                     COALESCE(tar.id, aar.id)   AS artist_id,
                     COALESCE(tar.name, aar.name, '') AS artist_name,
@@ -193,13 +204,18 @@ class SuspectAlbumTagDetector(RepairJob):
             track_title   = (row['track_title'] or '').strip()
 
             reasons = []
+            if (row.get('album_type') or '').lower() == 'single':
+                result.skipped += 1
+                continue
 
             # Signal 1: no cover art + lone track
             if check_art and not thumb_url:
                 reasons.append('no cover art')
 
             # Signal 2: compilation-pattern album name OR Various Artists album with named track artist
-            is_compilation_title = bool(_COMPILATION_PATTERNS.search(album_title))
+            own_album = album_artist.lower() == artist_name.lower()
+            is_compilation_title = bool(_COMPILATION_PATTERNS.search(
+                _ARTIST_COMPILATION.sub('', album_title) if own_album else album_title))
             is_va_track = _is_various_artist(artist_name)
             is_va_album = _is_various_artist(album_artist)
 
@@ -208,8 +224,9 @@ class SuspectAlbumTagDetector(RepairJob):
             elif is_va_album and not is_va_track:
                 reasons.append(f'lone track in Various Artists compilation "{album_title}"')
 
-            # Signal 3: full release has many tracks but we only own 1
-            if full_count >= min_track_count:
+            # Signal 3: full release has many tracks but we only own 1 --
+            # corroboration only, never a reason on its own.
+            if full_count >= min_track_count and reasons:
                 reasons.append(
                     f'only 1 of {full_count} tracks locally owned')
 
