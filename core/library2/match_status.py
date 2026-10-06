@@ -497,3 +497,18 @@ def apply_manual_match(conn: Any, entity_type: str, entity_id: int, service: str
         raise ValueError(f"Watchlist column {column!r} is unavailable")
     conn.execute(f"UPDATE watchlist_artists SET {column}=? WHERE id=?",
                  (service_id, int(watchlist_row_id)))
+
+
+_configured_services_getter = None
+
+
+def set_configured_services_getter(getter) -> None:
+    """The app knows which providers are configured; jobs ask here instead of
+    importing web_server (which starts the whole app in a job's process)."""
+    global _configured_services_getter
+    _configured_services_getter = getter
+
+
+def configured_services() -> Optional[set]:
+    """Configured provider ids, or None when nothing registered an answer."""
+    return set(_configured_services_getter()) if _configured_services_getter else None

@@ -37,3 +37,16 @@ def test_batch_size_does_not_require_an_undeclared_context_attribute():
     context = _context({})
     assert not hasattr(context, 'settings')
     assert NativeEnrichmentSweepJob()._batch_size(context) == DEFAULT_BATCH
+
+
+def test_the_sweep_asks_the_registered_answer_instead_of_importing_the_app(monkeypatch):
+    """L12: importing web_server from a job started the whole app."""
+    import sys
+
+    from core.library2 import match_status
+    from core.repair_jobs.native_enrichment_sweep import _configured_services
+
+    monkeypatch.setattr(match_status, "_configured_services_getter", lambda: {"deezer"})
+    monkeypatch.delitem(sys.modules, "web_server", raising=False)
+    assert _configured_services(None) == {"deezer"}
+    assert "web_server" not in sys.modules

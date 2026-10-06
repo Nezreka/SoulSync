@@ -23318,6 +23318,8 @@ def _library_v2_profile_page_allowed(page_id):
     return allowed_pages is None or page_id in allowed_pages
 
 
+from core.library2.match_status import set_configured_services_getter
+set_configured_services_getter(_library_v2_configured_match_services)
 _register_library_v2_routes(
     app,
     get_database=get_database,

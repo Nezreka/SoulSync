@@ -58,10 +58,8 @@ def _configured_services(config_manager) -> set:
     an OAuth tab in a user's browser (see schedule_native_entity_enrich).
     """
     try:
-        from web_server import _library_v2_configured_match_services
-
-        services = _library_v2_configured_match_services()
-        return set(services) if services else None
+        from core.library2.match_status import configured_services
+        return configured_services() or None
     except Exception:  # noqa: BLE001 - fall back to letting each client decide
         return None
 
