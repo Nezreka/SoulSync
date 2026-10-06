@@ -246,8 +246,17 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                     logger.debug("canonical search-query add failed: %s", _cq_err)
 
                 # Step 3: Search and score
-                best_match = None
-                best_confidence = 0.0
+                # same service on both ends (#1566): the mirror already has
+                # this track's own id, so fetch it instead of searching. a
+                # failed lookup leaves best_match empty and the search runs.
+                from core.discovery.direct_match import direct_source_match
+                best_match = direct_source_match(
+                    source, discovery_source, use_spotify, track.get('source_track_id'),
+                    spotify_client=deps.spotify_client, fallback_client=itunes_client_instance)
+                best_confidence = 1.0 if best_match else 0.0
+                if best_match:
+                    logger.info(f"DIRECT [{i+1}/{len(undiscovered_tracks)}]: {track_name} → "
+                                f"{getattr(best_match, 'name', '?')} (by {source} id)")
                 min_confidence = 0.7
 
                 # deezer's free text can leave the original out entirely
@@ -256,6 +265,8 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                 _source = with_song_first_pass(itunes_client_instance, track_name, artist_name)
 
                 for search_query in search_queries:
+                    if best_confidence >= 0.9:
+                        break
                     try:
                         if use_spotify:
                             results = deps.spotify_client.search_tracks(search_query, limit=10)
