@@ -279,6 +279,86 @@ describe('library reconciliation review queue', () => {
     expect(screen.queryByLabelText('Evidence summary')).toBeNull();
   });
 
+  it('presents competing copies as one explicit keeper decision', async () => {
+    const duplicateFinding = {
+      ...finding,
+      finding_type: 'reconciliation_duplicate',
+      title: 'Duplicate copies: Cold',
+      description: 'These files identify as the same release track; choose a keeper.',
+      details: {
+        album_title: 'The Dark',
+        artist_name: 'Chelsea Wolfe',
+        album_folder: '/music/Chelsea Wolfe/The Dark',
+        resolution_kind: 'duplicate_copies',
+        duplicate_copies: [
+          {
+            track_id: 'album-copy',
+            title: 'Cold',
+            file_path: '/music/Chelsea Wolfe/The Dark/01 - Cold.flac',
+            playlists: [],
+          },
+          {
+            track_id: 'single-copy',
+            title: 'Cold',
+            file_path: '/music/Chelsea Wolfe/The Dark/CHELSEA WOLFE - The Dark - 01 Cold.flac',
+            playlists: ['Release Radar'],
+          },
+        ],
+        acoustid: {
+          status: 'ok',
+          recordings: [
+            { mbid: 'cold-one', title: 'Cold', artist: 'Chelsea Wolfe', score: 0.99 },
+            { mbid: 'cold-two', title: 'Cold', artist: 'Chelsea Wolfe', score: 0.99 },
+          ],
+        },
+      },
+    };
+    fetchMock.mockImplementation((url: string) => {
+      const common = auxiliary(url);
+      if (common) return Promise.resolve(common);
+      if (url.startsWith('/api/repair/review-queue?'))
+        return Promise.resolve(
+          reply({
+            items: [
+              {
+                case_id: 'album:1:dark',
+                album: 'The Dark',
+                artist: 'Chelsea Wolfe',
+                pending: 1,
+                priority: 1,
+                finding_types: ['reconciliation_duplicate'],
+                error_count: 0,
+              },
+            ],
+            total: 1,
+            page: 0,
+            limit: 30,
+          }),
+        );
+      if (url.startsWith('/api/repair/review-queue/album%3A1%3Adark?'))
+        return Promise.resolve(
+          reply({
+            case_id: 'album:1:dark',
+            album: 'The Dark',
+            artist: 'Chelsea Wolfe',
+            folder: '/music/Chelsea Wolfe/The Dark',
+            count: 1,
+            status: 'pending',
+            items: [duplicateFinding],
+          }),
+        );
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(<ReviewPage />);
+
+    await screen.findByRole('heading', { name: 'Duplicate local copies' });
+    expect(screen.getByText('Choose the copy to keep')).toBeTruthy();
+    expect(screen.getByText('Playlist: Release Radar')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Keep this copy' })).toHaveLength(2);
+    expect(screen.getByText('2 linked recording IDs')).toBeTruthy();
+  });
+
   it('pins the chosen release with its evidence token', async () => {
     let applied = false;
     fetchMock.mockImplementation((url: string, options?: RequestInit) => {

@@ -60,6 +60,7 @@ export interface FindingTypeInfo {
 export const FINDING_TYPE_BLURBS: Record<string, string> = {
   reconciliation_metadata: 'Audio and release slots suggest tag or filename corrections.',
   reconciliation_extra: 'A file does not fit any slot on the selected release.',
+  reconciliation_duplicate: 'Several local files identify as the same release track.',
   reconciliation_unresolved: 'The audio or release could not be identified reliably.',
   reconciliation_intent: 'Choose complete or partial album before requesting tracks.',
   reconciliation_missing: 'A track is absent from an album you marked as complete.',

@@ -22,6 +22,7 @@ import styles from './review-page.module.css';
 
 const requireChoice = new Set([
   'reconciliation_extra',
+  'reconciliation_duplicate',
   'reconciliation_intent',
   'reconciliation_release',
 ]);
@@ -161,6 +162,7 @@ export function ReviewPage() {
   const albumNumber = queue && caseIndex >= 0 ? page * queue.limit + caseIndex + 1 : null;
   const typeInfo = active ? catalog[active.finding_type] : undefined;
   const canApply = Boolean(typeInfo?.fixable) && active?.finding_type !== 'suspect_album_tag';
+  const duplicateChoice = active?.finding_type === 'reconciliation_duplicate';
   const suggested = canApply && active && !requireChoice.has(active.finding_type);
 
   const selectCase = (next: string) => {
@@ -419,16 +421,20 @@ export function ReviewPage() {
                 <div>
                   <div className={styles.eyebrow}>Suggested resolution</div>
                   <strong>
-                    {suggested
-                      ? typeInfo?.verb || 'Apply repair'
-                      : canApply
-                        ? 'Choose the correct action after reviewing the evidence'
-                        : 'Review manually'}
+                    {duplicateChoice
+                      ? 'Choose the copy to keep'
+                      : suggested
+                        ? typeInfo?.verb || 'Apply repair'
+                        : canApply
+                          ? 'Choose the correct action after reviewing the evidence'
+                          : 'Review manually'}
                   </strong>
                   <p>
-                    {suggested
-                      ? 'Evidence supports a direct repair.'
-                      : 'The evidence still requires a decision.'}
+                    {duplicateChoice
+                      ? 'Both files identify as the same release track. Playlist membership is shown with each copy.'
+                      : suggested
+                        ? 'Evidence supports a direct repair.'
+                        : 'The evidence still requires a decision.'}
                   </p>
                 </div>
               </section>
@@ -440,6 +446,9 @@ export function ReviewPage() {
                   active.finding_type === 'reconciliation_release'
                     ? (index) => void act(active, 'fix', String(index))
                     : undefined
+                }
+                onKeepCopy={
+                  duplicateChoice ? (trackId) => void act(active, 'fix', trackId) : undefined
                 }
               />
 
@@ -464,7 +473,8 @@ export function ReviewPage() {
                   </>
                 ) : (
                   canApply &&
-                  active.finding_type !== 'reconciliation_release' && (
+                  active.finding_type !== 'reconciliation_release' &&
+                  active.finding_type !== 'reconciliation_duplicate' && (
                     <button
                       type="button"
                       disabled={busy}

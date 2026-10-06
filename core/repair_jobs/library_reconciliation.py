@@ -22,7 +22,7 @@ from core.library_reorganize import _safe_filename
 from core.library.reconciliation_evidence import ReconciliationEvidence, folder_audio_path_digest
 from core.library.reconciliation_plan import reconcile_folder, _title_score
 from core.library.retag_planner import plan_track
-from core.matching.audio_verification import fingerprint_is_ambiguous
+from core.matching.audio_verification import fingerprint_is_ambiguous, normalize
 from core.metadata.album_tracks import get_album_for_source, get_album_tracks_for_source
 from core.repair_jobs import register_job
 from core.repair_jobs.base import RepairJob, JobContext, JobResult, all_library_roots, walk_library
@@ -186,7 +186,7 @@ def _candidate_evidence(files: list[dict], scored: tuple) -> dict:
         recordings = file['acoustid'].get('recordings') or []
         slot_mbid = str(slot.get('recording_mbid') or '')
 
-        def support_rank(recording):
+        def support_rank(recording, slot_mbid=slot_mbid, slot=slot):
             score = float(recording.get('score') or 0)
             eligible = score >= 0.80
             mbid_match = bool(slot_mbid and recording.get('mbid') == slot_mbid)
@@ -199,17 +199,36 @@ def _candidate_evidence(files: list[dict], scored: tuple) -> dict:
             return (eligible and mbid_match, eligible and title_match and artist_match, score)
 
         top = max(recordings, key=support_rank, default={})
+
+        def identity(recording):
+            # AcoustID often links one fingerprint to several MusicBrainz
+            # recording rows for the same named performance. Different MBIDs
+            # are useful internally, but repeating "Song by Artist" ten times
+            # is not useful review evidence. Keep version qualifiers while
+            # folding punctuation/case variants.
+            def part(value):
+                folded = re.sub(r'[^\w\s]+', ' ', str(value or '').casefold())
+                return re.sub(r'\s+', ' ', folded).strip()
+            return part(recording.get('title')), part(recording.get('artist'))
+
+        top_identity = identity(top)
+        grouped = {}
+        for recording in recordings:
+            key = identity(recording)
+            if not any(key) or key == top_identity:
+                continue
+            current = grouped.get(key)
+            if current is None or support_rank(recording) > support_rank(current):
+                grouped[key] = recording
         alternatives = [
             {'mbid': recording.get('mbid') or '',
              'title': recording.get('title') or '',
              'artist': recording.get('artist') or '',
-             'score': recording.get('score')}
-            for recording in recordings
-            if recording is not top and (
-                recording.get('mbid') != top.get('mbid') or
-                recording.get('title') != top.get('title') or
-                recording.get('artist') != top.get('artist'))
+             'score': recording.get('score'),
+             'recording_count': sum(identity(other) == key for other in recordings)}
+            for key, recording in grouped.items()
         ]
+        alternatives.sort(key=support_rank, reverse=True)
         pairs.append({
             'file': os.path.basename(file['path']),
             'tag_title': file['tags'].get('title') or '',
@@ -217,6 +236,8 @@ def _candidate_evidence(files: list[dict], scored: tuple) -> dict:
             'audio_title': top.get('title') or '',
             'audio_artist': top.get('artist') or '',
             'audio_score': top.get('score'),
+            'audio_recording_count': sum(identity(recording) == top_identity
+                                         for recording in recordings),
             'audio_alternatives': alternatives,
             'slot_title': slot['title'],
             'slot_number': slot.get('track_number'),
@@ -226,6 +247,7 @@ def _candidate_evidence(files: list[dict], scored: tuple) -> dict:
             'confidence': pair['confidence'],
             'reasons': pair['reasons'],
             'ambiguity_reasons': pair.get('ambiguity_reasons') or [],
+            'playlists': list(file.get('playlists') or []),
         })
     return {
         'source': source, 'release_id': release_id,
@@ -234,6 +256,62 @@ def _candidate_evidence(files: list[dict], scored: tuple) -> dict:
         'missing': [slots[index]['title'] for index in plan['missing_slots']],
         'extra': [os.path.basename(files[index]['path'])
                   for index in plan['extra_files']],
+    }
+
+
+def _candidate_shape(scored: tuple) -> tuple:
+    """The release facts reconciliation can distinguish, excluding edition ID."""
+    _clear, _matched, _extras, _source, _release_id, slots, plan = scored
+
+    def slot_shape(slot: dict) -> tuple:
+        track_number = slot.get('track_number')
+        return (slot.get('disc_number') or 1, track_number is None,
+                track_number or 0, normalize(slot.get('title') or ''))
+
+    pairs = tuple(sorted(
+        (pair['file_index'], *slot_shape(slots[pair['slot_index']]))
+        for pair in plan['pairs']))
+    missing = tuple(sorted(
+        slot_shape(slots[index])
+        for index in plan['missing_slots']))
+    return len(slots), pairs, missing, tuple(sorted(plan['extra_files']))
+
+
+def _same_recording_copies(files: list[dict], indexes: list[int]) -> bool:
+    """Require shared strong audio identity and compatible lengths."""
+    if len(indexes) < 2:
+        return False
+    evidence = [files[index].get('acoustid') or {} for index in indexes]
+    fingerprint_keys = [item.get('fingerprint_key') for item in evidence]
+    if all(fingerprint_keys) and len(set(fingerprint_keys)) == 1:
+        return True
+    strong_ids = [
+        {str(row.get('mbid')) for row in item.get('recordings') or []
+         if row.get('mbid') and float(row.get('score') or 0) >= 0.90}
+        for item in evidence]
+    if not strong_ids or not set.intersection(*strong_ids):
+        return False
+    durations = [int((files[index].get('tags') or {}).get('duration_ms') or 0)
+                 for index in indexes]
+    durations = [duration for duration in durations if duration]
+    return len(durations) < 2 or max(durations) - min(durations) <= 3000
+
+
+def _duplicate_copy(file: dict) -> dict:
+    row = file.get('db') or {}
+    return {
+        'track_id': row.get('id'),
+        'title': row.get('title') or file.get('tags', {}).get('title') or '',
+        'artist': row.get('artist_name') or file.get('tags', {}).get('artist') or '',
+        'album': row.get('album_title') or file.get('tags', {}).get('album') or '',
+        'file_path': file.get('path') or '',
+        'fingerprint_key': file.get('acoustid', {}).get('fingerprint_key'),
+        'size_bytes': file.get('size_bytes'),
+        'mtime_ns': file.get('mtime_ns'),
+        'bitrate': row.get('bitrate') or 0,
+        'duration': row.get('duration') or 0,
+        'track_number': row.get('track_number'),
+        'playlists': list(file.get('playlists') or []),
     }
 
 
@@ -284,7 +362,7 @@ class LibraryReconciliationJob(RepairJob):
     default_settings = {'min_acoustid_score': 0.80}
     auto_fix = False
 
-    def _load_rows(self, context: JobContext) -> tuple[dict, dict]:
+    def _load_rows(self, context: JobContext, roots: list[str]) -> tuple[dict, dict]:
         """One DB read for path→track and album metadata, with old-schema guards."""
         conn = context.db._get_connection()
         try:
@@ -301,6 +379,7 @@ class LibraryReconciliationJob(RepairJob):
             owner = ', al.owner_profile_id' if 'owner_profile_id' in columns else ''
             locked = ', t.metadata_locked' if 'metadata_locked' in track_columns else ''
             size = ', t.file_size' if 'file_size' in track_columns else ''
+            bitrate = ', t.bitrate' if 'bitrate' in track_columns else ''
             artist = ', ar.name AS artist_name' if 'artists' in {
                 row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
             } else ''
@@ -308,7 +387,7 @@ class LibraryReconciliationJob(RepairJob):
             cursor = conn.execute(f'''
                 SELECT t.id, t.file_path, t.title, t.album_id, t.track_number,
                        t.disc_number, t.duration, t.musicbrainz_recording_id,
-                       al.title AS album_title{artist}{canonical}{owner}{locked}{size}{extras}
+                       al.title AS album_title{artist}{canonical}{owner}{locked}{size}{bitrate}{extras}
                 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
                 {artist_join}
                 WHERE t.file_path IS NOT NULL AND t.file_path != ''
@@ -321,23 +400,57 @@ class LibraryReconciliationJob(RepairJob):
                 data = dict(zip(names, row, strict=True))
                 path = data.get('file_path')
                 if path:
-                    direct = os.path.isfile(path)
-                    physical = path if direct else resolve_library_file_path(
-                        path, transfer_folder=context.transfer_folder,
-                        config_manager=context.config_manager)
-                    if physical and not direct:
+                    # The same library is commonly mounted at both /music and
+                    # /app/Music/library. A stored /music path may exist, but
+                    # the scanner can be walking the other mount. Index scan
+                    # aliases only when they resolve to the same physical file;
+                    # matching suffixes in separate profile roots are not enough.
+                    direct_exists = os.path.isfile(path)
+                    candidates = []
+                    for root in roots:
+                        physical = resolve_library_file_path(path, library_root=root)
+                        if not physical or physical in candidates:
+                            continue
+                        candidates.append(physical)
+                    physical_paths = [path] if direct_exists else []
+                    if direct_exists:
+                        for physical in candidates:
+                            try:
+                                if (physical not in physical_paths and
+                                        os.path.samefile(path, physical)):
+                                    physical_paths.append(physical)
+                            except OSError:
+                                continue
+                    elif len(candidates) == 1:
+                        physical_paths = candidates
+                    elif candidates:
+                        # A stale root prefix can resolve to the same relative
+                        # path in two independent profile libraries. Only keep
+                        # multiple aliases when the OS proves they are one file.
+                        try:
+                            if all(os.path.samefile(candidates[0], candidate)
+                                   for candidate in candidates[1:]):
+                                physical_paths = candidates
+                        except OSError:
+                            pass
+                    if not physical_paths and not candidates:
+                        physical = resolve_library_file_path(
+                            path, transfer_folder=context.transfer_folder,
+                            config_manager=context.config_manager)
+                        if physical:
+                            physical_paths.append(physical)
+                    for physical in physical_paths:
                         stored_parts = os.path.normpath(path).replace('\\', '/').split('/')[-2:]
                         resolved_parts = os.path.normpath(physical).replace('\\', '/').split('/')[-2:]
                         if [part.casefold() for part in stored_parts] != [
                                 part.casefold() for part in resolved_parts]:
-                            physical = None
+                            continue
                         elif data.get('file_size'):
                             try:
                                 if os.path.getsize(physical) != data['file_size']:
-                                    physical = None
+                                    continue
                             except OSError:
-                                physical = None
-                    if physical:
+                                continue
                         tracks[os.path.normpath(physical)] = data
                 if data.get('album_id') is not None:
                     albums[data['album_id']] = data
@@ -415,8 +528,14 @@ class LibraryReconciliationJob(RepairJob):
         if not roots or any(not os.path.isdir(root) for root in roots):
             result.stopped_early = 'A configured library root is unavailable'
             return result
-        tracks, albums = self._load_rows(context)
+        tracks, albums = self._load_rows(context, roots)
         intents = self._intents(context)
+        playlist_membership = {}
+        if context.playlist_membership:
+            try:
+                playlist_membership = context.playlist_membership() or {}
+            except Exception as exc:
+                logger.debug('Could not read playlist membership: %s', exc)
         folders: dict[str, list[str]] = defaultdict(list)
         for root in roots:
             if not os.path.isdir(root):
@@ -461,8 +580,11 @@ class LibraryReconciliationJob(RepairJob):
                         result.errors += 1
                         result.stopped_early = audio.get('error') or 'AcoustID lookup failed'
                         break
+                    playlists = (list(playlist_membership.get(str(db_row['id']), []))
+                                 if db_row else [])
                     files.append({'path': path, 'tags': _read_file_tags(path),
                                   'acoustid': audio, 'db': db_row,
+                                  'playlists': playlists,
                                   'size_bytes': stat.st_size, 'mtime_ns': stat.st_mtime_ns})
                     result.scanned += 1
                 # The evidence cache uses its own SQLite connection. Release
@@ -531,6 +653,17 @@ class LibraryReconciliationJob(RepairJob):
                     cache.checkpoint()
                     continue
                 scored.sort(key=lambda c: c[:3], reverse=True)
+                # Album/source IDs are direct evidence of intended edition.
+                # Prefer the first stored candidate when it fits as well as
+                # the best audio-discovered candidate; sorting by opaque UUID
+                # must never manufacture a human decision.
+                top_score = scored[0][:3]
+                linked_row = next((row for candidate in candidates for row in scored
+                                   if row[:3] == top_score and
+                                   (row[3], row[4]) == candidate), None)
+                if linked_row:
+                    scored.remove(linked_row)
+                    scored.insert(0, linked_row)
                 pinned_row = None
                 if album and album.get('canonical_locked'):
                     pinned_row = next((row for row in scored
@@ -543,8 +676,11 @@ class LibraryReconciliationJob(RepairJob):
                 clear, matched, _extras, source, release_id, slots, plan = scored[0]
                 locked_conflict = bool(album and album.get('canonical_locked') and
                                        (not pinned_row or pinned_row[:3] != scored[0][:3]))
-                tied = (len(scored) > 1 and scored[1][:3] == scored[0][:3]
-                        and (source, release_id) != (scored[1][3], scored[1][4]))
+                tied_rows = [row for row in scored if row[:3] == scored[0][:3]]
+                equivalent_tie = (len(tied_rows) > 1 and
+                                  all(_candidate_shape(row) == _candidate_shape(tied_rows[0])
+                                      for row in tied_rows[1:]))
+                tied = (len(tied_rows) > 1 and not linked_row and not equivalent_tie)
                 if pinned_row and not locked_conflict:
                     tied = False
                 pinned = bool(album and album.get('canonical_source') == source
@@ -608,13 +744,49 @@ class LibraryReconciliationJob(RepairJob):
                     'exact_release_id': exact_release_id,
                     'release_track_count': len(slots), 'local_file_count': len(files),
                     'folder_audio_path_digest': folder_audio_path_digest(folder),
+                    'evidence_signature': _evidence_signature(files, (source, release_id)),
+                    'playlist_tracks': [
+                        {'file': os.path.basename(file['path']),
+                         'title': file['tags'].get('title') or '',
+                         'playlists': list(file.get('playlists') or [])}
+                        for file in files if file.get('playlists')],
                 }
+                raw_duplicate_groups = []
+                for extra_index, rivals in plan.get('competing_files', {}).items():
+                    indexes = set([extra_index, *rivals])
+                    if (_same_recording_copies(files, indexes) and
+                            all((files[index].get('db') or {}).get('id')
+                                for index in indexes)):
+                        overlapping = [group for group in raw_duplicate_groups
+                                       if group & indexes]
+                        for group in overlapping:
+                            indexes.update(group)
+                            raw_duplicate_groups.remove(group)
+                        raw_duplicate_groups.append(indexes)
+                duplicate_groups = {}
+                duplicate_indexes = set()
+                extra_indexes = set(plan['extra_files'])
+                for indexes in raw_duplicate_groups:
+                    if not _same_recording_copies(files, list(indexes)):
+                        continue
+                    leaders = sorted(indexes & extra_indexes)
+                    if not leaders:
+                        continue
+                    duplicate_groups[leaders[0]] = sorted(indexes)
+                    duplicate_indexes.update(indexes)
                 album_title_proposed = False
                 for pair in plan['pairs']:
                     file = files[pair['file_index']]
                     slot = slots[pair['slot_index']]
                     tags = file['tags']
                     if pair['confidence'] != 'clear':
+                        if (pair['file_index'] in duplicate_indexes and
+                                pair.get('ambiguity_reasons') == [
+                                    'another local file fits this release track']):
+                            # The duplicate decision below owns both copies;
+                            # emitting a second "confirm this match" card makes
+                            # one problem look like two unrelated problems.
+                            continue
                         if emit(
                             job_id=self.job_id, finding_type='reconciliation_unresolved',
                             severity='info', entity_type='track' if file.get('db') else 'file',
@@ -624,7 +796,8 @@ class LibraryReconciliationJob(RepairJob):
                             details={**common, 'current_tags': tags, 'acoustid': file['acoustid'],
                                      'fingerprint_key': file['acoustid'].get('fingerprint_key'),
                                      'expected_title': slot['title'], 'match_reasons': pair['reasons'],
-                                     'confidence': pair['confidence']}):
+                                     'confidence': pair['confidence'],
+                                     'playlists': list(file.get('playlists') or [])}):
                             result.findings_created += 1
                         continue
                     target = {'name': slot['title'], 'track_number': slot['track_number'],
@@ -723,6 +896,8 @@ class LibraryReconciliationJob(RepairJob):
                         result.findings_created += 1
 
                 for file_index in plan['extra_files']:
+                    if file_index in duplicate_indexes and file_index not in duplicate_groups:
+                        continue
                     file = files[file_index]
                     audio = file['acoustid']
                     recordings = audio.get('recordings') or []
@@ -734,6 +909,9 @@ class LibraryReconciliationJob(RepairJob):
                                         files[pair['file_index']]['acoustid'].get('fingerprint_key') ==
                                         audio['fingerprint_key']]
                     competing_paths = list(dict.fromkeys(competing_paths + same_audio_paths))
+                    duplicate_indexes = duplicate_groups.get(file_index) or []
+                    duplicate_copies = [_duplicate_copy(files[index])
+                                        for index in duplicate_indexes]
                     identified = (audio.get('status') == 'ok' and
                                   float(best.get('score') or 0) >= 0.80 and
                                   not fingerprint_is_ambiguous(recordings) and
@@ -744,18 +922,29 @@ class LibraryReconciliationJob(RepairJob):
                                'size_bytes': file['size_bytes'], 'mtime_ns': file['mtime_ns'],
                                'track_id': file['db']['id'] if file.get('db') else None,
                                'competing_copies': competing_paths,
+                               'duplicate_copies': duplicate_copies,
+                               'resolution_kind': ('duplicate_copies'
+                                                   if duplicate_copies else ''),
+                               'tracks': duplicate_copies,
+                               'playlists': list(file.get('playlists') or []),
                                'acoustid_title': best.get('title'),
                                'acoustid_artist': best.get('artist'),
                                'acoustid_score': best.get('score')}
                     if emit(
                         job_id=self.job_id,
-                        finding_type='reconciliation_extra' if identified else 'reconciliation_unresolved',
-                        severity='warning' if identified else 'info',
+                        finding_type=('reconciliation_duplicate' if duplicate_copies else
+                                      'reconciliation_extra' if identified else
+                                      'reconciliation_unresolved'),
+                        severity='warning' if identified or duplicate_copies else 'info',
                         entity_type='track' if file.get('db') else 'file',
                         entity_id=str(file['db']['id']) if file.get('db') else file['path'],
                         file_path=file['path'],
-                        title=f'Unassigned audio: {file["tags"].get("title") or os.path.basename(file["path"])}',
-                        description=('Another file also fits this release slot; choose a keeper.'
+                        title=((f'Duplicate copies: {best.get("title") or file["tags"].get("title")}'
+                               if duplicate_copies else
+                               f'Unassigned audio: {file["tags"].get("title") or os.path.basename(file["path"])}')),
+                        description=('These files identify as the same release track; choose a keeper.'
+                                     if duplicate_copies else
+                                     'Another file also fits this release slot; choose a keeper.'
                                      if competing_paths else
                                      'Audio does not fit a slot on the selected release.'
                                      if identified else 'Audio identity could not be established.'),
@@ -767,6 +956,12 @@ class LibraryReconciliationJob(RepairJob):
                     saved_intent = intents.get(str(album_id))
                     scope = (saved_intent[0] if saved_intent and
                              saved_intent[1:] == (source, release_id) else '')
+                    if not scope and len(files) == 1 and files[0].get('playlists'):
+                        # A lone album track that is actively referenced by a
+                        # playlist is positive partial-acquisition evidence.
+                        # Treat absent release slots as intentionally unowned;
+                        # do not persist a guess or request the other tracks.
+                        scope = 'partial'
                     if not scope:
                         if emit(
                             job_id=self.job_id, finding_type='reconciliation_intent',

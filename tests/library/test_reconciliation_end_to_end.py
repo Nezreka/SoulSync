@@ -15,7 +15,7 @@ from mutagen.flac import FLAC
 from core.library.reconciliation_evidence import ReconciliationEvidence
 from core.repair_jobs.base import JobContext
 from core.repair_jobs.library_reconciliation import (
-    LibraryReconciliationJob, _candidate_evidence, _group_disc_folders,
+    LibraryReconciliationJob, _candidate_evidence, _candidate_shape, _group_disc_folders,
     _normalize_slot, _suggest_filename,
 )
 from core.repair_worker import RepairWorker
@@ -48,6 +48,10 @@ def test_candidate_evidence_displays_the_acoustid_recording_that_supports_the_sl
         'acoustid': {'recordings': [
             {'mbid': 'play-id', 'title': 'Play Crack the Sky',
              'artist': 'Brand New', 'score': 0.999},
+            {'mbid': 'play-id-2', 'title': 'Play Crack the Sky!',
+             'artist': 'Brand New', 'score': 0.999},
+            {'mbid': 'play-live-id', 'title': 'Play Crack the Sky (Live)',
+             'artist': 'Brand New', 'score': 0.999},
             {'mbid': 'tautou-id', 'title': 'Tautou',
              'artist': 'Brand New', 'score': 0.999},
         ]},
@@ -65,10 +69,28 @@ def test_candidate_evidence_displays_the_acoustid_recording_that_supports_the_sl
         files, (1, 1, 0, 'musicbrainz', 'release-id', slots, plan))['pairs'][0]
 
     assert pair['audio_title'] == 'Tautou'
-    assert pair['audio_alternatives'] == [{
-        'mbid': 'play-id', 'title': 'Play Crack the Sky',
-        'artist': 'Brand New', 'score': 0.999,
-    }]
+    assert pair['audio_alternatives'] == [
+        {'mbid': 'play-id', 'title': 'Play Crack the Sky',
+         'artist': 'Brand New', 'score': 0.999, 'recording_count': 2},
+        {'mbid': 'play-live-id', 'title': 'Play Crack the Sky (Live)',
+         'artist': 'Brand New', 'score': 0.999, 'recording_count': 1},
+    ]
+    assert pair['audio_recording_count'] == 1
+
+
+def test_candidate_shape_sorts_numbered_and_unnumbered_missing_slots():
+    slots = [
+        {'title': 'Numbered', 'disc_number': 1, 'track_number': 2},
+        {'title': 'Unnumbered', 'disc_number': 1, 'track_number': None},
+    ]
+    plan = {'pairs': [], 'missing_slots': [1, 0], 'extra_files': []}
+
+    shape = _candidate_shape((0, 0, 0, 'musicbrainz', 'release', slots, plan))
+
+    assert shape[2] == (
+        (1, False, 2, 'numbered'),
+        (1, True, 0, 'unnumbered'),
+    )
 
 
 def _album(db, path):
@@ -94,6 +116,45 @@ def _minimal_flac(path, tags):
     for key, value in tags.items():
         audio[key] = [value]
     audio.save()
+
+
+def test_load_rows_indexes_the_scan_mount_when_stored_mount_also_exists(tmp_path):
+    server_root = tmp_path / 'server-mount'
+    scan_root = tmp_path / 'scan-mount'
+    suffix = ('Lamb of God', 'Ashes of the Wake', '01 - Laid to Rest.flac')
+    server_path = server_root.joinpath(*suffix)
+    scan_path = scan_root.joinpath(*suffix)
+    server_path.parent.mkdir(parents=True)
+    scan_path.parent.mkdir(parents=True)
+    server_path.write_bytes(b'audio fixture')
+    scan_path.hardlink_to(server_path)
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, server_path)
+    context = JobContext(db=db, transfer_folder=str(scan_root), config_manager=None)
+
+    tracks, _albums = LibraryReconciliationJob()._load_rows(context, [str(scan_root)])
+
+    assert tracks[str(scan_path)]['id'] == '1'
+
+
+def test_load_rows_does_not_join_distinct_libraries_by_relative_path(tmp_path):
+    server_root = tmp_path / 'server-mount'
+    scan_root = tmp_path / 'other-library'
+    suffix = ('Lamb of God', 'Ashes of the Wake', '01 - Laid to Rest.flac')
+    server_path = server_root.joinpath(*suffix)
+    scan_path = scan_root.joinpath(*suffix)
+    server_path.parent.mkdir(parents=True)
+    scan_path.parent.mkdir(parents=True)
+    server_path.write_bytes(b'server audio')
+    scan_path.write_bytes(b'other audio!')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, server_path)
+    context = JobContext(db=db, transfer_folder=str(scan_root), config_manager=None)
+
+    tracks, _albums = LibraryReconciliationJob()._load_rows(context, [str(scan_root)])
+
+    assert str(server_path) in tracks
+    assert str(scan_path) not in tracks
 
 
 def test_scan_review_intent_and_exact_missing_request(tmp_path, monkeypatch):
@@ -172,6 +233,89 @@ def test_scan_review_intent_and_exact_missing_request(tmp_path, monkeypatch):
     pending = worker.get_review_case(case_id)['items']
     assert any(item['finding_type'] == 'reconciliation_intent' and
                item['details']['release_id'] == 'alternate-edition' for item in pending)
+
+
+def test_stored_release_breaks_an_equal_fit_without_human_review(tmp_path, monkeypatch):
+    import core.repair_jobs.library_reconciliation as module
+
+    root = tmp_path / 'music'
+    folder = root / 'Lamb of God' / 'Ashes of the Wake'
+    folder.mkdir(parents=True)
+    path = folder / '01 - Laid to Rest.flac'
+    path.write_bytes(b'audio fixture')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, path)
+    with db._get_connection() as conn:
+        conn.execute("UPDATE albums SET musicbrainz_release_id = 'other-release' WHERE id = 10")
+        conn.commit()
+    worker = RepairWorker(database=db)
+    client = _Acoustid({path.name: {
+        'mbid': 'laid-id', 'title': 'Laid to Rest',
+        'artist': 'Lamb of God', 'score': 0.99,
+    }})
+    monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
+    monkeypatch.setattr(module, '_read_file_tags', lambda _path: {
+        'title': 'Laid to Rest', 'artist': 'Lamb of God',
+        'album': 'Ashes of the Wake', 'track_number': 1,
+        'disc_number': 1, 'duration_ms': 200000,
+    })
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args: [
+        {'id': 'laid-id', 'name': 'Laid to Rest',
+         'artists': [{'name': 'Lamb of God'}],
+         'track_number': 1, 'disc_number': 1, 'duration_ms': 200000},
+    ])
+    monkeypatch.setattr(module, 'get_album_for_source', lambda *_args: {
+        'name': 'Ashes of the Wake', 'artists': [{'name': 'Lamb of God'}]})
+    context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
+                         acoustid_client=client, create_finding=worker._create_finding)
+
+    result = LibraryReconciliationJob().scan(context)
+
+    assert result.findings_created == 0
+    assert worker.get_review_cases(job_id='library_reconciliation')['total'] == 0
+
+
+def test_lone_playlist_track_is_treated_as_partial_album_intent(tmp_path, monkeypatch):
+    import core.repair_jobs.library_reconciliation as module
+
+    root = tmp_path / 'music'
+    folder = root / 'Lamb of God' / 'Ashes of the Wake'
+    folder.mkdir(parents=True)
+    path = folder / '01 - Laid to Rest.flac'
+    path.write_bytes(b'audio fixture')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, path)
+    worker = RepairWorker(database=db)
+    client = _Acoustid({path.name: {
+        'mbid': 'laid-id', 'title': 'Laid to Rest',
+        'artist': 'Lamb of God', 'score': 0.99,
+    }})
+    monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
+    monkeypatch.setattr(module, '_read_file_tags', lambda _path: {
+        'title': 'Laid to Rest', 'artist': 'Lamb of God',
+        'album': 'Ashes of the Wake', 'track_number': 1,
+        'disc_number': 1, 'duration_ms': 200000,
+    })
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args: [
+        {'id': 'laid-id', 'name': 'Laid to Rest',
+         'artists': [{'name': 'Lamb of God'}],
+         'track_number': 1, 'disc_number': 1, 'duration_ms': 200000},
+        {'id': 'hourglass-id', 'name': 'Hourglass',
+         'artists': [{'name': 'Lamb of God'}],
+         'track_number': 2, 'disc_number': 1, 'duration_ms': 240000},
+    ])
+    monkeypatch.setattr(module, 'get_album_for_source', lambda *_args: {
+        'name': 'Ashes of the Wake', 'artists': [{'name': 'Lamb of God'}]})
+    context = JobContext(
+        db=db, transfer_folder=str(root), config_manager=None,
+        acoustid_client=client, create_finding=worker._create_finding,
+        playlist_membership=lambda: {'1': ['Imported playlist']},
+    )
+
+    result = LibraryReconciliationJob().scan(context)
+
+    assert result.findings_created == 0
+    assert worker.get_review_cases(job_id='library_reconciliation')['total'] == 0
 
 
 def test_musicbrainz_release_group_missing_request_uses_exact_edition(tmp_path, monkeypatch):
@@ -568,7 +712,9 @@ def test_ambiguous_unassigned_audio_is_not_offered_for_quarantine(tmp_path, monk
     root = tmp_path / 'music'
     root.mkdir()
     path = root / '01 - Laid to Rest.flac'
+    untracked_copy = root / 'copy - Laid to Rest.flac'
     path.write_bytes(b'audio fixture')
+    untracked_copy.write_bytes(b'untracked audio fixture')
     db = MusicDatabase(str(tmp_path / 'music.db'))
     _album(db, path)
     worker = RepairWorker(database=db)
@@ -598,21 +744,32 @@ def test_ambiguous_unassigned_audio_is_not_offered_for_quarantine(tmp_path, monk
     assert all(item['finding_type'] != 'reconciliation_extra' for item in findings)
 
 
-def test_competing_copies_are_reviewed_without_picking_one_to_quarantine(tmp_path, monkeypatch):
+def test_competing_audio_copies_become_one_keeper_decision(tmp_path, monkeypatch):
     import core.repair_jobs.library_reconciliation as module
 
     root = tmp_path / 'music'
     root.mkdir()
     first = root / '01 - Hourglass.flac'
     second = root / 'copy - Hourglass.flac'
+    third = root / 'single - Hourglass.flac'
     first.write_bytes(b'first fixture')
     second.write_bytes(b'second fixture')
+    third.write_bytes(b'third fixture')
     db = MusicDatabase(str(tmp_path / 'music.db'))
     _album(db, first)
+    with db._get_connection() as conn:
+        conn.execute("""INSERT INTO tracks
+            (id, album_id, artist_id, title, track_number, file_path)
+            VALUES (2, 10, 1, 'Hourglass', 1, ?)""", (str(second),))
+        conn.execute("""INSERT INTO tracks
+            (id, album_id, artist_id, title, track_number, file_path)
+            VALUES (3, 10, 1, 'Hourglass', 1, ?)""", (str(third),))
+        conn.commit()
     worker = RepairWorker(database=db)
     client = _Acoustid({path.name: {'mbid': 'hourglass-id', 'title': 'Hourglass',
                                    'artist': 'Lamb of God', 'score': 0.99}
-                        for path in (first, second)})
+                        for path in (first, second, third)})
+    monkeypatch.setattr(RepairWorker, 'acoustid_client', property(lambda _self: client))
     monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
     monkeypatch.setattr(module, '_read_file_tags', lambda _path: {
         'title': 'Hourglass', 'artist': 'Lamb of God',
@@ -623,14 +780,31 @@ def test_competing_copies_are_reviewed_without_picking_one_to_quarantine(tmp_pat
         {'id': 'hourglass-id', 'name': 'Hourglass', 'track_number': 1,
          'disc_number': 1, 'duration_ms': 200000},
     ])
-    context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
-                         acoustid_client=client, create_finding=worker._create_finding)
+    context = JobContext(
+        db=db, transfer_folder=str(root), config_manager=None,
+        acoustid_client=client, create_finding=worker._create_finding,
+        playlist_membership=lambda: {'2': ['Singles queue']},
+    )
     LibraryReconciliationJob().scan(context)
     case_id = worker.get_review_cases()['items'][0]['case_id']
     findings = worker.get_review_case(case_id)['items']
-    assert all(item['finding_type'] == 'reconciliation_unresolved' for item in findings), [
-        item['finding_type'] for item in findings]
-    assert any(item['details'].get('competing_copies') for item in findings)
+    assert [item['finding_type'] for item in findings] == ['reconciliation_duplicate']
+    copies = findings[0]['details']['duplicate_copies']
+    assert {copy['track_id'] for copy in copies} == {'1', '2', '3'}
+    assert next(copy for copy in copies if copy['track_id'] == '2')['playlists'] == [
+        'Singles queue']
+
+    outcome = worker.apply_review_decision(
+        case_id, findings[0]['id'], evidence_token=findings[0]['evidence_token'],
+        action='fix', fix_action='1')
+
+    assert outcome['success'] is True
+    assert first.exists()
+    assert not second.exists()
+    assert not third.exists()
+    with db._get_connection() as conn:
+        assert [row[0] for row in conn.execute(
+            'SELECT id FROM tracks ORDER BY id').fetchall()] == ['1']
 
 
 def test_audio_backed_retag_writes_real_flac_and_track_row(tmp_path, monkeypatch):

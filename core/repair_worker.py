@@ -58,6 +58,7 @@ _ABSENCE_IS_THE_FINDING = frozenset({'dead_file', 'empty_folder'})
 
 DESTRUCTIVE_FINDING_TYPES = frozenset({
     'reconciliation_extra',
+    'reconciliation_duplicate',
     'orphan_file',            # default 'staging' MOVES the file; 'delete' removes it
     'dead_file',              # 'remove' drops the library row + file
     'corrupt_audio',          # moves to the deleted-files folder, re-wishlists
@@ -75,7 +76,8 @@ DESTRUCTIVE_FINDING_TYPES = frozenset({
 # the legacy grouped Fix All nor the unscoped "safe" sweep may run them.
 REVIEW_ONLY_FINDING_TYPES = frozenset({
     'reconciliation_metadata', 'reconciliation_extra',
-    'reconciliation_intent', 'reconciliation_missing', 'reconciliation_release',
+    'reconciliation_duplicate', 'reconciliation_intent',
+    'reconciliation_missing', 'reconciliation_release',
 })
 
 # Display metadata for every finding type the jobs can emit. The UI used to
@@ -88,6 +90,7 @@ REVIEW_ONLY_FINDING_TYPES = frozenset({
 FINDING_TYPE_META = {
     'reconciliation_metadata': {'label': 'Audio-backed Repair', 'verb': 'Apply Repair'},
     'reconciliation_extra': {'label': 'Unassigned Audio', 'verb': 'Quarantine File'},
+    'reconciliation_duplicate': {'label': 'Duplicate Copies', 'verb': 'Choose Keeper'},
     'reconciliation_unresolved': {'label': 'Unidentified Audio'},
     'reconciliation_intent': {'label': 'Album Completion Intent', 'verb': 'Choose Intent'},
     'reconciliation_missing': {'label': 'Missing Wanted Track', 'verb': 'Request Track'},
@@ -2184,6 +2187,7 @@ class RepairWorker:
         return {
             'reconciliation_metadata': self._fix_reconciliation_metadata,
             'reconciliation_extra': self._fix_reconciliation_extra,
+            'reconciliation_duplicate': self._fix_reconciliation_duplicate,
             'reconciliation_intent': self._fix_reconciliation_intent,
             'reconciliation_missing': self._fix_reconciliation_missing,
             'reconciliation_release': self._fix_reconciliation_release,
@@ -4138,6 +4142,46 @@ class RepairWorker:
                 conn.close()
         return {'success': True, 'action': 'quarantined',
                 'message': 'File moved to recoverable quarantine', 'quarantine_path': dest}
+
+    def _fix_reconciliation_duplicate(self, entity_type, entity_id, file_path, details):
+        """Choose one audio-proven copy and reuse the guarded duplicate remover."""
+        error = self._reconciliation_release_guard(details)
+        if error:
+            return {'success': False, 'error': error}
+        if not details.get('_fix_action'):
+            return {'success': False, 'error': 'Choose which copy to keep'}
+        copies = details.get('duplicate_copies') or []
+        if len(copies) < 2:
+            return {'success': False, 'error': 'The duplicate evidence is incomplete'}
+        conn = self.db._get_connection()
+        try:
+            for copy in copies:
+                track_id = copy.get('track_id')
+                reviewed_path = copy.get('file_path')
+                if not track_id or not reviewed_path:
+                    return {'success': False, 'error': 'The duplicate evidence is incomplete'}
+                row = conn.execute('SELECT file_path FROM tracks WHERE id = ?',
+                                   (track_id,)).fetchone()
+                stored_path = row[0] if row else ''
+                current_path = _resolve_file_path(
+                    stored_path, self.transfer_folder, config_manager=self._config_manager)
+                if not current_path:
+                    return {'success': False,
+                            'error': 'A duplicate track changed; rescan before applying'}
+                try:
+                    same_file = os.path.samefile(current_path, reviewed_path)
+                except OSError:
+                    same_file = (os.path.normcase(os.path.normpath(current_path)) ==
+                                 os.path.normcase(os.path.normpath(reviewed_path)))
+                if not same_file:
+                    return {'success': False,
+                            'error': 'A duplicate track changed; rescan before applying'}
+                error = self._reconciliation_file_guard(reviewed_path, copy)
+                if error:
+                    return {'success': False, 'error': error}
+        finally:
+            conn.close()
+        return self._fix_duplicates(entity_type, entity_id, file_path, details)
 
     def _fix_library_retag(self, entity_type, entity_id, file_path, details):
         """Apply a library re-tag finding: write each track's planned tags in

@@ -129,8 +129,15 @@ function TrackRows({ pairs }: { pairs: Data[] }) {
           : [];
         const audioAlternatives = objects(pair.audio_alternatives);
         const alternativeNames = audioAlternatives
-          .map((recording) => label(recording.title) || 'unnamed recording')
+          .map((recording) => {
+            const name = label(recording.title) || 'unnamed recording';
+            const linked = count(recording.recording_count);
+            return linked > 1 ? `${name} (${linked} IDs)` : name;
+          })
           .slice(0, 2);
+        const playlists = Array.isArray(pair.playlists)
+          ? pair.playlists.map(label).filter(Boolean)
+          : [];
         const reasons = Array.isArray(pair.reasons) ? pair.reasons.map(label).filter(Boolean) : [];
         const localTitle = label(pair.tag_title) || label(pair.file) || 'Unknown file';
         const releaseTitle = label(pair.slot_title) || 'Unknown release track';
@@ -157,6 +164,9 @@ function TrackRows({ pairs }: { pairs: Data[] }) {
                 {label(pair.file) && label(pair.file) !== localTitle && (
                   <span>{label(pair.file)}</span>
                 )}
+                {playlists.length > 0 && (
+                  <span className={styles.playlistLine}>Playlist: {playlists.join(', ')}</span>
+                )}
               </div>
               <EvidenceIcon name="arrow" />
               <div>
@@ -166,6 +176,8 @@ function TrackRows({ pairs }: { pairs: Data[] }) {
                   <span className={styles.audioLine}>
                     <EvidenceIcon name="audio" /> {label(pair.audio_title)}
                     {Boolean(pair.audio_score) && ` · ${percent(pair.audio_score)}`}
+                    {count(pair.audio_recording_count) > 1 &&
+                      ` · ${count(pair.audio_recording_count)} catalog IDs`}
                   </span>
                 )}
                 {audioAlternatives.length > 0 && (
@@ -244,6 +256,11 @@ function EvidenceSummary({ details }: { details: Data }) {
   const extra = Array.isArray(candidate.extra) ? candidate.extra.length : 0;
   const audio = pairs.filter((pair) => Boolean(pair.audio_title || pair.audio_score)).length;
   const ambiguous = Math.max(0, matched - clear);
+  const playlistNames = new Set(
+    pairs.flatMap((pair) =>
+      Array.isArray(pair.playlists) ? pair.playlists.map(label).filter(Boolean) : [],
+    ),
+  );
   return (
     <section className={styles.summaryStrip} aria-label="Evidence summary">
       <StatusChip tone={matched === total && total > 0 ? 'good' : 'warning'} icon="disc">
@@ -263,13 +280,87 @@ function EvidenceSummary({ details }: { details: Data }) {
           {ambiguous} uncertain
         </StatusChip>
       )}
+      {playlistNames.size > 0 && (
+        <StatusChip tone="info" icon="info">
+          In {playlistNames.size} playlist{playlistNames.size === 1 ? '' : 's'}
+        </StatusChip>
+      )}
+    </section>
+  );
+}
+
+function DuplicateCopies({
+  details,
+  onKeepCopy,
+  busy,
+}: {
+  details: Data;
+  onKeepCopy?: (trackId: string) => void;
+  busy: boolean;
+}) {
+  const copies = objects(details.duplicate_copies);
+  if (copies.length < 2) return null;
+  return (
+    <section className={styles.duplicateCard}>
+      <div className={styles.sectionHeading}>
+        <div>
+          <h4>
+            <EvidenceIcon name="warning" /> Duplicate local copies
+          </h4>
+          <p>These files identify as the same track. Choose the copy SoulSync should keep.</p>
+        </div>
+      </div>
+      <div className={styles.duplicateList}>
+        {copies.map((copy, index) => {
+          const path = label(copy.file_path);
+          const playlists = Array.isArray(copy.playlists)
+            ? copy.playlists.map(label).filter(Boolean)
+            : [];
+          const trackId = label(copy.track_id || copy.id);
+          return (
+            <article key={`${trackId}-${path}-${index}`}>
+              <div>
+                <strong>{path.split('/').pop() || label(copy.title) || 'Unknown file'}</strong>
+                <small>{path}</small>
+                {playlists.length > 0 && <span>Playlist: {playlists.join(', ')}</span>}
+              </div>
+              {onKeepCopy && trackId && (
+                <button type="button" disabled={busy} onClick={() => onKeepCopy(trackId)}>
+                  Keep this copy
+                </button>
+              )}
+            </article>
+          );
+        })}
+      </div>
     </section>
   );
 }
 
 function AudioEvidence({ details }: { details: Data }) {
   const audio = object(details.acoustid);
-  const recordings = objects(audio.recordings).sort((a, b) => count(b.score) - count(a.score));
+  const grouped = new Map<string, Data>();
+  for (const recording of objects(audio.recordings)) {
+    const identity = `${label(recording.title)
+      .toLocaleLowerCase()
+      .replaceAll(/[^\p{L}\p{N}\s]/gu, ' ')
+      .replaceAll(/\s+/g, ' ')
+      .trim()}::${label(recording.artist)
+      .toLocaleLowerCase()
+      .replaceAll(/[^\p{L}\p{N}\s]/gu, ' ')
+      .replaceAll(/\s+/g, ' ')
+      .trim()}`;
+    const current = grouped.get(identity);
+    if (!current || count(recording.score) > count(current.score)) {
+      grouped.set(identity, {
+        ...recording,
+        recording_count: count(current?.recording_count) + 1,
+      });
+    } else {
+      current.recording_count = count(current.recording_count) + 1;
+    }
+  }
+  const recordings = [...grouped.values()].sort((a, b) => count(b.score) - count(a.score));
   const status = label(audio.status || details.acoustid_status);
   if (!status) return null;
   return (
@@ -289,6 +380,9 @@ function AudioEvidence({ details }: { details: Data }) {
           {recordings.slice(0, 5).map((recording, index) => (
             <li key={`${label(recording.mbid)}-${index}`}>
               <strong>{audioSummary(recording) || 'Unnamed recording'}</strong>
+              {count(recording.recording_count) > 1 && (
+                <small>{count(recording.recording_count)} linked recording IDs</small>
+              )}
               {Boolean(recording.mbid) && <small>Recording ID: {label(recording.mbid)}</small>}
             </li>
           ))}
@@ -581,10 +675,12 @@ function Facts({ finding, details }: { finding: ReviewFinding; details: Data }) 
 export function ReconciliationEvidence({
   finding,
   onPin,
+  onKeepCopy,
   busy = false,
 }: {
   finding: ReviewFinding;
   onPin?: (index: number) => void;
+  onKeepCopy?: (trackId: string) => void;
   busy?: boolean;
 }) {
   const details = object(finding.details);
@@ -592,6 +688,7 @@ export function ReconciliationEvidence({
   const missing = objects(details.missing_tracks);
   const reasons = Array.isArray(details.match_reasons) ? details.match_reasons.map(label) : [];
   const primaryPairs = objects(objects(details.candidates)[0]?.pairs);
+  const duplicateCopies = objects(details.duplicate_copies);
 
   return (
     <div className={styles.reconciliationEvidence}>
@@ -626,6 +723,7 @@ export function ReconciliationEvidence({
         </section>
       )}
       <ReleaseCandidates details={details} onPin={onPin} busy={busy} />
+      <DuplicateCopies details={details} onKeepCopy={onKeepCopy} busy={busy} />
       {missing.length > 0 && (
         <section className={styles.problemCard} data-tone="danger">
           <h4>
@@ -640,18 +738,20 @@ export function ReconciliationEvidence({
           </ol>
         </section>
       )}
-      {Array.isArray(details.competing_copies) && details.competing_copies.length > 0 && (
-        <section className={styles.problemCard} data-tone="warning">
-          <h4>
-            <EvidenceIcon name="warning" /> Other files that fit this slot
-          </h4>
-          <ul>
-            {details.competing_copies.map((path, index) => (
-              <li key={index}>{label(path)}</li>
-            ))}
-          </ul>
-        </section>
-      )}
+      {duplicateCopies.length === 0 &&
+        Array.isArray(details.competing_copies) &&
+        details.competing_copies.length > 0 && (
+          <section className={styles.problemCard} data-tone="warning">
+            <h4>
+              <EvidenceIcon name="warning" /> Other files that fit this slot
+            </h4>
+            <ul>
+              {details.competing_copies.map((path, index) => (
+                <li key={index}>{label(path)}</li>
+              ))}
+            </ul>
+          </section>
+        )}
       <details className={styles.technicalEvidence}>
         <summary>
           <EvidenceIcon name="info" /> Technical evidence

@@ -313,6 +313,7 @@
 .trackSection,
 .releaseSection,
 .changesCard,
+.duplicateCard,
 .problemCard,
 .technicalEvidence {
   border: 1px solid #3b4053;
@@ -323,6 +324,7 @@
 .trackSection,
 .releaseSection,
 .changesCard,
+.duplicateCard,
 .problemCard {
   padding: 18px;
 }
@@ -461,6 +463,10 @@
   gap: 4px;
   color: #d9b66f !important;
 }
+.playlistLine {
+  color: #8fc5ff !important;
+  font-weight: 650;
+}
 .audioLine .evidenceIcon {
   width: 13px;
   height: 13px;
@@ -595,6 +601,48 @@
   padding: 8px 12px;
   cursor: pointer;
   width: fit-content;
+}
+.duplicateCard {
+  border-color: #806537;
+  background: #282319;
+}
+.duplicateList {
+  display: grid;
+  gap: 9px;
+}
+.duplicateList article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid #665533;
+  border-radius: 10px;
+  background: #211e18;
+}
+.duplicateList article > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.duplicateList small,
+.duplicateList span {
+  color: #aeb6c9;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.duplicateList span {
+  color: #8fc5ff;
+  font-weight: 650;
+}
+.duplicateList button {
+  flex: 0 0 auto;
+  border: 1px solid #8b7548;
+  border-radius: 8px;
+  padding: 8px 11px;
+  color: #fff0c8;
+  background: #463a22;
+  cursor: pointer;
 }
 .sameMapping {
   display: flex;
