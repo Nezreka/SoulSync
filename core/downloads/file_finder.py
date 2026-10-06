@@ -185,8 +185,11 @@ def _search_in_directory(
             if not _is_audio_candidate(file_path):
                 continue
 
-            # Tier 1 + 2: exact basename match.
-            if filename == target_basename:
+            # Tier 1 + 2: exact basename match. An extensionless encoded
+            # title (``id||title``) matches the stem exactly; letting it fall
+            # to the fuzzy tier picked 'ANGEL (Live).flac' over 'ANGEL.flac'.
+            stem, ext = os.path.splitext(filename)
+            if target_basename in (filename, stem):
                 if api_dirs and _path_matches_api_dirs(file_path, api_dirs):
                     logger.info(
                         "Found path-confirmed match in %s: %s",
@@ -203,7 +206,6 @@ def _search_in_directory(
                 continue
 
             # Tier 3: slskd dedup suffix.
-            stem, ext = os.path.splitext(filename)
             stripped_stem = _SLSKD_DEDUP_SUFFIX.sub('', stem)
             if stripped_stem != stem and stripped_stem + ext == target_basename:
                 if api_dirs and _path_matches_api_dirs(file_path, api_dirs):
@@ -236,7 +238,6 @@ def _search_in_directory(
             # comparison is unchanged, so every previously-accepted
             # match still passes.
             normalized_file = _normalize_for_finding(filename)
-            stem, _ext = os.path.splitext(filename)
             normalized_stem = _normalize_for_finding(stem)
             similarity = max(
                 SequenceMatcher(
