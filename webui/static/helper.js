@@ -3473,6 +3473,8 @@ const WHATS_NEW = {
         { title: 'New tagging options', desc: 'Opt-in artist.nfo for Jellyfin, Kodi and Emby, original release date as DATE, last.fm artist tags as a genre fallback, and $label in the album path template (#1497, #1520, #1544).', page: 'settings' },
         { title: 'Audiobook import fixes', desc: 'Single-file torrents import instead of stalling on no audio files, and release search finds series volumes named Series 03 - Title (#1554, #1563).' },
         { title: 'Soulseek cleanup scope', desc: 'Cleanup only removes this client\'s own transfers and searches, with a scope setting for single-client installs (#1501, #1524).', page: 'settings' },
+        { title: 'Deezer matching fixes', desc: 'Identification, re-identify and enrichment stop picking karaoke or reprise versions over the original song, and MP3s get their MusicBrainz recording ID (#1565).' },
+        { title: 'Every profile\'s video follows', desc: 'Followed people, studios, channels, playlists and shows are scanned for every profile, not just admin.' },
         { title: 'Earlier versions', desc: '3.5.0 brought the video discover overhaul, per-profile sync and discover, and repair jobs on the automation engine.' },
     ],
     '3.5.0': [

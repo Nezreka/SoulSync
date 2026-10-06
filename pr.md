@@ -15,6 +15,7 @@ download discography learns about watchlists and editions, music videos and epis
 - episode requests: request one episode instead of the whole show, approved per episode. youtube request kinds, and a podcast watchlist gate (#1500).
 - the request button shows on episode rows for profiles that can't download, specials (season 0) can be requested, and video pages show the right buttons for non-admin profiles (#1531, #1532, #1502).
 - video automation hardening: approvals reach every profile that asked, quality profiles are admin-only, and episode wishlist rows stop falling back to profile 1 (#1505).
+- the video watchlist went per-profile, but the scan automations run as admin and only read admin's list, so a non-admin's followed people, studios, channels, playlists and shows were never scanned. the admin run now does a pass per profile that follows something, as that profile.
 
 ## dashboard
 
@@ -33,6 +34,8 @@ download discography learns about watchlists and editions, music videos and epis
 
 ## tagging and metadata
 
+- deezer matching stops picking the wrong song or version. deezer's free text ranks karaoke and reprise tracks above the original and sometimes leaves the original out, so identification could save the reprise. discovery and re-identify now also use the field-scoped song search, enrichment prefers the exact title and won't take a different version, and the pool fix and rematch save where the match really came from (thanks @cremonies) (#1565).
+- mp3s get their musicbrainz recording id. picard keeps it in a UFID frame the tag reader never read, so an mp3 had every musicbrainz id but the recording while its flac twin had one (thanks c5pie on discord).
 - musicbrainz recording match was picking the wrong same-named band (#1509).
 - wishlist downloads lost featured artists because they never got the metadata source (#1508).
 - ARTISTSORT and ALBUMARTISTSORT follow the primary source (#1510).
@@ -48,7 +51,7 @@ download discography learns about watchlists and editions, music videos and epis
 
 - audiobook imports stop stalling on single-file torrents. the path resolver only understood folders, so a single .m4b never resolved and the import said "no audio files in the download". it handles files now, including a client category subfolder (thanks SeadogsBooty on discord) (#1563).
 - audiobook release search finds series volumes named "Series 03 - Title" (thanks @SimpleSimonLA) (#1554).
-- soulseek cleanup only removes this client's own transfers and searches, with a scope setting for single-client installs (thanks @splitsec2) (#1501, #1524).
+- soulseek cleanup only removes this client's own transfers and searches, with a scope setting for single-client installs (thanks @splitsec2) (#1501, #1524). the list of what's ours is saved now, so a restart doesn't make every older transfer look foreign and pile up in slskd.
 - own library maintenance tools and repair re-downloads go to the owning profile's library (#1504, #1530).
 - the expired download cleaner protects a download by whether the track is still in a playlist, not by playlist name (#1558). it also matches by the track's id, so a song still in discover weekly isn't treated as gone just because deezer credits the artist differently ("GTA" vs "Good Times Ahead").
 - running an automation manually works even when it's disabled (#1560).

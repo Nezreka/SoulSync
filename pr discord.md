@@ -8,6 +8,6 @@ Playlist sync: wishlisted tracks download as a playlist-named batch so the libra
 
 Tagging: MusicBrainz stops matching the wrong same-named band, wishlist downloads keep featured artists, sort tags follow the primary source, "hip hop" and "hip-hop" merge, full-depth re-tag actually writes, and versioned recordings can be told apart. New opt-in artist.nfo for Jellyfin/Kodi/Emby, original date as DATE, and $label in album paths.
 
-Fixes: singles no longer show owned because the album has the same song, single-file audiobook torrents import instead of stalling (thanks SeadogsBooty), audiobook search finds "Series 03" volumes (thanks @SimpleSimonLA), Soulseek cleanup only touches its own transfers (thanks @splitsec2), and repair and tools fixes from @mandos21.
+Fixes: Deezer matching stops picking karaoke or reprise versions over the original (thanks @cremonies), MP3s get their MusicBrainz recording ID, non-admin video follows get scanned, singles no longer show owned because the album has the same song, single-file audiobook torrents import instead of stalling (thanks SeadogsBooty), audiobook search finds "Series 03" volumes (thanks @SimpleSimonLA), Soulseek cleanup only touches its own transfers (thanks @splitsec2), and repair and tools fixes from @mandos21.
 
 Full notes on GitHub.
