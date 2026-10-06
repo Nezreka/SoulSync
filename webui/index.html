@@ -7901,6 +7901,17 @@
                                                     different ID is never overwritten. To backfill folders you
                                                     already have, run the <em>Artist NFO Backfill</em> repair job.
                                                 </div>
+                                                <label class="toggle-row" style="margin-top: 10px;">
+                                                    <input type="checkbox" id="redownload-externally-deleted">
+                                                    <span>Re-download files deleted outside SoulSync</span>
+                                                </label>
+                                                <div class="help-text" style="margin-top: 6px;">
+                                                    When a library scan finds that a monitored track's file was
+                                                    deleted outside SoulSync, the track is wanted again and goes
+                                                    back to the Wishlist (on by default, like Lidarr). Turn off to
+                                                    treat such a deletion like <em>Don't download again</em>:
+                                                    the track is unmonitored instead.
+                                                </div>
                                             </div>
 
                                         </div>

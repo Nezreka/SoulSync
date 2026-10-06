@@ -20,6 +20,11 @@ Missing paths then advance only while their library root is known healthy:
 one miss is suspected, two are confirmed — or one, when a person pressed
 "Refresh & Scan" (``manual=True``). Unhealthy/unknown mounts defer the
 transition, and a recovered path returns to active.
+
+A confirmed miss makes a monitored track wanted again, the way Lidarr treats
+a file deleted outside it. ``library.redownload_externally_deleted`` turns
+that off: the deletion then counts as "don't download again" for a track left
+without a file.
 """
 
 from __future__ import annotations
@@ -40,6 +45,7 @@ MISSING_CONFIRMATION_SCANS = 2
 #: and confirming it would queue the whole library for re-download.
 MASS_MISSING_MIN = 50
 MASS_MISSING_SHARE = 0.25
+REDOWNLOAD_SETTING = "library.redownload_externally_deleted"
 
 
 def _file_rows_in_scope(
@@ -304,7 +310,8 @@ def rescan_files(
     ``missing`` for paths that did not resolve, ``path_drift``/``path_repointed``
     for renames spotted and repaired, ``missing_suspected``/``missing_confirmed``
     for lifecycle transitions written, and ``recovered`` for files that came
-    back.  Never raises for individual files — a broken file just stays on its
+    back.  ``released`` appears when ``library.redownload_externally_deleted``
+    is off and counts the tracks that are no longer wanted.  Never raises for individual files — a broken file just stays on its
     imported values.
 
     Stored paths are the legacy DB's (often the media server's) view of the
@@ -329,8 +336,18 @@ def rescan_files(
 
     total = len(rows)
     presence: List[int] = []
+    confirmed: List[int] = []
     _rescan_loop(database, rows, total, progress=progress, stats=stats,
-                 manual=manual, presence=presence, source=source)
+                 manual=manual, presence=presence, source=source,
+                 confirmed=confirmed)
+    if confirmed and not _redownload_externally_deleted():
+        # Before the presence consumer: it mirrors the wanted projection, so
+        # it has to see the track already released.
+        try:
+            stats["released"] = release_externally_deleted(database, confirmed)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("releasing externally deleted tracks failed: %s",
+                         exc, exc_info=True)
     logger.info(
         "Library v2 file rescan: %(scanned)d probed, %(updated)d updated, "
         "%(missing)d paths absent, %(path_repointed)d repointed, "
@@ -358,7 +375,8 @@ def rescan_files(
 _OBSERVATION_FLUSH_BATCH = 100
 
 
-def _flush_observations(database, pending, stats, presence=None) -> None:
+def _flush_observations(database, pending, stats, presence=None,
+                        confirmed=None) -> None:
     """Apply one buffered batch on a single connection, then close it.
 
     Each observation still commits on its own, so the write lock is held for
@@ -369,6 +387,9 @@ def _flush_observations(database, pending, stats, presence=None) -> None:
     the event acquisition cares about, and reporting it is what lets a scan
     hand its result straight to the wanted/Wishlist mirror instead of leaving
     it for the hourly reconcile to notice.
+
+    ``confirmed`` collects the file ids this batch moved to
+    ``missing_confirmed``.
     """
     if not pending:
         return
@@ -379,9 +400,11 @@ def _flush_observations(database, pending, stats, presence=None) -> None:
                     database, conn=conn, **payload)
                 if state:
                     stats[state] = stats.get(state, 0) + 1
-                if (changed and state == "missing_confirmed"
-                        and presence is not None and track_id):
-                    presence.append(int(track_id))
+                if changed and state == "missing_confirmed":
+                    if presence is not None and track_id:
+                        presence.append(int(track_id))
+                    if confirmed is not None:
+                        confirmed.append(int(payload["file_id"]))
                 continue
             outcome = _persist_present_observation(database, conn=conn, **payload)
             if outcome["updated"]:
@@ -396,7 +419,7 @@ def _flush_observations(database, pending, stats, presence=None) -> None:
 
 
 def _rescan_loop(database, rows, total, *, progress, stats, manual: bool = False,
-                 presence=None, source='scan') -> None:
+                 presence=None, source='scan', confirmed=None) -> None:
     """The per-file body of :func:`rescan_files`, in three ordered phases.
 
     The order is the behaviour, not an implementation detail:
@@ -427,7 +450,7 @@ def _rescan_loop(database, rows, total, *, progress, stats, manual: bool = False
         _probe_rows(database, repointed, len(repointed), progress=None, stats=stats,
                     presence=presence, source=source)
     _observe_missing(database, still_missing, stats=stats, manual=manual,
-                     ambiguous=ambiguous, presence=presence)
+                     ambiguous=ambiguous, presence=presence, confirmed=confirmed)
 
 
 def _probe_rows(database, rows, total, *, progress, stats,
@@ -547,7 +570,7 @@ def _reconcile_drifted_paths(database, rows, *, stats, repair: bool):
 
 
 def _observe_missing(database, rows, *, stats, manual: bool, ambiguous,
-                     presence=None) -> None:
+                     presence=None, confirmed=None) -> None:
     """Phase 3: what survived the drift check is genuinely absent."""
     from core.library2.paths import missing_path_root_is_healthy
 
@@ -572,8 +595,77 @@ def _observe_missing(database, rows, *, stats, manual: bool, ambiguous,
             "force_confirm": bool(manual),
         }))
         if len(pending) >= _OBSERVATION_FLUSH_BATCH:
-            _flush_observations(database, pending, stats, presence)
-    _flush_observations(database, pending, stats, presence)
+            _flush_observations(database, pending, stats, presence, confirmed)
+    _flush_observations(database, pending, stats, presence, confirmed)
 
 
-__all__ = ["MISSING_CONFIRMATION_SCANS", "rescan_files"]
+def _redownload_externally_deleted() -> bool:
+    try:
+        from core.settings import config_manager
+        return bool(config_manager.get(REDOWNLOAD_SETTING, True))
+    except Exception:  # noqa: BLE001 - unreadable config keeps the default
+        return True
+
+
+def release_externally_deleted(database, file_ids: List[int]) -> int:
+    """Stop wanting the tracks whose files were deleted outside SoulSync.
+
+    Only a track left without a live file in the same library counts: a FLAC
+    deleted next to a kept MP3 is a quality question, not a deletion of the
+    song. The rule is the one the removal dialog's "Don't download again"
+    writes, an explicit per-track unmonitor, so an album or artist toggle
+    later does not bring the track back on its own.
+
+    Returns the number of tracks released.
+    """
+    from core.library2 import ADMIN_PROFILE_ID
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    from core.library2.wanted import recompute_wanted
+
+    ids = sorted({int(file_id) for file_id in file_ids})
+    if not ids:
+        return 0
+    released = 0
+    with closing(database._get_connection()) as conn:
+        by_profile: Dict[int, set] = {}
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            marks = ",".join("?" for _ in chunk)
+            for row in conn.execute(
+                f"""SELECT f.track_id, f.owner_profile_id
+                      FROM lib2_track_files f
+                     WHERE f.id IN ({marks}) AND f.file_state='missing_confirmed'
+                       AND NOT EXISTS (
+                           SELECT 1 FROM lib2_track_files o
+                            WHERE o.track_id = f.track_id AND o.id <> f.id
+                              AND o.owner_profile_id IS f.owner_profile_id
+                              AND o.path IS NOT NULL AND TRIM(o.path) <> ''
+                              AND COALESCE(o.file_state,'active') = 'active')""",
+                chunk,
+            ):
+                owner = row["owner_profile_id"]
+                profile_id = int(owner) if owner is not None else ADMIN_PROFILE_ID
+                by_profile.setdefault(profile_id, set()).add(int(row["track_id"]))
+        for profile_id, track_set in by_profile.items():
+            track_ids = sorted(track_set)
+            if profile_id == ADMIN_PROFILE_ID:
+                # The monitored column is the shared library's flag only.
+                for start in range(0, len(track_ids), 500):
+                    chunk = track_ids[start:start + 500]
+                    marks = ",".join("?" for _ in chunk)
+                    conn.execute(
+                        f"UPDATE lib2_tracks SET monitored=0, updated_at=CURRENT_TIMESTAMP "
+                        f"WHERE id IN ({marks}) AND monitored=1", chunk)
+            for track_id in track_ids:
+                record_rule(conn, "track", track_id, False, PROVENANCE_USER,
+                            profile_id=profile_id)
+            recompute_wanted(conn, profile_id=profile_id, track_ids=track_ids)
+            released += len(track_ids)
+        conn.commit()
+    if released:
+        logger.info("Library v2 scan: %d track(s) deleted outside SoulSync "
+                    "will not be downloaded again", released)
+    return released
+
+
+__all__ = ["MISSING_CONFIRMATION_SCANS", "release_externally_deleted", "rescan_files"]

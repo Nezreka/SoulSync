@@ -771,3 +771,104 @@ def test_a_failing_presence_consumer_cannot_fail_the_scan(
     assert conn.execute(
         "SELECT file_state FROM lib2_track_files WHERE path='/m/a.flac'"
     ).fetchone()[0] == "missing_confirmed"
+
+
+def _missing_scan_shim(conn, monkeypatch, *, redownload):
+    db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+
+    class _Shim:
+        def _get_connection(self):
+            return row_conn(db_path)
+
+    class _Config:
+        def get(self, key, default=None):
+            if key == "library.redownload_externally_deleted":
+                return redownload
+            return default
+
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path",
+        lambda path, config_manager=None: None if path == "/m/a.flac" else path)
+    monkeypatch.setattr(
+        "core.library2.paths.missing_path_root_is_healthy", lambda _path: True
+    )
+    monkeypatch.setattr("core.settings.config_manager", _Config())
+    return _Shim()
+
+
+def _monitor_album_one(conn, album_id):
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    from core.library2.wanted import recompute_wanted, track_is_wanted
+
+    track_id = conn.execute(
+        "SELECT id FROM lib2_tracks WHERE album_id=?", (album_id,)).fetchone()[0]
+    conn.execute("UPDATE lib2_albums SET monitored=1 WHERE id=?", (album_id,))
+    conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE id=?", (track_id,))
+    record_rule(conn, "album", album_id, True, PROVENANCE_USER)
+    recompute_wanted(conn, track_ids=[track_id])
+    conn.commit()
+    assert track_is_wanted(conn, track_id)
+    return track_id
+
+
+def test_a_file_deleted_outside_soulsync_stays_wanted_by_default(
+        scoped_conn, monkeypatch):
+    """Lidarr behaviour: the monitored song comes back."""
+    from core.library2.scan import rescan_files
+    from core.library2.wanted import track_is_wanted
+
+    conn, album_ids = scoped_conn
+    track_id = _monitor_album_one(conn, album_ids[0])
+    shim = _missing_scan_shim(conn, monkeypatch, redownload=True)
+
+    stats = rescan_files(shim, album_ids=[album_ids[0]], manual=True)
+
+    assert stats["missing_confirmed"] == 1
+    assert "released" not in stats
+    assert track_is_wanted(conn, track_id)
+
+
+def test_with_redownload_off_an_external_deletion_is_not_downloaded_again(
+        scoped_conn, monkeypatch):
+    """The deletion counts as the removal dialog's "Don't download again":
+    an explicit track rule, so the monitored album does not win it back."""
+    from core.library2.scan import rescan_files
+    from core.library2.wanted import track_is_wanted
+
+    conn, album_ids = scoped_conn
+    track_id = _monitor_album_one(conn, album_ids[0])
+    shim = _missing_scan_shim(conn, monkeypatch, redownload=False)
+
+    stats = rescan_files(shim, album_ids=[album_ids[0]], manual=True)
+
+    assert stats["released"] == 1
+    assert not track_is_wanted(conn, track_id)
+    assert conn.execute("SELECT monitored FROM lib2_tracks WHERE id=?",
+                        (track_id,)).fetchone()[0] == 0
+    assert tuple(conn.execute(
+        "SELECT monitored, provenance FROM lib2_monitor_rules "
+        "WHERE entity_type='track' AND entity_id=?", (track_id,)
+    ).fetchone()) == (0, "user_explicit")
+
+    # The next pass changes nothing and releases nothing again.
+    stats = rescan_files(shim, album_ids=[album_ids[0]], manual=True)
+    assert "released" not in stats
+
+
+def test_with_redownload_off_a_track_that_keeps_a_file_stays_wanted(
+        scoped_conn, monkeypatch):
+    """A FLAC deleted next to a kept MP3 is not a deletion of the song."""
+    from core.library2.scan import rescan_files
+    from core.library2.wanted import track_is_wanted
+
+    conn, album_ids = scoped_conn
+    track_id = _monitor_album_one(conn, album_ids[0])
+    conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, '/m/a.mp3')",
+                 (track_id,))
+    conn.commit()
+    shim = _missing_scan_shim(conn, monkeypatch, redownload=False)
+
+    stats = rescan_files(shim, album_ids=[album_ids[0]], manual=True)
+
+    assert stats["missing_confirmed"] == 1
+    assert stats["released"] == 0
+    assert track_is_wanted(conn, track_id)

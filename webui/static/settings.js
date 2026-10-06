@@ -3391,6 +3391,10 @@ async function loadSettingsData() {
         const _nfoEl = document.getElementById('write-artist-nfo');
         if (_nfoEl) _nfoEl.checked = settings.library?.write_artist_nfo === true;
 
+        // Library v2: re-download files deleted outside SoulSync (default on)
+        const _redlEl = document.getElementById('redownload-externally-deleted');
+        if (_redlEl) _redlEl.checked = settings.library?.redownload_externally_deleted !== false;
+
         // Populate Content Filter settings
         document.getElementById('allow-explicit').checked = settings.content_filter?.allow_explicit !== false;
         document.getElementById('prefer-explicit').checked = settings.content_filter?.prefer_explicit === true;
@@ -6433,7 +6437,8 @@ async function saveSettings(quiet = false) {
             podcasts_path: _cfgStr('podcasts-path', { fallback: './podcasts' }),
             audiobooks_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),
             reorganize_preserve_casing: _cfgBool('reorganize-preserve-casing'),
-            write_artist_nfo: _cfgBool('write-artist-nfo')
+            write_artist_nfo: _cfgBool('write-artist-nfo'),
+            redownload_externally_deleted: _cfgBool('redownload-externally-deleted')
         },
         podcasts: {
             download_path: _cfgStr('podcasts-path', { fallback: './podcasts' }),
