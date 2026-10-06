@@ -111,3 +111,24 @@ def test_compile_normalizes_to_compilation(tmp_path):
     assert _resolve(tmp_path, db, incoming_album_type="compilation") == os.path.normpath(folder)
     # incoming single vs stored compilation -> different -> refuse
     assert _resolve(tmp_path, db, incoming_album_type="single") is None
+
+
+class _ProductionDb(_Db):
+    """Mirrors a real production DB: the albums table carries record_type
+    (populated by the enrichment workers) and has NO album_type column at
+    all. The kind gate must read the live column."""
+
+    def _get_connection(self):
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE albums (id TEXT, musicbrainz_release_id TEXT, record_type TEXT)")
+        conn.execute("INSERT INTO albums VALUES ('1', NULL, 'album')")
+        return conn
+
+
+def test_kind_gate_reads_record_type_in_production(tmp_path):
+    # The album_type column is never written by current code; without the
+    # record_type fallback the gate below would be lenient and reuse the
+    # album folder for the single.
+    _folder, tracks = _existing_album_folder(tmp_path)
+    db = _ProductionDb(tracks)
+    assert _resolve(tmp_path, db, incoming_album_type="single") is None
