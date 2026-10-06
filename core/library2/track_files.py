@@ -72,11 +72,14 @@ def quality_order(alias: str = "") -> str:
     """The documented "best file" ordering WITHOUT the primary flag.
 
     Used to elect a primary (backfill, promotion after delete). Legacy rows
-    with NULL ``file_state`` count as active.
+    with NULL ``file_state`` count as active. The file the track's quality
+    profile ranks best wins (``profile_rank``, see :func:`rank_files_by_profile`);
+    unranked files fall back to lossless first.
     """
     p = f"{alias}." if alias else ""
     return (
         f"CASE WHEN COALESCE({p}file_state,'active')='active' THEN 0 ELSE 1 END, "
+        f"COALESCE({p}profile_rank, 2147483647), "
         f"CASE WHEN lower(COALESCE({p}format,'')) IN {_LOSSLESS_FORMATS} THEN 0 ELSE 1 END, "
         f"COALESCE({p}bit_depth,0) DESC, "
         f"COALESCE({p}sample_rate,0) DESC, "
@@ -543,6 +546,44 @@ def backfill_file_roles(cursor) -> int:
     return changed
 
 
+def rank_files_by_profile(conn, track_ids=None) -> int:
+    """Rank each file of a multi-file track under the track's quality profile;
+    the primary trigger then elects the best-ranked one (a manual choice still
+    wins). Only tracks with more than one live file are ranked -- one file is
+    its own primary. Returns how many file ranks changed. Does not commit."""
+    from core.library2.quality_eval import (
+        audio_quality_from_file, effective_track_profile, profile_targets,
+    )
+    from core.quality.model import rank_candidate
+    live = "COALESCE(file_state,'active')<>'deleted'"
+    if track_ids is None:
+        ids = [r[0] for r in conn.execute(
+            f"SELECT track_id FROM lib2_track_files WHERE {live} AND track_id IS NOT NULL "
+            "GROUP BY track_id HAVING COUNT(*) > 1")]
+    else:
+        ids = [int(t) for t in track_ids]
+    targets_by_profile, changed = {}, 0
+    for track_id in ids:
+        files = conn.execute(f"SELECT * FROM lib2_track_files WHERE track_id=? AND {live}",
+                             (track_id,)).fetchall()
+        if len(files) < 2:
+            continue
+        try:
+            profile = effective_track_profile(conn, track_id)
+        except (LookupError, ValueError):
+            continue
+        key = profile.get("id")
+        if key not in targets_by_profile:
+            targets_by_profile[key] = profile_targets(profile)[0]
+        for f in files:
+            quality = audio_quality_from_file(dict(f))
+            rank = rank_candidate(quality, targets_by_profile[key])[0] if quality else None
+            if rank != f["profile_rank"]:
+                conn.execute("UPDATE lib2_track_files SET profile_rank=? WHERE id=?", (rank, f["id"]))
+                changed += 1
+    return changed
+
+
 def install_primary_triggers(cursor) -> None:
     """(Re)install the invariant-keeping triggers. Idempotent.
 
@@ -622,7 +663,7 @@ def install_primary_triggers(cursor) -> None:
     """)
     cursor.execute(f"""
         CREATE TRIGGER trg_lib2_track_files_primary_quality_state
-        AFTER UPDATE OF file_state, format, bit_depth, sample_rate, bitrate
+        AFTER UPDATE OF file_state, format, bit_depth, sample_rate, bitrate, profile_rank
         ON lib2_track_files
         FOR EACH ROW
         WHEN NEW.track_id IS NOT NULL
@@ -654,6 +695,7 @@ __all__ = [
     "primary_file_row",
     "primary_order",
     "quality_order",
+    "rank_files_by_profile",
     "repoint_file_path",
     "set_file_state",
     "set_primary_file",

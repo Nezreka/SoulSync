@@ -1078,6 +1078,10 @@ def reconcile_track_wishlist(
         # A wanted track that has its file and is no upgrade candidate is
         # simply owned; mirroring it only to learn that cost ~66 s per hourly
         # run on a 200k-track library.
+        # Profile edits change which copy of a multi-file track is primary,
+        # and the upgrade verdict below reads the primary.
+        from core.library2.track_files import rank_files_by_profile
+        rank_files_by_profile(conn)
         queueable = _tracks_without_file(conn, wanted) | set(
             upgrade_candidate_track_ids(conn, profile_id=profile_id))
         adds = [t for t in wanted if t not in wishlisted_set and t in queueable]

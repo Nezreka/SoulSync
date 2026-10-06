@@ -1013,7 +1013,10 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
             # quality profile stays where it belongs — in the quality cascade
             # `effective_profile_id` resolves.
             from core.library2 import ADMIN_PROFILE_ID
+            from core.library2.track_files import rank_files_by_profile
             from core.library2.wanted import recompute_wanted
+            # a second copy: the profile decides which one is primary
+            rank_files_by_profile(conn, [track_id])
             recompute_wanted(conn, profile_id=ADMIN_PROFILE_ID,
                              track_ids=[track_id])
             # and the intent of the library the file went into (#1199)

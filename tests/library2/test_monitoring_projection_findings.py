@@ -251,3 +251,39 @@ def test_a_media_server_bitrate_in_bps_is_judged_in_kbps():
         "upgrade_candidate"] is True
     assert evaluate_file({"format": "mp3", "bitrate": 320}, targets, policy, cutoff)[
         "upgrade_candidate"] is False
+
+
+def test_the_quality_profile_decides_which_copy_is_primary(imported_conn, tmp_path):
+    """L4: with FLAC + MP3 320 on one track, an MP3 profile makes the MP3
+    primary (lossless-first made the FLAC a permanent upgrade candidate), a
+    FLAC profile the FLAC, and a manual choice still wins."""
+    from core.library2.track_files import rank_files_by_profile, set_primary_file
+
+    conn = imported_conn
+    track_id = conn.execute(
+        "SELECT id FROM lib2_tracks t WHERE NOT EXISTS ("
+        "SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id) LIMIT 1").fetchone()[0]
+    ids = {fmt: conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path, format, bitrate) VALUES(?,?,?,?)",
+        (track_id, str(tmp_path / f"song.{fmt}"), fmt, rate)).lastrowid
+        for fmt, rate in (("flac", 1000), ("mp3", 320))}
+
+    def primary():
+        return conn.execute("SELECT id FROM lib2_track_files WHERE track_id=? AND is_primary=1",
+                            (track_id,)).fetchone()[0]
+
+    assert primary() == ids["flac"]  # unranked: lossless first, as before
+    for targets, winner in (('[{"label": "MP3", "format": "mp3", "min_bitrate": 320}]', "mp3"),
+                            ('[{"label": "FLAC", "format": "flac"}]', "flac")):
+        profile = conn.execute(
+            "INSERT INTO quality_profiles(name, upgrade_policy, upgrade_cutoff_index, "
+            "ranked_targets, is_default) VALUES(?, 'acceptable', 0, ?, 0)",
+            (f"only {winner}", targets)).lastrowid
+        conn.execute("UPDATE lib2_tracks SET quality_profile_id=?, quality_profile_explicit=1 "
+                     "WHERE id=?", (profile, track_id))
+        rank_files_by_profile(conn)
+        assert primary() == ids[winner]
+
+    set_primary_file(conn, track_id, ids["mp3"])
+    rank_files_by_profile(conn)
+    assert primary() == ids["mp3"]

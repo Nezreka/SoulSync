@@ -235,6 +235,7 @@ CREATE TABLE IF NOT EXISTS lib2_track_files (
     content_hash TEXT,                                -- for dedup / single-vs-album
     is_primary INTEGER NOT NULL DEFAULT 0,            -- exactly one per track (ADR-03)
     primary_manual INTEGER NOT NULL DEFAULT 0,        -- explicit user choice; automatic election must preserve it
+    profile_rank INTEGER,                             -- rank under the track's quality profile (NULL: unranked)
     file_role TEXT NOT NULL DEFAULT 'master',         -- 'master'|'derivative'|'alternate'
     derived_from_file_id INTEGER,                     -- generated from this retained source file
     acquired_quality_json TEXT,                       -- quality before configured output transforms
@@ -435,6 +436,8 @@ _ADDED_COLUMNS = (
      "ALTER TABLE lib2_track_files ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0"),
     ("lib2_track_files", "primary_manual",
      "ALTER TABLE lib2_track_files ADD COLUMN primary_manual INTEGER NOT NULL DEFAULT 0"),
+    ("lib2_track_files", "profile_rank",
+     "ALTER TABLE lib2_track_files ADD COLUMN profile_rank INTEGER"),
     ("lib2_track_files", "file_role",
      "ALTER TABLE lib2_track_files ADD COLUMN file_role TEXT NOT NULL DEFAULT 'master'"),
     ("lib2_track_files", "derived_from_file_id",
