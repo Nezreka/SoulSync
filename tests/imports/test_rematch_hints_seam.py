@@ -39,7 +39,7 @@ CREATE TABLE lib2_tracks (id INTEGER PRIMARY KEY, title TEXT);
 CREATE TABLE lib2_track_files (
     id INTEGER PRIMARY KEY AUTOINCREMENT, track_id INTEGER, path TEXT,
     file_state TEXT DEFAULT 'active', is_primary INTEGER DEFAULT 1,
-    primary_manual INTEGER DEFAULT 0,
+    primary_manual INTEGER DEFAULT 0, profile_rank INTEGER,
     format TEXT, bit_depth INTEGER, sample_rate INTEGER, bitrate INTEGER,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
 """
