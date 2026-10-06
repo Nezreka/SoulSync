@@ -1,103 +1,70 @@
-# soulsync 3.5.0: `dev` → `main`
+# soulsync 3.5.1: `dev` → `main`
 
-video discover gets the music-side treatment, video import and matching get smarter, sync goes per-profile, and a stack of provider, filing and repair fixes. scope: the commits since the 3.4.9 release commit (`2063841b`).
+download discography learns about watchlists and editions, music videos and episodes become requestable, the dashboard gets a new look, and a big stack of tagging, playlist sync and download fixes. scope: everything merged since 3.5.0 went to main (#1496).
 
-## video discover
+## download discography and watchlist
 
-- the full music-side visual overhaul lands on video discover: story blocks, trailers, genre art, card elevation, banners, a hero badge, story tickers, and genre tiles that load eagerly with an ambient crossfade and deduped posters (#1427, #1433, #1434, #1435, #1436).
-- the trust-test harness declared a stale timer variable; fixed (#1432).
+- download discography has a second button, wishlist + watchlist. it queues the releases you picked, then adds the artist to your watchlist with release types, content filters and auto-download set right there in the modal. the artist page's add to watchlist button opens the same settings instead of adding blind. releases that fail to resolve show up with a retry button instead of vanishing (#1553).
+- one edition per album. the watchlist used to grab the standard and the deluxe of the same album, so the same songs downloaded twice into two folders, and a deluxe reissue of an album you own downloaded only the bonus tracks. new edition preference in global watchlist settings: all editions (default, same as before), one per album standard, or one per album most complete (#1561).
+- the artist page labels releases your watchlist filters skip, instead of a bare "missing" (#1550, #1556).
+- a single no longer shows owned because the album has the same song. yellowcard's 2024 "ocean avenue" single was marked owned off the 2003 album's title track, while the download analysis said missing. now the page checks the single's own release, and an ep stays owned whichever provider called it an ep (thanks SeadogsBooty on discord) (#1562).
 
-## video library and import
+## requests
 
-- video detail pages get an "i have this" button: when automatic matching says you don't own something you do, search the library and pick the match yourself (#1438).
-- rematching a video clears its poster, backdrop and logo first, so the corrected match re-downloads art instead of keeping the old title's (#1440).
-- the video import "place file" modal got restyled, commercial-free episode cuts pass the duration gate, and the episode tab reads the AP (#1423). the import's picked-title hero was missing its styles; added (#1439).
-- episode-level library checks for the extension, and total_episodes for shows in the library api (#1437, #1442).
-- video calendar cards wear their acquisition badges: wanted, downloading, queued, failed, missing — the grid used to show only the owned check (#1480).
+- non-admin profiles can request music videos. the save button used to just error, now it's a request that lands on the requests page next to music, and approving it downloads the video (#1503).
+- episode requests: request one episode instead of the whole show, approved per episode. youtube request kinds, and a podcast watchlist gate (#1500).
+- the request button shows on episode rows for profiles that can't download, specials (season 0) can be requested, and video pages show the right buttons for non-admin profiles (#1531, #1532, #1502).
+- video automation hardening: approvals reach every profile that asked, quality profiles are admin-only, and episode wishlist rows stop falling back to profile 1 (#1505).
 
-## discover
+## dashboard
 
-- listening recs and the listening mix are per profile now, and the warmer warms per profile too.
-- a deezer editorial playlist opens to a preview first instead of playing blind (#1418).
-- a built playlist can be named, and its missing tracks land on the wishlist (#1421).
-- discovery pool matches can be sorted by match % and the cached matches cleared per playlist (#1452).
+- visual refresh. same layout, every section redesigned, worker orbs float free, art-forward rail cards, and library radio is a proper station deck (#1552).
+- new weekly digest banner: hours, tracks, top artist, discoveries, streak and a 7-day chart from your real listening.
 
-## sync
+## playlist sync
 
-- server playlists are per profile: the page shows whose is whose, and two mirrors with the same name stop overwriting each other (#1414).
-- a deleted track is noticed on the next sync (#1417), and deleting a mirror lets go of its server playlist (#1420).
-- a manual match applies to wing-it tracks (#1289).
-- syncing a playlist no longer has to re-download everything you deleted: the wishlist step is now optional. a global toggle in settings → playlists, plus split buttons — sync (never wishlists) and sync + download (always wishlists) (#1455).
+- the download origins modal can remove a track's origin without deleting the file (#1547).
+- tracks wishlisted from a playlist sync download as a batch named after the playlist, so the library scan runs after them (#1548).
+- pipeline completion says how many tracks still need identifying instead of claiming a clean 100% (#1549).
+- a new mirror gets its server playlist on the first sync, not the second (#1543, #1545).
+- navidrome gets a server-admin playlist section (#1542, #1546).
+- mirrored discover stops counting cached tracks twice (#1529).
+- listenbrainz weekly playlists stop getting stuck on an old week. new weeks only got cached by the watchlist scan, so an empty watchlist froze weekly exploration and weekly jams on whatever week you had last (thanks @ifedan-ed) (#1564).
 
-## downloads and filing
+## tagging and metadata
 
-- a single no longer merges into a same-named album folder. yellowcard's "ocean avenue" single was landing in the "ocean avenue" album folder and colliding with the album track (thanks SeadogsBooty on discord) (#1441).
-- a customized single path template is honored for explicitly-typed singles (thanks Hirvi on discord) (#1431).
-- lossy copies get native tags and cover art, and ARTISTS follows the primary source (#1422, #1425).
-- a partial import with files left in staging actually finishes now (#1289).
+- musicbrainz recording match was picking the wrong same-named band (#1509).
+- wishlist downloads lost featured artists because they never got the metadata source (#1508).
+- ARTISTSORT and ALBUMARTISTSORT follow the primary source (#1510).
+- genre merge treats "hip hop" and "hip-hop" as one genre (#1512).
+- last.fm artist tags as an opt-in genre fallback (#1520).
+- library re-tag at full depth actually writes now, and stopped clobbering dates. lyrics-only and art-only retags work (#1511, #1517, #1521, #1522).
+- musicbrainz recording disambiguation is read and stored, so versioned tracks like live or acoustic cuts can be told apart (#1536, #1539, @mandos21 #1541).
+- when enhancement fails, foreign musicbrainz album ids are stripped instead of left pointing at the wrong release (#1555, #1559).
+- new opt-in artist.nfo writer with the musicbrainz artist id for jellyfin, kodi and emby, and an option to write the original release date as DATE (#1449, #1451, #1497).
+- `$label` in the album path template (#1544).
 
-## matching (@mandos21)
+## downloads and imports
 
-- providers stop crying rate limit when an id just happens to contain 429 or 503. the http status is trusted over digits in the url, for musicbrainz, spotify, tidal, deezer and jiosaavn (#1391), then audiodb, discogs, genius and last.fm (#1443).
-- canonical alternate editions use the provider's artist id, not soulsync's local key. a spotify-shaped id was going to musicbrainz and coming back 400 invalid mbid (#1415).
-- musicbrainz album consistency: a release must be by the album's artist, a slot must hold the same song, and a romanized title isn't judged against a native-script one (#1426).
+- audiobook imports stop stalling on single-file torrents. the path resolver only understood folders, so a single .m4b never resolved and the import said "no audio files in the download". it handles files now, including a client category subfolder (thanks SeadogsBooty on discord) (#1563).
+- audiobook release search finds series volumes named "Series 03 - Title" (thanks @SimpleSimonLA) (#1554).
+- soulseek cleanup only removes this client's own transfers and searches, with a scope setting for single-client installs (thanks @splitsec2) (#1501, #1524).
+- own library maintenance tools and repair re-downloads go to the owning profile's library (#1504, #1530).
+- the expired download cleaner protects a download by whether the track is still in a playlist, not by playlist name (#1558). it also matches by the track's id, so a song still in discover weekly isn't treated as gone just because deezer credits the artist differently ("GTA" vs "Good Times Ahead").
+- running an automation manually works even when it's disabled (#1560).
 
-## repair jobs
+## repair and tools (@mandos21)
 
-- acoustid retag keeps the album artist (#1289).
-- sfv and srr files count as leftover junk (#1289).
-- a run that quit early says so instead of pretending it finished (#1289).
-- repair jobs moved onto the automation engine: each maintenance job is now a system automation with a schedule trigger, visible in the automations page with delete protection, and the tools page cadence editor writes to it (#1289).
-- new bpm backfill repair job: fills missing bpm from deezer or local analysis, findings-first like the metadata gap filler, off by default (#1476).
-- manual library match opens with a worklist of every wanted-but-unmatched track instead of an empty search box (#1289).
-
-## clearer and safer (#1289)
-
-- safer defaults: playlist sync defaults to reconcile instead of replace (replace was wiping navidrome edits), and "transfer is my permanent library" defaults on for new installs (#1477).
-- clearer language: track-identification "discovery" is now "identify" (discovery pool → match review, discover button → identify), "transfer" becomes "music library" in labels, and mirrored refresh vs sync buttons read differently (#1477, #1463).
-- fewer surprises: second confirmation before relocate moves files to staging, a warning when turning off dry-run on library-writing jobs, wing it clarifies catalogue-miss vs library-miss, and manual match can add to the server playlist too (#1477).
-- 7 import inbox bug fixes: stale waiting rows backfilled past the 200-row window, partial imports shown honestly, cover-version match stealing fixed, warnings when files are left behind, acoustid relocate stops rewriting the album artist, junk-only folders cleaned, interrupted runs reported as stopped-early (#1474).
-- 4 follow-ups: mirrored cards refresh after manual match saves, format findings default to ignored instead of redownload, singles lead with the title tag in the inbox (#1463).
-- 6 quick wins: import rows lead with folder names, the playlist explorer 50% gate is a warning, quality terms separated, timer pipelines count as scheduled (#1457).
-- deezer reissue dates stop marking owned albums as missing: the api reports the digital reissue year, so the year check no longer vetoes a same-title match (thanks SeadogsBooty on discord) (#1492).
-
-## community fixes
-
-- wishlist auto-cleanup respects album scope: it no longer removes tracks of a requested album when the song is owned on a different release (thanks mateusguilherme) (#1447).
-- download discography stops skipping tracks over substring-only title matches — "respiro" vs "sessão respiro" no longer counts as owned (#1448).
-- the discovery pool playlist filter actually filters, including wing-it stats (#1452).
-- dashboard recently added drops stale cards after a db rebuild (#1453).
-- deleting a mirror cleans up its orphaned auto-sync automations — no more ghost "playlist #<id>" rows; "sync started" fires after the in-progress guard; dead re-run buttons disabled (#1455).
-- audible marketplace is configurable in settings → audiobooks (default us) (#1458).
-- audiodb uses the current free api key (123, not the retired 2) (#1475).
-
-## automations
-
-- non-admin automations re-arm after a restart. a scheduled playlist pipeline owned by another profile ran once, then never again (thanks splitsec2 on discord) (#1428, #1430).
-
-## cleaner
-
-- every user's navidrome stars protect a download, and every profile's mirrors and watchlists keep their downloads (#1416).
-
-## companion extension
-
-- new chat tab: the server chat lives in the extension popup, with rooms, dms and replies.
-- video badges: library-status pills on video pages, watchlist actions, rec rails, and throttled checks.
-- a premier polish pass across all popup tabs.
-
-## api
-
-- new v1 endpoints: library playlists and their tracks, recently played, mirrored playlists with tracks — built for the companion extension's mini player (#1459, #1461, #1469).
-- v1 artists endpoint fixes: library scope set explicitly for api-key requests, and the server_source filter skipped for api clients (#1472, #1473).
+- orphan findings are rechecked before anything touches files, and filename-only matches no longer count (#1535).
+- the mbid mismatch scan honors your musicbrainz rate, and mirror pacing backs off when musicbrainz is overloaded (#1537).
+- bpm backfill works for text track ids (#1538).
 
 ## the rest
 
-- a new install scans after downloads.
-- the db updater progress line says "tracks" when it's counting tracks (#1491).
-- chat user list deduped: slskd can return the same user twice (#1483).
-- dashboard worker orbs line up: the soulid orb gets its missing margin, and mobile gets even rows (#1493).
+- seven bugs found while porting 3.5.0 onto library v2, including provider image urls in the reassign modal and sample studio chops with no pitch or tempo change (thanks @nick2000713) (#1507).
+- build and ci from @splitsec2: tests run in parallel, superseded runs cancel, the image leaves out tests and docs, and the webui builds on the build platform (#1523, #1525, #1526, #1527, #1533, #1534).
 
 ## validation
 
-- fixes shipped with regression tests and green neighboring suites, per their commits and PRs.
-- a full green suite run on the release head has not been verified.
+- every fix shipped with regression tests and green neighboring suites, per its PR.
+- full suite on the release head: 22624 passed, 0 failed (run twice, before and after the cleaner fix).
