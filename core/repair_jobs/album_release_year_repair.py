@@ -385,8 +385,8 @@ def rename_album_folder(
             if conn is not None:
                 try:
                     conn.rollback()
-                except Exception:  # noqa: BLE001 - best effort, the rename is undone below
-                    pass
+                except Exception as rb_err:  # noqa: BLE001 - best effort, the rename is undone below
+                    logger.debug("rollback after the failed update failed: %s", rb_err)
             try:
                 os.rename(new_folder, old_folder)
             except OSError as undo:
