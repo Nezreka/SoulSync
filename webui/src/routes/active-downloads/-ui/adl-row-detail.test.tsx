@@ -177,11 +177,43 @@ describe('liveDetailLines', () => {
 // ── the row expansion ───────────────────────────────────────────────────────
 
 describe('AdlRow expansion (#1156)', () => {
-  it('separates a completed import from incomplete metadata', () => {
+  it('keeps completed downloads compact without a metadata badge', () => {
     const view = render(<AdlRow dl={row({ status: 'completed', metadata_status: 'issues' })} />);
-    expect(view.getByText('Metadata incomplete')).toBeInTheDocument();
-    expect(view.queryByText('Metadata ✓')).not.toBeInTheDocument();
+    expect(view.getByText('Completed')).toBeInTheDocument();
+    expect(view.queryByTitle('Final file metadata validation')).not.toBeInTheDocument();
   });
+
+  it.each([
+    [
+      '8 results, 1 passed filters but download failed to start | "other": no results found',
+      'Matching results found, but the download could not start. No specific failure reason was recorded.',
+      'Failed',
+    ],
+    [
+      '1 results but none passed quality/artist filters',
+      'Results found, but none passed the quality or artist filters.',
+      'Not Found',
+    ],
+    ['no results found', 'No results found from the searched sources.', 'Not Found'],
+    [
+      'search error — timeout',
+      'Some searches failed. Expand details for the source errors.',
+      'Failed',
+    ],
+  ])(
+    'summarizes search failure (%s) and keeps diagnostics accessible',
+    async (diagnostic, message, label) => {
+      const error = `No match found for "Xtal" by Aphex Twin after 3 queries. Breakdown: "q": ${diagnostic}`;
+      const view = render(<AdlRow dl={row({ status: 'not_found', error })} />);
+      expect(view.getByText(message)).toBeInTheDocument();
+      expect(view.getByText(label)).toBeInTheDocument();
+      expect(view.queryByText(error)).not.toBeInTheDocument();
+      await act(async () =>
+        fireEvent.click(view.container.querySelector('.adl-row') as HTMLElement),
+      );
+      expect(view.getByText(error, { exact: false })).toBeInTheDocument();
+    },
+  );
   it('an in-flight row expands to the live narration on click', () => {
     const { container } = render(
       <AdlRow

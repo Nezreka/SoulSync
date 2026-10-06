@@ -5,6 +5,7 @@ import type { AdlDownload, AdlTaskDetail } from '../-adl.types';
 import { fetchTaskDetail } from '../-adl.api';
 import {
   batchColorIndex,
+  downloadFailureSummary,
   formatSpeed,
   liveDetailLines,
   qualityChipTitle,
@@ -96,7 +97,10 @@ function RowDetailPanel({
         ['Quality', detail.quality || dl.quality],
         ['AcoustID', detail.acoustid_result],
         ['File', detail.file_path],
-        ['Reason', detail.status_kind === 'completed' ? '' : detail.reason],
+        [
+          'Reason',
+          detail.status_kind === 'completed' || detail.reason === dl.error ? '' : detail.reason,
+        ],
         [
           'Expected',
           detail.expected?.title
@@ -161,7 +165,8 @@ export function AdlRow({
   compact,
 }: AdlRowProps) {
   const cls = statusClass(dl.status);
-  const label = statusLabel(dl.status);
+  const failure = downloadFailureSummary(dl);
+  const label = statusLabel(failure?.status ?? dl.status);
   const badge = verificationBadge(dl);
   /**
    * Locks the cancel button while its request is in flight.
@@ -275,7 +280,12 @@ export function AdlRow({
               : ''}
           </div>
         ) : null}
-        {dl.error ? <div className="adl-row-error">{dl.error}</div> : null}
+        {dl.error ? <div className="adl-row-error">{failure?.message ?? dl.error}</div> : null}
+        {open && failure ? (
+          <div className="verif-quar-details">
+            <span className="verif-detail-label">Search details:</span> {dl.error}
+          </div>
+        ) : null}
         {open && !onRowAudit ? (
           <RowDetailPanel dl={dl} detail={detail} terminal={terminal} />
         ) : null}
@@ -285,15 +295,6 @@ export function AdlRow({
         <span className={`adl-status-dot ${cls}`} />
         {label.spinner ? <span className="adl-spinner" /> : null}
         {label.text}
-        {dl.status === 'completed' && dl.metadata_status ? (
-          <span className="adl-quality-chip" title="Final file metadata validation">
-            {dl.metadata_status === 'correct'
-              ? 'Metadata ✓'
-              : dl.metadata_status === 'issues'
-                ? 'Metadata incomplete'
-                : 'Metadata partly checked'}
-          </span>
-        ) : null}
         {downloading ? ` ${Math.round(dl.progress || 0)}%` : ''}
         {speed ? <span className="adl-row-speed">{speed}</span> : null}
         {badge ? (

@@ -60,6 +60,28 @@ function renderWithClient(node: React.ReactElement) {
 }
 
 describe('library v2 match chips (deep-dive A8)', () => {
+  it.each(['artist', 'album', 'track'] as const)(
+    'opens a matched %s provider from the matching dialog',
+    async (entityType) => {
+      renderWithClient(
+        <MatchChips
+          entityType={entityType}
+          entityName="Xtal"
+          abbreviated={entityType === 'track'}
+          services={[service()]}
+        />,
+      );
+      expect(screen.queryByRole('link')).not.toBeInTheDocument();
+      fireEvent.click(
+        screen.getByRole('button', { name: entityType === 'track' ? 'SP' : 'Spotify' }),
+      );
+      expect(
+        await screen.findByRole('link', { name: `Open this ${entityType} on Spotify` }),
+      ).toHaveAttribute('href', `https://open.spotify.com/${entityType}/sp1`);
+      expect(screen.getByRole('button', { name: 'Search' })).toBeInTheDocument();
+    },
+  );
+
   it('hides chips flagged unavailable', () => {
     renderWithClient(
       <MatchChips

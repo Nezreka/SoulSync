@@ -1175,39 +1175,20 @@ export function MatchChips({
           .filter(Boolean)
           .join(' · ');
         const tip = `${s.label}: ${s.status} (${details})`;
-        // The chip itself keeps its job — click to (re)match. The catalogue
-        // also knows WHERE this id points, and until now could do nothing with
-        // it, so a matched chip gains a separate link out to the provider's
-        // own page. Discogs album ids route through master/release; a service
-        // with no page for this entity type simply gets no link.
-        const external = s.external_id ? getServiceUrl(s.service, entityType, s.external_id) : null;
         return (
-          <span key={s.service} className={styles.matchChipGroup}>
-            <button
-              type="button"
-              className={`${styles.matchChip} ${abbreviated ? styles.trackMatchChip : ''} ${matchChipClass(s.status)}`}
-              title={canWrite ? tip : 'Library changes require the admin profile'}
-              data-requires-write=""
-              disabled={!canWrite || s.library_v2_entity_id == null}
-              onClick={() => {
-                if (canWrite) setActive(s);
-              }}
-            >
-              <span>{abbreviated ? getServiceAbbreviation(s.service) : s.label}</span>
-            </button>
-            {external ? (
-              <a
-                className={styles.matchChipLink}
-                href={external}
-                target="_blank"
-                rel="noreferrer noopener"
-                title={`Open this ${entityType} on ${s.label}`}
-                aria-label={`Open this ${entityType} on ${s.label}`}
-              >
-                ↗
-              </a>
-            ) : null}
-          </span>
+          <button
+            key={s.service}
+            type="button"
+            className={`${styles.matchChip} ${abbreviated ? styles.trackMatchChip : ''} ${matchChipClass(s.status)}`}
+            title={canWrite ? tip : 'Library changes require the admin profile'}
+            data-requires-write=""
+            disabled={!canWrite || s.library_v2_entity_id == null}
+            onClick={() => {
+              if (canWrite) setActive(s);
+            }}
+          >
+            <span>{abbreviated ? getServiceAbbreviation(s.service) : s.label}</span>
+          </button>
         );
       })}
       {active && active.library_v2_entity_id != null ? (
@@ -1425,6 +1406,9 @@ function ManualMatchModal({
     },
   });
   const results = search.data ?? [];
+  const currentUrl = service.external_id
+    ? getServiceUrl(service.service, entityType, service.external_id)
+    : null;
   const currentReleases: LibraryV2MatchRelease[] = artistReleases.slice(0, 6).map((album) => ({
     id: String(album.id),
     title: album.title,
@@ -1461,6 +1445,17 @@ function ManualMatchModal({
               {service.external_id}
               <span>Copy</span>
             </button>
+            {currentUrl ? (
+              <a
+                className={styles.currentMatchLink}
+                href={currentUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+                aria-label={`Open this ${entityType} on ${service.label}`}
+              >
+                Open on {service.label}
+              </a>
+            ) : null}
             {entityType === 'artist' && currentReleases.length ? (
               <div className={styles.currentMatchReleases}>
                 <span>Library release context</span>
