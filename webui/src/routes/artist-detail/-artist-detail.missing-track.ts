@@ -14,6 +14,30 @@ export interface MissingTrackArtist {
 }
 
 /**
+ * The row's own performers, from its source tracklist. A missing row on a
+ * cast album or soundtrack is sung by someone other than the page artist
+ * (Bruce Adler, not Alan Menken), and that name is what the download
+ * searches with and filters candidates on (#1569). Empty when the row
+ * carries none.
+ */
+export function trackArtistNames(track: EnhancedTrack): string[] {
+  const record = track as Record<string, unknown>;
+  const source = (record._sourceTrack || {}) as Record<string, unknown>;
+  for (const value of [record.artists, source.artists, record.artist_names, source.artist_names]) {
+    if (!Array.isArray(value)) continue;
+    const names = value
+      .map((entry) =>
+        String(
+          (entry && typeof entry === 'object' ? (entry as { name?: unknown }).name : entry) ?? '',
+        ).trim(),
+      )
+      .filter(Boolean);
+    if (names.length) return names;
+  }
+  return [];
+}
+
+/**
  * The wishlist payload (4848-4871): the track id prefers the metadata-source
  * ids over the synthetic row id, and the album's total_tracks prefers the
  * canonical count so a partially-owned album doesn't wishlist as complete.
@@ -28,6 +52,7 @@ export function buildWishlistPayload(
   wishlistTrack: Record<string, unknown>;
 } {
   const record = track as Record<string, unknown>;
+  const ownArtists = trackArtistNames(track);
   const albumData = {
     id: album.id,
     name: album.title || 'Unknown Album',
@@ -51,7 +76,7 @@ export function buildWishlistPayload(
       track.id,
     name: track.title || `Track ${track.track_number || ''}`,
     title: track.title || `Track ${track.track_number || ''}`,
-    artists: [{ name: artist.name }],
+    artists: ownArtists.length ? ownArtists.map((name) => ({ name })) : [{ name: artist.name }],
     duration_ms: track.duration || 0,
     track_number: track.track_number || 1,
     disc_number: (record.disc_number as number) || 1,
@@ -126,6 +151,7 @@ export function buildExpectedTrack(
 ): Record<string, unknown> {
   const record = track as Record<string, unknown>;
   const source = (record._sourceTrack || record) as Record<string, unknown>;
+  const ownArtists = trackArtistNames(track);
   return {
     title: track.title || source.title || source.name || '',
     name: track.title || source.title || source.name || '',
@@ -142,7 +168,7 @@ export function buildExpectedTrack(
     itunes_track_id: record.itunes_track_id || source.itunes_track_id || '',
     musicbrainz_recording_id:
       record.musicbrainz_recording_id || source.musicbrainz_recording_id || '',
-    artists: record.artists || source.artists || [artistName],
+    artists: ownArtists.length ? ownArtists : [artistName],
   };
 }
 
