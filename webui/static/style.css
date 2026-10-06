@@ -5424,17 +5424,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     animation: pulse 2s infinite;
 }
 
-@keyframes pulse {
-
-    0%,
-    100% {
-        opacity: 1;
-    }
-
-    50% {
-        opacity: 0.7;
-    }
-}
 
 .detection-progress .progress-text {
     font-size: 12px;
@@ -6359,15 +6348,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     animation: spin 1s linear infinite;
 }
 
-@keyframes spin {
-    0% {
-        transform: rotate(0deg);
-    }
-
-    100% {
-        transform: rotate(360deg);
-    }
-}
 
 .loading-message {
     color: rgba(255, 255, 255, 0.8);
@@ -7626,18 +7606,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     background: #169c46;
 }
 
-/* Animation for modal appearance */
-@keyframes modalFadeIn {
-    from {
-        opacity: 0;
-        transform: scale(0.9);
-    }
-
-    to {
-        opacity: 1;
-        transform: scale(1);
-    }
-}
 
 .version-modal-overlay:not(.hidden) .version-modal {
     animation: modalFadeIn 0.3s ease-out;
@@ -7785,15 +7753,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     margin-right: 10px;
 }
 
-@keyframes spin {
-    0% {
-        transform: rotate(0deg);
-    }
-
-    100% {
-        transform: rotate(360deg);
-    }
-}
 
 /* Search Input */
 .search-input {
@@ -10923,29 +10882,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     animation: spin 1s linear infinite;
 }
 
-@keyframes pulse {
 
-    0%,
-    100% {
-        opacity: 1;
-        transform: scale(1);
-    }
-
-    50% {
-        opacity: 0.7;
-        transform: scale(1.1);
-    }
-}
-
-@keyframes spin {
-    from {
-        transform: rotate(0deg);
-    }
-
-    to {
-        transform: rotate(360deg);
-    }
-}
 
 .tool-card-progress-section {
     padding-top: 12px;
@@ -14985,15 +14922,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     animation: shimmer 2s infinite;
 }
 
-@keyframes shimmer {
-    0% {
-        left: -100%;
-    }
-
-    100% {
-        left: 100%;
-    }
-}
 
 
 /* Styles for Stats inside the DB Updater Tool Card */
@@ -17474,17 +17402,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 16px;
 }
 
-@keyframes pulse {
-
-    0%,
-    100% {
-        opacity: 1;
-    }
-
-    50% {
-        opacity: 0.5;
-    }
-}
 
 .beatport-rebuild-slider {
     position: relative;
@@ -18293,15 +18210,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     margin-bottom: 15px;
 }
 
-@keyframes spin {
-    0% {
-        transform: rotate(0deg);
-    }
-
-    100% {
-        transform: rotate(360deg);
-    }
-}
 
 .refresh-genres-btn {
     background: linear-gradient(135deg, #01FF95 0%, #00E085 100%);
@@ -18912,15 +18820,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     margin: 0 auto 16px auto;
 }
 
-@keyframes spin {
-    0% {
-        transform: rotate(0deg);
-    }
-
-    100% {
-        transform: rotate(360deg);
-    }
-}
 
 .charts-loading-placeholder p {
     font-size: 16px;
@@ -30957,18 +30856,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     /* Show immediately instead of animation for now */
 }
 
-/* Animation keyframes for future use */
-@keyframes fadeInUp {
-    from {
-        opacity: 0;
-        transform: translateY(20px);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
 
 .section-header {
     display: flex;
@@ -31561,10 +31448,6 @@ div.artist-hero-badge {
     animation: shimmer 2s infinite;
 }
 
-@keyframes shimmer {
-    0% { transform: translateX(-100%); }
-    100% { transform: translateX(100%); }
-}
 
 /* Bio section */
 .artist-hero-bio {
@@ -36198,15 +36081,6 @@ div.artist-hero-badge {
     animation: slideUp 0.3s ease;
 }
 
-@keyframes fadeIn {
-    from {
-        opacity: 0;
-    }
-
-    to {
-        opacity: 1;
-    }
-}
 
 @keyframes slideUp {
     from {
@@ -37788,17 +37662,6 @@ div.artist-hero-badge {
     animation: slideDown 0.3s ease;
 }
 
-@keyframes slideDown {
-    from {
-        opacity: 0;
-        transform: translateY(-10px);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
 
 .sync-status-content {
     display: flex;
@@ -37823,15 +37686,6 @@ div.artist-hero-badge {
     transform-origin: center center;
 }
 
-@keyframes spin {
-    from {
-        transform: rotate(0deg);
-    }
-
-    to {
-        transform: rotate(360deg);
-    }
-}
 
 .sync-status-stats {
     display: flex;
@@ -37905,11 +37759,6 @@ div.artist-hero-badge {
     margin-bottom: 16px;
 }
 
-@keyframes spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
 
 .discover-loading p {
     margin: 0;
@@ -39804,7 +39653,6 @@ div.artist-hero-badge {
     animation: spin 0.8s linear infinite;
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
 
 .genre-dive-section {
     margin-bottom: 28px;
@@ -41090,19 +40938,6 @@ div.artist-hero-badge {
     animation: pulse 2s ease-in-out infinite;
 }
 
-@keyframes pulse {
-
-    0%,
-    100% {
-        opacity: 1;
-        transform: scale(1);
-    }
-
-    50% {
-        opacity: 0.7;
-        transform: scale(1.1);
-    }
-}
 
 .discover-download-sidebar-title {
     font-size: 12px;
@@ -42421,11 +42256,6 @@ div.artist-hero-badge {
     animation: spin 0.8s linear infinite;
 }
 
-@keyframes spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
 
 .empty-icon {
     font-size: 48px;
@@ -54618,7 +54448,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     animation: spin 0.8s linear infinite;
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
 
 .discog-check { color: #4caf50; font-size: 16px; font-weight: 700; animation: discogPop 0.3s ease; }
 .discog-skip { color: rgba(255,255,255,0.3); font-size: 16px; }
@@ -63824,10 +63653,6 @@ tr.tag-diff-same {
     color: rgba(96, 165, 250, 0.9);
     animation: explorer-pulse 1.5s ease-in-out infinite;
 }
-@keyframes explorer-pulse {
-    0%, 100% { opacity: 0.7; }
-    50% { opacity: 1; }
-}
 
 .explorer-picker-card {
     position: relative;
@@ -64013,10 +63838,6 @@ tr.tag-diff-same {
     animation: explorer-action-bar-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
-@keyframes explorer-action-bar-in {
-    from { opacity: 0; transform: translateY(-12px); }
-    to { opacity: 1; transform: none; }
-}
 
 .explorer-action-left {
     display: flex;
@@ -64113,9 +63934,6 @@ tr.tag-diff-same {
 .explorer-empty-icon svg circle:nth-child(7) { animation-delay: 0.7s; }
 .explorer-empty-icon svg line:nth-child(8) { animation-delay: 0.5s; }
 
-@keyframes explorer-empty-draw {
-    to { stroke-dashoffset: 0; }
-}
 
 .explorer-empty-title {
     font-size: 18px;
@@ -64168,9 +63986,6 @@ tr.tag-diff-same {
     animation: explorer-shimmer 1.5s ease-in-out infinite;
 }
 
-@keyframes explorer-shimmer {
-    to { left: 100%; }
-}
 
 .explorer-progress-text {
     font-size: 12px;
@@ -64396,10 +64211,6 @@ tr.tag-diff-same {
     animation: explorer-glow-pulse 4s ease-in-out infinite;
 }
 
-@keyframes explorer-glow-pulse {
-    0%, 100% { opacity: 0.5; transform: scale(1); }
-    50% { opacity: 1; transform: scale(1.05); }
-}
 
 /* ── Artist Node ── */
 .explorer-node-artist {
@@ -64486,10 +64297,6 @@ tr.tag-diff-same {
     animation: explorer-selected-breathe 2.5s ease-in-out infinite;
 }
 
-@keyframes explorer-selected-breathe {
-    0%, 100% { box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.2), 0 4px 16px rgba(var(--accent-rgb), 0.1); }
-    50% { box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.35), 0 4px 24px rgba(var(--accent-rgb), 0.2); }
-}
 
 .explorer-node-album.owned {
     opacity: 0.45;
@@ -64626,14 +64433,7 @@ tr.tag-diff-same {
     animation: explorer-line-draw 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
-@keyframes explorer-line-draw {
-    to { stroke-dashoffset: 0; }
-}
 
-@keyframes explorer-node-enter {
-    from { opacity: 0; transform: translateY(20px) scale(0.8); }
-    to { opacity: 1; transform: none; }
-}
 
 /* ── Responsive ── */
 @media (max-width: 900px) {
@@ -65123,16 +64923,7 @@ tr.tag-diff-same {
     filter: drop-shadow(0 0 2px rgba(var(--accent-rgb), 0.1));
 }
 
-@keyframes explorer-line-draw {
-    from { stroke-dashoffset: var(--line-length, 500); }
-    to { stroke-dashoffset: 0; }
-}
 
-@keyframes explorer-node-enter {
-    from { opacity: 0; transform: translateY(16px) scale(0.92) rotate(-2deg); }
-    60% { transform: translateY(-2px) scale(1.02) rotate(0.5deg); }
-    to { opacity: 1; transform: none; }
-}
 
 /* Responsive */
 @media (max-width: 900px) {
@@ -66680,7 +66471,6 @@ tr.tag-diff-same {
     animation: spin 0.6s linear infinite;
     margin: 0 auto 8px;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
 
 .server-search-result {
     display: flex;

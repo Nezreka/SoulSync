@@ -98,3 +98,28 @@
        MUST agree or the tabs and the content below them line up differently. */
     --settings-max-width: 1400px;
 }
+
+/* ── Shared keyframes ─────────────────────────────────────────────────
+   The single global definition of each name. Keyframe names are global and
+   the last definition wins, so never redefine these in another sheet — pick a
+   new, prefixed name instead. (CSS modules hash their own names, so a local
+   @keyframes there is fine.) */
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(1.1); }
+}
+
+@keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+@keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}

@@ -635,7 +635,6 @@ body[data-side="video"] .dashboard-header-sweep {
     position: relative; z-index: 2; max-width: 720px; padding: 0 0 52px 56px;
     animation: vdRise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
-@keyframes vdRise { from { opacity: 0; transform: translateY(26px); } to { opacity: 1; transform: none; } }
 .vd-title {
     font-size: clamp(2.6em, 5vw, 4.4em); line-height: 0.98; font-weight: 900; margin: 0 0 18px;
     color: #fff; letter-spacing: -0.02em; text-shadow: 0 4px 30px rgba(0,0,0,0.7);

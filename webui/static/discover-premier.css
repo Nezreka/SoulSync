@@ -1221,9 +1221,6 @@
     animation: dsc-spin 0.8s linear infinite;
 }
 
-@keyframes dsc-spin {
-    to { transform: rotate(360deg); }
-}
 
 .discover-station-open {
     display: flex;
