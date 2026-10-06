@@ -305,3 +305,64 @@ def redownload_start(track_id):
     except Exception as e:
         logger.error(f"Error starting redownload: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+def search_metadata(track_id) -> dict:
+    """The redownload modal's first step: the catalogue's idea of the track and
+    what each metadata source offers for it. Tools findings, Operations and
+    the album upgrade open this modal, so it must answer for Library v2 ids."""
+    import os
+    import re
+
+    from core.library2.provider_ids import parse_external_ids
+    from core.metadata.multi_source_search import TrackQuery, search_all_sources
+
+    conn = get_database()._get_connection()
+    try:
+        row = conn.execute("""
+            SELECT t.id, t.title, t.duration, t.spotify_id, t.external_ids,
+                   al.title AS album_title, al.image_url AS thumb_url,
+                   COALESCE((SELECT ar2.name FROM lib2_track_artists ta
+                               JOIN lib2_artists ar2 ON ar2.id = ta.artist_id
+                              WHERE ta.track_id = t.id
+                              ORDER BY CASE ta.role WHEN 'primary' THEN 0 ELSE 1 END, ta.position
+                              LIMIT 1), ar.name) AS artist_name,
+                   f.path AS file_path, f.bitrate
+              FROM lib2_tracks t
+              JOIN lib2_albums al ON al.id = t.album_id
+              LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+              LEFT JOIN lib2_track_files f ON f.track_id = t.id AND f.is_primary = 1
+                   AND COALESCE(f.file_state, 'active') <> 'deleted'
+             WHERE t.id = ?""", (int(track_id),)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        raise LookupError('Track not found')
+
+    title, artist = row['title'] or '', row['artist_name'] or ''
+    clean_title = re.sub(r'\s*[\(\[](single version|album version|remaster|deluxe|bonus|explicit|clean|radio edit)[\)\]]',
+                         '', title, flags=re.IGNORECASE).strip()
+    deezer_id = parse_external_ids(row['external_ids']).get('deezer')
+    ext = os.path.splitext(row['file_path'] or '')[1].lstrip('.').upper()
+    sources = [('spotify', spotify_client)] if spotify_client and spotify_client.is_authenticated() else []
+    for name, getter in (('itunes', _get_itunes_client), ('deezer', _get_deezer_client)):
+        try:
+            sources.append((name, getter()))
+        except Exception as e:  # noqa: BLE001 - an unavailable source is skipped
+            logger.debug("%s client not available for redownload search: %s", name, e)
+    result = search_all_sources(
+        TrackQuery(title=title, artist=artist, album=row['album_title'] or '',
+                   duration_ms=row['duration'] or 0, spotify_track_id=row['spotify_id'],
+                   deezer_id=deezer_id),
+        sources, clean_title=clean_title)
+    return {
+        'current_track': {
+            'id': row['id'], 'title': title, 'artist': artist, 'album': row['album_title'],
+            'duration_ms': row['duration'] or 0, 'file_path': row['file_path'] or '',
+            'format': ext if ext in ('FLAC', 'MP3', 'OPUS', 'OGG', 'M4A', 'WAV') else '',
+            'bitrate': row['bitrate'] or 0, 'spotify_track_id': row['spotify_id'],
+            'deezer_id': deezer_id, 'thumb_url': row['thumb_url'] or '',
+        },
+        'metadata_results': result.metadata_results,
+        'best_match': result.best_match,
+    }

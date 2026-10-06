@@ -11247,6 +11247,19 @@ def _library_track_route_id(track_id):
     return text.split(':', 1)[1] if text.startswith('lib2:') else track_id
 
 
+@app.route('/api/library/track/<track_id>/redownload/search-metadata', methods=['POST'])
+def redownload_search_metadata(track_id):
+    """Step one of the redownload modal: candidate metadata for the track."""
+    from core.library.redownload import search_metadata
+    try:
+        return jsonify({"success": True, **search_metadata(_library_track_route_id(track_id))})
+    except (LookupError, ValueError) as e:
+        return jsonify({"success": False, "error": str(e)}), 404
+    except Exception as e:
+        logger.error(f"Error in redownload metadata search: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/library/track/<track_id>/redownload/search-sources', methods=['POST'])
 def redownload_search_sources(track_id):
     """Search all active download sources for a track using the selected metadata."""
