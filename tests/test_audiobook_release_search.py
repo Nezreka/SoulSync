@@ -1530,3 +1530,42 @@ def test_single_word_title_without_author_penalized():
     assert len(ranked) == 1
     assert ranked[0].title == real_book.title
 
+
+# a book SOLD in parts (graphicaudio's "The Reckoning (Part 1 of 2)") is its
+# own catalogue entry with its own runtime. the posting of that part is the
+# whole thing, not a fragment, and the other part is a different product.
+RECKONING_PART_1 = {
+    "asin": "B0RECKON01",
+    "title": "The Reckoning (Part 1 of 2) (Dramatized Adaptation)",
+    "author_names": ["Caroline Peckham", "Susanne Valenti"],
+    "narrator_names": [],
+    "runtime_minutes": 398,
+    "series": [],
+}
+
+
+def test_the_books_own_part_is_not_a_fragment():
+    release = _release(
+        "The Reckoning (Part 1 of 2) by Caroline Peckham, Susanne Valenti [ENG / M4B] [VIP]")
+    ranked = rank_releases([release], RECKONING_PART_1, 0.0, "any")
+    assert len(ranked) == 1
+    assert ranked[0].part_verdict == "match"
+    assert "will not import" not in ranked[0].short_warning
+
+
+def test_the_other_part_is_dropped_not_grabbed():
+    # the automatic wishlist grabs whatever ranks first, so a part 2 posting
+    # must never stand in for the part 1 book
+    part_1 = _release(
+        "The Reckoning (Part 1 of 2) by Caroline Peckham, Susanne Valenti [ENG / M4B] [VIP]")
+    part_2 = _release(
+        "The Reckoning (Part 2 of 2) by Caroline Peckham, Susanne Valenti [ENG / M4B] [VIP]",
+        guid="guid-2")
+    ranked = rank_releases([part_2, part_1], RECKONING_PART_1, 0.0, "any")
+    assert [r.guid for r in ranked] == ["guid-1"]
+
+
+def test_a_whole_book_still_warns_about_a_part_posting():
+    warning = rank_releases([_release("The Way of Kings (1 of 5)")], BOOK, 0.0, "any")[0]
+    assert warning.part_verdict == "unknown"
+    assert "will not import" in warning.short_warning
