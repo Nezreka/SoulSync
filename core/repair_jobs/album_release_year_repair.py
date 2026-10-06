@@ -362,7 +362,14 @@ def rename_album_folder(
                             "WHERE id = ?", (new_fp, file_id))
                 conn.commit()
         except Exception as e:
+            # The catalogue still points into the old folder: put it back, or
+            # every file of the album reads as missing on the next scan.
             logger.error("Error updating file paths in the catalogue after folder rename: %s", e)
+            try:
+                os.rename(new_folder, old_folder)
+            except OSError as undo:
+                logger.error("Could not restore '%s' after the failed update: %s", old_folder, undo)
+            return None
 
     return new_folder
 
