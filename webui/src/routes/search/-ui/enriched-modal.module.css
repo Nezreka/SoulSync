@@ -5,20 +5,15 @@
 .popup {
   --em-raised: #1a1c23;
   --em-raised-2: #22242d;
-  --em-line: rgba(255, 255, 255, 0.07);
-  --em-line-strong: rgba(255, 255, 255, 0.12);
   --em-text: #f3f4f8;
-  --em-muted: #9b9dad;
   --em-faint: #6b6d7c;
-  --em-ok: #4ade80;
-  --em-warn: #fbbf24;
   --em-mono: 'SF Mono', ui-monospace, 'Cascadia Code', Consolas, monospace;
 
   width: min(880px, 100%) !important;
   height: min(720px, 92vh);
   border-radius: 20px !important;
   background: #15161c !important;
-  border-color: var(--em-line-strong) !important;
+  border-color: var(--line-strong) !important;
   color: var(--em-text);
 }
 
@@ -40,7 +35,7 @@
   align-items: center;
   gap: 14px;
   padding: 20px 20px 16px;
-  border-bottom: 1px solid var(--em-line);
+  border-bottom: 1px solid var(--white-a07);
   flex-shrink: 0;
 }
 
@@ -57,7 +52,7 @@
 }
 
 .sub {
-  color: var(--em-muted);
+  color: var(--text-secondary);
   font-size: 13px;
   white-space: nowrap;
   overflow: hidden;
@@ -87,7 +82,7 @@
   height: 1px;
   margin-right: 8px;
   vertical-align: middle;
-  background: var(--em-line-strong);
+  background: var(--line-strong);
 }
 
 .steps li[data-on] {
@@ -103,7 +98,7 @@
   border: none;
   border-radius: 50%;
   background: var(--em-raised);
-  color: var(--em-muted) !important;
+  color: var(--text-secondary) !important;
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
@@ -127,16 +122,16 @@
 
 .providers button {
   padding: 5px 12px;
-  border: 1px solid var(--em-line);
+  border: 1px solid var(--white-a07);
   border-radius: 999px;
   background: var(--em-raised);
   font-size: 12.5px;
-  color: var(--em-muted);
+  color: var(--text-secondary);
   cursor: pointer;
 }
 
 .providers button[aria-pressed='true'] {
-  border-color: var(--em-line-strong);
+  border-color: var(--line-strong);
   background: var(--em-raised-2);
   color: var(--em-text);
 }
@@ -146,7 +141,7 @@
   align-items: center;
   gap: 8px;
   padding: 0 12px;
-  border: 1px solid var(--em-line);
+  border: 1px solid var(--white-a07);
   border-radius: 11px;
   background: var(--em-raised);
 }
@@ -190,7 +185,7 @@
 .notice {
   margin: 24px 0;
   text-align: center;
-  color: var(--em-muted);
+  color: var(--text-secondary);
   font-size: 13.5px;
 }
 
@@ -214,7 +209,7 @@
   flex-direction: column;
   min-width: 0;
   padding: 10px;
-  border: 1px solid var(--em-line);
+  border: 1px solid var(--white-a07);
   border-radius: 14px;
   background: var(--em-raised);
   text-align: left;
@@ -225,7 +220,7 @@
 }
 
 .candidate:hover {
-  border-color: var(--em-line-strong);
+  border-color: var(--line-strong);
 }
 
 .candidate[aria-checked='true'] {
@@ -273,7 +268,7 @@
 }
 
 .candSub {
-  color: var(--em-muted);
+  color: var(--text-secondary);
   font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
@@ -284,7 +279,7 @@
   padding: 10px 12px;
   border-radius: 11px;
   background: var(--em-raised);
-  color: var(--em-muted);
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
@@ -314,7 +309,7 @@
 
 .map td {
   padding: 8px;
-  border-top: 1px solid var(--em-line);
+  border-top: 1px solid var(--white-a07);
   vertical-align: middle;
 }
 
@@ -322,7 +317,7 @@
   max-width: 320px;
   font-family: var(--em-mono);
   font-size: 11.5px;
-  color: var(--em-muted);
+  color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -332,7 +327,7 @@
   width: 100%;
   max-width: 320px;
   padding: 6px 8px;
-  border: 1px solid var(--em-line-strong);
+  border: 1px solid var(--line-strong);
   border-radius: 8px;
   background: var(--em-raised);
   font-size: 12.5px;
@@ -343,7 +338,7 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--em-muted);
+  color: var(--text-secondary);
   white-space: nowrap;
 }
 
@@ -351,11 +346,11 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--em-ok);
+  background: var(--success);
 }
 
 .conf[data-level='low'] i {
-  background: var(--em-warn);
+  background: var(--warning);
 }
 
 .conf[data-level='skip'] i {
@@ -367,7 +362,7 @@
   align-items: center;
   gap: 10px;
   padding: 14px 20px;
-  border-top: 1px solid var(--em-line);
+  border-top: 1px solid var(--white-a07);
   flex-shrink: 0;
 }
 
@@ -384,7 +379,7 @@
 .button {
   flex-shrink: 0;
   padding: 9px 18px;
-  border: 1px solid var(--em-line-strong);
+  border: 1px solid var(--line-strong);
   border-radius: 999px;
   background: var(--em-raised);
   font-size: 13.5px;

@@ -4,16 +4,13 @@
 .popup {
   --dc-raised: #1a1c23;
   --dc-raised-2: #22242d;
-  --dc-line: rgba(255, 255, 255, 0.07);
-  --dc-line-strong: rgba(255, 255, 255, 0.12);
   --dc-text: #f3f4f8;
-  --dc-muted: #9b9dad;
   --dc-faint: #6b6d7c;
 
   width: min(560px, 100%) !important;
   border-radius: 20px !important;
   background: #15161c !important;
-  border-color: var(--dc-line-strong) !important;
+  border-color: var(--line-strong) !important;
   color: var(--dc-text);
 }
 
@@ -33,7 +30,7 @@
   align-items: center;
   gap: 14px;
   padding: 20px 20px 16px;
-  border-bottom: 1px solid var(--dc-line);
+  border-bottom: 1px solid var(--white-a07);
 }
 
 .art {
@@ -73,7 +70,7 @@
 }
 
 .sub {
-  color: var(--dc-muted);
+  color: var(--text-secondary);
   font-size: 13px;
   white-space: nowrap;
   overflow: hidden;
@@ -93,7 +90,7 @@
   border: none;
   border-radius: 50%;
   background: var(--dc-raised);
-  color: var(--dc-muted) !important;
+  color: var(--text-secondary) !important;
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
@@ -118,7 +115,7 @@
   gap: 14px;
   width: 100%;
   padding: 14px;
-  border: 1px solid var(--dc-line);
+  border: 1px solid var(--white-a07);
   border-radius: 14px;
   background: var(--dc-raised);
   text-align: left;
@@ -129,7 +126,7 @@
 }
 
 .option:hover {
-  border-color: var(--dc-line-strong);
+  border-color: var(--line-strong);
   background: var(--dc-raised-2);
 }
 
@@ -145,7 +142,7 @@
   height: 40px;
   border-radius: 11px;
   background: var(--dc-raised-2);
-  color: var(--dc-muted);
+  color: var(--text-secondary);
 }
 
 .icon svg {
@@ -169,7 +166,7 @@
 .optionText {
   display: block;
   margin-top: 2px;
-  color: var(--dc-muted);
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
@@ -188,7 +185,7 @@
   position: relative;
   width: 18px;
   height: 18px;
-  border: 1.5px solid var(--dc-line-strong);
+  border: 1.5px solid var(--line-strong);
   border-radius: 50%;
 }
 
@@ -209,7 +206,7 @@
   align-items: center;
   gap: 10px;
   padding: 14px 20px;
-  border-top: 1px solid var(--dc-line);
+  border-top: 1px solid var(--white-a07);
 }
 
 .note {
@@ -225,7 +222,7 @@
 .button {
   flex-shrink: 0;
   padding: 9px 18px;
-  border: 1px solid var(--dc-line-strong);
+  border: 1px solid var(--line-strong);
   border-radius: 999px;
   background: var(--dc-raised);
   font-size: 13.5px;

@@ -2,14 +2,10 @@
    init.js builds the markup, this file is all of its look. */
 
 :root {
-    --pf-accent: var(--accent);
     --pf-accent-soft: rgba(var(--accent-rgb), 0.14);
     --pf-accent-line: rgba(var(--accent-rgb), 0.45);
-    --pf-bg: #0b0d10;
     --pf-surface: #15181d;
     --pf-surface-2: #1c2027;
-    --pf-line: rgba(255, 255, 255, 0.08);
-    --pf-line-strong: rgba(255, 255, 255, 0.16);
     --pf-text: #f2f4f7;
     --pf-text-2: rgba(242, 244, 247, 0.62);
     --pf-text-3: rgba(242, 244, 247, 0.42);
@@ -36,7 +32,7 @@ body.pf-modal-open .toast-container { z-index: 150000; }
     padding: 48px 16px;
     background:
         radial-gradient(1200px 600px at 50% -10%, rgba(var(--accent-rgb), 0.10), transparent 60%),
-        var(--pf-bg);
+        var(--bg-primary);
     animation: pfFade 0.35s var(--pf-ease);
 }
 
@@ -84,11 +80,11 @@ body.pf-modal-open .toast-container { z-index: 150000; }
 
 .pf-tile:hover .pf-avatar--tile,
 .pf-tile:focus-visible .pf-avatar--tile {
-    box-shadow: 0 0 0 3px var(--pf-bg), 0 0 0 5px rgba(255, 255, 255, 0.85);
+    box-shadow: 0 0 0 3px var(--bg-primary), 0 0 0 5px rgba(255, 255, 255, 0.85);
 }
 
 .pf-tile.is-current .pf-avatar--tile {
-    box-shadow: 0 0 0 3px var(--pf-bg), 0 0 0 5px var(--pf-accent);
+    box-shadow: 0 0 0 3px var(--bg-primary), 0 0 0 5px var(--accent);
 }
 
 .pf-tile-name {
@@ -116,7 +112,7 @@ body.pf-modal-open .toast-container { z-index: 150000; }
     width: 132px;
     height: 132px;
     border-radius: 28px;
-    border: 2px dashed var(--pf-line-strong);
+    border: 2px dashed var(--white-a16);
     color: var(--pf-text-2);
     transition: border-color 0.2s ease, color 0.2s ease;
 }
@@ -141,7 +137,7 @@ body.pf-modal-open .toast-container { z-index: 150000; }
     box-sizing: border-box;
     padding: 10px 22px;
     border-radius: 999px;
-    border: 1px solid var(--pf-line-strong);
+    border: 1px solid var(--white-a16);
     font-size: 14px;
     font-weight: 500;
     color: var(--pf-text-2);
@@ -150,7 +146,7 @@ body.pf-modal-open .toast-container { z-index: 150000; }
 }
 
 .pf-pill:hover { color: var(--pf-text); border-color: rgba(255, 255, 255, 0.4); }
-.pf-pill:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 3px; }
+.pf-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 /* ── avatars ─────────────────────────────────────────────── */
 
@@ -204,7 +200,7 @@ body.pf-modal-open .toast-container { z-index: 150000; }
     max-height: calc(100vh - 48px);
     max-height: calc(100dvh - 48px);
     border-radius: 24px;
-    border: 1px solid var(--pf-line);
+    border: 1px solid var(--line);
     background: var(--pf-surface);
     box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
     color: var(--pf-text);
@@ -274,7 +270,7 @@ body.pf-modal-open .toast-container { z-index: 150000; }
 }
 
 .pf-icon-btn:hover { background: rgba(255, 255, 255, 0.07); color: var(--pf-text); }
-.pf-icon-btn:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
+.pf-icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .pf-icon-btn svg { width: 18px; height: 18px; }
 
 .pf-btn {
@@ -296,9 +292,9 @@ body.pf-modal-open .toast-container { z-index: 150000; }
 }
 
 .pf-btn:hover { background: rgba(255, 255, 255, 0.12); }
-.pf-btn:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
+.pf-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .pf-btn[disabled] { opacity: 0.45; cursor: default; }
-.pf-btn--primary { background: var(--pf-accent); color: #04130a; }
+.pf-btn--primary { background: var(--accent); color: #04130a; }
 .pf-btn--primary:hover { background: rgb(36, 205, 96); }
 .pf-btn--quiet { background: transparent; color: var(--pf-text-2); }
 .pf-btn--quiet:hover { background: rgba(255, 255, 255, 0.06); color: var(--pf-text); }
@@ -323,7 +319,7 @@ body.pf-modal-open .toast-container { z-index: 150000; }
     height: 44px;
     padding: 0 14px;
     border-radius: 12px;
-    border: 1px solid var(--pf-line-strong);
+    border: 1px solid var(--white-a16);
     background: var(--pf-surface-2);
     color: var(--pf-text);
     font: inherit;
@@ -365,11 +361,11 @@ select.pf-input { appearance: auto; }
 
 .pf-group {
     border-radius: 16px;
-    border: 1px solid var(--pf-line);
+    border: 1px solid var(--line);
     background: rgba(255, 255, 255, 0.02);
 }
 
-.pf-group > * + * { border-top: 1px solid var(--pf-line); }
+.pf-group > * + * { border-top: 1px solid var(--line); }
 
 .pf-switch-row {
     position: relative;
@@ -416,9 +412,9 @@ select.pf-input { appearance: auto; }
     transition: transform 0.22s var(--pf-ease);
 }
 
-.pf-switch-input:checked + .pf-switch-track { background: var(--pf-accent); }
+.pf-switch-input:checked + .pf-switch-track { background: var(--accent); }
 .pf-switch-input:checked + .pf-switch-track .pf-switch-thumb { transform: translateX(18px); }
-.pf-switch-input:focus-visible + .pf-switch-track { outline: 2px solid var(--pf-accent); outline-offset: 3px; }
+.pf-switch-input:focus-visible + .pf-switch-track { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 .pf-group-extra { padding: 4px 16px 16px; border-top: 0 !important; }
 
@@ -448,7 +444,7 @@ select.pf-input { appearance: auto; }
 
 .pf-step[aria-selected="true"] { background: rgba(255, 255, 255, 0.09); color: var(--pf-text); }
 .pf-step[disabled] { cursor: default; }
-.pf-step:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 1px; }
+.pf-step:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .pf-identity-preview {
     display: flex;
@@ -476,7 +472,7 @@ select.pf-input { appearance: auto; }
 }
 
 .pf-seg button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.1); color: var(--pf-text); }
-.pf-seg button:focus-visible { outline: 2px solid var(--pf-accent); }
+.pf-seg button:focus-visible { outline: 2px solid var(--accent); }
 
 .pf-swatches { display: flex; flex-wrap: wrap; gap: 10px; }
 
@@ -491,7 +487,7 @@ select.pf-input { appearance: auto; }
 
 .pf-swatch:hover { transform: scale(1.08); }
 .pf-swatch[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--pf-surface), 0 0 0 5px #fff; }
-.pf-swatch:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 4px; }
+.pf-swatch:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 
 .pf-presets {
     display: grid;
@@ -507,14 +503,14 @@ select.pf-input { appearance: auto; }
     gap: 4px;
     padding: 14px 12px;
     border-radius: 14px;
-    border: 1px solid var(--pf-line-strong);
+    border: 1px solid var(--white-a16);
     cursor: pointer;
     transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .pf-preset:hover { border-color: rgba(255, 255, 255, 0.3); }
-.pf-preset:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
-.pf-preset[aria-checked="true"] { border-color: var(--pf-accent); background: var(--pf-accent-soft); }
+.pf-preset:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pf-preset[aria-checked="true"] { border-color: var(--accent); background: var(--pf-accent-soft); }
 .pf-preset-name { font-size: 14px; font-weight: 700; color: var(--pf-text); }
 .pf-preset-desc { font-size: 12px; line-height: 1.35; color: var(--pf-text-2); }
 
@@ -535,7 +531,7 @@ select.pf-input { appearance: auto; }
 .pf-details > summary::-webkit-details-marker { display: none; }
 .pf-details > summary::before { content: '›'; display: inline-block; font-size: 18px; transition: transform 0.2s ease; }
 .pf-details[open] > summary::before { transform: rotate(90deg); }
-.pf-details > summary:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; border-radius: 6px; }
+.pf-details > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 
 .pf-pages {
     display: grid;
@@ -554,7 +550,7 @@ select.pf-input { appearance: auto; }
     cursor: pointer;
 }
 
-.pf-pages input { accent-color: var(--pf-accent); width: 16px; height: 16px; }
+.pf-pages input { accent-color: var(--accent); width: 16px; height: 16px; }
 .pf-pages-group { margin: 12px 0 4px; font-size: 12px; font-weight: 700; color: var(--pf-text-3); }
 
 .pf-note {
@@ -592,12 +588,12 @@ select.pf-input { appearance: auto; }
 .pf-card {
     position: relative;
     border-radius: var(--pf-radius);
-    border: 1px solid var(--pf-line);
+    border: 1px solid var(--line);
     background: var(--pf-surface-2);
     transition: border-color 0.15s ease;
 }
 
-.pf-card:hover { border-color: var(--pf-line-strong); }
+.pf-card:hover { border-color: var(--white-a16); }
 
 .pf-card-main {
     all: unset;
@@ -612,7 +608,7 @@ select.pf-input { appearance: auto; }
     text-align: left;
 }
 
-.pf-card-main:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: -2px; }
+.pf-card-main:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .pf-card-main[disabled] { cursor: default; }
 
 .pf-card-name {
@@ -626,7 +622,7 @@ select.pf-input { appearance: auto; }
 }
 
 .pf-card-role { margin-top: 2px; font-size: 13px; color: var(--pf-text-2); }
-.pf-card-role .pf-you { color: var(--pf-accent); }
+.pf-card-role .pf-you { color: var(--accent); }
 .pf-card-summary { margin-top: 10px; font-size: 13px; line-height: 1.45; color: var(--pf-text-3); }
 .pf-card-summary .pf-warn { color: #fca5a5; }
 
@@ -658,7 +654,7 @@ select.pf-input { appearance: auto; }
     max-width: calc(100vw - 32px);
     padding: 6px;
     border-radius: 16px;
-    border: 1px solid var(--pf-line-strong);
+    border: 1px solid var(--white-a16);
     background: rgba(24, 27, 33, 0.98);
     box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
     color: var(--pf-text);
@@ -697,7 +693,7 @@ select.pf-input { appearance: auto; }
 .pf-menu-item-text { flex: 1; min-width: 0; }
 .pf-menu-item-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pf-menu-item-meta { display: block; font-size: 12px; color: var(--pf-text-3); }
-.pf-menu-sep { height: 1px; margin: 6px 4px; background: var(--pf-line); }
+.pf-menu-sep { height: 1px; margin: 6px 4px; background: var(--line); }
 
 /* the sidebar indicator: avatar + name is one real button */
 .profile-indicator-main {
@@ -713,7 +709,7 @@ select.pf-input { appearance: auto; }
     cursor: pointer;
 }
 
-.profile-indicator-main:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
+.profile-indicator-main:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ── pin entry ───────────────────────────────────────────── */
 
@@ -813,10 +809,10 @@ select.pf-input { appearance: auto; }
 
 .pf-key:hover { background: rgba(255, 255, 255, 0.14); }
 .pf-key:active { transform: scale(0.94); background: rgba(255, 255, 255, 0.2); }
-.pf-key:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 3px; }
+.pf-key:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .pf-key[disabled] { opacity: 0.35; cursor: default; }
 .pf-key--quiet { background: transparent; font-size: 15px; color: var(--pf-text-2); }
-.pf-key--go { background: var(--pf-accent); color: #04130a; }
+.pf-key--go { background: var(--accent); color: #04130a; }
 .pf-key--go:hover { background: rgb(36, 205, 96); }
 .pf-key svg { width: 24px; height: 24px; }
 
@@ -838,7 +834,7 @@ select.pf-input { appearance: auto; }
 }
 
 .pf-link:hover { color: var(--pf-text); text-decoration: underline; }
-.pf-link:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 3px; border-radius: 4px; }
+.pf-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
 
 /* ── kids & limits, this device: a row with a control on the right ── */
 
@@ -881,11 +877,11 @@ select.pf-input { appearance: auto; }
     padding: 0;
     list-style: none;
     border-radius: 16px;
-    border: 1px solid var(--pf-line);
+    border: 1px solid var(--line);
     background: rgba(255, 255, 255, 0.02);
 }
 
-.pf-rows > li + li { border-top: 1px solid var(--pf-line); }
+.pf-rows > li + li { border-top: 1px solid var(--line); }
 
 .pf-row {
     display: flex;
@@ -915,7 +911,7 @@ select.pf-input { appearance: auto; }
     background: rgba(255, 255, 255, 0.06);
 }
 
-.pf-state--open { color: var(--pf-accent); background: var(--pf-accent-soft); }
+.pf-state--open { color: var(--accent); background: var(--pf-accent-soft); }
 
 .pf-empty {
     display: flex;
@@ -923,7 +919,7 @@ select.pf-input { appearance: auto; }
     gap: 6px;
     padding: 36px 20px;
     border-radius: 16px;
-    border: 1px dashed var(--pf-line-strong);
+    border: 1px dashed var(--white-a16);
     text-align: center;
     font-size: 13.5px;
     line-height: 1.5;

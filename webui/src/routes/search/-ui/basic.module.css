@@ -8,12 +8,8 @@
   --bs-surface: #13141a;
   --bs-raised: #1a1c23;
   --bs-raised-2: #22242d;
-  --bs-line: rgba(255, 255, 255, 0.07);
-  --bs-line-strong: rgba(255, 255, 255, 0.12);
   --bs-text: #f3f4f8;
-  --bs-muted: #9b9dad;
   --bs-faint: #6b6d7c;
-  --bs-ok: #4ade80;
   --bs-mono: 'SF Mono', ui-monospace, 'Cascadia Code', Consolas, monospace;
 
   /* no display here. style.css hides .search-section and shows it as a flex
@@ -45,7 +41,7 @@
   gap: 4px;
   padding: 6px;
   background: var(--bs-surface);
-  border: 1px solid var(--bs-line-strong);
+  border: 1px solid var(--line-strong);
   border-radius: 14px;
   transition:
     border-color 0.15s ease,
@@ -85,7 +81,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--bs-ok);
+  background: var(--success);
   box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.15);
 }
 
@@ -148,7 +144,7 @@
 
 .cancelButton {
   flex-shrink: 0;
-  border: 1px solid var(--bs-line-strong);
+  border: 1px solid var(--line-strong);
   border-radius: 10px;
   padding: 8px 16px;
   font-size: 13.5px;
@@ -158,7 +154,7 @@
 }
 
 .status {
-  color: var(--bs-muted);
+  color: var(--text-secondary);
   font-size: 13px;
   padding-inline: 4px;
 }
@@ -174,7 +170,7 @@
 
 .count {
   margin-right: auto;
-  color: var(--bs-muted);
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
@@ -186,7 +182,7 @@
 .segmented {
   display: inline-flex;
   padding: 3px;
-  border: 1px solid var(--bs-line);
+  border: 1px solid var(--white-a07);
   border-radius: 10px;
   background: var(--bs-surface);
 }
@@ -198,7 +194,7 @@
   padding: 5px 12px;
   font-size: 12.5px;
   font-weight: 500;
-  color: var(--bs-muted);
+  color: var(--text-secondary);
   cursor: pointer;
 }
 
@@ -214,11 +210,11 @@
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  border: 1px solid var(--bs-line);
+  border: 1px solid var(--white-a07);
   border-radius: 10px;
   background: var(--bs-surface);
   font-size: 12.5px;
-  color: var(--bs-muted);
+  color: var(--text-secondary);
 }
 
 .menu b {
@@ -235,7 +231,7 @@
 }
 
 .menu:focus-within {
-  border-color: var(--bs-line-strong);
+  border-color: var(--line-strong);
 }
 
 .orderButton {
@@ -243,10 +239,10 @@
   place-items: center;
   width: 30px;
   height: 30px;
-  border: 1px solid var(--bs-line);
+  border: 1px solid var(--white-a07);
   border-radius: 10px;
   background: var(--bs-surface);
-  color: var(--bs-muted);
+  color: var(--text-secondary);
   cursor: pointer;
 }
 
@@ -263,7 +259,7 @@
 /* ── results ──────────────────────────────────────────────────────────── */
 
 .list {
-  border: 1px solid var(--bs-line);
+  border: 1px solid var(--white-a07);
   border-radius: 16px;
   background: var(--bs-surface);
   overflow: hidden;
@@ -272,7 +268,7 @@
 .empty {
   padding: 56px 24px;
   text-align: center;
-  color: var(--bs-muted);
+  color: var(--text-secondary);
   font-size: 14px;
 }
 
@@ -287,7 +283,7 @@
   align-items: center;
   gap: 16px;
   padding: 12px 16px;
-  border-top: 1px solid var(--bs-line);
+  border-top: 1px solid var(--white-a07);
   transition: background 0.12s ease;
 }
 
@@ -375,7 +371,7 @@
 }
 
 .sub {
-  color: var(--bs-muted);
+  color: var(--text-secondary);
   font-size: 13px;
   white-space: nowrap;
   overflow: hidden;
@@ -391,7 +387,7 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  color: var(--bs-muted);
+  color: var(--text-secondary);
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -403,7 +399,7 @@
 
 .badge {
   padding: 3px 7px;
-  border: 1px solid var(--bs-line-strong);
+  border: 1px solid var(--line-strong);
   border-radius: 6px;
   font-family: var(--bs-mono);
   font-size: 11px;
@@ -442,7 +438,7 @@
   align-items: center;
   gap: 7px;
   padding: 7px 14px;
-  border: 1px solid var(--bs-line-strong);
+  border: 1px solid var(--line-strong);
   border-radius: 999px;
   background: var(--bs-raised);
   font-size: 13px;
@@ -468,7 +464,7 @@
 
 .tracks {
   padding: 4px 16px 10px 80px;
-  border-top: 1px solid var(--bs-line);
+  border-top: 1px solid var(--white-a07);
   background: rgba(0, 0, 0, 0.18);
 }
 
@@ -487,9 +483,9 @@
   align-items: center;
   gap: 12px;
   padding: 7px 0;
-  border-top: 1px solid var(--bs-line);
+  border-top: 1px solid var(--white-a07);
   font-size: 13px;
-  color: var(--bs-muted);
+  color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -513,7 +509,7 @@
 }
 
 .trackArtist {
-  color: var(--bs-muted);
+  color: var(--text-secondary);
 }
 
 .trackDownload {

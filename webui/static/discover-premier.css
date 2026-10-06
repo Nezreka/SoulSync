@@ -6,8 +6,6 @@
 
 /* ── 1. Discover Canvas & Dynamic Ambient Environment ────────────────────── */
 .discover-container {
-    --dsc-text-muted: rgba(255, 255, 255, 0.45);
-    
     position: relative;
     width: 100%;
     max-width: 1480px;
@@ -820,7 +818,7 @@
 
 .mix-card-meta {
     font-size: 0.78rem !important;
-    color: var(--dsc-text-muted) !important;
+    color: var(--white-a45) !important;
     margin-top: 4px !important;
 }
 
@@ -993,7 +991,7 @@
 .ya-card.recommended-artist-card .ya-card-sub,
 [id="your-artists-carousel"] .ya-card .ya-card-sub {
     font-size: 0.76rem !important;
-    color: var(--dsc-text-muted) !important;
+    color: var(--white-a45) !important;
     white-space: nowrap !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
