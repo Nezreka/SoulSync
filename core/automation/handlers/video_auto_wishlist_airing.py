@@ -231,6 +231,66 @@ def _season_lookup(season_meta, tmdb_id, season_number, cache):
     return cache[key]
 
 
+def auto_video_add_airing_episodes_all_profiles(config: Dict[str, Any], deps: AutomationDeps,
+                                                **kwargs) -> Dict[str, Any]:
+    """the airing run for the owner, then for every other profile that follows a show.
+
+    the watchlist is per-profile and the system automation is admin's, so
+    without this a non-admin's followed shows never got their new episodes.
+    an extra pass only wishes episodes of shows that profile explicitly
+    follows: the calendar also counts every airing library show as watched by
+    default, and copying those into every profile's wishlist is noise.
+
+    the catch-up bookmark is shared, so it is read once up front and written
+    once after every pass worked. otherwise the first pass would advance it
+    and the next profile would lose the days it was meant to catch up.
+    """
+    from core.automation.handlers.video_profile_fanout import run_per_profile
+
+    real_get = kwargs.pop('get_bookmark', None) or _default_get_bookmark
+    real_set = kwargs.pop('set_bookmark', None) or _default_set_bookmark
+    fetch_airing = kwargs.pop('fetch_airing', None) or _default_fetch_airing
+    fetch_follows = kwargs.pop('fetch_follows', None) or _default_followed_shows
+    follower_profiles = kwargs.pop('follower_profiles', None)
+    try:
+        bookmark, bookmark_err = real_get(), None
+    except Exception as e:   # noqa: BLE001 - each pass degrades to today-only, no write
+        bookmark, bookmark_err = None, e
+
+    def get_bookmark():
+        if bookmark_err is not None:
+            raise bookmark_err
+        return bookmark
+
+    wrote: List[str] = []
+
+    def run_pass(pass_deps, pid, is_owner):
+        extra = dict(kwargs)
+        if not is_owner:
+            follows = {str(f.get('tmdb_id')) for f in (fetch_follows(pid) or [])}
+            extra['fetch_airing'] = lambda start, end: [
+                r for r in (fetch_airing(start, end) or [])
+                if str(r.get('show_tmdb_id')) in follows]
+        else:
+            extra['fetch_airing'] = fetch_airing
+        return auto_video_add_airing_episodes(
+            config, pass_deps, get_bookmark=get_bookmark, set_bookmark=wrote.append, **extra)
+
+    result = run_per_profile(run_pass, deps, ['show'], follower_profiles=follower_profiles)
+    if wrote and result.get('status') != 'error':
+        try:
+            real_set(wrote[-1])
+        except Exception as e:   # noqa: BLE001 - same rule as the single run: re-cover next time
+            result = dict(result, status='error',
+                          error='Could not persist the catch-up bookmark: %s' % e)
+    return result
+
+
+def _default_followed_shows(profile_id: int) -> List[Dict[str, Any]]:
+    from api.video import get_video_db
+    return get_video_db().followed_shows(profile_id=profile_id)
+
+
 def auto_video_add_airing_episodes(
     config: Dict[str, Any],
     deps: AutomationDeps,

@@ -6600,6 +6600,23 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def watchlist_profile_ids(self, kinds) -> list[int]:
+        """profiles with at least one followed watchlist row of these kinds.
+        the admin-owned scan automations use it to also scan every other
+        profile's follows (the watchlist is per-profile)."""
+        kinds = [str(k) for k in (kinds or []) if k]
+        if not kinds:
+            return []
+        conn = self._get_connection()
+        try:
+            marks = ",".join("?" * len(kinds))
+            return [int(r[0]) for r in conn.execute(
+                "SELECT DISTINCT profile_id FROM video_watchlist "
+                "WHERE state='follow' AND kind IN (" + marks + ") ORDER BY profile_id",
+                kinds)]
+        finally:
+            conn.close()
+
     def followed_shows(self, profile_id: int = 1, server_source=None) -> list[dict]:
         """Explicitly-followed shows (state='follow') with their library status when
         owned (NULL for tmdb-only follows). ``server_source`` scopes the library_id

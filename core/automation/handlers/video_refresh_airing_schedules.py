@@ -39,11 +39,27 @@ def _default_fetch_shows() -> List[Dict[str, Any]]:
     from api.video import get_video_db
     from core.profile_context import get_current_profile_id
     from core.video.sources import resolve_video_server
+    from core.automation.handlers.video_profile_fanout import extra_profiles
     try:
         pid = int(get_current_profile_id() or 1)
     except Exception:
         pid = 1
-    return get_video_db().watchlist_continuing_shows(resolve_video_server(), profile_id=pid)
+    db = get_video_db()
+    server = resolve_video_server()
+    shows = db.watchlist_continuing_shows(server, profile_id=pid)
+    # the watchlist is per-profile: the admin-owned run also refreshes the
+    # shows other profiles follow, each show once.
+    try:
+        others = extra_profiles(pid, db.watchlist_profile_ids(['show']))
+    except Exception:   # noqa: BLE001 - can't list followers: refresh the owner's like before
+        others = []
+    seen = {s.get('library_id') for s in shows}
+    for other in others:
+        for s in db.watchlist_continuing_shows(server, profile_id=other) or []:
+            if s.get('library_id') not in seen:
+                seen.add(s.get('library_id'))
+                shows.append(s)
+    return shows
 
 
 def _stamp_refresh() -> bool:
