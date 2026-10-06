@@ -361,6 +361,19 @@ def test_repair_worker_fix_execution(tmp_path):
         assert "Jazz (1978)" in new_fp
 
 
+def test_a_failed_catalogue_update_puts_the_folder_back(tmp_path):
+    old_folder = tmp_path / "Queen" / "Jazz (2011)"
+    old_folder.mkdir(parents=True)
+    (old_folder / "01.flac").write_bytes(b"dummy")
+
+    class BrokenDb:
+        def _get_connection(self):
+            raise RuntimeError("database is locked")
+
+    assert rename_album_folder(BrokenDb(), str(old_folder), "Jazz (1978)", 1) is None
+    assert old_folder.is_dir() and not (tmp_path / "Queen" / "Jazz (1978)").exists()
+
+
 def test_rename_album_folder_docker_paths(tmp_path):
     """Test that tracks with server-side/Docker paths (e.g. /media/Queen/Jazz (2011)/01.flac)
     still have their DB path updated when the folder on the host is renamed."""

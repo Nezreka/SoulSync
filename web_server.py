@@ -22250,6 +22250,7 @@ try:
     # Raised' / 'Maintenance Scan Done' triggers — music parity with video)
     if automation_engine is not None:
         repair_worker._event_emit = automation_engine.emit
+        repair_worker._automation_engine = automation_engine
     repair_worker.start()
     logger.info("Repair worker initialized and started")
 except Exception as e:

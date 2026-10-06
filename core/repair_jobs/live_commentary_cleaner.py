@@ -35,14 +35,13 @@ _CONTENT_PATTERNS = [
     (r'\bcommentary\b', 'commentary'),
     (r'\bcommented\b', 'commentary'),
     (r'\btrack.?by.?track\b', 'commentary'),
-    # Interview
+    # Interview. Not 'interlude' or 'introduction': on most albums (and in
+    # classical titles) those are music, and the fix deletes the file.
     (r'\binterview\b', 'interview'),
-    (r'\binterlude\b', 'interview'),
     (r'\bskit\b', 'interview'),
     # Spoken word
     (r'\bspoken\s*word\b', 'spoken_word'),
     (r'\bnarrat(?:ion|ed)\b', 'spoken_word'),
-    (r'\bintroduction\b', 'spoken_word'),
     # Acappella
     (r'\ba\s*cappella\b', 'acappella'),
     (r'\bacappella\b', 'acappella'),
@@ -84,8 +83,8 @@ class LiveCommentaryCleanerJob(RepairJob):
         'Settings:\n'
         '- Flag Live: Flag live performances and concert recordings\n'
         '- Flag Commentary: Flag commentary and track-by-track content\n'
-        '- Flag Interviews: Flag interviews, skits, and interludes\n'
-        '- Flag Spoken Word: Flag spoken word, narration, and introductions\n'
+        '- Flag Interviews: Flag interviews and skits\n'
+        '- Flag Spoken Word: Flag spoken word and narration\n'
         '- Scan Album Titles: Also check album titles (catches "Live at Wembley" albums)\n'
         '- Scope: "tracks" flags individual tracks, "albums" flags entire albums with matching titles'
     )

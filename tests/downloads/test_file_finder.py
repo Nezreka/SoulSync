@@ -505,3 +505,29 @@ def test_stray_closing_bracket_does_not_break_match(tmp_path):
     )
 
     assert found == str(target)
+
+
+@pytest.mark.parametrize('reverse', [False, True])
+def test_extensionless_encoded_title_exact_stem_wins_in_any_walk_order(
+        tmp_path, monkeypatch, reverse):
+    """The exact stem wins whichever file the filesystem lists first; the
+    fuzzy tier used to tie and let directory order pick the Live version."""
+    import core.downloads.file_finder as file_finder
+
+    real_walk = os.walk
+
+    def _ordered_walk(top, *args, **kwargs):
+        for root, dirs, files in real_walk(top, *args, **kwargs):
+            yield root, dirs, sorted(files, reverse=reverse)
+
+    monkeypatch.setattr(file_finder.os, 'walk', _ordered_walk)
+    downloads = tmp_path / 'downloads'
+    _touch(downloads / 'PRYVT - ANGEL (Live).flac')
+    target = downloads / 'PRYVT - ANGEL.flac'
+    _touch(target)
+
+    found, _ = find_completed_audio_file(
+        str(downloads), '353882896||PRYVT - ANGEL',
+    )
+
+    assert found == str(target)

@@ -342,6 +342,7 @@ def rename_album_folder(
 
     # Update database tracks for this album
     if db:
+        conn = None
         try:
             conn = db._get_connection()
             cursor = conn.cursor()
@@ -378,7 +379,19 @@ def rename_album_folder(
                     )
             conn.commit()
         except Exception as e:
+            # The database still points into the old folder: put it back, or
+            # every track of the album reads as missing until the next sync.
             logger.error("Error updating track paths in DB after folder rename: %s", e)
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:  # noqa: BLE001 - best effort, the rename is undone below
+                    pass
+            try:
+                os.rename(new_folder, old_folder)
+            except OSError as undo:
+                logger.error("Could not restore '%s' after the failed update: %s", old_folder, undo)
+            return None
 
     return new_folder
 

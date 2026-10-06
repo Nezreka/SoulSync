@@ -6,6 +6,7 @@ import pytest
 from core.automation.migrate_repair_jobs import (
     _SYSTEM_OWNER,
     ensure_repair_job_automations,
+    set_system_job_enabled,
 )
 
 
@@ -63,6 +64,9 @@ class FakeEngine:
 
     def schedule_automation(self, automation_id):
         self.scheduled.append(automation_id)
+
+    def cancel_automation(self, automation_id):
+        self.scheduled = [a for a in self.scheduled if a != automation_id]
 
 
 class FakeJob:
@@ -171,3 +175,22 @@ def test_config_interval_overrides_default(monkeypatch):
     ensure_repair_job_automations(eng, db, cfg)
 
     assert json.loads(db.rows[0]["trigger_config"])["interval"] == 6
+
+
+def _system_row(db, job_id, enabled=True):
+    return db.create_automation(
+        name=f"[System] {job_id}", trigger_type="schedule",
+        trigger_config=json.dumps({"interval": 24, "unit": "hours"}),
+        action_type="run_repair_job", action_config=json.dumps({"job_id": job_id}),
+        owned_by=_SYSTEM_OWNER, is_system=True, enabled=enabled)
+
+
+def test_toggling_a_job_arms_and_cancels_its_timer():
+    db, eng = FakeDB(), FakeEngine()
+    aid = _system_row(db, "fake_job", enabled=False)
+
+    assert set_system_job_enabled(db, eng, "fake_job", True)
+    assert db.rows[0]["enabled"] == 1 and eng.scheduled == [aid]
+    set_system_job_enabled(db, eng, "fake_job", False)
+    assert db.rows[0]["enabled"] == 0 and eng.scheduled == []
+    assert not set_system_job_enabled(db, eng, "other_job", True)
