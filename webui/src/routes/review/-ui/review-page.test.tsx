@@ -21,6 +21,7 @@ const finding = {
   details: {
     album_title: 'Ashes of the Wake',
     artist_name: 'Lamb of God',
+    release_disambiguation: 'US deluxe edition',
     album_folder: '/music/Lamb of God/Ashes of the Wake',
     candidates: [
       {
@@ -184,6 +185,7 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByText(/Δ 0.01s/)).toBeTruthy();
     expect(screen.getByText(/AcoustID alternate ruled out: Hourglass/)).toBeTruthy();
     expect(screen.getAllByText('Recording: acoustic')).toHaveLength(2);
+    expect(screen.getByText('US deluxe edition')).toBeTruthy();
     expect(screen.getByText('1 confirmed match')).toBeTruthy();
     expect(screen.getByText(/Track comparisons were not saved/)).toBeTruthy();
     expect(screen.queryByText(/"release_id"/)).toBeNull();

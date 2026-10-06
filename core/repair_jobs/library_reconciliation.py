@@ -42,6 +42,9 @@ _SOURCES = {
 _DISC_FOLDER = re.compile(r'^(?:cd|disc|disk|volume|vol)\s*[-_. ]*\d+\b', re.I)
 _NUMBERED_FILENAME = re.compile(r'^(\d{1,4})(\s*[-_.]\s*|\s+)(.+)$')
 _WATCHLIST_REMOVAL_PREFIX = '.watchlist-removal-'
+_ALBUM_EDITION_WORD = re.compile(
+    r'\b(?:anniversary|bit|cd|deluxe|edition|expanded|khz|limited|lp|master|mono|'
+    r'pressing|reissue|remaster(?:ed)?|special|stereo|target|vinyl)\b', re.I)
 
 
 def _suggest_filename(path: str, slot: dict) -> str:
@@ -180,12 +183,17 @@ def _normalize_slot(item: dict, source: str) -> dict:
 
 
 def _score_release_candidates(files: list[dict], candidates: list[tuple[str, str]],
-                              release_cache: dict) -> list[tuple]:
+                              release_cache: dict,
+                              exact_musicbrainz_releases: set[str] | None = None) -> list[tuple]:
     scored = []
     for source, release_id in candidates:
         key = (source, release_id)
         if key not in release_cache:
-            raw = get_album_tracks_for_source(source, release_id)
+            is_exact_release = (source == 'musicbrainz' and
+                                release_id in (exact_musicbrainz_releases or set()))
+            raw = (get_album_tracks_for_source(source, release_id, exact_release=True)
+                   if is_exact_release else
+                   get_album_tracks_for_source(source, release_id))
             release_cache[key] = [_normalize_slot(item, source)
                                   for item in _track_items(raw)]
         slots = release_cache[key]
@@ -197,6 +205,22 @@ def _score_release_candidates(files: list[dict], candidates: list[tuple[str, str
         scored.append((clear, matched, -len(plan['extra_files']),
                        source, release_id, slots, plan))
     return scored
+
+
+def _album_titles_compatible(current: str, release: str) -> bool:
+    """Keep local edition detail when both names share the same album identity."""
+    current_normalized = normalize(current or '')
+    release_normalized = normalize(release or '')
+    if not current_normalized or not release_normalized:
+        return False
+    if current_normalized == release_normalized:
+        # Preserve detail already present locally, but still allow a selected
+        # release to add an edition suffix the local title does not carry.
+        return len(current.strip()) >= len(release.strip())
+    if current_normalized.startswith(f'{release_normalized} '):
+        local_detail = current_normalized[len(release_normalized):].strip()
+        return bool(_ALBUM_EDITION_WORD.search(local_detail))
+    return False
 
 
 def _candidate_evidence(files: list[dict], scored: tuple) -> dict:
@@ -522,15 +546,21 @@ class LibraryReconciliationJob(RepairJob):
         finally:
             conn.close()
 
-    def _release_candidates(self, files: list[dict], album: dict | None,
-                            context: JobContext, *, include_audio: bool = False) -> list[tuple[str, str]]:
+    def _release_candidates(
+        self, files: list[dict], album: dict | None, context: JobContext, *,
+        include_audio: bool = False,
+        exact_musicbrainz_releases: set[str] | None = None,
+    ) -> list[tuple[str, str]]:
         candidates = []
         if album:
             if album.get('canonical_source') and album.get('canonical_album_id'):
                 candidates.append((album['canonical_source'], str(album['canonical_album_id'])))
             for column, source in _SOURCES.items():
                 if album.get(column):
-                    candidates.append((source, str(album[column])))
+                    identifier = str(album[column])
+                    candidates.append((source, identifier))
+                    if column == 'musicbrainz_release_id' and exact_musicbrainz_releases is not None:
+                        exact_musicbrainz_releases.add(identifier)
         if include_audio and context.mb_client:
             # Only a few top fingerprint IDs are needed to seed release
             # discovery. Cap the fan-out; a single recording can belong to
@@ -557,6 +587,8 @@ class LibraryReconciliationJob(RepairJob):
                 for release in data.get('releases') or []:
                     if release.get('id'):
                         release_votes[release['id']] += 1
+                        if exact_musicbrainz_releases is not None:
+                            exact_musicbrainz_releases.add(str(release['id']))
                 if len(seen) >= 3:
                     break
             candidates.extend(('musicbrainz', release_id)
@@ -623,6 +655,7 @@ class LibraryReconciliationJob(RepairJob):
                 tracks[os.path.normpath(path)].get('album_id') is not None})
         release_cache = {}
         release_meta_cache = {}
+        exact_musicbrainz_releases: set[str] = set()
         cache = ReconciliationEvidence(context.db, client)
         lookup_error_reported = False
         try:
@@ -701,15 +734,20 @@ class LibraryReconciliationJob(RepairJob):
                                  'evidence_signature': _evidence_signature(files, album_id)}):
                         result.findings_created += 1
                     continue
-                candidates = self._release_candidates(files, album, context)
-                scored = _score_release_candidates(files, candidates, release_cache)
+                candidates = self._release_candidates(
+                    files, album, context,
+                    exact_musicbrainz_releases=exact_musicbrainz_releases)
+                scored = _score_release_candidates(
+                    files, candidates, release_cache, exact_musicbrainz_releases)
                 best_initial = max(scored, key=lambda c: c[:3]) if scored else None
                 if (not best_initial or best_initial[6]['extra_files']
                         or best_initial[6]['missing_slots']):
                     additional = [candidate for candidate in self._release_candidates(
-                        files, album, context, include_audio=True)
+                        files, album, context, include_audio=True,
+                        exact_musicbrainz_releases=exact_musicbrainz_releases)
                         if candidate not in candidates]
-                    scored.extend(_score_release_candidates(files, additional, release_cache))
+                    scored.extend(_score_release_candidates(
+                        files, additional, release_cache, exact_musicbrainz_releases))
                 if not scored:
                     if emit(
                         job_id=self.job_id, finding_type='reconciliation_unresolved',
@@ -800,7 +838,12 @@ class LibraryReconciliationJob(RepairJob):
                     continue
                 release_key = (source, release_id)
                 if release_key not in release_meta_cache:
-                    release_meta_cache[release_key] = get_album_for_source(source, release_id) or {}
+                    is_exact_release = (source == 'musicbrainz' and
+                                        release_id in exact_musicbrainz_releases)
+                    release_meta_cache[release_key] = (
+                        get_album_for_source(source, release_id, exact_release=True)
+                        if is_exact_release else
+                        get_album_for_source(source, release_id)) or {}
                 release_meta = release_meta_cache[release_key]
                 # MusicBrainz album IDs can be release-group IDs. Its album
                 # adapter picks a concrete representative release and exposes
@@ -812,12 +855,20 @@ class LibraryReconciliationJob(RepairJob):
                                  (album.get('album_title') if album else '') or
                                  os.path.basename(folder))
                 release_artists = release_meta.get('artists') or []
-                release_artist = next((artist.get('name') for artist in release_artists
-                                       if isinstance(artist, dict) and artist.get('name')), '')
+                release_artist_names = [
+                    artist.get('name') if isinstance(artist, dict) else str(artist)
+                    for artist in release_artists
+                    if ((isinstance(artist, dict) and artist.get('name')) or
+                        (not isinstance(artist, dict) and str(artist).strip()))
+                ]
+                release_artist = (' & '.join(release_artist_names) if release_artist_names
+                                  else (album.get('artist_name') if album else ''))
                 common = {
                     'album_id': album_id, 'album_title': release_title,
                     'library_album_title': album.get('album_title') if album else '',
                     'artist_name': release_artist or (album.get('artist_name') if album else ''),
+                    'release_artist_names': release_artist_names,
+                    'release_disambiguation': release_meta.get('disambiguation') or '',
                     'profile_id': album.get('owner_profile_id') if album else 1,
                     'album_folder': folder, 'source': source, 'release_id': release_id,
                     'exact_release_id': exact_release_id,
@@ -888,14 +939,29 @@ class LibraryReconciliationJob(RepairJob):
                               'disc_number': slot['disc_number'],
                               'artists': [{'name': slot['artist']}]
                               if slot['artist'] else []}
-                    meta = {'name': common['album_title'], 'artists':
-                            [{'name': common['artist_name']}] if common['artist_name'] else [],
+                    current_album_title = tags.get('album') or ''
+                    metadata_album_title = (current_album_title
+                        if _album_titles_compatible(current_album_title, release_title)
+                        else common['album_title'])
+                    # MusicBrainz exposes the individual artists but not its
+                    # join phrases in this adapter. Keep a complete local
+                    # collaboration credit rather than reducing it to one
+                    # artist or inventing punctuation.
+                    current_album_artist = tags.get('artist') or ''
+                    metadata_artist = (current_album_artist
+                        if len(release_artist_names) > 1 and current_album_artist
+                        else common['artist_name'])
+                    meta = {'name': metadata_album_title, 'artists':
+                            [{'name': metadata_artist}] if metadata_artist else [],
                             'total_tracks': len(slots)}
                     tag_plan = plan_track(tags, target, meta)
                     # Minor title spelling/version annotations are often valid;
                     # only act on a substantive title difference or hard slot
                     # fields. Album/artist edits require an explicit source.
                     changed = tag_plan['changes']
+                    if _album_titles_compatible(current_album_title, release_title):
+                        changed.pop('album', None)
+                        tag_plan['db_data'].pop('album_title', None)
                     if _title_score(tags.get('title') or '', slot['title']) >= 0.83:
                         changed.pop('title', None)
                         tag_plan['db_data'].pop('title', None)
@@ -947,7 +1013,9 @@ class LibraryReconciliationJob(RepairJob):
                                                'new': os.path.basename(target_path)}
                     db_album_title = ''
                     if (album and file.get('db') and not album_title_proposed and
-                            album.get('album_title') != release_title):
+                            album.get('album_title') != release_title and
+                            not _album_titles_compatible(
+                                album.get('album_title') or '', release_title)):
                         db_album_title = release_title
                         changed['library_album_title'] = {
                             'old': album.get('album_title') or '', 'new': release_title}

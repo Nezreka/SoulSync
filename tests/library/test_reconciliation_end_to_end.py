@@ -15,8 +15,9 @@ from mutagen.flac import FLAC
 from core.library.reconciliation_evidence import ReconciliationEvidence
 from core.repair_jobs.base import JobContext
 from core.repair_jobs.library_reconciliation import (
-    LibraryReconciliationJob, _candidate_evidence, _candidate_shape, _group_disc_folders,
-    _normalize_slot, _same_recording_copies, _suggest_filename,
+    LibraryReconciliationJob, _album_titles_compatible, _candidate_evidence,
+    _candidate_shape, _group_disc_folders, _normalize_slot, _same_recording_copies,
+    _suggest_filename,
 )
 from core.repair_worker import RepairWorker
 from database.music_database import MusicDatabase
@@ -100,6 +101,18 @@ def test_musicbrainz_slot_keeps_recording_disambiguation():
     }, 'musicbrainz')
 
     assert slot['recording_disambiguation'] == 'Connect Sets acoustic'
+
+
+def test_album_title_compatibility_preserves_edition_detail_only_for_same_album():
+    assert _album_titles_compatible(
+        'New Miserable Experience (Deluxe Edition)', 'New Miserable Experience')
+    assert _album_titles_compatible('The Courage of Others [Deluxe]',
+                                    'The Courage of Others')
+    assert _album_titles_compatible('Symbolic - Dutch Mediamotion pressing', 'Symbolic')
+    assert _album_titles_compatible('Album - 24 bit/96 kHz', 'Album')
+    assert not _album_titles_compatible('New Miserable Experience',
+                                        'New Miserable Experience (Deluxe Edition)')
+    assert not _album_titles_compatible('R', 'Rated R')
 
 
 def test_same_audio_is_not_a_duplicate_across_recording_versions():
@@ -350,12 +363,12 @@ def test_stored_release_breaks_an_equal_fit_without_human_review(tmp_path, monke
         'album': 'Ashes of the Wake', 'track_number': 1,
         'disc_number': 1, 'duration_ms': 200000,
     })
-    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args: [
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args, **_kwargs: [
         {'id': 'laid-id', 'name': 'Laid to Rest',
          'artists': [{'name': 'Lamb of God'}],
          'track_number': 1, 'disc_number': 1, 'duration_ms': 200000},
     ])
-    monkeypatch.setattr(module, 'get_album_for_source', lambda *_args: {
+    monkeypatch.setattr(module, 'get_album_for_source', lambda *_args, **_kwargs: {
         'name': 'Ashes of the Wake', 'artists': [{'name': 'Lamb of God'}]})
     context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
                          acoustid_client=client, create_finding=worker._create_finding)
@@ -1092,6 +1105,50 @@ def test_exact_release_title_repairs_rated_r_album_and_file_tags(tmp_path, monke
     with db._get_connection() as conn:
         title = conn.execute('SELECT title FROM albums WHERE id = 10').fetchone()[0]
     assert title == 'Rated R'
+
+
+def test_reconciliation_preserves_edition_title_and_complete_artist_credit(
+        tmp_path, monkeypatch):
+    import core.repair_jobs.library_reconciliation as module
+
+    root = tmp_path / 'music'
+    root.mkdir()
+    path = root / '01 - Laid to Rest.flac'
+    path.write_bytes(b'audio fixture')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, path)
+    with db._get_connection() as conn:
+        conn.execute("UPDATE albums SET title = 'Ashes of the Wake (Deluxe Edition)' "
+                     "WHERE id = 10")
+        conn.commit()
+    worker = RepairWorker(database=db)
+    client = _Acoustid({path.name: {
+        'mbid': 'laid-id', 'title': 'Laid to Rest',
+        'artist': 'Lamb of God', 'score': 0.99,
+    }})
+    monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
+    monkeypatch.setattr(module, '_read_file_tags', lambda _path: {
+        'title': 'Laid to Rest', 'artist': 'Lamb of God & Guest Artist',
+        'album': 'Ashes of the Wake (Deluxe Edition)', 'track_number': 1,
+        'disc_number': 1, 'duration_ms': 200000,
+    })
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args: [
+        {'id': 'laid-id', 'name': 'Laid to Rest',
+         'artists': [{'name': 'Lamb of God'}],
+         'track_number': 1, 'disc_number': 1, 'duration_ms': 200000},
+    ])
+    monkeypatch.setattr(module, 'get_album_for_source', lambda *_args: {
+        'name': 'Ashes of the Wake',
+        'artists': [{'name': 'Lamb of God'}, {'name': 'Guest Artist'}],
+        'disambiguation': 'US deluxe edition',
+    })
+    context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
+                         acoustid_client=client, create_finding=worker._create_finding)
+
+    result = LibraryReconciliationJob().scan(context)
+
+    assert result.findings_created == 0
+    assert worker.get_review_cases(job_id='library_reconciliation')['total'] == 0
 
 
 def test_filename_and_library_row_repair_when_file_tags_are_already_correct(tmp_path, monkeypatch):

@@ -648,6 +648,12 @@ function Facts({ finding, details }: { finding: ReviewFinding; details: Data }) 
               <dd>{label(details.album_title)}</dd>
             </div>
           )}
+          {Boolean(details.release_disambiguation) && (
+            <div>
+              <dt>Edition</dt>
+              <dd>{label(details.release_disambiguation)}</dd>
+            </div>
+          )}
           {Boolean(details.artist_name) && (
             <div>
               <dt>Artist</dt>

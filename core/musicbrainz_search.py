@@ -1057,6 +1057,16 @@ class MusicBrainzSearchClient:
             return flat
         return {'items': flat, 'total': len(flat)}
 
+    def get_release_album_tracks(self, release_mbid: str) -> Optional[Dict[str, Any]]:
+        """Return tracks for an identifier already known to be a release MBID."""
+        album = self.get_release_album(release_mbid, include_tracks=True)
+        if album is None:
+            return None
+        flat = album.get('tracks', [])
+        if isinstance(flat, dict):
+            return flat
+        return {'items': flat, 'total': len(flat)}
+
     def get_artist(self, artist_id: str) -> Optional[Dict[str, Any]]:
         """Return Spotify-compatible artist detail dict."""
         try:
@@ -1171,6 +1181,18 @@ class MusicBrainzSearchClient:
             return album
         except Exception as e:
             logger.error(f"MusicBrainz album detail failed for {album_mbid}: {e}")
+            return None
+
+    def get_release_album(self, release_mbid: str,
+                          include_tracks: bool = True) -> Optional[Dict[str, Any]]:
+        """Fetch a known release MBID without first probing release-group lookup."""
+        try:
+            album = self._render_release_as_album(release_mbid)
+            if album and not include_tracks:
+                album.pop('tracks', None)
+            return album
+        except Exception as e:
+            logger.error(f"MusicBrainz release detail failed for {release_mbid}: {e}")
             return None
 
     def _render_release_as_album(self, release_mbid: str,

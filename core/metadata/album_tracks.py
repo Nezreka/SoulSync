@@ -538,14 +538,18 @@ def _build_album_tracks_payload(
     }
 
 
-def get_album_tracks_for_source(source: str, album_id: str):
+def get_album_tracks_for_source(source: str, album_id: str, *, exact_release: bool = False):
     """Get album tracks for an exact source."""
     client = metadata_registry.get_client_for_source(source)
     if not client:
         return None
 
     try:
-        fetch = getattr(client, 'get_album_tracks_dict', None) if source == 'hydrabase' else getattr(client, 'get_album_tracks', None)
+        if source == 'musicbrainz' and exact_release:
+            fetch = getattr(client, 'get_release_album_tracks', None)
+        else:
+            fetch = (getattr(client, 'get_album_tracks_dict', None)
+                     if source == 'hydrabase' else getattr(client, 'get_album_tracks', None))
         if not fetch:
             return None
         if source == 'spotify':
@@ -555,7 +559,8 @@ def get_album_tracks_for_source(source: str, album_id: str):
         return None
 
 
-def get_album_for_source(source: str, album_id: str, artist_name: str = '', album_name: str = ''):
+def get_album_for_source(source: str, album_id: str, artist_name: str = '',
+                         album_name: str = '', *, exact_release: bool = False):
     """Get album metadata for an exact source."""
     client = metadata_registry.get_client_for_source(source)
     if not client:
@@ -577,13 +582,16 @@ def get_album_for_source(source: str, album_id: str, artist_name: str = '', albu
         except Exception:
             return None
 
-    if not hasattr(client, 'get_album'):
+    fetch = (getattr(client, 'get_release_album', None)
+             if source == 'musicbrainz' and exact_release
+             else getattr(client, 'get_album', None))
+    if not fetch:
         return None
 
     try:
         if source == 'spotify':
-            return client.get_album(album_id, allow_fallback=False)
-        return client.get_album(album_id)
+            return fetch(album_id, allow_fallback=False)
+        return fetch(album_id)
     except Exception:
         return None
 

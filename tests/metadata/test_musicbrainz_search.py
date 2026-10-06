@@ -631,6 +631,26 @@ def test_get_album_falls_back_to_release_lookup_on_rg_miss():
     assert album['musicbrainz_release_id'] == 'rel-abc'
 
 
+def test_get_release_album_skips_release_group_probe():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_release.return_value = {
+        'id': 'rel-abc',
+        'title': 'Some Album',
+        'artist-credit': [{'name': 'Some Artist'}],
+        'release-group': {'id': 'rg-abc', 'primary-type': 'Album'},
+        'media': [{'position': 1, 'tracks': []}],
+    }
+
+    album = client.get_release_album('rel-abc')
+
+    assert album is not None
+    assert album['musicbrainz_release_id'] == 'rel-abc'
+    client._client.get_release_group.assert_not_called()
+    client._client.get_release.assert_called_once_with(
+        'rel-abc', includes=['recordings', 'artist-credits', 'release-groups'])
+
+
 # ---------------------------------------------------------------------------
 # Title-hint extraction — for "Artist Album Title" bare queries
 # ---------------------------------------------------------------------------
