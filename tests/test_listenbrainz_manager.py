@@ -247,3 +247,58 @@ def test_refresh_playlist_does_not_walk_cleanup_or_rolling_series_for_unrelated_
     mgr.refresh_playlist("mbid-narrow")
 
     assert cleanup_calls == []  # Cleanup must NOT fire for targeted refresh.
+
+
+# ---------------------------------------------------------------------------
+# sync_created_for_index: cache new periods without re-pulling cached ones
+# ---------------------------------------------------------------------------
+
+
+def _lb_listing(mbid: str, title: str) -> Dict[str, Any]:
+    # createdfor list rows carry no tracks — _update_playlist fetches details
+    return {"playlist": {"identifier": f"https://listenbrainz.org/playlist/{mbid}", "title": title}}
+
+
+def test_sync_created_for_index_caches_only_unseen_playlists(tmp_db):
+    mgr = _build_manager(tmp_db)
+    _seed_playlist(tmp_db, "old-week", "Weekly Jams for u, week of 2026-08-24 Mon", "created_for", 3)
+    mgr.client.get_playlists_created_for_user.return_value = [
+        _lb_listing("new-week", "Weekly Jams for u, week of 2026-09-14 Mon"),
+        _lb_listing("old-week", "Weekly Jams for u, week of 2026-08-24 Mon"),
+    ]
+    mgr.client.get_playlist_details.return_value = {"playlist": {
+        "identifier": "https://listenbrainz.org/playlist/new-week",
+        "title": "Weekly Jams for u, week of 2026-09-14 Mon",
+        "track": [],
+    }}
+
+    result = mgr.sync_created_for_index()
+
+    assert result == {"success": True, "new": 1}
+    mgr.client.get_playlist_details.assert_called_once_with("new-week")
+    conn = sqlite3.connect(tmp_db)
+    try:
+        rows = conn.execute(
+            "SELECT playlist_mbid, playlist_type FROM listenbrainz_playlists ORDER BY playlist_mbid"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [("new-week", "created_for"), ("old-week", "created_for")]
+
+
+def test_sync_created_for_index_noop_when_nothing_new(tmp_db):
+    mgr = _build_manager(tmp_db)
+    _seed_playlist(tmp_db, "old-week", "Weekly Jams for u, week of 2026-08-24 Mon", "created_for", 3)
+    mgr.client.get_playlists_created_for_user.return_value = [
+        _lb_listing("old-week", "Weekly Jams for u, week of 2026-08-24 Mon"),
+    ]
+
+    assert mgr.sync_created_for_index() == {"success": True, "new": 0}
+    mgr.client.get_playlist_details.assert_not_called()
+
+
+def test_sync_created_for_index_unauthenticated_makes_no_calls(tmp_db):
+    mgr = _build_manager(tmp_db, authed=False)
+
+    assert mgr.sync_created_for_index()["success"] is False
+    mgr.client.get_playlists_created_for_user.assert_not_called()
