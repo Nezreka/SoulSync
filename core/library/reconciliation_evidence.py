@@ -41,6 +41,7 @@ class ReconciliationEvidence:
         self.client = acoustid_client
         self.metrics = {'fingerprints': 0, 'fingerprint_hits': 0,
                         'lookups': 0, 'lookup_hits': 0}
+        self.lookup_error = None
         self.conn.executescript('''
             CREATE TABLE IF NOT EXISTS reconcile_file_fingerprints (
                 file_path TEXT PRIMARY KEY, size_bytes INTEGER NOT NULL,
@@ -105,6 +106,12 @@ class ReconciliationEvidence:
             self.conn.execute('DELETE FROM reconcile_acoustid_results WHERE lookup_key = ?',
                               (key,))
 
+        # One exhausted service failure is enough to stop new requests for
+        # this run. Cached evidence remains usable, so the reconciliation job
+        # can still finish the rest of the library without hammering AcoustID.
+        if self.lookup_error is not None:
+            return {**self.lookup_error, 'fingerprint_key': key, 'deferred': True}
+
         for delay in (*_LOOKUP_RETRY_DELAYS, None):
             result = self.client.lookup_fingerprint_with_status(fingerprint, duration)
             self.metrics['lookups'] += 1
@@ -119,4 +126,6 @@ class ReconciliationEvidence:
                 INSERT OR REPLACE INTO reconcile_acoustid_results
                     (lookup_key, result_json, expires_at) VALUES (?, ?, ?)
             ''', (key, json.dumps(result), int(time.time()) + ttl))
+        elif result.get('status') == 'error':
+            self.lookup_error = dict(result)
         return {**result, 'fingerprint_key': key}

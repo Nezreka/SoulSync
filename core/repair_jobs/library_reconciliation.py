@@ -122,6 +122,22 @@ def _retire_stale_findings(db, observed: set[tuple[str, str, str]]) -> None:
         conn.close()
 
 
+def _preserve_folder_findings(db, observed: set[tuple[str, str, str]], folder: str) -> None:
+    """Keep existing decisions when transient evidence left one folder unscanned."""
+    conn = db._get_connection()
+    try:
+        rows = conn.execute('''
+            SELECT finding_type, entity_type, entity_id
+            FROM repair_findings
+            WHERE job_id = 'library_reconciliation' AND status = 'pending'
+              AND json_valid(details_json)
+              AND json_extract(details_json, '$.album_folder') = ?
+        ''', (folder,)).fetchall()
+        observed.update((row[0], row[1], str(row[2])) for row in rows)
+    finally:
+        conn.close()
+
+
 def _track_items(data) -> list[dict]:
     if isinstance(data, list):
         return [row for row in data if isinstance(row, dict)]
@@ -555,6 +571,7 @@ class LibraryReconciliationJob(RepairJob):
         release_cache = {}
         release_meta_cache = {}
         cache = ReconciliationEvidence(context.db, client)
+        lookup_error_reported = False
         try:
             for folder_index, (folder, paths) in enumerate(sorted(folders.items())):
                 if context.check_stop() or context.wait_if_paused():
@@ -564,6 +581,7 @@ class LibraryReconciliationJob(RepairJob):
 
                 files = []
                 cancelled = False
+                evidence_error = ''
                 for path in sorted(paths):
                     if context.check_stop():
                         cancelled = True
@@ -577,8 +595,10 @@ class LibraryReconciliationJob(RepairJob):
                         continue
                     audio = cache.identify(path)
                     if audio.get('status') == 'error':
-                        result.errors += 1
-                        result.stopped_early = audio.get('error') or 'AcoustID lookup failed'
+                        if not lookup_error_reported:
+                            result.errors += 1
+                            lookup_error_reported = True
+                        evidence_error = audio.get('error') or 'AcoustID lookup failed'
                         break
                     playlists = (list(playlist_membership.get(str(db_row['id']), []))
                                  if db_row else [])
@@ -590,9 +610,15 @@ class LibraryReconciliationJob(RepairJob):
                 # The evidence cache uses its own SQLite connection. Release
                 # its write lock before create_finding opens another one.
                 cache.checkpoint()
-                if cancelled or result.stopped_early:
+                if cancelled:
                     completed = False
                     break
+                if evidence_error:
+                    _preserve_folder_findings(context.db, observed, folder)
+                    logger.warning('Skipping reconciliation for %s: %s', folder, evidence_error)
+                    if context.update_progress:
+                        context.update_progress(folder_index + 1, len(folders))
+                    continue
                 if not files:
                     continue
                 album_counts = Counter(f['db']['album_id'] for f in files

@@ -436,7 +436,40 @@ def test_transient_audio_lookup_error_recovers_in_same_scan(tmp_path, monkeypatc
         cache.close()
 
 
-def test_api_error_stops_full_scan_before_repeating_failed_requests(tmp_path, monkeypatch):
+def test_exhausted_audio_lookup_opens_circuit_but_cached_evidence_remains_available(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr('core.library.reconciliation_evidence.time.sleep', lambda _delay: None)
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    failed = tmp_path / 'Failed.flac'
+    deferred = tmp_path / 'Deferred.flac'
+    cached = tmp_path / 'Cached.flac'
+    for path in (failed, deferred, cached):
+        path.write_bytes(b'fixture')
+    client = _Acoustid({cached.name: {'mbid': 'cached', 'title': 'Cached',
+                                     'artist': 'Artist', 'score': 0.99}})
+    cache = ReconciliationEvidence(db, client)
+    try:
+        assert cache.identify(str(cached))['status'] == 'ok'
+        calls = 0
+
+        def unavailable(*_args):
+            nonlocal calls
+            calls += 1
+            return {'status': 'error', 'recordings': [], 'error': 'AcoustID unavailable'}
+
+        client.lookup_fingerprint_with_status = unavailable
+        assert cache.identify(str(failed))['status'] == 'error'
+        deferred_result = cache.identify(str(deferred))
+        assert deferred_result['status'] == 'error'
+        assert deferred_result['deferred'] is True
+        assert calls == 5
+        assert cache.identify(str(cached))['status'] == 'ok'
+        assert calls == 5
+    finally:
+        cache.close()
+
+
+def test_api_error_skips_affected_folder_without_repeating_failed_requests(tmp_path, monkeypatch):
     import core.repair_jobs.library_reconciliation as module
     monkeypatch.setattr('core.library.reconciliation_evidence.time.sleep', lambda _delay: None)
 
@@ -455,9 +488,45 @@ def test_api_error_stops_full_scan_before_repeating_failed_requests(tmp_path, mo
                          create_finding=lambda **finding: findings.append(finding) or True)
     result = LibraryReconciliationJob().scan(context)
     assert result.errors == 1
-    assert 'rate limited' in result.stopped_early
+    assert not result.stopped_early
     assert client.fingerprints == 1
     assert findings == []
+
+
+def test_api_error_preserves_affected_folder_but_retires_other_stale_findings(
+        tmp_path, monkeypatch):
+    import core.repair_jobs.library_reconciliation as module
+    monkeypatch.setattr('core.library.reconciliation_evidence.time.sleep', lambda _delay: None)
+
+    root = tmp_path / 'music'
+    failed = root / 'A failed'
+    clean = root / 'B clean'
+    failed.mkdir(parents=True)
+    clean.mkdir()
+    failed_file = failed / '01.flac'
+    failed_file.write_bytes(b'failed')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    worker = RepairWorker(database=db)
+    for folder, entity in ((failed, 'failed'), (clean, 'clean')):
+        worker._create_finding(
+            job_id='library_reconciliation', finding_type='reconciliation_unresolved',
+            severity='info', entity_type='folder', entity_id=entity,
+            file_path=None, title=entity, description=entity,
+            details={'album_folder': str(folder), 'evidence_signature': entity})
+    client = _Acoustid({})
+    client.lookup_fingerprint_with_status = lambda *_args: {
+        'status': 'error', 'recordings': [], 'error': 'AcoustID unavailable'}
+    monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
+    context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
+                         acoustid_client=client, create_finding=worker._create_finding)
+
+    result = LibraryReconciliationJob().scan(context)
+
+    assert result.errors == 1
+    pending = worker.get_review_cases(job_id='library_reconciliation')['items']
+    assert len(pending) == 1
+    detail = worker.get_review_case(pending[0]['case_id'], job_id='library_reconciliation')
+    assert detail['folder'] == str(failed)
 
 
 def test_completed_scan_retires_absent_folder_findings_but_stopped_scan_keeps_them(
