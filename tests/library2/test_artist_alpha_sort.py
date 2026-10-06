@@ -18,8 +18,8 @@ def _sorted_names(conn, names):
 
 def test_leading_punctuation_does_not_lead_the_artist_list(imported_conn):
     names = ['"Weird Al" Yankovic', "*NSYNC", "2Pac", "ABBA", "The Notwist", "Zappa"]
-    for name in names:
-        artist(imported_conn, name, sort_name=name)
+    for name in names:  # monitored: the list shows artists with a file or intent
+        artist(imported_conn, name, sort_name=name, monitored=1)
 
     assert _sorted_names(imported_conn, names) == [
         "2Pac", "ABBA", "*NSYNC", "The Notwist", '"Weird Al" Yankovic', "Zappa",
@@ -29,8 +29,8 @@ def test_leading_punctuation_does_not_lead_the_artist_list(imported_conn):
 def test_an_artist_without_a_sort_name_sorts_by_its_name(imported_conn):
     names = ["Aaron", "Mogwai", "Zz Top"]
     for name in names:
-        artist(imported_conn, name, sort_name=name)
-    artist(imported_conn, "Mogwai", sort_name=None)
+        artist(imported_conn, name, sort_name=name, monitored=1)
+    artist(imported_conn, "Mogwai", sort_name=None, monitored=1)
 
     assert _sorted_names(imported_conn, names) == names
 

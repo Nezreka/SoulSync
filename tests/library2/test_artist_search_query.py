@@ -14,8 +14,10 @@ from core.library2 import queries as Q
 
 
 def _artist(conn, name, canonical_of=None):
+    # monitored: the list shows artists with a file or monitoring intent
     cur = conn.execute(
-        "INSERT INTO lib2_artists(name, sort_name, canonical_artist_id) VALUES(?,?,?)",
+        "INSERT INTO lib2_artists(name, sort_name, canonical_artist_id, monitored) "
+        "VALUES(?,?,?,1)",
         (name, name, canonical_of),
     )
     return int(cur.lastrowid)

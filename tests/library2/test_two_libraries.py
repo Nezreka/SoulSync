@@ -573,6 +573,8 @@ class TestJobsWorkInOneLibrary:
         _, album_id, track_id = _album_with_file(lib.db, artist="A", album="B", title="S",
                                                  path=shared_path, key="x")
         with lib.db._get_connection() as conn:
+            # the planner refuses a track without a number rather than guess one
+            conn.execute("UPDATE lib2_tracks SET track_number=1 WHERE id=?", (track_id,))
             conn.execute("INSERT INTO lib2_track_files(track_id, path, is_primary, file_state)"
                          " VALUES(?,?,0,'active')", (track_id, kim_path))
             conn.execute("UPDATE lib2_track_files SET is_primary = (path = ?) WHERE track_id=?",

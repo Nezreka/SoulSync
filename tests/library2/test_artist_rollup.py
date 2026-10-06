@@ -113,12 +113,13 @@ def test_every_sort_returns_the_same_counts(conn, sort):
 def test_ordering_actually_follows_the_counts(conn):
     _seed(conn)
     small = _artist(conn, "Zero Albums")
+    # listed only through monitoring intent: it has no albums at all
+    conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (small,))
     conn.commit()
 
     by_albums = [r["name"] for r in Q.list_artists(conn, sort="albums")[0]]
     assert by_albums[0] == "Aphex Twin"
     assert by_albums[-1] == "Zero Albums", "an artist with no albums must sort last"
-    assert small  # silence the unused warning; the id is not needed
 
 
 def test_a_new_artist_invalidates_the_rollup_immediately(conn):
