@@ -371,8 +371,8 @@ def test_torrent_finalize_single_file_torrent_via_remapped_path(tmp_path: Path, 
 
 def test_torrent_finalize_single_file_archive_via_remapped_path(tmp_path: Path, monkeypatch) -> None:
     """A single-FILE archive torrent whose client path needs remapping: the
-    archive extracts (in place, as the old shared-root walk did) and its
-    audio is collected — never a hard 'No audio files' failure."""
+    archive extracts into its own folder and its audio is collected, never a
+    hard 'No audio files' failure."""
     import zipfile
 
     from core.download_plugins import album_bundle as ab
@@ -428,8 +428,8 @@ def test_audio_from_single_file_takes_audio_directly_and_absolute(tmp_path: Path
 
 
 def test_audio_from_single_file_extracts_archives(tmp_path: Path) -> None:
-    """A single-file archive extracts (in place, like the old shared-root
-    walk) and the extraction is walked."""
+    """A single-file archive extracts into its own folder and the extraction
+    is walked."""
     import zipfile
 
     from core.download_plugins.torrent import _audio_from_single_file
@@ -1201,3 +1201,23 @@ def test_sample_releases_never_become_candidates(title, size, projected) -> None
     ])
 
     assert bool(tracks) is projected
+
+
+def test_audio_from_single_file_archive_ignores_neighbours(tmp_path: Path) -> None:
+    """the archive sits in the shared download root next to other downloads.
+    only the archive's own audio comes back, never a neighbour's."""
+    import io
+    import tarfile
+
+    from core.download_plugins.torrent import _audio_from_single_file
+    (tmp_path / 'other_album').mkdir()
+    (tmp_path / 'other_album' / 'x.flac').write_bytes(b'fLaC')
+    (tmp_path / 'loose.mp3').write_bytes(b'ID3')
+    archive = tmp_path / 'Album.tar.gz'
+    with tarfile.open(archive, 'w:gz') as tf:
+        info = tarfile.TarInfo('track.flac')
+        info.size = 4
+        tf.addfile(info, io.BytesIO(b'fLaC'))
+    out = _audio_from_single_file(archive)
+    assert [p.name for p in out] == ['track.flac']
+    assert out[0].parent == tmp_path / 'Album'

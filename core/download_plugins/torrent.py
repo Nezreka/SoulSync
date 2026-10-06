@@ -985,20 +985,40 @@ def _audio_from_single_file(path: Path) -> List[Path]:
     """Audio files for a download that resolved to ONE file, not a folder.
 
     A single-FILE torrent's resolved path names the file itself. Audio files
-    are taken directly; single-file ARCHIVES are extracted in place (the same
-    placement the old shared-root walk produced) and the extraction walked;
-    anything else yields nothing. Always returns absolute paths, matching
-    ``walk_audio_files`` — downstream stages persist these paths and do real
-    file IO on them.
+    are taken directly; single-file ARCHIVES are extracted and the extraction
+    walked; anything else yields nothing. Always returns absolute paths,
+    matching ``walk_audio_files`` — downstream stages persist these paths and
+    do real file IO on them.
+
+    an archive unpacks into its own folder next to it, never into its parent.
+    the parent is usually the shared download root, and walking it would hand
+    this job every other download's audio.
     """
     resolved = Path(path).resolve()
     if resolved.suffix.lower() in AUDIO_EXTENSIONS:
         return [resolved]
     if is_archive(resolved):
-        extracted = extract_archive(resolved)
+        extracted = extract_archive(resolved, extract_to=_archive_extract_dir(resolved))
         if extracted is not None:
             return walk_audio_files(Path(extracted))
     return []
+
+
+_ARCHIVE_SUFFIXES = ('.tar.gz', '.tar.bz2', '.tar.xz', '.tgz', '.tar', '.zip', '.rar', '.7z')
+
+
+def _archive_extract_dir(archive: Path) -> Path:
+    """'<dir>/Album.tar.gz' -> '<dir>/Album'. falls back to '<name>.extracted'
+    when the stem would be empty or is the archive itself."""
+    name = archive.name
+    stem = name
+    for suffix in _ARCHIVE_SUFFIXES:
+        if name.lower().endswith(suffix):
+            stem = name[:-len(suffix)]
+            break
+    if not stem or stem == name:
+        stem = name + '.extracted'
+    return archive.parent / stem
 
 
 def _collect_album_audio(
