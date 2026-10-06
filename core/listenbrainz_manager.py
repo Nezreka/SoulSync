@@ -183,6 +183,54 @@ class ListenBrainzManager:
             "playlist_type": playlist_type,
         }
 
+    def sync_created_for_index(self) -> Dict:
+        """Cache any created-for playlist LB has that we don't have yet.
+
+        One list call, plus a detail fetch per genuinely new MBID —
+        already-cached playlists are left alone (``refresh_playlist``
+        owns those). Rolling-series refreshes call this before
+        resolving their latest member: new weekly / yearly periods
+        otherwise only enter the cache via ``update_all_playlists``,
+        whose only scheduled caller is the watchlist auto-scan, and
+        that returns early when the watchlist is empty — freezing the
+        rolling mirrors on whatever period was cached last.
+
+        Returns
+        -------
+        Dict with ``success`` (bool) and ``new`` (int) on success, or
+        ``error`` (str) on failure.
+        """
+        if not self.client.is_authenticated():
+            return {"success": False, "error": "Not authenticated"}
+
+        playlists = self.client.get_playlists_created_for_user()
+
+        conn = self._get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT playlist_mbid FROM listenbrainz_playlists WHERE profile_id = ?",
+                (self.profile_id,),
+            )
+            cached = {row[0] for row in cursor.fetchall()}
+        finally:
+            conn.close()
+
+        new = 0
+        for playlist in playlists:
+            meta = playlist.get('playlist', playlist)
+            mbid = meta.get('identifier', '').split('/')[-1]
+            if not mbid or mbid in cached:
+                continue
+            if self._update_playlist(playlist, "created_for") == "new":
+                new += 1
+
+        if new:
+            logger.info(f"Cached {new} new created-for ListenBrainz playlist(s)")
+            self._cleanup_old_playlists()
+
+        return {"success": True, "new": new}
+
     def _update_playlist(self, playlist_data: Dict, playlist_type: str) -> str:
         """
         Update a single playlist. Returns 'updated', 'skipped', or 'new'

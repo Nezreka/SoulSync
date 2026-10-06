@@ -290,6 +290,16 @@ class ListenBrainzPlaylistSource(PlaylistSource):
         target_mbid = playlist_id
         from core.playlists.lb_series import is_series_synthetic_id
         if is_series_synthetic_id(playlist_id):
+            # Pull in periods LB published since the last cache fill,
+            # otherwise "latest" means latest-we-happen-to-have. A
+            # failure here still refreshes the newest cached period.
+            try:
+                manager.sync_created_for_index()
+            except Exception:
+                logger.warning(
+                    "LB created-for index sync failed — refreshing %r from cached periods",
+                    playlist_id, exc_info=True,
+                )
             resolved = self._resolve_series_to_latest_mbid(manager, playlist_id)
             if not resolved:
                 logger.warning(

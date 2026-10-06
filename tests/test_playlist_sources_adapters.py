@@ -510,6 +510,15 @@ class _FakeLBManager:
             raise self.refresh_raises
         return {"success": True, "result": "skipped", "playlist_mbid": mbid}
 
+    def sync_created_for_index(self):
+        self.sync_calls = getattr(self, "sync_calls", 0) + 1
+        if getattr(self, "sync_raises", None) is not None:
+            raise self.sync_raises
+        hook = getattr(self, "on_sync", None)
+        if hook:
+            hook()
+        return {"success": True, "new": 0}
+
 
 def test_listenbrainz_adapter_marks_needs_discovery():
     manager = _FakeLBManager()
@@ -635,6 +644,67 @@ def test_listenbrainz_series_resolves_to_the_newest_week_not_the_newest_write():
     src = ListenBrainzPlaylistSource(lambda: manager)
     assert src._resolve_series_to_latest_mbid(manager, "lb_weekly_exploration_nezreka") == "new-mbid"
 
+
+
+def _series_cache(manager, rows):
+    """In-memory LB cache the series resolver can query."""
+    import sqlite3
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        "CREATE TABLE listenbrainz_playlists "
+        "(playlist_mbid TEXT, title TEXT, profile_id INTEGER, last_updated TEXT)"
+    )
+    conn.executemany("INSERT INTO listenbrainz_playlists VALUES (?, ?, 1, ?)", rows)
+    conn.commit()
+    manager.profile_id = 1
+    manager._get_db_connection = lambda: conn
+    return conn
+
+
+def test_listenbrainz_series_refresh_picks_up_a_week_published_since_last_cache_fill():
+    """New weekly periods used to enter the cache only via
+    ``update_all_playlists`` (watchlist auto-scan, which bails on an empty
+    watchlist), so the rolling mirror re-synced the last cached week
+    forever. The series refresh now syncs the created-for index first."""
+    manager = _FakeLBManager()
+    conn = _series_cache(manager, [
+        ("old-mbid", "Weekly Exploration for nezreka, week of 2026-08-24 Mon", "2026-08-24"),
+    ])
+
+    def lb_published_a_new_week():
+        conn.execute(
+            "INSERT INTO listenbrainz_playlists VALUES (?, ?, 1, ?)",
+            ("new-mbid", "Weekly Exploration for nezreka, week of 2026-09-14 Mon", "2026-10-06"),
+        )
+    manager.on_sync = lb_published_a_new_week
+
+    src = ListenBrainzPlaylistSource(lambda: manager)
+    src.refresh_playlist("lb_weekly_exploration_nezreka")
+
+    assert getattr(manager, "sync_calls", 0) == 1
+    assert manager.refresh_playlist_calls == ["new-mbid"]
+
+
+def test_listenbrainz_series_refresh_falls_back_to_cache_when_index_sync_fails():
+    manager = _FakeLBManager()
+    _series_cache(manager, [
+        ("cached-mbid", "Weekly Jams for nezreka, week of 2026-08-24 Mon", "2026-08-24"),
+    ])
+    manager.sync_raises = RuntimeError("LB API timed out")
+
+    src = ListenBrainzPlaylistSource(lambda: manager)
+    src.refresh_playlist("lb_weekly_jams_nezreka")
+
+    assert manager.refresh_playlist_calls == ["cached-mbid"]
+
+
+def test_listenbrainz_plain_mbid_refresh_does_not_sync_created_for_index():
+    manager = _FakeLBManager()
+    src = ListenBrainzPlaylistSource(lambda: manager)
+    src.refresh_playlist("lb-1")
+
+    assert getattr(manager, "sync_calls", 0) == 0
+    assert manager.refresh_playlist_calls == ["lb-1"]
 
 # ─── Last.fm ────────────────────────────────────────────────────────────
 
