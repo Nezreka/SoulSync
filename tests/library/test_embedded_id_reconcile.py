@@ -100,13 +100,32 @@ def test_jiosaavn_single_column_provider_maps_per_entity():
     assert plan.filled == 3
 
 
-def test_mb_album_and_artist_filled_track_recording_skipped():
+def test_mb_album_and_artist_filled_junk_recording_skipped():
     tags = {'musicbrainz_albumid': 'MBA', 'musicbrainz_artistid': 'MBR', 'musicbrainz_trackid': 'MBT'}
     plan = plan_reconcile(tags, {'track': {}, 'album': {}, 'artist': {}})
     cols = {(f.entity, f.id_column): f.value for f in plan.fills}
     assert cols[('album', 'musicbrainz_release_id')] == 'MBA'
     assert cols[('artist', 'musicbrainz_id')] == 'MBR'
-    assert plan.fills_for('track') == []  # recording id not reconciled
+    # not an mbid, so not a recording id: never filled
+    assert plan.fills_for('track') == []
+
+
+REC = '1f9df192-a621-4f54-8850-2c5373b7eac9'
+
+
+def test_mb_recording_id_filled_on_the_track():
+    plan = plan_reconcile({'musicbrainz_trackid': REC.upper()},
+                          {'track': {}, 'album': {}, 'artist': {}})
+    assert [(f.entity, f.id_column, f.status_column, f.value) for f in plan.fills] == [
+        ('track', 'musicbrainz_recording_id', 'musicbrainz_match_status', REC)]
+
+
+def test_mb_recording_id_never_overwrites():
+    other = '00000000-0000-0000-0000-000000000000'
+    plan = plan_reconcile({'musicbrainz_trackid': REC},
+                          {'track': {'musicbrainz_recording_id': other}})
+    assert plan.fills == []
+    assert plan.conflicts[0]['column'] == 'musicbrainz_recording_id'
 
 
 def test_lastfm_url_maps_to_track_only():
@@ -369,3 +388,31 @@ def test_reconcile_library_progress_and_stop():
     totals = reconcile_library(conn, _reader({}), track_ids=['t1', 't2'],
                                should_stop=lambda: True)
     assert totals.processed == 0
+
+
+def test_picard_mp3_recording_id_is_read_and_reconciled(tmp_path):
+    # the reported shape: picard keeps the recording id in a UFID frame and
+    # the album / release-group / release-track / artist ids in TXXX frames.
+    # the reader only walked TXXX, so the mp3 never got a recording id while
+    # its flac twin did, and the two copies didn't line up.
+    from mutagen.id3 import ID3, TXXX, UFID
+
+    from core.library.file_tags import read_embedded_tags
+
+    path = tmp_path / 'friend.mp3'
+    path.write_bytes((bytes([0xFF, 0xFB, 0x90, 0x64]) + bytes(413)) * 10)
+    tags = ID3()
+    tags.add(UFID(owner='http://musicbrainz.org', data=REC.encode('ascii')))
+    tags.add(TXXX(encoding=3, desc='MusicBrainz Release Track Id',
+                  text=['aaaaaaaa-0000-0000-0000-000000000001']))
+    tags.add(TXXX(encoding=3, desc='MusicBrainz Album Id', text=['MBA']))
+    tags.save(str(path))
+
+    embedded = read_embedded_tags(str(path))['tags']
+    assert embedded['musicbrainz_trackid'] == REC
+    # the release-track id is a different thing and stays where it was
+    assert embedded['musicbrainz_releasetrackid'] == 'aaaaaaaa-0000-0000-0000-000000000001'
+
+    plan = plan_reconcile(embedded, {'track': {}, 'album': {}, 'artist': {}})
+    assert ('track', 'musicbrainz_recording_id', REC) in [
+        (f.entity, f.id_column, f.value) for f in plan.fills]
