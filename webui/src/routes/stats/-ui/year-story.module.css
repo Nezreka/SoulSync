@@ -1213,18 +1213,6 @@
   cursor: default;
 }
 
-.navButtonPrimary {
-  background: rgba(var(--accent-light-rgb), 0.2);
-  border-color: rgba(var(--accent-light-rgb), 0.4);
-  color: #34d399;
-}
-
-.navButtonPrimary:hover:not(:disabled) {
-  background: var(--accent-light);
-  border-color: var(--accent-light);
-  color: #04160b;
-}
-
 .counter {
   color: var(--white-a50);
   font-size: 0.88rem;

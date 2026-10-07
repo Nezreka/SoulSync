@@ -88,33 +88,6 @@
   border-color: #f5b942;
 }
 
-.filterRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.filterPill {
-  background: var(--white-a05);
-  border: 1px solid var(--white-a10);
-  color: #b9b6ae;
-  border-radius: var(--radius-pill);
-  padding: 4px 10px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.filterPill[data-active='true'] {
-  background: rgba(245, 185, 66, 0.15);
-  border-color: #f5b942;
-  color: #f5b942;
-}
-
-.filterPill:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
 /* Library filters: three compact selects on one line instead of three
    wrapping rows of pills (~200px of chrome above the track list). */
 .filterSelects {

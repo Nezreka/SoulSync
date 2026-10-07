@@ -25,17 +25,6 @@
   flex: none;
 }
 
-.backendBadge {
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: none;
-  color: #f5b942;
-  border: 1px solid #3a3423;
-  border-radius: var(--radius-pill);
-  padding: 2px 8px;
-}
-
 .body {
   display: flex;
   flex-direction: column;
@@ -242,50 +231,6 @@
 
 /* Shown instead of the "Separate stems" button when torch/demucs isn't
    installed. A closed disclosure: one quiet line until someone opens it. */
-.setupNote {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 0;
-  border-top: 1px solid #2a2620;
-  padding-top: 10px;
-}
-
-.setupNote[open] {
-  padding-bottom: 2px;
-}
-
-.setupSummary {
-  cursor: pointer;
-  font-size: 12px;
-  color: #8a877f;
-  list-style: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.setupSummary::-webkit-details-marker {
-  display: none;
-}
-
-.setupSummary::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: rotate(-45deg);
-  transition: transform 120ms;
-}
-
-.setupNote[open] > .setupSummary::before {
-  transform: rotate(45deg);
-}
-
-.setupSummary:hover {
-  color: #e8e4da;
-}
 
 .setupTitle {
   margin: 0;
@@ -305,68 +250,4 @@
   white-space: pre-wrap;
   word-break: break-all;
   user-select: all;
-}
-
-/* Rough splits: always-available built-in DSP, visually distinct from Demucs.
-   The divider only shows when something sits above it. */
-.roughSection {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.roughSection:not(:first-child) {
-  border-top: 1px solid #2a2620;
-  padding-top: 12px;
-}
-
-.roughHead {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-/* Secondary action: neutral, so the one amber button on the card stays the
-   primary. */
-.secondary {
-  padding: 7px 14px;
-  border: 1px solid #3a3730;
-  border-radius: var(--radius-md);
-  background: #1c1b18;
-  color: #e8e4da;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.secondary:hover:not(:disabled) {
-  border-color: #6b675d;
-  background: #23211d;
-}
-
-.secondary:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.roughTitle {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 600;
-  color: #b5b0a4;
-}
-
-.roughActions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-/* Switcher between finished separation methods. */
-.methodSwitch {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
 }

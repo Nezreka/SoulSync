@@ -153,12 +153,6 @@
   cursor: pointer;
 }
 
-.status {
-  color: var(--text-secondary);
-  font-size: 13px;
-  padding-inline: 4px;
-}
-
 /* ── toolbar ──────────────────────────────────────────────────────────── */
 
 .toolbar {
