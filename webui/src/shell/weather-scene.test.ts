@@ -4,6 +4,8 @@ import {
   conditionsFromWeather,
   createWeatherScene,
   gustEnvelope,
+  presetConditions,
+  SCENE_PRESETS,
   seasonForMonth,
   windSide,
   windStrength,
@@ -331,5 +333,32 @@ describe('cost', () => {
     const before = rng.mock.calls.length;
     eng.resize(261, 900, 2);
     expect(rng.mock.calls.length).toBe(before);
+  });
+});
+
+describe('presets', () => {
+  it('every preset builds full conditions and paints', () => {
+    for (const key of Object.keys(SCENE_PRESETS)) {
+      const c = presetConditions(key);
+      expect(c, key).not.toBeNull();
+      expect(() => run(c!, 1)).not.toThrow();
+    }
+    expect(presetConditions('nope')).toBeNull();
+  });
+
+  it('the presets cover every kind of sky', () => {
+    const all = Object.keys(SCENE_PRESETS).map((k) => presetConditions(k)!);
+    expect(new Set(all.map((c) => c.sky))).toEqual(new Set(['clear', 'partly', 'overcast', 'fog']));
+    expect(new Set(all.map((c) => c.precip))).toEqual(new Set(['none', 'rain', 'snow']));
+    expect(all.some((c) => c.thunder)).toBe(true);
+    expect(all.some((c) => !c.isDay)).toBe(true);
+    expect(all.some((c) => windStrength(c) > 0.6)).toBe(true);
+  });
+
+  it('a pretend date sets the season, flipped south of the equator', () => {
+    const xmas = new Date('2026-12-24T12:00:00Z');
+    expect(presetConditions('snowfall', xmas)!.season).toBe('winter');
+    expect(presetConditions('snowfall', xmas, -33.9)!.season).toBe('summer');
+    expect(presetConditions('breezy', new Date('2026-10-31T12:00:00Z'))!.season).toBe('autumn');
   });
 });

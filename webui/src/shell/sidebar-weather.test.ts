@@ -11,10 +11,12 @@ import {
   formatHiLo,
   formatLocalTime,
   formatTemp,
+  getWeatherPreview,
   glyphForWeatherCode,
   glyphSvg,
   lineGlyph,
   refreshSidebarWeather,
+  setWeatherPreview,
   shouldRenderWeather,
   type PopoverGeom,
   type WeatherResponse,
@@ -984,5 +986,73 @@ describe('refresh while the tab stays open', () => {
     mockWeather(null);
     await refreshSidebarWeather();
     expect(document.getElementById('sidebar-weather-line')!.textContent).toBe(line);
+  });
+});
+
+describe('weather preview (settings > advanced > developer)', () => {
+  afterEach(() => {
+    sessionStorage.clear();
+    vi.useRealTimers();
+  });
+
+  it('shows the chosen sky, says Preview on the line, and swaps the scene', async () => {
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => fake2dContext()) as never;
+    await bootSidebarWeather();
+    const live = document.getElementById('sidebar-weather-scene');
+    setWeatherPreview({ preset: 'thunderstorm', date: null });
+    const line = document.getElementById('sidebar-weather-line')!.textContent!;
+    expect(line).toContain('Preview · Thunderstorm');
+    expect(line).not.toContain('68°F'); // never passes for the real sky
+    const next = document.getElementById('sidebar-weather-scene');
+    expect(next).not.toBeNull();
+    expect(next).not.toBe(live);
+  });
+
+  it('lives in this tab only: session storage, no request to the server', async () => {
+    const writes: string[] = [];
+    server.use(
+      http.put('*/api/weather/*', ({ request }) => {
+        writes.push(request.url);
+        return HttpResponse.json({});
+      }),
+    );
+    await bootSidebarWeather();
+    setWeatherPreview({ preset: 'blizzard', date: '2026-12-24' });
+    expect(JSON.parse(sessionStorage.getItem('soulsync-weather-preview')!)).toEqual({
+      preset: 'blizzard',
+      date: '2026-12-24',
+    });
+    expect(localStorage.getItem('soulsync-weather-preview')).toBeNull();
+    expect(writes).toEqual([]);
+  });
+
+  it('survives a reload in the same tab, and paints even when the live sky has no scene', async () => {
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => fake2dContext()) as never;
+    sessionStorage.setItem(
+      'soulsync-weather-preview',
+      JSON.stringify({ preset: 'snowfall', date: null }),
+    );
+    mockWeather({ ...BASE_PAYLOAD, scene: null });
+    await bootSidebarWeather();
+    expect(document.getElementById('sidebar-weather-line')!.textContent).toContain(
+      'Preview · Snowfall',
+    );
+    expect(document.getElementById('sidebar-weather-scene')).not.toBeNull();
+  });
+
+  it('back to live puts the real line back', async () => {
+    await bootSidebarWeather();
+    setWeatherPreview({ preset: 'gale', date: null });
+    setWeatherPreview(null);
+    expect(getWeatherPreview()).toBeNull();
+    expect(document.getElementById('sidebar-weather-line')!.textContent).toContain('68°F');
+  });
+
+  it('ignores a stored preset that no longer exists', () => {
+    sessionStorage.setItem(
+      'soulsync-weather-preview',
+      JSON.stringify({ preset: 'meteor-shower', date: null }),
+    );
+    expect(getWeatherPreview()).toBeNull();
   });
 });

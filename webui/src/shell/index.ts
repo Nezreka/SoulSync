@@ -64,13 +64,20 @@ import {
   setActiveSource,
   switchServiceSwitchTab,
 } from './service-switch';
-import { bootSidebarWeather, initSidebarWeather } from './sidebar-weather';
+import {
+  bootSidebarWeather,
+  getWeatherPreview,
+  initSidebarWeather,
+  setWeatherPreview,
+  weatherPreviewPresets,
+} from './sidebar-weather';
 import { closeTrackDetail, openTrackDetail } from './track-detail';
 import {
   closeWatchlistHistoryModal,
   openWatchlistHistoryModal,
   toggleWatchlistHistoryRun,
 } from './watchlist-history';
+import { initWeatherPreviewSettings } from './weather-preview-settings';
 
 /** every name the rest of the app may reach through window. */
 export const SHELL_WINDOW_EXPORTS = {
@@ -135,8 +142,17 @@ export const SHELL_WINDOW_EXPORTS = {
   initSidebarWeather,
   // re-runnable boot, called from settings.js after a location/enabled change
   bootSidebarWeather,
+  // settings > advanced > developer: preview any sky in this tab
+  getWeatherPreview,
+  setWeatherPreview,
+  weatherPreviewPresets,
 } as const;
 
 Object.assign(window, SHELL_WINDOW_EXPORTS);
 startDiscoverInboxBadge();
 initSidebarWeather();
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initWeatherPreviewSettings, { once: true });
+} else {
+  initWeatherPreviewSettings();
+}

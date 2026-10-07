@@ -9774,6 +9774,43 @@
                                         </div>
                                     </div><!-- end Sidebar Weather body -->
 
+                                    <!-- Developer (collapsible tile): tools for checking how things look.
+                                         Wired by webui/src/shell/weather-preview-settings.ts. Nothing here
+                                         is saved; it only changes what this browser tab shows. -->
+                                    <div class="settings-section-header collapsed" data-stg="advanced"
+                                        onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
+                                        role="button" tabindex="0" aria-expanded="false">
+                                        <span class="settings-section-arrow">&#9660;</span>
+                                        <h3>Developer</h3>
+                                        <span class="settings-section-hint">Preview tools, nothing saved</span>
+                                    </div>
+                                    <div class="settings-section-body collapsed" data-stg="advanced">
+                                        <div class="settings-group" data-stg="advanced">
+                                            <div class="form-group">
+                                                <label for="sw-preview-preset">Weather preview:</label>
+                                                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                                    <select id="sw-preview-preset">
+                                                        <option value="">Live weather</option>
+                                                    </select>
+                                                    <input type="date" id="sw-preview-date"
+                                                        aria-label="Pretend date">
+                                                    <button class="test-button" id="sw-preview-reset"
+                                                        type="button">Back to live</button>
+                                                </div>
+                                                <div class="help-text">
+                                                    Shows any sky in the sidebar so you can check how it looks.
+                                                    Only this browser tab sees it and nothing is saved; the weather
+                                                    line reads "Preview" while it's on. The date pretends it's
+                                                    another day (season now, holiday scenes later).
+                                                </div>
+                                            </div>
+                                            <div class="form-group">
+                                                <label>Status:</label>
+                                                <span id="sw-preview-status" class="readonly-field">Live weather</span>
+                                            </div>
+                                        </div>
+                                    </div><!-- end Developer body -->
+
                                     <div class="settings-experimental-break" data-stg="advanced" role="separator"
                                         aria-label="Experimental features">
                                         <span class="settings-experimental-break__line" aria-hidden="true"></span>

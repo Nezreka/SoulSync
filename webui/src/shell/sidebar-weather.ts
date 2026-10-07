@@ -14,7 +14,13 @@
  *   as-is rather than adding a client-side tz database for a sub-hour glitch.
  */
 
-import { conditionsFromWeather, createWeatherScene } from './weather-scene';
+import {
+  conditionsFromWeather,
+  createWeatherScene,
+  presetConditions,
+  SCENE_PRESETS,
+  type SceneConditions,
+} from './weather-scene';
 
 export interface WeatherDailyRow {
   date: string;
@@ -279,7 +285,7 @@ function syncSceneWithMotionPreference(): void {
     }
     return;
   }
-  if (stopScene || !active || !active.data.scene) return;
+  if (stopScene || !active || !hasScene(active.data)) return;
   const sidebar = document.getElementById('app-sidebar');
   if (!sidebar) return;
   mountScene(sidebar, active.data);
@@ -341,8 +347,15 @@ function teardown(): void {
 function renderLineText(data: WeatherResponse): string {
   const snap = data.snapshot!;
   const cur = snap.current;
-  const glyph = glyphSvg(lineGlyph(data));
   const time = formatLocalTime(snap.utc_offset_seconds);
+  const preview = getWeatherPreview();
+  const preset = preview ? SCENE_PRESETS[preview.preset] : null;
+  if (preset) {
+    // a preview says so on the line, so it never passes for the real sky
+    const glyph = glyphSvg(presetGlyph(preview!.preset));
+    return `${glyph}<span>${time} &middot; Preview &middot; ${escapeAttr(preset.label)}</span>`;
+  }
+  const glyph = glyphSvg(lineGlyph(data));
   const temp = formatTemp(cur?.temp, data.units);
   const condition =
     typeof cur?.condition === 'string' && cur.condition.length > 0
@@ -631,10 +644,7 @@ function startScene(
   const rawCtx = canvas.getContext('2d');
   if (!rawCtx) return () => canvas.remove();
   const ctx: CanvasRenderingContext2D = rawCtx;
-  const engine = createWeatherScene(
-    ctx,
-    conditionsFromWeather(data.snapshot!, Date.now(), data.location?.latitude ?? 0),
-  );
+  const engine = createWeatherScene(ctx, sceneConditions(data));
 
   function fit(): void {
     const r = sidebar.getBoundingClientRect();
@@ -758,7 +768,7 @@ export async function bootSidebarWeather(): Promise<void> {
   active = { data, line };
   startClockTick();
 
-  if (data.scene && !reducedMotion()) mountScene(sidebar, data);
+  if (hasScene(data) && !reducedMotion()) mountScene(sidebar, data);
   watchMotionPreference();
   refreshTimer = setInterval(() => void refreshSidebarWeather(), REFRESH_MS);
 }
@@ -785,6 +795,12 @@ export async function refreshSidebarWeather(): Promise<void> {
   }
   active.data = data;
   active.line.innerHTML = renderLineText(data);
+  swapScene();
+}
+
+/** fade the current scene out under a fresh one built from active.data */
+function swapScene(): void {
+  if (!active) return;
   const sidebar = document.getElementById('app-sidebar');
   if (!sidebar || reducedMotion()) return;
   const old = stopScene;
@@ -801,7 +817,90 @@ export async function refreshSidebarWeather(): Promise<void> {
       old();
     }, SCENE_FADE_MS);
   }
-  if (data.scene) mountScene(sidebar, data);
+  if (hasScene(active.data)) mountScene(sidebar, active.data);
+}
+
+/* ------------------------------------------------------------------ */
+/* preview: see any sky on demand (settings > advanced > developer)    */
+/* ------------------------------------------------------------------ */
+
+const PREVIEW_KEY = 'soulsync-weather-preview';
+
+export interface WeatherPreview {
+  preset: string;
+  /** 'YYYY-MM-DD' to pretend it's another day, null for today */
+  date: string | null;
+}
+
+/**
+ * the preview lives in this tab's session only: never saved to the server,
+ * gone when the tab closes, so a forgotten test can't stick around
+ */
+export function getWeatherPreview(): WeatherPreview | null {
+  try {
+    const raw = sessionStorage.getItem(PREVIEW_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as WeatherPreview;
+    return p && typeof p.preset === 'string' && SCENE_PRESETS[p.preset] ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+/** pick a sky to preview, or null to go back to the live weather */
+export function setWeatherPreview(preview: WeatherPreview | null): void {
+  try {
+    if (preview && SCENE_PRESETS[preview.preset])
+      sessionStorage.setItem(PREVIEW_KEY, JSON.stringify(preview));
+    else sessionStorage.removeItem(PREVIEW_KEY);
+  } catch {
+    // storage blocked: nothing to remember, the live sky stays
+  }
+  if (!active) return;
+  active.line.innerHTML = renderLineText(active.data);
+  swapScene();
+}
+
+/** true once the weather line is up: a preview paints over it, so it needs it */
+export function isSidebarWeatherMounted(): boolean {
+  return active !== null;
+}
+
+/** every sky the preview can show, for the settings dropdown */
+export function weatherPreviewPresets(): Array<{ key: string; label: string }> {
+  return Object.entries(SCENE_PRESETS).map(([key, p]) => ({ key, label: p.label }));
+}
+
+function previewDate(p: WeatherPreview): Date | null {
+  if (!p.date || !/^\d{4}-\d{2}-\d{2}$/.test(p.date)) return null;
+  const d = new Date(`${p.date}T12:00:00Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** what the scene paints: the preview when one is on, else the real sky */
+function sceneConditions(data: WeatherResponse): SceneConditions {
+  const latitude = data.location?.latitude ?? 0;
+  const preview = getWeatherPreview();
+  if (preview) {
+    const c = presetConditions(preview.preset, previewDate(preview), latitude);
+    if (c) return c;
+  }
+  return conditionsFromWeather(data.snapshot!, Date.now(), latitude);
+}
+
+function hasScene(data: WeatherResponse): boolean {
+  return !!data.scene || !!getWeatherPreview();
+}
+
+function presetGlyph(key: string): WeatherGlyphKind {
+  const p = SCENE_PRESETS[key];
+  if (p.windy) return 'wind';
+  const kind = glyphForWeatherCode(p.code);
+  if (p.cond.isDay === false) {
+    if (kind === 'sun') return 'moon';
+    if (kind === 'partly-cloudy') return 'partly-cloudy-night';
+  }
+  return kind;
 }
 
 /**

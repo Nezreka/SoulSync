@@ -181,6 +181,7 @@ describe('the window contract', () => {
       'connectMyAccount',
       'deleteSelectedOriginEntries',
       'disconnectMyAccount',
+      'getWeatherPreview',
       'initSidebarWeather',
       'navigateToArtistDetail',
       'onBlocklistSearchInput',
@@ -199,6 +200,7 @@ describe('the window contract', () => {
       'removeSelectedOriginEntries',
       'saveMyAccountToken',
       'setActiveSource',
+      'setWeatherPreview',
       'switchBlocklistTab',
       'switchDownloadOriginTab',
       'switchServiceSwitchTab',
@@ -207,6 +209,7 @@ describe('the window contract', () => {
       'toggleOriginGroup',
       'toggleWatchlistHistoryRun',
       'unblockEntry',
+      'weatherPreviewPresets',
     ]);
     // importing the entry assigned them
     expect(window.openBlocklistModal).toBe(SHELL_WINDOW_EXPORTS.openBlocklistModal);

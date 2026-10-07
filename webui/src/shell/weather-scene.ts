@@ -1073,3 +1073,174 @@ export function createWeatherScene(
     },
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* presets: every sky, for the settings preview and the playground     */
+/* ------------------------------------------------------------------ */
+
+export interface ScenePreset {
+  label: string;
+  /** what the weather line says it is */
+  condition: string;
+  /** a WMO code for the line's glyph */
+  code: number;
+  /** the line shows the wind glyph */
+  windy?: boolean;
+  cond: Partial<SceneConditions>;
+}
+
+const PRESET_BASE: SceneConditions = {
+  sky: 'clear',
+  precip: 'none',
+  intensity: 0,
+  thunder: false,
+  isDay: true,
+  cloudCover: 0.04,
+  windMph: 4,
+  gustMph: 6,
+  windFromDeg: 250,
+  dayPhase: 0.5,
+  twilight: 0,
+  season: 'autumn',
+};
+
+export const SCENE_PRESETS: Record<string, ScenePreset> = {
+  'clear-noon': { label: 'Clear noon', condition: 'Clear sky', code: 0, cond: {} },
+  'golden-hour': {
+    label: 'Golden hour',
+    condition: 'Clear sky',
+    code: 0,
+    cond: { cloudCover: 0.1, windMph: 6, gustMph: 9, dayPhase: 0.97, twilight: 0.9 },
+  },
+  'clear-night': {
+    label: 'Clear night',
+    condition: 'Clear sky',
+    code: 0,
+    cond: { isDay: false, windMph: 3, gustMph: 5 },
+  },
+  'partly-cloudy': {
+    label: 'Partly cloudy',
+    condition: 'Partly cloudy',
+    code: 2,
+    cond: { sky: 'partly', cloudCover: 0.5, windMph: 8, gustMph: 12, dayPhase: 0.4 },
+  },
+  overcast: {
+    label: 'Overcast',
+    condition: 'Overcast',
+    code: 3,
+    cond: { sky: 'overcast', cloudCover: 0.95, windMph: 7, gustMph: 11 },
+  },
+  fog: {
+    label: 'Fog',
+    condition: 'Fog',
+    code: 45,
+    cond: { sky: 'fog', cloudCover: 0.7, windMph: 2, gustMph: 4, dayPhase: 0.15 },
+  },
+  drizzle: {
+    label: 'Drizzle',
+    condition: 'Light drizzle',
+    code: 51,
+    cond: {
+      sky: 'overcast',
+      precip: 'rain',
+      intensity: 0.22,
+      cloudCover: 0.9,
+      windMph: 6,
+      gustMph: 9,
+    },
+  },
+  downpour: {
+    label: 'Downpour',
+    condition: 'Heavy rain',
+    code: 65,
+    cond: {
+      sky: 'overcast',
+      precip: 'rain',
+      intensity: 0.95,
+      cloudCover: 1,
+      windMph: 22,
+      gustMph: 36,
+    },
+  },
+  thunderstorm: {
+    label: 'Thunderstorm',
+    condition: 'Thunderstorm',
+    code: 95,
+    cond: {
+      sky: 'overcast',
+      precip: 'rain',
+      intensity: 0.8,
+      thunder: true,
+      isDay: false,
+      cloudCover: 1,
+      windMph: 18,
+      gustMph: 32,
+    },
+  },
+  snowfall: {
+    label: 'Snowfall',
+    condition: 'Moderate snow',
+    code: 73,
+    cond: {
+      sky: 'overcast',
+      precip: 'snow',
+      intensity: 0.4,
+      cloudCover: 0.9,
+      windMph: 5,
+      gustMph: 8,
+    },
+  },
+  blizzard: {
+    label: 'Blizzard',
+    condition: 'Heavy snow',
+    code: 75,
+    cond: {
+      sky: 'overcast',
+      precip: 'snow',
+      intensity: 0.95,
+      cloudCover: 1,
+      windMph: 30,
+      gustMph: 46,
+    },
+  },
+  breezy: {
+    label: 'Breezy',
+    condition: 'Breezy',
+    code: 1,
+    windy: true,
+    cond: { cloudCover: 0.12, windMph: 17, gustMph: 26, dayPhase: 0.6 },
+  },
+  gale: {
+    label: 'Gale',
+    condition: 'Gale',
+    code: 2,
+    windy: true,
+    cond: { sky: 'partly', cloudCover: 0.35, windMph: 34, gustMph: 52, dayPhase: 0.45 },
+  },
+  'windy-night': {
+    label: 'Windy night',
+    condition: 'Windy',
+    code: 0,
+    windy: true,
+    cond: { cloudCover: 0.08, windMph: 28, gustMph: 40, isDay: false, windFromDeg: 80 },
+  },
+};
+
+/**
+ * a preset's full conditions. `date` pretends it's another day: the season
+ * follows it now, the holiday scenes will too.
+ */
+export function presetConditions(
+  key: string,
+  date?: Date | null,
+  latitude = 0,
+): SceneConditions | null {
+  const p = SCENE_PRESETS[key];
+  if (!p) return null;
+  const when = date ?? new Date();
+  return {
+    ...PRESET_BASE,
+    season: seasonForMonth(when.getUTCMonth(), latitude < 0),
+    ...p.cond,
+  };
+}

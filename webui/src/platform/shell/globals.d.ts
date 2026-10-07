@@ -579,6 +579,10 @@ declare global {
     initSidebarWeather?: () => void;
     /** re-runnable weather boot, called from settings.js after a location/enabled change. */
     bootSidebarWeather?: () => Promise<void>;
+    /** settings > advanced > developer: preview a sky in this tab only */
+    getWeatherPreview?: () => { preset: string; date: string | null } | null;
+    setWeatherPreview?: (preview: { preset: string; date: string | null } | null) => void;
+    weatherPreviewPresets?: () => Array<{ key: string; label: string }>;
     /** shared-helpers.js html escaper (also re-declared by downloads.js) */
     escapeHtml?: (text: unknown) => string;
     /** init.js - the active profile, or null before profiles load */
