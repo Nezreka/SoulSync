@@ -472,6 +472,18 @@ def _score_streaming_candidates(results, spotify_track, why=None):
             continue
 
         # Score using matching engine's generic scorer (same weights as Soulseek).
+        if r.username in ('torrent', 'usenet'):
+            release_title = (getattr(r, '_source_metadata', None) or {}).get('release_title')
+            if release_title:
+                from core.download_plugins.torrent import _parse_release_title
+                # Scene artist names can themselves contain bare hyphens.
+                # Resolve the boundary against real release-prefix evidence
+                # before the artist gate, without substituting a wanted name.
+                for artist in sorted((a for a in expected_artists if a), key=len, reverse=True):
+                    parsed_artist, parsed_title = _parse_release_title(release_title, artist_hint=artist)
+                    if parsed_artist.casefold() == artist.casefold():
+                        r.artist, r.title, r.album = parsed_artist, parsed_title, parsed_title
+                        break
         # Torrent/usenet release projections sometimes only have the indexer name
         # in the artist field when a title did not parse as "Artist - Release".
         # Treat that as unknown artist, not as a real mismatch.

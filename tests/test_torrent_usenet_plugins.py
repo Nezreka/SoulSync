@@ -111,6 +111,75 @@ def test_parse_release_title_rejects_url_prefix() -> None:
     assert artist == ''
 
 
+@pytest.mark.parametrize('release,artist,title', [
+    ('MoTrip-Guten Morgen NSA-16BIT-44-KHZ-WEB-FLAC-2013-WALKMAN', 'MoTrip', 'Guten Morgen NSA'),
+    ('The Weeknd-Starboy-DELUXE EDITION-24BIT-WEB-FLAC-2023-RECTiFY', 'The Weeknd', 'Starboy-DELUXE EDITION'),
+    ('MoTrip-Guten_Morgen_NSA-16BIT-44-KHZ-WEB-FLAC-2013-WALKMAN', 'MoTrip', 'Guten Morgen NSA'),
+    ('Jay-Z - The Blueprint-WEB-FLAC-2001-GROUP', 'Jay-Z', 'The Blueprint'),
+    ('Artist-Song-Live-WEB-FLAC-2024-GROUP', 'Artist', 'Song-Live'),
+])
+def test_scene_release_projection_preserves_music_identity(release, artist, title):
+    """Both Prowlarr sources must expose music identity, not scene packaging."""
+    for plugin, protocol in [(TorrentDownloadPlugin(), 'torrent'), (UsenetDownloadPlugin(), 'usenet')]:
+        tracks, albums = plugin._project_results([
+            _make_torrent_result(title=release, protocol=protocol),
+        ])
+        assert tracks[0].artist == artist
+        assert tracks[0].title == title
+        assert albums[0].artist == artist
+        assert albums[0].album_title == title
+        assert tracks[0]._source_metadata['release_title'] == release
+        assert tracks[0].quality == 'flac'
+
+
+@pytest.mark.parametrize('release', ['Self-Titled', 'Artist-Title', 'Artist - WEB of Lies', 'Artist - MP3 Player'])
+def test_release_parser_does_not_invent_scene_metadata(release):
+    expected = ('Artist', release.split(' - ', 1)[1]) if ' - ' in release else ('', release)
+    assert _parse_release_title(release) == expected
+
+
+@pytest.mark.parametrize('protocol', ['torrent', 'usenet'])
+@pytest.mark.parametrize('release,artist,title', [
+    ('Jay-Z-The Blueprint-WEB-FLAC-2001-GROUP', 'Jay-Z', 'The Blueprint'),
+    ('G-Eazy-Lets Get Lost-16BIT-WEB-FLAC-2014-GROUP', 'G-Eazy', 'Lets Get Lost'),
+    ('Artist-Song-Live-WEB-FLAC-2024-GROUP', 'Artist', 'Song-Live'),
+])
+def test_scene_candidate_validation_uses_expected_artist_as_boundary(monkeypatch, protocol, release, artist, title):
+    from types import SimpleNamespace
+    from core.downloads import validation
+    from core.matching_engine import MusicMatchingEngine
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    plugin = TorrentDownloadPlugin() if protocol == 'torrent' else UsenetDownloadPlugin()
+    tracks, _ = plugin._project_results([_make_torrent_result(title=release, protocol=protocol)])
+    expected = SimpleNamespace(name=title, artists=[artist], duration_ms=180_000, album=None)
+
+    assert validation._score_streaming_candidates(tracks, expected) == tracks
+    assert tracks[0].artist == artist
+    assert tracks[0].title == title
+
+
+def test_scene_artist_hint_requires_evidence_in_actual_release():
+    release = 'Other Artist-Song-WEB-FLAC-2024-GROUP'
+    assert _parse_release_title(release, artist_hint='Wanted Artist') == ('Other Artist', 'Song')
+
+
+@pytest.mark.parametrize('protocol', ['torrent', 'usenet'])
+def test_scene_artist_hint_does_not_override_explicit_artist_boundary(monkeypatch, protocol):
+    from types import SimpleNamespace
+    from core.downloads import validation
+    from core.matching_engine import MusicMatchingEngine
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    release = 'G-Eazy - Lets Get Lost-WEB-FLAC-2014-GROUP'
+    plugin = TorrentDownloadPlugin() if protocol == 'torrent' else UsenetDownloadPlugin()
+    tracks, _ = plugin._project_results([_make_torrent_result(title=release, protocol=protocol)])
+    expected = SimpleNamespace(name='Lets Get Lost', artists=['G'], duration_ms=180_000, album=None)
+
+    assert validation._score_streaming_candidates(tracks, expected) == []
+    assert tracks[0].artist == 'G-Eazy'
+
+
 def test_adapter_state_mapping_covers_complete_states() -> None:
     assert _adapter_state_to_display('downloading') == 'InProgress, Downloading'
     assert _adapter_state_to_display('seeding') == 'Completed, Succeeded'

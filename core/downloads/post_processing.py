@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from utils.logging_config import get_logger
 import os
+import re
 import shutil
 import time
 import traceback
@@ -38,6 +39,7 @@ from core.imports.context import (
 )
 from core.imports.filename import extract_track_number_from_filename, parse_filename_metadata
 from core.metadata import enrichment as metadata_enrichment
+from core.text.title_match import recording_version_markers
 from core.runtime_state import (
     download_tasks,
     matched_context_lock,
@@ -84,20 +86,22 @@ def _normalize_match_text(value: str) -> str:
 
 def _release_audio_match_score(path: str, expected_title: str, expected_artist: str) -> float:
     parsed = parse_filename_metadata(path)
-    parsed_title = parsed.get('title') or Path(path).stem
+    parsed_title = (parsed.get('title') or Path(path).stem).replace('_', ' ')
+    expected_title = str(expected_title or '').replace('_', ' ')
     parsed_artist = parsed.get('artist') or ''
+    if recording_version_markers(expected_title) != recording_version_markers(parsed_title):
+        return 0.0
+    # A remaster is the same recording. Keep this decoration tolerance narrow
+    # instead of treating any occurrence of the title as a perfect match.
+    edition = r'(?:\d{4}[ -]+)?(?:remaster(?:ed)?|mono|stereo)(?:[ -]+\d{4})?'
+    edition_suffix = rf'\s*(?:[\[(]{edition}[\])]|[-–]\s*{edition})\s*$'
+    expected_title = re.sub(edition_suffix, '', expected_title, flags=re.IGNORECASE)
+    parsed_title = re.sub(edition_suffix, '', parsed_title, flags=re.IGNORECASE)
     expected_title_norm = _normalize_match_text(expected_title)
     parsed_title_norm = _normalize_match_text(parsed_title)
-    if expected_title_norm and (
-        expected_title_norm in parsed_title_norm or parsed_title_norm in expected_title_norm
-    ):
-        title_score = 1.0
-    else:
-        title_score = SequenceMatcher(
-            None,
-            expected_title_norm,
-            parsed_title_norm,
-        ).ratio()
+    if not expected_title_norm or not parsed_title_norm:
+        return 0.0
+    title_score = SequenceMatcher(None, expected_title_norm, parsed_title_norm).ratio()
     if expected_artist and parsed_artist:
         artist_score = SequenceMatcher(
             None,
