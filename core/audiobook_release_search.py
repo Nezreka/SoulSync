@@ -591,6 +591,11 @@ def _strip_trailing_brackets(title: str) -> str:
         stripped = shorter
 
 
+# where a hand-typed search query rides on the book dict, so every source that
+# builds its queries from the book picks it up without a new parameter each.
+TYPED_QUERY_KEY = "_typed_query"
+
+
 def build_queries(book: Dict[str, Any]) -> List[str]:
     """Search strings to try for a book, most specific first.
 
@@ -608,6 +613,12 @@ def build_queries(book: Dict[str, Any]) -> List[str]:
     "Twisted Dreams (German edition)"), release names rarely do, and every word
     of the query has to be in the release name for the indexer to return it.
     """
+    # a query the user typed replaces the variants outright. they typed it
+    # because the release is named in a way the catalogue entry is not.
+    typed = str(book.get(TYPED_QUERY_KEY) or "").strip()
+    if typed:
+        return [typed]
+
     title = _strip_trailing_brackets(str(book.get("title") or "").strip())
     if not title:
         return []

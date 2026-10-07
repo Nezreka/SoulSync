@@ -817,14 +817,22 @@ def create_audiobooks_blueprint() -> Blueprint:
         if book is None:
             return jsonify({"success": False, "error": f"No audiobook found for {asin}"}), 404
 
+        from core.audiobook_release_search import build_queries
+
         narrator_mode = _narrator_mode_for(asin)
-        job_id = start(book.to_dict(), narrator_mode=narrator_mode, limit=_limit(25))
+        body = request.get_json(silent=True) or {}
+        query = str(body.get("query") or "").strip() if isinstance(body, dict) else ""
+        job_id = start(book.to_dict(), narrator_mode=narrator_mode, limit=_limit(25),
+                       query=query)
         return jsonify({
             "success": True,
             "id": job_id,
             "asin": asin,
             "narrator_mode": narrator_mode,
             "narrators": book.narrator_names,
+            # what the search box starts with: the query the automatic search
+            # leads with, so editing it starts from what was actually sent
+            "default_query": next(iter(build_queries(book.to_dict())), ""),
             # What the client should wait between polls. Matches video's cadence.
             "poll_ms": 1200,
         })

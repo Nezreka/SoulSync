@@ -1293,3 +1293,13 @@ def test_delete_rejects_manifest_escape_before_moving_any_file(client, wishlist_
     assert result.status_code == 400
     discard.assert_not_called()
     assert wishlist_db.get_library_entry('local:copy') is not None
+
+
+def test_a_typed_query_reaches_the_search(client, catalog, wishlist_db):
+    catalog.get_book.return_value = _item(asin="B1")
+    with patch("core.audiobook_search_job.start", return_value="job-1") as start:
+        body = client.post("/api/audiobooks/releases/B1/start",
+                           json={"query": "The Reckoning Part 1 of 2 GraphicAudio"}).get_json()
+    assert start.call_args.kwargs["query"] == "The Reckoning Part 1 of 2 GraphicAudio"
+    # the box starts from what the automatic search leads with
+    assert body["default_query"]
