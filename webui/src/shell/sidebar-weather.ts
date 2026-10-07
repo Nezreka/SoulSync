@@ -230,7 +230,6 @@ interface ActiveWeather {
 
 let active: ActiveWeather | null = null;
 let clockTimer: ReturnType<typeof setTimeout> | null = null;
-let rafId: number | null = null;
 let stopScene: (() => void) | null = null;
 let stopMotionWatch: (() => void) | null = null;
 let listenerInstalled = false;
@@ -330,10 +329,6 @@ function teardown(): void {
   if (stopScene) {
     stopScene();
     stopScene = null;
-  }
-  if (rafId !== null && typeof window.cancelAnimationFrame === 'function') {
-    window.cancelAnimationFrame(rafId);
-    rafId = null;
   }
   document.getElementById(LINE_ID)?.remove();
   document.getElementById(CANVAS_ID)?.remove();
@@ -656,6 +651,9 @@ function startScene(
     engine.resize(w, h, dpr);
   }
 
+  // this scene's own frame handle. shared module state let a crossfade's
+  // outgoing scene cancel the incoming one's frame, freezing the new sky
+  let raf: number | null = null;
   let running = true;
   let last = typeof performance !== 'undefined' ? performance.now() : 0;
   let t = 0;
@@ -667,7 +665,7 @@ function startScene(
     t += dt;
     engine.frame(dt, t);
     if (typeof window.requestAnimationFrame === 'function') {
-      rafId = window.requestAnimationFrame(frame);
+      raf = window.requestAnimationFrame(frame);
     }
   }
 
@@ -675,30 +673,30 @@ function startScene(
   function setCollapsed(collapsed: boolean): void {
     if (!running || typeof window.requestAnimationFrame !== 'function') return;
     if (collapsed) {
-      if (rafId !== null && typeof window.cancelAnimationFrame === 'function') {
-        window.cancelAnimationFrame(rafId);
-        rafId = null;
+      if (raf !== null && typeof window.cancelAnimationFrame === 'function') {
+        window.cancelAnimationFrame(raf);
+        raf = null;
       }
-    } else if (rafId === null) {
+    } else if (raf === null) {
       last = typeof performance !== 'undefined' ? performance.now() : 0;
-      rafId = window.requestAnimationFrame(frame);
+      raf = window.requestAnimationFrame(frame);
     }
   }
 
   function onVisibility(): void {
     if (document.hidden) {
-      if (rafId !== null && typeof window.cancelAnimationFrame === 'function') {
-        window.cancelAnimationFrame(rafId);
-        rafId = null;
+      if (raf !== null && typeof window.cancelAnimationFrame === 'function') {
+        window.cancelAnimationFrame(raf);
+        raf = null;
       }
     } else if (
       running &&
-      rafId === null &&
+      raf === null &&
       !sidebarCollapsed() &&
       typeof window.requestAnimationFrame === 'function'
     ) {
       last = typeof performance !== 'undefined' ? performance.now() : 0;
-      rafId = window.requestAnimationFrame(frame);
+      raf = window.requestAnimationFrame(frame);
     }
   }
 
@@ -709,7 +707,7 @@ function startScene(
   const stopCollapseWatch = watchSidebarCollapse(setCollapsed);
   engine.frame(0, 0); // one static frame even without rAF
   if (typeof window.requestAnimationFrame === 'function' && !sidebarCollapsed()) {
-    rafId = window.requestAnimationFrame(frame);
+    raf = window.requestAnimationFrame(frame);
   }
   // fade in: the next frame, so the transition has a start state
   const reveal = () => canvas.classList.add('is-visible');
@@ -721,9 +719,9 @@ function startScene(
     document.removeEventListener('visibilitychange', onVisibility);
     stopCollapseWatch();
     ro?.disconnect();
-    if (rafId !== null && typeof window.cancelAnimationFrame === 'function') {
-      window.cancelAnimationFrame(rafId);
-      rafId = null;
+    if (raf !== null && typeof window.cancelAnimationFrame === 'function') {
+      window.cancelAnimationFrame(raf);
+      raf = null;
     }
     canvas.remove();
   };

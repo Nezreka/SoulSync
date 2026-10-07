@@ -1056,3 +1056,56 @@ describe('weather preview (settings > advanced > developer)', () => {
     expect(getWeatherPreview()).toBeNull();
   });
 });
+
+describe('the scene keeps running after a crossfade', () => {
+  afterEach(() => {
+    sessionStorage.clear();
+    vi.useRealTimers();
+  });
+
+  /** a controllable rAF: callbacks queue until flushed, cancels are honoured */
+  function manualRaf() {
+    let nextId = 1;
+    const queue = new Map<number, FrameRequestCallback>();
+    Object.defineProperty(window, 'requestAnimationFrame', {
+      configurable: true,
+      value: (cb: FrameRequestCallback) => {
+        const id = nextId++;
+        queue.set(id, cb);
+        return id;
+      },
+    });
+    Object.defineProperty(window, 'cancelAnimationFrame', {
+      configurable: true,
+      value: (id: number) => queue.delete(id),
+    });
+    return {
+      /** run one round of queued frames; how many ran */
+      flush(): number {
+        const due = [...queue.entries()];
+        queue.clear();
+        for (const [, cb] of due) cb(performance.now());
+        return due.length;
+      },
+    };
+  }
+
+  for (const [name, swap] of [
+    ['a preview', () => setWeatherPreview({ preset: 'gale', date: null })],
+    ['a refresh', () => refreshSidebarWeather()],
+  ] as const) {
+    it(`after ${name}, the new scene still animates once the old one is gone`, async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
+      HTMLCanvasElement.prototype.getContext = vi.fn(() => fake2dContext()) as never;
+      const raf = manualRaf();
+      await bootSidebarWeather();
+      raf.flush();
+      await swap();
+      raf.flush();
+      vi.advanceTimersByTime(1600); // the old scene fades out and stops
+      // the new scene must still have a frame queued, and keep queuing them
+      expect(raf.flush()).toBeGreaterThan(0);
+      expect(raf.flush()).toBeGreaterThan(0);
+    });
+  }
+});
