@@ -1,6 +1,37 @@
 # soulsync 3.5.1: `dev` → `main`
 
-download discography learns about watchlists and editions, music videos and episodes become requestable, the dashboard gets a new look, and a big stack of tagging, playlist sync and download fixes. scope: everything merged since 3.5.0 went to main (#1496).
+sign in with plex, listening history that's yours (the kids' plays stay out of your stats, and plays stop counting twice), download discography learns about watchlists and editions, music videos and episodes become requestable, the dashboard gets a new look and the sidebar gets live weather, plus a big stack of tagging, playlist sync and download fixes. scope: everything merged since 3.5.0 went to main (#1496).
+
+## sign in with plex
+
+- new opt-in "sign in with plex" on the login screen, the same pin flow overseerr and tautulli use. soulsync never sees the password. the server's owner signs in as the admin (plex says who owns the server, it isn't guessed from a token), anyone else the server is shared with gets their own profile if you allow it, starting on discover/search/library/wishlist/requests, never the machinery. the profile acts as that person on plex, so their playlists land in their own plex account (thanks SeadogsBooty on discord). three hostile review passes before it shipped: identity can't be borrowed from a home-user link, rate limits on every plex.tv call, two tabs finishing at once make one profile.
+- settings > plex has "re-link with plex", so a configured server can take a fresh token without clearing the connection first. the token is only saved once it proves it reaches that server.
+- my account has "connect with plex" too, so a profile that signs in with a password (a shared friend, a kid) can prove its own plex account and get its playlists and listening history there.
+
+## listening history per person
+
+- plex plays go in the pile of whoever played them. plex's history names the account behind each play, so the kids' katy perry stays out of the admin's stats, mixes, discover and last.fm. a profile linked to a plex account (plex sign-in, connect with plex, or a home-user link) owns its pile, an account linked to nobody is kept but claimed by no one. older plays get tagged once from plex's full history and re-filed, and linking someone later moves their plays to them.
+- plays stopped counting twice. plex and web-player plays were stored in the server's local time, last.fm and listenbrainz in utc, so every scrobble soulsync sent came back on the next import as a second play, 7 hours off for a pacific server, and never matched. one install had 9,499 of 9,787 plex plays doubled. every writer stores utc now, the scrobblers send the real instant, and a one-time repair moves old plays to utc and folds each echo back into its play (the listening tables are backed up next to the database first). the listening clock and stats times read in your local time.
+
+## kids profiles
+
+- a kids profile (hide explicit) could play nothing from the library: the browser said "audio format not supported". the guard that stops soulseek results from playing also blocked the stream every library track plays through, after the track had already passed the explicit check. the library play now vouches for the file it checked, and the stream only serves a kid that file. an explicit track says "not available on this profile" instead of trying a stream that would be refused too, and review queue plays are blocked for kids like soulseek streams.
+
+## sidebar weather
+
+- the sidebar weather scene paints the sky as it actually is: rain, snow, fog, storms with lightning, wind that moves things, sun and moon by the real time of day, and a clear night gets a planet and a glinting satellite (#1575, #1576).
+- holiday decorations with real art for halloween, thanksgiving, lunar new year, christmas (snow on christmas day whatever the forecast) and new year's fireworks.
+- settings > advanced > developer can preview any sky.
+
+## more fixes
+
+- discovery identifies a mirrored deezer or spotify track by its own id instead of searching by name, the identify button too, and the id beats a stale cached match (#1566).
+- a missing track on a cast album searches with its own performer, not the page artist (#1569).
+- tracks keep both the server's path and soulsync's own, so navidrome and soulsync mounting the music folder under different names stops breaking playlist writes and path compares, and a full scan no longer flips soulsync's paths back (#1573, #1571).
+- the duplicate finder sees through a feat credit in the title (#1568), track-number and path-mismatch fixes work with text track ids (#1574), and one or two tracks from a playlist no longer make an artist a backfill target or an album incomplete (#1572).
+- an audiobook sold in parts takes its own part instead of either one, and the download button shows the server's reason when it fails.
+- five library v2 review fixes from @nick2000713: the live/commentary cleaner keeps interludes and intros, an exact stem match beats a fuzzy one, a tools job toggle arms its timer, the album year fix restores the folder if the database update fails, and suspect album tags stop flagging normal wishlist albums (#1570).
+- the db updater's progress stops flipping between "tracks" and "artists" (thanks SeadogsBooty on discord).
 
 ## download discography and watchlist
 
@@ -70,4 +101,4 @@ download discography learns about watchlists and editions, music videos and epis
 ## validation
 
 - every fix shipped with regression tests and green neighboring suites, per its PR.
-- full suite on the release head: 22624 passed, 0 failed (run twice, before and after the cleaner fix).
+- full suite on the 3.5.1 bump head: 22624 passed, 0 failed (run twice, before and after the cleaner fix). the late additions above (plex sign-in onward) shipped with their own tests and mutation checks; the full suite gets re-run on the final head before the merge.

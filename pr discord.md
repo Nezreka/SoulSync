@@ -1,13 +1,13 @@
 **SoulSync 3.5.1 is out** :musical_note:
 
-Download Discography now has a Wishlist + Watchlist button: grab the releases you picked and start watching the artist in one go, with release types and filters set right in the modal. A new edition preference stops the watchlist from grabbing both the standard and deluxe of the same album.
+Sign in with Plex: everyone you share your server with can log in with their own Plex account, and their playlists land in their own Plex. Profiles can also connect Plex from My Account (thanks SeadogsBooty).
 
-Non-admin profiles can request music videos and single episodes, approved from the same requests page as music. The dashboard got a visual refresh plus a weekly listening digest built from your real plays.
+Listening history is per person now. Plex plays go to whoever played them, so the kids' plays stay out of your stats, mixes and Last.fm, and plays stop counting twice when your scrobbles come back from Last.fm or ListenBrainz (existing history gets cleaned up once, with a backup first). Kids profiles can play library music again.
 
-Playlist sync: wishlisted tracks download as a playlist-named batch so the library scan runs after them, new mirrors get their server playlist on the first sync, completion stops claiming 100% when tracks still need identifying, and ListenBrainz weekly playlists stop getting stuck on an old week (thanks @ifedan-ed).
+Download Discography has a Wishlist + Watchlist button, and a new edition preference stops the watchlist grabbing both standard and deluxe. Non-admin profiles can request music videos and single episodes. The dashboard got a refresh, and the sidebar shows live weather with holiday decorations.
 
-Tagging: MusicBrainz stops matching the wrong same-named band, wishlist downloads keep featured artists, sort tags follow the primary source, "hip hop" and "hip-hop" merge, full-depth re-tag actually writes, and versioned recordings can be told apart. New opt-in artist.nfo for Jellyfin/Kodi/Emby, original date as DATE, and $label in album paths.
+Playlist sync: playlist-named download batches, new mirrors get their server playlist on the first sync, mirrored tracks are identified by their own Deezer or Spotify ID, and ListenBrainz weekly playlists stop getting stuck (thanks @ifedan-ed).
 
-Fixes: Deezer matching stops picking karaoke or reprise versions over the original (thanks @cremonies), MP3s get their MusicBrainz recording ID, non-admin video follows get scanned, singles no longer show owned because the album has the same song, single-file audiobook torrents import instead of stalling (thanks SeadogsBooty), audiobook search finds "Series 03" volumes (thanks @SimpleSimonLA), Soulseek cleanup only touches its own transfers (thanks @splitsec2), and repair and tools fixes from @mandos21.
+Tagging and fixes: Deezer stops picking karaoke or reprise versions (thanks @cremonies), MP3s get their MusicBrainz recording ID, Navidrome libraries mounted under a different path stop breaking playlist writes, singles stop showing owned because the album has the song, audiobooks import from single-file torrents (thanks SeadogsBooty) and take the right part of a multi-part book, Soulseek cleanup only touches its own transfers (thanks @splitsec2), plus repair fixes from @mandos21 and @nick2000713.
 
 Full notes on GitHub.

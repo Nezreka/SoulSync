@@ -3462,6 +3462,14 @@ const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
     '3.5.1': [
         { date: 'October 2026 · 3.5.1' },
+        { title: 'Sign in with Plex', desc: 'Turn it on in Settings and everyone you share Plex with can log in with their own Plex account. The server owner signs in as admin, anyone else gets their own profile, and their playlists land in their own Plex. Settings also has Re-link with Plex for a fresh token.', page: 'settings' },
+        { title: 'Connect with Plex in My Account', desc: 'A profile that signs in with a password, like a shared friend or a kid, can connect its own Plex account for its playlists and listening history.' },
+        { title: 'Listening history per person', desc: 'Plex plays go to whoever played them, so the kids\' plays stay out of your stats, mixes, discover and Last.fm. Linking someone later moves their plays to them.', page: 'stats' },
+        { title: 'Plays stop counting twice', desc: 'Your scrobbles coming back from Last.fm or ListenBrainz used to land as a second play, hours off. They match their play now, and your existing history is cleaned up once, with a backup of the listening tables first. The listening clock reads your local time.', page: 'stats' },
+        { title: 'Kids profiles play library music', desc: 'A profile with explicit filtering could not play anything from the library (audio format not supported). Clean tracks play again, and explicit ones say not available on this profile.' },
+        { title: 'Sidebar weather', desc: 'The sidebar paints the real sky: rain, snow, fog, storms, wind and day or night, a planet and satellite on clear nights, and holiday decorations. Preview any sky from Settings > Advanced > Developer (#1575, #1576).' },
+        { title: 'Path and library fixes', desc: 'Tracks keep both the server path and SoulSync\'s own, so a Navidrome mount under a different name stops breaking playlist writes. Mirrored tracks are identified by their own Deezer or Spotify ID, cast albums search with the right performer, and duplicate and repair fixes (#1566, #1568, #1569, #1571, #1572, #1573, #1574).' },
+        { title: 'Repair fixes from @nick2000713', desc: 'The Live/Commentary cleaner keeps interludes, exact stem matches win, Tools job toggles arm their timer, and the album year fix restores the folder on failure (#1570). Multi-part audiobooks also take their own part.' },
         { title: 'Wishlist + Watchlist in one go', desc: 'Download Discography has a second button: queue the releases you picked and add the artist to your watchlist with release types, filters and auto-download set right in the modal. The artist page add to watchlist button opens the same settings, and releases that fail to resolve get a retry button (#1553).' },
         { title: 'One edition per album', desc: 'New edition preference in global watchlist settings: all editions, one per album standard, or one per album most complete. No more standard and deluxe downloading the same songs twice (#1561).', page: 'watchlist' },
         { title: 'Singles own themselves', desc: 'A single no longer shows owned because the album has the same song. The artist page checks the single release itself, and labels releases your watchlist filters skip (#1556, #1562).' },
@@ -3529,9 +3537,14 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: '3.5.1: watchlist + editions, requests, dashboard and tagging fixes',
-        description: 'Download Discography learns about watchlists and editions, music videos and episodes become requestable, the dashboard gets a new look, and a stack of tagging, playlist sync and download fixes.',
+        title: '3.5.1: sign in with plex, your own listening history, watchlist + editions and more',
+        description: 'Sign in with Plex, listening history that is yours, live sidebar weather, Download Discography learns about watchlists and editions, music videos and episodes become requestable, the dashboard gets a new look, and a stack of tagging, playlist sync and download fixes.',
         features: [
+            'Sign in with Plex for everyone you share your server with, Re-link with Plex in Settings, and Connect with Plex in My Account.',
+            'Listening history per person: Plex plays go to whoever played them, and plays stop counting twice when scrobbles come back.',
+            'Kids profiles play library music again.',
+            'Sidebar weather: the real sky, holiday decorations, and a developer preview (#1575, #1576).',
+            'Library paths keep the server path and SoulSync\'s own; mirrored tracks identified by ID; duplicate and repair fixes (#1566 to #1574).',
             'Wishlist + Watchlist button in Download Discography, with per-artist watchlist settings in the modal (#1553).',
             'Edition preference: one edition per album instead of standard and deluxe both downloading (#1561).',
             'Singles stop showing owned from the album copy of the song; watchlist-skipped releases are labeled (#1556, #1562).',
