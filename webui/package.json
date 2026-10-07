@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:visual": "npm run build && node scripts/visual.mjs",
-    "test:visual:update": "npm run build && node scripts/visual.mjs --update-snapshots=all"
+    "test:visual:update": "npm run build && node scripts/visual.mjs --update-snapshots=all",
+    "test:visual:compare": "node scripts/visual-compare.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

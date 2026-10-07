@@ -29,6 +29,31 @@ globals, such as the sidebar "Library / <artist>" breadcrumb. A shot fails
 outright when any `/static/` file is missing, so run `npm run build` before
 calling `scripts/visual.mjs` on its own.
 
+## Comparing another branch
+
+```sh
+git fetch origin
+npm run test:visual:compare -- origin/some-branch            # every shot
+npm run test:visual:compare -- origin/some-branch -g discover
+```
+
+`scripts/visual-compare.mjs` checks the ref out into
+`.visual-compare/<ref>` (a git worktree at the repo root, reused on later
+runs), copies this checkout's harness and baselines over it, and runs the
+shots there. Each shot shows whether the other branch looks different from
+this one. The HTML report has expected/actual/diff images per shot; the
+script prints the `npx playwright show-report` command to open it.
+
+The default tolerance, pixelmatch at 0.2, is too loose for that: it lets
+through colour snaps such as rose `#f43f5e` to red `#ef4444`. Pixelmatch
+strict enough to catch those also trips on blur and glow rasterisation that
+changes from run to run on the same build. The compare therefore uses
+Playwright's perceptual `ssim-cie94` comparator. A pixel counts once its
+colour moves past a just-noticeable difference (CIE94 ΔE > 1, about two grey
+levels on a flat fill) and it isn't rasterisation noise. It is stable on a
+build against its own baselines. `VISUAL_THRESHOLD=<n>` switches back to
+pixelmatch at that threshold.
+
 ## What's covered
 
 - **Routes** (`ROUTES`): every main page at 1440×900, plus the key ones at
