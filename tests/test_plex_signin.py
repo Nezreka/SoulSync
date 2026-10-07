@@ -9,6 +9,7 @@ profile when allowed, request-only unless the admin says otherwise.
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from uuid import uuid4
@@ -392,3 +393,21 @@ def test_a_new_profile_gets_the_cleaned_name():
     r = plex_signin.sign_in(db, PlexAccount(str(int(uuid4().int % 10**9)), f'<b>{tag}</b>', 'tok'),
                             allow_create=True, default_can_download=False)
     assert db.get_profile(r.profile_id)['name'] == f'b{tag}b'
+
+
+def test_a_new_plex_profile_starts_on_finding_and_asking_not_the_machinery():
+    db = web_server.get_database()
+    r = plex_signin.sign_in(db, PlexAccount(str(int(uuid4().int % 10**9)), f'Pages{_uid()}', 'tok'),
+                            allow_create=True, default_can_download=True)
+    p = db.get_profile(r.profile_id)
+    pages = p['allowed_pages']
+    pages = json.loads(pages) if isinstance(pages, str) else pages
+    assert set(pages) == set(plex_signin.SIGNUP_PAGES)
+    for machinery in ('sync', 'automations', 'import', 'active-downloads', 'tools', 'settings', 'watchlist'):
+        assert machinery not in pages
+    assert p['home_page'] == 'discover'
+
+
+def test_signup_pages_are_all_real_pages():
+    assert set(plex_signin.SIGNUP_PAGES) <= web_server.VALID_PAGE_IDS
+    assert 'settings' not in plex_signin.SIGNUP_PAGES

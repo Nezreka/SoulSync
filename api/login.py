@@ -181,7 +181,6 @@ def plex_signin_check():
             default_can_download=bool(config_manager.get('security.plex_signin_default_can_download', False)),
         )
         if result.error:
-            login_limiter.record_failure(request.remote_addr or 'unknown', '<plex>', time.time())
             return jsonify({'success': False, 'error': result.error}), 403
         _complete_sign_in(database, result.profile_id)
         profile = database.get_profile(result.profile_id) or {}

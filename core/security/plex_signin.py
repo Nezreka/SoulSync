@@ -40,6 +40,13 @@ PRODUCT = "SoulSync"
 TIMEOUT = 10
 
 
+# what a profile made by plex sign-in can open. sign-in is an open invite to
+# everyone the admin shares plex with, so it starts on finding and asking
+# for music, never the machinery (sync, automations, import, downloads,
+# tools). the admin widens it per person in profile management
+SIGNUP_PAGES = ['discover', 'search', 'library', 'artist-detail', 'wishlist', 'stats', 'help', 'issues']
+SIGNUP_HOME_PAGE = 'discover'
+
 _cid_lock = threading.Lock()
 # find-or-create a profile is one step: two tabs (or a double click) finishing
 # at once must not make two profiles for one plex account
@@ -196,7 +203,8 @@ def _create_profile(db, username: str, *, can_download: bool) -> Optional[int]:
         name = base if n == 0 else f"{base} {n + 1}"
         if db.get_profile_by_name(name):
             continue
-        pid = db.create_profile(name, can_download=can_download)
+        pid = db.create_profile(name, can_download=can_download,
+                                allowed_pages=list(SIGNUP_PAGES), home_page=SIGNUP_HOME_PAGE)
         if pid:
             return pid
     return None
