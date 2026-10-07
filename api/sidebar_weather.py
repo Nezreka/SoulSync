@@ -245,9 +245,14 @@ def fetch_snapshot(latitude, longitude, use_celsius):
         {
             "latitude": latitude,
             "longitude": longitude,
-            "current": "temperature_2m,weather_code,wind_speed_10m",
+            # the scene reads the sky as it is: wind direction and gusts
+            # shape the wind, cloud cover the clouds, is_day day or night,
+            # precipitation how hard it falls, sunrise/sunset the glow
+            "current": "temperature_2m,weather_code,wind_speed_10m,"
+                       "wind_direction_10m,wind_gusts_10m,is_day,cloud_cover,"
+                       "precipitation",
             "daily": "weather_code,temperature_2m_max,temperature_2m_min,"
-                     "precipitation_probability_max",
+                     "precipitation_probability_max,sunrise,sunset",
             "temperature_unit": "celsius" if use_celsius else "fahrenheit",
             "wind_speed_unit": "mph",
             "timezone": "auto",
@@ -265,12 +270,16 @@ def fetch_snapshot(latitude, longitude, use_celsius):
         raise ValueError("forecast response has no current temperature_2m")
     code = _round_or_none(current.get("weather_code"))
     wind = _float_or_none(current.get("wind_speed_10m"))
+    is_day = current.get("is_day")
+    is_day = None if is_day is None else bool(_round_or_none(is_day))
 
     dates = daily.get("time") or []
     codes = daily.get("weather_code") or []
     tmaxs = daily.get("temperature_2m_max") or []
     tmins = daily.get("temperature_2m_min") or []
     precips = daily.get("precipitation_probability_max") or []
+    sunrises = daily.get("sunrise") or []
+    sunsets = daily.get("sunset") or []
     days = []
     for i in range(min(3, len(dates))):
         tmax = _round_or_none(tmaxs[i]) if i < len(tmaxs) else None
@@ -288,6 +297,9 @@ def fetch_snapshot(latitude, longitude, use_celsius):
                 "precip_probability": (
                     _round_or_none(precips[i]) if i < len(precips) else None
                 ),
+                # location-local ISO times ("2026-10-06T07:14"), no offset
+                "sunrise": str(sunrises[i]) if i < len(sunrises) and sunrises[i] else None,
+                "sunset": str(sunsets[i]) if i < len(sunsets) and sunsets[i] else None,
             }
         )
 
@@ -303,6 +315,12 @@ def fetch_snapshot(latitude, longitude, use_celsius):
             "weather_code": code,
             "condition": condition_text(code),
             "wind_speed": wind,  # raw float; the wire copy rounds it
+            "wind_gusts": _float_or_none(current.get("wind_gusts_10m")),
+            # meteorological: the direction the wind blows FROM, degrees
+            "wind_direction": _float_or_none(current.get("wind_direction_10m")),
+            "is_day": is_day,
+            "cloud_cover": _float_or_none(current.get("cloud_cover")),
+            "precipitation": _float_or_none(current.get("precipitation")),
         },
         "daily": days,
     }

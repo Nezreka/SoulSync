@@ -134,7 +134,8 @@ html[data-sidebar="collapsed"] #sidebar-weather-line {
  * z-index 1, so this earliest sibling sits underneath). The faint dark
  * gradient is the scrim: it deepens the background behind the particles so
  * nav text stays crisp. */
-#sidebar-weather-scene {
+#sidebar-weather-scene,
+.sidebar-weather-scene {
     position: absolute;
     inset: 0;
     width: 100%;
@@ -144,4 +145,16 @@ html[data-sidebar="collapsed"] #sidebar-weather-line {
             rgba(0, 0, 0, 0) 0%,
             rgba(0, 0, 0, 0.05) 45%,
             rgba(0, 0, 0, 0.16) 100%);
+}
+
+/* the scene fades in on mount, and a refresh crossfades old into new. a
+ * refresh drops the id from the outgoing canvas, so this lives on the
+ * class. keep the duration in sync with SCENE_FADE_MS in sidebar-weather.ts */
+.sidebar-weather-scene {
+    opacity: 0;
+    transition: opacity 1.6s ease;
+}
+
+.sidebar-weather-scene.is-visible {
+    opacity: 1;
 }

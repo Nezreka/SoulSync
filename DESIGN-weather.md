@@ -89,12 +89,29 @@ Behavior:
   `.sidebar-header`/`.sidebar-scroll` (nav stays crisp; add a subtle dark scrim
   via CSS gradient on the canvas wrapper or sidebar::after — must not alter
   existing sidebar styles, only add).
-  - Scene types: `rain` (thin diagonal streaks), `snow` (slow drifting dots,
-    faint dust-mote density), `wind` (horizontal gust streaks + a few tumbling
-    leaves), `clear` (barely-visible drifting cloud wisps).
-  - Density: restrained — match the approved mock (snow ≈ faint dust motes).
-    Cap particle counts (e.g. ≤ 90 rain, ≤ 70 snow, ≤ 40 wind streaks+12 leaves,
-    ≤ 8 wisps); scale down on narrow/height-constrained sidebars.
+  - The scene paints the sky as it is, from the real readings (Oct 2026
+    rework, `webui/src/shell/weather-scene.ts`, pure drawing, no dom):
+    - sky light: a warm sun glow that slides with the day (gold at noon,
+      rose within an hour of sunrise/sunset), soft rays only when the sun
+      gets through; at night moonlight, twinkling stars thinned by cloud,
+      a rare shooting star.
+    - clouds: blurred, flattened puff sprites; count and weight follow
+      `cloud_cover`; stratus bands under overcast/rain/fog; fog banks drift.
+    - rain/snow: count, length and speed follow the code's intensity
+      sharpened by measured `precipitation`; slant and drift follow the wind
+      and its gusts; a downpour mists the bottom; thunderstorms flash softly
+      (a flicker then the main flash, never a strobe).
+    - wind (dry weather only): long tapered ribbons through a slow flow
+      field along the real `wind_direction` (side view: east-west part),
+      a gust envelope swelling between `wind_speed` and `wind_gusts`, the
+      odd ribbon curling into a loop in a gust, seasonal leaves flipping
+      edge-on in a real wind. under rain/snow the slant shows the wind.
+  - The backend passes `wind_gusts`, `wind_direction`, `is_day`,
+    `cloud_cover`, `precipitation` and daily `sunrise`/`sunset` through;
+    snapshots cached before that still paint with fallbacks.
+  - The client refetches every 15 minutes and crossfades the scene, so a
+    tab left open turns from day to night and follows the weather.
+  - Tune it in the Sky Console playground (same engine, transpiled in).
   - `matchMedia('(prefers-reduced-motion: reduce)')` → no canvas at all.
   - `document.visibilitychange` → pause rAF loop when hidden, resume when visible.
   - Resize observer on sidebar → resize canvas (devicePixelRatio-capped at 2).

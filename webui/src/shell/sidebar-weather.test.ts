@@ -5,7 +5,6 @@ import { server } from '@/test/msw';
 
 import {
   bootSidebarWeather,
-  buildSceneParticles,
   closePopover,
   computePopoverPlacement,
   dayLabelForDaily,
@@ -14,10 +13,12 @@ import {
   formatTemp,
   glyphForWeatherCode,
   glyphSvg,
-  SCENE_SPECS,
+  lineGlyph,
+  refreshSidebarWeather,
   shouldRenderWeather,
   type PopoverGeom,
   type WeatherResponse,
+  type WeatherSnapshot,
 } from './sidebar-weather';
 
 const BASE_PAYLOAD: WeatherResponse = {
@@ -117,48 +118,13 @@ function fake2dContext() {
     createRadialGradient: vi.fn(gradient),
     createLinearGradient: vi.fn(gradient),
     drawImage: vi.fn(),
+    quadraticCurveTo: vi.fn(),
+    closePath: vi.fn(),
     globalAlpha: 1,
+    globalCompositeOperation: 'source-over',
+    lineCap: 'butt',
+    lineJoin: 'miter',
   };
-}
-
-// The plain fake only keeps the LAST fillStyle/strokeStyle/globalAlpha, so a
-// draw test asserting every particle's visuals needs the full assignment
-// history. Wraps the fake with recording setters for the three properties.
-function recording2dContext() {
-  const ctx = fake2dContext();
-  const rec = ctx as unknown as Record<string, unknown>;
-  const fills: unknown[] = [];
-  const strokes: unknown[] = [];
-  const alphas: number[] = [];
-  Object.defineProperty(rec, 'fillStyle', {
-    configurable: true,
-    get: () => (fills.length > 0 ? fills[fills.length - 1] : ''),
-    set: (v: unknown) => {
-      fills.push(v);
-    },
-  });
-  Object.defineProperty(rec, 'strokeStyle', {
-    configurable: true,
-    get: () => (strokes.length > 0 ? strokes[strokes.length - 1] : ''),
-    set: (v: unknown) => {
-      strokes.push(v);
-    },
-  });
-  Object.defineProperty(rec, 'globalAlpha', {
-    configurable: true,
-    get: () => (alphas.length > 0 ? alphas[alphas.length - 1] : 1),
-    set: (v: number) => {
-      alphas.push(v);
-    },
-  });
-  return { ctx: rec, base: ctx, fills, strokes, alphas };
-}
-
-/** `rgba(<tint>,<alpha>)` -> [tint, alpha]; throws the test on a bad shape. */
-function parseRgba(color: string): [string, number] {
-  const m = /^rgba\((\d+,\d+,\d+),([\d.]+)\)$/.exec(color);
-  expect(m, `expected an rgba() color, got ${color}`).not.toBeNull();
-  return [m![1], parseFloat(m![2])];
 }
 
 const origMatchMedia = window.matchMedia;
@@ -430,500 +396,6 @@ describe('the particle scene', () => {
     await bootSidebarWeather();
     expect(document.getElementById('sidebar-weather-line')).toBeNull();
     expect(document.getElementById('sidebar-weather-scene')).toBeNull();
-  });
-});
-
-describe('the wind scene redesign', () => {
-  const W = 280;
-  const H = 900; // full density: no downscaling
-
-  it('design spec: wisps are few, slow and faint', () => {
-    const wsp = SCENE_SPECS.wind.wisps;
-    expect(wsp.cap).toBeLessThanOrEqual(8);
-    expect(wsp.vxMax).toBeLessThanOrEqual(60);
-    expect(wsp.alphaMax).toBeLessThanOrEqual(0.09);
-    expect(wsp.halfWidthMin * 2).toBeGreaterThanOrEqual(120);
-    expect(wsp.halfWidthMax * 2).toBeLessThanOrEqual(220);
-  });
-
-  it('design spec: leaves are rare, small, faint and slow-turning', () => {
-    const lsp = SCENE_SPECS.wind.leaves;
-    expect(lsp.cap).toBeLessThanOrEqual(5);
-    expect(lsp.alphaMax).toBeLessThanOrEqual(0.3);
-    expect(lsp.vrMax).toBeLessThanOrEqual(1.5);
-    expect(lsp.sizeMax).toBeLessThanOrEqual(2.8);
-    expect(lsp.vxMax).toBeLessThanOrEqual(70);
-  });
-
-  it('built particles honor the exact spec bounds (no slack)', () => {
-    const wsp = SCENE_SPECS.wind.wisps;
-    const lsp = SCENE_SPECS.wind.leaves;
-    for (let i = 0; i < 50; i++) {
-      const { drops, leaves } = buildSceneParticles('wind', W, H);
-      expect(drops.length).toBeLessThanOrEqual(wsp.cap);
-      expect(leaves.length).toBeLessThanOrEqual(lsp.cap);
-      for (const p of drops) {
-        expect(p.x).toBeGreaterThanOrEqual(-wsp.halfWidthMax);
-        expect(p.x).toBeLessThanOrEqual(W + wsp.halfWidthMax);
-        expect(p.y).toBeGreaterThanOrEqual(0);
-        expect(p.y).toBeLessThanOrEqual(H);
-        expect(p.vx).toBeGreaterThanOrEqual(wsp.vxMin);
-        expect(p.vx).toBeLessThanOrEqual(wsp.vxMax);
-        expect(p.vy).toBeGreaterThanOrEqual(wsp.vyMin);
-        expect(p.vy).toBeLessThanOrEqual(wsp.vyMax);
-        expect(p.s).toBeGreaterThanOrEqual(wsp.halfWidthMin);
-        expect(p.s).toBeLessThanOrEqual(wsp.halfWidthMax);
-        expect(p.a).toBeGreaterThanOrEqual(wsp.alphaMin);
-        expect(p.a).toBeLessThanOrEqual(wsp.alphaMax);
-        expect(p.rot).toBeGreaterThanOrEqual(wsp.tiltMin);
-        expect(p.rot).toBeLessThanOrEqual(wsp.tiltMax);
-        expect(p.vr).toBeGreaterThanOrEqual(wsp.wanderMin);
-        expect(p.vr).toBeLessThanOrEqual(wsp.wanderMax);
-      }
-      for (const p of leaves) {
-        expect(p.x).toBeGreaterThanOrEqual(0);
-        expect(p.x).toBeLessThanOrEqual(W);
-        expect(p.y).toBeGreaterThanOrEqual(0);
-        expect(p.y).toBeLessThanOrEqual(H);
-        expect(p.vx).toBeGreaterThanOrEqual(lsp.vxMin);
-        expect(p.vx).toBeLessThanOrEqual(lsp.vxMax);
-        expect(p.vy).toBeGreaterThanOrEqual(lsp.vyMin);
-        expect(p.vy).toBeLessThanOrEqual(lsp.vyMax);
-        expect(p.s).toBeGreaterThanOrEqual(lsp.sizeMin);
-        expect(p.s).toBeLessThanOrEqual(lsp.sizeMax);
-        expect(p.a).toBeGreaterThanOrEqual(lsp.alphaMin);
-        expect(p.a).toBeLessThanOrEqual(lsp.alphaMax);
-        expect(Math.abs(p.vr)).toBeLessThanOrEqual(lsp.vrMax);
-      }
-    }
-  });
-
-  it('draws the wind scene (wash + wisps + leaves) with the spec visuals', async () => {
-    const rec = recording2dContext();
-    HTMLCanvasElement.prototype.getContext = vi.fn(() => rec.ctx) as never;
-    mockWeather({ ...BASE_PAYLOAD, scene: 'wind' });
-    await bootSidebarWeather();
-    // the static first frame ran: wash gradient + wisp radial gradients used
-    const ctx = (HTMLCanvasElement.prototype.getContext as ReturnType<typeof vi.fn>).mock.results[0]
-      .value;
-    const wsp = SCENE_SPECS.wind.wisps;
-    const lsp = SCENE_SPECS.wind.leaves;
-    expect(ctx.createLinearGradient).toHaveBeenCalled(); // the cool tint wash
-    expect(ctx.createRadialGradient).toHaveBeenCalled(); // soft wisp ellipses
-
-    // every wisp gradient carries the spec tint, fading from the particle's
-    // own alpha to transparent
-    const wispGrads = ctx.createRadialGradient.mock.results.map((r: { value: unknown }) => r.value);
-    expect(wispGrads.length).toBeGreaterThan(0);
-    for (const g of wispGrads) {
-      const [tint, alpha] = parseRgba(g.stops[0][1]);
-      expect(tint).toBe(wsp.tint);
-      expect(alpha).toBeGreaterThanOrEqual(wsp.alphaMin);
-      expect(alpha).toBeLessThanOrEqual(wsp.alphaMax);
-      expect(g.stops[1][1]).toBe(`rgba(${wsp.tint},0)`);
-    }
-    // the cool tint wash is the only linear gradient in the wind scene: its
-    // stops pin the spec values, a deliberately distinct palette from the
-    // wisp tint
-    const wash = SCENE_SPECS.wind.wash;
-    const washGrads = ctx.createLinearGradient.mock.results.map((r: { value: unknown }) => r.value);
-    expect(washGrads.length).toBeGreaterThan(0);
-    for (const g of washGrads) {
-      expect(g.stops).toEqual(
-        wash.stops.map(([offset, alpha]) => [offset, `rgba(${wash.tint},${alpha})`]),
-      );
-    }
-    expect(wash.tint).not.toBe(wsp.tint);
-    // the wisp squash factor is the spec value, not a draw() literal
-    const scales = ctx.scale.mock.calls;
-    expect(scales.length).toBeGreaterThan(0);
-    for (const [sx, sy] of scales) {
-      expect(sy).toBeCloseTo(sx * wsp.squash, 10);
-    }
-
-    // leaves render as tinted ellipses with per-particle alpha
-    expect(ctx.ellipse).toHaveBeenCalled();
-    const leafFills = rec.fills.filter(
-      (f): f is string => typeof f === 'string' && f.startsWith(`rgba(${lsp.tint},`),
-    );
-    expect(leafFills.length).toBeGreaterThan(0);
-    for (const fill of leafFills) {
-      const alpha = parseRgba(fill)[1];
-      expect(alpha).toBeGreaterThanOrEqual(lsp.alphaMin);
-      expect(alpha).toBeLessThanOrEqual(lsp.alphaMax);
-    }
-    // the leaf ry/rx ratio is the spec's aspect, not a draw() literal —
-    // in the wind scene only leaves use ctx.ellipse
-    const leafEllipses = ctx.ellipse.mock.calls as unknown[][];
-    expect(leafEllipses.length).toBeGreaterThan(0);
-    for (const call of leafEllipses) {
-      const rx = call[2] as number;
-      const ry = call[3] as number;
-      expect(ry).toBeCloseTo(rx * lsp.aspect, 10);
-    }
-    expect(document.getElementById('sidebar-weather-scene')).not.toBeNull();
-  });
-
-  it('keeps wisps within vertical bounds over simulated time', async () => {
-    const rec = recording2dContext();
-    HTMLCanvasElement.prototype.getContext = vi.fn(() => rec.ctx) as never;
-    const frames: FrameRequestCallback[] = [];
-    let nextId = 1;
-    Object.defineProperty(window, 'requestAnimationFrame', {
-      configurable: true,
-      value: (cb: FrameRequestCallback): number => {
-        frames.push(cb);
-        return nextId++;
-      },
-    });
-    // pin the build: every rand() ~0, so wisps start top-left with the
-    // slowest drift and the strongest upward pull — the shape that used to
-    // leak off the top edge and stay invisible until the next x-wrap
-    const randSpy = vi.spyOn(Math, 'random').mockReturnValue(0.001);
-    mockWeather({ ...BASE_PAYLOAD, scene: 'wind' });
-    await bootSidebarWeather();
-    randSpy.mockRestore();
-    const ctx = (HTMLCanvasElement.prototype.getContext as ReturnType<typeof vi.fn>).mock.results[0]
-      .value;
-
-    // pump ~35s of frames at the clamped 50ms step; draw() records every
-    // wisp/leaf position through ctx.translate
-    let t = performance.now();
-    for (let i = 0; i < 700; i++) {
-      frames[frames.length - 1]!(t);
-      t += 50;
-    }
-    const ys = ctx.translate.mock.calls.map((c: unknown[]) => c[1] as number);
-    expect(ys.length).toBeGreaterThan(0);
-    // jsdom rects are all zeros, so fit() falls back to h = 600
-    const wsp = SCENE_SPECS.wind.wisps;
-    for (const y of ys) {
-      expect(y).toBeGreaterThanOrEqual(-wsp.wrapMarginY);
-      expect(y).toBeLessThanOrEqual(600 + wsp.wrapMarginY);
-    }
-  });
-});
-
-describe('the rain scene polish', () => {
-  const W = 280;
-  const H = 900;
-
-  it('design spec: thin, faint, restrained — two depth planes', () => {
-    const rsp = SCENE_SPECS.rain;
-    expect(rsp.cap).toBeLessThanOrEqual(64);
-    expect(rsp.far.alphaMax).toBeLessThanOrEqual(0.1);
-    expect(rsp.near.alphaMax).toBeLessThanOrEqual(0.17);
-    expect(rsp.near.lenMax).toBeLessThanOrEqual(36);
-    expect(rsp.far.share + rsp.near.share).toBeCloseTo(1);
-  });
-
-  it('built particles honor the spec across many samples', () => {
-    const rsp = SCENE_SPECS.rain;
-    for (let i = 0; i < 50; i++) {
-      const { drops } = buildSceneParticles('rain', W, H);
-      expect(drops.length).toBeLessThanOrEqual(rsp.cap);
-      let near = 0;
-      for (const p of drops) {
-        // bounds come from the particle's own depth plane, like the build
-        const L = p.layer === 1 ? rsp.near : rsp.far;
-        expect(p.s).toBeGreaterThanOrEqual(L.lenMin); // streak length
-        expect(p.s).toBeLessThanOrEqual(L.lenMax);
-        expect(p.a).toBeGreaterThanOrEqual(L.alphaMin);
-        expect(p.a).toBeLessThanOrEqual(L.alphaMax);
-        expect(p.vx).toBeGreaterThanOrEqual(L.vxMin);
-        expect(p.vx).toBeLessThanOrEqual(L.vxMax);
-        expect(p.vy).toBeGreaterThanOrEqual(L.vyMin);
-        expect(p.vy).toBeLessThanOrEqual(L.vyMax);
-        expect(p.layer === 0 || p.layer === 1).toBe(true);
-        if (p.layer === 1) near++;
-      }
-      // both depth planes are actually populated — a share of 0 or 1 would
-      // silently collapse the two-plane design
-      expect(near).toBeGreaterThan(0);
-      expect(near).toBeLessThan(drops.length);
-    }
-  });
-
-  it('draws soft gradient streaks with the spec tints and per-plane alphas', async () => {
-    const rec = recording2dContext();
-    HTMLCanvasElement.prototype.getContext = vi.fn(() => rec.ctx) as never;
-    mockWeather({ ...BASE_PAYLOAD, scene: 'rain' }); // BASE_PAYLOAD is rain
-    await bootSidebarWeather();
-    const ctx = (HTMLCanvasElement.prototype.getContext as ReturnType<typeof vi.fn>).mock.results[0]
-      .value;
-    const rsp = SCENE_SPECS.rain;
-    expect(ctx.createLinearGradient).toHaveBeenCalled(); // soft fading tails
-    expect(ctx.lineWidth).toBe(rsp.lineWidth); // the spec'd stroke width, not a draw() literal
-    // every streak gradient carries its plane's spec tint, fading from the
-    // particle's own alpha to transparent
-    const streakGrads = ctx.createLinearGradient.mock.results.map(
-      (r: { value: unknown }) => r.value,
-    );
-    expect(streakGrads.length).toBeGreaterThan(0);
-    for (const g of streakGrads) {
-      const [tint, alpha] = parseRgba(g.stops[0][1]);
-      const plane = tint === rsp.near.tint ? rsp.near : rsp.far;
-      expect(tint === rsp.near.tint || tint === rsp.far.tint).toBe(true);
-      expect(alpha).toBeGreaterThanOrEqual(plane.alphaMin);
-      expect(alpha).toBeLessThanOrEqual(plane.alphaMax);
-      expect(g.stops[1][1]).toBe(`rgba(${tint},0)`);
-    }
-  });
-});
-
-describe('the snow scene polish', () => {
-  const W = 280;
-  const H = 900;
-
-  it('design spec: dust-mote density, two depth planes', () => {
-    const ssp = SCENE_SPECS.snow;
-    expect(ssp.cap).toBeLessThanOrEqual(56);
-    expect(ssp.far.alphaMax).toBeLessThanOrEqual(0.16);
-    expect(ssp.near.alphaMax).toBeLessThanOrEqual(0.3);
-    expect(ssp.near.sizeMax).toBeLessThanOrEqual(2.8);
-    expect(ssp.far.share + ssp.near.share).toBeCloseTo(1);
-  });
-
-  it('built particles honor the spec across many samples', () => {
-    const ssp = SCENE_SPECS.snow;
-    for (let i = 0; i < 50; i++) {
-      const { drops } = buildSceneParticles('snow', W, H);
-      expect(drops.length).toBeLessThanOrEqual(ssp.cap);
-      let near = 0;
-      for (const p of drops) {
-        // bounds come from the particle's own depth plane, like the build
-        const L = p.layer === 1 ? ssp.near : ssp.far;
-        expect(p.s).toBeGreaterThanOrEqual(L.sizeMin);
-        expect(p.s).toBeLessThanOrEqual(L.sizeMax);
-        expect(p.a).toBeGreaterThanOrEqual(L.alphaMin);
-        expect(p.a).toBeLessThanOrEqual(L.alphaMax);
-        expect(p.vx).toBeGreaterThanOrEqual(L.vxMin);
-        expect(p.vx).toBeLessThanOrEqual(L.vxMax);
-        expect(p.vy).toBeGreaterThanOrEqual(L.vyMin);
-        expect(p.vy).toBeLessThanOrEqual(L.vyMax);
-        expect(p.vr).toBe(L.sway); // sway amplitude scales with depth
-        expect(p.layer === 0 || p.layer === 1).toBe(true);
-        if (p.layer === 1) near++;
-      }
-      // both planes are actually populated over 50 samples
-      expect(near).toBeGreaterThan(0);
-      expect(near).toBeLessThan(drops.length);
-    }
-  });
-
-  it('falls back to hard dots when the soft sprite cannot be baked', async () => {
-    // startScene calls getContext twice: first for the scene canvas, then
-    // inside makeSoftDot to bake the sprite. The bake gets null, so no
-    // sprite is built and every flake (near and far) takes the hard-dot path.
-    const rec = recording2dContext();
-    HTMLCanvasElement.prototype.getContext = vi
-      .fn()
-      .mockReturnValueOnce(rec.ctx)
-      .mockReturnValue(null) as never;
-    mockWeather({ ...BASE_PAYLOAD, scene: 'snow' });
-    await bootSidebarWeather();
-    const ctx = (HTMLCanvasElement.prototype.getContext as ReturnType<typeof vi.fn>).mock.results[0]
-      .value;
-    const ssp = SCENE_SPECS.snow;
-    expect(ctx.drawImage).not.toHaveBeenCalled(); // no sprite to stamp
-    expect(ctx.arc).toHaveBeenCalled(); // the hard-dot fallback path draws
-    // hard dots keep the spec tint with each particle's own alpha
-    expect(rec.fills.length).toBeGreaterThan(0);
-    for (const fill of rec.fills) {
-      const [tint, alpha] = parseRgba(fill as string);
-      expect(tint).toBe(ssp.tint);
-      expect(alpha).toBeGreaterThanOrEqual(ssp.far.alphaMin);
-      expect(alpha).toBeLessThanOrEqual(ssp.near.alphaMax);
-    }
-    expect(document.getElementById('sidebar-weather-scene')).not.toBeNull();
-  });
-
-  it('stamps the pre-baked soft sprite for near flakes when the bake succeeds', async () => {
-    const scene = recording2dContext();
-    const sprite = recording2dContext();
-    HTMLCanvasElement.prototype.getContext = vi
-      .fn()
-      .mockReturnValueOnce(scene.ctx)
-      .mockReturnValue(sprite.ctx) as never;
-    mockWeather({ ...BASE_PAYLOAD, scene: 'snow' });
-    await bootSidebarWeather();
-    const ctx = (HTMLCanvasElement.prototype.getContext as ReturnType<typeof vi.fn>).mock.results[0]
-      .value;
-    const ssp = SCENE_SPECS.snow;
-    // the sprite bakes exactly once, with the spec's alpha ramp over the spec tint
-    const bakeGrads = sprite.base.createRadialGradient.mock.results;
-    expect(bakeGrads).toHaveLength(1);
-    expect(bakeGrads[0].value.stops).toEqual(
-      ssp.sprite.stops.map(([offset, alpha]) => [offset, `rgba(${ssp.tint},${alpha})`]),
-    );
-    // near flakes stamp the sprite at their own alpha; far flakes stay hard dots
-    expect(ctx.drawImage).toHaveBeenCalled();
-    expect(ctx.arc).toHaveBeenCalled();
-    expect(scene.alphas.length).toBeGreaterThan(0);
-    for (const a of scene.alphas) {
-      const nearFlake = a >= ssp.near.alphaMin && a <= ssp.near.alphaMax;
-      expect(nearFlake || a === 1, `unexpected globalAlpha ${a}`).toBe(true);
-    }
-    for (const fill of scene.fills) {
-      const [tint, alpha] = parseRgba(fill as string);
-      expect(tint).toBe(ssp.tint);
-      expect(alpha).toBeGreaterThanOrEqual(ssp.far.alphaMin);
-      expect(alpha).toBeLessThanOrEqual(ssp.far.alphaMax);
-    }
-    expect(document.getElementById('sidebar-weather-scene')).not.toBeNull();
-  });
-});
-
-describe('the clear scene (unchanged)', () => {
-  const W = 280;
-  const H = 600; // jsdom rects are all zeros, so fit() falls back to 280x600
-
-  it('stays barely-there: few ultra-faint wisps', () => {
-    const csp = SCENE_SPECS.clear;
-    expect(csp.cap).toBeLessThanOrEqual(8);
-    for (let i = 0; i < 50; i++) {
-      const { drops } = buildSceneParticles('clear', W, H);
-      expect(drops.length).toBeLessThanOrEqual(csp.cap);
-      for (const p of drops) {
-        expect(p.s).toBeGreaterThanOrEqual(csp.sizeMin);
-        expect(p.s).toBeLessThanOrEqual(csp.sizeMax);
-        expect(p.a).toBeGreaterThanOrEqual(csp.alphaMin);
-        expect(p.a).toBeLessThanOrEqual(csp.alphaMax);
-        expect(p.vx).toBeGreaterThanOrEqual(csp.vxMin);
-        expect(p.vx).toBeLessThanOrEqual(csp.vxMax);
-        expect(p.vy).toBeGreaterThanOrEqual(csp.vyMin);
-        expect(p.vy).toBeLessThanOrEqual(csp.vyMax);
-      }
-    }
-  });
-
-  it('draws layered soft ellipses from the spec: tint, per-layer alphas, radii ratio', async () => {
-    const rec = recording2dContext();
-    HTMLCanvasElement.prototype.getContext = vi.fn(() => rec.ctx) as never;
-    mockWeather({ ...BASE_PAYLOAD, scene: 'clear' });
-    await bootSidebarWeather();
-    const ctx = (HTMLCanvasElement.prototype.getContext as ReturnType<typeof vi.fn>).mock.results[0]
-      .value;
-    const csp = SCENE_SPECS.clear;
-    // the boot's static first frame ran: layers.count ellipses per wisp
-    const ellipses = ctx.ellipse.mock.calls as unknown[][];
-    expect(ellipses.length).toBeGreaterThan(0);
-    expect(ellipses.length % csp.layers.count).toBe(0);
-    for (let i = 0; i < ellipses.length; i += csp.layers.count) {
-      const radii: Array<[number, number]> = [];
-      for (let l = 0; l < csp.layers.count; l++) {
-        const [x, y, rx, ry] = ellipses[i + l] as unknown as [number, number, number, number];
-        // the same center across the wisp's layers
-        expect(x).toBe(ellipses[i][0]);
-        expect(y).toBe(ellipses[i][1]);
-        // the rx/ry ratio is the spec's size multiplier, not a draw() literal
-        expect(ry as number).toBeCloseTo((rx as number) / csp.layers.sizeMultiplier, 10);
-        // the largest layer pins the radius the wrap margins are derived from
-        expect(rx as number).toBeLessThanOrEqual(csp.sizeMax * csp.layers.sizeMultiplier);
-        radii.push([rx as number, ry as number]);
-      }
-      // layers shrink inward per the spec's decay
-      for (let l = 1; l < csp.layers.count; l++) {
-        expect(radii[l][0] / radii[0][0]).toBeCloseTo(1 - l * csp.layers.shrinkPerLayer, 10);
-      }
-    }
-    // every layer fill carries the spec tint, fading per the alpha decay
-    for (const fill of rec.fills) {
-      const [tint, alpha] = parseRgba(fill as string);
-      expect(tint).toBe(csp.layers.tint);
-      expect(alpha).toBeGreaterThanOrEqual(
-        csp.alphaMin * (1 - (csp.layers.count - 1) * csp.layers.alphaDecayPerLayer),
-      );
-      expect(alpha).toBeLessThanOrEqual(csp.alphaMax);
-    }
-  });
-
-  it('wraps wisps only once fully off-screen — no visible pop-in', async () => {
-    const rec = recording2dContext();
-    HTMLCanvasElement.prototype.getContext = vi.fn(() => rec.ctx) as never;
-    const frames: FrameRequestCallback[] = [];
-    let nextId = 1;
-    Object.defineProperty(window, 'requestAnimationFrame', {
-      configurable: true,
-      value: (cb: FrameRequestCallback): number => {
-        frames.push(cb);
-        return nextId++;
-      },
-    });
-    // Pin the build with a per-particle rand() sequence: even particles
-    // drift horizontally at near-max speed from mid-screen height (so the
-    // x-wrap is exercised while the wisp is vertically visible), odd ones
-    // drift downward at near-max speed. The idle axis gets exactly 0, so
-    // teleports isolate to one axis per wisp.
-    let call = 0;
-    const randSpy = vi.spyOn(Math, 'random').mockImplementation(() => {
-      const slot = call % 7; // x, y, vx, vy, s, a, ph per particle
-      const xDrifter = Math.floor(call / 7) % 2 === 0;
-      call++;
-      if (slot === 0) return 0.99; // x: near the right edge
-      if (slot === 1) return xDrifter ? 0.5 : 0.99; // y: mid-screen vs near bottom
-      if (slot === 2) return xDrifter ? 0.999 : 0.5; // vx: near-max vs 0
-      if (slot === 3) return xDrifter ? 0.5 : 0.999; // vy: 0 vs near-max
-      if (slot === 4) return 0.999; // s: max radius, the worst case
-      return 0.5; // a, ph
-    });
-    mockWeather({ ...BASE_PAYLOAD, scene: 'clear' });
-    await bootSidebarWeather();
-    randSpy.mockRestore();
-    const ctx = (HTMLCanvasElement.prototype.getContext as ReturnType<typeof vi.fn>).mock.results[0]
-      .value;
-    const csp = SCENE_SPECS.clear;
-
-    // pump ~35s of frames at the clamped 50ms step; the boot's static draw
-    // is frame 0, every later frame adds layers.count ellipses per wisp
-    let t = performance.now();
-    for (let i = 0; i < 700; i++) {
-      frames[frames.length - 1]!(t);
-      t += 50;
-    }
-    const ellipses = ctx.ellipse.mock.calls as unknown[][];
-    const perWisp = ellipses.length / csp.layers.count;
-    expect(Number.isInteger(perWisp)).toBe(true);
-    const wisps = perWisp / (1 + 700);
-    expect(Number.isInteger(wisps) && wisps > 0).toBe(true);
-    // frame f, wisp k: the first of its layers carries the center
-    const centers: Array<Array<[number, number]>> = [];
-    for (let f = 0; f <= 700; f++) {
-      const frame: Array<[number, number]> = [];
-      for (let k = 0; k < wisps; k++) {
-        const e = ellipses[f * wisps * csp.layers.count + k * csp.layers.count];
-        frame.push([e[0] as number, e[1] as number]);
-      }
-      centers.push(frame);
-    }
-    // A teleport is a frame-to-frame jump far beyond the max per-frame drift
-    // (|v| <= 7px/s * 0.05s). Each axis is checked on its own: the x-wrap
-    // must only fire while the largest ellipse (rx <= sizeMax *
-    // sizeMultiplier) is fully past the left/right edge, and likewise for y
-    // (ry <= sizeMax) — otherwise the hard-edged ellipse visibly pops.
-    const maxRx = csp.sizeMax * csp.layers.sizeMultiplier;
-    const maxRy = csp.sizeMax;
-    let xTeleports = 0;
-    let yTeleports = 0;
-    for (let k = 0; k < wisps; k++) {
-      for (let f = 1; f < centers.length; f++) {
-        const [px, py] = centers[f - 1][k];
-        const [x, y] = centers[f][k];
-        if (Math.abs(x - px) > 2) {
-          xTeleports++;
-          const off = px <= -maxRx || px >= W + maxRx;
-          expect(off, `wisp ${k} x-wrapped while visible at (${px},${py})`).toBe(true);
-        }
-        if (Math.abs(y - py) > 2) {
-          yTeleports++;
-          const off = py <= -maxRy || py >= H + maxRy;
-          expect(off, `wisp ${k} y-wrapped while visible at (${px},${py})`).toBe(true);
-        }
-      }
-    }
-    // both axes wrap inside the window — the test is not vacuous
-    expect(xTeleports).toBeGreaterThan(0);
-    expect(yTeleports).toBeGreaterThan(0);
   });
 });
 
@@ -1398,5 +870,119 @@ describe('reduced-motion follow-up', () => {
     setReducedMotion(false);
     document.dispatchEvent(new Event('visibilitychange'));
     expect(document.getElementById('sidebar-weather-scene')).not.toBeNull();
+  });
+});
+
+describe('the line glyph reads the moment', () => {
+  const withCurrent = (
+    current: Partial<WeatherSnapshot['current']>,
+    scene: WeatherResponse['scene'] = 'clear',
+  ): WeatherResponse => ({
+    ...BASE_PAYLOAD,
+    scene,
+    snapshot: {
+      ...BASE_PAYLOAD.snapshot!,
+      current: { ...BASE_PAYLOAD.snapshot!.current, ...current },
+    },
+  });
+
+  it('a moon on a clear night, a sun by day', () => {
+    expect(lineGlyph(withCurrent({ weather_code: 0, is_day: false }))).toBe('moon');
+    expect(lineGlyph(withCurrent({ weather_code: 2, is_day: false }))).toBe('partly-cloudy-night');
+    expect(lineGlyph(withCurrent({ weather_code: 0, is_day: true }))).toBe('sun');
+    // a snapshot from before is_day existed keeps the day glyph
+    expect(lineGlyph(withCurrent({ weather_code: 0 }))).toBe('sun');
+  });
+
+  it('the wind glyph when the wind is what you would notice', () => {
+    expect(lineGlyph(withCurrent({ weather_code: 0 }, 'wind'))).toBe('wind');
+  });
+
+  it('draws the night glyphs', () => {
+    expect(glyphSvg('moon')).toContain('<path');
+    expect(glyphSvg('partly-cloudy-night')).toContain('<path');
+  });
+});
+
+describe('popover rain chance', () => {
+  it('shows a dash, not 0%, when the chance is unknown', async () => {
+    const daily = BASE_PAYLOAD.snapshot!.daily.map((d, i) =>
+      i === 1 ? { ...d, precip_probability: null } : d,
+    );
+    mockWeather({ ...BASE_PAYLOAD, snapshot: { ...BASE_PAYLOAD.snapshot!, daily } });
+    await bootSidebarWeather();
+    document.getElementById('sidebar-weather-line')!.click();
+    const precips = [...document.querySelectorAll('.sidebar-weather-precip')].map(
+      (e) => e.textContent,
+    );
+    expect(precips).toEqual(['5%', '—', '0%']);
+  });
+});
+
+describe('refresh while the tab stays open', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('updates the line in place and crossfades the scene, then stops the old one', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => fake2dContext()) as never;
+    await bootSidebarWeather();
+    const first = document.getElementById('sidebar-weather-scene')!;
+    expect(first.classList.contains('sidebar-weather-scene')).toBe(true);
+
+    const later = {
+      ...BASE_PAYLOAD,
+      snapshot: {
+        ...BASE_PAYLOAD.snapshot!,
+        current: { ...BASE_PAYLOAD.snapshot!.current, temp: 41 },
+      },
+    };
+    mockWeather(later);
+    await refreshSidebarWeather();
+
+    expect(document.getElementById('sidebar-weather-line')!.textContent).toContain('41°F');
+    const next = document.getElementById('sidebar-weather-scene')!;
+    expect(next).not.toBe(first);
+    // the old one is still there, fading, without the id
+    expect(first.isConnected).toBe(true);
+    expect(first.id).toBe('');
+    expect(first.classList.contains('is-visible')).toBe(false);
+
+    vi.advanceTimersByTime(1600);
+    expect(first.isConnected).toBe(false);
+    expect(document.querySelectorAll('#app-sidebar canvas').length).toBe(1);
+  });
+
+  it('refetches every 15 minutes, and a teardown stops the timer', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
+    // one counting handler for the whole test: a second server.use would
+    // shadow it and later fetches would go uncounted
+    let hits = 0;
+    let payload: WeatherResponse = BASE_PAYLOAD;
+    server.use(
+      http.get('*/api/weather', () => {
+        hits++;
+        return HttpResponse.json(payload);
+      }),
+    );
+    await bootSidebarWeather();
+    expect(hits).toBe(1);
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    expect(hits).toBe(2);
+
+    payload = { ...BASE_PAYLOAD, enabled: false };
+    await bootSidebarWeather(); // turned off: everything goes
+    const before = hits;
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    expect(hits).toBe(before);
+  });
+
+  it('a failed refresh keeps what is showing', async () => {
+    await bootSidebarWeather();
+    const line = document.getElementById('sidebar-weather-line')!.textContent;
+    mockWeather(null);
+    await refreshSidebarWeather();
+    expect(document.getElementById('sidebar-weather-line')!.textContent).toBe(line);
   });
 });

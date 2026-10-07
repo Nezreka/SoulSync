@@ -470,12 +470,13 @@ def test_get_shape_matches_contract(client, monkeypatch):
     assert snap["utc_offset_seconds"] == -25200
     cur = snap["current"]
     assert cur == {"temp": 68, "weather_code": 1, "condition": "Mainly clear",
-                   "wind_speed": 8}
+                   "wind_speed": 8, "wind_gusts": None, "wind_direction": None,
+                   "is_day": None, "cloud_cover": None, "precipitation": None}
     assert len(snap["daily"]) == 3
     day = snap["daily"][0]
     assert day == {"date": "2026-10-06", "temp_max": 70, "temp_min": 52,
                    "weather_code": 1, "condition": "Mainly clear",
-                   "precip_probability": 5}
+                   "precip_probability": 5, "sunrise": None, "sunset": None}
     assert body["scene"] == "clear"
 
 
@@ -673,3 +674,33 @@ def test_webserver_registers_sidebar_weather_blueprint():
             "create_blueprint as _bp_sw") in src
     assert "_cfg_sw(config_manager=config_manager)" in src
     assert "app.register_blueprint(_bp_sw())" in src
+
+
+# -- the scene reads the real sky (wind direction/gusts, cloud, day, precip) --
+
+def test_fetch_snapshot_carries_what_the_scene_needs(monkeypatch):
+    forecast = _forecast()
+    forecast["current"].update({"wind_direction_10m": 250, "wind_gusts_10m": 31.4,
+                                "is_day": 0, "cloud_cover": 72, "precipitation": 1.2})
+    forecast["daily"]["sunrise"] = ["2026-10-06T07:14", "2026-10-07T07:15", "2026-10-08T07:16"]
+    forecast["daily"]["sunset"] = ["2026-10-06T18:41", "2026-10-07T18:39", "2026-10-08T18:38"]
+    calls = _fake_http(monkeypatch, forecast=forecast)
+    snap = sw.fetch_snapshot(42.3265, -122.8756, False)
+    cur = snap["current"]
+    assert (cur["wind_direction"], cur["wind_gusts"], cur["is_day"],
+            cur["cloud_cover"], cur["precipitation"]) == (250.0, 31.4, False, 72.0, 1.2)
+    assert (snap["daily"][0]["sunrise"], snap["daily"][0]["sunset"]) == (
+        "2026-10-06T07:14", "2026-10-06T18:41")
+    params = calls[-1][1]
+    for field in ("wind_direction_10m", "wind_gusts_10m", "is_day", "cloud_cover", "precipitation"):
+        assert field in params["current"]
+    assert "sunrise" in params["daily"] and "sunset" in params["daily"]
+
+
+def test_fetch_snapshot_tolerates_a_provider_without_the_scene_fields(monkeypatch):
+    _fake_http(monkeypatch)
+    snap = sw.fetch_snapshot(42.3265, -122.8756, False)
+    cur = snap["current"]
+    assert (cur["wind_direction"], cur["wind_gusts"], cur["is_day"],
+            cur["cloud_cover"], cur["precipitation"]) == (None, None, None, None, None)
+    assert snap["daily"][0]["sunrise"] is None
