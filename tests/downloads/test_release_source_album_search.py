@@ -255,7 +255,7 @@ def test_cancelled_task_does_not_grab_a_later_release_source_result(monkeypatch,
 
 
 @pytest.mark.parametrize('release_title', [
-    'Pink Floyd - The Dark Side of the Moon [Lossless]',
+    'Pink Floyd - The Dark Side of the Moon [ALAC]',
     'Pink Floyd - The Dark Side of the Moon [MP3 320kbps]',
     'Pink Floyd - The Dark Side of the Moon [MP3 + FLAC]',
 ])

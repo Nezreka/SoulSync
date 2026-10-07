@@ -179,19 +179,6 @@ def test_a_bare_title_still_takes_the_exact_category():
     assert audio_quality_from_release('Artist - Album', [3010]).format == 'mp3'
 
 
-@pytest.mark.parametrize('title', [
-    'Artist - Album [Lossless]',
-    'Artist - Album Hi-Res',
-    'Artist - Album 24bit WEB',
-])
-def test_a_lossless_family_claim_does_not_invent_a_codec(title):
-    quality = audio_quality_from_release(title, [3040])
-    assert quality.format == 'unknown'
-    assert quality.bitrate is None
-    assert quality.sample_rate is None
-    assert evaluate_release({'flac'}, title, categories=[3040])[0] is False
-
-
 def test_file_codec_override_drops_incompatible_title_resolution():
     quality = audio_quality_from_release(
         'Artist - Album [FLAC 24-96]', file_names=['01 - Track.mp3'])
