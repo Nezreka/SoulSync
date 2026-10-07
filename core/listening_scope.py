@@ -22,6 +22,9 @@ from utils.logging_config import get_logger
 logger = get_logger("listening_scope")
 
 SHARED_OWNER = 1
+# plays by a media-server account no profile is linked to: kept, in nobody's
+# pile, until a profile links that account and claims them
+UNCLAIMED = 0
 
 # the accounts that make a pile a profile's own. listenbrainz is a token,
 # last.fm is just a username (its scrobbles are public, the app's key reads them)
@@ -32,6 +35,20 @@ ACCOUNT_COLUMNS = {
 _HAS_ACCOUNT = " OR ".join(
     f"({col} IS NOT NULL AND {col} != '')" for col in ACCOUNT_COLUMNS.values()
 )
+
+# a profile linked to its own media-server account owns a pile too: the
+# server's history says who played what, so its plays are its own (a kid's
+# katy perry stays out of the admin's stats and mixes)
+MEDIA_ACCOUNT_COLUMNS = ('plex_account_id', 'plex_home_user_id')
+
+
+def _owns_pile_sql(conn) -> str:
+    """the "this profile has its own pile" condition, for the columns this
+    schema has (an old one may not have the plex ones yet)"""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(profiles)").fetchall()}
+    parts = [_HAS_ACCOUNT]
+    parts += [f"({c} IS NOT NULL AND {c} != '')" for c in MEDIA_ACCOUNT_COLUMNS if c in cols]
+    return " OR ".join(parts)
 
 
 def listening_owner(database, profile_id: Optional[int]) -> int:
@@ -48,7 +65,7 @@ def listening_owner(database, profile_id: Optional[int]) -> int:
     try:
         conn = database._get_connection()
         row = conn.execute(
-            f"SELECT 1 FROM profiles WHERE id = ? AND ({_HAS_ACCOUNT})", (pid,),
+            f"SELECT 1 FROM profiles WHERE id = ? AND ({_owns_pile_sql(conn)})", (pid,),
         ).fetchone()
         return pid if row else SHARED_OWNER
     except Exception as e:
@@ -67,7 +84,7 @@ def listening_owners(database) -> List[int]:
     try:
         conn = database._get_connection()
         rows = conn.execute(
-            f"SELECT id FROM profiles WHERE ({_HAS_ACCOUNT}) AND id != ? ORDER BY id",
+            f"SELECT id FROM profiles WHERE ({_owns_pile_sql(conn)}) AND id != ? ORDER BY id",
             (SHARED_OWNER,),
         ).fetchall()
         owners.extend(int(r[0]) for r in rows)
@@ -159,3 +176,85 @@ def pile_keys(owner: Optional[int]) -> List[str]:
     if owner_i == SHARED_OWNER:
         return []
     return [owner_key(base, owner_i) for base in PILE_KEY_BASES]
+
+
+# -- plays by media-server account (#plex per-user history) ------------------
+
+# plex reports the server owner's own plays as account 1, everyone else under
+# their plex.tv user id (checked against a live server, Oct 2026)
+PLEX_OWNER_ACCOUNT = '1'
+
+
+def media_account_owners(database, server_source: str) -> dict:
+    """{server account id: pile} for every profile linked to an account on
+    this server. plex only for now; the owner's account is the shared pile"""
+    if server_source != 'plex':
+        return {}
+    owners = {PLEX_OWNER_ACCOUNT: SHARED_OWNER}
+    conn = None
+    try:
+        conn = database._get_connection()
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(profiles)").fetchall()}
+        # sign-in's own record first, then the home-user link; lowest id wins
+        # a tie, so two profiles on one account can't split its plays
+        for col in [c for c in MEDIA_ACCOUNT_COLUMNS if c in cols]:
+            for pid, account in conn.execute(
+                    f"SELECT id, {col} FROM profiles WHERE {col} IS NOT NULL AND {col} != '' "
+                    f"AND id != ? ORDER BY id DESC", (SHARED_OWNER,)).fetchall():
+                owners.setdefault(str(account), int(pid))
+    except Exception as e:
+        logger.debug("media account owners lookup failed: %s", e)
+    finally:
+        if conn is not None:
+            conn.close()
+    return owners
+
+
+def media_account_owner(owners: dict, account_id) -> int:
+    """the pile a play by this server account belongs to. no account (a
+    server that doesn't say, an old row) = the shared pile, as before"""
+    if account_id is None or account_id == '':
+        return SHARED_OWNER
+    return owners.get(str(account_id), UNCLAIMED)
+
+
+def reattribute_media_plays(database, server_source: str = 'plex') -> int:
+    """re-file every play whose account now belongs to a different pile: a
+    profile linked (or unlinked) since, or rows from before accounts were
+    kept. returns how many plays moved. the same play already sitting in the
+    target pile wins and the stray copy goes"""
+    owners = media_account_owners(database, server_source)
+    if not owners:
+        return 0
+    conn = None
+    moved = 0
+    try:
+        conn = database._get_connection()
+        accounts = [r[0] for r in conn.execute(
+            "SELECT DISTINCT server_account_id FROM listening_history "
+            "WHERE server_source = ? AND server_account_id IS NOT NULL", (server_source,)).fetchall()]
+        for account in accounts:
+            pile = media_account_owner(owners, account)
+            cur = conn.execute(
+                "UPDATE OR IGNORE listening_history SET profile_id = ? "
+                "WHERE server_source = ? AND server_account_id = ? AND profile_id != ?",
+                (pile, server_source, account, pile))
+            moved += cur.rowcount
+            # anything left in the wrong pile collided with the same play
+            # already filed right: a duplicate
+            conn.execute(
+                "DELETE FROM listening_history "
+                "WHERE server_source = ? AND server_account_id = ? AND profile_id != ?",
+                (server_source, account, pile))
+        conn.commit()
+    except Exception as e:
+        logger.error("re-filing %s plays by account failed: %s", server_source, e)
+        if conn is not None:
+            conn.rollback()
+        return 0
+    finally:
+        if conn is not None:
+            conn.close()
+    if moved:
+        logger.info("re-filed %d %s plays into their accounts' piles", moved, server_source)
+    return moved

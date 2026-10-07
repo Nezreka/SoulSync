@@ -7009,19 +7009,29 @@ class MusicDatabase:
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_listening_dedup_pile "
             "ON listening_history (track_id, played_at, server_source, profile_id)"
         )
+        # which media-server account played it (plex's history says). a play
+        # is filed in the pile of the profile linked to that account, and a
+        # later link or unlink re-files it, so the account has to be kept
+        cursor.execute("PRAGMA table_info(listening_history)")
+        if 'server_account_id' not in [c[1] for c in cursor.fetchall()]:
+            cursor.execute("ALTER TABLE listening_history ADD COLUMN server_account_id TEXT DEFAULT NULL")
+            logger.info("Added server_account_id column to listening_history")
         from core.listening_import.dedup import ensure_import_events_table
         ensure_import_events_table(cursor.connection)
 
     def insert_listening_events(self, events):
         """Insert server/player events through the same matcher as history imports.
 
-        an event's profile_id is its pile, none means the shared one."""
+        an event's profile_id is its pile, none means the shared one. 0 is
+        a real answer (UNCLAIMED: an account linked to nobody), never shared."""
         from core.listening_import.dedup import insert_import_events
         from core.listening_scope import SHARED_OWNER
 
         grouped = {}
         for event in events or []:
-            owner = event.get('profile_id') or SHARED_OWNER
+            owner = event.get('profile_id')
+            if owner is None:
+                owner = SHARED_OWNER
             grouped.setdefault((event.get('server_source') or '', owner), []).append(event)
         inserted = 0
         for (source, owner), batch in grouped.items():

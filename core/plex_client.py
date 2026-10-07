@@ -1268,6 +1268,10 @@ class PlexClient(MediaServerClient):
                         'played_at': item.viewedAt.isoformat() if hasattr(item, 'viewedAt') and item.viewedAt else None,
                         'duration_ms': (item.duration or 0),
                         'track_id': str(item.ratingKey),
+                        # who played it: 1 is the server owner, anyone else
+                        # their plex.tv user id. files the play in their pile
+                        'account_id': (str(item.accountID) if getattr(item, 'accountID', None) is not None
+                                       else None),
                     })
                 except Exception:
                     continue

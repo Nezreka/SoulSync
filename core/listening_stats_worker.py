@@ -147,6 +147,43 @@ class ListeningStatsWorker:
         self.current_item = None
         logger.info("Listening stats worker thread finished")
 
+    _TAGGED_KEY = 'listening_plays_account_tagged_{server}'
+
+    def _tag_old_plays_once(self, client, server):
+        """rows recorded before plays kept their account don't say who played
+        them, so they all sat in the shared pile. read the server's full
+        history once and tag each row with its account; re-filing then moves
+        them. plex only (the only server whose history names the account).
+        retried next poll if it fails; never twice once done"""
+        if server != 'plex':
+            return
+        key = self._TAGGED_KEY.format(server=server)
+        try:
+            if self.db.get_metadata(key):
+                return
+            history = client.get_play_history(limit=None)
+            if not history:
+                return
+            tags = [(e['account_id'], e['track_id'], e['played_at']) for e in history
+                    if e.get('account_id') and e.get('track_id') and e.get('played_at')]
+            conn = self.db._get_connection()
+            try:
+                tagged = 0
+                for account_id, track_id, played_at in tags:
+                    cur = conn.execute(
+                        "UPDATE listening_history SET server_account_id = ? "
+                        "WHERE server_source = ? AND track_id = ? AND played_at = ? "
+                        "AND server_account_id IS NULL",
+                        (account_id, server, track_id, played_at))
+                    tagged += cur.rowcount
+                conn.commit()
+            finally:
+                conn.close()
+            self.db.set_metadata(key, '1')
+            logger.info(f"Tagged {tagged} earlier {server} plays with the account that played them")
+        except Exception as e:
+            logger.warning(f"Tagging earlier {server} plays by account failed, will retry: {e}")
+
     def _poll(self):
         """Poll the active media server for play data."""
         active_server = self.config_manager.get_active_media_server()
@@ -173,11 +210,17 @@ class ListeningStatsWorker:
             return
 
         if history:
+            # each play goes in the pile of whoever played it: the owner's
+            # plays are the shared pile, a linked profile's are its own, an
+            # account linked to nobody is kept but claimed by no one
+            from core.listening_scope import media_account_owner, media_account_owners
+            account_owners = media_account_owners(self.db, active_server)
             # Convert to DB format
             events = []
             for entry in history:
                 if not entry.get('played_at'):
                     continue
+                account_id = entry.get('account_id')
                 events.append({
                     'track_id': entry.get('track_id', ''),
                     'title': entry.get('track_title', ''),
@@ -186,9 +229,10 @@ class ListeningStatsWorker:
                     'played_at': entry.get('played_at'),
                     'duration_ms': entry.get('duration_ms', 0),
                     'server_source': active_server,
-                    # the app's server account, so the shared pile. a navidrome
-                    # admin only ever sees its own plays here (#1293).
-                    'profile_id': SHARED_OWNER,
+                    # no account (jellyfin, navidrome: the app's own account
+                    # only) is the shared pile, as before (#1293)
+                    'profile_id': media_account_owner(account_owners, account_id),
+                    'server_account_id': account_id,
                     # db_track_id filled in below by a single batched lookup
                     'db_track_id': None,
                 })
@@ -204,6 +248,16 @@ class ListeningStatsWorker:
             inserted = self.db.insert_listening_events(events)
             self.stats['events_added'] += inserted
             logger.info(f"Inserted {inserted} new listening events (of {len(events)} total)")
+
+        # plays recorded before accounts were kept: tag them once from the
+        # server's full history, then re-file anything whose account's pile
+        # changed (a profile linked or unlinked since)
+        self._tag_old_plays_once(client, active_server)
+        try:
+            from core.listening_scope import reattribute_media_plays
+            reattribute_media_plays(self.db, active_server)
+        except Exception as e:
+            logger.warning(f"Re-filing plays by account failed: {e}")
 
         # Step 2: Fetch play counts and update tracks table
         self.current_item = f"Updating play counts from {active_server}..."
