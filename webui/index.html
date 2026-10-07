@@ -6828,11 +6828,20 @@
                                             <button type="button" id="folders-music-tab" role="tab" aria-selected="true"
                                                 aria-controls="folders-music-panel" tabindex="0"
                                                 onclick="switchLibraryMediaTab(this)"
-                                                onkeydown="handleLibraryMediaTabKey(event)">Music</button><button
-                                                type="button" id="folders-video-tab" role="tab" aria-selected="false"
+                                                onkeydown="handleLibraryMediaTabKey(event)">Music</button>
+                                            <button type="button" id="folders-audiobooks-tab" role="tab" aria-selected="false"
+                                                aria-controls="folders-audiobooks-panel" tabindex="-1"
+                                                onclick="switchLibraryMediaTab(this)"
+                                                onkeydown="handleLibraryMediaTabKey(event)">Audiobooks</button>
+                                            <button type="button" id="folders-podcasts-tab" role="tab" aria-selected="false"
+                                                aria-controls="folders-podcasts-panel" tabindex="-1"
+                                                onclick="switchLibraryMediaTab(this)"
+                                                onkeydown="handleLibraryMediaTabKey(event)">Podcasts</button>
+                                            <button type="button" id="folders-video-tab" role="tab" aria-selected="false"
                                                 aria-controls="folders-video-panel" tabindex="-1"
                                                 onclick="switchLibraryMediaTab(this)"
-                                                onkeydown="handleLibraryMediaTabKey(event)">Video</button></div>
+                                                onkeydown="handleLibraryMediaTabKey(event)">Video</button>
+                                        </div>
                                         <div id="folders-music-panel" role="tabpanel"
                                             aria-labelledby="folders-music-tab" class="stg-media-panel" tabindex="0">
                                             <div class="stg-media-context"><strong>Music folders</strong><span
@@ -6899,31 +6908,6 @@
                                                     <small class="settings-hint">Your main music library. Finished
                                                         tracks are moved here, organized into Artist/Album
                                                         folders.</small>
-                                                </div>
-
-                                                <div class="form-group">
-                                                    <label>Podcasts Folder (output):</label>
-                                                    <div class="path-input-group">
-                                                        <input type="text" id="podcasts-path" placeholder="./podcasts"
-                                                            readonly>
-                                                        <button class="browse-button locked"
-                                                            onclick="typeof togglePathLock==='function'?togglePathLock('podcasts', this):((function(b){const i=document.getElementById('podcasts-path');if(!i)return;const l=i.hasAttribute('readonly')||i.readOnly;if(l){i.removeAttribute('readonly');i.readOnly=false;i.focus();b.textContent='Lock';b.classList.remove('locked');}else{i.setAttribute('readonly','');i.readOnly=true;b.textContent='Unlock';b.classList.add('locked');}})(this))">Unlock</button>
-                                                    </div>
-                                                    <small class="settings-hint">Where downloaded podcast episodes are
-                                                        saved and organized.</small>
-                                                </div>
-
-                                                <div class="form-group">
-                                                    <label>Audiobooks Folder (output):</label>
-                                                    <div class="path-input-group">
-                                                        <input type="text" id="audiobooks-path"
-                                                            placeholder="./audiobooks" readonly>
-                                                        <button class="browse-button locked"
-                                                            onclick="typeof togglePathLock==='function'?togglePathLock('audiobooks', this):((function(b){const i=document.getElementById('audiobooks-path');if(!i)return;const l=i.hasAttribute('readonly')||i.readOnly;if(l){i.removeAttribute('readonly');i.readOnly=false;i.focus();b.textContent='Lock';b.classList.remove('locked');}else{i.setAttribute('readonly','');i.readOnly=true;b.textContent='Unlock';b.classList.add('locked');}})(this))">Unlock</button>
-                                                    </div>
-                                                    <small class="settings-hint">Where downloaded audiobooks are saved
-                                                        and organized. Keep this separate from your music library so a
-                                                        media server does not index chapter files as albums.</small>
                                                 </div>
 
                                                 <div class="form-group">
@@ -7088,6 +7072,49 @@
                                             </div>
 
                                         </div>
+                                        <div id="folders-audiobooks-panel" role="tabpanel"
+                                            aria-labelledby="folders-audiobooks-tab" class="stg-media-panel" hidden
+                                            tabindex="0">
+                                            <div class="stg-media-context"><strong>Audiobook folders</strong><span
+                                                    class="stg-media-summary">Where finished books live</span></div>
+
+                                            <div class="settings-group" data-stg="library">
+                                                <div class="form-group">
+                                                    <label>Audiobooks Folder (output):</label>
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="audiobooks-path"
+                                                            placeholder="./audiobooks" readonly>
+                                                        <button class="browse-button locked"
+                                                            onclick="typeof togglePathLock==='function'?togglePathLock('audiobooks', this):((function(b){const i=document.getElementById('audiobooks-path');if(!i)return;const l=i.hasAttribute('readonly')||i.readOnly;if(l){i.removeAttribute('readonly');i.readOnly=false;i.focus();b.textContent='Lock';b.classList.remove('locked');}else{i.setAttribute('readonly','');i.readOnly=true;b.textContent='Unlock';b.classList.add('locked');}})(this))">Unlock</button>
+                                                    </div>
+                                                    <small class="settings-hint">Where downloaded audiobooks are saved
+                                                        and organized. Keep this separate from your music library so a
+                                                        media server does not index chapter files as albums.</small>
+                                                </div>
+                                            </div>
+
+                                        </div>
+                                        <div id="folders-podcasts-panel" role="tabpanel"
+                                            aria-labelledby="folders-podcasts-tab" class="stg-media-panel" hidden
+                                            tabindex="0">
+                                            <div class="stg-media-context"><strong>Podcast folders</strong><span
+                                                    class="stg-media-summary">Where episodes live</span></div>
+
+                                            <div class="settings-group" data-stg="library">
+                                                <div class="form-group">
+                                                    <label>Podcasts Folder (output):</label>
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="podcasts-path" placeholder="./podcasts"
+                                                            readonly>
+                                                        <button class="browse-button locked"
+                                                            onclick="typeof togglePathLock==='function'?togglePathLock('podcasts', this):((function(b){const i=document.getElementById('podcasts-path');if(!i)return;const l=i.hasAttribute('readonly')||i.readOnly;if(l){i.removeAttribute('readonly');i.readOnly=false;i.focus();b.textContent='Lock';b.classList.remove('locked');}else{i.setAttribute('readonly','');i.readOnly=true;b.textContent='Unlock';b.classList.add('locked');}})(this))">Unlock</button>
+                                                    </div>
+                                                    <small class="settings-hint">Where downloaded podcast episodes are
+                                                        saved and organized.</small>
+                                                </div>
+                                            </div>
+
+                                        </div>
                                         <div id="folders-video-panel" role="tabpanel"
                                             aria-labelledby="folders-video-tab" class="stg-media-panel" hidden
                                             tabindex="0">
@@ -7164,16 +7191,24 @@
                                         <span class="settings-section-hint">Naming, layout and file handling</span>
                                     </div>
                                     <div class="settings-section-body collapsed stg-media-card" data-stg="library">
-                                        <div class="stg-media-switcher" role="tablist"
-                                            aria-label="Organization media type"><button type="button"
-                                                id="organization-music-tab" role="tab" aria-selected="true"
+                                        <div class="stg-media-switcher" role="tablist" aria-label="Organization media type">
+                                            <button type="button" id="organization-music-tab" role="tab" aria-selected="true"
                                                 aria-controls="organization-music-panel" tabindex="0"
                                                 onclick="switchLibraryMediaTab(this)"
-                                                onkeydown="handleLibraryMediaTabKey(event)">Music</button><button
-                                                type="button" id="organization-video-tab" role="tab"
-                                                aria-selected="false" aria-controls="organization-video-panel"
-                                                tabindex="-1" onclick="switchLibraryMediaTab(this)"
-                                                onkeydown="handleLibraryMediaTabKey(event)">Video</button></div>
+                                                onkeydown="handleLibraryMediaTabKey(event)">Music</button>
+                                            <button type="button" id="organization-audiobooks-tab" role="tab" aria-selected="false"
+                                                aria-controls="organization-audiobooks-panel" tabindex="-1"
+                                                onclick="switchLibraryMediaTab(this)"
+                                                onkeydown="handleLibraryMediaTabKey(event)">Audiobooks</button>
+                                            <button type="button" id="organization-podcasts-tab" role="tab" aria-selected="false"
+                                                aria-controls="organization-podcasts-panel" tabindex="-1"
+                                                onclick="switchLibraryMediaTab(this)"
+                                                onkeydown="handleLibraryMediaTabKey(event)">Podcasts</button>
+                                            <button type="button" id="organization-video-tab" role="tab" aria-selected="false"
+                                                aria-controls="organization-video-panel" tabindex="-1"
+                                                onclick="switchLibraryMediaTab(this)"
+                                                onkeydown="handleLibraryMediaTabKey(event)">Video</button>
+                                        </div>
                                         <div id="organization-music-panel" role="tabpanel"
                                             aria-labelledby="organization-music-tab" class="stg-media-panel"
                                             tabindex="0">
@@ -7351,67 +7386,6 @@
                                                 </div>
 
                                                 <div class="form-group">
-                                                    <label>Podcast Path Template:</label>
-                                                    <input type="text" id="template-podcast-path"
-                                                        placeholder="$show/Season $season/$title">
-                                                    <span class="info-icon" role="button" tabindex="0"
-                                                        title="What's this?" onclick="toggleSettingHelp(this)"
-                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden>Variables:
-                                                        <code>$show</code>, <code>$author</code>, <code>$title</code>,
-                                                        <code>$season</code> (01), <code>$seasonnum</code> (1),
-                                                        <code>$episode</code> (01), <code>$episodenum</code> (1),
-                                                        <code>$year</code>, <code>$date</code> (YYYY-MM-DD),
-                                                        <code>$type</code>. Default:
-                                                        <code>$show/Season $season/$title</code>. Season and episode
-                                                        folders collapse cleanly if omitted in feed. Use
-                                                        <code>${var}</code> to append text.</small>
-                                                </div>
-
-                                                <div class="form-group">
-                                                    <label>Podcast Media Format:</label>
-                                                    <select id="podcast-media-format" class="form-select">
-                                                        <option value="audio">Audio Only (MP3 / M4A) — Default</option>
-                                                        <option value="video">Video Only (MP4 with static artwork for TV
-                                                            media servers)</option>
-                                                        <option value="both">Audio &amp; Video (Both formats
-                                                            side-by-side)</option>
-                                                    </select>
-                                                    <span class="info-icon" role="button" tabindex="0"
-                                                        title="What's this?" onclick="toggleSettingHelp(this)"
-                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden>Choose which
-                                                        formats to store in your podcast folders. <strong>Audio
-                                                            Only</strong> keeps standard audio files with embedded tags.
-                                                        <strong>Video Only</strong> remuxes the audio into an MP4 video
-                                                        container with a static high-res episode artwork frame and
-                                                        Apple/iTunes TV metadata tags so Plex, Jellyfin, and Emby can
-                                                        catalog them as TV Shows with seasons, episode posters, and
-                                                        playback resume. <strong>Audio &amp; Video</strong> keeps both
-                                                        formats side-by-side in the same folder with shared NFO sidecars
-                                                        so both Music and TV media libraries can index the same folder
-                                                        simultaneously.</small>
-                                                </div>
-
-                                                <div class="form-group">
-                                                    <label>Audiobook Path Template:</label>
-                                                    <input type="text" id="template-audiobook-path"
-                                                        placeholder="$author/$series/$seriespos - $title">
-                                                    <span class="info-icon" role="button" tabindex="0"
-                                                        title="What's this?" onclick="toggleSettingHelp(this)"
-                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden>Variables:
-                                                        <code>$author</code>, <code>$authorletter</code>,
-                                                        <code>$narrator</code>, <code>$title</code>,
-                                                        <code>$series</code>, <code>$seriespos</code> (01),
-                                                        <code>$year</code>, <code>$asin</code>. Default:
-                                                        <code>$author/$series/$seriespos - $title</code>. Books with no
-                                                        series collapse the series folder and its number cleanly, the
-                                                        same way podcast season folders do. Use <code>${var}</code> to
-                                                        append text.</small>
-                                                </div>
-
-                                                <div class="form-group">
                                                     <label>Sample Path Template:</label>
                                                     <input type="text" id="template-sample-path"
                                                         placeholder="$artist/$track - $chop">
@@ -7428,6 +7402,220 @@
                                                         rendered file also carries its own tags. Empty segments
                                                         collapse — a chop with no album info won't leave a stray
                                                         folder. Use <code>${var}</code> to append text.</small>
+                                                </div>
+
+
+                                                <div class="form-group">
+                                                    <label>Multi-Disc Folder Label:</label>
+                                                    <select id="disc-label">
+                                                        <option value="Disc">Disc (e.g., Disc 1/)</option>
+                                                        <option value="CD">CD (e.g., CD 1/)</option>
+                                                    </select>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Label for the
+                                                        disc subfolder SoulSync adds automatically on a multi-disc album
+                                                        (<code>Disc 1/</code>). Ignored when your path template already
+                                                        places the disc itself with <code>$disc</code>,
+                                                        <code>$discnum</code> or <code>$cdnum</code> &mdash; the
+                                                        template wins.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>Collaborative Album Artist:</label>
+                                                    <select id="collab-artist-mode" class="form-select">
+                                                        <option value="first">First Listed Artist (recommended)</option>
+                                                        <option value="all">All Artists Combined</option>
+                                                    </select>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>How
+                                                        <code>$albumartist</code> resolves when a release has multiple
+                                                        artists — this governs the FOLDER your music sorts into for both
+                                                        albums and singles (the default templates use
+                                                        <code>$albumartist</code>). "First Listed" uses only the primary
+                                                        artist for folder names (e.g., "Larry June" instead of "Larry
+                                                        June, Curren$y &amp; The Alchemist"). Full artist list is always
+                                                        preserved in file metadata tags.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>
+                                                        <input type="checkbox" id="artistletter-symbol-fallback">
+                                                        Group numbers &amp; symbols under "#"
+                                                    </label>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>When
+                                                        <code>$artistletter</code> is used in templates: artists
+                                                        starting with digits, symbols or non-Latin scripts all sort into
+                                                        a single <code>#</code> folder instead of one folder per
+                                                        character ("365 Days" → <code>#/</code>, "北京" →
+                                                        <code>#/</code>). Accented letters fold to their base letter
+                                                        (Édith Piaf → <code>E/</code>). Off = the literal first
+                                                        character, exactly as before.</small>
+                                                </div>
+
+
+                                                <div class="form-group">
+                                                    <label>Artist Tag Separator:</label>
+                                                    <select id="artist-separator" class="form-select">
+                                                        <option value=", ">, (comma)</option>
+                                                        <option value="; ">; (semicolon)</option>
+                                                        <option value=" / ">/ (slash)</option>
+                                                        <option value=" & ">&amp; (ampersand)</option>
+                                                    </select>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Separator
+                                                        between multiple artists in the ARTIST tag (e.g.
+                                                        <code>&amp;</code> matches MusicBrainz/Picard style)</small>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="write-multi-artist">
+                                                        <span>Write multi-value ARTISTS tag</span>
+                                                    </label>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Write each
+                                                        artist as a separate tag value for Navidrome/Jellyfin
+                                                        multi-artist support</small>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="feat-in-title">
+                                                        <span>Move featured artists to title</span>
+                                                    </label>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Keep only
+                                                        primary artist in ARTIST tag, append others as (feat. ...) in
+                                                        title</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="allow-duplicate-tracks" checked>
+                                                        Allow duplicate tracks across albums
+                                                    </label>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>When enabled,
+                                                        the same song can be added to the wishlist from different albums
+                                                        (e.g., completing a discography where albums share tracks). When
+                                                        disabled, tracks with the same name and artist are
+                                                        skipped.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="wishlist-wing-it-guesses">
+                                                        <span>Search Wing It guesses as wishlist tracks</span>
+                                                    </label>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Wing It
+                                                        means a track couldn't be matched in the metadata catalogue
+                                                        — these are unmatched guesses, not tracks missing from your
+                                                        library. Off by default: guesses stay in the Wing It Pool for
+                                                        manual review. Turn this on to let guesses be searched like
+                                                        any other wishlist track.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label for="wishlist-ignore-ttl">Removed-track re-try window
+                                                        (days)</label>
+                                                    <input type="number" id="wishlist-ignore-ttl" min="1" max="365"
+                                                        step="1" value="30">
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>When you
+                                                        remove or cancel a wishlist track, SoulSync remembers not to
+                                                        re-add it automatically for this many days. Lower it (e.g. 7) to
+                                                        give removed tracks another chance sooner.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <button class="test-button"
+                                                        onclick="resetFileOrganizationTemplates()"
+                                                        style="background: #666;">
+                                                        🔄 Reset to Defaults
+                                                    </button>
+                                                    <small class="settings-hint">
+                                                        Restores original path structure. Your downloads will be
+                                                        organized like before.
+                                                    </small>
+                                                </div>
+                                            </div>
+                                            <div class="settings-group" data-stg="library">
+                                                <h3>Library Organize</h3>
+                                                <label class="toggle-row">
+                                                    <input type="checkbox" id="reorganize-preserve-casing">
+                                                    <span>Preserve my casing, year &amp; disc layout</span>
+                                                </label>
+                                                <div class="help-text" style="margin-top: 6px;">
+                                                    When the Library Organize tool re-matches a track, the metadata
+                                                    source often
+                                                    differs from files you've already organized: capitalization, release
+                                                    year (a
+                                                    reissue [2023] "corrected" to the source's 2020), or disc layout (a
+                                                    single-disc
+                                                    album matched to a deluxe 2-disc edition, stamping a bogus "0211"
+                                                    prefix). With
+                                                    this on (default), a title/album differing <em>only</em> by
+                                                    letter-case, your own
+                                                    album year, and a genuinely single-disc album's numbering are all
+                                                    left alone —
+                                                    no needless renames. Turn off to match the metadata source exactly.
+                                                </div>
+                                                <label class="toggle-row" style="margin-top: 10px;">
+                                                    <input type="checkbox" id="write-artist-nfo">
+                                                    <span>Write artist.nfo (Jellyfin / Kodi / Emby)</span>
+                                                </label>
+                                                <div class="help-text" style="margin-top: 6px;">
+                                                    When an import creates an artist folder, also write a Kodi-format
+                                                    <em>artist.nfo</em> containing the artist's name and MusicBrainz
+                                                    artist ID, so Jellyfin / Kodi / Emby identify the artist instead
+                                                    of guessing by name. An existing <em>artist.nfo</em> with a
+                                                    different ID is never overwritten. To backfill folders you
+                                                    already have, run the <em>Artist NFO Backfill</em> repair job.
+                                                </div>
+                                            </div>
+
+                                        </div>
+                                        <div id="organization-audiobooks-panel" role="tabpanel"
+                                            aria-labelledby="organization-audiobooks-tab" class="stg-media-panel" hidden
+                                            tabindex="0">
+                                            <div class="stg-media-context"><strong>Audiobook organization</strong><span
+                                                    class="stg-media-summary">Naming, quality, tags &amp; recycle</span></div>
+
+                                            <div class="settings-group" data-stg="library">
+                                                <div class="form-group">
+                                                    <label>Audiobook Path Template:</label>
+                                                    <input type="text" id="template-audiobook-path"
+                                                        placeholder="$author/$series/$seriespos - $title">
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Variables:
+                                                        <code>$author</code>, <code>$authorletter</code>,
+                                                        <code>$narrator</code>, <code>$title</code>,
+                                                        <code>$series</code>, <code>$seriespos</code> (01),
+                                                        <code>$year</code>, <code>$asin</code>. Default:
+                                                        <code>$author/$series/$seriespos - $title</code>. Books with no
+                                                        series collapse the series folder and its number cleanly, the
+                                                        same way podcast season folders do. Use <code>${var}</code> to
+                                                        append text.</small>
                                                 </div>
 
                                                 <div class="form-group">
@@ -7539,10 +7727,9 @@
                                                         hidden entirely.</small>
                                                 </div>
 
-                                                <h4 class="settings-subheading">Audiobooks</h4>
-                                                <small class="settings-hint">Applies to the audiobook library only.
-                                                    Downloads use the same torrent, usenet and Soulseek clients as music
-                                                    &mdash; set those under Downloads.</small>
+                                                <h4 class="settings-subheading">Downloads &amp; Import</h4>
+                                                <small class="settings-hint">Books use the same torrent, usenet and Soulseek
+                                                        clients as music &mdash; set those up under Sources.</small>
 
                                                 <div class="form-group">
                                                     <label>Audible Marketplace:</label>
@@ -7750,192 +7937,57 @@
                                                         what lets the daily library scan recognise a book you imported
                                                         months ago.</small>
                                                 </div>
-
-
-                                                <div class="form-group">
-                                                    <label>Multi-Disc Folder Label:</label>
-                                                    <select id="disc-label">
-                                                        <option value="Disc">Disc (e.g., Disc 1/)</option>
-                                                        <option value="CD">CD (e.g., CD 1/)</option>
-                                                    </select>
-                                                    <span class="info-icon" role="button" tabindex="0"
-                                                        title="What's this?" onclick="toggleSettingHelp(this)"
-                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden>Label for the
-                                                        disc subfolder SoulSync adds automatically on a multi-disc album
-                                                        (<code>Disc 1/</code>). Ignored when your path template already
-                                                        places the disc itself with <code>$disc</code>,
-                                                        <code>$discnum</code> or <code>$cdnum</code> &mdash; the
-                                                        template wins.</small>
-                                                </div>
-
-                                                <div class="form-group">
-                                                    <label>Collaborative Album Artist:</label>
-                                                    <select id="collab-artist-mode" class="form-select">
-                                                        <option value="first">First Listed Artist (recommended)</option>
-                                                        <option value="all">All Artists Combined</option>
-                                                    </select>
-                                                    <span class="info-icon" role="button" tabindex="0"
-                                                        title="What's this?" onclick="toggleSettingHelp(this)"
-                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden>How
-                                                        <code>$albumartist</code> resolves when a release has multiple
-                                                        artists — this governs the FOLDER your music sorts into for both
-                                                        albums and singles (the default templates use
-                                                        <code>$albumartist</code>). "First Listed" uses only the primary
-                                                        artist for folder names (e.g., "Larry June" instead of "Larry
-                                                        June, Curren$y &amp; The Alchemist"). Full artist list is always
-                                                        preserved in file metadata tags.</small>
-                                                </div>
-
-                                                <div class="form-group">
-                                                    <label>
-                                                        <input type="checkbox" id="artistletter-symbol-fallback">
-                                                        Group numbers &amp; symbols under "#"
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0"
-                                                        title="What's this?" onclick="toggleSettingHelp(this)"
-                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden>When
-                                                        <code>$artistletter</code> is used in templates: artists
-                                                        starting with digits, symbols or non-Latin scripts all sort into
-                                                        a single <code>#</code> folder instead of one folder per
-                                                        character ("365 Days" → <code>#/</code>, "北京" →
-                                                        <code>#/</code>). Accented letters fold to their base letter
-                                                        (Édith Piaf → <code>E/</code>). Off = the literal first
-                                                        character, exactly as before.</small>
-                                                </div>
-
-
-                                                <div class="form-group">
-                                                    <label>Artist Tag Separator:</label>
-                                                    <select id="artist-separator" class="form-select">
-                                                        <option value=", ">, (comma)</option>
-                                                        <option value="; ">; (semicolon)</option>
-                                                        <option value=" / ">/ (slash)</option>
-                                                        <option value=" & ">&amp; (ampersand)</option>
-                                                    </select>
-                                                    <span class="info-icon" role="button" tabindex="0"
-                                                        title="What's this?" onclick="toggleSettingHelp(this)"
-                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden>Separator
-                                                        between multiple artists in the ARTIST tag (e.g.
-                                                        <code>&amp;</code> matches MusicBrainz/Picard style)</small>
-                                                </div>
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="write-multi-artist">
-                                                        <span>Write multi-value ARTISTS tag</span>
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0"
-                                                        title="What's this?" onclick="toggleSettingHelp(this)"
-                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden>Write each
-                                                        artist as a separate tag value for Navidrome/Jellyfin
-                                                        multi-artist support</small>
-                                                </div>
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="feat-in-title">
-                                                        <span>Move featured artists to title</span>
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0"
-                                                        title="What's this?" onclick="toggleSettingHelp(this)"
-                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden>Keep only
-                                                        primary artist in ARTIST tag, append others as (feat. ...) in
-                                                        title</small>
-                                                </div>
-
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="allow-duplicate-tracks" checked>
-                                                        Allow duplicate tracks across albums
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0"
-                                                        title="What's this?" onclick="toggleSettingHelp(this)"
-                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden>When enabled,
-                                                        the same song can be added to the wishlist from different albums
-                                                        (e.g., completing a discography where albums share tracks). When
-                                                        disabled, tracks with the same name and artist are
-                                                        skipped.</small>
-                                                </div>
-
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="wishlist-wing-it-guesses">
-                                                        <span>Search Wing It guesses as wishlist tracks</span>
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0"
-                                                        title="What's this?" onclick="toggleSettingHelp(this)"
-                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden>Wing It
-                                                        means a track couldn't be matched in the metadata catalogue
-                                                        — these are unmatched guesses, not tracks missing from your
-                                                        library. Off by default: guesses stay in the Wing It Pool for
-                                                        manual review. Turn this on to let guesses be searched like
-                                                        any other wishlist track.</small>
-                                                </div>
-
-                                                <div class="form-group">
-                                                    <label for="wishlist-ignore-ttl">Removed-track re-try window
-                                                        (days)</label>
-                                                    <input type="number" id="wishlist-ignore-ttl" min="1" max="365"
-                                                        step="1" value="30">
-                                                    <span class="info-icon" role="button" tabindex="0"
-                                                        title="What's this?" onclick="toggleSettingHelp(this)"
-                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden>When you
-                                                        remove or cancel a wishlist track, SoulSync remembers not to
-                                                        re-add it automatically for this many days. Lower it (e.g. 7) to
-                                                        give removed tracks another chance sooner.</small>
-                                                </div>
-
-                                                <div class="form-group">
-                                                    <button class="test-button"
-                                                        onclick="resetFileOrganizationTemplates()"
-                                                        style="background: #666;">
-                                                        🔄 Reset to Defaults
-                                                    </button>
-                                                    <small class="settings-hint">
-                                                        Restores original path structure. Your downloads will be
-                                                        organized like before.
-                                                    </small>
-                                                </div>
                                             </div>
+
+                                        </div>
+                                        <div id="organization-podcasts-panel" role="tabpanel"
+                                            aria-labelledby="organization-podcasts-tab" class="stg-media-panel" hidden
+                                            tabindex="0">
+                                            <div class="stg-media-context"><strong>Podcast organization</strong><span
+                                                    class="stg-media-summary">Naming &amp; media format</span></div>
+
                                             <div class="settings-group" data-stg="library">
-                                                <h3>Library Organize</h3>
-                                                <label class="toggle-row">
-                                                    <input type="checkbox" id="reorganize-preserve-casing">
-                                                    <span>Preserve my casing, year &amp; disc layout</span>
-                                                </label>
-                                                <div class="help-text" style="margin-top: 6px;">
-                                                    When the Library Organize tool re-matches a track, the metadata
-                                                    source often
-                                                    differs from files you've already organized: capitalization, release
-                                                    year (a
-                                                    reissue [2023] "corrected" to the source's 2020), or disc layout (a
-                                                    single-disc
-                                                    album matched to a deluxe 2-disc edition, stamping a bogus "0211"
-                                                    prefix). With
-                                                    this on (default), a title/album differing <em>only</em> by
-                                                    letter-case, your own
-                                                    album year, and a genuinely single-disc album's numbering are all
-                                                    left alone —
-                                                    no needless renames. Turn off to match the metadata source exactly.
+                                                <div class="form-group">
+                                                    <label>Podcast Path Template:</label>
+                                                    <input type="text" id="template-podcast-path"
+                                                        placeholder="$show/Season $season/$title">
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Variables:
+                                                        <code>$show</code>, <code>$author</code>, <code>$title</code>,
+                                                        <code>$season</code> (01), <code>$seasonnum</code> (1),
+                                                        <code>$episode</code> (01), <code>$episodenum</code> (1),
+                                                        <code>$year</code>, <code>$date</code> (YYYY-MM-DD),
+                                                        <code>$type</code>. Default:
+                                                        <code>$show/Season $season/$title</code>. Season and episode
+                                                        folders collapse cleanly if omitted in feed. Use
+                                                        <code>${var}</code> to append text.</small>
                                                 </div>
-                                                <label class="toggle-row" style="margin-top: 10px;">
-                                                    <input type="checkbox" id="write-artist-nfo">
-                                                    <span>Write artist.nfo (Jellyfin / Kodi / Emby)</span>
-                                                </label>
-                                                <div class="help-text" style="margin-top: 6px;">
-                                                    When an import creates an artist folder, also write a Kodi-format
-                                                    <em>artist.nfo</em> containing the artist's name and MusicBrainz
-                                                    artist ID, so Jellyfin / Kodi / Emby identify the artist instead
-                                                    of guessing by name. An existing <em>artist.nfo</em> with a
-                                                    different ID is never overwritten. To backfill folders you
-                                                    already have, run the <em>Artist NFO Backfill</em> repair job.
+
+                                                <div class="form-group">
+                                                    <label>Podcast Media Format:</label>
+                                                    <select id="podcast-media-format" class="form-select">
+                                                        <option value="audio">Audio Only (MP3 / M4A) — Default</option>
+                                                        <option value="video">Video Only (MP4 with static artwork for TV
+                                                            media servers)</option>
+                                                        <option value="both">Audio &amp; Video (Both formats
+                                                            side-by-side)</option>
+                                                    </select>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Choose which
+                                                        formats to store in your podcast folders. <strong>Audio
+                                                            Only</strong> keeps standard audio files with embedded tags.
+                                                        <strong>Video Only</strong> remuxes the audio into an MP4 video
+                                                        container with a static high-res episode artwork frame and
+                                                        Apple/iTunes TV metadata tags so Plex, Jellyfin, and Emby can
+                                                        catalog them as TV Shows with seasons, episode posters, and
+                                                        playback resume. <strong>Audio &amp; Video</strong> keeps both
+                                                        formats side-by-side in the same folder with shared NFO sidecars
+                                                        so both Music and TV media libraries can index the same folder
+                                                        simultaneously.</small>
                                                 </div>
                                             </div>
 

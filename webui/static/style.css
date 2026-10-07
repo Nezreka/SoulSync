@@ -88311,7 +88311,8 @@ body.src-modal-open { overflow: hidden; }
 #settings-page .stg-media-summary.is-live { color: rgba(var(--accent-rgb),.8); }
 @media (max-width: 600px) {
     #settings-page .stg-media-card .stg-media-switcher { display: flex; }
-    #settings-page .stg-media-switcher button { flex: 1; }
+    /* four tabs at 100px each overflow a phone, so they share the row */
+    #settings-page .stg-media-switcher button { flex: 1; min-width: 0; padding: 9px 4px; }
 }
 #settings-page .stg-media-panel > .settings-group {
     margin-top: 0;

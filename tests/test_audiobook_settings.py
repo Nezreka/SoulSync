@@ -324,9 +324,13 @@ def test_the_two_downloader_categories_stay_in_step(settings_js):
 
 
 def test_the_audiobook_group_is_labelled_on_the_page(index_html):
-    # These knobs sit inside a section that is otherwise about music paths.
-    # Without a heading the next reader takes them for global settings.
-    assert 'class="settings-subheading">Audiobooks<' in index_html
+    # these knobs used to sit in the music section under a heading, and the
+    # next reader took them for global settings. they have their own tab now.
+    start = index_html.index('id="organization-audiobooks-panel"')
+    end = index_html.index('id="organization-podcasts-panel"')
+    panel = index_html[start:end]
+    for knob in ('template-audiobook-path', 'audiobook-marketplace', 'audiobook-write-nfo'):
+        assert f'id="{knob}"' in panel
 
 
 @pytest.mark.parametrize("css_class", ["settings-subheading", "settings-unit"])
