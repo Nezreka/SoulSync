@@ -111,10 +111,13 @@ def search_typed_query(client: Any, query: str, limit: int = 10, **kwargs) -> Li
 
     Deezer's free text ranks reprises and karaoke above the real song and can
     leave it out of the page, so for "Auli'i Cravalho How Far I'll Go" the
-    original never reaches the list. When the query names an artist (found from
-    the plain results' own artist names), also run ``track:"title" artist`` and
-    put those results first. Any other source, a query that names no artist, or
-    a failure of the extra search returns the plain results unchanged.
+    original never reaches the list. When the query names an artist, also run
+    ``track:"title" artist`` and put those results first. The artist is read
+    from the plain results' own artist names; when none of them is in the query
+    (the plain results for "Taylor Swift Love Story" are all covers) a few
+    short artist lookups find it instead. The scoped results are used only if
+    one of them is actually credited to that artist. Any other source, a query
+    that names no artist, or a failure returns the plain results unchanged.
     """
     plain = client.search_tracks(query, limit=limit, **kwargs)
 
@@ -123,15 +126,43 @@ def search_typed_query(client: Any, query: str, limit: int = 10, **kwargs) -> Li
     if kwargs or not isinstance(client, DeezerClient) or not plain:
         return plain
     try:
-        from core.deezer_track_query import artist_scoped_query, merge_by_id
+        from core.deezer_track_query import (
+            artist_lookup_phrases,
+            artist_scoped_query,
+            credits_artist,
+            exact_artist_match,
+            merge_by_id,
+            split_query_by_artist,
+        )
+
+        def scoped_for(names):
+            scoped_query = artist_scoped_query(query, names)
+            split = split_query_by_artist(query, names) if scoped_query else None
+            if not split:
+                return None
+            scoped = client.search_tracks(scoped_query, limit=limit)
+            # Deezer only RANKS by the artist words (its artist filter is broken),
+            # so covers by other artists can still lead: put the artist's own
+            # tracks first, and trust the scoped list only if there are any.
+            by_artist = [t for t in scoped if credits_artist(getattr(t, "artists", None), split[0])]
+            if by_artist:
+                rest = [t for t in scoped if t not in by_artist]
+                return merge_by_id(by_artist, rest, plain, limit=limit)
+            return None
 
         names = [a for t in plain for a in (getattr(t, "artists", None) or []) if isinstance(a, str)]
-        scoped_query = artist_scoped_query(query, names)
-        if not scoped_query:
-            return plain
-        scoped = client.search_tracks(scoped_query, limit=limit)
-        return merge_by_id(scoped, plain, limit=limit)
+        found = scoped_for(names)
+        if found:
+            return found
+
+        for phrase in artist_lookup_phrases(query):
+            candidates = [getattr(a, "name", "") for a in (client.search_artists(phrase, limit=5) or [])]
+            hit = exact_artist_match(phrase, candidates)
+            if hit:
+                found = scoped_for([hit])
+                if found:
+                    return found
+        return plain
     except Exception as e:  # the plain results still stand
         logger.debug("typed-query exact-title search failed for %r: %s", query, e)
         return plain
-
