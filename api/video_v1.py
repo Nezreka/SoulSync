@@ -126,6 +126,26 @@ def register_routes(bp):
         """Body: {kind, tmdb_id}"""
         return _relay("video_watchlist_remove", error_code="WATCHLIST_ERROR")
 
+    # ---- youtube channels (followed channels live on the video watchlist) ----
+
+    @bp.route("/video/youtube/resolve", methods=["GET"])
+    @require_api_key
+    def video_youtube_channel_resolve():
+        """Preview a channel URL without committing. ?url=&limit="""
+        return _relay("video_youtube_resolve", error_code="YOUTUBE_ERROR")
+
+    @bp.route("/video/youtube/follow", methods=["POST"])
+    @require_api_key
+    def video_youtube_channel_follow():
+        """Follow a channel + wish its recent uploads. Body: {url}"""
+        return _relay("video_youtube_follow", error_code="YOUTUBE_ERROR")
+
+    @bp.route("/video/youtube/unfollow", methods=["POST"])
+    @require_api_key
+    def video_youtube_channel_unfollow():
+        """Un-follow a channel. Body: {youtube_id}"""
+        return _relay("video_youtube_unfollow", error_code="YOUTUBE_ERROR")
+
     # ---- scan ----
 
     @bp.route("/video/scan", methods=["POST"])
