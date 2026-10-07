@@ -2349,7 +2349,7 @@
 .categoryModalOverlay {
   position: fixed;
   inset: 0;
-  z-index: 10000;
+  z-index: var(--z-modal);
   background: rgba(0, 0, 0, 0.78);
   backdrop-filter: blur(16px);
   display: flex;
@@ -3360,7 +3360,7 @@
   inset: 0;
   background: rgba(0, 0, 0, 0.72);
   backdrop-filter: blur(8px);
-  z-index: 1050;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3388,6 +3388,15 @@
   overflow: hidden;
   max-height: 90vh;
   animation: modalSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Per-dialog widths for the RSS and OPML modals. */
+.modalDialog.rssDialog {
+  max-width: 520px;
+}
+
+.modalDialog.opmlDialog {
+  max-width: 640px;
 }
 
 @keyframes modalSlideUp {

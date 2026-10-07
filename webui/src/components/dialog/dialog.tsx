@@ -5,25 +5,43 @@ import clsx from 'clsx';
 
 import styles from './dialog.module.css';
 
+/**
+ * A modal dialog: base-ui's focus trap, Escape, outside press and scroll lock.
+ *
+ * By default it brings its own backdrop and frame, and `className` is added to
+ * the popup. An overlay that keeps its own look passes `viewportClassName`
+ * instead: that class goes on the viewport (backdrop colour, centring,
+ * z-index), `className` alone styles the popup, and none of the default frame
+ * styles apply.
+ */
 export function DialogFrame({
+  'aria-label': ariaLabel,
   children,
   className,
   initialFocus,
   onOpenChange,
   open,
+  viewportClassName,
 }: {
+  'aria-label'?: string;
   children: ReactNode;
   className?: string;
   initialFocus?: ComponentProps<typeof Dialog.Popup>['initialFocus'];
   onOpenChange: (open: boolean) => void;
   open: boolean;
+  viewportClassName?: string;
 }) {
+  const custom = viewportClassName !== undefined;
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Backdrop className={styles.backdrop} />
-        <Dialog.Viewport className={styles.viewport}>
-          <Dialog.Popup initialFocus={initialFocus} className={clsx(styles.popup, className)}>
+        {custom ? null : <Dialog.Backdrop className={styles.backdrop} />}
+        <Dialog.Viewport className={custom ? viewportClassName : styles.viewport}>
+          <Dialog.Popup
+            aria-label={ariaLabel}
+            initialFocus={initialFocus}
+            className={custom ? className : clsx(styles.popup, className)}
+          >
             {children}
           </Dialog.Popup>
         </Dialog.Viewport>
