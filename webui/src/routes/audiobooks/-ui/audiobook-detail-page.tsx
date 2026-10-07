@@ -1,6 +1,8 @@
 import { Link, useParams } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 
+import { Skeleton } from '@/components/primitives';
+
 import type { AudiobookItem } from '../-audiobooks.types';
 
 import {
@@ -91,7 +93,7 @@ export function AudiobookDetailPage() {
     return (
       <div className={styles.detailPage}>
         <AudiobookBackButton />
-        <div className={styles.detailSkeleton} />
+        <Skeleton className={styles.detailSkeleton} />
       </div>
     );
   }

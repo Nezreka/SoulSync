@@ -1,6 +1,8 @@
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { useCallback, useEffect, useState } from 'react';
 
+import { Skeleton } from '@/components/primitives';
+
 import type {
   AudiobookCategory,
   AudiobookHome,
@@ -312,7 +314,7 @@ export function AudiobooksBrowsePage() {
         <>
           {homeLoading ? (
             <>
-              <div className={styles.heroSkeleton} />
+              <Skeleton className={styles.heroSkeleton} />
               <SkeletonGrid />
             </>
           ) : (
@@ -344,7 +346,7 @@ function SkeletonGrid() {
   return (
     <div className={styles.grid} aria-hidden="true">
       {Array.from({ length: 12 }).map((_, index) => (
-        <div className={styles.cardSkeleton} key={index} />
+        <Skeleton className={styles.cardSkeleton} key={index} />
       ))}
     </div>
   );

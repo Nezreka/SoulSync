@@ -56,15 +56,6 @@
   }
 }
 
-@keyframes shimmer {
-  0% {
-    background-position: -400px 0;
-  }
-  100% {
-    background-position: 400px 0;
-  }
-}
-
 /* Shown ABOVE results that have already arrived, so the list stays readable
    while the slower sources are still answering. The full-height loader is only
    for an empty list. */
@@ -667,9 +658,6 @@
 .heroSkeleton {
   height: 360px;
   border-radius: 22px;
-  background: linear-gradient(90deg, var(--white-a04), var(--white-a09), var(--white-a04));
-  background-size: 800px 100%;
-  animation: shimmer 1.4s linear infinite;
 }
 
 /* ── Rails ──────────────────────────────────────────────────────────────── */
@@ -950,9 +938,6 @@
 .cardSkeleton {
   aspect-ratio: 1 / 1;
   border-radius: 13px;
-  background: linear-gradient(90deg, var(--white-a04), var(--white-a09), var(--white-a04));
-  background-size: 800px 100%;
-  animation: shimmer 1.4s linear infinite;
 }
 
 /* ── Works (person pages) ───────────────────────────────────────────────── */
@@ -1486,9 +1471,6 @@
 .detailSkeleton {
   height: 420px;
   border-radius: 22px;
-  background: linear-gradient(90deg, var(--white-a04), var(--white-a09), var(--white-a04));
-  background-size: 800px 100%;
-  animation: shimmer 1.4s linear infinite;
 }
 
 /* ── People row (search results) ────────────────────────────────────────── */
@@ -2693,11 +2675,6 @@
   .card,
   .hero,
   .detailTop {
-    animation: none;
-  }
-  .cardSkeleton,
-  .heroSkeleton,
-  .detailSkeleton {
     animation: none;
   }
   .card:hover .cardCoverLink {

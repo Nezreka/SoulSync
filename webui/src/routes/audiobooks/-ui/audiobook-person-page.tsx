@@ -1,6 +1,8 @@
 import { Link } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 
+import { Skeleton } from '@/components/primitives';
+
 import type { AudiobookPersonProfile, AudiobookRole } from '../-audiobooks.types';
 
 import { fetchPersonProfile, followAuthor, unfollowAuthor } from '../-audiobooks.api';
@@ -51,7 +53,7 @@ export function AudiobookPersonPage({ name, role }: AudiobookPersonPageProps) {
     return (
       <div className={styles.personPage}>
         <AudiobookBackButton />
-        <div className={styles.detailSkeleton} />
+        <Skeleton className={styles.detailSkeleton} />
       </div>
     );
   }
