@@ -116,9 +116,10 @@
     --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
     /* ── Layout ─────────────────────────────────────────────────────── */
-    /* One number for the whole settings page. The nav row and the columns
-       MUST agree or the tabs and the content below them line up differently. */
-    --settings-max-width: 1400px;
+    /* One number for the whole settings page: the cap on #settings-page
+       .settings-content (settings-premier.css). The nav row and the columns
+       fill it, so the tabs and the content below them always line up. */
+    --settings-max-width: 1240px;
 }
 
 /* ── Shared keyframes ─────────────────────────────────────────────────

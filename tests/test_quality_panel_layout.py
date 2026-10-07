@@ -26,6 +26,7 @@ import pytest
 
 _CSS = Path(__file__).resolve().parents[1] / "webui" / "static" / "style.css"
 _TOKENS = _CSS.with_name("tokens.css")
+_PREMIER = _CSS.with_name("settings-premier.css")
 
 
 def _css():
@@ -73,15 +74,22 @@ def test_the_two_columns_add_up_to_the_whole_width():
         "two can never be set to values that overflow"
     )
 
-    # and at the real column width the split leaves the tiles usable
+    # and at the real column width the split leaves the tiles usable. The column
+    # is .settings-content (capped at the token) minus its side padding.
     tokens = _TOKENS.read_text(encoding="utf-8")
-    column = int(re.search(r"--settings-max-width:\s*(\d+)px", tokens).group(1))
+    cap = int(re.search(r"--settings-max-width:\s*(\d+)px", tokens).group(1))
+    content = _rule_body("#settings-page .settings-content",
+                         _strip_comments(_PREMIER.read_text(encoding="utf-8")))
+    side = int(re.search(r"padding:\s*\d+px\s+(\d+)px", content).group(1))
+    column = cap - 2 * side
     tiles = column - panel - gap
     assert tiles + gap + panel == column
-    assert tiles >= 920, (
-        f"tiles get {tiles}px. The panel used to hang outside precisely so the "
-        f"tiles could keep the full 920px column, so dropping below that would "
-        f"be a regression on the reason it was built that way."
+    # 834px today. This used to demand 920px against the token's old 1400px,
+    # but the premier layout had capped the page at 1240px all along, so that
+    # number was never what rendered.
+    assert tiles >= 800, (
+        f"tiles get {tiles}px - too narrow for the profile tiles to read beside "
+        f"the panel"
     )
 
 

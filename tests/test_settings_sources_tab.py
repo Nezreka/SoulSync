@@ -357,21 +357,41 @@ def test_usenet_has_a_tile(js):
     assert "torrent:" in m
 
 
+def _max_widths(css: str, selector: str) -> list[str]:
+    """Every max-width set on exactly this selector (ignoring :has() variants)."""
+    pattern = r"(?m)^" + re.escape(selector) + r"\s*\{([^}]*)\}"
+    return [m.strip() for body in re.findall(pattern, css)
+            for m in re.findall(r"max-width:\s*([^;]+);", body)]
+
+
 def test_the_page_width_is_one_number():
     """The nav row and the columns have to agree or the tabs and the content
-    below them line up differently."""
+    below them line up differently. They agree by both filling .settings-content,
+    which is the one thing capped, by the one token.
+
+    There used to be two numbers: style.css capped the nav row and columns at
+    the token while settings-premier.css capped .settings-content at 1240px and
+    lifted the columns' cap with max-width: none !important. The token was dead.
+    """
+    tokens = _strip_comments(_read("webui/static/tokens.css"))
+    assert "--settings-max-width:" in tokens
+    premier = _strip_comments(_read("webui/static/settings-premier.css"))
+    assert _max_widths(premier, "#settings-page .settings-content") == [
+        "var(--settings-max-width) !important"
+    ]
     css = _strip_comments(_read("webui/static/style.css"))
-    assert "--settings-max-width:" in _strip_comments(_read("webui/static/tokens.css"))
-    for sel in ("#settings-page .settings-nav-row {", "#settings-page .settings-columns {"):
-        block = css.split(sel, 1)[1].split("}", 1)[0]
-        assert "var(--settings-max-width)" in block, sel
-        assert "920px" not in block
+    for sel in ("#settings-page .settings-nav-row", "#settings-page .settings-columns"):
+        for source in (css, premier):
+            assert not _max_widths(source, sel), f"{sel} carries a cap of its own"
 
 
 def test_sources_gets_the_full_width_like_logs():
     # A grid uses width by fitting more tiles; a form just stretches its inputs.
+    # Nothing caps the columns below .settings-content, so every tab, logs and
+    # sources included, gets the full column.
     css = _strip_comments(_read("webui/static/style.css"))
-    assert 'data-stg="sources"' in css.split(":has(", 1)[1][:4000] or 'data-stg="sources"' in css
+    assert ".settings-columns:has(" not in css or "max-width" not in css.split(
+        ".settings-columns:has(", 1)[1].split("}", 1)[0]
 
 
 # ---------------------------------------------------------------------------

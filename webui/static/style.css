@@ -4427,7 +4427,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
    would have left the tiles too narrow to read.
 
    The column is --settings-max-width wide now, so the trade is gone: the tiles
-   keep about 1070px, which is wider than the whole column used to be. Hanging
+   keep about 830px, nearly the whole width the column used to be. Hanging
    outside had also started to LOOK wrong once the settings card grew a visible
    border, because the panel was sitting past it with nothing behind it. */
 .qp-layout {
@@ -7007,9 +7007,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     }
 
     /* Deliberately nothing here. The settings width is set by
-       --settings-max-width on the layout override further down; a cap at this
-       level is overridden by its `max-width: 100% !important` and only looks
-       like it works. */
+       --settings-max-width on #settings-page .settings-content in
+       settings-premier.css; a cap at this level only looks like it works. */
 }
 
 /* ===== VERSION MODAL STYLES ===== */
@@ -53489,9 +53488,9 @@ tr.tag-diff-same {
 
 /* ── Settings page layout override — transform old layout ── */
 
-/* One number for the whole page: --settings-max-width (tokens.css). The nav
-   row and the columns MUST agree or the tabs and the content below them line
-   up differently. */
+/* One number for the whole page: --settings-max-width (tokens.css) caps
+   .settings-content in settings-premier.css. The nav row and the columns fill
+   it rather than carrying caps of their own, so they always agree. */
 
 /* Center everything in a single column */
 #settings-page .settings-content {
@@ -53503,12 +53502,6 @@ tr.tag-diff-same {
 /* Tab bar + save action sit on one control row. */
 #settings-page .settings-nav-row {
     width: 100%;
-    /* Was 920px. That is what actually set the page width — the earlier
-       .settings-content cap never applied (settings-premier.css sets its
-       max-width with !important), so the page caps the CHILDREN instead.
-       920px also made the tab bar wrap: the tabs fit fine, the row they sit
-       in did not. */
-    max-width: var(--settings-max-width);
     margin: 0 auto 28px;
 }
 
@@ -53537,24 +53530,8 @@ tr.tag-diff-same {
 
 /* Columns become single centered column */
 #settings-page .settings-columns {
-    /* settings-premier.css overrides this with max-width: none !important.
-       It stays because test_the_page_width_is_one_number pins it. */
-    max-width: var(--settings-max-width);
     margin-bottom: 0;
 }
-/* The Logs tab uses the full available width — the log terminal benefits from
-   the extra horizontal space (other tabs stay at the readable 920px). Matches
-   only while the logs group is the visible one (switchSettingsTab clears its
-   inline display when active, sets display:none otherwise). */
-#settings-page .settings-columns:has(> .settings-group[data-stg="logs"]:not([style*="none"])) {
-    max-width: 100%;
-}
-/* Sources is a grid, not a form — it uses width the way the log terminal does,
-   fitting more tiles per row instead of stretching text fields. */
-#settings-page .settings-columns:has(> .settings-group[data-stg="sources"]:not([style*="none"])) {
-    max-width: 100%;
-}
-
 #settings-page .settings-group[data-stg="logs"] {
     width: 100%;
     max-width: 100%;
