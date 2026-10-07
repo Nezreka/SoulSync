@@ -1482,6 +1482,19 @@ def test_the_connections_tab_survives_a_phone():
     assert 'server-toggle-btn' in narrow, "the server toggles have no phone rules"
     assert 'flex: 1 1 calc(50% - 4px)' in narrow, "the toggles do not wrap two per line"
 
+    # the phone rules share the base rules' specificity, so they only win if
+    # they come after them - an earlier version sat above the base and never applied
+    base = re.search(
+        r'(?m)^#settings-page \.settings-group\[data-svc-side\] \.server-toggle-btn\s*\{', css)
+    phone = [m for m in re.finditer(r'@media \(max-width: 560px\)\s*\{(.*?)\n\}', css, re.S)
+             if 'flex: 1 1 calc(50% - 4px)' in m.group(1)]
+    assert base and phone and phone[0].start() > base.start(), (
+        "the phone toggle rules come before the base rules, so the base wins"
+    )
+    assert '--svc-server-logo-max: 30px' in phone[0].group(1), (
+        "the phone logo cap does not go through the token video-side.css reads"
+    )
+
     art = re.search(r'\.svc-tile-art\s*\{([^}]*)\}', narrow)
     assert art, "the icon well has no phone rule"
     assert 'width:' in art.group(1) and 'height:' in art.group(1), (

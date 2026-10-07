@@ -77624,22 +77624,6 @@ body.src-modal-open { overflow: hidden; }
     .svc-glyph { font-size: 1.05rem; }
     .svc-monogram { font-size: 1rem; }
 
-    /* Server toggles had NO narrow-screen rules at all: four capped-at-176px
-       buttons in a flex row do not fit a 360px screen, and the row scrolled
-       sideways or squeezed the logos into slivers. Two per line, and the logo
-       cap comes down with them. */
-    #settings-page .settings-group[data-svc-side] .server-toggle-container {
-        gap: 8px;
-    }
-    #settings-page .settings-group[data-svc-side] .server-toggle-btn {
-        flex: 1 1 calc(50% - 4px);
-        max-width: none;
-        min-height: 66px;
-        padding: 10px 12px;
-    }
-    #settings-page .settings-group[data-svc-side] .server-logo {
-        max-height: 30px;
-    }
     /* label above control, so a URL field is not 60px wide next to its label */
     #settings-page .settings-group[data-svc-side] .form-group > select,
     #settings-page .settings-group[data-svc-side] .form-group > input {
@@ -77725,6 +77709,23 @@ body.src-modal-open { overflow: hidden; }
 #settings-page .settings-group[data-svc-side] .server-toggle-btn.active {
     box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.45),
                 0 0 20px -8px rgba(var(--accent-rgb), 0.6);
+}
+/* Phones: four capped-at-176px buttons in a flex row do not fit a 360px
+   screen, so the row scrolled sideways or squeezed the logos into slivers. Two
+   per line, and the logo cap comes down with them. This has to come after the
+   base rules above, which have the same specificity. The logo cap goes through
+   the token because video-side.css loads last and reads it for the video half. */
+@media (max-width: 560px) {
+    #settings-page .settings-group[data-svc-side] .server-toggle-container {
+        --svc-server-logo-max: 30px;
+        gap: 8px;
+    }
+    #settings-page .settings-group[data-svc-side] .server-toggle-btn {
+        flex: 1 1 calc(50% - 4px);
+        max-width: none;
+        min-height: 66px;
+        padding: 10px 12px;
+    }
 }
 
 /* Rows inside a server section follow the page's grammar: one setting per row,
