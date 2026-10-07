@@ -128,41 +128,6 @@ def merge_by_id(*lists, limit: Optional[int] = None) -> list:
     return out[:limit] if limit else out
 
 
-def artist_lookup_phrases(query: str, max_lookups: int = 4) -> List[str]:
-    """Word groups at the start and end of ``query`` worth looking up as artists.
-
-    For when no artist could be read from the plain search results ("Taylor Swift
-    Love Story" returns covers, none by Taylor Swift). Two-word groups first,
-    then one-word, start before end, capped so one typed search costs a handful
-    of extra lookups at most.
-    """
-    words = str(query or "").split()
-    n = len(words)
-    if n < 2:
-        return []
-    out: List[str] = []
-    for k in (2, 1):
-        if k >= n:
-            continue
-        for phrase in (" ".join(words[:k]), " ".join(words[-k:])):
-            if phrase not in out:
-                out.append(phrase)
-    return out[:max_lookups]
-
-
-def exact_artist_match(phrase: str, candidate_names: Iterable[str]) -> Optional[str]:
-    """The candidate that is exactly ``phrase`` (ignoring case, accents and
-    apostrophes). A lookup returns near matches too ("Taylor Swift" for
-    "Taylor Swif"); only an exact one proves the phrase is an artist name."""
-    wanted = fold(phrase)
-    if not wanted:
-        return None
-    for name in candidate_names or []:
-        if fold(name) == wanted:
-            return name
-    return None
-
-
 def credits_artist(result_artist_names: Iterable[str], artist: str) -> bool:
     """True if one of a result's artist names is ``artist`` (folded)."""
     wanted = fold(artist)

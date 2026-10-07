@@ -182,102 +182,53 @@ def test_library_match_modal_leaves_artist_and_album_searches_alone(monkeypatch)
     assert seen == [QUERY]
 
 
-# ── artist not among the plain results ("Taylor Swift Love Story") ───────────
+# ── the artist's own tracks lead the scoped list ─────────────────────────────
 
-from core.deezer_track_query import artist_lookup_phrases, credits_artist, exact_artist_match  # noqa: E402
+from core.deezer_track_query import credits_artist  # noqa: E402
 
 COVER = _track(1, "Love Story (Bonus Track)", "Vitamin String Quartet")
 TS_VERSION = _track(2, "Love Story (Taylor's Version)", "Taylor Swift")
 TS_ORIGINAL = _track(3, "Love Story", "Taylor Swift")
 
 
-class FakeDeezerNoArtist(DeezerClient):
-    """Plain results are all covers; the artist is only found by a lookup."""
+class FakeDeezerScopedCovers(DeezerClient):
+    """Plain results include the artist; Deezer's scoped list still has a cover first."""
 
-    def __init__(self, artists=("Taylor Swift",), scoped=None):  # noqa: D401
-        self.queries, self.artist_lookups = [], []
-        self._artists = list(artists)
-        self._scoped = scoped if scoped is not None else [COVER, TS_VERSION, TS_ORIGINAL]
+    def __init__(self):  # noqa: D401
+        self.queries = []
 
     def search_tracks(self, query="", limit=20, **kwargs):
         self.queries.append(query)
-        return list(self._scoped) if query.startswith("track:") else [COVER]
-
-    def search_artists(self, query, limit=20):
-        self.artist_lookups.append(query)
-        return [types.SimpleNamespace(name=n) for n in self._artists if n.lower().startswith(query.lower())]
+        if query.startswith("track:"):
+            return [COVER, TS_VERSION, TS_ORIGINAL]
+        return [COVER, TS_VERSION]
 
 
-def test_helpers_for_artist_lookup():
-    assert artist_lookup_phrases("Taylor Swift Love Story") == ["Taylor Swift", "Love Story", "Taylor", "Story"]
-    assert artist_lookup_phrases("Halo") == []
-    assert len(artist_lookup_phrases("a b c d e f g h")) <= 4
-    assert exact_artist_match("taylor swift", ["Taylor Swift - Piano Covers", "Taylor Swift"]) == "Taylor Swift"
-    assert exact_artist_match("Taylor Swif", ["Taylor Swift"]) is None
-    assert credits_artist(["Beyoncé"], "beyonce") and not credits_artist(["Beyonce Experience"], "beyonce")
+def test_credits_artist_matches_whole_names_only():
+    assert credits_artist(["Beyoncé"], "beyonce")
+    assert not credits_artist(["Beyonce Experience"], "beyonce")
 
 
-def test_artist_found_by_lookup_puts_her_own_tracks_first():
-    client = FakeDeezerNoArtist()
+def test_the_named_artists_own_tracks_lead_the_scoped_list():
+    client = FakeDeezerScopedCovers()
     out = search_typed_query(client, "Taylor Swift Love Story", limit=10)
-
-    assert [t.id for t in out[:2]] == ["2", "3"]  # Taylor Swift's own tracks lead
-    assert out[2].id == "1"                       # the cover is still listed, after
-    assert client.artist_lookups == ["Taylor Swift"]  # stopped at the first hit
+    assert [t.id for t in out] == ["2", "3", "1"]
+    assert len(client.queries) == 2  # the plain search and one scoped search, no lookups
 
 
-def test_an_artist_lookup_that_hits_the_wrong_name_is_dropped():
-    # an artist literally named "Love Story" exists, but nothing is credited to it
-    client = FakeDeezerNoArtist(artists=("Love Story",), scoped=[COVER, TS_ORIGINAL])
+def test_scoped_results_not_credited_to_the_artist_are_dropped():
+    class Wrong(FakeDeezerScopedCovers):
+        def search_tracks(self, query="", limit=20, **kwargs):
+            self.queries.append(query)
+            return [COVER] if query.startswith("track:") else [COVER, TS_VERSION]
+
+    out = search_typed_query(Wrong(), "Taylor Swift Love Story", limit=10)
+    assert [t.id for t in out] == ["1", "2"]  # plain order, scoped list ignored
+
+
+def test_no_artist_in_the_plain_results_means_no_extra_request():
+    client = FakeDeezerScopedCovers()
+    client.search_tracks = lambda query="", limit=20, **kw: client.queries.append(query) or [COVER]
     out = search_typed_query(client, "Taylor Swift Love Story", limit=10)
-    assert out == [COVER]  # plain results unchanged
-
-
-def test_no_artist_anywhere_costs_at_most_four_lookups_and_changes_nothing():
-    client = FakeDeezerNoArtist(artists=())
-    out = search_typed_query(client, "How Far I'll Go Tonight", limit=10)
     assert out == [COVER]
-    assert 0 < len(client.artist_lookups) <= 4
-    assert not any(q.startswith("track:") for q in client.queries)
-
-
-def test_a_failing_artist_lookup_returns_the_plain_results():
-    client = FakeDeezerNoArtist()
-    client.search_artists = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
-    assert search_typed_query(client, "Taylor Swift Love Story", limit=10) == [COVER]
-
-
-def test_library_match_modal_finds_the_artist_by_lookup_and_lists_her_first(monkeypatch):
-    import requests
-
-    from core.library import service_search
-
-    cover = _item(1, "Love Story (Bonus Track)", "Vitamin String Quartet")
-    ts_version = _item(2, "Love Story (Taylor's Version)", "Taylor Swift")
-    ts_orig = _item(3, "Love Story", "Taylor Swift")
-    seen = []
-
-    class Resp:
-        def __init__(self, data):
-            self._d = data
-
-        def json(self):
-            return {"data": self._d}
-
-    def get(url, params=None, timeout=None):
-        seen.append((url.rsplit("/", 1)[-1], params["q"]))
-        if url.endswith("/artist"):
-            return Resp([{"id": 9, "name": "Taylor Swift"}] if params["q"] == "Taylor Swift" else [])
-        if params["q"].startswith("track:"):
-            return Resp([cover, ts_version, ts_orig])
-        return Resp([cover])
-
-    monkeypatch.setattr(requests, "get", get)
-    import core.deezer_throttle as throttle
-
-    monkeypatch.setattr(throttle, "wait_for_slot", lambda *a, **k: True)
-
-    out = service_search._search_service("deezer", "track", "Taylor Swift Love Story")
-
-    assert [r["id"] for r in out] == ["2", "3", "1"]
-    assert ("artist", "Taylor Swift") in seen
+    assert client.queries == ["Taylor Swift Love Story"]

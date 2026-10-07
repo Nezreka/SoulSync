@@ -111,13 +111,12 @@ def search_typed_query(client: Any, query: str, limit: int = 10, **kwargs) -> Li
 
     Deezer's free text ranks reprises and karaoke above the real song and can
     leave it out of the page, so for "Auli'i Cravalho How Far I'll Go" the
-    original never reaches the list. When the query names an artist, also run
-    ``track:"title" artist`` and put those results first. The artist is read
-    from the plain results' own artist names; when none of them is in the query
-    (the plain results for "Taylor Swift Love Story" are all covers) a few
-    short artist lookups find it instead. The scoped results are used only if
-    one of them is actually credited to that artist. Any other source, a query
-    that names no artist, or a failure returns the plain results unchanged.
+    original never reaches the list. When the query names an artist (read from the
+    plain results' own artist names), also run ``track:"title" artist`` and put
+    that artist's own tracks first; the scoped results are used only if one of
+    them is actually credited to that artist. Any other source, a query that
+    names no artist, or a failure returns the plain results unchanged. This
+    costs one extra request, and none when no artist is found.
     """
     plain = client.search_tracks(query, limit=limit, **kwargs)
 
@@ -127,10 +126,8 @@ def search_typed_query(client: Any, query: str, limit: int = 10, **kwargs) -> Li
         return plain
     try:
         from core.deezer_track_query import (
-            artist_lookup_phrases,
             artist_scoped_query,
             credits_artist,
-            exact_artist_match,
             merge_by_id,
             split_query_by_artist,
         )
@@ -154,14 +151,6 @@ def search_typed_query(client: Any, query: str, limit: int = 10, **kwargs) -> Li
         found = scoped_for(names)
         if found:
             return found
-
-        for phrase in artist_lookup_phrases(query):
-            candidates = [getattr(a, "name", "") for a in (client.search_artists(phrase, limit=5) or [])]
-            hit = exact_artist_match(phrase, candidates)
-            if hit:
-                found = scoped_for([hit])
-                if found:
-                    return found
         return plain
     except Exception as e:  # the plain results still stand
         logger.debug("typed-query exact-title search failed for %r: %s", query, e)

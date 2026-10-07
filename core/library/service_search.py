@@ -217,16 +217,13 @@ def _deezer_exact_title_first(query, plain, req_lib, limit=8):
     The plain results can leave the real song out entirely (for "Auli'i Cravalho
     How Far I'll Go" they are the Reprise and karaoke copies). When the query
     names an artist, the exact-title results go first. The artist is read from
-    the plain results' artist names, or, when none of them is in the query, from
-    a few short artist lookups. Scoped results are used only if one is credited
-    to that artist. Returns ``plain`` unchanged otherwise.
+    the plain results' artist names. Scoped results are used only if one is
+    credited to that artist. Returns ``plain`` unchanged otherwise.
     """
     from core.deezer_throttle import wait_for_slot
     from core.deezer_track_query import (
-        artist_lookup_phrases,
         artist_scoped_query,
         credits_artist,
-        exact_artist_match,
         merge_by_id,
         split_query_by_artist,
     )
@@ -253,12 +250,6 @@ def _deezer_exact_title_first(query, plain, req_lib, limit=8):
     found = scoped_for([n for n in names if n])
     if found:
         return found
-    for phrase in artist_lookup_phrases(query):
-        hit = exact_artist_match(phrase, [a.get('name') for a in get('artist', phrase, 5)])
-        if hit:
-            found = scoped_for([hit])
-            if found:
-                return found
     return plain
 
 
