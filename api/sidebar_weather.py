@@ -540,6 +540,8 @@ def _weather_payload():
         "units": units,
         "snapshot": snapshot,
         "scene": scene,
+        # holiday decorations in the sidebar, on unless turned off
+        "holidays": bool(config_manager.get("weather.holidays", True)),
     }
 
 
@@ -638,6 +640,17 @@ def put_weather_display():
     enabled = bool(data["enabled"])
     config_manager.set("weather.enabled", enabled)
     return jsonify({"success": True, "enabled": enabled})
+
+
+@bp.route("/api/weather/holidays", methods=["PUT"])
+@admin_only
+def put_weather_holidays():
+    data = request.get_json(silent=True) or {}
+    if "enabled" not in data:
+        return jsonify({"success": False, "error": "enabled is required"}), 400
+    enabled = bool(data["enabled"])
+    config_manager.set("weather.holidays", enabled)
+    return jsonify({"success": True, "holidays": enabled})
 
 
 @bp.route("/api/weather/units", methods=["PUT"])

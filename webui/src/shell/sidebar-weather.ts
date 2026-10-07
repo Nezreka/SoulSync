@@ -14,11 +14,14 @@
  *   as-is rather than adding a client-side tz database for a sub-hour glitch.
  */
 
+import { HOLIDAY_LABELS, holidayOn, localDate, type HolidayId } from './holidays';
+import { mountHoliday, unmountHoliday } from './sidebar-holiday';
 import {
   conditionsFromWeather,
   createWeatherScene,
   presetConditions,
   SCENE_PRESETS,
+  windStrength,
   type SceneConditions,
 } from './weather-scene';
 
@@ -67,6 +70,8 @@ export interface WeatherResponse {
   units: 'fahrenheit' | 'celsius';
   snapshot: WeatherSnapshot | null;
   scene: WeatherScene | null;
+  /** holiday decorations on; absent on servers from before they existed */
+  holidays?: boolean;
 }
 
 const LINE_ID = 'sidebar-weather-line';
@@ -332,6 +337,7 @@ function teardown(): void {
   }
   document.getElementById(LINE_ID)?.remove();
   document.getElementById(CANVAS_ID)?.remove();
+  unmountHoliday();
   active = null;
 }
 
@@ -344,11 +350,11 @@ function renderLineText(data: WeatherResponse): string {
   const cur = snap.current;
   const time = formatLocalTime(snap.utc_offset_seconds);
   const preview = getWeatherPreview();
-  const preset = preview ? SCENE_PRESETS[preview.preset] : null;
-  if (preset) {
+  if (preview) {
     // a preview says so on the line, so it never passes for the real sky
-    const glyph = glyphSvg(presetGlyph(preview!.preset));
-    return `${glyph}<span>${time} &middot; Preview &middot; ${escapeAttr(preset.label)}</span>`;
+    const preset = SCENE_PRESETS[preview.preset];
+    const glyph = glyphSvg(preset ? presetGlyph(preview.preset) : lineGlyph(data));
+    return `${glyph}<span>${time} &middot; Preview &middot; ${escapeAttr(previewLabel(preview))}</span>`;
   }
   const glyph = glyphSvg(lineGlyph(data));
   const temp = formatTemp(cur?.temp, data.units);
@@ -767,6 +773,7 @@ export async function bootSidebarWeather(): Promise<void> {
   startClockTick();
 
   if (hasScene(data) && !reducedMotion()) mountScene(sidebar, data);
+  syncHoliday();
   watchMotionPreference();
   refreshTimer = setInterval(() => void refreshSidebarWeather(), REFRESH_MS);
 }
@@ -794,6 +801,7 @@ export async function refreshSidebarWeather(): Promise<void> {
   active.data = data;
   active.line.innerHTML = renderLineText(data);
   swapScene();
+  syncHoliday();
 }
 
 /** fade the current scene out under a fresh one built from active.data */
@@ -825,9 +833,26 @@ function swapScene(): void {
 const PREVIEW_KEY = 'soulsync-weather-preview';
 
 export interface WeatherPreview {
+  /** a SCENE_PRESETS key, or '' to keep the live sky */
   preset: string;
   /** 'YYYY-MM-DD' to pretend it's another day, null for today */
   date: string | null;
+  /** force a holiday, 'none' for none, '' or absent to go by the date */
+  holiday?: string;
+}
+
+function isPreviewing(p: WeatherPreview | null | undefined): p is WeatherPreview {
+  return (
+    !!p &&
+    typeof p.preset === 'string' &&
+    (!!SCENE_PRESETS[p.preset] || !!p.date || (!!p.holiday && p.holiday !== ''))
+  );
+}
+
+function previewLabel(p: WeatherPreview): string {
+  const sky = SCENE_PRESETS[p.preset]?.label;
+  const holiday = p.holiday && p.holiday !== 'none' ? HOLIDAY_LABELS[p.holiday as HolidayId] : null;
+  return [sky, holiday, !sky && !holiday ? p.date : null].filter(Boolean).join(' · ') || 'Live';
 }
 
 /**
@@ -839,7 +864,7 @@ export function getWeatherPreview(): WeatherPreview | null {
     const raw = sessionStorage.getItem(PREVIEW_KEY);
     if (!raw) return null;
     const p = JSON.parse(raw) as WeatherPreview;
-    return p && typeof p.preset === 'string' && SCENE_PRESETS[p.preset] ? p : null;
+    return isPreviewing(p) ? p : null;
   } catch {
     return null;
   }
@@ -848,8 +873,7 @@ export function getWeatherPreview(): WeatherPreview | null {
 /** pick a sky to preview, or null to go back to the live weather */
 export function setWeatherPreview(preview: WeatherPreview | null): void {
   try {
-    if (preview && SCENE_PRESETS[preview.preset])
-      sessionStorage.setItem(PREVIEW_KEY, JSON.stringify(preview));
+    if (isPreviewing(preview)) sessionStorage.setItem(PREVIEW_KEY, JSON.stringify(preview));
     else sessionStorage.removeItem(PREVIEW_KEY);
   } catch {
     // storage blocked: nothing to remember, the live sky stays
@@ -857,6 +881,30 @@ export function setWeatherPreview(preview: WeatherPreview | null): void {
   if (!active) return;
   active.line.innerHTML = renderLineText(active.data);
   swapScene();
+  syncHoliday();
+}
+
+/** the holiday showing now: a forced one, else by the (pretend) date */
+export function currentHoliday(data: WeatherResponse): HolidayId | null {
+  const preview = getWeatherPreview();
+  if (preview?.holiday === 'none') return null;
+  if (preview?.holiday && preview.holiday in HOLIDAY_LABELS) return preview.holiday as HolidayId;
+  if (data.holidays === false && !preview?.date) return null;
+  const pretend = preview ? previewDate(preview) : null;
+  const [y, m, d] = pretend
+    ? [pretend.getUTCFullYear(), pretend.getUTCMonth() + 1, pretend.getUTCDate()]
+    : localDate(data.snapshot?.utc_offset_seconds ?? 0);
+  return holidayOn(y, m, d, data.location?.country_code ?? null)?.id ?? null;
+}
+
+/** put up (or take down) the holiday's decorations, lit for the hour */
+function syncHoliday(): void {
+  if (!active) {
+    unmountHoliday();
+    return;
+  }
+  const cond = sceneConditions(active.data);
+  mountHoliday(currentHoliday(active.data), { night: !cond.isDay, wind: windStrength(cond) });
 }
 
 /** true once the weather line is up: a preview paints over it, so it needs it */
@@ -879,7 +927,7 @@ function previewDate(p: WeatherPreview): Date | null {
 function sceneConditions(data: WeatherResponse): SceneConditions {
   const latitude = data.location?.latitude ?? 0;
   const preview = getWeatherPreview();
-  if (preview) {
+  if (preview && SCENE_PRESETS[preview.preset]) {
     const c = presetConditions(preview.preset, previewDate(preview), latitude);
     if (c) return c;
   }
@@ -887,7 +935,7 @@ function sceneConditions(data: WeatherResponse): SceneConditions {
 }
 
 function hasScene(data: WeatherResponse): boolean {
-  return !!data.scene || !!getWeatherPreview();
+  return !!data.scene || !!SCENE_PRESETS[getWeatherPreview()?.preset ?? ''];
 }
 
 function presetGlyph(key: string): WeatherGlyphKind {

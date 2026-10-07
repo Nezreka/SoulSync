@@ -5,6 +5,7 @@ import { server } from '@/test/msw';
 
 import {
   bootSidebarWeather,
+  currentHoliday,
   closePopover,
   computePopoverPlacement,
   dayLabelForDaily,
@@ -1108,4 +1109,93 @@ describe('the scene keeps running after a crossfade', () => {
       expect(raf.flush()).toBeGreaterThan(0);
     });
   }
+});
+
+describe('holidays in the sidebar', () => {
+  afterEach(() => {
+    sessionStorage.clear();
+  });
+
+  // oct 31 2026, 8pm in medford (utc-7)
+  const HALLOWEEN_NIGHT = Date.UTC(2026, 10, 1, 3, 0);
+
+  function shellWithFooter() {
+    document.body.innerHTML = `
+      <div class="sidebar" id="app-sidebar">
+        <div class="sidebar-header">
+          <div id="profile-indicator" class="profile-indicator" style="display:none;"></div>
+        </div>
+        <div class="sidebar-scroll"><div class="sidebar-spacer"></div><div class="status-section"></div></div>
+      </div>`;
+  }
+
+  it("goes by the location's date", () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: HALLOWEEN_NIGHT });
+    try {
+      expect(currentHoliday(BASE_PAYLOAD)).toBe('halloween');
+      vi.setSystemTime(Date.UTC(2026, 6, 14, 12));
+      expect(currentHoliday(BASE_PAYLOAD)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('the settings switch turns them off; a pretend date or a forced holiday still previews', () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: HALLOWEEN_NIGHT });
+    try {
+      const off = { ...BASE_PAYLOAD, holidays: false };
+      expect(currentHoliday(off)).toBeNull();
+      sessionStorage.setItem(
+        'soulsync-weather-preview',
+        JSON.stringify({ preset: '', date: '2026-02-17', holiday: '' }),
+      );
+      expect(currentHoliday(off)).toBe('lunar-new-year');
+      sessionStorage.setItem(
+        'soulsync-weather-preview',
+        JSON.stringify({ preset: '', date: null, holiday: 'thanksgiving' }),
+      );
+      expect(currentHoliday(off)).toBe('thanksgiving');
+      sessionStorage.setItem(
+        'soulsync-weather-preview',
+        JSON.stringify({ preset: '', date: null, holiday: 'none' }),
+      );
+      expect(currentHoliday(BASE_PAYLOAD)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('boot puts the decorations up, a preview swaps them, teardown takes them down', async () => {
+    shellWithFooter();
+    sessionStorage.setItem(
+      'soulsync-weather-preview',
+      JSON.stringify({ preset: '', date: null, holiday: 'halloween' }),
+    );
+    await bootSidebarWeather();
+    expect(
+      document.querySelectorAll('.sidebar-holiday[data-holiday="halloween"]').length,
+    ).toBeGreaterThan(0);
+    expect(document.getElementById('sidebar-weather-line')!.textContent).toContain(
+      'Preview · Halloween',
+    );
+
+    setWeatherPreview({ preset: '', date: null, holiday: 'lunar-new-year' });
+    expect(document.querySelectorAll('.sidebar-holiday[data-holiday="halloween"]').length).toBe(0);
+    expect(
+      document.querySelectorAll('.sidebar-holiday[data-holiday="lunar-new-year"]').length,
+    ).toBe(1);
+
+    mockWeather({ ...BASE_PAYLOAD, enabled: false });
+    await bootSidebarWeather();
+    expect(document.querySelectorAll('.sidebar-holiday').length).toBe(0);
+  });
+
+  it('a preview night sky lights the candles', async () => {
+    shellWithFooter();
+    await bootSidebarWeather();
+    setWeatherPreview({ preset: 'clear-night', date: null, holiday: 'halloween' });
+    expect(document.getElementById('app-sidebar')!.classList.contains('holiday-night')).toBe(true);
+    setWeatherPreview({ preset: 'clear-noon', date: null, holiday: 'halloween' });
+    expect(document.getElementById('app-sidebar')!.classList.contains('holiday-night')).toBe(false);
+  });
 });

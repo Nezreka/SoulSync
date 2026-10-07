@@ -13,6 +13,7 @@ function dom() {
       <div class="sidebar-header"><div id="profile-indicator"></div></div>
     </div>
     <select id="sw-preview-preset"><option value="">Live weather</option></select>
+    <select id="sw-preview-holiday"><option value="">Holiday by date</option><option value="none">No holiday</option></select>
     <input type="date" id="sw-preview-date">
     <button id="sw-preview-reset" type="button">Back to live</button>
     <span id="sw-preview-status"></span>`;
@@ -66,23 +67,48 @@ describe('the weather preview controls', () => {
     await bootSidebarWeather();
     initWeatherPreviewSettings();
     expect(statusText()).toBe('Live weather');
-    expect(date().disabled).toBe(true);
 
     select().value = 'thunderstorm';
     change(select());
-    expect(getWeatherPreview()).toEqual({ preset: 'thunderstorm', date: null });
+    expect(getWeatherPreview()).toEqual({ preset: 'thunderstorm', date: null, holiday: '' });
     expect(statusText()).toBe('Previewing Thunderstorm');
-    expect(date().disabled).toBe(false);
 
     date().value = '2026-12-24';
     change(date());
-    expect(getWeatherPreview()).toEqual({ preset: 'thunderstorm', date: '2026-12-24' });
+    expect(getWeatherPreview()).toEqual({
+      preset: 'thunderstorm',
+      date: '2026-12-24',
+      holiday: '',
+    });
     expect(statusText()).toBe('Previewing Thunderstorm on 2026-12-24');
 
     document.getElementById('sw-preview-reset')!.click();
     expect(getWeatherPreview()).toBeNull();
     expect(select().value).toBe('');
     expect(statusText()).toBe('Live weather');
+  });
+
+  it('a holiday alone previews over the live sky; a date alone picks the holiday', async () => {
+    await bootSidebarWeather();
+    initWeatherPreviewSettings();
+    const holiday = document.getElementById('sw-preview-holiday') as HTMLSelectElement;
+    expect([...holiday.options].map((o) => o.value)).toEqual([
+      '',
+      'none',
+      'halloween',
+      'thanksgiving',
+      'lunar-new-year',
+    ]);
+
+    holiday.value = 'lunar-new-year';
+    change(holiday);
+    expect(getWeatherPreview()).toEqual({ preset: '', date: null, holiday: 'lunar-new-year' });
+    expect(statusText()).toBe('Previewing live sky, Lunar New Year');
+
+    holiday.value = '';
+    date().value = '2026-10-31';
+    change(date());
+    expect(getWeatherPreview()).toEqual({ preset: '', date: '2026-10-31', holiday: '' });
   });
 
   it('says so when there is no weather line to paint over', async () => {

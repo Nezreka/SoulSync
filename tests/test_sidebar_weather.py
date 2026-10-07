@@ -484,7 +484,8 @@ def test_get_feature_off_with_no_location(client, monkeypatch):
     _fake_http(monkeypatch)
     body = client.get("/api/weather").get_json()
     assert body == {"success": True, "enabled": True, "location": None,
-                    "units": "fahrenheit", "snapshot": None, "scene": None}
+                    "units": "fahrenheit", "snapshot": None, "scene": None,
+                    "holidays": True}
     assert _forecast_calls([]) == []
 
 
@@ -704,3 +705,21 @@ def test_fetch_snapshot_tolerates_a_provider_without_the_scene_fields(monkeypatc
     assert (cur["wind_direction"], cur["wind_gusts"], cur["is_day"],
             cur["cloud_cover"], cur["precipitation"]) == (None, None, None, None, None)
     assert snap["daily"][0]["sunrise"] is None
+
+
+# -- holiday decorations switch --
+
+def test_holidays_on_by_default_and_switchable(client, monkeypatch):
+    _fake_http(monkeypatch)
+    assert client.get("/api/weather").get_json()["holidays"] is True
+    resp = client.put("/api/weather/holidays", json={"enabled": False})
+    assert resp.get_json() == {"success": True, "holidays": False}
+    assert client.get("/api/weather").get_json()["holidays"] is False
+    client.put("/api/weather/holidays", json={"enabled": True})
+    assert client.get("/api/weather").get_json()["holidays"] is True
+
+
+def test_holidays_missing_key_400(client, monkeypatch):
+    _fake_http(monkeypatch)
+    resp = client.put("/api/weather/holidays", json={})
+    assert resp.status_code == 400

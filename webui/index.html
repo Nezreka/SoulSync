@@ -9755,6 +9755,18 @@
                                             </div>
 
                                             <div class="form-group">
+                                                <label for="sw-holidays"
+                                                    style="display:flex;align-items:center;gap:8px;">
+                                                    <input type="checkbox" id="sw-holidays" checked>
+                                                    Holiday decorations
+                                                </label>
+                                            </div>
+                                            <div class="help-text">
+                                                Halloween, Thanksgiving and Lunar New Year art in the sidebar for
+                                                the week around each, by your location's date.
+                                            </div>
+
+                                            <div class="form-group">
                                                 <label for="sw-celsius"
                                                     style="display:flex;align-items:center;gap:8px;">
                                                     <input type="checkbox" id="sw-celsius"
@@ -9792,16 +9804,20 @@
                                                     <select id="sw-preview-preset">
                                                         <option value="">Live weather</option>
                                                     </select>
+                                                    <select id="sw-preview-holiday" aria-label="Holiday">
+                                                        <option value="">Holiday by date</option>
+                                                        <option value="none">No holiday</option>
+                                                    </select>
                                                     <input type="date" id="sw-preview-date"
                                                         aria-label="Pretend date">
                                                     <button class="test-button" id="sw-preview-reset"
                                                         type="button">Back to live</button>
                                                 </div>
                                                 <div class="help-text">
-                                                    Shows any sky in the sidebar so you can check how it looks.
-                                                    Only this browser tab sees it and nothing is saved; the weather
-                                                    line reads "Preview" while it's on. The date pretends it's
-                                                    another day (season now, holiday scenes later).
+                                                    Shows any sky or holiday in the sidebar so you can check how it
+                                                    looks. Only this browser tab sees it and nothing is saved; the
+                                                    weather line reads "Preview" while it's on. The date pretends
+                                                    it's another day, which sets the season and the holiday.
                                                 </div>
                                             </div>
                                             <div class="form-group">
