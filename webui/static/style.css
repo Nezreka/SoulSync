@@ -70552,15 +70552,15 @@ body.max-performance {
 
 /* Server Activity — click-through to the SoulSync detail page */
 .sact-card--link { cursor: pointer; }
-.sact-card--link .sact-title { color: rgb(var(--vd-accent-rgb, 88 101 242)); }
+.sact-card--link .sact-title { color: rgb(var(--vd-accent-rgb, 88, 101, 242)); }
 .sact-card--link:hover .sact-title { filter: brightness(1.25); }
 /* a PERSISTENT 'Open' pill so it's obviously clickable (was hover-only, easy to miss) */
 .sact-open { display: inline-flex; align-items: center; margin-left: 8px; font-size: 9.5px; font-weight: 800;
-    letter-spacing: 0.04em; text-transform: uppercase; color: rgb(var(--vd-accent-rgb, 88 101 242));
-    background: rgba(var(--vd-accent-rgb, 88 101 242), 0.16); padding: 2px 7px; border-radius: var(--radius-sm);
+    letter-spacing: 0.04em; text-transform: uppercase; color: rgb(var(--vd-accent-rgb, 88, 101, 242));
+    background: rgba(var(--vd-accent-rgb, 88, 101, 242), 0.16); padding: 2px 7px; border-radius: var(--radius-sm);
     vertical-align: 2px; transition: all 0.15s ease; }
 .sact-open::after { content: 'Open ↗'; }
-.sact-card--link:hover .sact-open { background: rgba(var(--vd-accent-rgb, 88 101 242), 0.3); }
+.sact-card--link:hover .sact-open { background: rgba(var(--vd-accent-rgb, 88, 101, 242), 0.3); }
 
 /* ── Artist photo picker (hover overlay on the artist-detail hero image) ─── */
 /* Mirrors .enhanced-art-edit-overlay: invisible until hover, click opens the

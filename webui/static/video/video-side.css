@@ -819,14 +819,14 @@ body[data-side="video"] .dashboard-header-sweep {
 .vcal-acq--owned { color: #4ade80; border-color: rgba(74,222,128,0.32); background: rgba(74,222,128,0.1); }
 .vcal-acq--live  { color: #38bdf8; border-color: rgba(56,189,248,0.34); background: rgba(56,189,248,0.1); }
 .vcal-acq--bad   { color: #f87171; border-color: rgba(248,113,113,0.36); background: rgba(248,113,113,0.1); }
-.vcal-acq--want  { color: rgb(var(--vd-accent-rgb, 88 101 242)); border-color: rgba(var(--vd-accent-rgb, 88 101 242), 0.4); }
+.vcal-acq--want  { color: rgb(var(--vd-accent-rgb, 88, 101, 242)); border-color: rgba(var(--vd-accent-rgb, 88, 101, 242), 0.4); }
 .vcal-acq--mut   { opacity: 0.55; }
 .vcal-acq--miss  { color: #fbbf24; border-color: rgba(251,191,36,0.32); background: rgba(251,191,36,0.09); }
 /* The needs-action filter is the one that finds work, so it reads as such. */
 .vcal-filter-btn--needs.vcal-filter-btn--on { border-color: rgba(251,191,36,0.55); color: #fbbf24; }
 .vcm-badge--live { color: #38bdf8; border-color: rgba(56,189,248,0.34); }
 .vcm-badge--bad  { color: #f87171; border-color: rgba(248,113,113,0.36); }
-.vcm-badge--want { color: rgb(var(--vd-accent-rgb, 88 101 242)); }
+.vcm-badge--want { color: rgb(var(--vd-accent-rgb, 88, 101, 242)); }
 .vcm-badge--mut  { opacity: 0.6; }
 
 .vd-acq-section { margin: 0 0 26px; }
@@ -1044,13 +1044,13 @@ body[data-side="video"] .dashboard-header-sweep {
     background: var(--white-a06); border: 1px solid var(--white-a12);
     color: #fff; font-size: 13.5px;
 }
-.vd-yt-search-in:focus { outline: none; border-color: rgba(var(--vd-accent-rgb, 255 59 59), 0.6);
+.vd-yt-search-in:focus { outline: none; border-color: rgba(var(--vd-accent-rgb, 255, 59, 59), 0.6);
     background: var(--white-a09); }
 .vd-yt-sort {
     padding: 9px 12px; border-radius: 10px; background: var(--white-a06);
     border: 1px solid var(--white-a12); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
 }
-.vd-yt-sort:focus { outline: none; border-color: rgba(var(--vd-accent-rgb, 255 59 59), 0.6); }
+.vd-yt-sort:focus { outline: none; border-color: rgba(var(--vd-accent-rgb, 255, 59, 59), 0.6); }
 .vd-ep-info { min-width: 0; }
 .vd-ep-top { display: flex; align-items: baseline; gap: 12px; margin-bottom: 5px; }
 .vd-ep-title { font-size: 15.5px; font-weight: 700; color: #fff; }
@@ -1066,7 +1066,7 @@ body[data-side="video"] .dashboard-header-sweep {
 /* Continue Watching — per-episode watch state (server truth from the scan) */
 .vd-ep-prog { position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; height: 4px;
     background: var(--white-a25); }
-.vd-ep-prog-fill { display: block; height: 100%; background: rgb(var(--vd-accent-rgb, 255 59 59));
+.vd-ep-prog-fill { display: block; height: 100%; background: rgb(var(--vd-accent-rgb, 255, 59, 59));
     border-radius: 0 2px 2px 0; }
 .vd-ep-check { flex: none; font-size: 13px; font-weight: 900; color: #4ade80; line-height: 1;
     align-self: center; }
@@ -1075,10 +1075,10 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-ep--watched:hover .vd-ep-still { filter: grayscale(0.1) brightness(0.72); }
 .vd-ep-next-chip { flex: none; align-self: center; font-size: 10.5px; font-weight: 800;
     text-transform: uppercase; letter-spacing: 0.6px; padding: 3px 9px; border-radius: var(--radius-pill);
-    color: #fff; background: rgba(var(--vd-accent-rgb, 255 59 59), 0.85); white-space: nowrap; }
-.vd-ep--next { box-shadow: inset 3px 0 0 rgb(var(--vd-accent-rgb, 255 59 59));
-    background: rgba(var(--vd-accent-rgb, 255 59 59), 0.05); }
-.vd-ep--next:hover { background: rgba(var(--vd-accent-rgb, 255 59 59), 0.09); }
+    color: #fff; background: rgba(var(--vd-accent-rgb, 255, 59, 59), 0.85); white-space: nowrap; }
+.vd-ep--next { box-shadow: inset 3px 0 0 rgb(var(--vd-accent-rgb, 255, 59, 59));
+    background: rgba(var(--vd-accent-rgb, 255, 59, 59), 0.05); }
+.vd-ep--next:hover { background: rgba(var(--vd-accent-rgb, 255, 59, 59), 0.09); }
 /* hero: watched tag in the meta line + the S/E tag inside the play button */
 .vd-watched-tag { color: #4ade80 !important; font-weight: 700; }
 .vd-play-ep { font-weight: 800; padding: 2px 8px; border-radius: var(--radius-sm);
