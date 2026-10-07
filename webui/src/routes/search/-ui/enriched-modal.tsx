@@ -2,6 +2,7 @@ import { Dialog } from '@base-ui/react/dialog';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { DialogFrame } from '@/components/dialog';
+import { Spinner } from '@/components/primitives';
 
 import type { Assignment, EnrichedFile, EnrichedProvider, MatchResponse } from '../-basic.enriched';
 import type { DownloadTarget } from '../-basic.types';
@@ -316,7 +317,7 @@ export function EnrichedModal({
                 spellCheck={false}
               />
               {searching ? (
-                <span className={styles.spinner} role="status" aria-label="Searching" />
+                <Spinner className={styles.spinner} size={14} label="Searching" />
               ) : null}
             </label>
 

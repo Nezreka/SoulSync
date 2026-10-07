@@ -17,6 +17,7 @@ import {
   searchWishlistBook,
   setNarratorMode,
 } from '@/routes/audiobooks/-audiobooks.api';
+import { Spinner } from '@/components/primitives';
 import { AudiobookReleasesModal } from '@/routes/audiobooks/-ui/audiobook-releases-modal';
 
 import styles from './wishlist-audiobooks.module.css';
@@ -322,7 +323,7 @@ export function WishlistAudiobooks({
             >
               {searching ? (
                 <>
-                  <span className={styles.searchNowSpinner} />
+                  <Spinner size={14} tone="light" />
                   Searching…
                 </>
               ) : (
@@ -424,7 +425,7 @@ export function WishlistAudiobooks({
         >
           {searching ? (
             <>
-              <span className={styles.searchNowSpinner} />
+              <Spinner size={14} tone="light" />
               Searching…
             </>
           ) : (

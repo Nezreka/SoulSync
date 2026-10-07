@@ -2182,21 +2182,6 @@
   color: var(--white-a60);
 }
 
-.spinner {
-  width: 18px;
-  height: 18px;
-  border-radius: var(--radius-circle);
-  border: 2px solid var(--white-a15);
-  border-top-color: rgba(var(--accent-rgb), 1);
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .releaseList {
   list-style: none;
   margin: 0;

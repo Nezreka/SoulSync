@@ -86,21 +86,6 @@
   font-size: 14px;
 }
 
-.issuesSpinner {
-  width: 20px;
-  height: 20px;
-  border: 2px solid var(--white-a10);
-  border-top-color: rgba(var(--accent-light-rgb), 0.7);
-  border-radius: var(--radius-circle);
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .issuesEmptyIcon {
   font-size: 40px;
   margin-bottom: 12px;

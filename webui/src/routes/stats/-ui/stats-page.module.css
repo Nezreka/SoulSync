@@ -254,13 +254,7 @@
   border: 2px solid rgba(var(--accent-rgb), 0.2);
   border-top-color: rgb(var(--accent-rgb));
   border-radius: var(--radius-circle);
-  animation: spin 0.75s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  animation: global(spin) 0.75s linear infinite;
 }
 
 .statsSyncControls {

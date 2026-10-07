@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 
+import { Spinner } from '@/components/primitives';
+
 import type { AudiobookBlockedRelease, AudiobookRecycledBook } from '../-audiobooks.types';
 
 import {
@@ -156,7 +158,7 @@ export function AudiobookReviewModal({
         <div className={styles.modalBody}>
           {loading ? (
             <div className={styles.modalLoading}>
-              <span className={styles.spinner} aria-hidden="true" />
+              <Spinner size={18} />
               Loading…
             </div>
           ) : pane === 'recycle' ? (

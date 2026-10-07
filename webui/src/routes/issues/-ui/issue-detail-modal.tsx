@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { DialogBody, DialogFooter, DialogFrame, DialogHeader } from '@/components/dialog';
 import { Button } from '@/components/form';
-import { Show } from '@/components/primitives';
+import { Show, Spinner } from '@/components/primitives';
 import { useProfile } from '@/platform/shell/route-controllers';
 import {
   launchAlbumDownloadWorkflow,
@@ -489,7 +489,7 @@ export function IssueDetailModal({
     if (queryLoading) {
       return (
         <div className={styles.issuesLoading}>
-          <div className={styles.issuesSpinner} />
+          <Spinner size={20} tone="soft" />
           Loading issue details...
         </div>
       );

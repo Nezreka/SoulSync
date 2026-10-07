@@ -34,22 +34,6 @@
   }
 }
 
-.searchNowSpinner {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--white-a30);
-  border-top-color: #fff;
-  border-radius: var(--radius-circle);
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .notice {
   margin: 0;
   padding: 12px 18px;

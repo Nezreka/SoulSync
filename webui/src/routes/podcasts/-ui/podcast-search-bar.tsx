@@ -1,3 +1,5 @@
+import { Spinner } from '@/components/primitives';
+
 import styles from './podcasts-page.module.css';
 
 interface PodcastSearchBarProps {
@@ -127,7 +129,7 @@ export function PodcastSearchBar({
       <div className={styles.searchBarWrapper}>
         <span className={styles.searchIcon}>
           {isSearching ? (
-            <div className={styles.spinner} style={{ width: 16, height: 16, borderWidth: 2 }} />
+            <Spinner size={16} tone="tinted" />
           ) : (
             <svg
               width="18"

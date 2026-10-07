@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Select, TextInput } from '@/components/form';
 import { PageHeader } from '@/components/page-header';
-import { Show } from '@/components/primitives';
+import { Show, Spinner } from '@/components/primitives';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type {
@@ -536,7 +536,7 @@ function IssueBoardList({
     if (issuesLoading) {
       return (
         <div className={styles.issuesLoading}>
-          <div className={styles.issuesSpinner} />
+          <Spinner size={20} tone="soft" />
           Loading issues...
         </div>
       );
