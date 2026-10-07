@@ -6426,6 +6426,28 @@ class MusicDatabase:
             logger.error(f"Error saving plex home user for profile {profile_id}: {e}")
             return False
 
+    def get_profile_by_plex_user(self, plex_user_id: str) -> Optional[Dict[str, Any]]:
+        """the profile linked to a plex.tv user id (a home-user link or a plex
+        sign-in), or None. {'id', 'name', 'is_admin', 'disabled'}"""
+        if not plex_user_id:
+            return None
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(profiles)")
+                has_disabled = any(c[1] == 'disabled' for c in cursor.fetchall())
+                cursor.execute(
+                    f"SELECT id, name, is_admin{', disabled' if has_disabled else ''} FROM profiles "
+                    "WHERE plex_home_user_id = ? ORDER BY id LIMIT 1", (str(plex_user_id),))
+                row = cursor.fetchone()
+            if not row:
+                return None
+            return {'id': row['id'], 'name': row['name'], 'is_admin': bool(row['is_admin']),
+                    'disabled': bool(row['disabled']) if has_disabled else False}
+        except Exception as e:
+            logger.error(f"Error looking up profile by plex user {plex_user_id}: {e}")
+            return None
+
     def get_profile_plex_home_user(self, profile_id: int) -> Optional[Dict[str, str]]:
         """{'id', 'title', 'token'} for the profile's linked plex home user,
         or None when it has none (act as the app account, as always)."""

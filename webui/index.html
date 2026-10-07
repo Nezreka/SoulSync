@@ -200,6 +200,11 @@
                     autocomplete="current-password" maxlength="200" style="letter-spacing: normal;"
                     onkeydown="if(event.key==='Enter') submitLogin()">
                 <button id="login-submit" class="launch-pin-submit" onclick="submitLogin()">Sign in</button>
+                <!-- shown when sign in with plex is on (webui/src/shell/plex-signin.ts) -->
+                <div id="login-plex" class="login-plex" hidden>
+                    <span class="login-plex-or">or</span>
+                    <button id="login-plex-button" type="button" class="login-plex-button">Sign in with Plex</button>
+                </div>
                 <p id="login-error" class="launch-pin-error" style="display: none;"></p>
                 <button class="launch-pin-forgot" onclick="showLoginRecovery()">Forgot password?</button>
             </div>
@@ -9216,6 +9221,28 @@
                                                         Replaces the profile picker + PIN with a sign-in screen. Best
                                                         for instances exposed to the internet.
                                                     </div>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label class="toggle-label">
+                                                        <input type="checkbox" id="security-plex-signin">
+                                                        <span>Sign in with Plex</span>
+                                                    </label>
+                                                    <div class="setting-help-text">
+                                                        Adds a "Sign in with Plex" button to the sign-in screen. Anyone
+                                                        with access to your Plex server signs in with their Plex account
+                                                        (SoulSync never sees their password), and their playlists sync to
+                                                        their own Plex account. The server's owner signs in as the admin.
+                                                        Needs Plex as a media server and internet access to plex.tv.
+                                                    </div>
+                                                    <label class="toggle-label" style="margin-top: 8px;">
+                                                        <input type="checkbox" id="security-plex-signin-auto-create" checked>
+                                                        <span>Create a profile the first time someone signs in</span>
+                                                    </label>
+                                                    <label class="toggle-label">
+                                                        <input type="checkbox" id="security-plex-signin-can-download">
+                                                        <span>New Plex profiles can download (off: request-only)</span>
+                                                    </label>
                                                 </div>
                                             </div>
 

@@ -23179,7 +23179,8 @@ _cfg_autom(get_database_=get_database, config_manager_=config_manager,
 app.register_blueprint(_bp_autom())
 # Login/session endpoints (api/login.py).
 from api.login import configure as _cfg_login, create_blueprint as _bp_login
-_cfg_login(get_database_=get_database)
+_cfg_login(get_database_=get_database, config_manager_=config_manager,
+           get_plex_client_=lambda: media_server_engine.client('plex') if media_server_engine else None)
 app.register_blueprint(_bp_login())
 # Quarantine review endpoints (api/quarantine.py).
 from api.quarantine import configure as _cfg_quar, create_blueprint as _bp_quar

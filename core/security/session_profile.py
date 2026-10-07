@@ -50,6 +50,7 @@ _ALLOWED_GET = frozenset({
     '/api/profiles/current',
     '/api/setup/status',
     '/api/auth/recovery-question',
+    '/api/auth/plex/available',      # sign in with plex: show the button or not
 })
 
 _ALLOWED_POST = frozenset({
@@ -60,6 +61,8 @@ _ALLOWED_POST = frozenset({
     '/api/auth/login',
     '/api/auth/logout',
     '/api/auth/recovery-reset',
+    '/api/auth/plex/start',          # sign in with plex: the pin, bound to this session
+    '/api/auth/plex/check',          # sign in with plex: poll it, sign in on approval
 })
 
 

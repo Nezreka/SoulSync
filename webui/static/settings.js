@@ -3558,6 +3558,12 @@ async function loadSettingsData() {
             if (authHeader) authHeader.value = settings.security?.auth_proxy_header || '';
             const reqLogin = document.getElementById('security-require-login');
             if (reqLogin) reqLogin.checked = settings.security?.require_login || false;
+            const plexSignin = document.getElementById('security-plex-signin');
+            if (plexSignin) plexSignin.checked = settings.security?.plex_signin || false;
+            const plexCreate = document.getElementById('security-plex-signin-auto-create');
+            if (plexCreate) plexCreate.checked = settings.security?.plex_signin_auto_create !== false;
+            const plexDl = document.getElementById('security-plex-signin-can-download');
+            if (plexDl) plexDl.checked = settings.security?.plex_signin_default_can_download || false;
 
             // Check if admin has a PIN set
             const profilesRes = await fetch('/api/profiles');
@@ -6553,6 +6559,9 @@ async function saveSettings(quiet = false) {
             trust_reverse_proxy: _cfgBool('security-trust-proxy'),
             auth_proxy_header: _cfgStr('security-auth-proxy-header', { trim: true }),
             require_login: _cfgBool('security-require-login'),
+            plex_signin: _cfgBool('security-plex-signin'),
+            plex_signin_auto_create: _cfgBool('security-plex-signin-auto-create'),
+            plex_signin_default_can_download: _cfgBool('security-plex-signin-can-download'),
         }
     };
 

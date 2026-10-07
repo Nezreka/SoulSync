@@ -89027,3 +89027,44 @@ body.src-modal-open { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
     #dashboard-page .dash-hero-library .scanning .library-status-dot { animation: none; }
 }
+/* sign in with plex on the login screen (webui/src/shell/plex-signin.ts) */
+.login-plex {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    margin-top: 14px;
+}
+.login-plex[hidden] {
+    display: none;
+}
+.login-plex-or {
+    text-align: center;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.4);
+}
+.login-plex-button {
+    padding: 12px 16px;
+    border-radius: 10px;
+    border: 1px solid rgba(229, 160, 13, 0.55);
+    background: rgba(229, 160, 13, 0.12);
+    color: #f3c35b;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+.login-plex-button:hover:not(:disabled) {
+    background: rgba(229, 160, 13, 0.22);
+    border-color: rgba(229, 160, 13, 0.85);
+}
+.login-plex-button:focus-visible {
+    outline: 2px solid #e5a00d;
+    outline-offset: 2px;
+}
+.login-plex-button:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}

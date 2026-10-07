@@ -57,6 +57,7 @@ import {
   toggleOriginGroup,
 } from './origin-history';
 import './server-activity';
+import { initPlexSignIn } from './plex-signin';
 import {
   closeServiceSwitchModal,
   openServiceSwitchModal,
@@ -151,8 +152,12 @@ export const SHELL_WINDOW_EXPORTS = {
 Object.assign(window, SHELL_WINDOW_EXPORTS);
 startDiscoverInboxBadge();
 initSidebarWeather();
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initWeatherPreviewSettings, { once: true });
-} else {
+const onReady = () => {
   initWeatherPreviewSettings();
+  void initPlexSignIn();
+};
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', onReady, { once: true });
+} else {
+  onReady();
 }
