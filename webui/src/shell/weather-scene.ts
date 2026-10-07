@@ -418,6 +418,25 @@ interface Star {
   ph: number;
 }
 
+interface Satellite {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  age: number;
+  /** seconds between glints */
+  period: number;
+  ph: number;
+  glint?: number;
+}
+
+/** the bright ones you can pick out without a telescope */
+const PLANETS: Array<[string, string]> = [
+  ['venus', '255,244,214'],
+  ['jupiter', '246,232,204'],
+  ['mars', '255,178,140'],
+];
+
 const TRAIL = 72;
 /** a trail point every 1/60 s, whatever the display's refresh rate */
 const TRAIL_STEP = 1 / 60;
@@ -467,6 +486,13 @@ export function createWeatherScene(
   let stars: Star[] = [];
   let shooting: { x: number; y: number; vx: number; vy: number; age: number } | null = null;
   let nextShooting = rand(8, 20);
+  // a clear night's two quiet wanderers: a planet that holds still and
+  // doesn't twinkle (that's how you tell it from a star), and a satellite
+  // gliding over, glinting as it tumbles
+  let planet: { x: number; y: number; sprite: Sprite } | null = null;
+  let satellite: Satellite | null = null;
+  let nextSatellite = rand(2, 6);
+  let satelliteGlow = 0;
   let flash = 0; // lightning, 0..1
   let flashX = 0.5;
   let nextFlash = rand(4, 9);
@@ -571,6 +597,11 @@ export function createWeatherScene(
     }
 
     stars = [];
+    planet = null;
+    if (night && cond.cloudCover < 0.6) {
+      const [, rgb] = PLANETS[Math.floor(rng() * PLANETS.length)];
+      planet = { x: rand(0.18, 0.82) * w, y: rand(0.07, 0.3) * h, sprite: softDot(rgb) };
+    }
     if (night) {
       const clearness = 1 - smoothstep(0.2, 0.95, cond.cloudCover);
       const n = Math.round(72 * k * clearness);
@@ -761,6 +792,41 @@ export function createWeatherScene(
         shooting.y += shooting.vy * dt;
         if (shooting.age > 0.95) shooting = null;
       }
+
+      nextSatellite -= dt;
+      if (!satellite && nextSatellite <= 0) {
+        const dir = rng() < 0.5 ? -1 : 1;
+        const speed = (w + 40) / rand(22, 34); // a slow, steady crossing
+        satellite = {
+          x: dir > 0 ? -10 : w + 10,
+          y: rand(0.05, 0.55) * h,
+          vx: dir * speed,
+          vy: speed * rand(-0.14, 0.14),
+          age: 0,
+          period: rand(1.6, 3),
+          ph: rand(0, 3),
+        };
+      }
+      satelliteGlow = 0;
+      if (satellite) {
+        const sat = satellite;
+        sat.age += dt;
+        sat.x += sat.vx * dt;
+        sat.y += sat.vy * dt;
+        if (sat.x < -20 || sat.x > w + 20 || sat.y < -20 || sat.y > h + 20) {
+          satellite = null;
+          nextSatellite = rand(18, 40);
+        } else {
+          // a glint every period: a quick swell and back, like sunlight
+          // catching a tumbling panel
+          const p = (sat.age + sat.ph) % sat.period;
+          const near = Math.min(p, sat.period - p);
+          const glint = Math.exp(-((near / 0.1) ** 2));
+          const edge = Math.min(sat.x + 10, w + 10 - sat.x) / 30;
+          satelliteGlow = (0.4 + 0.6 * glint) * clamp(edge, 0, 1) * smoothstep(0, 1.2, sat.age);
+          sat.glint = glint;
+        }
+      }
     }
 
     if (storm) {
@@ -835,6 +901,28 @@ export function createWeatherScene(
           ctx.globalAlpha = s.a * tw;
           const d = s.r * 2.4;
           drawSprite(starDot, s.x - d / 2, s.y - d / 2, d, d);
+        }
+        if (planet?.sprite) {
+          // steady: a planet's light doesn't twinkle, only breathes a touch
+          const clear = 1 - smoothstep(0.2, 0.6, cond.cloudCover);
+          const breath = 0.95 + 0.05 * Math.sin(t * 0.3);
+          ctx.globalAlpha = 0.34 * clear * breath;
+          drawSprite(planet.sprite, planet.x - 12, planet.y - 12, 24, 24);
+          ctx.globalAlpha = clear * breath;
+          drawSprite(planet.sprite, planet.x - 3.2, planet.y - 3.2, 6.4, 6.4);
+        }
+        if (satellite && satelliteGlow > 0.01) {
+          const g = satellite.glint ?? 0;
+          // between glints a faint steady point; at a glint it flares
+          // brighter than any star, with a brief halo
+          if (g > 0.05) {
+            const halo = 6 + 12 * g;
+            ctx.globalAlpha = satelliteGlow * 0.45 * g;
+            drawSprite(starDot, satellite.x - halo / 2, satellite.y - halo / 2, halo, halo);
+          }
+          const d = 2.2 + 3.4 * g;
+          ctx.globalAlpha = Math.min(1, satelliteGlow * (1 + 0.4 * g));
+          drawSprite(starDot, satellite.x - d / 2, satellite.y - d / 2, d, d);
         }
         if (shooting) {
           const life = shooting.age / 0.95;
@@ -1067,6 +1155,8 @@ export function createWeatherScene(
         streams: streams.length,
         leaves: leafList.length,
         stars: stars.length,
+        planet: planet ? 1 : 0,
+        satellite: satelliteGlow,
         flash,
         driftX,
       };

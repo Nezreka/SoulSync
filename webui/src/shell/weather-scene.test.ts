@@ -362,3 +362,43 @@ describe('presets', () => {
     expect(presetConditions('breezy', new Date('2026-10-31T12:00:00Z'))!.season).toBe('autumn');
   });
 });
+
+describe('a clear night', () => {
+  function watch(cond: Partial<SceneConditions>, seconds: number) {
+    const ctx = fakeCtx();
+    const eng = createWeatherScene(
+      ctx as unknown as CanvasRenderingContext2D,
+      { ...CALM, ...cond },
+      seeded(),
+    );
+    eng.resize(260, 900, 2);
+    const glow: number[] = [];
+    let t = 0;
+    for (let i = 0; i < seconds * 60; i++) {
+      t += 1 / 60;
+      eng.frame(1 / 60, t);
+      glow.push(eng.stats().satellite);
+    }
+    return { eng, glow };
+  }
+
+  it('has a planet, but only at night and only when the sky is clear enough', () => {
+    expect(run({ isDay: false }).stats.planet).toBe(1);
+    expect(run({ isDay: true }).stats.planet).toBe(0);
+    expect(run({ isDay: false, cloudCover: 0.9 }).stats.planet).toBe(0);
+  });
+
+  it('a satellite crosses and glints: faint between glints, bright at them', () => {
+    const { glow } = watch({ isDay: false }, 40);
+    const visible = glow.filter((g) => g > 0.01);
+    expect(visible.length).toBeGreaterThan(60 * 10); // it takes its time crossing
+    expect(Math.max(...visible)).toBeGreaterThan(0.85);
+    // between glints it rests near its faint steady level
+    expect(visible.filter((g) => g < 0.5).length).toBeGreaterThan(visible.length / 2);
+  });
+
+  it('no satellite by day or under cloud', () => {
+    expect(Math.max(...watch({ isDay: true }, 40).glow)).toBe(0);
+    expect(Math.max(...watch({ isDay: false, cloudCover: 0.8 }, 40).glow)).toBe(0);
+  });
+});
