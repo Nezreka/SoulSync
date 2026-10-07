@@ -126,3 +126,53 @@ def test_a_failed_info_lookup_still_aborts_early():
     a = QBittorrentAdapter()
     a._call = lambda method, path, **kw: None
     assert a._add_torrent_sync(_MAGNET, "soulsync", None) is None
+
+
+# ── a .torrent FILE the client already holds (mam hands these out) ───────────
+
+def _bencode(value):
+    if isinstance(value, int):
+        return b"i%de" % value
+    if isinstance(value, bytes):
+        return b"%d:%s" % (len(value), value)
+    if isinstance(value, str):
+        return _bencode(value.encode())
+    if isinstance(value, list):
+        return b"l" + b"".join(_bencode(v) for v in value) + b"e"
+    keys = sorted(value)
+    return b"d" + b"".join(_bencode(k) + _bencode(value[k]) for k in keys) + b"e"
+
+
+_INFO = {"name": "The Reckoning", "piece length": 16384, "pieces": b"x" * 20,
+         "files": [{"length": 5, "path": ["01.mp3"]}]}
+_TORRENT = _bencode({"announce": "https://tracker.invalid/a", "info": _INFO})
+
+
+def _file_hash():
+    import hashlib
+    return hashlib.sha1(_bencode(_INFO)).hexdigest()
+
+
+def test_the_info_hash_of_a_torrent_file_is_read():
+    from core.quality.torrent_contents import torrent_info_hash
+    assert torrent_info_hash(_TORRENT) == _file_hash()
+
+
+def test_the_info_hash_never_raises_on_junk():
+    from core.quality.torrent_contents import torrent_info_hash
+    for bad in (None, b"", b"not bencode", b"d4:infoi1", b"le", 42):
+        assert torrent_info_hash(bad) is None
+
+
+def test_a_torrent_file_the_client_already_holds_is_adopted():
+    a = _adapter([_file_hash()], "Fails.")
+    assert a._add_torrent_file_sync(_TORRENT, "audiobooks", None) == _file_hash()
+    # adopted without sending it again
+    assert ("POST", "/api/v2/torrents/add") not in a._calls
+
+
+def test_a_new_torrent_file_is_still_added():
+    a = _adapter(["0" * 40], "Fails.")
+    a._poll_for_new_hash = lambda before: None
+    assert a._add_torrent_file_sync(_TORRENT, "audiobooks", None) is None
+    assert ("POST", "/api/v2/torrents/add") in a._calls
