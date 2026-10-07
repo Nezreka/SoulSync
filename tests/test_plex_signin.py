@@ -411,3 +411,109 @@ def test_a_new_plex_profile_starts_on_finding_and_asking_not_the_machinery():
 def test_signup_pages_are_all_real_pages():
     assert set(plex_signin.SIGNUP_PAGES) <= web_server.VALID_PAGE_IDS
     assert 'settings' not in plex_signin.SIGNUP_PAGES
+
+
+# -- connect with plex, from my account --
+
+def _member(name=None):
+    db = web_server.get_database()
+    return db.create_profile(name=name or f'member{_uid()}')
+
+
+def _signed_in_as(pid):
+    c = web_server.app.test_client()
+    with c.session_transaction() as s:
+        s.clear()
+        s['profile_id'] = pid
+        s['login_authenticated'] = True
+    return c
+
+
+def test_connect_links_a_shared_friend_to_their_own_profile():
+    """a friend the server is shared with signs in with a password and has no
+    plex home user to pick. connecting proves their plex account instead"""
+    db = web_server.get_database()
+    pid = _member()
+    plex_id = str(int(uuid4().int % 10**9))
+    r = plex_signin.connect_profile(db, pid, PlexAccount(plex_id, 'maxnrose', 'their-server-token'))
+    assert r.error is None and r.profile_id == pid
+    assert db.get_profile_by_plex_account(plex_id)['id'] == pid
+    link = db.get_profile_plex_home_user(pid)
+    assert link['token'] == 'their-server-token' and link['title'] == 'maxnrose'
+    # and plex sign-in with that account now lands on this profile
+    again = plex_signin.sign_in(db, PlexAccount(plex_id, 'maxnrose', 'fresh'),
+                                allow_create=False, default_can_download=False)
+    assert again.profile_id == pid
+
+
+def test_connect_refuses_what_it_should():
+    db = web_server.get_database()
+    pid, other = _member(), _member()
+    taken = str(int(uuid4().int % 10**9))
+    assert plex_signin.connect_profile(db, other, PlexAccount(taken, 'a', 'tok')).error is None
+    # one plex account, one profile
+    r = plex_signin.connect_profile(db, pid, PlexAccount(taken, 'a', 'tok'))
+    assert r.error and 'another' in r.error and db.get_profile_by_plex_account(taken)['id'] == other
+    # no access to this server
+    assert 'access' in plex_signin.connect_profile(db, pid, PlexAccount('5', 'b', None)).error
+    # the owner's account is the admin's, not a member's
+    r = plex_signin.connect_profile(db, pid, PlexAccount('6', 'owner', 'tok', owns_server=True))
+    assert r.error and 'owner' in r.error
+    assert db.get_profile_plex_home_user(pid) is None
+    # the admin connecting the owner account: nothing to do, not an error
+    assert plex_signin.connect_profile(db, 1, PlexAccount('6', 'owner', 'tok', owns_server=True)).error is None
+
+
+def test_connect_moves_their_recorded_plays_into_their_pile():
+    db = web_server.get_database()
+    pid = _member()
+    plex_id = str(int(uuid4().int % 10**9))
+    db.insert_listening_events([{
+        'track_id': f'rk-{plex_id}', 'title': 'Song', 'artist': f'Band{plex_id}', 'album': '',
+        'played_at': '2026-10-06 10:00:00', 'duration_ms': 1, 'server_source': 'plex',
+        'profile_id': 0, 'server_account_id': plex_id,
+    }])
+    plex_signin.connect_profile(db, pid, PlexAccount(plex_id, 'friend', 'tok'))
+    conn = db._get_connection()
+    try:
+        owner = conn.execute("SELECT profile_id FROM listening_history WHERE artist = ?",
+                             (f'Band{plex_id}',)).fetchone()[0]
+    finally:
+        conn.close()
+    assert owner == pid
+
+
+def test_connect_routes_full_flow(monkeypatch):
+    _config(monkeypatch)
+    acct = _stub_plex(monkeypatch, approve_after=1)
+    pid = _member()
+    c = _signed_in_as(pid)
+    start = c.post('/api/profiles/me/plex-connect/start')
+    assert start.status_code == 200 and start.get_json()['url'].startswith('https://app.plex.tv/')
+    assert c.post('/api/profiles/me/plex-connect/check').get_json() == {'success': True, 'pending': True}
+    done = c.post('/api/profiles/me/plex-connect/check').get_json()
+    assert done['success'] and done['pending'] is False and done['title'] == acct.username
+    assert web_server.get_database().get_profile_by_plex_account(acct.id)['id'] == pid
+
+
+def test_connect_pin_belongs_to_the_profile_that_started_it(monkeypatch):
+    """two profiles in one browser: the one that started it is the one linked"""
+    _config(monkeypatch)
+    acct = _stub_plex(monkeypatch, approve_after=0)
+    first, second = _member(), _member()
+    c = _signed_in_as(first)
+    c.post('/api/profiles/me/plex-connect/start')
+    with c.session_transaction() as s:
+        s['profile_id'] = second
+    assert c.post('/api/profiles/me/plex-connect/check').status_code == 400
+    assert web_server.get_database().get_profile_by_plex_account(acct.id) is None
+
+
+def test_connect_needs_a_profile_and_is_rate_limited(monkeypatch):
+    _config(monkeypatch)
+    _stub_plex(monkeypatch)
+    nobody = web_server.app.test_client()
+    assert nobody.post('/api/profiles/me/plex-connect/start').status_code == 401
+    c = _signed_in_as(_member())
+    codes = [c.post('/api/profiles/me/plex-connect/start').status_code for _ in range(10)]
+    assert codes[:8] == [200] * 8 and codes[8] == 429

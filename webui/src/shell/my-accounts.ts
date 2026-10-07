@@ -435,7 +435,7 @@ function _maServerLine(s: ServerModel): string {
     const lib = s.plexLibrary ? `, syncing to ${escapeHtml(s.plexLibrary)}` : '';
     return s.plexLinkedUser
       ? `You're ${escapeHtml(s.plexLinkedUser)} on Plex${lib}.`
-      : `Using the app's account${lib}. Pick who you are on Plex.`;
+      : `Using the app's account${lib}. Connect your Plex account to make it yours.`;
   }
   const user = s.jellyUsers?.find((u) => u.id === s.jellyUser)?.name;
   const lib = s.jellyLibraries?.find((l) => l.id === s.jellyLibrary)?.name;
@@ -489,11 +489,22 @@ function _maServerForm(s: ServerModel): string {
   if (s.type === 'plex') {
     const users = s.plexHomeUsers || [];
     const picked = users.find((u) => String(u.id) === s.plexHomeUserId);
+    // connect with plex: proves the account on plex's own page, so it works
+    // for everyone the server is shared with, not just plex home users
+    const connect = `
+      <div class="ma-actions">
+        <button type="button" class="ma-btn ma-btn-primary" data-ma="plex-connect">${
+          s.plexLinkedUser ? 'Connect a different Plex account' : 'Connect with Plex'
+        }</button>
+        ${s.plexLinkedUser ? '<button type="button" class="ma-btn ma-btn-quiet" data-ma="plex-unlink">Use app account</button>' : ''}
+      </div>`;
     const who = users.length
       ? `
+        <div class="ma-divider"></div>
+        <p class="ma-panel-text">Or pick a Plex Home user on this server.</p>
         ${_maField(
           'ma-plex-user',
-          'Who you are on Plex',
+          'Plex Home user',
           `<select class="ma-input" id="ma-plex-user">${_maOptions(
             users.map((u) => ({
               value: String(u.id),
@@ -508,12 +519,12 @@ function _maServerForm(s: ServerModel): string {
           <input class="ma-input" id="ma-plex-pin" type="password" inputmode="numeric" autocomplete="off" placeholder="Used once to link, never saved">
         </div>
         <div class="ma-actions">
-          ${s.plexLinkedUser ? '<button type="button" class="ma-btn ma-btn-quiet" data-ma="plex-unlink">Use app account</button>' : ''}
-          <button type="button" class="ma-btn ma-btn-primary" data-ma="plex-link">Link</button>
+          <button type="button" class="ma-btn ma-btn-quiet" data-ma="plex-link">Link Home user</button>
         </div>`
-      : '<p class="ma-panel-text">No Plex Home users on this server, so playlists go to the app account.</p>';
+      : '';
     return `
-      <p class="ma-panel-text">Pick who you are on Plex and the playlists you sync will belong to you there.</p>
+      <p class="ma-panel-text">Connect your own Plex account. The playlists you sync belong to you there, and what you play on Plex stays in your own listening history.</p>
+      ${connect}
       ${who}
       <div class="ma-divider"></div>
       ${_maField(
@@ -525,7 +536,7 @@ function _maServerForm(s: ServerModel): string {
           "Admin's default",
         )}</select>`,
       )}
-      <div class="ma-actions"><button type="button" class="ma-btn ma-btn-primary" data-ma="plex-lib-save">Save library</button></div>`;
+      <div class="ma-actions"><button type="button" class="ma-btn ma-btn-quiet" data-ma="plex-lib-save">Save library</button></div>`;
   }
   return `
     <p class="ma-panel-text">Choose which Jellyfin user and library your playlists sync to.</p>
@@ -719,6 +730,9 @@ function _maOnClick(e: Event): void {
       break;
     case 'plex-link':
       void _maPlexLink();
+      break;
+    case 'plex-connect':
+      void _maPlexConnect(btn);
       break;
     case 'plex-unlink':
       void _maServerCall(
@@ -946,4 +960,98 @@ async function _maPlexLink(): Promise<void> {
     { user_id: userId, pin },
     'Plex user linked, the playlists you sync belong to you there',
   );
+}
+
+const _MA_PLEX_POLL_MS = 1500;
+const _MA_PLEX_GIVE_UP_MS = 4 * 60_000;
+
+async function _maPost(
+  url: string,
+): Promise<{ ok: boolean; body: Record<string, unknown> } | null> {
+  try {
+    const res = await fetch(url, { method: 'POST', headers: { Accept: 'application/json' } });
+    let body: Record<string, unknown> = {};
+    try {
+      body = (await res.json()) as Record<string, unknown>;
+    } catch {
+      // the status says enough
+    }
+    return { ok: res.ok, body };
+  } catch {
+    return null;
+  }
+}
+
+/** the server's error message, or the fallback when it sent none */
+function _maError(body: Record<string, unknown> | undefined, fallback: string): string {
+  return typeof body?.error === 'string' && body.error ? body.error : fallback;
+}
+
+/**
+ * connect with plex: plex's own page in a popup (opened straight from the
+ * click so a blocker lets it through), then poll until plex says yes
+ */
+export async function _maPlexConnect(
+  button: HTMLElement | null,
+  openPopup: () => Window | null = () =>
+    window.open('', 'soulsync-plex-connect', 'width=520,height=720'),
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+): Promise<boolean> {
+  const btn = button instanceof HTMLButtonElement ? button : null;
+  const label = btn?.textContent || '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Waiting for Plex...';
+  }
+  const popup = openPopup();
+  try {
+    const start = await _maPost('/api/profiles/me/plex-connect/start');
+    const url = start?.body.url;
+    if (!start?.ok || typeof url !== 'string') {
+      popup?.close();
+      toast(_maError(start?.body, "Couldn't reach Plex. Try again in a moment."), 'error');
+      return false;
+    }
+    if (popup) popup.location.href = url;
+    else window.open(url, '_blank', 'noopener');
+    const until = Date.now() + _MA_PLEX_GIVE_UP_MS;
+    while (Date.now() < until) {
+      await sleep(_MA_PLEX_POLL_MS);
+      const check = await _maPost('/api/profiles/me/plex-connect/check');
+      if (!check) continue; // a blip; keep waiting
+      if (!check.ok) {
+        popup?.close();
+        toast(_maError(check.body, 'Connecting with Plex failed. Try again.'), 'error');
+        return false;
+      }
+      if (check.body.pending) {
+        if (popup?.closed) {
+          // closed without approving: one last look, then stop
+          const last = await _maPost('/api/profiles/me/plex-connect/check');
+          if (!(last?.ok && last.body.pending === false)) {
+            toast('Connecting with Plex was cancelled', 'info');
+            return false;
+          }
+          check.body = last.body;
+        } else {
+          continue;
+        }
+      }
+      popup?.close();
+      const who =
+        typeof check.body.title === 'string' && check.body.title ? check.body.title : 'you';
+      toast(`Connected to Plex as ${who}`, 'success');
+      _ma.open = null;
+      await _maLoad();
+      return true;
+    }
+    popup?.close();
+    toast('Connecting with Plex timed out. Try again.', 'error');
+    return false;
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  }
 }

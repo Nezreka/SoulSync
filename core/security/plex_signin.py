@@ -187,6 +187,40 @@ def _sign_in(db, account: PlexAccount, *, allow_create: bool, default_can_downlo
     return SignInResult(profile_id=profile_id, created=True)
 
 
+def connect_profile(db, profile_id: int, account: PlexAccount) -> SignInResult:
+    """connect with plex from my account: link a signed-in profile to the
+    plex account it just proved on plex's page. after this the profile acts
+    as that user on the server (playlists), its plays file into its own
+    listening pile, and plex sign-in lands on it"""
+    with _sign_in_lock:
+        return _connect_profile(db, profile_id, account)
+
+
+def _connect_profile(db, profile_id: int, account: PlexAccount) -> SignInResult:
+    if not account.server_token:
+        return SignInResult(error="That Plex account doesn't have access to this server")
+    if account.owns_server:
+        # the owner is the admin, who acts as the app account already
+        if profile_id == _admin_profile_id(db):
+            return SignInResult(profile_id=profile_id)
+        return SignInResult(error="That's the server owner's Plex account. Connect your own.")
+    holder = db.get_profile_by_plex_account(account.id)
+    if holder and holder.get("id") != profile_id:
+        # one plex account, one profile: sign-in has to know where it lands
+        return SignInResult(error="That Plex account is connected to another SoulSync profile")
+    if not db.set_profile_plex_account(profile_id, account.id):
+        return SignInResult(error="Couldn't save the Plex connection")
+    db.set_profile_plex_home_user(profile_id, account.id, account.username, account.server_token)
+    logger.info("Plex connect: profile %s is Plex user '%s'", profile_id, account.username)
+    try:
+        # their plays already recorded move to their own pile now, not at the next poll
+        from core.listening_scope import reattribute_media_plays
+        reattribute_media_plays(db, "plex")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Plex connect: re-filing plays failed, the next poll will: %s", e)
+    return SignInResult(profile_id=profile_id)
+
+
 def profile_name_for(username: str) -> str:
     """a profile name from a plex username. it comes from outside, so only
     plain characters survive: letters, digits, spaces and . _ -. no quotes,
