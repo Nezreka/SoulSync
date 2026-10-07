@@ -104,3 +104,34 @@ def with_song_first_pass(client: Any, title: str, artist: str = "") -> Any:
     if not title or not isinstance(client, DeezerClient):
         return client
     return _SongFirstPass(client, title, (artist or "").strip())
+
+
+def search_typed_query(client: Any, query: str, limit: int = 10, **kwargs) -> List[Any]:
+    """``client.search_tracks(query)`` for a query a person typed into a search box.
+
+    Deezer's free text ranks reprises and karaoke above the real song and can
+    leave it out of the page, so for "Auli'i Cravalho How Far I'll Go" the
+    original never reaches the list. When the query names an artist (found from
+    the plain results' own artist names), also run ``track:"title" artist`` and
+    put those results first. Any other source, a query that names no artist, or
+    a failure of the extra search returns the plain results unchanged.
+    """
+    plain = client.search_tracks(query, limit=limit, **kwargs)
+
+    from core.deezer_client import DeezerClient
+
+    if kwargs or not isinstance(client, DeezerClient) or not plain:
+        return plain
+    try:
+        from core.deezer_track_query import artist_scoped_query, merge_by_id
+
+        names = [a for t in plain for a in (getattr(t, "artists", None) or []) if isinstance(a, str)]
+        scoped_query = artist_scoped_query(query, names)
+        if not scoped_query:
+            return plain
+        scoped = client.search_tracks(scoped_query, limit=limit)
+        return merge_by_id(scoped, plain, limit=limit)
+    except Exception as e:  # the plain results still stand
+        logger.debug("typed-query exact-title search failed for %r: %s", query, e)
+        return plain
+

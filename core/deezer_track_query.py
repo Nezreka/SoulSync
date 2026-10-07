@@ -95,3 +95,34 @@ def exact_title_queries(query: str, artist_names: Iterable[str]) -> List[str]:
         return [f'track:"{_clean_phrase(title)}" {_clean_phrase(artist)}']
     title = _clean_phrase(fold(query))
     return [f'track:"{title}"'] if len(title) >= _MIN_TITLE_CHARS else []
+
+
+def artist_scoped_query(query: str, artist_names: Iterable[str]) -> Optional[str]:
+    """``track:"title" artist`` only when the query names an artist.
+
+    For a search box where people type an artist, an album or a title: with no
+    artist found there is nothing to scope by, and treating the whole query as a
+    title would put songs that merely share a name with the artist first, so
+    this returns None and the plain results stand.
+    """
+    names = list(artist_names or [])
+    if not split_query_by_artist(query, names):
+        return None
+    queries = exact_title_queries(query, names)
+    return queries[0] if queries else None
+
+
+def merge_by_id(*lists, limit: Optional[int] = None) -> list:
+    """Concatenate result lists (dicts with ``id`` or objects with ``.id``),
+    keeping the first of each id."""
+    seen = set()
+    out = []
+    for items in lists:
+        for item in items or []:
+            key = item.get("id") if isinstance(item, dict) else getattr(item, "id", None)
+            key = str(key) if key not in (None, "") else id(item)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(item)
+    return out[:limit] if limit else out

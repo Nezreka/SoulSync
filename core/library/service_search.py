@@ -324,6 +324,20 @@ def _search_service(service, entity_type, query):
             data = resp.json().get('data', [])
         except Exception:
             data = []
+        if entity_type == 'track' and data:
+            # the plain search can leave the real song out of its 8 results; for
+            # a query that names an artist, put the exact-title results first
+            try:
+                from core.deezer_track_query import artist_scoped_query, merge_by_id
+                names = [(i.get('artist') or {}).get('name') for i in data if isinstance(i.get('artist'), dict)]
+                scoped_query = artist_scoped_query(query, [n for n in names if n])
+                if scoped_query:
+                    wait_for_slot()
+                    scoped = req_lib.get('https://api.deezer.com/search/track',
+                                         params={'q': scoped_query, 'limit': 8}, timeout=10).json().get('data', [])
+                    data = merge_by_id(scoped, data, limit=8)
+            except Exception as e:
+                logger.debug("deezer exact-title search skipped for %r: %s", query, e)
         results = []
         for item in data:
             if entity_type == 'artist':
