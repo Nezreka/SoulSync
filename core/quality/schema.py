@@ -29,6 +29,13 @@ from utils.logging_config import get_logger
 
 logger = get_logger("database.quality_schema")
 
+RELEASE_IMPORT_MODES = ("requested_tracks", "complete_album")
+
+
+def normalize_release_import_mode(value: Any) -> str:
+    """Album expansion is opt-in; missing or malformed policy keeps track-only imports."""
+    return value if isinstance(value, str) and value in RELEASE_IMPORT_MODES else "requested_tracks"
+
 
 # --- Quality profiles --------------------------------------------------------
 # ``upgrade_policy='until_cutoff'`` is the Lidarr-like "keep searching/
@@ -62,6 +69,7 @@ CREATE TABLE IF NOT EXISTS quality_profiles (
     rank_candidates_by_quality INTEGER NOT NULL DEFAULT 0,
     upgrade_policy TEXT NOT NULL DEFAULT 'acceptable', -- 'acceptable'|'until_cutoff'|'until_top'
     upgrade_cutoff_index INTEGER NOT NULL DEFAULT 0,
+    release_import_mode TEXT NOT NULL DEFAULT 'requested_tracks',
     acoustid_required INTEGER NOT NULL DEFAULT 0,
     downsample_enabled INTEGER NOT NULL DEFAULT 0,
     deep_audio_verify INTEGER NOT NULL DEFAULT 0,
@@ -85,6 +93,8 @@ _INDEXES = (
 # Columns added after the initial schema shipped -- applied to existing installs via
 # a PRAGMA-probe ALTER (SQLite has no ADD COLUMN IF NOT EXISTS). (table, column, ddl).
 _ADDED_COLUMNS = (
+    ("quality_profiles", "release_import_mode",
+     "ALTER TABLE quality_profiles ADD COLUMN release_import_mode TEXT NOT NULL DEFAULT 'requested_tracks'"),
     ("quality_profiles", "upgrade_policy",
      "ALTER TABLE quality_profiles ADD COLUMN upgrade_policy TEXT NOT NULL DEFAULT 'acceptable'"),
     ("quality_profiles", "upgrade_cutoff_index",
@@ -203,5 +213,7 @@ def ensure_quality_profiles_schema(connection: Any) -> None:
 
 __all__ = [
     "ensure_quality_profiles_schema",
+    "RELEASE_IMPORT_MODES",
+    "normalize_release_import_mode",
     "QUALITY_PROFILES_DDL",
 ]

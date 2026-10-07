@@ -6243,6 +6243,34 @@
                                                             </div>
                                                         </div>
 
+                                                        <!-- Profile-specific release import scope -->
+                                                        <div class="form-group">
+                                                            <div class="setting-row" style="margin-bottom:4px;">
+                                                                <label for="quality-release-import-mode"
+                                                                    style="font-weight:600;">Album release imports</label>
+                                                                <span class="info-icon" role="button" tabindex="0"
+                                                                    title="What's this?"
+                                                                    onclick="toggleSettingHelp(this)"
+                                                                    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                            </div>
+                                                            <select id="quality-release-import-mode"
+                                                                style="width:100%;max-width:420px;"
+                                                                onchange="debouncedSaveQualityProfile()">
+                                                                <option value="requested_tracks">Requested tracks only (default)</option>
+                                                                <option value="complete_album">Complete album when all tracks pass</option>
+                                                            </select>
+                                                            <div class="help-text setting-help-body" hidden>
+                                                                When a requested track arrives in a Usenet or torrent album release,
+                                                                <strong>Requested tracks only</strong> imports only the tracks you requested.
+                                                                <br><br>
+                                                                <strong>Complete album</strong> also imports the other tracks only when
+                                                                the whole album is unambiguously identified and every track passes
+                                                                this profile's checks. AcoustID confirmation is required when
+                                                                this profile requires verified AcoustID; otherwise its checks are advisory.
+                                                                If album expansion fails, the requested track follows the normal import checks.
+                                                            </div>
+                                                        </div>
+
                                                         <!-- Fallback Option -->
                                                         <div class="form-group">
                                                             <div class="setting-row">

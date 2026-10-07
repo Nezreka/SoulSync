@@ -205,7 +205,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
     ) -> Tuple[List[TrackResult], List[AlbumResult]]:
         if not self._prowlarr.is_configured():
             return ([], [])
-        results = await prowlarr_search_with_variants(
+        results = await prowlarr_track_search(
             self._prowlarr, query, "torrent", timeout=timeout,
         )
         return self._project_results(results)
@@ -1201,7 +1201,85 @@ def _guess_quality_from_title(title: str) -> str:
     return audio_quality_from_release_title(title).format
 
 
+async def prowlarr_track_search(
+    prowlarr: ProwlarrClient, query: str, protocol: str, *, timeout: Optional[int] = None,
+) -> List[ProwlarrSearchResult]:
+    """Collect a track query plus one known artist/album hint for this source.
+
+    The hint belongs to one worker task. Cache the album answer (including an
+    empty answer or transport error) across its track-query ladder so retries
+    do not multiply album requests. Only release plugins opt into this helper.
+    """
+    from core.downloads.track_hint import current_track_hint
+
+    hint = current_track_hint() or {}
+    artist = str(hint.get('artist') or '').strip()
+    album = str(hint.get('album') or '').strip()
+    title = str(hint.get('title') or '').strip()
+    additional = []
+    if artist and album and album.casefold() not in ('unknown album', title.casefold()):
+        additional.append(f"{artist} {album}")
+    cache = hint.setdefault('_prowlarr_album_queries', {}) if hint else None
+    return await prowlarr_search_with_variants(
+        prowlarr, query, protocol, timeout=timeout,
+        additional_queries=additional, additional_query_cache=cache,
+    )
+
+
 async def prowlarr_search_with_variants(
+    prowlarr: ProwlarrClient,
+    query: str,
+    protocol: str,
+    *,
+    timeout: Optional[int] = None,
+    categories=DEFAULT_MUSIC_CATEGORIES,
+    additional_queries=(),
+    additional_query_cache=None,
+) -> List[ProwlarrSearchResult]:
+    """Track variants plus at most one artist/album query, de-duplicated.
+
+    Raw hits are not proof of a match: the album query must still run after
+    irrelevant track hits. The worker applies its ordinary artist, version
+    and quality gates to the combined result. Direct track hits remain first.
+    Every query uses the existing supported free-text endpoint and throttle.
+    """
+    protocol = canonical_protocol(protocol)
+    additional = list(additional_queries)[:1]
+    album_keys = {' '.join(str(value or '').split()).casefold() for value in additional}
+    queries = [query, *additional]
+    results, seen, searched = [], set(), set()
+    first_error = None
+    for candidate_query in queries:
+        query_key = ' '.join(str(candidate_query or '').split()).casefold()
+        if not query_key or query_key in searched:
+            continue
+        searched.add(query_key)
+        cache_key = (protocol, query_key)
+        cache_album = query_key in album_keys and additional_query_cache is not None
+        cached = cache_album and cache_key in additional_query_cache
+        try:
+            answer = additional_query_cache[cache_key] if cached else await _prowlarr_search_query_with_variants(
+                prowlarr, candidate_query, protocol, timeout=timeout, categories=categories)
+            if isinstance(answer, Exception):
+                raise answer
+            if cache_album:
+                additional_query_cache[cache_key] = answer
+        except ProwlarrSearchError as exc:
+            first_error = first_error or exc
+            if cache_album:
+                additional_query_cache[cache_key] = exc
+            continue
+        for result in answer:
+            key = (result.indexer_id, result.guid or result.download_url or result.magnet_uri or result.title)
+            if key not in seen:
+                seen.add(key)
+                results.append(result)
+    if not results and first_error is not None:
+        raise first_error
+    return results
+
+
+async def _prowlarr_search_query_with_variants(
     prowlarr: ProwlarrClient,
     query: str,
     protocol: str,

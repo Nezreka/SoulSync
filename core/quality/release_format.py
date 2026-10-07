@@ -48,9 +48,8 @@ logger = get_logger("quality.release_format")
 # AIFF is the ``wav`` PCM tier and DSF/DFF are the ``dsf`` DSD tier.
 AUDIO_EXTENSIONS = frozenset(SOURCE_AUDIO_EXTENSIONS)
 
-# Title markers, longest/most specific first. Order matters: '24bit' implies
-# lossless, and a title saying both FLAC and MP3 is a mixed release, which we
-# want to notice rather than resolve to whichever matched first.
+# Title markers, longest/most specific first. A title saying both FLAC and
+# MP3 is a mixed release; never resolve it to whichever matched first.
 _TITLE_MARKERS = (
     ('dsd1024', 'dsf'),
     ('dsd512', 'dsf'),
@@ -86,8 +85,7 @@ _TITLE_MARKERS = (
 )
 
 # 'Lossless' / '24bit' / 'Hi-Res' assert losslessness without naming a codec.
-# In practice on music trackers that means FLAC, but we record it as a
-# lossless CLAIM rather than as FLAC specifically.
+# They do not identify a codec; retain this only for category conflicts.
 _LOSSLESS_HINT = re.compile(
     r'\b(?:lossless|24[\s\-_]?bit|hi[\s\-_]?res|hires|web[\s\-_]?flac)\b', re.I)
 
@@ -160,11 +158,6 @@ def formats_in_title(title: str) -> Set[str]:
         for marker, fmt in _TITLE_MARKERS
         if re.search(rf'(?<![a-z0-9]){re.escape(marker)}(?![a-z0-9])', lower)
     }
-    if not found and _LOSSLESS_HINT.search(lower):
-        # A lossless claim with no codec named. Treated as FLAC because that
-        # is what it means on every music tracker in practice, and because
-        # the file list (when we have one) will correct us.
-        found.add('flac')
     if not found and _LOSSY_HINT.search(lower):
         found.add('mp3')
     return found
@@ -254,9 +247,11 @@ def audio_quality_from_release(
     quality = audio_quality_from_release_title(title)
     file_formats = formats_in_files(file_names or ())
     if file_formats:
-        quality.format = (
-            next(iter(file_formats)) if len(file_formats) == 1 else 'unknown'
-        )
+        file_format = next(iter(file_formats)) if len(file_formats) == 1 else 'unknown'
+        if file_format != quality.format or file_format == 'unknown':
+            # An extension can identify a codec, never the resolution or
+            # bitrate advertised for a different codec in the release title.
+            return AudioQuality(format=file_format)
         return quality
     title_formats = formats_in_title(title)
     has_mp3_category = False
@@ -272,15 +267,16 @@ def audio_quality_from_release(
             has_lossless_category = True
 
     if has_mp3_category and has_lossless_category:
-        quality.format = 'unknown'
-        return quality
+        return AudioQuality(format='unknown')
 
     if has_mp3_category and not title_formats:
         # Fills a silent title only; a title that names a codec outranks a
         # category mapping (see evaluate_release for the same rule).
+        if _LOSSLESS_HINT.search(str(title or '')):
+            return AudioQuality(format='unknown')
         quality.format = 'mp3'
     elif has_lossless_category and quality.format in _LOSSY_FORMATS:
-        quality.format = 'unknown'
+        return AudioQuality(format='unknown')
     return quality
 
 
@@ -532,11 +528,9 @@ def evaluate_release(
         has_lossless_category = 3040 in category_ids
         source = 'title/category' if category_ids else 'title'
 
-        # Exact Audio/MP3 is structured codec evidence. Preserve it through
-        # this strict decision boundary instead of recognizing it in search,
-        # then throwing it away immediately before grab. A conflicting title
-        # becomes a mixed/contradictory set and is therefore never silently
-        # trusted by either a strict MP3 or strict lossless profile.
+        # Audio leaf categories are search hints, with the same precedence
+        # used by the projection. They do not measure the downloaded files;
+        # contradictory families must stay undetermined at the strict gate.
         if has_mp3_category and has_lossless_category:
             found = set()
         elif has_mp3_category:
@@ -545,7 +539,7 @@ def evaluate_release(
             # codec against a title that names one. The title describes THIS
             # release; the category describes the bucket the indexer put it in.
             # It fills a title that said nothing, and yields to one that did.
-            found = title_formats or {'mp3'}
+            found = title_formats or (set() if _LOSSLESS_HINT.search(str(title or '')) else {'mp3'})
         elif has_lossless_category and title_formats & _LOSSY_FORMATS:
             # Audio/Lossless identifies a family rather than a codec, so it
             # cannot fill a bare title. It can still disprove a lossy title.

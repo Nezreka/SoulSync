@@ -43,13 +43,11 @@ def test_a_named_format_is_read_from_the_title(title, expected):
     assert formats_in_title(title) == expected
 
 
-def test_a_lossless_claim_with_no_codec_reads_as_flac():
-    """'24bit' / 'Lossless' / 'Hi-Res' assert losslessness without naming a
-    codec. On music trackers that means FLAC, and a file list will correct us
-    when we have one."""
-    assert formats_in_title('Artist - Album 24bit WEB') == {'flac'}
-    assert formats_in_title('Artist - Album [Lossless]') == {'flac'}
-    assert formats_in_title('Artist - Album Hi-Res') == {'flac'}
+def test_a_lossless_claim_with_no_codec_stays_undetermined():
+    """Lossless/Hi-Res describe a family, not a particular audio codec."""
+    assert formats_in_title('Artist - Album 24bit WEB') == set()
+    assert formats_in_title('Artist - Album [Lossless]') == set()
+    assert formats_in_title('Artist - Album Hi-Res') == set()
 
 
 def test_a_bare_bitrate_reads_as_lossy():

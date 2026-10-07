@@ -37,6 +37,7 @@ from core.imports.context import (
     normalize_import_context,
 )
 from core.imports.file_integrity import (
+    IntegrityResult,
     check_audio_integrity,
     duration_reference_for_context,
     expected_duration_for_check,
@@ -473,6 +474,32 @@ def _maybe_stage_album_track(context, final_path):
     Returns ``final_path`` UNCHANGED for every normal case (flag off, no batch,
     not an album batch, not a fresh album, or any error), so default behavior is
     byte-for-byte today's. The decision is made once per batch and cached."""
+    # Release imports supply their own transaction staging root. Unlike the
+    # opt-in download-batch mode below, this redirect must never fail open into
+    # a partially published album, including when the global switch is off.
+    if '_release_staging_root' in context or '_release_transfer_dir' in context:
+        from core.downloads.atomic_album_publish import is_staged_path, to_staging_path
+
+        staging_root = context.get('_release_staging_root')
+        transfer_dir = context.get('_release_transfer_dir')
+        if not staging_root or not transfer_dir:
+            raise ValueError('Release staging requires both staging root and library root')
+        staging_root = os.path.realpath(os.path.abspath(staging_root))
+        transfer_dir = os.path.realpath(os.path.abspath(transfer_dir))
+        live_path = os.path.realpath(os.path.abspath(final_path))
+        if (os.path.commonpath((staging_root, transfer_dir)) != transfer_dir
+                or not is_staged_path(staging_root, transfer_dir)):
+            raise ValueError('Release staging root must be inside the private library staging tree')
+        if context.get('_release_abort_on_existing') and os.path.lexists(final_path):
+            raise FileExistsError(f'Release import would replace an existing library file: {final_path}')
+        staged = to_staging_path(live_path, transfer_dir, staging_root)
+        if not staged or os.path.commonpath((os.path.realpath(staged), staging_root)) != staging_root:
+            raise ValueError('Release destination cannot be mapped into the explicit staging root')
+        return staged
+
+    if context.get('_release_abort_on_existing') and os.path.lexists(final_path):
+        raise FileExistsError(f'Release import would replace an existing library file: {final_path}')
+
     try:
         if not config_manager.get('album_downloads.atomic_publish', False):
             return final_path
@@ -577,6 +604,9 @@ def _persist_verification_status(context, final_path):
         from core.matching.verification_status import status_for_import
         from core.tag_writer import write_verification_status
         status = status_for_import(context)
+        if status is None and context.get('_acoustid_advisory_msg'):
+            from core.matching.verification_status import UNVERIFIED
+            status = UNVERIFIED
         if status:
             context['_verification_status'] = status
             if final_path:
@@ -736,6 +766,17 @@ def _merge_upgraded_album_folder(context, artist_context, album_info, old_album_
 
 
 def post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=None):
+    """Run the normal import guards, then publish unless release preflight was requested.
+
+    ``_release_preflight_only`` checks an isolated candidate copy and sets
+    ``_release_checks_passed`` only after every applicable gate has passed.
+    Successful preflight returns before tags, file moves and success effects.
+    Rejections retain the normal context flags and quarantine behavior.
+    """
+    original_context = context
+    release_preflight_only = bool(context.get('_release_preflight_only'))
+    if release_preflight_only:
+        context.pop('_release_checks_passed', None)
     on_download_completed = getattr(runtime, "on_download_completed", None)
     automation_engine = getattr(runtime, "automation_engine", None)
     web_scan_manager = getattr(runtime, "web_scan_manager", None)
@@ -755,7 +796,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
     try:
         if not os.path.exists(file_path):
             existing_final = context.get('_final_processed_path')
-            if existing_final and os.path.exists(existing_final):
+            if not release_preflight_only and existing_final and os.path.exists(existing_final):
                 logger.info(
                     f"[Race Guard] Source gone but destination exists — already processed by another thread: "
                     f"{os.path.basename(existing_final)}"
@@ -838,10 +879,21 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     length_tolerance_s=_duration_tolerance_override,
                     verify_flac_decode=bool(
                         config_manager.get('post_processing.verify_flac_decode', False)),
+                    **({'require_measured': True} if release_preflight_only else {}),
                 )
             except Exception as integrity_error:
-                logger.error(f"[Integrity] Check raised unexpectedly (continuing): {integrity_error}")
-                integrity = None
+                logger.error(f"[Integrity] Check raised unexpectedly: {integrity_error}")
+                integrity = (IntegrityResult(ok=False, reason=f'Integrity check unavailable: {integrity_error}')
+                             if release_preflight_only else None)
+            if release_preflight_only and integrity is None:
+                integrity = IntegrityResult(ok=False, reason='Integrity check did not produce a measurable result')
+            if release_preflight_only and integrity is not None and integrity.ok and (
+                integrity.checks.get('mutagen_parse') in ('unavailable', 'zero_length_unknown')
+                or integrity.checks.get('length_check') == 'skipped_unknown_length'
+            ):
+                integrity = IntegrityResult(
+                    ok=False, reason='Integrity check could not measure audio parse or duration', checks=integrity.checks,
+                )
 
         if integrity is not None and not integrity.ok:
             logger.error(f"[Integrity] Rejected {_basename}: {integrity.reason}")
@@ -909,7 +961,12 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             'deep_audio_verify',
             config_manager.get('post_processing.audio_completeness_check', False))
         _skip_audio = (not _audio_guard_enabled) or _should_skip_quarantine_check(context, 'silence')
-        audio_reason = None if _skip_audio else detect_broken_audio(file_path)
+        if _skip_audio:
+            audio_reason = None
+        elif release_preflight_only:
+            audio_reason = detect_broken_audio(file_path, require_measured=True)
+        else:
+            audio_reason = detect_broken_audio(file_path)
         if audio_reason:
             logger.error(f"[AudioGuard] Rejected {_basename}: {audio_reason}")
             context['_silence_rejected'] = True
@@ -965,8 +1022,9 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             claimed_format=(get_import_original_search(context) or {}).get('quality'),
             claimed_bitrate=(get_import_original_search(context) or {}).get('bitrate'),
         )
-        if context['_audio_quality']:
-            logger.info(f"Audio quality detected: {context['_audio_quality']}")
+        if context['_audio_quality'] or release_preflight_only:
+            if context['_audio_quality']:
+                logger.info(f"Audio quality detected: {context['_audio_quality']}")
 
             _skip_quality = _should_skip_quarantine_check(context, 'bit_depth') or \
                             _should_skip_quarantine_check(context, 'quality')
@@ -1018,113 +1076,99 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     _notify_download_completed(batch_id, task_id, success=False)
                 return
 
+        # Verification always runs when available. Its result is advisory for
+        # an optional profile, and a required profile accepts only a hard PASS.
+        require_verified = bool(_resolve_context_quality_profile(context).get(
+            'acoustid_required', config_manager.get('acoustid.require_verified', False)))
         _skip_acoustid = _should_skip_quarantine_check(context, 'acoustid')
+        verification_msg = ''
+        context.pop('_acoustid_advisory_msg', None)
         if _skip_acoustid:
             logger.info(f"[AcoustID] Skipped (user approval) for {_basename}")
-        try:
-            from core.acoustid_verification import AcoustIDVerification, VerificationResult
+            context['_acoustid_result'] = 'skip'
+        else:
+            try:
+                from core.acoustid_verification import AcoustIDVerification
 
-            verifier = AcoustIDVerification()
-            available, available_reason = verifier.quick_check_available()
-            if available and not _skip_acoustid:
-                context = normalize_import_context(context)
-                track_info = get_import_track_info(context)
-                original_search = get_import_original_search(context)
-                artist_context = get_import_context_artist(context)
+                verifier = AcoustIDVerification()
+                available, available_reason = verifier.quick_check_available()
+                if available:
+                    context = normalize_import_context(context)
+                    track_info = get_import_track_info(context)
+                    original_search = get_import_original_search(context)
+                    artist_context = get_import_context_artist(context)
 
-                expected_track = get_import_clean_title(context, default=original_search.get('title', ''))
-                expected_artist = ''
-                track_artists = track_info.get('artists', [])
-                if track_artists:
-                    first = track_artists[0]
-                    if isinstance(first, dict):
-                        expected_artist = first.get('name', '')
-                    elif isinstance(first, str):
-                        expected_artist = first
-                if not expected_artist:
-                    expected_artist = extract_artist_name(artist_context) or get_import_clean_artist(context, default='')
+                    expected_track = get_import_clean_title(context, default=original_search.get('title', ''))
+                    expected_artist = ''
+                    track_artists = track_info.get('artists', [])
+                    if track_artists:
+                        first = track_artists[0]
+                        if isinstance(first, dict):
+                            expected_artist = first.get('name', '')
+                        elif isinstance(first, str):
+                            expected_artist = first
+                    if not expected_artist:
+                        expected_artist = extract_artist_name(artist_context) or get_import_clean_artist(context, default='')
 
-                if expected_track and expected_artist:
-                    logger.info(f"Running AcoustID verification for: '{expected_track}' by '{expected_artist}'")
-                    verification_result, verification_msg = verifier.verify_audio_file(
-                        file_path,
-                        expected_track,
-                        expected_artist,
-                        context,
-                    )
-                    logger.info(f"AcoustID verification result: {verification_result.value} - {verification_msg}")
-                    context['_acoustid_result'] = verification_result.value
-
-                    # Fail-closed mode: when the item's quality profile
-                    # requires a hard AcoustID PASS, a SKIP (ran but couldn't
-                    # confirm — no fingerprint match / cross-script metadata)
-                    # is treated like a FAIL: quarantine + try the next
-                    # candidate, instead of importing an unverified file.
-                    # ERROR (rate-limit / infra) is NOT blocked — that would
-                    # stall the whole pipeline during an outage; those still
-                    # import with their existing flag.
-                    require_verified = _resolve_context_quality_profile(context).get(
-                        'acoustid_required',
-                        config_manager.get('acoustid.require_verified', False))
-                    _skip_as_fail = (
-                        require_verified
-                        and verification_result == VerificationResult.SKIP
-                    )
-                    if _skip_as_fail:
-                        verification_msg = (
-                            f"AcoustID could not confirm the track and 'require verified' "
-                            f"is on — rejecting unverified file ({verification_msg})"
+                    if expected_track and expected_artist:
+                        logger.info(f"Running AcoustID verification for: '{expected_track}' by '{expected_artist}'")
+                        verification_result, verification_msg = verifier.verify_audio_file(
+                            file_path, expected_track, expected_artist, context,
                         )
-                        logger.warning("[AcoustID] Require-verified: SKIP treated as FAIL — %s", verification_msg)
-
-                    if verification_result == VerificationResult.FAIL or _skip_as_fail:
-                        try:
-                            quarantine_path = move_to_quarantine(
-                                file_path,
-                                context,
-                                verification_msg,
-                                automation_engine,
-                                trigger='acoustid_unverified' if _skip_as_fail else 'acoustid',
-                            )
-                            _mark_task_quarantined(context, quarantine_path)
-                            logger.error(f"File quarantined due to verification failure: {quarantine_path}")
-                        except Exception as quarantine_error:
-                            # Don't delete a file we couldn't quarantine — leave it for
-                            # retry instead of forcing a re-download (data loss). The
-                            # task is still marked failed / requeued below. See integrity.
-                            logger.error(
-                                f"Quarantine failed ({quarantine_error}) — leaving file "
-                                f"in place for retry (not deleting): {file_path}"
-                            )
-
-                        context['_acoustid_quarantined'] = True
-                        context['_acoustid_failure_msg'] = verification_msg
-                        with matched_context_lock:
-                            if context_key in matched_downloads_context:
-                                del matched_downloads_context[context_key]
-
-                        task_id = context.get('task_id')
-                        batch_id = context.get('batch_id')
-                        if task_id:
-                            with tasks_lock:
-                                if task_id in download_tasks:
-                                    download_tasks[task_id]['status'] = 'failed'
-                                    download_tasks[task_id]['error_message'] = (
-                                        f"AcoustID verification failed: {verification_msg}"
-                                    )
-
-                        if task_id and batch_id:
-                            _notify_download_completed(batch_id, task_id, success=False)
-                        return
+                        context['_acoustid_result'] = verification_result.value
+                        logger.info("AcoustID verification result: %s - %s", verification_result.value, verification_msg)
+                    else:
+                        verification_msg = 'AcoustID verification skipped: missing track/artist info'
+                        logger.warning(verification_msg)
+                        context['_acoustid_result'] = 'skip'
                 else:
-                    logger.warning("AcoustID verification skipped: missing track/artist info")
-                    context['_acoustid_result'] = 'skip'
-            else:
-                logger.info(f"ℹ️ AcoustID verification not available: {available_reason}")
-                context['_acoustid_result'] = 'disabled'
-        except Exception as verify_error:
-            logger.error(f"AcoustID verification error (continuing normally): {verify_error}")
-            context['_acoustid_result'] = 'error'
+                    verification_msg = f'AcoustID verification not available: {available_reason}'
+                    logger.info(verification_msg)
+                    context['_acoustid_result'] = 'disabled'
+            except Exception as verify_error:
+                verification_msg = f'AcoustID verification error: {verify_error}'
+                logger.error(verification_msg)
+                context['_acoustid_result'] = 'error'
+
+        if not _skip_acoustid and context.get('_acoustid_result') != 'pass':
+            if require_verified:
+                verification_msg = (
+                    'AcoustID PASS is required by the quality profile — '
+                    f'rejecting unverified file ({verification_msg or context.get("_acoustid_result", "unknown")})'
+                )
+                context['_acoustid_quarantined'] = True
+                context['_acoustid_failure_msg'] = verification_msg
+                try:
+                    quarantine_path = move_to_quarantine(
+                        file_path, context, verification_msg, automation_engine,
+                        trigger=('acoustid' if context.get('_acoustid_result') == 'fail' else 'acoustid_unverified'),
+                    )
+                    _mark_task_quarantined(context, quarantine_path)
+                    logger.error(f"File quarantined due to verification failure: {quarantine_path}")
+                except Exception as quarantine_error:
+                    logger.error(
+                        f"Quarantine failed ({quarantine_error}) — leaving file "
+                        f"in place for retry (not deleting): {file_path}"
+                    )
+
+                with matched_context_lock:
+                    matched_downloads_context.pop(context_key, None)
+                task_id = context.get('task_id')
+                batch_id = context.get('batch_id')
+                if task_id:
+                    with tasks_lock:
+                        if task_id in download_tasks:
+                            download_tasks[task_id]['status'] = 'failed'
+                            download_tasks[task_id]['error_message'] = f'AcoustID verification failed: {verification_msg}'
+                if task_id and batch_id:
+                    _notify_download_completed(batch_id, task_id, success=False)
+                return
+            context['_acoustid_advisory_msg'] = verification_msg or 'AcoustID did not confirm the track'
+            logger.warning('[AcoustID] Optional profile — importing with advisory: %s', context['_acoustid_advisory_msg'])
+
+        if release_preflight_only:
+            context['_release_checks_passed'] = True
+            return
 
         search_result = context.get('search_result', {}) or {}
         if not isinstance(search_result, dict):
@@ -1134,6 +1178,9 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             logger.info(f"Processing simple download (no metadata enhancement): {file_path}")
 
             destination, album_name, filename = build_simple_download_destination(context, file_path)
+            if ('_release_staging_root' in context or '_release_transfer_dir' in context
+                    or context.get('_release_abort_on_existing')):
+                destination = _maybe_stage_album_track(context, destination)
             if album_name:
                 logger.info(f"Moving to album folder: {album_name}")
             else:
@@ -1428,7 +1475,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         # for fresh whole-album batches; returns final_path unchanged otherwise.
         # Upgrades publish at the live destination before retiring an old copy;
         # a private album staging path is not a completed replacement.
-        if not is_quality_upgrade:
+        if (not is_quality_upgrade or '_release_staging_root' in context
+                or '_release_transfer_dir' in context or context.get('_release_abort_on_existing')):
             final_path = _maybe_stage_album_track(context, final_path)
         logger.info(f"Resolved path: '{final_path}'")
         context['_final_processed_path'] = final_path
@@ -1690,7 +1738,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
 
         logger.info(f"Post-processing complete for: {context.get('_final_processed_path', final_path)}")
 
-        emit_track_downloaded(context, automation_engine)
+        if not context.get('_release_defer_events'):
+            emit_track_downloaded(context, automation_engine)
         record_library_history_download(context)
         record_download_provenance(context)
         record_soulsync_library_entry(context, artist_context, album_info)
@@ -1768,6 +1817,10 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         else:
             logger.warning(f"Source file gone, not retrying: {context_key}")
     finally:
+        # Context normalizers may return a replacement dict. Outcome flags must
+        # still reach the caller's original context on every success/failure exit.
+        if context is not original_context:
+            original_context.update(context)
         file_lock.release()
         with post_process_locks_lock:
             post_process_locks.pop(context_key, None)

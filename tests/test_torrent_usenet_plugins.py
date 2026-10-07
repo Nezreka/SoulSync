@@ -63,7 +63,7 @@ def test_decode_filename_handles_magnet_with_embedded_separators() -> None:
 
 def test_guess_quality_from_title() -> None:
     assert _guess_quality_from_title('Album [FLAC]') == 'flac'
-    assert _guess_quality_from_title('Album 24-bit Hi-Res') == 'flac'
+    assert _guess_quality_from_title('Album 24-bit Hi-Res') == 'unknown'
     assert _guess_quality_from_title('Album [MP3 320]') == 'mp3'
     assert _guess_quality_from_title('Album [AAC 256]') == 'aac'
     assert _guess_quality_from_title('Album [OGG]') == 'ogg'

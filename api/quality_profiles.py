@@ -12,6 +12,8 @@ from datetime import datetime
 
 from flask import Blueprint, jsonify, request
 
+from core.quality.schema import RELEASE_IMPORT_MODES
+
 from utils.logging_config import get_logger
 
 logger = get_logger("api.quality_profiles")
@@ -31,6 +33,15 @@ def configure(*, get_database, add_activity_item):
 
 def create_blueprint():
     return bp
+
+
+def _validate_profile_data(data):
+    """Reject malformed policy at the API boundary before persisting any edits."""
+    if not isinstance(data, dict):
+        return "Profile data must be an object"
+    if "release_import_mode" in data and data["release_import_mode"] not in RELEASE_IMPORT_MODES:
+        return "release_import_mode must be requested_tracks or complete_album"
+    return None
 
 
 @bp.route('/api/quality-profile', methods=['GET'])
@@ -59,6 +70,10 @@ def save_quality_profile():
         data = request.get_json()
         if not data:
             return jsonify({"success": False, "error": "No profile data provided"}), 400
+
+        error = _validate_profile_data(data)
+        if error:
+            return jsonify({"success": False, "error": error}), 400
 
         success = db.set_quality_profile(data)
 
@@ -108,6 +123,8 @@ def apply_quality_preset(preset_name):
         preset['search_mode'] = current.get('search_mode', preset.get('search_mode', 'priority'))
         preset['rank_candidates_by_quality'] = current.get(
             'rank_candidates_by_quality', preset.get('rank_candidates_by_quality', False))
+        # Quick Sets change quality targets, preserving profile import scope.
+        preset['release_import_mode'] = current['release_import_mode']
         success = db.set_quality_profile(preset)
 
         if success:
@@ -137,6 +154,8 @@ def reset_quality_preset(preset_name):
         preset['search_mode'] = current.get('search_mode', preset.get('search_mode', 'priority'))
         preset['rank_candidates_by_quality'] = current.get(
             'rank_candidates_by_quality', preset.get('rank_candidates_by_quality', False))
+        # Quick Sets change quality targets, preserving profile import scope.
+        preset['release_import_mode'] = current['release_import_mode']
         success = db.set_quality_profile(preset)
 
         if success:
@@ -177,6 +196,9 @@ def create_custom_quality_profile():
         db = MusicDatabase()
 
         data = request.get_json() or {}
+        error = _validate_profile_data(data)
+        if error:
+            return jsonify({"success": False, "error": error}), 400
         name = str(data.get('name') or '').strip()
         if not name:
             return jsonify({"success": False, "error": "Name is required"}), 400
@@ -243,6 +265,9 @@ def update_custom_quality_profile(profile_id):
         db = MusicDatabase()
 
         data = request.get_json() or {}
+        error = _validate_profile_data(data)
+        if error:
+            return jsonify({"success": False, "error": error}), 400
         if not db.update_quality_profile(profile_id, data):
             return jsonify({"success": False, "error": "Profile not found"}), 404
 

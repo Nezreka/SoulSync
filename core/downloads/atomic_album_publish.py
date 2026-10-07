@@ -58,7 +58,7 @@ logger = get_logger("downloads.atomic_album_publish")
 STAGING_DIRNAME = ".soulsync_atomic_staging"
 
 _AUDIO_EXTS = {'.flac', '.mp3', '.m4a', '.mp4', '.ogg', '.oga', '.opus',
-               '.wav', '.aiff', '.aif', '.wma', '.alac'}
+               '.wav', '.aiff', '.aif', '.wma', '.alac', '.ape', '.dsf', '.dff', '.aac'}
 
 # The batch manifest (#1289) lives INSIDE the batch's staging root so one
 # directory is one self-describing unit: discard takes it with the audio, and a

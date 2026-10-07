@@ -735,3 +735,34 @@ def test_fuzzy_context_matching_when_exact_key_missing(monkeypatch):
     # Won't find file → marks failed. But the fuzzy match log path executes.
     pp.run_post_processing_worker('t1', 'b1', deps)
     assert download_tasks['t1']['status'] == 'failed'
+
+
+@pytest.mark.parametrize('cancel_during_import',[False,True])
+@pytest.mark.parametrize('outcome_status',['imported','pending'])
+def test_complete_album_fast_path_keeps_requested_playback_path_and_cancellation(tmp_path,monkeypatch,cancel_during_import,outcome_status):
+    from types import SimpleNamespace
+    from core.downloads import release_import
+    source=tmp_path/'Artist - Song.flac'; source.write_bytes(b'audio')
+    final=tmp_path/'library'/'Song.flac'; final.parent.mkdir(); final.write_bytes(b'audio')
+    filename='nzb://id||Artist - Album'
+    download_tasks['t1']={'status':'post_processing','filename':filename,'username':'usenet',
+                          'track_info':{'name':'Song','artists':[{'name':'Artist'}]}}
+    matched_downloads_context[f'usenet::{filename}']={'artist':{'name':'Artist'}}
+    deps,rec=_build_deps(download_orchestrator=SimpleNamespace(get_download_status=lambda id:SimpleNamespace(file_path=str(source),audio_files=[str(source)])),run_async=lambda status:status)
+    deps.process_release_file=lambda *a:None
+    def import_album(*a,**kw):
+        if cancel_during_import:
+            download_tasks['t1']['status']='cancelled'
+        return {'status':outcome_status,'path':str(final),'count':2}
+    monkeypatch.setattr(release_import,'try_complete_album_import',import_album)
+    pp.run_post_processing_worker('t1','b1',deps)
+    if cancel_during_import:
+        assert download_tasks['t1']['status']=='cancelled'
+        assert not any(call[0] in ('mark_completed','on_complete') for call in rec.calls)
+    elif outcome_status=='pending':
+        assert download_tasks['t1']['status']=='failed'
+        assert not any(call[0]=='mark_completed' for call in rec.calls)
+    else:
+        assert download_tasks['t1']['final_file_path']==str(final)
+        assert any(call[0]=='mark_completed' for call in rec.calls)
+        assert any(call[0]=='on_complete' and call[1][-1] is True for call in rec.calls)

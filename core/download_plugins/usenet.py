@@ -37,6 +37,7 @@ from core.download_plugins.base import DownloadSourcePlugin
 from core.download_plugins.candidate_store import get_candidate_store
 from core.download_plugins.torrent import (
     prowlarr_search_with_variants,
+    prowlarr_track_search,
     _adapter_state_to_display,
     _decode_filename,
     _guess_quality_from_title,
@@ -110,7 +111,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
     ) -> Tuple[List[TrackResult], List[AlbumResult]]:
         if not self._prowlarr.is_configured():
             return ([], [])
-        results = await prowlarr_search_with_variants(
+        results = await prowlarr_track_search(
             self._prowlarr, query, "usenet", timeout=timeout,
         )
         return self._project_results(results)
