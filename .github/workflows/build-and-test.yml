@@ -78,6 +78,11 @@ jobs:
   webui-visual:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Non-blocking for now: UI changes land on dev without re-rendered
+    # baselines, so a diff here is a heads-up, not a red run. The diffs are
+    # still uploaded. Refresh the baselines with the visual-baselines
+    # workflow (see webui/tests/visual/README.md).
+    continue-on-error: true
     # The baselines are rendered in this image (webui/scripts/visual.mjs runs
     # them in it locally too), so fonts and rasterising match. Keep the tag in
     # step with @playwright/test in webui/package.json.
