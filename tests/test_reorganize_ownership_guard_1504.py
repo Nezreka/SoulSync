@@ -7,7 +7,6 @@ Admins may reorganize anything. Anything else gets a 403.
 from __future__ import annotations
 
 import os
-import sqlite3
 import tempfile
 
 import pytest
@@ -35,7 +34,9 @@ def profiles():
     # (neither artists.id nor albums.id auto-increments — set both explicitly)
     artist_pk = f'guard_artist_{os.urandom(4).hex()}'
     album_pk = f'guard_album_{os.urandom(4).hex()}'
-    conn = sqlite3.connect(os.environ['DATABASE_PATH'])
+    # Collection of other modules may change DATABASE_PATH. Seed the same
+    # database instance that the application routes actually read.
+    conn = db._get_connection()
     try:
         conn.execute("INSERT INTO artists (id, name) VALUES (?, 'Guard Artist')", (artist_pk,))
         conn.execute(

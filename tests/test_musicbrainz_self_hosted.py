@@ -131,14 +131,20 @@ def server():
 
 def test_real_http_search_lookup_browse_and_retry(monkeypatch, server):
     url, calls, outcomes = server
-    monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_BASE_URL', url)
-    monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_REQUEST_INTERVAL', '0')
-    monkeypatch.setattr(mb.time, 'sleep', lambda delay: None)
+    # Existing enrichment clients resolve settings at every request. Keep
+    # their requests away from this server's ordered response fixture, and
+    # retain real sleep so background workers cannot spin during the retry.
+    caller = threading.current_thread()
+    real_settings = mb._server_settings
+    monkeypatch.setattr(
+        mb, '_server_settings',
+        lambda: (f'{url}/ws/2', 0) if threading.current_thread() is caller else real_settings(),
+    )
     outcomes.extend([(503, {}), (200, {'artists': [{'id': 'artist-id'}]}),
                      (200, {'id': 'release-id'}), (200, {'release-groups': [{'id': 'group-id'}]})])
     client = mb.MusicBrainzClient()
     client.session.trust_env = False
-    assert client.search_artist('Björk')[0]['id'] == 'artist-id'
+    assert client.search_artist('Björk', raise_on_error=True)[0]['id'] == 'artist-id'
     assert client.get_release('release-id')['id'] == 'release-id'
     assert client.browse_artist_release_groups('artist-id')[0]['id'] == 'group-id'
     assert len(calls) == 4
