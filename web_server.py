@@ -10987,7 +10987,7 @@ def library_log_play():
         from core.playback.play_log import build_play_event
         data = request.get_json(silent=True) or {}
         track = data.get('track') or data
-        played_at = datetime.now().isoformat()
+        played_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         duration_ms = data.get('duration_ms', 0)
         event = build_play_event(track, played_at, duration_ms)
         if not event:

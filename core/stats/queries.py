@@ -386,8 +386,9 @@ def get_listening_events(
         hour_i = int(hour)
         if not (0 <= weekday_i <= 6 and 0 <= hour_i <= 23):
             raise ValueError('weekday/hour out of range')
-        clauses.append("CAST(strftime('%w', lh.played_at) AS INTEGER) = ?")
-        clauses.append("CAST(strftime('%H', lh.played_at) AS INTEGER) = ?")
+        # local hours, like the clock it drills into (played_at is utc)
+        clauses.append("CAST(strftime('%w', lh.played_at, 'localtime') AS INTEGER) = ?")
+        clauses.append("CAST(strftime('%H', lh.played_at, 'localtime') AS INTEGER) = ?")
         params.extend([weekday_i, hour_i])
         title = f"{['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][weekday_i]} {hour_i:02d}:00"
     elif filter_type == 'hour':
@@ -396,7 +397,7 @@ def get_listening_events(
         hour_i = int(hour)
         if not (0 <= hour_i <= 23):
             raise ValueError('hour out of range')
-        clauses.append("CAST(strftime('%H', lh.played_at) AS INTEGER) = ?")
+        clauses.append("CAST(strftime('%H', lh.played_at, 'localtime') AS INTEGER) = ?")
         params.append(hour_i)
         title = f"{hour_i:02d}:00"
     else:

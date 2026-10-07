@@ -5,7 +5,7 @@ from plexapi.playlist import Playlist as PlexPlaylist
 from plexapi.exceptions import PlexApiException, NotFound
 from typing import List, Optional, Dict, Any
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import re
 from utils.logging_config import get_logger
 from core.settings import config_manager
@@ -1265,7 +1265,11 @@ class PlexClient(MediaServerClient):
                         'track_title': item.title or '',
                         'artist': item.grandparentTitle or '',
                         'album': item.parentTitle or '',
-                        'played_at': item.viewedAt.isoformat() if hasattr(item, 'viewedAt') and item.viewedAt else None,
+                        # plexapi gives the server's local time with no zone;
+                        # the history keeps utc (the clock last.fm and
+                        # listenbrainz copies come back in)
+                        'played_at': (item.viewedAt.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+                                      if getattr(item, 'viewedAt', None) else None),
                         'duration_ms': (item.duration or 0),
                         'track_id': str(item.ratingKey),
                         # who played it: 1 is the server owner, anyone else

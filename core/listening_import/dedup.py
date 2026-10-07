@@ -1,5 +1,6 @@
 """Atomic event ingestion with durable, one-to-one source provenance."""
 from datetime import datetime, timezone
+from typing import Optional
 
 from core.listening_scope import SHARED_OWNER
 
@@ -47,6 +48,30 @@ def _text(value):
     return str(value or "").strip().casefold()
 
 
+# a stored play time: utc, "YYYY-MM-DD HH:MM:SS". one clock and one shape, so
+# a play and its last.fm / listenbrainz copy line up, and text range queries
+# on played_at mean what they say
+CANONICAL = "%Y-%m-%d %H:%M:%S"
+
+
+def canonical_played_at(value, *, naive_is_local: bool = False) -> Optional[str]:
+    """a play time as stored: utc, "YYYY-MM-DD HH:MM:SS". a time with no zone
+    is utc by the history's rule, or local when the writer is known to have
+    used local time. None when it can't be read"""
+    if value is None:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        if naive_is_local:
+            dt = dt.astimezone()  # the app's local zone, dst included
+        else:
+            dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).strftime(CANONICAL)
+
+
 def _timestamp(value):
     dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     if dt.tzinfo is None:
@@ -69,6 +94,10 @@ def insert_import_events(database, events, source, profile_id=SHARED_OWNER):
     for event in events:
         if not event.get("title") or not event.get("played_at"):
             continue
+        played_at = canonical_played_at(event["played_at"])
+        if played_at is None:
+            continue
+        event = {**event, "played_at": played_at}
         key = (_text(event["title"]), _text(event.get("artist")), _timestamp(event["played_at"]))
         incoming.setdefault(key, event)
     if not incoming:

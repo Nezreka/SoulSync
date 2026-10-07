@@ -18,6 +18,7 @@ real MusicDatabase on a tmp file throughout.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -57,12 +58,12 @@ def _play(title, artist, played_at, account, track_id=None):
 
 
 HISTORY = [
-    _play('This Dream of You', 'Martin Garrix', '2026-10-06T20:00:00', '1'),
-    _play('Be The One', 'Bree Runway', '2026-10-06T20:05:00', '1'),
-    _play('Hot N Cold', 'Katy Perry', '2026-10-06T17:00:00', KIDS_PLEX),
-    _play('Swish Swish', 'Katy Perry', '2026-10-06T17:04:00', KIDS_PLEX),
-    _play('7 rings', 'Ariana Grande', '2026-10-06T17:08:00', KIDS_PLEX),
-    _play('Some Song', 'Friend Band', '2026-10-06T12:00:00', FRIEND_PLEX),
+    _play('This Dream of You', 'Martin Garrix', '2026-10-06 20:00:00', '1'),
+    _play('Be The One', 'Bree Runway', '2026-10-06 20:05:00', '1'),
+    _play('Hot N Cold', 'Katy Perry', '2026-10-06 17:00:00', KIDS_PLEX),
+    _play('Swish Swish', 'Katy Perry', '2026-10-06 17:04:00', KIDS_PLEX),
+    _play('7 rings', 'Ariana Grande', '2026-10-06 17:08:00', KIDS_PLEX),
+    _play('Some Song', 'Friend Band', '2026-10-06 12:00:00', FRIEND_PLEX),
 ]
 
 
@@ -159,7 +160,7 @@ def test_the_admins_stats_no_longer_count_the_kids(db):
 
 def test_an_unclaimed_play_never_falls_back_to_the_admin(db):
     db.insert_listening_events([{
-        'track_id': 'rk-x', 'title': 'X', 'artist': 'Y', 'album': '', 'played_at': '2026-10-06T10:00:00',
+        'track_id': 'rk-x', 'title': 'X', 'artist': 'Y', 'album': '', 'played_at': '2026-10-06 10:00:00',
         'duration_ms': 1, 'server_source': 'plex', 'profile_id': UNCLAIMED, 'server_account_id': FRIEND_PLEX,
     }])
     assert _pile(db, SHARED_OWNER) == []
@@ -185,7 +186,7 @@ def test_refiling_onto_a_play_already_in_the_target_pile_leaves_one_copy(db):
     for owner in (SHARED_OWNER, kids):
         db.insert_listening_events([{
             'track_id': 'rk-dup', 'title': 'Dup', 'artist': 'Katy Perry', 'album': '',
-            'played_at': '2026-10-06T09:00:00', 'duration_ms': 1, 'server_source': 'plex',
+            'played_at': '2026-10-06 09:00:00', 'duration_ms': 1, 'server_source': 'plex',
             'profile_id': owner, 'server_account_id': KIDS_PLEX,
         }])
     reattribute_media_plays(db, 'plex')
@@ -195,13 +196,23 @@ def test_refiling_onto_a_play_already_in_the_target_pile_leaves_one_copy(db):
 
 # -- rows from before accounts were kept --
 
-def test_old_plays_are_tagged_once_and_moved_out_of_the_admins_pile(db):
+def test_old_plays_are_tagged_once_and_moved_out_of_the_admins_pile(db, server_tz):
+    """rows from before: no account, all in the shared pile, and in the
+    server's local time with a T (how plex plays used to be stored). the
+    poll's one-time repair moves them to utc first, so tagging (which matches
+    plex's history, now utc) finds every one"""
+    server_tz('America/Los_Angeles')
     kids = _kids(db)
-    # recorded the old way: no account, everything in the shared pile
-    db.insert_listening_events([{
-        'track_id': p['track_id'], 'title': p['track_title'], 'artist': p['artist'], 'album': 'Album',
-        'played_at': p['played_at'], 'duration_ms': 1, 'server_source': 'plex', 'profile_id': SHARED_OWNER,
-    } for p in HISTORY])
+    conn = db._get_connection()
+    for p in HISTORY:
+        utc = datetime.strptime(p['played_at'], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+        conn.execute(
+            "INSERT INTO listening_history (track_id, title, artist, album, played_at, duration_ms, "
+            "server_source, profile_id) VALUES (?, ?, ?, 'Album', ?, 1, 'plex', ?)",
+            (p['track_id'], p['track_title'], p['artist'],
+             utc.astimezone().replace(tzinfo=None).isoformat(), SHARED_OWNER))
+    conn.commit()
+    conn.close()
     assert len(_pile(db, SHARED_OWNER)) == 6
 
     plex = _Plex(HISTORY)
@@ -235,7 +246,7 @@ def test_a_kids_play_is_never_matched_onto_the_admins_lastfm_row(db):
     kids = _kids(db)
     db.insert_listening_events([{
         'track_id': 'lfm-roar', 'title': 'Hot N Cold', 'artist': 'Katy Perry', 'album': 'Album',
-        'played_at': '2026-10-06T17:00:05', 'duration_ms': 1, 'server_source': 'lastfm', 'profile_id': SHARED_OWNER,
+        'played_at': '2026-10-06 17:00:05', 'duration_ms': 1, 'server_source': 'lastfm', 'profile_id': SHARED_OWNER,
     }])
-    _worker(db, _Plex([_play('Hot N Cold', 'Katy Perry', '2026-10-06T17:00:00', KIDS_PLEX)]))._poll()
+    _worker(db, _Plex([_play('Hot N Cold', 'Katy Perry', '2026-10-06 17:00:00', KIDS_PLEX)]))._poll()
     assert _pile(db, kids) == ['Katy Perry']

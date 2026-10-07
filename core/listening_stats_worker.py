@@ -17,6 +17,13 @@ from core.worker_utils import interruptible_sleep
 
 logger = get_logger("listening_stats_worker")
 
+
+def _play_epoch(played_at):
+    """a stored play time (utc) as unix seconds, None when unreadable"""
+    from core.listening_import.dedup import canonical_played_at, _timestamp
+    canonical = canonical_played_at(played_at)
+    return _timestamp(canonical) if canonical else None
+
 SHARED_SCOPE = owner_clause(SHARED_OWNER)
 
 
@@ -184,11 +191,23 @@ class ListeningStatsWorker:
         except Exception as e:
             logger.warning(f"Tagging earlier {server} plays by account failed, will retry: {e}")
 
+    def _repair_history_once(self):
+        try:
+            from core.listening_import.history_repair import repair_once
+            repair_once(self.db)
+        except Exception as e:
+            logger.warning(f"Listening history repair failed, will retry next poll: {e}")
+
     def _poll(self):
         """Poll the active media server for play data."""
         active_server = self.config_manager.get_active_media_server()
         logger.info(f"Polling {active_server} for listening data...")
         self.current_item = f"Polling {active_server}..."
+
+        # once: put every stored play on one clock and fold the last.fm /
+        # listenbrainz copies of soulsync's own scrobbles back into their
+        # plays. before this poll inserts, so new plays meet repaired rows
+        self._repair_history_once()
 
         client = self._engine.client(active_server) if self._engine else None
         # SoulSync standalone has no listening data; only the three
@@ -462,8 +481,9 @@ class ListeningStatsWorker:
                                     'artist': r[2] or '',
                                     'track': r[1] or '',
                                     'album': r[3] or '',
-                                    'timestamp': r[4],
-                                } for r in rows]
+                                    # stored utc; the clients read a bare time as local
+                                    'timestamp': _play_epoch(r[4]),
+                                } for r in rows if _play_epoch(r[4])]
 
                                 if lb_client.submit_listens(listens):
                                     # Mark as scrobbled
@@ -512,8 +532,9 @@ class ListeningStatsWorker:
                                     'artist': r[2] or '',
                                     'track': r[1] or '',
                                     'album': r[3] or '',
-                                    'timestamp': r[4],
-                                } for r in batch]
+                                    # stored utc; the clients read a bare time as local
+                                    'timestamp': _play_epoch(r[4]),
+                                } for r in batch if _play_epoch(r[4])]
 
                                 if lfm_client.scrobble_tracks(tracks):
                                     all_scrobbled_ids.extend(r[0] for r in batch)

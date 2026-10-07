@@ -1564,3 +1564,22 @@ def _web_server_clients_start_as_the_admin():
         yield
     finally:
         ws.app.test_client_class = saved
+
+
+@pytest.fixture
+def server_tz(monkeypatch):
+    """set the server's local timezone for one test. played_at is stored
+    utc and hour-of-day charts read it in local time, so a test that seeds
+    hours picks the zone it means. call with a tz name, e.g. server_tz('UTC')"""
+    def _set(name):
+        monkeypatch.setenv('TZ', name)
+        time.tzset()
+    yield _set
+    monkeypatch.undo()
+    time.tzset()
+
+
+@pytest.fixture
+def utc_server(server_tz):
+    """the server's local time is utc: a stored hour is the hour shown"""
+    server_tz('UTC')

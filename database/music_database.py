@@ -7150,16 +7150,12 @@ class MusicDatabase:
 
     # ── When you listen (stats P3) ───────────────────────────────────────
     #
-    # TIMEZONE NOTE: played_at is stored as LOCAL naive wall-clock — the web
-    # player writes datetime.now().isoformat() and plex_client writes
-    # item.viewedAt.isoformat(), both local. So strftime('%H', played_at)
-    # already yields the hour the user actually listened, which is precisely
-    # what this chart means. Do NOT "fix" it to UTC.
-    #
-    # (The same fact means the range filters, which compare local timestamps
-    # against SQLite's UTC datetime('now'), are skewed by the server's UTC
-    # offset. Pre-existing, affects every range-scoped stat, and deliberately
-    # not changed here — see STATS_PAGE_PLAN.md.)
+    # TIMEZONE NOTE: played_at is stored utc (core.listening_import.dedup
+    # CANONICAL), the same clock as datetime('now'), so the range filters are
+    # exact. an hour of the day is the listener's though, so the clock reads
+    # played_at in the server's local time ('localtime'). the drill-down in
+    # core/stats/queries.py must read it the same way or a cell's plays
+    # won't match its count.
 
     def get_listening_clock(self, time_range='all', profile_id=None):
         """Plays by weekday x hour — the shape of a listening week.
@@ -7175,8 +7171,8 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(f"""
-                SELECT CAST(strftime('%w', played_at) AS INTEGER) AS weekday,
-                       CAST(strftime('%H', played_at) AS INTEGER) AS hour,
+                SELECT CAST(strftime('%w', played_at, 'localtime') AS INTEGER) AS weekday,
+                       CAST(strftime('%H', played_at, 'localtime') AS INTEGER) AS hour,
                        COUNT(*) AS plays
                 FROM listening_history
                 {where}
@@ -7833,7 +7829,7 @@ class MusicDatabase:
             peak = cursor.fetchone()
 
             cursor.execute(f"""
-                SELECT CAST(strftime('%H', played_at) AS INTEGER) AS h, COUNT(*) AS plays
+                SELECT CAST(strftime('%H', played_at, 'localtime') AS INTEGER) AS h, COUNT(*) AS plays
                 FROM listening_history {window}
                 GROUP BY h HAVING h IS NOT NULL
                 ORDER BY plays DESC, h ASC LIMIT 1
