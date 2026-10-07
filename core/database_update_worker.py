@@ -243,6 +243,9 @@ class DatabaseUpdateWorker:
         try:
             # Initialize database
             self.database = get_database(self.database_path)
+            # mounts and library paths may have changed since the last scan
+            from core.library.server_paths import reset as _reset_server_paths
+            _reset_server_paths()
 
             if self.full_refresh:
                 logger.info(f"Performing full database refresh for {self.server_type} - clearing existing {self.server_type} data")
@@ -464,6 +467,9 @@ class DatabaseUpdateWorker:
         try:
             # Initialize database
             self.database = get_database(self.database_path)
+            # mounts and library paths may have changed since the last scan
+            from core.library.server_paths import reset as _reset_server_paths
+            _reset_server_paths()
 
             logger.info(f"Starting deep library scan for {self.server_type}")
             self._emit_signal('phase_changed', "Deep scan: Connecting to media server...")

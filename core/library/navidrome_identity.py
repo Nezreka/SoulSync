@@ -93,6 +93,30 @@ def _live_candidates(paths, stored_path):
     return paths.get(('tail', tail), []) if tail else []
 
 
+def _rekey_candidates(same_file_ids, old, paths, songs):
+    """Live ids that may be this stale row's song, best evidence first.
+
+    1. the path Navidrome reported for it (server_path, #1573), or file_path
+       on rows from before that column, exactly
+    2. another row for the same local file whose id is live: navidrome
+       re-keyed the song and the scan already brought the new row in
+    3. the artist/album/file tail of either path (#1571)
+    """
+    server_path, file_path = old.get('server_path'), old.get('file_path')
+    for stored in (server_path, file_path):
+        exact = paths.get(_path(stored)) if stored else None
+        if exact:
+            return exact
+    live = [sid for sid in same_file_ids if sid in songs]
+    if live:
+        return live
+    for stored in (server_path, file_path):
+        candidates = _live_candidates(paths, stored)
+        if candidates:
+            return candidates
+    return []
+
+
 def _same_recording(old, song):
     title = ' '.join(str(old.get('title') or '').casefold().split())
     current = ' '.join(str(song.get('title') or '').casefold().split())
@@ -113,9 +137,12 @@ def resolve_tracks(tracks, songs, db):
                   or (track.get('id', '') if isinstance(track, dict) else ''))
         if sid not in songs:
             with db._get_connection() as conn:
-                row = conn.execute("SELECT file_path,title,duration FROM tracks WHERE id=? AND server_source='navidrome'", (sid,)).fetchone()
-            old = dict(row) if row else {}
-            candidates = _live_candidates(paths, old.get('file_path'))
+                row = conn.execute("SELECT * FROM tracks WHERE id=? AND server_source='navidrome'", (sid,)).fetchone()
+                old = dict(row) if row else {}
+                same_file = [str(r[0]) for r in conn.execute(
+                    "SELECT id FROM tracks WHERE file_path=? AND server_source='navidrome' AND id!=?",
+                    (old['file_path'], sid))] if old.get('file_path') else []
+            candidates = _rekey_candidates(same_file, old, paths, songs) if old else []
             if len(candidates) != 1 or not _same_recording(old, songs[candidates[0]]):
                 raise IdentityError(f'Cannot safely resolve Navidrome song {sid}; playlist left unchanged. Run a library scan.')
             sid = candidates[0]
@@ -135,8 +162,14 @@ def repair_rekeyed_tracks(db, songs):
         conn.execute('BEGIN IMMEDIATE')
         rows = conn.execute("SELECT * FROM tracks WHERE server_source='navidrome'").fetchall()
         by_id = {str(r['id']): r for r in rows}
+        # one pass, not a query per stale row: file_path has no index and this
+        # runs under a write lock with thousands of stale rows on some libraries
+        by_file = defaultdict(list)
+        for r in rows:
+            if r['file_path']:
+                by_file[r['file_path']].append(str(r['id']))
         owned = {'id', 'album_id', 'artist_id', 'title', 'track_number', 'disc_number',
-                 'duration', 'file_path', 'bitrate', 'file_size', 'server_source', 'track_artist',
+                 'duration', 'file_path', 'server_path', 'bitrate', 'file_size', 'server_source', 'track_artist',
                  'created_at', 'updated_at'}
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         references = []
@@ -147,7 +180,8 @@ def repair_rekeyed_tracks(db, songs):
         for old_id, old in by_id.items():
             if old_id in songs:
                 continue
-            candidates = _live_candidates(paths, old['file_path'])
+            same_file = [i for i in by_file.get(old['file_path'], []) if i != old_id]
+            candidates = _rekey_candidates(same_file, dict(old), paths, songs)
             if len(candidates) != 1 or candidates[0] not in by_id:
                 continue
             new_id = candidates[0]

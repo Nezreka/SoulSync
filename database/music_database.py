@@ -2089,6 +2089,12 @@ class MusicDatabase:
             if track_cols and 'disc_number' not in track_cols:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN disc_number INTEGER DEFAULT 1")
                 logger.info("Repaired missing disc_number column on tracks table (#927)")
+            # #1573: where the media server says the file is. file_path is where
+            # SoulSync opens it; the two differ whenever the containers mount the
+            # music folder under different names. NULL until a scan fills it.
+            if track_cols and 'server_path' not in track_cols:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN server_path TEXT")
+                logger.info("Added server_path column to tracks table (#1573)")
 
             cursor.execute("PRAGMA table_info(albums)")
             album_cols = {c[1] for c in cursor.fetchall()}
@@ -10548,6 +10554,20 @@ class MusicDatabase:
                     if isinstance(_wrapper_size, int) and _wrapper_size > 0:
                         file_size = _wrapper_size
 
+                # #1573: keep the server's path as reported, and store where
+                # SoulSync itself opens the file. the standalone server scans
+                # SoulSync's own disk, its path already is the local one. when
+                # the file can't be found from here, file_path falls back to
+                # the server's path below, same as before.
+                server_path = file_path
+                if file_path and server_source != 'soulsync':
+                    from core.library.server_paths import local_path_for
+                    try:
+                        from core.settings import config_manager as _cm
+                    except Exception:  # noqa: BLE001 - no config, raw path only
+                        _cm = None
+                    file_path = local_path_for(file_path, _cm) or None
+
                 # Extract per-track artist for compilations/DJ mixes.
                 # Only stored when it differs from the album artist.
                 track_artist = None
@@ -10614,12 +10634,24 @@ class MusicDatabase:
                 title_norm = self._normalize_for_comparison(title) if title else ''
                 track_artist_norm = self._normalize_for_comparison(track_artist) if track_artist else None
 
+                if not file_path and server_path:
+                    # not reachable from here: keep a local path SoulSync set
+                    # earlier if that file is still there, else the server's
+                    if not is_new_track:
+                        cursor.execute("SELECT file_path FROM tracks WHERE id = ?", (track_id,))
+                        _prev = cursor.fetchone()
+                        _prev_path = _prev[0] if _prev else None
+                        if _prev_path and os.path.exists(_prev_path):
+                            file_path = _prev_path
+                    if not file_path:
+                        file_path = server_path
+
                 if is_new_track:
                     cursor.execute("""
                         INSERT INTO tracks
-                        (id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, title_norm, track_artist_norm, owner_profile_id, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (track_id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, title_norm, track_artist_norm or '', owner_profile_id))
+                        (id, album_id, artist_id, title, track_number, disc_number, duration, file_path, server_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, title_norm, track_artist_norm, owner_profile_id, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (track_id, album_id, artist_id, title, track_number, disc_number, duration, file_path, server_path, bitrate, file_size, server_source, track_artist, mbid, title_norm, track_artist_norm or '', owner_profile_id))
                 else:
                     # Update server-provided fields only — preserves spotify_track_id, deezer_id,
                     # isrc, bpm, and all other enrichment data. file_size uses
@@ -10629,7 +10661,8 @@ class MusicDatabase:
                     cursor.execute("""
                         UPDATE tracks
                         SET album_id = ?, artist_id = ?, title = ?, track_number = ?, disc_number = ?,
-                            duration = ?, file_path = COALESCE(?, file_path), bitrate = ?,
+                            duration = ?, file_path = COALESCE(?, file_path),
+                            server_path = COALESCE(?, server_path), bitrate = ?,
                             file_size = COALESCE(?, file_size),
                             server_source = ?,
                             track_artist = COALESCE(?, track_artist),
@@ -10642,7 +10675,7 @@ class MusicDatabase:
                             track_artist_norm = COALESCE(?, track_artist_norm),
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    """, (album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, mbid, mbid, title_norm, track_artist_norm, track_id))
+                    """, (album_id, artist_id, title, track_number, disc_number, duration, file_path, server_path, bitrate, file_size, server_source, track_artist, mbid, mbid, mbid, title_norm, track_artist_norm, track_id))
 
                 if is_new_track or track_artist_norm is not None:
                     cursor.execute("DELETE FROM track_credits WHERE track_id = ?", (track_id,))
@@ -10838,13 +10871,19 @@ class MusicDatabase:
         """All library tracks that have a file, for playlist/M3U export.
 
         Returns ``[{path, title, artist, duration}]`` ordered by artist / album / track number.
-        ``duration`` is converted to SECONDS here (the schema stores milliseconds)."""
+        ``duration`` is converted to SECONDS here (the schema stores milliseconds).
+
+        ``path`` is the media server's own path when the scan recorded one: the
+        M3U is read by the server, and file_path is SoulSync's mount (#1573)."""
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.file_path AS path, t.title AS title, ar.name AS artist,
+            cursor.execute("PRAGMA table_info(tracks)")
+            _path_expr = ("COALESCE(NULLIF(t.server_path, ''), t.file_path)"
+                          if any(c[1] == 'server_path' for c in cursor.fetchall()) else "t.file_path")
+            cursor.execute(f"""
+                SELECT {_path_expr} AS path, t.title AS title, ar.name AS artist,
                        t.duration AS duration_ms, t.track_number AS track_number
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
