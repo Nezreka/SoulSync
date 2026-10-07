@@ -1,6 +1,6 @@
-# soulsync 3.5.1: `dev` → `main`
+# soulsync 3.5.2: `dev` → `main`
 
-sign in with plex, listening history that's yours (the kids' plays stay out of your stats, and plays stop counting twice), download discography learns about watchlists and editions, music videos and episodes become requestable, the dashboard gets a new look and the sidebar gets live weather, plus a big stack of tagging, playlist sync and download fixes. scope: everything merged since 3.5.0 went to main (#1496).
+sign in with plex, listening history that's yours (the kids' plays stay out of your stats, and plays stop counting twice), download discography learns about watchlists and editions, music videos and episodes become requestable, the dashboard gets a new look and the sidebar gets live weather, plus a big stack of tagging, playlist sync and download fixes. scope: everything merged since 3.5.0 went to main (#1496). dev went to main early as 3.5.1 by accident, so 3.5.2 is that release plus everything that landed since.
 
 ## sign in with plex
 
@@ -106,4 +106,4 @@ sign in with plex, listening history that's yours (the kids' plays stay out of y
 ## validation
 
 - every fix shipped with regression tests and green neighboring suites, per its PR.
-- full suite on the 3.5.1 bump head: 22624 passed, 0 failed (run twice, before and after the cleaner fix). the late additions above (plex sign-in onward) shipped with their own tests and mutation checks; the full suite gets re-run on the final head before the merge.
+- full suite on the first 3.5.1 bump head: 22624 passed, 0 failed (run twice, before and after the cleaner fix). the late additions above (plex sign-in onward) shipped with their own tests and mutation checks; the full suite gets re-run on the final head before the merge.
