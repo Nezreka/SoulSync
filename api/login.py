@@ -177,7 +177,6 @@ def plex_signin_check():
         database = get_database()
         result = plex_signin.sign_in(
             database, account,
-            owner_account_id=plex_signin.owner_account_id(plex),
             allow_create=bool(config_manager.get('security.plex_signin_auto_create', True)),
             default_can_download=bool(config_manager.get('security.plex_signin_default_can_download', False)),
         )

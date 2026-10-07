@@ -5,7 +5,8 @@ plex.tv for a pin, the user approves it on plex's site (soulsync never sees
 their password), soulsync reads back their account token. from that:
 
 - the account must be able to see THIS server, else no entry
-- the server owner signs in as the admin profile
+- the server's owner (plex says so: the server is `owned` in their
+  resources) signs in as the admin profile
 - an account that signed in before signs in as the profile it got then.
   only plex sign-in records that; the home-user link never counts, since
   any profile can point it at any unprotected home user
@@ -20,6 +21,8 @@ never kept.
 
 from __future__ import annotations
 
+import re
+import threading
 import uuid
 from dataclasses import dataclass
 from typing import Optional
@@ -37,14 +40,22 @@ PRODUCT = "SoulSync"
 TIMEOUT = 10
 
 
+_cid_lock = threading.Lock()
+# find-or-create a profile is one step: two tabs (or a double click) finishing
+# at once must not make two profiles for one plex account
+_sign_in_lock = threading.Lock()
+
+
 def client_identifier(config_manager) -> str:
     """this install's stable plex client id. plex ties a pin to the client
-    that made it, so it must not change between start and check"""
-    cid = config_manager.get("plex_signin.client_id", "") or ""
-    if not cid:
-        cid = f"soulsync-{uuid.uuid4()}"
-        config_manager.set("plex_signin.client_id", cid)
-    return cid
+    that made it, so it must not change between start and check (two first
+    sign-ins racing would each make one, and the loser's pin would 404)"""
+    with _cid_lock:
+        cid = config_manager.get("plex_signin.client_id", "") or ""
+        if not cid:
+            cid = f"soulsync-{uuid.uuid4()}"
+            config_manager.set("plex_signin.client_id", cid)
+        return cid
 
 
 def _headers(cid: str, token: Optional[str] = None) -> dict:
@@ -81,6 +92,9 @@ class PlexAccount:
     id: str
     username: str
     server_token: Optional[str]
+    # plex's own word that this account owns the server, not a guess from
+    # whose token soulsync happens to be configured with
+    owns_server: bool = False
 
 
 def resolve_account(account_token: str, machine_id: str) -> PlexAccount:
@@ -90,13 +104,15 @@ def resolve_account(account_token: str, machine_id: str) -> PlexAccount:
 
     account = MyPlexAccount(token=account_token)
     server_token = None
+    owns = False
     for resource in account.resources():
         provides = getattr(resource, "provides", "") or ""
         if "server" in provides and resource.clientIdentifier == machine_id and resource.accessToken:
             server_token = resource.accessToken
+            owns = bool(getattr(resource, "owned", False))
             break
     name = getattr(account, "username", None) or getattr(account, "title", None) or "Plex user"
-    return PlexAccount(id=str(account.id), username=str(name), server_token=server_token)
+    return PlexAccount(id=str(account.id), username=str(name), server_token=server_token, owns_server=owns)
 
 
 @dataclass
@@ -110,18 +126,32 @@ def sign_in(
     db,
     account: PlexAccount,
     *,
-    owner_account_id: Optional[str],
     allow_create: bool,
     default_can_download: bool,
 ) -> SignInResult:
     """map a signed-in plex account to a soulsync profile (see module doc)"""
+    with _sign_in_lock:
+        return _sign_in(db, account, allow_create=allow_create, default_can_download=default_can_download)
+
+
+def _admin_profile_id(db) -> Optional[int]:
+    """the admin profile the owner signs in as: profile 1, the one setup
+    makes and nothing can delete, as long as it really is an admin"""
+    p = db.get_profile(1) or {}
+    return 1 if p.get("is_admin") else None
+
+
+def _sign_in(db, account: PlexAccount, *, allow_create: bool, default_can_download: bool) -> SignInResult:
     if not account.server_token:
         return SignInResult(error="That Plex account doesn't have access to this server")
 
-    if owner_account_id and account.id == str(owner_account_id):
+    if account.owns_server:
         # the server's owner is the admin. the admin acts as the app account,
         # so no per-user link is stored for it
-        return SignInResult(profile_id=1)
+        admin = _admin_profile_id(db)
+        if admin is None:
+            return SignInResult(error="SoulSync has no admin profile to sign you in to")
+        return SignInResult(profile_id=admin)
 
     # identity comes only from plex sign-in's own record. the home-user link
     # can't be trusted for it: any profile can point that at any unprotected
@@ -150,9 +180,18 @@ def sign_in(
     return SignInResult(profile_id=profile_id, created=True)
 
 
+def profile_name_for(username: str) -> str:
+    """a profile name from a plex username. it comes from outside, so only
+    plain characters survive: letters, digits, spaces and . _ -. no quotes,
+    so a name can never close an html attribute wherever it's shown"""
+    cleaned = re.sub(r"[^\w .\-]", "", username or "", flags=re.UNICODE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()[:36]
+    return cleaned or "Plex user"
+
+
 def _create_profile(db, username: str, *, can_download: bool) -> Optional[int]:
     """a profile named after the plex user; a taken name gets a number"""
-    base = (username or "Plex user").strip()[:36] or "Plex user"
+    base = profile_name_for(username)
     for n in range(0, 50):
         name = base if n == 0 else f"{base} {n + 1}"
         if db.get_profile_by_name(name):
@@ -161,18 +200,6 @@ def _create_profile(db, username: str, *, can_download: bool) -> Optional[int]:
         if pid:
             return pid
     return None
-
-
-def owner_account_id(plex_client) -> Optional[str]:
-    """the plex.tv id of the account the app's own token belongs to: the
-    server owner, as far as soulsync is concerned. None when plex isn't set up"""
-    try:
-        if plex_client is None or not plex_client.ensure_connection():
-            return None
-        return str(plex_client._account().id)
-    except Exception as e:  # noqa: BLE001 - no owner means nobody maps to admin
-        logger.warning("Plex sign-in: could not read the server owner's account: %s", e)
-        return None
 
 
 def server_machine_id(plex_client) -> Optional[str]:

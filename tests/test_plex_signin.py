@@ -69,24 +69,31 @@ def test_check_pin_returns_the_token_only_once_approved(monkeypatch):
 
 def test_no_access_to_this_server_means_no_entry():
     db = web_server.get_database()
-    r = plex_signin.sign_in(db, PlexAccount('1', 'stranger', None), owner_account_id='9',
+    r = plex_signin.sign_in(db, PlexAccount('1', 'stranger', None),
                             allow_create=True, default_can_download=False)
     assert r.profile_id is None and 'access' in r.error
 
 
 def test_the_server_owner_is_the_admin():
     db = web_server.get_database()
-    r = plex_signin.sign_in(db, PlexAccount('9', 'owner', 'srv'), owner_account_id='9',
+    r = plex_signin.sign_in(db, PlexAccount('9', 'owner', 'srv', owns_server=True),
                             allow_create=False, default_can_download=False)
     assert r.profile_id == 1 and r.error is None
+
+
+def test_an_account_plex_says_is_not_the_owner_never_gets_admin():
+    db = web_server.get_database()
+    r = plex_signin.sign_in(db, PlexAccount('9', f'Notowner{_uid()}', 'srv', owns_server=False),
+                            allow_create=True, default_can_download=False)
+    assert r.profile_id != 1 and not db.get_profile(r.profile_id)['is_admin']
 
 
 def test_signing_in_again_lands_on_the_same_profile_and_refreshes_the_token():
     db = web_server.get_database()
     plex_id = str(int(uuid4().int % 10**9))
-    first = plex_signin.sign_in(db, PlexAccount(plex_id, f'Again{_uid()}', 'old-token'), owner_account_id='9',
+    first = plex_signin.sign_in(db, PlexAccount(plex_id, f'Again{_uid()}', 'old-token'),
                                 allow_create=True, default_can_download=False)
-    again = plex_signin.sign_in(db, PlexAccount(plex_id, 'renamed', 'new-token'), owner_account_id='9',
+    again = plex_signin.sign_in(db, PlexAccount(plex_id, 'renamed', 'new-token'),
                                 allow_create=False, default_can_download=False)
     assert again.profile_id == first.profile_id and not again.created
     assert db.get_profile_plex_home_user(first.profile_id)['token'] == 'new-token'
@@ -100,7 +107,7 @@ def test_a_home_user_link_is_not_proof_of_who_someone_is():
     kid_id = str(int(uuid4().int % 10**9))
     mom = db.create_profile(name=f'Mom{_uid()}', can_download=True)
     db.set_profile_plex_home_user(mom, kid_id, 'Kid', 'kid-server-token')
-    r = plex_signin.sign_in(db, PlexAccount(kid_id, f'Kid{_uid()}', 'kid-token'), owner_account_id='9',
+    r = plex_signin.sign_in(db, PlexAccount(kid_id, f'Kid{_uid()}', 'kid-token'),
                             allow_create=True, default_can_download=False)
     assert r.profile_id != mom and r.created
     assert not db.get_profile(r.profile_id)['can_download']
@@ -111,7 +118,7 @@ def test_never_an_admin_profile_except_through_the_owner_check():
     plex_id = str(int(uuid4().int % 10**9))
     boss = db.create_profile(name=f'Boss{_uid()}', is_admin=True)
     db.set_profile_plex_account(boss, plex_id)
-    r = plex_signin.sign_in(db, PlexAccount(plex_id, 'boss', 'tok'), owner_account_id='9',
+    r = plex_signin.sign_in(db, PlexAccount(plex_id, 'boss', 'tok'),
                             allow_create=True, default_can_download=False)
     assert r.profile_id is None and 'admin' in r.error
 
@@ -122,7 +129,7 @@ def test_a_turned_off_profile_cannot_sign_in():
     pid = db.create_profile(name=f'Off{_uid()}')
     db.set_profile_plex_account(pid, plex_id)
     db.update_profile(pid, disabled=1)
-    r = plex_signin.sign_in(db, PlexAccount(plex_id, 'off', 'tok'), owner_account_id='9',
+    r = plex_signin.sign_in(db, PlexAccount(plex_id, 'off', 'tok'),
                             allow_create=True, default_can_download=False)
     assert r.profile_id is None and 'turned off' in r.error
 
@@ -131,7 +138,7 @@ def test_a_new_plex_user_gets_a_request_only_profile_linked_to_them():
     db = web_server.get_database()
     plex_id = str(int(uuid4().int % 10**9))
     name = f'Friend{_uid()}'
-    r = plex_signin.sign_in(db, PlexAccount(plex_id, name, 'friend-token'), owner_account_id='9',
+    r = plex_signin.sign_in(db, PlexAccount(plex_id, name, 'friend-token'),
                             allow_create=True, default_can_download=False)
     assert r.created and r.profile_id
     profile = db.get_profile(r.profile_id)
@@ -144,7 +151,7 @@ def test_a_taken_name_gets_a_number():
     db = web_server.get_database()
     name = f'Taken{_uid()}'
     db.create_profile(name=name)
-    r = plex_signin.sign_in(db, PlexAccount(str(int(uuid4().int % 10**9)), name, 'tok'), owner_account_id='9',
+    r = plex_signin.sign_in(db, PlexAccount(str(int(uuid4().int % 10**9)), name, 'tok'),
                             allow_create=True, default_can_download=True)
     assert db.get_profile(r.profile_id)['name'] == f'{name} 2'
     assert db.get_profile(r.profile_id)['can_download']
@@ -153,7 +160,7 @@ def test_a_taken_name_gets_a_number():
 def test_no_new_profiles_when_the_admin_says_so():
     db = web_server.get_database()
     r = plex_signin.sign_in(db, PlexAccount(str(int(uuid4().int % 10**9)), 'newbie', 'tok'),
-                            owner_account_id='9', allow_create=False, default_can_download=False)
+                            allow_create=False, default_can_download=False)
     assert r.profile_id is None and 'linked' in r.error
 
 
@@ -189,7 +196,6 @@ def _stub_plex(monkeypatch, *, approve_after=1, account=None):
 
     monkeypatch.setattr(plex_signin, 'check_pin', check)
     monkeypatch.setattr(plex_signin, 'server_machine_id', lambda plex: 'machine-1')
-    monkeypatch.setattr(plex_signin, 'owner_account_id', lambda plex: '9')
     acct = account or PlexAccount(str(int(uuid4().int % 10**9)), f'Routed{_uid()}', 'route-token')
     monkeypatch.setattr(plex_signin, 'resolve_account', lambda token, machine: acct)
     return acct
@@ -300,3 +306,89 @@ def test_a_blip_from_plex_keeps_waiting_an_expired_pin_starts_over(client, monke
     r = client.post('/api/auth/plex/check')
     assert r.status_code == 410 and 'expired' in r.get_json()['error']
     assert client.post('/api/auth/plex/check').status_code == 400  # the pin is gone
+
+
+# -- reading the account from plex --
+
+class _Res:
+    def __init__(self, cid, token, owned, provides='server'):
+        self.clientIdentifier, self.accessToken, self.owned, self.provides = cid, token, owned, provides
+
+
+class _Acct:
+    def __init__(self, *, resources, id=555, username='frienduser'):
+        self._resources, self.id, self.username = resources, id, username
+
+    def resources(self):
+        return self._resources
+
+
+def _fake_account(monkeypatch, acct):
+    import plexapi.myplex
+    monkeypatch.setattr(plexapi.myplex, 'MyPlexAccount', lambda token: acct)
+
+
+def test_resolve_account_takes_this_servers_token_and_its_owned_flag(monkeypatch):
+    _fake_account(monkeypatch, _Acct(resources=[
+        _Res('other-server', 'nope', True),
+        _Res('a-player', 'nope', False, provides='player'),
+        _Res('machine-1', 'srv-token', False),
+    ]))
+    a = plex_signin.resolve_account('acct-token', 'machine-1')
+    assert (a.id, a.username, a.server_token, a.owns_server) == ('555', 'frienduser', 'srv-token', False)
+
+
+def test_resolve_account_the_owner(monkeypatch):
+    _fake_account(monkeypatch, _Acct(resources=[_Res('machine-1', 'owner-srv', True)]))
+    assert plex_signin.resolve_account('t', 'machine-1').owns_server is True
+
+
+def test_resolve_account_owning_another_server_is_not_owning_this_one(monkeypatch):
+    _fake_account(monkeypatch, _Acct(resources=[_Res('other', 'x', True), _Res('machine-1', 'srv', False)]))
+    assert plex_signin.resolve_account('t', 'machine-1').owns_server is False
+
+
+def test_resolve_account_without_access(monkeypatch):
+    _fake_account(monkeypatch, _Acct(resources=[_Res('other', 'x', True)]))
+    a = plex_signin.resolve_account('t', 'machine-1')
+    assert a.server_token is None and a.owns_server is False
+
+
+# -- names from outside --
+
+def test_profile_names_from_plex_are_plain_text():
+    assert plex_signin.profile_name_for('Boulder_Badge.Dad') == 'Boulder_Badge.Dad'
+    assert plex_signin.profile_name_for('<img src=x onerror=1>') == 'img srcx onerror1'
+    assert "'" not in plex_signin.profile_name_for("O'Brien")
+    assert plex_signin.profile_name_for('') == 'Plex user'
+    assert len(plex_signin.profile_name_for('a' * 80)) == 36
+
+
+# -- racing sign-ins --
+
+def test_two_sign_ins_at_once_make_one_profile():
+    import threading
+    db = web_server.get_database()
+    acct = PlexAccount(str(int(uuid4().int % 10**9)), f'Racer{_uid()}', 'tok')
+    results = []
+    gate = threading.Barrier(4)
+
+    def go():
+        gate.wait()
+        results.append(plex_signin.sign_in(db, acct, allow_create=True, default_can_download=False))
+
+    threads = [threading.Thread(target=go) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len({r.profile_id for r in results}) == 1
+    assert sum(r.created for r in results) == 1
+
+
+def test_a_new_profile_gets_the_cleaned_name():
+    db = web_server.get_database()
+    tag = _uid()
+    r = plex_signin.sign_in(db, PlexAccount(str(int(uuid4().int % 10**9)), f'<b>{tag}</b>', 'tok'),
+                            allow_create=True, default_can_download=False)
+    assert db.get_profile(r.profile_id)['name'] == f'b{tag}b'
