@@ -356,30 +356,130 @@ function buildPopover(data: WeatherResponse): HTMLDivElement {
   return pop;
 }
 
-const POPOVER_HEIGHT_FALLBACK = 120;
+export interface PopoverGeom {
+  lineTop: number;
+  lineBottom: number;
+  lineRight: number;
+  popoverHeight: number;
+  popoverWidth: number;
+  viewportWidth: number;
+  viewportHeight: number;
+}
 
-/** Measured popover height; jsdom reports 0, so fall back to a rough estimate. */
+export interface PopoverPlacement {
+  top: string;
+  bottom: string;
+  right: string;
+  maxHeight?: string;
+}
+
+const POPOVER_MARGIN = 8;
+
+/**
+ * Pure placement math: where should the fixed forecast popover sit for a
+ * given line rect, popover size and viewport? Empty string = unset, matching
+ * how positionPopover writes the styles.
+ *
+ * Vertical: prefer above the line; flip below when the line sits too close
+ * to the viewport top; when neither side fits, take the roomier side and
+ * cap the height so the popover stays pinned inside the viewport.
+ * Horizontal: right-align to the line's right edge, then clamp so the left
+ * edge never crosses the 8px margin (pinning left at 8 when the popover is
+ * wider than the viewport minus margins).
+ */
+export function computePopoverPlacement(g: PopoverGeom): PopoverPlacement {
+  const placement: PopoverPlacement = { top: '', bottom: '', right: '' };
+  const above = g.lineTop - POPOVER_MARGIN;
+  const below = g.viewportHeight - g.lineBottom - POPOVER_MARGIN;
+  if (above >= g.popoverHeight) {
+    placement.bottom = `${g.viewportHeight - g.lineTop}px`;
+  } else if (below >= g.popoverHeight) {
+    placement.top = `${g.lineBottom}px`;
+  } else if (above >= below) {
+    placement.bottom = `${g.viewportHeight - g.lineTop}px`;
+    placement.maxHeight = `${Math.max(0, above)}px`;
+  } else {
+    placement.top = `${g.lineBottom}px`;
+    placement.maxHeight = `${Math.max(0, below)}px`;
+  }
+
+  let right = Math.max(POPOVER_MARGIN, g.viewportWidth - g.lineRight);
+  if (g.viewportWidth - right - g.popoverWidth < POPOVER_MARGIN) {
+    right = g.viewportWidth - g.popoverWidth - POPOVER_MARGIN;
+  }
+  placement.right = `${right}px`;
+  return placement;
+}
+
+function applyPlacement(pop: HTMLElement, p: PopoverPlacement): void {
+  pop.style.top = p.top;
+  pop.style.bottom = p.bottom;
+  pop.style.right = p.right;
+  pop.style.maxHeight = p.maxHeight ?? '';
+}
+
+/**
+ * Measured popover height. getBoundingClientRect forces a synchronous layout
+ * read (never cached), so right after appendChild this returns the real
+ * rendered height — including any webfont swap that already landed. When
+ * the box has no size yet (jsdom reports 0), estimate from the actual row
+ * count instead of a magic number: the popover is exactly its rows.
+ */
 function popoverHeight(pop: HTMLElement): number {
-  return pop.offsetHeight || pop.getBoundingClientRect().height || POPOVER_HEIGHT_FALLBACK;
+  const rectH = pop.getBoundingClientRect().height;
+  if (rectH > 0) return rectH;
+  if (pop.offsetHeight > 0) return pop.offsetHeight;
+  return pop.querySelectorAll('.sidebar-weather-row').length * 30 + 20;
+}
+
+function popoverWidth(pop: HTMLElement): number {
+  const rectW = pop.getBoundingClientRect().width;
+  if (rectW > 0) return rectW;
+  if (pop.offsetWidth > 0) return pop.offsetWidth;
+  return 260; // between the CSS min-width (236) and max-width (300)
 }
 
 /**
  * Above the weather line when there is room; below it when the line sits too
- * close to the viewport top (e.g. the profile indicator is hidden). The CSS
- * max-height + overflow guard covers the case where neither side fits.
+ * close to the viewport top (e.g. the profile indicator is hidden); pinned
+ * inside the viewport with a capped height when neither side fits.
+ * Ends with a self-heal pass: re-reads the real painted box and re-places
+ * if any edge escaped the viewport, covering any residual measurement race
+ * (late webfont swap, dynamic content).
  */
 function positionPopover(): void {
   const line = document.getElementById(LINE_ID);
   const pop = document.getElementById(POPOVER_ID);
   if (!line || !pop) return;
   const r = line.getBoundingClientRect();
-  pop.style.right = `${Math.max(8, window.innerWidth - r.right)}px`;
-  if (r.top < popoverHeight(pop)) {
-    pop.style.top = `${r.bottom}px`;
-    pop.style.bottom = '';
-  } else {
-    pop.style.bottom = `${Math.max(0, window.innerHeight - r.top)}px`;
-    pop.style.top = '';
+  const geom: PopoverGeom = {
+    lineTop: r.top,
+    lineBottom: r.bottom,
+    lineRight: r.right,
+    popoverHeight: popoverHeight(pop),
+    popoverWidth: popoverWidth(pop),
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+  };
+  applyPlacement(pop, computePopoverPlacement(geom));
+
+  // Self-heal: the first pass may have measured pre-font-swap; if the
+  // painted box now escapes the viewport, re-place with its real size.
+  const pr = pop.getBoundingClientRect();
+  if (
+    pr.top < 0 ||
+    pr.bottom > geom.viewportHeight ||
+    pr.left < 0 ||
+    pr.right > geom.viewportWidth
+  ) {
+    applyPlacement(
+      pop,
+      computePopoverPlacement({
+        ...geom,
+        popoverHeight: Math.max(pr.height, 1),
+        popoverWidth: Math.max(pr.width, 1),
+      }),
+    );
   }
 }
 
@@ -406,6 +506,19 @@ function onPopoverKey(e: KeyboardEvent): void {
 }
 
 /**
+ * A scroll that starts inside the popover (its capped, scrollable region in
+ * the neither-fits branch) is the user reading the forecast, not a dismiss
+ * gesture — only outside scrolls close it. Capture phase, like
+ * onOutsideDown's guard.
+ */
+function onPopoverScroll(e: Event): void {
+  const pop = document.getElementById(POPOVER_ID);
+  const t = e.target as Node | null;
+  if (pop && t && pop.contains(t)) return;
+  closePopover();
+}
+
+/**
  * SPA navigation (keyboard-Enter on nav links, programmatic navigateToPage)
  * fires none of the popover's pointer/keyboard/scroll close paths, so the
  * page-change event closes it explicitly.
@@ -420,11 +533,20 @@ function openPopover(): void {
   const pop = buildPopover(active.data);
   document.body.appendChild(pop);
   positionPopover();
+  // Webfonts load async: a popover measured pre-font-swap grows afterward
+  // and clips. Re-run placement once fonts settle AND once the first paint
+  // lands — both are idempotent and no-ops if the popover was closed.
+  if (typeof document.fonts?.ready?.then === 'function') {
+    void document.fonts.ready.then(() => positionPopover());
+  }
+  if (typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(() => positionPopover());
+  }
   document.addEventListener('pointerdown', onOutsideDown, true);
   document.addEventListener('keydown', onPopoverKey, true);
   window.addEventListener(_PAGE_WILL_CHANGE, onPageWillChange);
   window.addEventListener('resize', positionPopover);
-  window.addEventListener('scroll', closePopover, true);
+  window.addEventListener('scroll', onPopoverScroll, true);
 }
 
 export function closePopover(): void {
@@ -433,7 +555,7 @@ export function closePopover(): void {
   document.removeEventListener('keydown', onPopoverKey, true);
   window.removeEventListener(_PAGE_WILL_CHANGE, onPageWillChange);
   window.removeEventListener('resize', positionPopover);
-  window.removeEventListener('scroll', closePopover, true);
+  window.removeEventListener('scroll', onPopoverScroll, true);
 }
 
 function togglePopover(): void {
@@ -455,6 +577,252 @@ interface Particle {
   ph: number;
   rot: number;
   vr: number;
+  /** depth plane for layered scenes (rain/snow): 0 = far, 1 = near */
+  layer?: number;
+}
+
+/** Exported for tests: the exact numeric design each scene builds from. */
+export const SCENE_SPECS = {
+  rain: {
+    cap: 64,
+    lineWidth: 1, // streak stroke width
+    // Two depth planes (atmospheric perspective): far streaks are shorter,
+    // fainter and cooler; near ones slightly longer and brighter.
+    far: {
+      share: 0.55,
+      lenMin: 12,
+      lenMax: 20,
+      alphaMin: 0.05,
+      alphaMax: 0.1,
+      vxMin: -90,
+      vxMax: -60,
+      vyMin: 360,
+      vyMax: 480,
+      tint: '159,195,232', // cooler, dimmer streak
+    },
+    near: {
+      share: 0.45,
+      lenMin: 22,
+      lenMax: 36,
+      alphaMin: 0.1,
+      alphaMax: 0.17,
+      vxMin: -110,
+      vxMax: -80,
+      vyMin: 480,
+      vyMax: 620,
+      tint: '178,208,240', // a touch brighter (atmospheric perspective)
+    },
+  },
+  snow: {
+    cap: 56,
+    tint: '235,242,252',
+    // soft-dot sprite: radial alpha ramp baked once, drawImage'd per flake
+    sprite: {
+      stops: [
+        [0, 1],
+        [0.45, 0.55],
+        [1, 0],
+      ],
+    },
+    // Dust-mote density: many tiny faint far flakes (cheap hard dots), few
+    // larger soft near flakes (bokeh feel via a pre-rendered radial sprite).
+    far: {
+      share: 0.6,
+      sizeMin: 0.5,
+      sizeMax: 1.1,
+      alphaMin: 0.08,
+      alphaMax: 0.16,
+      vxMin: -6,
+      vxMax: 6,
+      vyMin: 10,
+      vyMax: 24,
+      sway: 4,
+    },
+    near: {
+      share: 0.4,
+      sizeMin: 1.6,
+      sizeMax: 2.8,
+      alphaMin: 0.16,
+      alphaMax: 0.3,
+      vxMin: -10,
+      vxMax: 10,
+      vyMin: 22,
+      vyMax: 44,
+      sway: 9,
+    },
+  },
+  wind: {
+    wisps: {
+      cap: 8,
+      vxMin: 18,
+      vxMax: 55,
+      vyMin: -6,
+      vyMax: 6,
+      alphaMin: 0.04,
+      alphaMax: 0.08,
+      halfWidthMin: 60,
+      halfWidthMax: 110,
+      tiltMin: -0.35,
+      tiltMax: -0.15,
+      wanderMin: 8,
+      wanderMax: 18,
+      wrapMarginY: 40, // a wisp re-enters 40px past the top/bottom edge
+      tint: '170,192,222',
+      squash: 0.08, // ellipse height as a fraction of the half-width
+    },
+    // Cool tint wash behind the wind scene: atmosphere without particles.
+    // Deliberately a different palette from the wisp tint (cooler, dimmer).
+    wash: {
+      tint: '130,160,205',
+      stops: [
+        [0, 0.05],
+        [0.7, 0],
+        [1, 0],
+      ],
+    },
+    leaves: {
+      cap: 5,
+      vxMin: 25,
+      vxMax: 70,
+      vyMin: -12,
+      vyMax: 18,
+      alphaMin: 0.16,
+      alphaMax: 0.28,
+      sizeMin: 1.6,
+      sizeMax: 2.8,
+      aspect: 0.55, // leaf height as a fraction of the width
+      vrMax: 1.2,
+      tint: '206,158,92',
+    },
+  },
+  clear: {
+    cap: 8,
+    vxMin: -7,
+    vxMax: 7,
+    vyMin: -4,
+    vyMax: 4,
+    sizeMin: 26,
+    sizeMax: 60,
+    alphaMin: 0.035,
+    alphaMax: 0.07,
+    layers: {
+      count: 3,
+      shrinkPerLayer: 0.28,
+      sizeMultiplier: 3,
+      alphaDecayPerLayer: 0.3,
+      tint: '174,189,212',
+    },
+    // Wrap margins cover the largest drawn ellipse (rx = sizeMax *
+    // sizeMultiplier = 180, ry = sizeMax = 60), so a wisp never teleports
+    // while any part of it is still on screen.
+    wrapMarginX: 190,
+    wrapMarginY: 70,
+  },
+} as const;
+
+export interface SceneParticles {
+  drops: Particle[];
+  leaves: Particle[];
+}
+
+/**
+ * Exported for tests: build the particle set for a scene at a given size.
+ * startScene uses this on every fit(); the same constants drive the real
+ * render, so the design spec tests assert what actually draws.
+ */
+export function buildSceneParticles(scene: WeatherScene, w: number, h: number): SceneParticles {
+  const scale = Math.min(1, Math.max(0.35, Math.min(w / 280, h / 900)));
+  const n = (cap: number) => Math.max(4, Math.round(cap * scale));
+  const drops: Particle[] = [];
+  const leaves: Particle[] = [];
+  if (scene === 'rain') {
+    const rsp = SCENE_SPECS.rain;
+    for (let i = 0; i < n(rsp.cap); i++) {
+      const near = Math.random() < rsp.near.share;
+      const L = near ? rsp.near : rsp.far;
+      drops.push({
+        x: rand(-40, w + 40),
+        y: rand(0, h),
+        vx: rand(L.vxMin, L.vxMax),
+        vy: rand(L.vyMin, L.vyMax),
+        s: rand(L.lenMin, L.lenMax), // streak length in px
+        a: rand(L.alphaMin, L.alphaMax),
+        ph: 0,
+        rot: 0,
+        vr: 0,
+        layer: near ? 1 : 0,
+      });
+    }
+  } else if (scene === 'snow') {
+    const ssp = SCENE_SPECS.snow;
+    for (let i = 0; i < n(ssp.cap); i++) {
+      const near = Math.random() < ssp.near.share;
+      const L = near ? ssp.near : ssp.far;
+      drops.push({
+        x: rand(0, w),
+        y: rand(0, h),
+        vx: rand(L.vxMin, L.vxMax),
+        vy: rand(L.vyMin, L.vyMax),
+        s: rand(L.sizeMin, L.sizeMax),
+        a: rand(L.alphaMin, L.alphaMax),
+        ph: rand(0, 6.28),
+        rot: 0,
+        vr: L.sway, // sway amplitude scales with depth
+        layer: near ? 1 : 0,
+      });
+    }
+  } else if (scene === 'wind') {
+    const wsp = SCENE_SPECS.wind.wisps;
+    // Soft air wisps: wide, faint radial-gradient ellipses drifting slowly —
+    // a breeze you sense, not an effect you watch. `s` is the half-width;
+    // height derives from it (8%); `rot` is the diagonal tilt; `vr` is the
+    // vertical wander amplitude in px/s.
+    for (let i = 0; i < n(wsp.cap); i++) {
+      drops.push({
+        x: rand(-wsp.halfWidthMax, w + wsp.halfWidthMax),
+        y: rand(0, h),
+        vx: rand(wsp.vxMin, wsp.vxMax),
+        vy: rand(wsp.vyMin, wsp.vyMax),
+        s: rand(wsp.halfWidthMin, wsp.halfWidthMax),
+        a: rand(wsp.alphaMin, wsp.alphaMax),
+        ph: rand(0, 6.28),
+        rot: rand(wsp.tiltMin, wsp.tiltMax),
+        vr: rand(wsp.wanderMin, wsp.wanderMax),
+      });
+    }
+    const lsp = SCENE_SPECS.wind.leaves;
+    // Rare, calm leaves: small, faint, drifting with a gentle sine sway and
+    // slow rotation — no wild tumbling.
+    for (let i = 0; i < n(lsp.cap); i++) {
+      leaves.push({
+        x: rand(0, w),
+        y: rand(0, h),
+        vx: rand(lsp.vxMin, lsp.vxMax),
+        vy: rand(lsp.vyMin, lsp.vyMax),
+        s: rand(lsp.sizeMin, lsp.sizeMax),
+        a: rand(lsp.alphaMin, lsp.alphaMax),
+        ph: rand(0, 6.28),
+        rot: rand(0, 6.28),
+        vr: rand(-lsp.vrMax, lsp.vrMax),
+      });
+    }
+  } else {
+    const csp = SCENE_SPECS.clear;
+    for (let i = 0; i < n(csp.cap); i++) {
+      drops.push({
+        x: rand(0, w),
+        y: rand(0, h),
+        vx: rand(csp.vxMin, csp.vxMax),
+        vy: rand(csp.vyMin, csp.vyMax),
+        s: rand(csp.sizeMin, csp.sizeMax),
+        a: rand(csp.alphaMin, csp.alphaMax),
+        ph: rand(0, 6.28),
+        rot: 0,
+        vr: 0,
+      });
+    }
+  }
+  return { drops, leaves };
 }
 
 function rand(a: number, b: number): number {
@@ -475,88 +843,50 @@ function startScene(
   // non-null binding: TS cannot narrow the nullable capture across closures
   const ctx: CanvasRenderingContext2D = rawCtx;
 
-  const CAPS = { rain: 90, snow: 70, windStreaks: 40, windLeaves: 12, wisps: 8 } as const;
   let w = 280;
   let h = 600;
   let drops: Particle[] = [];
   let leaves: Particle[] = [];
+  let windWash: CanvasGradient | null = null;
 
   function buildParticles(): void {
-    const scale = Math.min(1, Math.max(0.35, Math.min(w / 280, h / 900)));
-    const n = (cap: number) => Math.max(4, Math.round(cap * scale));
-    drops = [];
-    leaves = [];
-    if (scene === 'rain') {
-      for (let i = 0; i < n(CAPS.rain); i++) {
-        drops.push({
-          x: rand(-40, w + 40),
-          y: rand(0, h),
-          vx: rand(-110, -70),
-          vy: rand(430, 620),
-          s: rand(9, 18),
-          a: rand(0.1, 0.26),
-          ph: 0,
-          rot: 0,
-          vr: 0,
-        });
-      }
-    } else if (scene === 'snow') {
-      for (let i = 0; i < n(CAPS.snow); i++) {
-        drops.push({
-          x: rand(0, w),
-          y: rand(0, h),
-          vx: rand(-9, 9),
-          vy: rand(14, 42),
-          s: rand(0.8, 2.1),
-          a: rand(0.14, 0.38),
-          ph: rand(0, 6.28),
-          rot: 0,
-          vr: 0,
-        });
-      }
-    } else if (scene === 'wind') {
-      for (let i = 0; i < n(CAPS.windStreaks); i++) {
-        drops.push({
-          x: rand(-w, w),
-          y: rand(0, h),
-          vx: rand(260, 640),
-          vy: rand(-26, 26),
-          s: rand(30, 110),
-          a: rand(0.06, 0.16),
-          ph: rand(0, 6.28),
-          rot: 0,
-          vr: 0,
-        });
-      }
-      for (let i = 0; i < n(CAPS.windLeaves); i++) {
-        leaves.push({
-          x: rand(0, w),
-          y: rand(0, h),
-          vx: rand(60, 200),
-          vy: rand(-40, 60),
-          s: rand(2.4, 4.4),
-          a: rand(0.35, 0.6),
-          ph: rand(0, 6.28),
-          rot: rand(0, 6.28),
-          vr: rand(-4, 4),
-        });
-      }
-    } else {
-      for (let i = 0; i < n(CAPS.wisps); i++) {
-        drops.push({
-          x: rand(0, w),
-          y: rand(0, h),
-          vx: rand(-7, 7),
-          vy: rand(-4, 4),
-          s: rand(26, 60),
-          a: rand(0.035, 0.07),
-          ph: rand(0, 6.28),
-          rot: 0,
-          vr: 0,
-        });
-      }
-    }
+    const built = buildSceneParticles(scene, w, h);
+    drops = built.drops;
+    leaves = built.leaves;
   }
+
+  /** Cool tint wash for the wind scene only: atmosphere without particles. */
+  function makeWindWash(): CanvasGradient {
+    const wash = SCENE_SPECS.wind.wash;
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    for (const [offset, alpha] of wash.stops) {
+      g.addColorStop(offset, `rgba(${wash.tint},${alpha})`);
+    }
+    return g;
+  }
+
+  /**
+   * Pre-rendered soft dot sprite: one radial gradient baked once, then
+   * drawImage'd per near snow flake — cheaper than a gradient per particle
+   * per frame, and the soft edge is what sells the bokeh depth feel.
+   */
+  function makeSoftDot(): HTMLCanvasElement | null {
+    const c = document.createElement('canvas');
+    c.width = 32;
+    c.height = 32;
+    const g2 = c.getContext('2d');
+    if (!g2) return null;
+    const ssp = SCENE_SPECS.snow;
+    const grad = g2.createRadialGradient(16, 16, 0, 16, 16, 16);
+    for (const [offset, alpha] of ssp.sprite.stops) {
+      grad.addColorStop(offset, `rgba(${ssp.tint},${alpha})`);
+    }
+    g2.fillStyle = grad;
+    g2.fillRect(0, 0, 32, 32);
+    return c;
+  }
+
+  const softDot = scene === 'snow' ? makeSoftDot() : null;
 
   function fit(): void {
     const r = sidebar.getBoundingClientRect();
@@ -566,6 +896,7 @@ function startScene(
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    windWash = scene === 'wind' ? makeWindWash() : null;
     buildParticles();
   }
 
@@ -573,29 +904,46 @@ function startScene(
     for (const p of drops) {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
-      if (scene === 'snow') p.x += Math.sin(now / 1400 + p.ph) * 9 * dt;
+      if (scene === 'snow') p.x += Math.sin(now / 1400 + p.ph) * p.vr * dt;
       if (scene === 'rain' && p.y > h + 20) {
         p.y = -20;
         p.x = rand(-40, w + 40);
       }
-      if (scene !== 'rain' && scene !== 'wind' && p.y > h + 10) {
+      // Snow is the only scene on the shared downward wrap: clear has its
+      // own margins below (large enough to cover its drawn radii), rain and
+      // wind each wrap themselves.
+      if (scene === 'snow' && p.y > h + 10) {
         p.y = -10;
         p.x = rand(0, w);
       }
-      if (scene === 'wind' && p.x - p.s > w) {
-        p.x = -p.s - rand(0, 80);
-        p.y = rand(0, h);
+      if (scene === 'wind') {
+        // wisps: gentle vertical wander on top of the base drift; wrap once
+        // fully off-screen right (x > w + 240), re-entering from the left.
+        // The base vy drift would otherwise carry a wisp off the top/bottom
+        // edge and leave it invisible for tens of seconds, so wrap y too.
+        p.y += Math.sin(now / 1600 + p.ph) * p.vr * dt;
+        if (p.x > w + 240) {
+          p.x = -p.s - rand(0, 60);
+          p.y = rand(0, h);
+        }
+        const wrapY = SCENE_SPECS.wind.wisps.wrapMarginY;
+        if (p.y < -wrapY) p.y = h + wrapY;
+        if (p.y > h + wrapY) p.y = -wrapY;
       }
       if (scene === 'clear') {
-        if (p.x < -120) p.x = w + 120;
-        if (p.x > w + 120) p.x = -120;
-        if (p.y < -80) p.y = h + 80;
-        if (p.y > h + 80) p.y = -80;
+        // own margins from the spec: the drawn ellipses reach rx = sizeMax *
+        // sizeMultiplier, ry = sizeMax, so the wrap must wait until the whole
+        // ellipse is off screen — no hard-edged pop-in
+        const csp = SCENE_SPECS.clear;
+        if (p.x < -csp.wrapMarginX) p.x = w + csp.wrapMarginX;
+        if (p.x > w + csp.wrapMarginX) p.x = -csp.wrapMarginX;
+        if (p.y < -csp.wrapMarginY) p.y = h + csp.wrapMarginY;
+        if (p.y > h + csp.wrapMarginY) p.y = -csp.wrapMarginY;
       }
     }
     for (const p of leaves) {
-      p.x += (p.vx + Math.sin(now / 700 + p.ph) * 26) * dt;
-      p.y += (p.vy + Math.cos(now / 900 + p.ph) * 20) * dt;
+      p.x += (p.vx + Math.sin(now / 1200 + p.ph) * 10) * dt;
+      p.y += (p.vy + Math.cos(now / 1500 + p.ph) * 8) * dt;
       p.rot += p.vr * dt;
       if (p.x > w + 14) {
         p.x = -14;
@@ -608,49 +956,89 @@ function startScene(
 
   function draw(): void {
     ctx.clearRect(0, 0, w, h);
+    const rsp = SCENE_SPECS.rain;
+    const ssp = SCENE_SPECS.snow;
+    const wsp = SCENE_SPECS.wind.wisps;
+    const lsp = SCENE_SPECS.wind.leaves;
+    const csp = SCENE_SPECS.clear;
     if (scene === 'rain') {
-      ctx.lineWidth = 1;
+      ctx.lineWidth = rsp.lineWidth;
       for (const p of drops) {
-        ctx.strokeStyle = `rgba(159,195,232,${p.a.toFixed(3)})`;
+        const mag = Math.hypot(p.vx, p.vy) || 1;
+        const tx = p.x - (p.vx / mag) * p.s;
+        const ty = p.y - (p.vy / mag) * p.s;
+        // Soft tail fading into the head: reads as motion blur, not a hard
+        // line. Near streaks are a touch brighter (atmospheric perspective).
+        const g = ctx.createLinearGradient(p.x, p.y, tx, ty);
+        const tint = p.layer === 1 ? rsp.near.tint : rsp.far.tint;
+        g.addColorStop(0, `rgba(${tint},${p.a.toFixed(3)})`);
+        g.addColorStop(1, `rgba(${tint},0)`);
+        ctx.strokeStyle = g;
         ctx.beginPath();
         ctx.moveTo(p.x, p.y);
-        ctx.lineTo(p.x - p.vx * 0.055, p.y - p.vy * 0.055);
+        ctx.lineTo(tx, ty);
         ctx.stroke();
       }
     } else if (scene === 'snow') {
       for (const p of drops) {
-        ctx.fillStyle = `rgba(235,242,252,${p.a.toFixed(3)})`;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.s, 0, 6.2832);
-        ctx.fill();
+        if (p.layer === 1 && softDot) {
+          // near flakes: soft bokeh dot via the pre-rendered sprite
+          ctx.globalAlpha = p.a;
+          ctx.drawImage(softDot, p.x - p.s, p.y - p.s, p.s * 2, p.s * 2);
+          ctx.globalAlpha = 1;
+        } else {
+          // far flakes: tiny hard dots are fine at this size
+          ctx.fillStyle = `rgba(${ssp.tint},${p.a.toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.s, 0, 6.2832);
+          ctx.fill();
+        }
       }
     } else if (scene === 'wind') {
-      ctx.lineWidth = 1.4;
+      // cool tint wash first: atmosphere without particles
+      if (windWash) {
+        ctx.fillStyle = windWash;
+        ctx.fillRect(0, 0, w, h);
+      }
       for (const p of drops) {
-        ctx.strokeStyle = `rgba(188,204,226,${p.a.toFixed(3)})`;
-        ctx.beginPath();
-        ctx.moveTo(p.x, p.y);
-        ctx.lineTo(p.x - p.vx * 0.16, p.y - p.vy * 0.16);
-        ctx.stroke();
+        // wide, faint radial-gradient ellipse, tilted for a diagonal sweep
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.scale(p.s, p.s * wsp.squash);
+        const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+        g.addColorStop(0, `rgba(${wsp.tint},${p.a.toFixed(3)})`);
+        g.addColorStop(1, `rgba(${wsp.tint},0)`);
+        ctx.fillStyle = g;
+        ctx.fillRect(-1, -1, 2, 2);
+        ctx.restore();
       }
       for (const p of leaves) {
         ctx.save();
         ctx.translate(p.x, p.y);
         ctx.rotate(p.rot);
-        ctx.fillStyle = `rgba(206,158,92,${p.a.toFixed(3)})`;
+        ctx.fillStyle = `rgba(${lsp.tint},${p.a.toFixed(3)})`;
         ctx.beginPath();
-        ctx.ellipse(0, 0, p.s, p.s * 0.55, 0, 0, 6.2832);
+        ctx.ellipse(0, 0, p.s, p.s * lsp.aspect, 0, 0, 6.2832);
         ctx.fill();
         ctx.restore();
       }
     } else {
       // clear: barely-visible drifting cloud wisps, layered soft ellipses
       for (const p of drops) {
-        for (let layer = 0; layer < 3; layer++) {
-          const shrink = 1 - layer * 0.28;
-          ctx.fillStyle = `rgba(174,189,212,${(p.a * (1 - layer * 0.3)).toFixed(4)})`;
+        for (let layer = 0; layer < csp.layers.count; layer++) {
+          const shrink = 1 - layer * csp.layers.shrinkPerLayer;
+          ctx.fillStyle = `rgba(${csp.layers.tint},${(p.a * (1 - layer * csp.layers.alphaDecayPerLayer)).toFixed(4)})`;
           ctx.beginPath();
-          ctx.ellipse(p.x, p.y, p.s * 3 * shrink, p.s * shrink, 0, 0, 6.2832);
+          ctx.ellipse(
+            p.x,
+            p.y,
+            p.s * csp.layers.sizeMultiplier * shrink,
+            p.s * shrink,
+            0,
+            0,
+            6.2832,
+          );
           ctx.fill();
         }
       }
