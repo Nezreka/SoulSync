@@ -3,7 +3,9 @@
 **Optional.** These screenshot tests need Docker and are not part of
 `npm run check` or `npm test`, so a normal PR doesn't need them. Run them
 when you change CSS or layout: they show whether a refactor changed anything
-it didn't mean to. CI runs them as their own `webui-visual` job.
+it didn't mean to. CI runs them as their own `webui-visual` job, which is
+non-blocking for now: a diff there doesn't turn the run red. Without Docker,
+see [Refreshing the baselines without Docker](#refreshing-the-baselines-without-docker).
 
 They cover the main routes, overlays and states.
 
@@ -102,7 +104,37 @@ in `package-lock.json`.
   PNGs in the diff, and call the change out in the PR.
 - After a Playwright upgrade, which changes the image and the browser,
   regenerate in a commit of its own. Bump the image tag in
-  `.github/workflows/build-and-test.yml` to match.
+  `.github/workflows/build-and-test.yml` and
+  `.github/workflows/visual-baselines.yml` to match.
+
+## Refreshing the baselines without Docker
+
+The manual `visual-baselines` workflow renders fresh baselines in CI. It uses
+the same pinned Playwright image as the `webui-visual` job, so its PNGs match
+that job's renders exactly: zero differing pixels at its tolerance. It never
+commits anything. GitHub only lets you run it once the file is on the default
+branch (`main`); after that, `--ref` can name any branch.
+
+1. Run the workflow from the Actions tab ("Render visual baselines", with an
+   optional ref to render), or:
+
+   ```sh
+   gh workflow run visual-baselines.yml --ref <branch>
+   ```
+
+2. Download the `visual-baselines` artifact into the baselines folder. It holds
+   `desktop/` and `mobile/`, so it unzips in place. `gh run download` won't
+   overwrite files, so remove the old baselines first; the artifact is the
+   complete set:
+
+   ```sh
+   gh run list --workflow visual-baselines.yml --limit 1   # the run id
+   rm -rf webui/tests/visual/__screenshots__
+   gh run download <run-id> -n visual-baselines -D webui/tests/visual/__screenshots__
+   ```
+
+3. Review the changed PNGs (`git diff --stat`, or look at them), then commit
+   them.
 
 ## Adding a shot
 
