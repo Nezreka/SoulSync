@@ -81,22 +81,46 @@ def test_the_server_owner_is_the_admin():
     assert r.profile_id == 1 and r.error is None
 
 
-def test_a_linked_plex_user_signs_into_their_profile_and_refreshes_the_token():
+def test_signing_in_again_lands_on_the_same_profile_and_refreshes_the_token():
     db = web_server.get_database()
     plex_id = str(int(uuid4().int % 10**9))
-    pid = db.create_profile(name=f'Linked{_uid()}')
-    db.set_profile_plex_home_user(pid, plex_id, 'old name', 'old-token')
-    r = plex_signin.sign_in(db, PlexAccount(plex_id, 'newname', 'new-token'), owner_account_id='9',
-                            allow_create=False, default_can_download=False)
-    assert r.profile_id == pid and not r.created
-    assert db.get_profile_plex_home_user(pid)['token'] == 'new-token'
+    first = plex_signin.sign_in(db, PlexAccount(plex_id, f'Again{_uid()}', 'old-token'), owner_account_id='9',
+                                allow_create=True, default_can_download=False)
+    again = plex_signin.sign_in(db, PlexAccount(plex_id, 'renamed', 'new-token'), owner_account_id='9',
+                                allow_create=False, default_can_download=False)
+    assert again.profile_id == first.profile_id and not again.created
+    assert db.get_profile_plex_home_user(first.profile_id)['token'] == 'new-token'
+
+
+def test_a_home_user_link_is_not_proof_of_who_someone_is():
+    """mom links her profile to the kid's home user so playlists land there.
+    the kid signing in with plex must NOT become mom: any profile can point
+    that link at any unprotected home user, so it proves nothing"""
+    db = web_server.get_database()
+    kid_id = str(int(uuid4().int % 10**9))
+    mom = db.create_profile(name=f'Mom{_uid()}', can_download=True)
+    db.set_profile_plex_home_user(mom, kid_id, 'Kid', 'kid-server-token')
+    r = plex_signin.sign_in(db, PlexAccount(kid_id, f'Kid{_uid()}', 'kid-token'), owner_account_id='9',
+                            allow_create=True, default_can_download=False)
+    assert r.profile_id != mom and r.created
+    assert not db.get_profile(r.profile_id)['can_download']
+
+
+def test_never_an_admin_profile_except_through_the_owner_check():
+    db = web_server.get_database()
+    plex_id = str(int(uuid4().int % 10**9))
+    boss = db.create_profile(name=f'Boss{_uid()}', is_admin=True)
+    db.set_profile_plex_account(boss, plex_id)
+    r = plex_signin.sign_in(db, PlexAccount(plex_id, 'boss', 'tok'), owner_account_id='9',
+                            allow_create=True, default_can_download=False)
+    assert r.profile_id is None and 'admin' in r.error
 
 
 def test_a_turned_off_profile_cannot_sign_in():
     db = web_server.get_database()
     plex_id = str(int(uuid4().int % 10**9))
     pid = db.create_profile(name=f'Off{_uid()}')
-    db.set_profile_plex_home_user(pid, plex_id, 'off', 'tok')
+    db.set_profile_plex_account(pid, plex_id)
     db.update_profile(pid, disabled=1)
     r = plex_signin.sign_in(db, PlexAccount(plex_id, 'off', 'tok'), owner_account_id='9',
                             allow_create=True, default_can_download=False)
@@ -113,6 +137,7 @@ def test_a_new_plex_user_gets_a_request_only_profile_linked_to_them():
     profile = db.get_profile(r.profile_id)
     assert profile['name'] == name and not profile['is_admin'] and not profile['can_download']
     assert db.get_profile_plex_home_user(r.profile_id) == {'id': plex_id, 'title': name, 'token': 'friend-token'}
+    assert db.get_profile_by_plex_account(plex_id)['id'] == r.profile_id
 
 
 def test_a_taken_name_gets_a_number():
@@ -147,6 +172,9 @@ def _config(monkeypatch, **over):
     monkeypatch.setattr(web_server.config_manager, 'get',
                         lambda k, d=None: values[k] if k in values else real_get(k, d))
     web_server._login_limiter.reset()
+    import api.login as login_api
+    login_api.plex_start_limiter.reset()
+    monkeypatch.setattr(login_api, '_PLEX_CHECK_MIN_INTERVAL', 0)
 
 
 def _stub_plex(monkeypatch, *, approve_after=1, account=None):
@@ -229,3 +257,46 @@ def test_password_login_still_works_after_the_refactor(client, monkeypatch):
     r = client.post('/api/auth/login', json={'username': name, 'password': 'secretpw'})
     assert r.status_code == 200
     assert client.get(_GATED).status_code == 200
+
+
+def test_starts_are_rate_limited_even_when_they_succeed(client, monkeypatch):
+    _config(monkeypatch)
+    _stub_plex(monkeypatch)
+    codes = [client.post('/api/auth/plex/start').status_code for _ in range(10)]
+    assert codes[:8] == [200] * 8
+    assert codes[8] == 429
+
+
+def test_polling_faster_than_a_second_never_reaches_plex(client, monkeypatch):
+    _config(monkeypatch)
+    import api.login as login_api
+    monkeypatch.setattr(login_api, '_PLEX_CHECK_MIN_INTERVAL', 60)
+    calls = []
+    _stub_plex(monkeypatch)
+    monkeypatch.setattr(plex_signin, 'check_pin', lambda cid, pin: calls.append(pin))
+    client.post('/api/auth/plex/start')
+    client.post('/api/auth/plex/check')
+    assert client.post('/api/auth/plex/check').get_json() == {'success': True, 'pending': True}
+    assert len(calls) == 1
+
+
+def test_a_blip_from_plex_keeps_waiting_an_expired_pin_starts_over(client, monkeypatch):
+    import requests
+    _config(monkeypatch)
+    _stub_plex(monkeypatch)
+    client.post('/api/auth/plex/start')
+
+    def blip(cid, pin):
+        raise requests.ConnectionError('plex.tv hiccup')
+    monkeypatch.setattr(plex_signin, 'check_pin', blip)
+    assert client.post('/api/auth/plex/check').get_json() == {'success': True, 'pending': True}
+
+    class _Gone:
+        status_code = 404
+
+    def expired(cid, pin):
+        raise requests.HTTPError('404', response=_Gone())
+    monkeypatch.setattr(plex_signin, 'check_pin', expired)
+    r = client.post('/api/auth/plex/check')
+    assert r.status_code == 410 and 'expired' in r.get_json()['error']
+    assert client.post('/api/auth/plex/check').status_code == 400  # the pin is gone

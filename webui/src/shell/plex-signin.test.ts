@@ -122,3 +122,27 @@ describe('runPlexSignIn', () => {
     expect(document.getElementById('login-error')!.textContent).toBe("Couldn't reach Plex.");
   });
 });
+
+describe('a blocked popup', () => {
+  it('offers a real link instead of opening a window nobody sees', async () => {
+    server.use(
+      http.post('*/api/auth/plex/start', () =>
+        HttpResponse.json({ success: true, url: 'https://app.plex.tv/auth#?x' }),
+      ),
+      http.post('*/api/auth/plex/check', () =>
+        HttpResponse.json({ success: true, pending: false }),
+      ),
+    );
+    const opened = vi.spyOn(window, 'open').mockImplementation(() => null);
+    const reload = vi.fn();
+    const done = runPlexSignIn(() => null, reload);
+    await vi.advanceTimersByTimeAsync(10);
+    const link = document.querySelector('#login-error a') as HTMLAnchorElement;
+    expect(link.href).toBe('https://app.plex.tv/auth#?x');
+    expect(link.target).toBe('_blank');
+    expect(opened).not.toHaveBeenCalled(); // a late window.open would be blocked anyway
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(await done).toBe(true);
+    expect(reload).toHaveBeenCalled();
+  });
+});

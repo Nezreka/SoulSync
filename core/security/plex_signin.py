@@ -6,8 +6,9 @@ their password), soulsync reads back their account token. from that:
 
 - the account must be able to see THIS server, else no entry
 - the server owner signs in as the admin profile
-- an account already linked to a profile (the same plex.tv user id the
-  home-user link stores) signs in as that profile
+- an account that signed in before signs in as the profile it got then.
+  only plex sign-in records that; the home-user link never counts, since
+  any profile can point it at any unprotected home user
 - anyone else gets a new profile, if the admin allows it, with the admin's
   default role (request-only unless they say otherwise)
 
@@ -122,10 +123,17 @@ def sign_in(
         # so no per-user link is stored for it
         return SignInResult(profile_id=1)
 
-    profile = db.get_profile_by_plex_user(account.id)
+    # identity comes only from plex sign-in's own record. the home-user link
+    # can't be trusted for it: any profile can point that at any unprotected
+    # home user, so trusting it would sign that user in as someone else
+    profile = db.get_profile_by_plex_account(account.id)
     if profile:
         if profile.get("disabled"):
             return SignInResult(error="This profile is turned off. Ask your admin.")
+        if profile.get("is_admin"):
+            # admin is reached through the owner check above and nowhere else
+            logger.warning("Plex sign-in: refused, account %s is recorded on an admin profile", account.id)
+            return SignInResult(error="This Plex account can't sign in as an admin profile")
         # refresh the stored server token: it changes when access is re-shared
         db.set_profile_plex_home_user(profile["id"], account.id, account.username, account.server_token)
         return SignInResult(profile_id=profile["id"])
@@ -136,6 +144,7 @@ def sign_in(
     profile_id = _create_profile(db, account.username, can_download=default_can_download)
     if profile_id is None:
         return SignInResult(error="Couldn't create a profile for your Plex account")
+    db.set_profile_plex_account(profile_id, account.id)
     db.set_profile_plex_home_user(profile_id, account.id, account.username, account.server_token)
     logger.info("Plex sign-in: created profile %s for Plex user '%s'", profile_id, account.username)
     return SignInResult(profile_id=profile_id, created=True)

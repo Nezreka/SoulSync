@@ -6399,6 +6399,11 @@ class MusicDatabase:
             "ALTER TABLE profiles ADD COLUMN plex_home_user_id TEXT DEFAULT NULL",
             "ALTER TABLE profiles ADD COLUMN plex_home_user_title TEXT DEFAULT NULL",
             "ALTER TABLE profiles ADD COLUMN plex_home_user_token TEXT DEFAULT NULL",
+            # who signed in with plex as this profile. set ONLY by plex sign-in,
+            # never by the home-user link: that link says where playlists go
+            # and any profile can point it at any unprotected home user, so
+            # it can't prove who someone is
+            "ALTER TABLE profiles ADD COLUMN plex_account_id TEXT DEFAULT NULL",
         ):
             try:
                 cursor.execute(sql)
@@ -6426,27 +6431,45 @@ class MusicDatabase:
             logger.error(f"Error saving plex home user for profile {profile_id}: {e}")
             return False
 
-    def get_profile_by_plex_user(self, plex_user_id: str) -> Optional[Dict[str, Any]]:
-        """the profile linked to a plex.tv user id (a home-user link or a plex
-        sign-in), or None. {'id', 'name', 'is_admin', 'disabled'}"""
-        if not plex_user_id:
+    def get_profile_by_plex_account(self, plex_account_id: str) -> Optional[Dict[str, Any]]:
+        """the profile a plex account signed in as before (plex sign-in's own
+        record, never the home-user link), or None.
+        {'id', 'name', 'is_admin', 'disabled'}"""
+        if not plex_account_id:
             return None
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("PRAGMA table_info(profiles)")
-                has_disabled = any(c[1] == 'disabled' for c in cursor.fetchall())
+                cols = {c[1] for c in cursor.fetchall()}
+                if 'plex_account_id' not in cols:
+                    return None
+                has_disabled = 'disabled' in cols
                 cursor.execute(
                     f"SELECT id, name, is_admin{', disabled' if has_disabled else ''} FROM profiles "
-                    "WHERE plex_home_user_id = ? ORDER BY id LIMIT 1", (str(plex_user_id),))
+                    "WHERE plex_account_id = ? ORDER BY id LIMIT 1", (str(plex_account_id),))
                 row = cursor.fetchone()
             if not row:
                 return None
             return {'id': row['id'], 'name': row['name'], 'is_admin': bool(row['is_admin']),
                     'disabled': bool(row['disabled']) if has_disabled else False}
         except Exception as e:
-            logger.error(f"Error looking up profile by plex user {plex_user_id}: {e}")
+            logger.error(f"Error looking up profile by plex account {plex_account_id}: {e}")
             return None
+
+    def set_profile_plex_account(self, profile_id: int, plex_account_id: Optional[str]) -> bool:
+        """record (or with None clear) which plex account signs in as a profile"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE profiles SET plex_account_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (str(plex_account_id) if plex_account_id else None, profile_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error saving plex account for profile {profile_id}: {e}")
+            return False
 
     def get_profile_plex_home_user(self, profile_id: int) -> Optional[Dict[str, str]]:
         """{'id', 'title', 'token'} for the profile's linked plex home user,

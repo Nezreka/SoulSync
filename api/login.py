@@ -26,6 +26,14 @@ logger = get_logger("api.login")
 # clears only the account that succeeded, so signing in as yourself no longer
 # resets your guesses at someone else's.
 login_limiter = TargetedLimiter(max_attempts=10, window_seconds=300)
+# every plex sign-in start is an outbound call to plex.tv that makes a pin
+# under this install's client id. counted per ip on EVERY start, not just
+# failures, so nobody can make the server spray pins (plex.tv would throttle
+# the client id for everyone)
+plex_start_limiter = TargetedLimiter(max_attempts=8, window_seconds=300)
+# a browser polls /check about every 1.5s; faster than this is answered
+# "pending" without asking plex.tv
+_PLEX_CHECK_MIN_INTERVAL = 1.0
 
 # injected by configure()
 get_database = None
@@ -111,19 +119,20 @@ def plex_signin_start():
         return jsonify({'success': False, 'error': 'Plex sign-in is turned off'}), 403
     _ip = request.remote_addr or 'unknown'
     _now = time.time()
-    _locked, _retry_after = login_limiter.is_locked(_ip, '<plex>', _now)
+    _locked, _retry_after = plex_start_limiter.is_locked(_ip, '<plex>', _now)
     if _locked:
         return (jsonify({'success': False, 'error': 'Too many attempts — please wait and try again'}),
                 429, {'Retry-After': str(_retry_after)})
+    plex_start_limiter.record_failure(_ip, '<plex>', _now)  # every start counts
     try:
         from core.security import plex_signin
         cid = plex_signin.client_identifier(config_manager)
         pin = plex_signin.start_pin(cid)
         session['plex_signin_pin'] = pin['id']
+        session.pop('plex_signin_checked_at', None)
         return jsonify({'success': True, 'url': pin['url']})
     except Exception as e:
         logger.error(f"Plex sign-in could not start: {e}")
-        login_limiter.record_failure(_ip, '<plex>', _now)
         return jsonify({'success': False, 'error': "Couldn't reach Plex. Try again in a moment."}), 502
 
 
@@ -136,10 +145,27 @@ def plex_signin_check():
     pin_id = session.get('plex_signin_pin')
     if not pin_id:
         return jsonify({'success': False, 'error': 'Start Plex sign-in first'}), 400
+    _now = time.time()
+    if _now - float(session.get('plex_signin_checked_at') or 0) < _PLEX_CHECK_MIN_INTERVAL:
+        return jsonify({'success': True, 'pending': True})
+    session['plex_signin_checked_at'] = _now
     try:
+        import requests as _requests
         from core.security import plex_signin
         cid = plex_signin.client_identifier(config_manager)
-        account_token = plex_signin.check_pin(cid, pin_id)
+        try:
+            account_token = plex_signin.check_pin(cid, pin_id)
+        except _requests.HTTPError as e:
+            if getattr(e.response, 'status_code', None) == 404:
+                # plex pins expire: start over
+                session.pop('plex_signin_pin', None)
+                return jsonify({'success': False, 'error': 'Plex sign-in expired. Try again.'}), 410
+            logger.warning(f"Plex sign-in check failed, will retry: {e}")
+            return jsonify({'success': True, 'pending': True})
+        except _requests.RequestException as e:
+            # a blip talking to plex.tv: keep waiting, the next poll retries
+            logger.warning(f"Plex sign-in check failed, will retry: {e}")
+            return jsonify({'success': True, 'pending': True})
         if not account_token:
             return jsonify({'success': True, 'pending': True})
         session.pop('plex_signin_pin', None)

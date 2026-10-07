@@ -22,6 +22,23 @@ function showError(message: string): void {
   el.style.display = message ? 'block' : 'none';
 }
 
+/**
+ * the popup was blocked. a second window.open now would be too (it isn't
+ * in the click anymore), so offer a real link: a click on it always works
+ */
+function showOpenLink(url: string): void {
+  const el = document.getElementById(ERROR_ID);
+  if (!el) return;
+  el.textContent = 'Your browser blocked the Plex window. ';
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  a.textContent = 'Open Plex sign-in';
+  el.appendChild(a);
+  el.style.display = 'block';
+}
+
 async function post(url: string): Promise<{ ok: boolean; body: Record<string, unknown> }> {
   const resp = await fetch(url, { method: 'POST', headers: { Accept: 'application/json' } });
   let body: Record<string, unknown> = {};
@@ -55,7 +72,7 @@ export async function runPlexSignIn(
     return false;
   }
   if (popup) popup.location.href = start.body.url;
-  else window.open(start.body.url, '_blank');
+  else showOpenLink(start.body.url);
 
   const until = Date.now() + GIVE_UP_MS;
   while (Date.now() < until) {
