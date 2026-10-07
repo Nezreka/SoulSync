@@ -521,6 +521,67 @@ def test_youtube_task_uses_get_download_status_to_resolve_path(monkeypatch):
     assert any(c[0] == 'mark_completed' for c in rec.calls)
 
 
+@pytest.mark.parametrize('source', ['torrent', 'usenet'])
+@pytest.mark.parametrize('include_original', [True, False])
+def test_release_never_imports_another_song_with_requested_title_in_qualifier(tmp_path, source, include_original):
+    release_dir = tmp_path / 'release'
+    release_dir.mkdir()
+    original = release_dir / '04._Michael_Jackson_-_Thriller.flac'
+    unrelated = release_dir / '15._Michael_Jackson_-_Billie_Jean_2008_Kanye_West_Mix_(Thriller_25th_Anniversary_Remix).flac'
+    unrelated.write_bytes(b'wrong song')
+    audio_files = [str(unrelated)]
+    if include_original:
+        original.write_bytes(b'requested song')
+        audio_files.append(str(original))
+    transfer_dir = tmp_path / 'transfer'
+    filename = 'candidate||Michael Jackson - Thriller 25'
+    download_tasks['t1'] = {
+        'status': 'post_processing',
+        'filename': filename,
+        'username': source,
+        'download_id': 'release-1',
+        'track_info': {'name': 'Thriller', 'artists': [{'name': 'Michael Jackson'}]},
+    }
+
+    class _ReleaseClient:
+        def get_download_status(self, download_id):
+            from types import SimpleNamespace
+            assert download_id == 'release-1'
+            return SimpleNamespace(file_path=str(unrelated), audio_files=audio_files)
+
+    deps, _ = _build_deps(
+        config=_FakeConfig({'soulseek.transfer_path': str(transfer_dir)}),
+        download_orchestrator=_ReleaseClient(),
+        run_async=lambda status: status,
+    )
+    pp.run_post_processing_worker('t1', 'b1', deps)
+
+    assert not (transfer_dir / unrelated.name).exists()
+    if include_original:
+        assert (transfer_dir / original.name).read_bytes() == b'requested song'
+    else:
+        assert download_tasks['t1']['status'] == 'failed'
+        assert not list(transfer_dir.glob('*'))
+
+
+@pytest.mark.parametrize('filename,expected_title', [
+    ('Artist - Angel Eyes.flac', 'Angel'),
+    ('Artist - Thriller (Live).flac', 'Thriller'),
+    ('Artist - Thriller.flac', 'Thriller (Live)'),
+])
+def test_release_file_score_rejects_substrings_and_different_recordings(filename, expected_title):
+    assert pp._release_audio_match_score(filename, expected_title, 'Artist') < 0.80
+
+
+@pytest.mark.parametrize('filename,expected_title', [
+    ('Artist - Thriller (2008 Remastered).flac', 'Thriller'),
+    ('Artist - Thriller - Remastered 2008.flac', 'Thriller'),
+    ('Artist - Thriller.flac', 'Thriller - Remastered 2008'),
+])
+def test_release_file_score_still_accepts_remastered_original(filename, expected_title):
+    assert pp._release_audio_match_score(filename, expected_title, 'Artist') >= 0.80
+
+
 def test_torrent_release_copies_best_matching_audio_to_transfer(tmp_path):
     release_dir = tmp_path / 'release'
     release_dir.mkdir()

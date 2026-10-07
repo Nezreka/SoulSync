@@ -1137,10 +1137,22 @@ def _decode_filename(filename: str) -> Tuple[Optional[str], str]:
     return (url, display)
 
 
-def _parse_release_title(title: str) -> Tuple[str, str]:
+_SCENE_AUDIO_SUFFIX = re.compile(
+    r'-(?:(?:16|24|32)[-_ ]?BIT-)?'
+    r'(?:\d{2,3}(?:[._]\d+)?-KHZ-)?'
+    r'(?:(?:WEB|CD|VINYL|SACD|DVD)-(?:FLAC|ALAC|APE|WAV|MP3|AAC|OGG|OPUS)(?:-(?:19|20)\d{2})?'
+    r'|(?:FLAC|ALAC|APE|WAV|MP3|AAC|OGG|OPUS)-(?:19|20)\d{2})'
+    r'(?:-[A-Z0-9]+)?$',
+    re.IGNORECASE,
+)
+
+
+def _parse_release_title(title: str, *, artist_hint: Optional[str] = None) -> Tuple[str, str]:
     """Split a release title into ``(artist, title)`` using the
     ``Artist - Title`` / ``Artist - Album`` convention almost every
-    indexer follows. Returns ``('', title)`` when no dash is found.
+    indexer follows. Scene releases also use ``Artist-Album-WEB-FLAC-...``;
+    only a recognized audio suffix permits an unspaced artist/title split.
+    Returns ``('', title)`` when no unambiguous separator is found.
 
     Without this, ``TrackResult.__post_init__`` runs the bare
     filename through ``parse_filename_metadata`` — and our filename
@@ -1154,10 +1166,22 @@ def _parse_release_title(title: str) -> Tuple[str, str]:
     # Strip common quality / format tags so the dash split doesn't
     # eat them — "Artist - Album [FLAC] (2020)" → "Artist", "Album".
     cleaned = re.sub(r'\s*[\[\(][^\]\)]*[\]\)]\s*$', '', title.strip())
-    # Look for the FIRST " - " (or "-" surrounded by content). Some
-    # release titles have multiple dashes (subtitle dashes); the
-    # first split is the artist/work boundary.
+    scene_suffix = _SCENE_AUDIO_SUFFIX.search(cleaned)
+    if scene_suffix:
+        cleaned = cleaned[:scene_suffix.start()].replace('_', ' ').strip()
+    # Prefer a spaced boundary: it preserves hyphenated artist names such
+    # as "Jay-Z - Album". A hint must never shorten an explicit artist name.
     parts = re.split(r'\s+-\s+|\s+-(?=\S)|(?<=\S)-\s+', cleaned, maxsplit=1)
+    if len(parts) == 1 and scene_suffix:
+        if artist_hint:
+            # With no spaces, "Jay-Z-Album" cannot identify the boundary on
+            # its own. The requested artist is useful only if the actual
+            # release starts with that full name followed by a separator.
+            hint_pattern = re.escape(artist_hint.strip()).replace(r'\ ', r'[ ._]+')
+            match = re.match(rf'^{hint_pattern}\s*-\s*(.+)$', cleaned, re.IGNORECASE)
+            if match:
+                return artist_hint.strip(), match.group(1).strip()
+        parts = cleaned.split('-', 1)
     if len(parts) == 2:
         artist = parts[0].strip()
         rest = parts[1].strip()
