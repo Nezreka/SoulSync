@@ -4085,53 +4085,35 @@ def get_activity_logs():
         return jsonify({'logs': [f'Error reading activity feed: {str(e)}']})
 
 # --- Internal API Key Management (browser-only, no auth) ---
+# Same logic as the /api/v1/api-keys routes (api/key_store.py); these are the
+# session-authed doors the Settings page uses.
 @app.route('/api/v1/api-keys-internal', methods=['GET'])
 @admin_only
 def list_api_keys_internal():
     """List API keys for the settings page (no auth required — same as all UI routes)."""
-    keys = config_manager.get('api_keys', [])
-    safe_keys = [
-        {
-            "id": k.get("id"),
-            "label": k.get("label", ""),
-            "key_prefix": k.get("key_prefix", ""),
-            "created_at": k.get("created_at"),
-            "last_used_at": k.get("last_used_at"),
-        }
-        for k in keys
-    ]
-    return jsonify({"success": True, "data": {"keys": safe_keys}})
+    from api import key_store
+    from api.helpers import api_success
+    return api_success({"keys": key_store.list_keys(config_manager)})
 
 @app.route('/api/v1/api-keys-internal/generate', methods=['POST'])
 @admin_only
 def generate_api_key_internal():
     """Generate API key from settings page (no auth required)."""
-    from api.auth import generate_api_key
+    from api import key_store
+    from api.helpers import api_success
     body = request.get_json(silent=True) or {}
-    label = body.get("label", "")
-    raw_key, record = generate_api_key(label)
-    keys = config_manager.get('api_keys', [])
-    keys.append(record)
-    config_manager.set('api_keys', keys)
-    return jsonify({"success": True, "data": {
-        "key": raw_key,
-        "id": record["id"],
-        "label": record["label"],
-        "key_prefix": record["key_prefix"],
-        "created_at": record["created_at"],
-    }}), 201
+    raw_key, record = key_store.create_key(config_manager, body.get("label", ""))
+    return api_success(key_store.created_view(raw_key, record), status=201)
 
 @app.route('/api/v1/api-keys-internal/revoke/<key_id>', methods=['DELETE'])
 @admin_only
 def revoke_api_key_internal(key_id):
     """Revoke API key from settings page (no auth required)."""
-    keys = config_manager.get('api_keys', [])
-    original_len = len(keys)
-    keys = [k for k in keys if k.get("id") != key_id]
-    if len(keys) == original_len:
-        return jsonify({"success": False, "error": {"message": "Key not found"}}), 404
-    config_manager.set('api_keys', keys)
-    return jsonify({"success": True, "data": {"message": "API key revoked"}})
+    from api import key_store
+    from api.helpers import api_success, api_error
+    if not key_store.revoke_key(config_manager, key_id):
+        return api_error("NOT_FOUND", "Key not found", 404)
+    return api_success({"message": "API key revoked"})
 
 
 @app.route('/api/settings', methods=['GET', 'POST'])
