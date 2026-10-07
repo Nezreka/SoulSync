@@ -30,6 +30,7 @@ from core.download_plugins.registry import DownloadPluginRegistry, build_default
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
 from core.quality.selection import load_search_mode
 from core.quality.source_map import quality_profile_context
+from core.downloads.track_hint import track_hint_context
 
 logger = get_logger("download_orchestrator")
 
@@ -310,7 +311,7 @@ class DownloadOrchestrator:
         return chain
 
     async def search(self, query: str, timeout: int = None, progress_callback=None,
-                     exclude_sources=None, quality_profile_id=None
+                     exclude_sources=None, quality_profile_id=None, track_hint=None
                      ) -> Tuple[List[TrackResult], List[AlbumResult]]:
         """Search for tracks using configured source(s). Single-source
         modes route directly; hybrid mode delegates to
@@ -322,7 +323,16 @@ class DownloadOrchestrator:
         context batches — those sources are release-level and don't
         score meaningfully on per-track titles; the album-bundle flow
         on the master worker handles them separately when they're the
-        single active source."""
+        single active source.
+
+        ``track_hint`` (optional) is the song itself ({title, artist,
+        deezer_id}), for a source that can search better than a query
+        string (core/downloads/track_hint.py, #1582)."""
+        with track_hint_context(track_hint):
+            return await self._search(query, timeout, progress_callback,
+                                      exclude_sources, quality_profile_id)
+
+    async def _search(self, query, timeout, progress_callback, exclude_sources, quality_profile_id):
         if self.mode != 'hybrid':
             # Single-source mode is opt-in; honour the user's choice even
             # if it's torrent/usenet on an album batch (the master worker

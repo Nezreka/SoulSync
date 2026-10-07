@@ -545,6 +545,11 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         # so per-item profiles changed what survived import but not what was
         # considered in the first place (#1150). None = app-wide default.
         _profile_id = track_data.get('quality_profile_id') if isinstance(track_data, dict) else None
+        # the song itself, for sources that can search better than a query
+        # string (deezer by id / by title + the track's own artist, #1582).
+        # one dict per task: a source caches what it found in it
+        from core.downloads.track_hint import hint_from_track
+        _track_hint = hint_from_track(track_data) if isinstance(track_data, dict) else None
 
         # 2. Sequential Query Search (matches GUI's start_search_worker_parallel logic)
         search_diagnostics = []  # Track what happened per query for detailed error messages
@@ -664,6 +669,8 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 # source or pools every source for best-quality selection.
                 if _profile_id is not None:
                     _search_kwargs['quality_profile_id'] = _profile_id
+                if _track_hint:
+                    _search_kwargs['track_hint'] = _track_hint
                 tracks_result, _ = deps.run_async(
                     deps.download_orchestrator.search(query, **_search_kwargs)
                 )
