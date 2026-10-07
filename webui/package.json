@@ -10,7 +10,9 @@
     "build:shell": "vite build -c vite.shell.config.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:visual": "npm run build && node scripts/visual.mjs",
+    "test:visual:update": "npm run build && node scripts/visual.mjs --update-snapshots=all"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

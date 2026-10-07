@@ -74,3 +74,38 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  webui-visual:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The baselines are rendered in this image (webui/scripts/visual.mjs runs
+    # them in it locally too), so fonts and rasterising match. Keep the tag in
+    # step with @playwright/test in webui/package.json.
+    container:
+      image: mcr.microsoft.com/playwright:v1.59.1-jammy
+      options: --ipc=host
+
+    defaults:
+      run:
+        working-directory: webui
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build webui
+        run: npm run build
+
+      - name: Compare screenshot baselines
+        run: node scripts/visual.mjs
+
+      - name: Upload diffs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-diffs
+          path: webui/test-results
+          retention-days: 7
