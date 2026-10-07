@@ -1911,6 +1911,15 @@ function toggleAudiobookSource(src, on) {
     renderAudiobookHybrid();
 }
 
+// the sources audiobooks actually download through: the chain in hybrid mode,
+// the one picked source otherwise.
+function _audiobookActiveSources() {
+    const mode = document.getElementById('audiobook-download-mode')?.value;
+    if (!mode) return [];
+    const ids = mode === 'hybrid' ? _audiobookHybrid : [mode];
+    return ids.filter(s => AUDIOBOOK_SOURCES.includes(s));
+}
+
 // The chain only applies in hybrid mode; a single-source mode has nothing to
 // order, so showing the rows there would imply a choice that does nothing.
 function onAudiobookModeChange() {
@@ -2381,6 +2390,10 @@ async function testAllSources(opts = {}) {
         sources.add(mode);
     }
     if (sources.size === 0) sources.add('soulseek');
+    // the audiobook chain is its own setting. a user whose books come over
+    // torrent but whose music never does saw a grey torrent tile forever,
+    // because only the music chain got probed.
+    for (const id of _audiobookActiveSources()) sources.add(id);
 
     // Torrent/Usenet downloads go through Prowlarr — its connection must be
     // established first or those source tests fail. Probe Prowlarr up front.
