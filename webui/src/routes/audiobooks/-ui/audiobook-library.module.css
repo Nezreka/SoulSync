@@ -362,11 +362,13 @@
   font-size: 22px;
   font-weight: 500;
   color: #e7e1ec;
+  margin: 0;
 }
 .empty p {
   max-width: 450px;
   margin: 0 auto 24px;
   line-height: 1.8;
+  color: inherit;
 }
 @media (max-width: 700px) {
   .modal {

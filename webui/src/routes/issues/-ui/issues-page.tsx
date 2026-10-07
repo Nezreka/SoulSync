@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Select, TextInput } from '@/components/form';
 import { PageHeader } from '@/components/page-header';
-import { Show, Spinner } from '@/components/primitives';
+import { EmptyState, Show, Spinner } from '@/components/primitives';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type {
@@ -544,26 +544,20 @@ function IssueBoardList({
 
     if (issuesError) {
       return (
-        <div className={styles.issuesEmpty}>
-          <div className={styles.issuesEmptyTitle}>Failed to load issues</div>
-          <div className={styles.issuesEmptyText}>
-            {issuesError instanceof Error ? issuesError.message : 'Unknown error'}
-          </div>
-        </div>
+        <EmptyState
+          title="Failed to load issues"
+          description={issuesError instanceof Error ? issuesError.message : 'Unknown error'}
+        />
       );
     }
 
     if (issues.length === 0) {
       return (
-        <div className={styles.issuesEmpty}>
-          <div className={styles.issuesEmptyIcon} aria-hidden="true">
-            🔍
-          </div>
-          <div className={styles.issuesEmptyTitle}>No issues found</div>
-          <div className={styles.issuesEmptyText}>
-            {filtered ? 'Try adjusting your filters' : 'No issues have been reported yet'}
-          </div>
-        </div>
+        <EmptyState
+          icon="🔍"
+          title="No issues found"
+          description={filtered ? 'Try adjusting your filters' : 'No issues have been reported yet'}
+        />
       );
     }
 

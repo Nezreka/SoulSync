@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { DialogBody, DialogFooter, DialogFrame, DialogHeader } from '@/components/dialog';
 import { Button } from '@/components/form';
-import { Show, Spinner } from '@/components/primitives';
+import { EmptyState, Show, Spinner } from '@/components/primitives';
 import { useProfile } from '@/platform/shell/route-controllers';
 import {
   launchAlbumDownloadWorkflow,
@@ -497,12 +497,10 @@ export function IssueDetailModal({
 
     if (queryError) {
       return (
-        <div className={styles.issuesEmpty}>
-          <div className={styles.issuesEmptyTitle}>Failed to load issue</div>
-          <div className={styles.issuesEmptyText}>
-            {queryError instanceof Error ? queryError.message : 'Unknown error'}
-          </div>
-        </div>
+        <EmptyState
+          title="Failed to load issue"
+          description={queryError instanceof Error ? queryError.message : 'Unknown error'}
+        />
       );
     }
 

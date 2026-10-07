@@ -1,29 +1,12 @@
-.issuesLoading,
-.issuesEmpty {
-  text-align: center;
-  padding: 60px 20px;
-  color: var(--white-a40);
-}
-
 .issuesLoading {
+  text-align: center;
+  color: var(--white-a40);
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
   padding: 40px;
   font-size: 14px;
-}
-
-.issuesEmptyTitle {
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--white-a60);
-  margin-bottom: 6px;
-}
-
-.issuesEmptyText {
-  font-size: 13px;
-  color: var(--white-a35);
 }
 
 .issueDetailDialog {

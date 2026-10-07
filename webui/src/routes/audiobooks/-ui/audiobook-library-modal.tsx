@@ -1,6 +1,8 @@
 import { Link } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { EmptyState } from '@/components/primitives';
+
 import type { AudiobookLibraryEntry, AudiobookLibraryScan } from '../-audiobooks.types';
 
 import { deleteLibraryBook, fetchLibrary, scanLibrary } from '../-audiobooks.api';
@@ -363,12 +365,16 @@ export function AudiobookLibraryPanel({
         ) : loading ? (
           <p className={styles.empty}>Loading your shelves…</p>
         ) : books.length === 0 && !loadError ? (
-          <div className={styles.empty}>
-            <h3>Your books belong here</h3>
-            <p>
-              Scan your audiobook folder to find the books you already own, including those added
-              outside SoulSync. Your files stay where they are.
-            </p>
+          <EmptyState
+            className={styles.empty}
+            title="Your books belong here"
+            description={
+              <>
+                Scan your audiobook folder to find the books you already own, including those added
+                outside SoulSync. Your files stay where they are.
+              </>
+            }
+          >
             <button
               type="button"
               className={styles.primary}
@@ -377,7 +383,7 @@ export function AudiobookLibraryPanel({
             >
               {scanning ? 'Scanning…' : 'Scan my folder'}
             </button>
-          </div>
+          </EmptyState>
         ) : shown.length === 0 && !loadError ? (
           <p className={styles.empty}>No books match these filters.</p>
         ) : (

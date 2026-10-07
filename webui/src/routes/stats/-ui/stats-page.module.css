@@ -1427,9 +1427,10 @@
   color: var(--white-a50);
 }
 
-.statsEmptyIcon {
+.statsEmpty > [data-slot='empty-state-icon'] {
   font-size: 52px;
   margin-bottom: 18px;
+  opacity: 1;
 }
 
 .statsEmpty h3 {

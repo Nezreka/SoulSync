@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { Spinner } from '@/components/primitives';
+import { EmptyState, Spinner } from '@/components/primitives';
 
 import type { AudiobookReleaseContents } from '../-audiobooks.api';
 import type { AudiobookDownload } from '../-audiobooks.types';
@@ -399,24 +399,28 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
           )}
 
           {!loading && searchError && (
-            <div className={styles.emptyState}>
-              <h3>The search could not finish</h3>
-              <p>{searchError}</p>
+            <EmptyState
+              className={styles.emptyState}
+              title="The search could not finish"
+              description={searchError}
+            >
               <p>
                 That is a source failing, not proof the book is unavailable, so nothing has been
                 added to your wishlist.
               </p>
-            </div>
+            </EmptyState>
           )}
 
           {!loading && !searchError && releases.length === 0 ? (
-            <div className={styles.emptyState}>
-              <h3>Nothing found</h3>
-              <p>
-                {query
+            <EmptyState
+              className={styles.emptyState}
+              title="Nothing found"
+              description={
+                query
                   ? 'Nothing matched that search. Try fewer words, or reset to the automatic search.'
-                  : 'No indexer has this one right now. Add it to your wishlist and it will keep looking on its own.'}
-              </p>
+                  : 'No indexer has this one right now. Add it to your wishlist and it will keep looking on its own.'
+              }
+            >
               <button
                 type="button"
                 className={styles.emptyAction}
@@ -425,7 +429,7 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
               >
                 {wishlisting ? 'Adding…' : 'Add to wishlist'}
               </button>
-            </div>
+            </EmptyState>
           ) : (
             <ul className={styles.releaseList}>
               {ordered.map((release) => {

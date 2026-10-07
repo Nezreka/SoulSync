@@ -16,6 +16,7 @@ import {
 import type { ShellBridge } from '@/platform/shell/bridge';
 
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/primitives';
 import { useReactPageShell, useShellStatus } from '@/platform/shell/route-controllers';
 
 import type {
@@ -1676,14 +1677,17 @@ function StatsDbStorage({
 
 function StatsEmptyState() {
   return (
-    <div className={styles.statsEmpty}>
-      <div className={styles.statsEmptyIcon}>📊</div>
-      <h3>No Listening Data Yet</h3>
-      <p>
-        Enable &quot;Listening Stats&quot; in Settings to start tracking your listening activity
-        from your media server.
-      </p>
-    </div>
+    <EmptyState
+      className={styles.statsEmpty}
+      icon="📊"
+      title="No Listening Data Yet"
+      description={
+        <>
+          Enable &quot;Listening Stats&quot; in Settings to start tracking your listening activity
+          from your media server.
+        </>
+      }
+    />
   );
 }
 
@@ -1693,10 +1697,11 @@ function SectionLoadingState() {
 
 function SectionErrorState({ message }: { message: string }) {
   return (
-    <div className={styles.statsEmpty}>
-      <h3>Failed to load listening stats</h3>
-      <p>{message}</p>
-    </div>
+    <EmptyState
+      className={styles.statsEmpty}
+      title="Failed to load listening stats"
+      description={message}
+    />
   );
 }
 

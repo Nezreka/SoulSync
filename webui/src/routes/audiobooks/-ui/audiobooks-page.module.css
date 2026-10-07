@@ -113,12 +113,14 @@
   border-radius: 18px;
   background: var(--white-a03);
   border: 1px solid var(--white-a07);
+  color: inherit;
 }
 
 .emptyState h3 {
   margin: 0 0 8px;
   font-size: 18px;
   font-weight: 650;
+  color: inherit;
 }
 
 .emptyState p {
