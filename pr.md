@@ -31,6 +31,7 @@ sign in with plex, listening history that's yours (the kids' plays stay out of y
 - the duplicate finder sees through a feat credit in the title (#1568), track-number and path-mismatch fixes work with text track ids (#1574), and one or two tracks from a playlist no longer make an artist a backfill target or an album incomplete (#1572).
 - an audiobook sold in parts takes its own part instead of either one, and the download button shows the server's reason when it fails.
 - five library v2 review fixes from @nick2000713: the live/commentary cleaner keeps interludes and intros, an exact stem match beats a fuzzy one, a tools job toggle arms its timer, the album year fix restores the folder if the database update fails, and suspect album tags stop flagging normal wishlist albums (#1570).
+- acoustid verification stops quarantining every explicit track. musicbrainz never writes "explicit" in a recording title, so a deezer album named "(Album Version Explicit)" failed the version gate on every copy from every peer and kept re-downloading. explicit counts as the original for verification now, clean edits stay strict (thanks @mateusguilherme) (#1579).
 - the db updater's progress stops flipping between "tracks" and "artists" (thanks SeadogsBooty on discord).
 
 ## download discography and watchlist
