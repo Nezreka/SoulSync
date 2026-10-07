@@ -839,12 +839,17 @@ def test_logical_album_groups_same_db_album_across_arbitrary_folders():
 
 def test_logical_album_absorbs_only_unlinked_nonoverlapping_soundtrack_fragments():
     main = [f'/music/Various Artists/The Truman Show/{index:02}.flac'
-            for index in (*range(1, 7), *range(8, 12))]
+            for index in (*range(1, 7), *range(8, 11))]
+    soundtrack_folder_track = (
+        '/music/Various Artists/The Truman Show (Original Motion Picture Soundtrack)/11.flac')
+    main.append(soundtrack_folder_track)
     living = '/music/Philip Glass/The Truman Show/12.flac'
     beginning = '/music/Chopin/The Truman Show/07.flac'
     other = '/music/Other/The Truman Show/01.flac'
     folders = {
-        '/music/Various Artists/The Truman Show': main,
+        '/music/Various Artists/The Truman Show': main[:-1],
+        '/music/Various Artists/The Truman Show (Original Motion Picture Soundtrack)':
+            [soundtrack_folder_track],
         '/music/Philip Glass/The Truman Show': [living],
         '/music/Chopin/The Truman Show': [beginning],
         '/music/Other/The Truman Show': [other],
@@ -857,7 +862,7 @@ def test_logical_album_absorbs_only_unlinked_nonoverlapping_soundtrack_fragments
     tracks[beginning] = {'album_id': 12, 'track_number': 7, 'disc_number': 1}
     tracks[other] = {'album_id': 13, 'track_number': 1, 'disc_number': 1}
     albums = {
-        10: {'album_title': 'The Truman Show (Original Motion Picture Soundtrack)',
+        10: {'album_title': 'The Truman Show',
              'owner_profile_id': 1, 'musicbrainz_release_id': 'release'},
         11: {'album_title': 'The Truman Show', 'owner_profile_id': 1},
         12: {'album_title': 'The Truman Show', 'owner_profile_id': 1},

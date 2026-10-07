@@ -189,8 +189,13 @@ def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
             album_id = next(iter(ids))
             album = albums.get(album_id) or {}
             title = str(album.get('album_title') or '')
+            folder_signals_soundtrack = any(
+                'soundtrack' in os.path.dirname(path).casefold()
+                for path in groups[folder]
+            )
             if (len(groups[folder]) >= 8 and _album_has_release_id(album) and
-                    'soundtrack' in title.casefold()):
+                    ('soundtrack' in title.casefold() or folder_signals_soundtrack or
+                     str(album.get('record_type') or '').casefold() == 'compilation')):
                 anchors.append((folder, album_id))
         if len(anchors) != 1:
             continue

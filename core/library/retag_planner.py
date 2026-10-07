@@ -180,8 +180,8 @@ def _artist_credit_includes(credit: str, artist: str) -> bool:
         return True
     # Require visible collaboration punctuation before treating a longer
     # credit as a superset; ordinary substrings are not artist agreement.
-    return bool(re.search(r'\s(?:&|and|feat\.?|featuring|with|;|,)\s', credit,
-                          flags=re.IGNORECASE) and
+    return bool(re.search(r'(?:\s(?:&|and|feat\.?|featuring|with)\s|[,;]\s*)',
+                          credit, flags=re.IGNORECASE) and
                 re.search(rf'(?<!\w){re.escape(expected)}(?!\w)', current))
 
 

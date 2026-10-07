@@ -120,6 +120,20 @@ def test_track_artist_credit_keeps_all_source_performers():
     assert plan['db_data']['track_artist'] == 'First; Second'
 
 
+def test_source_does_not_shorten_a_comma_separated_local_artist_credit():
+    album = {'name': 'Soundtrack', 'artists': [{'name': 'Various Artists'}]}
+    source = {'name': 'Dreaming of Fiji', 'artists': [{'name': 'Philip Glass'}],
+              'track_number': 4, 'disc_number': 1}
+    current = {'title': 'Dreaming of Fiji', 'album': 'Soundtrack',
+               'album_artist': 'Various Artists',
+               'track_artist': 'Philip Glass, Burkhard Dallwitz',
+               'track_number': 4, 'disc_number': 1}
+
+    plan = rp.plan_track(current, source, album)
+
+    assert 'track_artist' not in plan['changes']
+
+
 def test_source_blank_field_never_written():
     album = {'name': 'Real Album', 'artists': [{'name': 'Real Artist'}]}  # no year/genres
     current = {'title': 'Real Title', 'album_artist': 'Real Artist', 'album': 'Real Album',
