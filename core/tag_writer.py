@@ -20,6 +20,28 @@ logger = logging.getLogger("tag_writer")
 # Supported extensions
 SUPPORTED_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.oga', '.opus', '.m4a', '.mp4'}
 
+# Alias spellings of artist / albumartist that other taggers leave behind, each
+# describing a SINGLE artist. Once the multi-value lists are written the file
+# answers the same question two ways and a server takes whichever alias its
+# mapping reaches first — the #1425 class of bug, where MusicBrainz's ARTISTS
+# credit split a band in two. Cleared on every write so one answer survives.
+#
+# ARTISTSORT / ALBUMARTISTSORT are also written by SoulSync's own MusicBrainz
+# pass (core/metadata/musicbrainz_tags.py:88), so a later re-enrich of the same
+# file puts them back. They go here anyway: a sort name for one artist is wrong
+# next to a three-artist list.
+_REDUNDANT_ARTIST_KEYS = frozenset({
+    'album artist', 'album_artist', 'album_artists',
+    'albumartist_credit', 'albumartists_credit',
+    'albumartistsort', 'albumartists_sort', 'albumartistssort',
+    'artist_credit', 'artists_credit', 'composer', 'author',
+    'artistsort', 'artists_sort', 'artistssort',
+})
+
+# The two that are native frames/atoms rather than freeform keys.
+_REDUNDANT_ID3_FRAMES = ('TSOP', 'TSO2')      # ARTISTSORT, ALBUMARTISTSORT
+_REDUNDANT_MP4_ATOMS = ('soar', 'soaa')       # same pair
+
 
 def read_file_tags(file_path: str) -> Dict[str, Any]:
     """
@@ -30,6 +52,14 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
         'title': None,
         'artist': None,
         'album_artist': None,
+        # Multi-value lists (None when the file carries none). build_tag_diff
+        # compares these, so a file whose display strings already match still
+        # counts as changed when only the list tags are missing.
+        'artists': None,
+        'album_artists': None,
+        # Alias keys present in the file that a write will delete, so the
+        # preview can show the cleanup instead of doing it invisibly.
+        'redundant_artist_tags': [],
         'album': None,
         'year': None,
         'genre': None,
@@ -83,9 +113,19 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
                     pass
             result['has_cover_art'] = bool(audio.tags.getall('APIC'))
             for fr in audio.tags.getall('TXXX'):
-                if getattr(fr, 'desc', '') == 'SOULSYNC_VERIFICATION' and fr.text:
-                    result['verification_status'] = str(fr.text[0])
-                    break
+                desc = getattr(fr, 'desc', '')
+                if desc == 'SOULSYNC_VERIFICATION' and fr.text:
+                    # first frame wins, as before the loop also looked for lists
+                    if result['verification_status'] is None:
+                        result['verification_status'] = str(fr.text[0])
+                elif desc == 'Artists' and fr.text:
+                    result['artists'] = [str(t) for t in fr.text]
+                elif desc == 'Album Artists' and fr.text:
+                    result['album_artists'] = [str(t) for t in fr.text]
+                elif desc.lower() in _REDUNDANT_ARTIST_KEYS:
+                    result['redundant_artist_tags'].append(desc.lower())
+            result['redundant_artist_tags'] += [
+                f for f in _REDUNDANT_ID3_FRAMES if audio.tags.getall(f)]
 
         elif isinstance(audio, (FLAC, OggVorbis)) or type(audio).__name__ == 'OggOpus':
             # FLAC / OGG
@@ -109,12 +149,24 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
                 # OGG doesn't have a standard picture field we can easily check
                 result['has_cover_art'] = False
             result['verification_status'] = _vorbis_first(audio, 'soulsync_verification')
+            result['artists'] = _vorbis_list(audio, 'artists')
+            result['album_artists'] = _vorbis_list(audio, 'albumartists')
+            result['redundant_artist_tags'] = sorted(
+                k.lower() for k in audio.keys() if k.lower() in _REDUNDANT_ARTIST_KEYS)
 
         elif isinstance(audio, MP4):
             # MP4 / M4A
             result['title'] = _mp4_first(audio, '\xa9nam')
             result['artist'] = _mp4_first(audio, '\xa9ART')
             result['album_artist'] = _mp4_first(audio, 'aART')
+            # #587 convention: the mp4 artist list lives in \xa9ART itself.
+            _art = (audio.tags or {}).get('\xa9ART') or []
+            if len(_art) > 1:
+                result['artists'] = [str(v) for v in _art]
+            result['redundant_artist_tags'] = [
+                a for a in _REDUNDANT_MP4_ATOMS if a in (audio.tags or {})] + [
+                k for k in (audio.tags or {})
+                if k.startswith('----:') and k.rsplit(':', 1)[-1].lower() in _REDUNDANT_ARTIST_KEYS]
             result['album'] = _mp4_first(audio, '\xa9alb')
             result['year'] = _mp4_first(audio, '\xa9day')
             result['genre'] = _mp4_first(audio, '\xa9gen')
@@ -347,6 +399,44 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
             'protected': protected,
         })
 
+    # Multi-value lists. Diffed so a file whose display strings already match
+    # but carries no Artists / Album Artists tag still counts as actionable —
+    # without this the batch writer's skip would pass it over and the lists
+    # would never land. Only when the setting is on, because that's the only
+    # case where the writer would actually write them: the preview must always
+    # agree with the write.
+    multi_on = _multi_artist_write_enabled()
+    for file_key, label, resolver in (
+        ('artists', 'Artists', _resolve_artists_list_for_write),
+        ('album_artists', 'Album Artists', _resolve_album_artists_list_for_write),
+    ):
+        file_list = _clean_name_list(file_tags.get(file_key))
+        db_list = resolver(db_data)
+        # A single name is not a multi-value credit — the writers skip those,
+        # so neither side being >1 means there is nothing to write.
+        want = db_list if db_list and len(db_list) > 1 else None
+        diffs.append({
+            'field': label,
+            'file_key': file_key,
+            'file_value': ', '.join(file_list) if file_list else '',
+            'db_value': ', '.join(want) if want else '',
+            'changed': bool(multi_on and want and file_list != want),
+            'protected': False,
+        })
+
+    # Alias keys the write will delete. Shown as a row of its own so the cleanup
+    # is visible in the preview and counts toward the batch writer's skip test,
+    # rather than happening silently on a file reported as unchanged.
+    redundant = list(file_tags.get('redundant_artist_tags') or [])
+    diffs.append({
+        'field': 'Redundant Tags',
+        'file_key': 'redundant_artist_tags',
+        'file_value': ', '.join(redundant),
+        'db_value': '',
+        'changed': bool(redundant),
+        'protected': False,
+    })
+
     # Cover art — special row
     diffs.append({
         'field': 'Cover Art',
@@ -489,16 +579,22 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
         #   - MP4 writes \xa9ART as the list when on, single string when off
         # When OFF or the list is empty/single — same single-string write
         # as before. Backward compatible for callers that don't pass it.
+        # `album_artists_list` is the same deal for the album's own artists
+        # (TXXX:Album Artists / albumartists). MP4 takes none: there is no tag
+        # navidrome reads for it, so aART stays the display string alone.
         artists_list = _resolve_artists_list_for_write(db_data)
+        album_artists_list = _resolve_album_artists_list_for_write(db_data)
 
         if isinstance(audio.tags, ID3):
             written = _write_id3(audio, title, artist, album_artist, album,
                                  year, genre_str, track_num, total_tracks,
-                                 disc_num, bpm, artists_list=artists_list)
+                                 disc_num, bpm, artists_list=artists_list,
+                                 album_artists_list=album_artists_list)
         elif isinstance(audio, (FLAC, OggVorbis)) or type(audio).__name__ == 'OggOpus':
             written = _write_vorbis(audio, title, artist, album_artist, album,
                                     year, genre_str, track_num, total_tracks,
-                                    disc_num, bpm, artists_list=artists_list)
+                                    disc_num, bpm, artists_list=artists_list,
+                                    album_artists_list=album_artists_list)
         elif isinstance(audio, MP4):
             written = _write_mp4(audio, title, artist, album_artist, album,
                                  year, genre_str, track_num, total_tracks,
@@ -553,6 +649,25 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
 # ── Format-specific writers ──
 
 
+def _resolve_album_artists_list_for_write(db_data: Dict[str, Any]) -> Optional[List[str]]:
+    """``_resolve_artists_list_for_write`` for the album's artists.
+
+    Separate key so a track's own credits can never be mistaken for the
+    album's — a feature doesn't make it a collab album (the rule
+    ``core/metadata/source.py`` applies to ``_album_artists_list``).
+    """
+    raw = db_data.get('album_artists_list') or db_data.get('_album_artists_list')
+    return _clean_name_list(raw)
+
+
+def _clean_name_list(raw: Any) -> Optional[List[str]]:
+    """Non-empty strings out of a supplied list, else ``None``."""
+    if not raw or not isinstance(raw, (list, tuple)):
+        return None
+    cleaned = [entry.strip() for entry in raw if isinstance(entry, str) and entry.strip()]
+    return cleaned or None
+
+
 def _resolve_artists_list_for_write(db_data: Dict[str, Any]) -> Optional[List[str]]:
     """Pull a multi-value artists list from db_data when caller supplied one.
 
@@ -563,17 +678,7 @@ def _resolve_artists_list_for_write(db_data: Dict[str, Any]) -> Optional[List[st
     "single-string only" vs "multi-value too".
     """
     raw = db_data.get('artists_list') or db_data.get('artists') or db_data.get('_artists_list')
-    if not raw:
-        return None
-    if not isinstance(raw, (list, tuple)):
-        return None
-    cleaned = []
-    for entry in raw:
-        if isinstance(entry, str):
-            text = entry.strip()
-            if text:
-                cleaned.append(text)
-    return cleaned or None
+    return _clean_name_list(raw)
 
 
 def _multi_artist_write_enabled() -> bool:
@@ -612,8 +717,11 @@ def _date_to_write(existing: Optional[str], year) -> str:
 
 def _write_id3(audio, title, artist, album_artist, album, year, genre,
                track_num, total_tracks, disc_num, bpm,
-               artists_list: Optional[List[str]] = None) -> List[str]:
+               artists_list: Optional[List[str]] = None,
+               album_artists_list: Optional[List[str]] = None) -> List[str]:
     written = []
+    if _drop_redundant_id3(audio.tags):
+        written.append('redundant_artist_tags')
     if title:
         audio.tags.delall('TIT2')
         audio.tags.add(TIT2(encoding=3, text=[title]))
@@ -628,14 +736,22 @@ def _write_id3(audio, title, artist, album_artist, album, year, genre,
         # list to a TXXX:Artists frame (Picard convention). Mirrors
         # the post-download enrichment writer at
         # core/metadata/enrichment.py.
+        # Cleared unconditionally: a stale list left behind by an earlier write
+        # would contradict the display string we just set.
+        audio.tags.delall('TXXX:Artists')
         if artists_list and len(artists_list) > 1 and _multi_artist_write_enabled():
-            audio.tags.delall('TXXX:Artists')
             audio.tags.add(TXXX(encoding=3, desc='Artists', text=list(artists_list)))
             written.append('artists_multi')
     if album_artist:
         audio.tags.delall('TPE2')
         audio.tags.add(TPE2(encoding=3, text=[album_artist]))
         written.append('album_artist')
+        # TPE2 stays the display string; the list goes where navidrome looks
+        # (mappings.yaml aliases albumartists to txxx:album artists).
+        audio.tags.delall('TXXX:Album Artists')
+        if album_artists_list and len(album_artists_list) > 1 and _multi_artist_write_enabled():
+            audio.tags.add(TXXX(encoding=3, desc='Album Artists', text=list(album_artists_list)))
+            written.append('album_artists_multi')
     if album:
         audio.tags.delall('TALB')
         audio.tags.add(TALB(encoding=3, text=[album]))
@@ -667,8 +783,11 @@ def _write_id3(audio, title, artist, album_artist, album, year, genre,
 
 def _write_vorbis(audio, title, artist, album_artist, album, year, genre,
                   track_num, total_tracks, disc_num, bpm,
-                  artists_list: Optional[List[str]] = None) -> List[str]:
+                  artists_list: Optional[List[str]] = None,
+                  album_artists_list: Optional[List[str]] = None) -> List[str]:
     written = []
+    if _drop_redundant_vorbis(audio):
+        written.append('redundant_artist_tags')
     if title:
         audio['title'] = [title]
         written.append('title')
@@ -679,12 +798,17 @@ def _write_vorbis(audio, title, artist, album_artist, album, year, genre,
         # `artists` key (separate from `artist`, picard convention) when
         # the caller supplied a list AND the user has multi-value write
         # enabled. Mirrors enrichment.py.
+        audio.pop('artists', None)   # stale list would contradict `artist`
         if artists_list and len(artists_list) > 1 and _multi_artist_write_enabled():
             audio['artists'] = list(artists_list)
             written.append('artists_multi')
     if album_artist:
         audio['albumartist'] = [album_artist]
         written.append('album_artist')
+        audio.pop('albumartists', None)
+        if album_artists_list and len(album_artists_list) > 1 and _multi_artist_write_enabled():
+            audio['albumartists'] = list(album_artists_list)
+            written.append('album_artists_multi')
     if album:
         audio['album'] = [album]
         written.append('album')
@@ -718,6 +842,8 @@ def _write_mp4(audio, title, artist, album_artist, album, year, genre,
                track_num, total_tracks, disc_num, bpm,
                artists_list: Optional[List[str]] = None) -> List[str]:
     written = []
+    if _drop_redundant_mp4(audio):
+        written.append('redundant_artist_tags')
     if title:
         audio['\xa9nam'] = [title]
         written.append('title')
@@ -811,6 +937,48 @@ def _id3_text(tags, frame_id: str) -> Optional[str]:
 def _vorbis_first(audio, key: str) -> Optional[str]:
     vals = audio.get(key, [])
     return vals[0] if vals else None
+
+
+def _vorbis_list(audio, key: str) -> Optional[List[str]]:
+    vals = audio.get(key, [])
+    return [str(v) for v in vals] if vals else None
+
+
+def _drop_redundant_vorbis(audio) -> List[str]:
+    """Delete the alias keys from a Vorbis-comment file. Returns what went."""
+    gone = [k for k in list(audio.keys()) if k.lower() in _REDUNDANT_ARTIST_KEYS]
+    for key in gone:
+        del audio[key]
+    return gone
+
+
+def _drop_redundant_id3(tags) -> List[str]:
+    """Same for ID3: the two native sort frames plus any TXXX alias."""
+    gone = []
+    for frame_id in _REDUNDANT_ID3_FRAMES:
+        if tags.getall(frame_id):
+            tags.delall(frame_id)
+            gone.append(frame_id)
+    for frame in list(tags.getall('TXXX')):
+        desc = str(getattr(frame, 'desc', ''))
+        if desc.lower() in _REDUNDANT_ARTIST_KEYS:
+            tags.delall(f'TXXX:{desc}')
+            gone.append(desc)
+    return gone
+
+
+def _drop_redundant_mp4(audio) -> List[str]:
+    """Same for MP4: the sort atoms plus any iTunes freeform alias."""
+    gone = []
+    for atom in _REDUNDANT_MP4_ATOMS:
+        if atom in audio:
+            del audio[atom]
+            gone.append(atom)
+    for key in list(audio.keys()):
+        if key.startswith('----:') and key.rsplit(':', 1)[-1].lower() in _REDUNDANT_ARTIST_KEYS:
+            del audio[key]
+            gone.append(key)
+    return gone
 
 
 def _mp4_first(audio, key: str) -> Optional[str]:
