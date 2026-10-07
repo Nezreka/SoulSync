@@ -13701,7 +13701,6 @@ class MusicDatabase:
             "rank_candidates_by_quality": 1 if profile.get("rank_candidates_by_quality") else 0,
             "upgrade_policy": policy,
             "upgrade_cutoff_index": cutoff_index,
-            "release_import_mode": normalize_release_import_mode(profile.get("release_import_mode")),
             "acoustid_required": 1 if profile.get("acoustid_required") else 0,
             "downsample_enabled": 1 if profile.get("downsample_enabled") else 0,
             "deep_audio_verify": 1 if profile.get("deep_audio_verify") else 0,
@@ -13710,6 +13709,7 @@ class MusicDatabase:
             "lossy_copy_codec": str(profile.get("lossy_copy_codec") or "mp3"),
             "lossy_copy_bitrate": str(profile.get("lossy_copy_bitrate") or "320"),
             "lossy_copy_delete_original": 1 if profile.get("lossy_copy_delete_original") else 0,
+            "release_import_mode": normalize_release_import_mode(profile.get("release_import_mode")),
         }
 
     # SQLite has no native boolean type — these columns are stored as 0/1.
@@ -13779,20 +13779,25 @@ class MusicDatabase:
             conn.close()
 
     def update_quality_profile(self, profile_id: int, profile: dict) -> bool:
-        """Update only supplied captured settings, preserving legacy/partial edits.
-
-        Name/is_default are untouched; omitted settings retain their stored
-        values. In particular an older client cannot reset album import opt-in.
-        """
+        """Overwrite an existing profile's captured settings with the given
+        v3 profile dict (edit-in-place — "update this profile with what's
+        currently on the page"). Name/is_default are untouched."""
         params = self._quality_profile_bundle_params(profile)
-        columns = [c for c in (*self._QUALITY_LADDER_COLUMNS, *self._QUALITY_BUNDLE_COLUMNS) if c in profile]
         conn = self._get_connection()
         try:
-            if not columns:
-                return conn.execute("SELECT 1 FROM quality_profiles WHERE id=?", (profile_id,)).fetchone() is not None
-            assignments = ", ".join(f"{c}=:{c}" for c in columns)
             cur = conn.execute(
-                f"UPDATE quality_profiles SET {assignments}, updated_at=CURRENT_TIMESTAMP WHERE id=:profile_id",
+                """UPDATE quality_profiles
+                      SET ranked_targets=:ranked_targets, fallback_enabled=:fallback_enabled,
+                          search_mode=:search_mode, rank_candidates_by_quality=:rank_candidates_by_quality,
+                          upgrade_policy=:upgrade_policy, upgrade_cutoff_index=:upgrade_cutoff_index,
+                          acoustid_required=:acoustid_required, downsample_enabled=:downsample_enabled,
+                          deep_audio_verify=:deep_audio_verify,
+                          replace_lower_quality=:replace_lower_quality, lossy_copy_enabled=:lossy_copy_enabled,
+                          lossy_copy_codec=:lossy_copy_codec, lossy_copy_bitrate=:lossy_copy_bitrate,
+                          lossy_copy_delete_original=:lossy_copy_delete_original,
+                          release_import_mode=:release_import_mode,
+                          updated_at=CURRENT_TIMESTAMP
+                    WHERE id=:profile_id""",
                 {"profile_id": profile_id, **params},
             )
             conn.commit()
@@ -14071,7 +14076,6 @@ class MusicDatabase:
         if profile_json:
             try:
                 profile = json.loads(profile_json)
-                profile['release_import_mode'] = normalize_release_import_mode(profile.get('release_import_mode'))
                 version = profile.get('version', 1)
                 if version < 2:
                     logger.info("Migrating quality profile v1 → v3")
@@ -14117,7 +14121,6 @@ class MusicDatabase:
         from core.quality.model import v2_qualities_to_ranked_targets
         profile = dict(profile)
         profile['version'] = 3
-        profile['release_import_mode'] = normalize_release_import_mode(profile.get('release_import_mode'))
         if 'ranked_targets' not in profile:
             ranked = v2_qualities_to_ranked_targets(profile.get('qualities', {}))
             # #896 review #5: the per-source quality dropdowns are gone — sources
@@ -14139,7 +14142,6 @@ class MusicDatabase:
         return {
             "version": 3,
             "preset": "balanced",
-            "release_import_mode": "requested_tracks",
             "fallback_enabled": True,
             "search_mode": "priority",
             "rank_candidates_by_quality": False,
@@ -14207,13 +14209,8 @@ class MusicDatabase:
         import json
 
         try:
-            profile = dict(profile)
-            if 'release_import_mode' in profile:
-                profile['release_import_mode'] = normalize_release_import_mode(profile['release_import_mode'])
-            # The legacy fallback must retain policy and settings omitted by
-            # older clients, just like the authoritative profile row does.
-            stored_profile = {**self.get_quality_profile(), **profile}
-            self.set_preference('quality_profile', json.dumps(stored_profile))
+            profile_json = json.dumps(profile)
+            self.set_preference('quality_profile', profile_json)
 
             preset_name = profile.get('preset')
             if preset_name in self._KNOWN_PRESETS:
@@ -14232,7 +14229,10 @@ class MusicDatabase:
             logger.error(f"Failed to save quality profile: {e}")
             return False
 
-    # Whitelisted persisted columns; updates write only supplied settings.
+    # The columns `_write_default_quality_profile_row` writes unconditionally
+    # (the ranked-target ladder and its flags), and the ones it writes only
+    # when the caller actually named them. See that method for why the split
+    # exists.
     _QUALITY_LADDER_COLUMNS = (
         "ranked_targets", "fallback_enabled", "search_mode",
         "rank_candidates_by_quality", "upgrade_policy", "upgrade_cutoff_index",
@@ -14244,16 +14244,31 @@ class MusicDatabase:
     )
 
     def _write_default_quality_profile_row(self, profile: dict) -> None:
-        """Update supplied settings on the default row, leaving omitted keys alone.
+        """Write-through helper for `set_quality_profile`: updates the
+        ``is_default=1`` row in `quality_profiles` to match.
 
-        Legacy ladder saves and Quick Sets do not carry the full settings
-        bundle. Missing fields must preserve the user's current choices;
-        explicit values still allow a full GET payload to round-trip.
+        Writes the ladder columns always and a bundle column only when
+        ``profile`` actually carries that key. The asymmetry is the point:
+        ``GET /api/quality-profile`` returns all fourteen fields, but the
+        Settings page posts back only the six ladder ones
+        (``settings.js::collectQualityProfileFromUI``) and a Quick Set preset
+        carries even fewer. The other eight belong to the global config and
+        reach this row through
+        :meth:`sync_default_quality_profile_from_config` after a settings
+        save, so a POST that never mentioned them must leave them alone —
+        writing a coerced default for an absent key would silently reset
+        lossy-copy, AcoustID strictness and replace-lower-quality every time
+        somebody reordered the target ladder.
+
+        Naming a key still works, including turning one off: presence decides,
+        not truthiness. That is what makes a full round-trip of the GET
+        payload behave the way a caller expects, which it previously did not
+        (PR #1103 reported exactly that, but fixed it by writing all fourteen
+        unconditionally, which is the reset described above).
         """
         params = self._quality_profile_bundle_params(profile)
-        columns = [c for c in (*self._QUALITY_LADDER_COLUMNS, *self._QUALITY_BUNDLE_COLUMNS) if c in profile]
-        if not columns:
-            return
+        columns = list(self._QUALITY_LADDER_COLUMNS)
+        columns += [c for c in self._QUALITY_BUNDLE_COLUMNS if c in profile]
         # Interpolated, but only ever from the two class-level tuples above —
         # `profile` decides which of those names are used, never what they are.
         assignments = ", ".join(f"{c}=:{c}" for c in columns)
@@ -14298,7 +14313,7 @@ class MusicDatabase:
         if customized:
             saved = self._load_preset_store().get(preset_name)
             if saved:
-                return {**saved, "release_import_mode": normalize_release_import_mode(saved.get("release_import_mode"))}
+                return saved
         return self._factory_quality_preset(preset_name)
 
     def _factory_quality_preset(self, preset_name: str) -> dict:
@@ -14353,7 +14368,7 @@ class MusicDatabase:
             },
         }
 
-        return {**presets.get(preset_name, presets["balanced"]), "release_import_mode": "requested_tracks"}
+        return presets.get(preset_name, presets["balanced"])
 
     # Wishlist management methods
 

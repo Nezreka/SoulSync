@@ -29,11 +29,11 @@ from utils.logging_config import get_logger
 
 logger = get_logger("database.quality_schema")
 
-RELEASE_IMPORT_MODES = ("requested_tracks", "complete_album")
+RELEASE_IMPORT_MODES = ("requested_tracks", "album_tracks")
 
 
 def normalize_release_import_mode(value: Any) -> str:
-    """Album expansion is opt-in; missing or malformed policy keeps track-only imports."""
+    """Album track imports are opt-in; missing or malformed policy keeps requested tracks only."""
     return value if isinstance(value, str) and value in RELEASE_IMPORT_MODES else "requested_tracks"
 
 

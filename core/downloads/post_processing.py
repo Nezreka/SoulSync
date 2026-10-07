@@ -19,12 +19,10 @@ from __future__ import annotations
 
 from utils.logging_config import get_logger
 import os
-import re
 import shutil
 import time
 import traceback
 from dataclasses import dataclass
-from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -37,9 +35,8 @@ from core.imports.context import (
     get_import_original_search,
     normalize_import_context,
 )
-from core.imports.filename import extract_track_number_from_filename, parse_filename_metadata
+from core.imports.filename import extract_track_number_from_filename
 from core.metadata import enrichment as metadata_enrichment
-from core.text.title_match import recording_version_markers
 from core.runtime_state import (
     download_tasks,
     matched_context_lock,
@@ -78,10 +75,6 @@ def _found_file_matches_expected(found_file: Optional[str],
     return os.path.normcase(os.path.realpath(found_file)) == os.path.normcase(
         os.path.realpath(expected_final_path)
     )
-
-
-def _normalize_match_text(value: str) -> str:
-    return ''.join(ch.lower() for ch in str(value or '') if ch.isalnum())
 
 
 def _release_audio_match_score(path: str, expected_title: str, expected_artist: str) -> float:
@@ -140,7 +133,6 @@ class PostProcessDeps:
     mark_task_completed: Callable[[str, Optional[dict]], None]
     on_download_completed: Callable[[str, str, bool], None]
     process_release_file: Optional[Callable] = None
-    automation_engine: Any = None
 
 
 def _get_task_context(make_context_key, username, filename, task_id):
@@ -286,6 +278,7 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
         # RESILIENT FILE-FINDING LOOP: Try up to 3 times with delays
         found_file = None
         file_location = None
+        release_album = None
 
         # CRITICAL FIX: For YouTube downloads, the filename in task is 'id||title' (metadata),
         # but the actual file on disk is the remuxed/transcoded audio (e.g. Title.mp3).
@@ -319,62 +312,26 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                         expected_artist = artist_ctx.get('name', '') if isinstance(artist_ctx, dict) else ''
 
                     from core.downloads.release_import import (
-                        read_release_file, select_requested_file, try_complete_album_import,
+                        profile_formats, read_release_file, select_requested_file,
                     )
+                    from core.quality.selection import load_profile_by_id
                     release_files = [read_release_file(deps.docker_resolve_path(path))
                                      for path in audio_files if _is_audio_file(path)]
                     expected_track = dict(track_info) if isinstance(track_info, dict) else {}
                     expected_track['name'] = expected_title
                     if not expected_track.get('artists'):
                         expected_track['artists'] = [{'name': expected_artist}]
-                    selected = select_requested_file(release_files, expected_track)
+                    selected = select_requested_file(
+                        release_files, expected_track,
+                        profile_formats(load_profile_by_id(expected_track.get('quality_profile_id'))))
                     if selected:
                         logger.info("[Post-Processing] Matched %s release file for %r: %s",
                                     task.get('username'), expected_title, selected.path)
-                        if context and deps.process_release_file:
-                            from core.imports.paths import transfer_root_for_context
-                            def _release_cancelled():
-                                with tasks_lock:
-                                    current = download_tasks.get(task_id)
-                                    return not current or current.get('status') != 'post_processing'
-                            outcome = try_complete_album_import(
-                                context_key, context, release_files, selected,
-                                transfer_root_for_context(context) or transfer_dir,
-                                deps.process_release_file, is_cancelled=_release_cancelled,
-                                automation_engine=deps.automation_engine,
-                            )
-                            if _release_cancelled():
-                                return
-                            if outcome:
-                                if outcome['status'] == 'cancelled':
-                                    return
-                                if outcome['status'] == 'imported':
-                                    with tasks_lock:
-                                        current = download_tasks.get(task_id)
-                                        if not current or current.get('status') != 'post_processing':
-                                            return
-                                        if not outcome.get('path') or not os.path.isfile(outcome['path']):
-                                            raise ValueError('Completed album has no requested playback file')
-                                        current.update(
-                                            final_file_path=outcome['path'], final_path=outcome['path'], metadata_enhanced=True,
-                                            release_imported_tracks=outcome['count'],
-                                        )
-                                        deps.mark_task_completed(task_id, track_info)
-                                    with matched_context_lock:
-                                        matched_downloads_context.pop(context_key, None)
-                                    deps.on_download_completed(batch_id, task_id, True)
-                                    return
-                                with tasks_lock:
-                                    current = download_tasks.get(task_id)
-                                    if not current or current.get('status') != 'post_processing':
-                                        return
-                                    current.update(status='failed', error_message=context.get('_release_import_note'))
-                                deps.on_download_completed(batch_id, task_id, False)
-                                return
                         copied_path = _copy_release_audio_to_transfer(selected.path, transfer_dir)
                         if copied_path:
                             found_file = copied_path
                             file_location = 'download'
+                            release_album = (release_files, selected)
                     if not found_file:
                         with tasks_lock:
                             if task_id in download_tasks:
@@ -665,8 +622,19 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
 
             if context:
                 logger.info(f"[Post-Processing] Found matched context, running full post-processing for: {context_key}")
+                if release_album:
+                    context.pop('_pipeline_import_succeeded', None)  # this attempt's outcome only
                 # Run the existing post-processing logic with verification
                 deps.post_process_with_verification(context_key, context, found_file, task_id, batch_id)
+                if release_album and context.get('_pipeline_import_succeeded') and deps.process_release_file:
+                    # The requested track is done and its task completed. The
+                    # profile may also want the album's other tracks from it.
+                    from core.downloads.release_import import import_album_tracks
+                    try:
+                        import_album_tracks(context_key, context, *release_album, transfer_dir,
+                                            deps.process_release_file, _copy_release_audio_to_transfer)
+                    except Exception as album_error:  # the completed request must stay completed
+                        logger.error(f"[Post-Processing] Album tracks import failed: {album_error}")
             else:
                 # No matched context - just mark as completed since file exists
                 #

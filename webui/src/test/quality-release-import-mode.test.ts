@@ -64,17 +64,17 @@ afterEach(() => {
 });
 
 it('loads and saves album opt-in to the selected named profile', async () => {
-  ui.populateQualityProfileUI({ release_import_mode: 'complete_album', ranked_targets: [] });
+  ui.populateQualityProfileUI({ release_import_mode: 'album_tracks', ranked_targets: [] });
   const select = document.getElementById('quality-release-import-mode') as HTMLSelectElement;
-  expect(select?.value).toBe('complete_album');
-  expect(ui.collectFullQualityBundleFromUI().release_import_mode).toBe('complete_album');
+  expect(select?.value).toBe('album_tracks');
+  expect(ui.collectFullQualityBundleFromUI().release_import_mode).toBe('album_tracks');
   expect(await ui.saveQualityProfile({ targetProfileId: 29 })).toBe(true);
   expect(posts[0].url).toBe('/api/quality-profile/custom/29/update');
-  expect(posts[0].profile.release_import_mode).toBe('complete_album');
+  expect(posts[0].profile.release_import_mode).toBe('album_tracks');
 });
 
 it('loads legacy and malformed policies as requested tracks', () => {
-  ui.populateQualityProfileUI({ release_import_mode: 'complete_album', ranked_targets: [] });
+  ui.populateQualityProfileUI({ release_import_mode: 'album_tracks', ranked_targets: [] });
   for (const profile of [{}, { release_import_mode: 'anything' }, { release_import_mode: null }]) {
     ui.populateQualityProfileUI(profile);
     expect(ui.collectFullQualityBundleFromUI().release_import_mode).toBe('requested_tracks');
@@ -82,7 +82,7 @@ it('loads legacy and malformed policies as requested tracks', () => {
 });
 
 it('saves an explicit opt-out after viewing an opted-in profile', async () => {
-  ui.populateQualityProfileUI({ release_import_mode: 'complete_album' });
+  ui.populateQualityProfileUI({ release_import_mode: 'album_tracks' });
   const select = document.getElementById('quality-release-import-mode') as HTMLSelectElement;
   expect(select).not.toBeNull();
   select.value = 'requested_tracks';
@@ -90,24 +90,28 @@ it('saves an explicit opt-out after viewing an opted-in profile', async () => {
   expect(posts[0].profile.release_import_mode).toBe('requested_tracks');
 });
 
-it('offers both policies within Quality and explains the normal import pipeline', () => {
+it('offers both policies in a profile card of Quality and explains the normal import pipeline', () => {
   const select = document.getElementById('quality-release-import-mode') as HTMLSelectElement;
   expect(select).not.toBeNull();
   expect(select.closest('[data-stg]')?.getAttribute('data-stg')).toBe('quality');
+  const body = select.closest('.settings-section-body');
+  const header = body?.previousElementSibling;
+  expect(header?.querySelector('h3')?.textContent).toBe('Album Releases');
+  expect(header?.querySelector('.qp-governed-badge')).not.toBeNull();
   expect([...select.options].map((option) => option.value)).toEqual([
     'requested_tracks',
-    'complete_album',
+    'album_tracks',
   ]);
   const help = select.closest('.form-group')?.textContent || '';
-  expect(help).toContain('this quality profile');
-  expect(help).toContain('normal download and import pipeline');
-  expect(help).toContain('requested track');
+  expect(help).toContain('this quality');
+  expect(help).toContain('normal import pipeline');
+  expect(help).toContain('quarantined on its own');
 });
 
 it('autosaves the album policy to its original profile when the user switches profiles', async () => {
   vi.useFakeTimers();
   ui.editProfile(29);
-  ui.populateQualityProfileUI({ release_import_mode: 'complete_album' });
+  ui.populateQualityProfileUI({ release_import_mode: 'album_tracks' });
   const select = document.getElementById('quality-release-import-mode') as HTMLSelectElement;
   expect(ui._qpHandleProfileControlChange({ target: select })).toBe(true);
   ui.editProfile(42);
@@ -115,5 +119,5 @@ it('autosaves the album policy to its original profile when the user switches pr
   await vi.runAllTimersAsync();
   expect(posts).toHaveLength(1);
   expect(posts[0].url).toBe('/api/quality-profile/custom/29/update');
-  expect(posts[0].profile.release_import_mode).toBe('complete_album');
+  expect(posts[0].profile.release_import_mode).toBe('album_tracks');
 });

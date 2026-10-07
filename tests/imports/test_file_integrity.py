@@ -504,18 +504,3 @@ def test_a_real_damaged_flac_fails_the_decode_and_a_real_clean_one_passes(tmp_pa
     assert file_integrity.flac_decode_test(str(good)) == (True, "")
     ok, reason = file_integrity.flac_decode_test(str(bad))
     assert ok is False and reason
-
-
-@pytest.mark.parametrize("failure", ["unavailable", "timeout", "os_error"])
-def test_required_flac_decode_rejects_tool_failures_but_ordinary_decode_keeps_fallback(monkeypatch, failure):
-    import subprocess
-    monkeypatch.setattr(file_integrity.shutil, "which", lambda name: None if failure == "unavailable" else "/usr/bin/flac")
-    def failed_decoder(*args, **kwargs):
-        if failure == "timeout":
-            raise subprocess.TimeoutExpired(["flac"], 600)
-        raise OSError("decoder unavailable")
-    monkeypatch.setattr(file_integrity.subprocess, "run", failed_decoder)
-    assert file_integrity.flac_decode_test("/tmp/audio.flac") == (True, "")
-    ok, reason = file_integrity.flac_decode_test("/tmp/audio.flac", require_measured=True)
-    assert ok is False
-    assert "measure" in reason.lower()

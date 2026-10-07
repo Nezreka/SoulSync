@@ -12,7 +12,7 @@ from datetime import datetime
 
 from flask import Blueprint, jsonify, request
 
-from core.quality.schema import RELEASE_IMPORT_MODES
+from core.quality.schema import RELEASE_IMPORT_MODES, normalize_release_import_mode
 
 from utils.logging_config import get_logger
 
@@ -40,7 +40,7 @@ def _validate_profile_data(data):
     if not isinstance(data, dict):
         return "Profile data must be an object"
     if "release_import_mode" in data and data["release_import_mode"] not in RELEASE_IMPORT_MODES:
-        return "release_import_mode must be requested_tracks or complete_album"
+        return "release_import_mode must be requested_tracks or album_tracks"
     return None
 
 
@@ -124,7 +124,7 @@ def apply_quality_preset(preset_name):
         preset['rank_candidates_by_quality'] = current.get(
             'rank_candidates_by_quality', preset.get('rank_candidates_by_quality', False))
         # Quick Sets change quality targets, preserving profile import scope.
-        preset['release_import_mode'] = current['release_import_mode']
+        preset['release_import_mode'] = normalize_release_import_mode(current.get('release_import_mode'))
         success = db.set_quality_profile(preset)
 
         if success:
@@ -155,7 +155,7 @@ def reset_quality_preset(preset_name):
         preset['rank_candidates_by_quality'] = current.get(
             'rank_candidates_by_quality', preset.get('rank_candidates_by_quality', False))
         # Quick Sets change quality targets, preserving profile import scope.
-        preset['release_import_mode'] = current['release_import_mode']
+        preset['release_import_mode'] = normalize_release_import_mode(current.get('release_import_mode'))
         success = db.set_quality_profile(preset)
 
         if success:

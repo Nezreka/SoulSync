@@ -296,22 +296,22 @@ def _confirm_broken_audio(file_path: str) -> Optional[str]:
 _FLAC_DECODE_TIMEOUT_S = 600
 
 
-def flac_decode_test(file_path: str, *, require_measured: bool = False) -> Tuple[bool, str]:
+def flac_decode_test(file_path: str) -> Tuple[bool, str]:
     """Fully decode a FLAC with ``flac -t`` (frames + STREAMINFO MD5).
 
-    Returns ``(ok, reason)``. Ordinary imports fail open on missing tooling,
-    timeout or OS error. Release preflight uses ``require_measured`` so those
-    outcomes reject instead of claiming an enabled decode check passed.
+    Returns ``(ok, reason)``. Fails OPEN — no ``flac`` binary, a timeout or an
+    OS error is ``(True, "")`` — because a false failure here quarantines a good
+    download. Same test as the Corrupt File Detector's library scan.
     """
     flac_bin = shutil.which("flac")
     if not flac_bin:
-        return (False, 'Could not measure FLAC decode: flac binary is unavailable') if require_measured else (True, '')
+        return True, ""
     try:
         proc = subprocess.run([flac_bin, "-t", "-s", file_path], capture_output=True,
                               text=True, errors="replace", timeout=_FLAC_DECODE_TIMEOUT_S)
     except (subprocess.TimeoutExpired, OSError) as exc:
         logger.debug("[Integrity] flac -t could not run on %s: %s", file_path, exc)
-        return (False, f'Could not measure FLAC decode: {exc}') if require_measured else (True, '')
+        return True, ""
     if proc.returncode == 0:
         return True, ""
     lines = [line.strip() for line in (proc.stderr or "").splitlines() if line.strip()]
@@ -325,26 +325,16 @@ def check_audio_integrity(
     length_tolerance_s: Optional[float] = None,
     min_file_size_bytes: int = _MIN_FILE_SIZE_BYTES,
     verify_flac_decode: bool = False,
-    require_measured: bool = False,
 ) -> IntegrityResult:
-    """Run integrity checks and any enabled full FLAC decode.
-
-    ``require_measured`` is used only by release preflight: unavailable parse,
-    unknown length and unavailable enabled FLAC decodes must not count as pass.
-    """
+    """Tier 1 (see ``_check_audio_integrity_tier1``), then tier 2 for a FLAC
+    when ``verify_flac_decode`` is on: a full ``flac -t`` decode."""
     result = _check_audio_integrity_tier1(
         file_path, expected_duration_ms,
         length_tolerance_s=length_tolerance_s,
         min_file_size_bytes=min_file_size_bytes)
-    if require_measured and result.ok and (
-        result.checks.get('mutagen_parse') in ('unavailable', 'zero_length_unknown')
-        or result.checks.get('length_check') == 'skipped_unknown_length'
-    ):
-        return IntegrityResult(ok=False, reason='Integrity check could not measure audio parse or duration', checks=result.checks)
     if not (result.ok and verify_flac_decode and str(file_path).lower().endswith(".flac")):
         return result
-    ok, reason = (flac_decode_test(str(file_path), require_measured=True)
-                  if require_measured else flac_decode_test(str(file_path)))
+    ok, reason = flac_decode_test(str(file_path))
     checks = {**result.checks, "flac_decode": "passed" if ok else "failed"}
     if ok:
         return IntegrityResult(ok=True, reason=result.reason, checks=checks)

@@ -4173,7 +4173,7 @@ function populateQualityProfileUI(profile) {
     if (rankCandidatesCheckbox) rankCandidatesCheckbox.checked = profile.rank_candidates_by_quality === true;
 
     const releaseImportSelect = document.getElementById('quality-release-import-mode');
-    if (releaseImportSelect) releaseImportSelect.value = profile.release_import_mode === 'complete_album' ? 'complete_album' : 'requested_tracks';
+    if (releaseImportSelect) releaseImportSelect.value = profile.release_import_mode === 'album_tracks' ? 'album_tracks' : 'requested_tracks';
 
     const upgradePolicySelect = document.getElementById('quality-upgrade-policy');
     if (upgradePolicySelect) {
@@ -4514,7 +4514,7 @@ function collectQualityProfileFromUI() {
         fallback_enabled: document.getElementById('quality-fallback-enabled')?.checked ?? true,
         search_mode: document.getElementById('quality-search-mode')?.value === 'best_quality' ? 'best_quality' : 'priority',
         rank_candidates_by_quality: document.getElementById('quality-rank-candidates')?.checked ?? false,
-        release_import_mode: document.getElementById('quality-release-import-mode')?.value === 'complete_album' ? 'complete_album' : 'requested_tracks',
+        release_import_mode: document.getElementById('quality-release-import-mode')?.value === 'album_tracks' ? 'album_tracks' : 'requested_tracks',
         upgrade_policy: document.getElementById('quality-upgrade-policy')?.value === 'until_cutoff' ? 'until_cutoff' : 'acceptable',
         upgrade_cutoff_index: parseInt(document.getElementById('quality-upgrade-cutoff')?.value || '0', 10) || 0,
         ranked_targets,

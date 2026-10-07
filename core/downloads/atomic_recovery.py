@@ -56,7 +56,7 @@ from utils.logging_config import get_logger
 logger = get_logger("downloads.atomic_recovery")
 
 
-def make_db_path_updater(db, *, include_provenance=False):
+def make_db_path_updater(db):
     """``fn(old_path, new_path) -> rows | None`` repointing a library row.
 
     Returns None — meaning "this count carries no information" — on anything but
@@ -71,16 +71,8 @@ def make_db_path_updater(db, *, include_provenance=False):
             cur = conn.cursor()
             cur.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
                         (new_path, old_path))
-            rowcount = getattr(cur, 'rowcount', None)
-            if include_provenance and rowcount == 0:
-                # Recovery can find a file whose DB pointer was committed just
-                # before the process exited. An already-final row is valid.
-                cur.execute("SELECT COUNT(*) FROM tracks WHERE file_path = ?", (new_path,))
-                rowcount = cur.fetchone()[0]
-            if include_provenance:
-                cur.execute("UPDATE library_history SET file_path = ? WHERE file_path = ?", (new_path, old_path))
-                cur.execute("UPDATE track_downloads SET file_path = ? WHERE file_path = ?", (new_path, old_path))
             conn.commit()
+            rowcount = getattr(cur, 'rowcount', None)
         finally:
             conn.close()
         try:
@@ -119,14 +111,9 @@ def context_from_manifest_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
 
 def _pending_from_manifest(manifest: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     pending: List[Dict[str, Any]] = []
-    entries = dict(manifest_tracks(manifest))
-    requested = (manifest or {}).get('release_requested')
-    if isinstance(requested, dict) and requested.get('staged_path'):
-        entries['release-request'] = requested
-    for staged_path, entry in entries.items():
+    for staged_path, entry in manifest_tracks(manifest).items():
         if not isinstance(entry, dict):
             continue
-        staged_path = entry.get('staged_path') or staged_path
         pending.append({
             'staged_path': os.path.normpath(str(staged_path)),
             'final_path': entry.get('final_path') or '',
@@ -266,14 +253,7 @@ def recover_orphan_staging(transfer_dirs: Iterable[str], *,
 
         manifest = read_manifest(root)
 
-        release_manifest = (os.path.basename(root).startswith('release-')
-                            or bool(manifest and 'release_state' in manifest))
-        if release_manifest and (manifest or {}).get('release_state') != 'ready':
-            logger.warning("[Atomic Recovery] Release album %s has not passed every import; keeping it private", root)
-            stats['reported'] += 1
-            continue
-
-        if not staged_files and not release_manifest:
+        if not staged_files:
             # A published batch prunes its own tree; an empty one left behind is
             # bookkeeping, not audio, and is the one thing safe to clear.
             remove_manifest(root)
@@ -302,7 +282,7 @@ def recover_orphan_staging(transfer_dirs: Iterable[str], *,
             continue
 
         # Never overwrite a file the library already has (see _set_aside_superseded).
-        set_aside = 0 if release_manifest else _set_aside_superseded(root, transfer_dir, staged_files)
+        set_aside = _set_aside_superseded(root, transfer_dir, staged_files)
         if set_aside is None:
             stats['failed'] += 1
             continue
@@ -327,14 +307,9 @@ def recover_orphan_staging(transfer_dirs: Iterable[str], *,
         try:
             from core.imports.file_ops import safe_move_file
             from database.music_database import MusicDatabase
-            if release_manifest:
-                from core.downloads.release_import import move_without_replace, publish_verified_release
-                result = publish_verified_release(root, transfer_dir, move_without_replace,
-                                                  make_db_path_updater(MusicDatabase(), include_provenance=True))
-            else:
-                result = _publish.publish_album_batch(
-                    root, transfer_dir, safe_move_file,
-                    make_db_path_updater(MusicDatabase()))
+            result = _publish.publish_album_batch(
+                root, transfer_dir, safe_move_file,
+                make_db_path_updater(MusicDatabase()))
         except Exception as exc:  # noqa: BLE001
             logger.error("[Atomic Recovery] Publish of %s failed, files kept in staging: %s",
                          root, exc, exc_info=True)

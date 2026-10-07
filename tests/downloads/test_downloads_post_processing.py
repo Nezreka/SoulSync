@@ -737,32 +737,74 @@ def test_fuzzy_context_matching_when_exact_key_missing(monkeypatch):
     assert download_tasks['t1']['status'] == 'failed'
 
 
-@pytest.mark.parametrize('cancel_during_import',[False,True])
-@pytest.mark.parametrize('outcome_status',['imported','pending'])
-def test_complete_album_fast_path_keeps_requested_playback_path_and_cancellation(tmp_path,monkeypatch,cancel_during_import,outcome_status):
+@pytest.mark.parametrize('requested_imported', [True, False])
+def test_album_tracks_follow_only_a_successful_requested_import(tmp_path, monkeypatch, requested_imported):
     from types import SimpleNamespace
     from core.downloads import release_import
-    source=tmp_path/'Artist - Song.flac'; source.write_bytes(b'audio')
-    final=tmp_path/'library'/'Song.flac'; final.parent.mkdir(); final.write_bytes(b'audio')
-    filename='nzb://id||Artist - Album'
-    download_tasks['t1']={'status':'post_processing','filename':filename,'username':'usenet',
-                          'track_info':{'name':'Song','artists':[{'name':'Artist'}]}}
-    matched_downloads_context[f'usenet::{filename}']={'artist':{'name':'Artist'}}
-    deps,rec=_build_deps(download_orchestrator=SimpleNamespace(get_download_status=lambda id:SimpleNamespace(file_path=str(source),audio_files=[str(source)])),run_async=lambda status:status)
-    deps.process_release_file=lambda *a:None
-    def import_album(*a,**kw):
-        if cancel_during_import:
-            download_tasks['t1']['status']='cancelled'
-        return {'status':outcome_status,'path':str(final),'count':2}
-    monkeypatch.setattr(release_import,'try_complete_album_import',import_album)
-    pp.run_post_processing_worker('t1','b1',deps)
-    if cancel_during_import:
-        assert download_tasks['t1']['status']=='cancelled'
-        assert not any(call[0] in ('mark_completed','on_complete') for call in rec.calls)
-    elif outcome_status=='pending':
-        assert download_tasks['t1']['status']=='failed'
-        assert not any(call[0]=='mark_completed' for call in rec.calls)
-    else:
-        assert download_tasks['t1']['final_file_path']==str(final)
-        assert any(call[0]=='mark_completed' for call in rec.calls)
-        assert any(call[0]=='on_complete' and call[1][-1] is True for call in rec.calls)
+    release = tmp_path / 'release'
+    release.mkdir()
+    song, other = release / '01 - Song.flac', release / '02 - Other.flac'
+    song.write_bytes(b'song')
+    other.write_bytes(b'other')
+    filename = 'nzb://id||Artist - Album'
+    download_tasks['t1'] = {'status': 'post_processing', 'filename': filename, 'username': 'usenet',
+                            'track_info': {'name': 'Song', 'artists': [{'name': 'Artist'}]}}
+    context = {'artist': {'name': 'Artist'}}
+    matched_downloads_context[f'usenet::{filename}'] = context
+    order = []
+
+    def requested_import(key, ctx, path, task_id, batch_id):
+        order.append(('requested', os.path.basename(path)))
+        if requested_imported:
+            ctx['_pipeline_import_succeeded'] = True
+
+    def album_tracks(key, ctx, files, requested, transfer, process, copy):
+        order.append(('album', sorted(os.path.basename(f.path) for f in files), os.path.basename(requested.path)))
+        assert ctx is context and process is deps.process_release_file
+        return 1
+
+    monkeypatch.setattr(release_import, 'import_album_tracks', album_tracks)
+    deps, rec = _build_deps(
+        config=_FakeConfig({'soulseek.transfer_path': str(tmp_path / 'transfer')}),
+        download_orchestrator=SimpleNamespace(get_download_status=lambda id: SimpleNamespace(
+            file_path=str(song), audio_files=[str(song), str(other)])),
+        run_async=lambda status: status,
+        post_process_with_verification=requested_import,
+    )
+    deps.process_release_file = lambda *a: None
+    pp.run_post_processing_worker('t1', 'b1', deps)
+    expected = [('requested', '01 - Song.flac')]
+    if requested_imported:
+        expected.append(('album', ['01 - Song.flac', '02 - Other.flac'], '01 - Song.flac'))
+    assert order == expected
+
+
+def test_failed_album_tracks_import_keeps_the_request_completed(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from core.downloads import release_import
+    song = tmp_path / '01 - Song.flac'
+    song.write_bytes(b'song')
+    filename = 'nzb://id||Artist - Album'
+    download_tasks['t1'] = {'status': 'post_processing', 'filename': filename, 'username': 'usenet',
+                            'track_info': {'name': 'Song', 'artists': [{'name': 'Artist'}]}}
+    matched_downloads_context[f'usenet::{filename}'] = {'artist': {'name': 'Artist'}}
+
+    def requested_import(key, ctx, path, task_id, batch_id):
+        ctx['_pipeline_import_succeeded'] = True
+        download_tasks[task_id]['status'] = 'completed'
+
+    def broken(*args):
+        raise RuntimeError('catalogue exploded')
+
+    monkeypatch.setattr(release_import, 'import_album_tracks', broken)
+    deps, rec = _build_deps(
+        config=_FakeConfig({'soulseek.transfer_path': str(tmp_path / 'transfer')}),
+        download_orchestrator=SimpleNamespace(get_download_status=lambda id: SimpleNamespace(
+            file_path=str(song), audio_files=[str(song)])),
+        run_async=lambda status: status,
+        post_process_with_verification=requested_import,
+    )
+    deps.process_release_file = lambda *a: None
+    pp.run_post_processing_worker('t1', 'b1', deps)
+    assert download_tasks['t1']['status'] == 'completed'
+    assert not any(call[0] == 'on_complete' and call[1][-1] is False for call in rec.calls)

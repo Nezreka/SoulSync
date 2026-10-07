@@ -214,7 +214,7 @@ def detect_incomplete_audio(
     try:
         from mutagen import File as MutagenFile
         audio = MutagenFile(file_path)
-        if audio is None or getattr(audio, "info", None) is None:
+        if not (audio and audio.info):
             return None
         container_s = float(getattr(audio.info, "length", 0) or 0)
         sample_rate = int(getattr(audio.info, "sample_rate", 0) or 0)
@@ -233,7 +233,6 @@ def detect_broken_audio(
     threshold: float = DEFAULT_THRESHOLD,
     noise_db: int = DEFAULT_NOISE_DB,
     min_silence_s: float = DEFAULT_MIN_SILENCE_S,
-    require_measured: bool = False,
 ) -> Optional[str]:
     """Combined post-download audio guard: reject a file that is truncated
     (real audio far shorter than the container) or mostly silence. Returns the
@@ -244,29 +243,23 @@ def detect_broken_audio(
     both checks instead of two full decodes. Halves the CPU cost versus running
     ``detect_incomplete_audio`` and ``detect_mostly_silent`` back to back.
 
-    Ordinary imports fail open when ffmpeg/mutagen cannot run. Release
-    preflight sets ``require_measured`` so unavailable probes, failed decodes
-    and missing sample measurements return an explicit rejection reason.
+    Fails open: returns None when ffmpeg/mutagen are unavailable or error, so a
+    tooling problem never quarantines a legitimate file.
     """
-    def unmeasured(reason: str) -> Optional[str]:
-        return f'Could not measure deep audio verification: {reason}' if require_measured else None
-
     if not _ffmpeg_available():
         logger.debug("audio guard skipped — ffmpeg not available")
-        return unmeasured('ffmpeg is unavailable')
+        return None
 
     try:
         from mutagen import File as MutagenFile
         audio = MutagenFile(file_path)
-        if audio is None or getattr(audio, "info", None) is None:
-            return unmeasured('audio container could not be read')
+        if not (audio and audio.info):
+            return None
         container_s = float(getattr(audio.info, "length", 0) or 0)
         sample_rate = int(getattr(audio.info, "sample_rate", 0) or 0)
-        if require_measured and (container_s <= 0 or sample_rate <= 0):
-            return unmeasured('audio duration or sample rate is unavailable')
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("container probe failed for %s: %s", file_path, exc)
-        return unmeasured(f'audio container probe failed ({exc})')
+        return None
 
     try:
         proc = subprocess.run(
@@ -279,19 +272,15 @@ def detect_broken_audio(
         )
     except (subprocess.SubprocessError, OSError) as exc:
         logger.debug("audio guard ffmpeg run failed for %s: %s", file_path, exc)
-        return unmeasured(f'ffmpeg decode failed ({exc})')
+        return None
 
-    if require_measured and getattr(proc, 'returncode', None) != 0:
-        return unmeasured('ffmpeg decode returned an error')
     stderr = proc.stderr.decode("utf-8", errors="replace") if proc.stderr else ""
-    measured_s = measured_duration_from_astats(stderr, sample_rate)
-    if require_measured and (measured_s is None or measured_s <= 0):
-        return unmeasured('ffmpeg did not report decoded audio samples')
 
     # Truncation check first (real audio far shorter than the container) — but
     # NOT for DSD: the astats sample-count ÷ DSD-rate math is invalid there and
     # would always false-positive (#939). Silence detection below still applies.
     if not is_dsd_path(file_path):
+        measured_s = measured_duration_from_astats(stderr, sample_rate)
         reason = incomplete_audio_reason(measured_s, container_s, min_ratio=min_ratio)
         if reason:
             return reason

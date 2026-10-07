@@ -1,9 +1,9 @@
-"""Real tagged audio regressions for release extraction and completeness."""
+"""Real tagged audio regressions for release extraction and album track pairing."""
 
 import subprocess
 from pathlib import Path
 import pytest
-from core.downloads.release_import import read_release_file, select_requested_file, match_complete_album
+from core.downloads.release_import import read_release_file, select_requested_file, match_album_tracks
 
 
 @pytest.fixture
@@ -73,24 +73,36 @@ def test_same_path_reported_twice_is_not_ambiguous(audio):
     assert select_requested_file([item, item], track()) == item
 
 
-def test_album_matches_every_file_once_including_multiple_discs(audio):
+def test_requested_position_settles_one_title_on_two_discs(audio):
+    items = [audio("cd1.flac", "Intro", track=1, disc=1), audio("cd2.flac", "Intro", track=1, disc=2)]
+    assert select_requested_file(items, track("Intro", 1, 2)).path == items[1].path
+
+
+def test_profile_format_settles_a_flac_and_mp3_release(audio):
+    items = [audio("Song.flac", "Song"), audio("Song.mp3", "Song")]
+    assert select_requested_file(items, track(), ["flac"]).path == items[0].path
+    assert select_requested_file(items, track(), ["mp3", "flac"]).path == items[1].path
+    assert select_requested_file(items, track()) is None
+
+
+def test_album_pairs_every_file_once_including_multiple_discs(audio):
     items = [audio("disc1.flac", "Song", track=1, disc=1), audio("disc2.flac", "Other", track=1, disc=2)]
-    result = match_complete_album(items, [track(), track("Other", 1, 2)], "Album")
-    assert result and len(result) == 2
+    assert len(match_album_tracks(items, [track(), track("Other", 1, 2)], "Album")) == 2
 
 
-def test_incomplete_album_is_not_expanded(audio):
-    assert match_complete_album([audio("a.flac", "Song")], [track(), track("Other", 2)], "Album") is None
+def test_partial_release_pairs_the_tracks_it_has(audio):
+    pairs = match_album_tracks([audio("a.flac", "Song")], [track(), track("Other", 2)], "Album")
+    assert [entry[0]["name"] for entry in pairs] == ["Song"]
 
 
-def test_wrong_edition_is_not_expanded(audio):
+def test_other_edition_files_are_not_paired(audio):
     items = [audio("a.flac", "Song", album="Album (Deluxe)"), audio("b.flac", "Other", album="Album (Deluxe)", track=2)]
-    assert match_complete_album(items, [track(), track("Other", 2)], "Album") is None
+    assert match_album_tracks(items, [track(), track("Other", 2)], "Album") == []
 
 
-def test_duplicate_track_slots_are_not_expanded(audio):
+def test_file_at_another_position_is_not_paired(audio):
     items = [audio("a.flac", "Song"), audio("b.flac", "Other", track=1)]
-    assert match_complete_album(items, [track(), track("Other", 2)], "Album") is None
+    assert [entry[0]["name"] for entry in match_album_tracks(items, [track(), track("Other", 2)], "Album")] == ["Song"]
 
 
 def test_duet_credit_matches_primary_artist_without_losing_collaborators(audio):
@@ -99,7 +111,7 @@ def test_duet_credit_matches_primary_artist_without_losing_collaborators(audio):
     assert select_requested_file([item], wanted) == item
 
 
-def test_missing_catalogue_artist_refuses_bonus_instead_of_retagging(audio):
+def test_missing_catalogue_artist_leaves_that_track_unpaired(audio):
     items = [audio("a.flac", "Song"), audio("b.flac", "Other", artist="Someone Else", track=2)]
     missing = dict(track("Other", 2), artists=[])
-    assert match_complete_album(items, [track(), missing], "Album") is None
+    assert [entry[0]["name"] for entry in match_album_tracks(items, [track(), missing], "Album")] == ["Song"]

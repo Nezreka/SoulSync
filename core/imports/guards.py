@@ -183,20 +183,16 @@ def check_quality_target(file_path: str, context: dict) -> Optional[str]:
     from core.imports.file_ops import probe_audio_quality
     from core.quality.selection import targets_from_profile, quality_meets_profile, load_profile_by_id
 
+    aq = probe_audio_quality(file_path)
+    if aq is None:
+        logger.debug("[QualityGuard] Could not probe %s — skipping check", os.path.basename(file_path))
+        return None
+
     track_info = context.get("track_info")
     if not isinstance(track_info, dict):
         track_info = {}
-    profile = context.get('_quality_profile')
-    if not isinstance(profile, dict):
-        profile = load_profile_by_id(track_info.get("quality_profile_id"))
+    profile = load_profile_by_id(track_info.get("quality_profile_id"))
     targets, fallback_enabled = targets_from_profile(profile)
-
-    aq = probe_audio_quality(file_path)
-    if aq is None:
-        if context.get('_release_preflight_only') and targets:
-            return 'Could not measure file audio quality required by the configured quality profile'
-        logger.debug("[QualityGuard] Could not probe %s — skipping check", os.path.basename(file_path))
-        return None
 
     if not targets:
         return None
