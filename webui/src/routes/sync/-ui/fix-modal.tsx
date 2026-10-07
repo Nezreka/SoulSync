@@ -277,6 +277,11 @@ export function FixModal({ config, sourceId, row, onClose, onFixed }: FixModalPr
                 >
                   <div className="fix-result-card-content">
                     <div className="fix-result-title">{track.name || 'Unknown Track'}</div>
+                    {track.disambiguation && (
+                      <div className="fix-result-disambiguation">
+                        Recording note: {track.disambiguation}
+                      </div>
+                    )}
                     <div className="fix-result-artist">{artistsText(track)}</div>
                     <div className="fix-result-album">{albumText(track)}</div>
                     <div className="fix-result-duration">

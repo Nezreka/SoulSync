@@ -4,11 +4,10 @@ The page could say how MUCH you listened and never when. These two are the
 first genuinely personal charts: the shape of a listening week, and listening
 as a habit rather than a total.
 
-TIMEZONE: played_at is stored as LOCAL naive wall-clock — the web player
-writes datetime.now().isoformat(), plex_client writes item.viewedAt (also
-local). So strftime('%H', played_at) is the hour the user actually listened,
-which is what the chart means. These tests insert local-looking timestamps for
-exactly that reason.
+TIMEZONE: played_at is stored utc and the clock reads it in the server's
+local time. these tests run with the server on utc (utc_server), so a seeded
+hour is the hour shown. test_the_clock_is_the_listeners_local_time covers
+another zone.
 """
 
 from __future__ import annotations
@@ -18,6 +17,8 @@ from datetime import date, datetime, timedelta
 import pytest
 
 from database.music_database import MusicDatabase
+
+pytestmark = pytest.mark.usefixtures('utc_server')
 
 
 @pytest.fixture()
@@ -47,6 +48,25 @@ def test_the_grid_is_dense_even_with_no_plays(db):
     assert clock['total'] == 0
     assert clock['peak']['plays'] == 0
 
+
+
+def test_the_clock_is_the_listeners_local_time(db, server_tz):
+    """played_at is utc. a pacific listener's wednesday 9:30pm play is stored
+    as thursday 04:30; the clock and its drill-down must both say wednesday
+    21:00, or late-night listening shows up as early morning"""
+    from core.stats import queries
+    server_tz('America/Los_Angeles')
+    _play_at(db, datetime(2026, 8, 13, 4, 30))
+
+    clock = db.get_listening_clock('all')
+    assert clock['grid'][3][21] == 1 and clock['total'] == 1
+
+    cell = queries.get_listening_events(db, lambda u: u, time_range='all',
+                                        filter_type='weekday_hour', weekday=3, hour=21, limit=10)
+    assert cell['total'] == 1
+    hour = queries.get_listening_events(db, lambda u: u, time_range='all',
+                                        filter_type='hour', hour=21, limit=10)
+    assert hour['total'] == 1
 
 def test_a_play_lands_in_its_own_weekday_and_hour(db):
     # 2026-08-12 is a Wednesday -> strftime %w == 3.

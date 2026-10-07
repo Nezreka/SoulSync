@@ -13,6 +13,36 @@ logger = get_logger("repair_job.orphan_files")
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
 
 
+def known_file_suffixes(db):
+    """Snapshot tracked paths using the detector's cross-mount matching rule."""
+    conn = db._get_connection()
+    try:
+        suffixes = set()
+        for (file_path,) in conn.execute(
+            "SELECT file_path FROM tracks WHERE file_path IS NOT NULL AND file_path != ''"
+        ):
+            parts = file_path.replace('\\', '/').split('/')
+            for depth in range(1, min(5, len(parts) + 1)):
+                suffixes.add('/'.join(parts[-depth:]).lower())
+        return suffixes
+    finally:
+        conn.close()
+
+
+def is_tracked_path(file_path, suffixes, *, min_depth=2):
+    """Match a DB path without conflating unrelated same-named files.
+
+    A filename alone is not evidence of identity: many albums contain files
+    such as ``01 - Intro.flac``. Keep that weaker check available to destructive
+    fixes so they can stop for manual review rather than act on an uncertain file.
+    """
+    parts = file_path.replace('\\', '/').split('/')
+    return any(
+        '/'.join(parts[-depth:]).lower() in suffixes
+        for depth in range(min_depth, min(5, len(parts) + 1))
+    )
+
+
 @register_job
 class OrphanFileDetectorJob(RepairJob):
     job_id = 'orphan_file_detector'
@@ -35,18 +65,19 @@ class OrphanFileDetectorJob(RepairJob):
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
 
-        transfer = context.transfer_folder
-        if not os.path.isdir(transfer):
-            logger.warning("Transfer folder does not exist: %s", transfer)
+        from core.repair_jobs.base import all_library_roots
+        # #1504: walk every library root (shared + own), not just shared.
+        roots = all_library_roots(context)
+        if not roots:
+            logger.warning("No library roots exist to scan")
             return result
 
         # Build set of known file-path suffixes from DB.
         # DB may store paths with a different base prefix than the local filesystem
         # (e.g. DB has /mnt/musicBackup/Artist/Album/track.mp3, local disk is
         # H:\Music\Artist\Album\track.mp3).  We compare using suffix fragments
-        # of depth 1-3 (filename, album/filename, artist/album/filename) which
-        # covers all realistic path-prefix mismatches.
-        known_suffixes = set()
+        # of depth 2-4 (album/filename, artist/album/filename) which covers
+        # mount-prefix mismatches without conflating common filenames.
         known_titles = set()       # (title_lower, artist_lower) for exact match
         known_titles_clean = set()  # (clean_title, clean_artist) for normalized match
         conn = None
@@ -56,17 +87,9 @@ class OrphanFileDetectorJob(RepairJob):
             return re.sub(r'\s*[\(\[][^)\]]*[\)\]]', '', s).strip()
 
         try:
+            known_suffixes = known_file_suffixes(context.db)
             conn = context.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT file_path FROM tracks WHERE file_path IS NOT NULL AND file_path != ''")
-            for row in cursor.fetchall():
-                parts = row[0].replace('\\', '/').split('/')
-                # Store last 1-4 path components as lowercase suffixes.
-                # Depth 4 covers Genre/Artist/Album/track.flac scenarios.
-                for depth in range(1, min(5, len(parts) + 1)):
-                    suffix = '/'.join(parts[-depth:]).lower()
-                    known_suffixes.add(suffix)
-
             # Build title+artist sets for fallback matching. Include both
             # track artist and album artist so Picard-style albumartist paths
             # don't look orphaned when tracks have featured/guest artists.
@@ -97,15 +120,16 @@ class OrphanFileDetectorJob(RepairJob):
             if conn:
                 conn.close()
 
-        # Walk transfer folder and find orphans
+        # Walk every library root and find orphans
         audio_files = []
-        for root, _dirs, files in walk_library(transfer):
-            if context.check_stop():
-                return result
-            for fname in files:
-                ext = os.path.splitext(fname)[1].lower()
-                if ext in AUDIO_EXTENSIONS:
-                    audio_files.append(os.path.join(root, fname))
+        for lib_root in roots:
+            for root, _dirs, files in walk_library(lib_root):
+                if context.check_stop():
+                    return result
+                for fname in files:
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext in AUDIO_EXTENSIONS:
+                        audio_files.append(os.path.join(root, fname))
 
         total = len(audio_files)
         if context.update_progress:
@@ -132,13 +156,7 @@ class OrphanFileDetectorJob(RepairJob):
                 )
 
             # Check if this file matches any known DB path via suffix matching
-            fpath_parts = fpath.replace('\\', '/').split('/')
-            is_known = False
-            for depth in range(1, min(5, len(fpath_parts) + 1)):
-                suffix = '/'.join(fpath_parts[-depth:]).lower()
-                if suffix in known_suffixes:
-                    is_known = True
-                    break
+            is_known = is_tracked_path(fpath, known_suffixes)
 
             # Fallback: read file tags and check if title+artist exists in DB
             # Catches path mismatches where the file is tracked but under a different path.
@@ -218,6 +236,18 @@ class OrphanFileDetectorJob(RepairJob):
             if context.update_progress and (i + 1) % 50 == 0:
                 context.update_progress(i + 1, total)
 
+        # Imports can register tracks while this (possibly long) filesystem walk
+        # is running. Re-read paths before raising findings from the old snapshot.
+        try:
+            current_suffixes = known_file_suffixes(context.db)
+        except Exception as e:
+            logger.error("Error refreshing tracked paths before orphan findings: %s", e,
+                         exc_info=True)
+            result.errors += 1
+            return result
+        orphan_files = [path for path in orphan_files
+                        if not is_tracked_path(path, current_suffixes)]
+
         # Safety: if most files look like orphans, it's almost certainly a path
         # mismatch between the DB and filesystem (remount / Docker volume change),
         # NOT real orphans. Creating findings anyway is dangerous — a user batch-
@@ -291,12 +321,12 @@ class OrphanFileDetectorJob(RepairJob):
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
-        transfer = context.transfer_folder
-        if not os.path.isdir(transfer):
-            return 0
+        from core.repair_jobs.base import all_library_roots
+        # #1504: count across every library root.
         count = 0
-        for _root, _dirs, files in walk_library(transfer):
-            for fname in files:
-                if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
-                    count += 1
+        for lib_root in all_library_roots(context):
+            for _root, _dirs, files in walk_library(lib_root):
+                for fname in files:
+                    if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
+                        count += 1
         return count

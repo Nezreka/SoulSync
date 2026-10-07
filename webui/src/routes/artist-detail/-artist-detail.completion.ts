@@ -19,6 +19,9 @@ export interface CompletionEvent {
   completion_percentage?: number;
   formats?: string[];
   processed_count?: number;
+  /** #1550: watchlist content-type exclusion ('remix', 'live', ...) that
+   * explains why the scan will never pick up this missing release. */
+  watchlist_excluded?: string | null;
 }
 
 /** Anything but 'missing' or 'error' counts as owned — including partials. */
@@ -86,11 +89,19 @@ export function applyCompletionEvent(
     const updated = releases.map((release) => {
       if (String(release.id ?? '') !== targetId) return release;
       changed = true;
-      return {
+      const merged: DiscographyRelease = {
         ...release,
         owned: isEventOwned(event),
         track_completion: completionFromEvent(event),
-      } as DiscographyRelease;
+      };
+      // #1550: carry the watchlist exclusion reason onto the release so the
+      // card overlay can explain a "Missing" the scan will never fix — but
+      // only when the event actually carries the key. A later event without
+      // it must not clobber a label set by an earlier one.
+      if ('watchlist_excluded' in event) {
+        merged.watchlist_excluded = event.watchlist_excluded ?? null;
+      }
+      return merged;
     });
     if (updated !== releases) next[bucket] = updated;
   }

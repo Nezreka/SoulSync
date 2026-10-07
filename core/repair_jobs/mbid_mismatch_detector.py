@@ -379,7 +379,6 @@ class MbidMismatchDetectorJob(RepairJob):
             return result
 
         checked = 0
-        import time
 
         for i, row in enumerate(tracks):
             if context.check_stop():
@@ -419,14 +418,28 @@ class MbidMismatchDetectorJob(RepairJob):
                     log_type='info'
                 )
 
+            lookup_complete = False
             try:
-                # Rate limit: MusicBrainz allows ~1 req/sec
-                if context.sleep_or_stop(1.1):
-                    return result
-
-                recording = mb_client.get_recording(mbid, includes=['artist-credits'])
+                # The client applies the configured interval and enforces the public API minimum.
+                recording = mb_client.get_recording(
+                    mbid, includes=['artist-credits'], raise_on_error=True)
+                lookup_complete = True
                 if not recording:
-                    # MBID doesn't exist — definitely wrong
+                    # A mirror may be behind replication; do not claim that an
+                    # ID is globally nonexistent based on its local 404 alone.
+                    from core.musicbrainz_client import _server_settings, is_public_musicbrainz_server
+                    server_url, _ = _server_settings()
+                    if not is_public_musicbrainz_server(server_url):
+                        result.errors += 1
+                        result.stopped_early = (
+                            'Some recording MBIDs were not found on the configured mirror. '
+                            'Retry this scan after replication or verify them against public MusicBrainz.')
+                        if context.report_progress:
+                            context.report_progress(
+                                log_line=f'MBID {mbid} is not on the mirror; retry verification after replication.',
+                                log_type='warning')
+                        result.scanned += 1
+                        continue
                     self._create_mismatch_finding(
                         context, result, track_id, title, artist_name, album_title,
                         resolved, album_thumb, artist_thumb, mbid, artist_id=artist_id,
@@ -455,8 +468,18 @@ class MbidMismatchDetectorJob(RepairJob):
                     )
 
             except Exception as e:
-                logger.debug("Error verifying MBID %s for track %s: %s", mbid, track_id, e)
-                # Don't count as error — could be transient network issue
+                issue = ('MusicBrainz server issue' if not lookup_complete
+                         else 'MBID finding could not be recorded')
+                logger.warning("%s for MBID %s, track %s: %s", issue, mbid, track_id, e)
+                result.errors += 1
+                result.stopped_early = (
+                    f'{issue}. Verification is incomplete for this track; '
+                    'retry this scan after the issue is resolved.')
+                if context.report_progress:
+                    context.report_progress(
+                        log_line=f'{issue} while verifying {mbid}; retry this scan.',
+                        log_type='error')
+                return result
 
             result.scanned += 1
 
@@ -482,12 +505,13 @@ class MbidMismatchDetectorJob(RepairJob):
         if context.report_progress:
             context.report_progress(
                 scanned=total, total=total,
-                phase='Complete',
+                phase='Partial — retry unverified MBIDs' if result.stopped_early else 'Complete',
                 log_line=(
                     f'Verified {checked} track MBIDs ({track_findings_so_far} mismatches) — '
-                    f'album consistency check found {album_findings} dissenters'
+                    f'album consistency check found {album_findings} dissenters; '
+                    f'{result.errors} verification errors'
                 ),
-                log_type='success' if result.findings_created == 0 else 'warning'
+                log_type='success' if result.findings_created == 0 and result.errors == 0 else 'warning'
             )
 
         return result

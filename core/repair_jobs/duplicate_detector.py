@@ -5,6 +5,7 @@ import re
 from collections import defaultdict
 from difflib import SequenceMatcher
 
+from core.downloads.candidates import _strip_featuring
 from core.imports.compilation import VARIOUS_ARTIST_NAMES
 from core.imports.file_ops import _strip_slskd_dedup_suffix
 from core.library.duplicate_rules import (
@@ -151,7 +152,10 @@ class DuplicateDetectorJob(RepairJob):
             # same reason, for a hand-tagged file whose row isn't locked yet
             if is_hand_tagged_path(file_path, hand_tagged):
                 continue
-            norm_title = _normalize(title)
+            # a feat credit names who's on it, not which version: 'Crack a
+            # Bottle (feat. Dr. Dre & 50 Cent)' is 'Crack A Bottle' tagged
+            # by another source (#1568, scored 0.54 and was never flagged)
+            norm_title = _normalize(_strip_featuring(title))
             bucket_key = norm_title[:4] if len(norm_title) >= 4 else norm_title
             buckets[bucket_key].append({
                 'id': track_id,

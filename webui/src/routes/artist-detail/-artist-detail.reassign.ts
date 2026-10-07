@@ -145,3 +145,14 @@ export function albumBits(album: ReassignAlbum): string {
     .filter(Boolean)
     .join(' · ');
 }
+
+/** A provider image URL is third-party data interpolated into a CSS
+ *  `url('...')` string: a quote or a backslash in it would end the literal
+ *  early and the rest would be read as CSS. `CSS.escape` is the wrong tool,
+ *  it escapes identifiers, not URL strings. */
+export function cssUrl(url: string): string {
+  return `url('${url
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/[\n\r]/g, '')}')`;
+}

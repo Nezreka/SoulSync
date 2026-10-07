@@ -867,7 +867,8 @@ def run_youtube_download(dl_id: Any, db_provider: Callable) -> None:
         process_youtube_download(
             dl, profile=profile, settings=settings,
             update_row=db.update_video_download, archive=_archive,
-            clear_wishlist=lambda vid: db.remove_youtube_from_wishlist("video", vid),
+            clear_wishlist=lambda vid: db.remove_youtube_from_wishlist(
+                "video", vid, profile_id=None),  # landed file satisfies every profile
             stage_dir=stage_dir,
             # default sidecars + the remembered-channel-meta lookup (banner/description
             # for the channel folder's fanart.jpg / tvshow.nfo)

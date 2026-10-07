@@ -13,6 +13,7 @@ import logging
 import threading
 import time
 import traceback
+from datetime import date, timedelta
 from typing import Any, Callable, Optional
 
 from core.listening_scope import listening_owner, owner_clause, owner_key
@@ -385,8 +386,9 @@ def get_listening_events(
         hour_i = int(hour)
         if not (0 <= weekday_i <= 6 and 0 <= hour_i <= 23):
             raise ValueError('weekday/hour out of range')
-        clauses.append("CAST(strftime('%w', lh.played_at) AS INTEGER) = ?")
-        clauses.append("CAST(strftime('%H', lh.played_at) AS INTEGER) = ?")
+        # local hours, like the clock it drills into (played_at is utc)
+        clauses.append("CAST(strftime('%w', lh.played_at, 'localtime') AS INTEGER) = ?")
+        clauses.append("CAST(strftime('%H', lh.played_at, 'localtime') AS INTEGER) = ?")
         params.extend([weekday_i, hour_i])
         title = f"{['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][weekday_i]} {hour_i:02d}:00"
     elif filter_type == 'hour':
@@ -395,7 +397,7 @@ def get_listening_events(
         hour_i = int(hour)
         if not (0 <= hour_i <= 23):
             raise ValueError('hour out of range')
-        clauses.append("CAST(strftime('%H', lh.played_at) AS INTEGER) = ?")
+        clauses.append("CAST(strftime('%H', lh.played_at, 'localtime') AS INTEGER) = ?")
         params.append(hour_i)
         title = f"{hour_i:02d}:00"
     else:
@@ -542,3 +544,101 @@ def get_listening_status(worker) -> dict:
         }
     return worker.get_stats()
 
+
+
+def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
+    """This-week listening digest for the dashboard banner.
+
+    Trailing 7 days, using the same ``datetime('now', '-7 days')`` window the
+    stats page uses for its 7d range — the banner can never disagree with the
+    stats page about what "this week" means. (played_at is stored as local
+    naive wall-clock; the day buckets below read it as-is, which is the local
+    day the user actually listened.)
+
+    Owner-scoped throughout: a profile only ever sees its own pile.
+
+    Returns totals, the top artist, new discoveries (distinct artists whose
+    first-ever play falls inside the window), the listening streak in days,
+    the ISO date range, and 7 daily hour buckets oldest-first for the banner
+    chart. ``tracks_played`` is 0 when there is nothing to show — the banner
+    renders nothing in that case (the calm-page rule).
+    """
+    scope = owner_clause(listening_owner(database, profile_id), 'lh')
+    window = "lh.played_at >= datetime('now', '-7 days')"
+    artist_present = "lh.artist IS NOT NULL AND TRIM(lh.artist) <> ''"
+
+    conn = database._get_connection()
+    try:
+        cursor = conn.cursor()
+
+        cursor.execute(
+            f"""SELECT COUNT(*), COALESCE(SUM(lh.duration_ms), 0)
+                FROM listening_history lh WHERE {window} AND {scope}"""
+        )
+        total_row = cursor.fetchone()
+
+        cursor.execute(
+            f"""SELECT lh.artist, COUNT(*) AS c
+                FROM listening_history lh
+                WHERE {window} AND {scope} AND {artist_present}
+                GROUP BY lh.artist ORDER BY c DESC, lh.artist ASC LIMIT 1"""
+        )
+        top_row = cursor.fetchone()
+
+        cursor.execute(
+            f"""SELECT COUNT(*) FROM (
+                    SELECT lh.artist FROM listening_history lh
+                    WHERE {scope} AND {artist_present}
+                    GROUP BY lh.artist
+                    HAVING MIN(lh.played_at) >= datetime('now', '-7 days')
+                )"""
+        )
+        discoveries = cursor.fetchone()[0] or 0
+
+        cursor.execute(
+            f"""SELECT date(lh.played_at) AS d, COALESCE(SUM(lh.duration_ms), 0)
+                FROM listening_history lh
+                WHERE {window} AND {scope}
+                GROUP BY d"""
+        )
+        day_ms = {row[0]: row[1] for row in cursor.fetchall()}
+
+        cursor.execute(
+            f"""SELECT DISTINCT date(lh.played_at)
+                FROM listening_history lh WHERE {scope}"""
+        )
+        play_days = {row[0] for row in cursor.fetchall()}
+    finally:
+        conn.close()
+
+    today = date.today()
+    daily = []
+    for back in range(6, -1, -1):
+        day = today - timedelta(days=back)
+        key = day.isoformat()
+        daily.append({
+            'date': key,
+            'day': 'mtwtfss'[day.weekday()],
+            'hours': round((day_ms.get(key) or 0) / 3_600_000, 1),
+        })
+
+    # Streak: consecutive local days with a play, counting back from today.
+    # A streak stays alive through today when yesterday has plays.
+    streak = 0
+    cursor_day = today
+    if cursor_day.isoformat() not in play_days:
+        cursor_day -= timedelta(days=1)
+    while cursor_day.isoformat() in play_days:
+        streak += 1
+        cursor_day -= timedelta(days=1)
+
+    return {
+        'tracks_played': total_row[0] or 0,
+        'time_ms': total_row[1] or 0,
+        'top_artist': top_row[0] if top_row else None,
+        'discoveries': discoveries,
+        'streak_days': streak,
+        'start_date': (today - timedelta(days=6)).isoformat(),
+        'end_date': today.isoformat(),
+        'daily': daily,
+    }

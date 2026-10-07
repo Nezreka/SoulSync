@@ -46,10 +46,87 @@ def _read_current_tags(file_path):
         return {}
 
 
-def _run_full_enrich(file_path, full_meta) -> bool:
+def build_retag_enrichment_runtime(config_manager=None, db=None):
+    """Build a real enrichment runtime for the 'full' depth path (issue #1511).
+
+    The repair job/worker have no access to the web_server worker globals, so
+    we construct the lightweight clients ``embed_source_ids()`` needs directly
+    (the same client classes the background workers wrap). Sources that need
+    the app's authenticated sessions (tidal, hifi, genius, bandcamp, spotify,
+    itunes, jiosaavn) are left as None — those processors skip gracefully.
+    Built fresh per apply call: clients hold plain sessions, no network.
+    """
+    from types import SimpleNamespace
+    mb_worker = deezer_worker = audiodb_worker = lastfm_worker = None
+    try:
+        from core.deezer_client import DeezerClient
+        deezer_worker = SimpleNamespace(client=DeezerClient())
+    except Exception as e:
+        logger.warning("retag enrichment: deezer client unavailable: %s", e)
+    try:
+        from core.audiodb_client import AudioDBClient
+        audiodb_worker = SimpleNamespace(client=AudioDBClient())
+    except Exception as e:
+        logger.warning("retag enrichment: audiodb client unavailable: %s", e)
+    try:
+        from core.lastfm_client import LastFMClient
+        api_key = (config_manager.get('lastfm.api_key', '') if config_manager else '') or ''
+        lastfm_worker = SimpleNamespace(client=LastFMClient(api_key=api_key))
+    except Exception as e:
+        logger.warning("retag enrichment: lastfm client unavailable: %s", e)
+    try:
+        if db is not None:
+            from core.musicbrainz_service import MusicBrainzService
+            mb_worker = SimpleNamespace(
+                mb_service=MusicBrainzService(db, "SoulSync", "1.0", ""))
+    except Exception as e:
+        logger.warning("retag enrichment: musicbrainz service unavailable: %s", e)
+    return SimpleNamespace(
+        mb_worker=mb_worker,
+        deezer_worker=deezer_worker,
+        audiodb_worker=audiodb_worker,
+        lastfm_worker=lastfm_worker,
+        tidal_client=None,
+        hifi_client=None,
+        qobuz_enrichment_worker=None,
+        genius_worker=None,
+        bandcamp_worker=None,
+        spotify_enrichment_worker=None,
+        itunes_enrichment_worker=None,
+        jiosaavn_worker=None,
+    )
+
+
+def _read_embedded_date(file_path, symbols):
+    """Raw date tag (TDRC/DATE/(c)day) without the year truncation _read_tags
+    applies. Fed into the full-depth enrichment metadata so the writer's
+    release-year fallback (``if release_year and not metadata.get("date")``)
+    can't replace a full date with a bare year (issue #1511.2)."""
+    try:
+        audio = symbols.File(file_path, easy=True)
+        if audio and audio.tags:
+            d = (audio.get('date') or [None])[0]
+            if d:
+                return str(d).strip()
+    except Exception as e:
+        logger.debug("read embedded date failed for %s: %s", file_path, e)
+    return None
+
+
+def _run_full_enrich(file_path, full_meta, runtime=None) -> bool:
     """'full' depth: run the same multi-source enrichment a fresh download gets
-    (MusicBrainz/Deezer/AudioDB/Tidal/… via embed_source_ids), ADDITIVELY — it
+    (MusicBrainz/Deezer/AudioDB/Last.fm via embed_source_ids), ADDITIVELY — it
     adds rich frames without clearing existing tags. Slow + API-heavy per track.
+
+    ``runtime`` must carry the source workers/clients; with none it degrades
+    to stamping the pinned source ids only. The file's date — as it stands
+    when the enrichment runs, i.e. after the light pass wrote — is copied into
+    a copy of the metadata so the writer's release-year fallback can't replace
+    a full date with a bare year (issue #1511.2). Note the MusicBrainz DATE tag
+    path still follows the #1451 precision rule exactly like a fresh download
+    (a year-differing MB edition date wins when
+    ``musicbrainz.tags.release_date`` is enabled); only the unconditional
+    release-year fallback is blocked here.
     """
     if not full_meta:
         return False
@@ -59,12 +136,17 @@ def _run_full_enrich(file_path, full_meta) -> bool:
         symbols = get_mutagen_symbols()
         if not symbols:
             return False
+        meta = dict(full_meta)
+        if not meta.get('date'):
+            file_date = _read_embedded_date(file_path, symbols)
+            if file_date:
+                meta['date'] = file_date
         audio = symbols.File(file_path)
         if audio is None:
             return False
         if getattr(audio, 'tags', None) is None and hasattr(audio, 'add_tags'):
             audio.add_tags()
-        embed_source_ids(audio, full_meta, context=None, runtime=None)
+        embed_source_ids(audio, meta, context=None, runtime=runtime)
         audio.save()
         return True
     except Exception as e:
@@ -73,7 +155,7 @@ def _run_full_enrich(file_path, full_meta) -> bool:
 
 
 def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False,
-                      lyrics_action=False) -> dict:
+                      lyrics_action=False, enrich_runtime=None) -> dict:
     """Write each plan's tags in place (+ optionally embed/refresh cover art,
     + optionally fetch/refresh .lrc lyrics), reusing tag_writer.write_tags_to_file.
     ``file_path`` on each plan must be a real, reachable path (caller resolves
@@ -108,21 +190,49 @@ def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False
     for tp in track_plans or []:
         fp = tp.get('file_path')
         db_data = tp.get('db_data') or {}
-        if not fp or not _os.path.isfile(fp) or (not db_data and not embed_cover and not _lyrics_client):
+        full_meta = tp.get('full_meta') if full else None
+        # needs_write: is there tag/cover work for the writer? (db_data or
+        # a successfully downloaded cover to embed)
+        needs_write = bool(db_data) or embed_cover
+        # has_work: should this track be processed at all? Separate from
+        # needs_write — an enrichment-only or lyrics-only plan has work
+        # but nothing for the tag writer. The old gate dropped enrichment
+        # plans entirely for sources whose ids aren't stamped (deezer).
+        has_work = needs_write or bool(_lyrics_client) or bool(full_meta)
+        if not fp or not _os.path.isfile(fp) or not has_work:
             result['skipped'] += 1
             continue
-        try:
-            res = write_tags_to_file(fp, db_data, embed_cover=embed_cover, cover_data=cover_data)
-            if res.get('success'):
-                result['written'] += 1
-                last_dir = _os.path.dirname(fp)
-                if full and tp.get('full_meta'):
-                    _run_full_enrich(fp, tp['full_meta'])
-            else:
+        # Tag write: only when there's something to write. Enrichment-only
+        # and lyrics-only plans skip the writer entirely.
+        write_ok = False
+        if needs_write:
+            try:
+                res = write_tags_to_file(fp, db_data, embed_cover=embed_cover,
+                                         cover_data=cover_data)
+                if res.get('success'):
+                    write_ok = True
+                    result['written'] += 1
+                    last_dir = _os.path.dirname(fp)
+                else:
+                    result['failed'] += 1
+            except Exception as e:
+                logger.warning("retag write failed for %s: %s", fp, e)
                 result['failed'] += 1
-        except Exception as e:
-            logger.warning("retag write failed for %s: %s", fp, e)
-            result['failed'] += 1
+        # Full-depth enrichment: independent of the tag write. Runs when the
+        # write succeeded, or when there was no write to do (enrichment-only).
+        # An enrichment-only plan counts here, not in the writer block.
+        if full_meta and (write_ok or not needs_write):
+            try:
+                if _run_full_enrich(fp, full_meta, runtime=enrich_runtime):
+                    if not needs_write:
+                        result['written'] += 1
+                        last_dir = _os.path.dirname(fp)
+                elif not needs_write:
+                    result['failed'] += 1
+            except Exception as e:
+                logger.warning("retag enrich failed for %s: %s", fp, e)
+                if not needs_write:
+                    result['failed'] += 1
 
         # Lyrics: fetch/refresh the .lrc for this track (independent of tag write
         # success — a track with no tag changes may still be missing lyrics).
@@ -188,8 +298,9 @@ _FULL_META_ID_KEYS = (
 
 def _build_full_meta(db_data, src, album_title, artist_name, lib_title):
     """Metadata dict for the 'full' depth enrichment cascade. Carries the matched
-    source's ids so embed_source_ids resolves the right entity instead of guessing
-    by name."""
+    source's ids (spotify/itunes/musicbrainz — deezer ids aren't stamped, so the
+    deezer processor falls back to its name search) so embed_source_ids resolves
+    the right entity instead of guessing by name where it can."""
     src_title = None
     for k in ('name', 'title', 'track_name'):
         v = src.get(k) if isinstance(src, dict) else getattr(src, k, None)
@@ -454,10 +565,12 @@ class LibraryRetagJob(RepairJob):
                 continue
             current = _read_current_tags(rp)
             plan = plan_track(current, src, album_meta, mode=mode)
+            # At 'full' depth every matched track gets the multi-source
+            # enrichment, even when the light pass changes nothing (issue
+            # #1511.3) — its plan carries full_meta for the apply to enrich.
             # Include a track when its tags change, OR there's a cover action,
-            # OR lyrics are being fetched (db_data may be empty — apply still
-            # embeds art / writes the .lrc).
-            if plan['changes'] or cover_action or lyrics_action:
+            # OR lyrics are being fetched, OR it needs the full enrichment.
+            if plan['changes'] or cover_action or lyrics_action or depth == 'full':
                 db_data = plan['db_data']
                 _add_source_ids(db_data, source, album_source_id, src)
                 tp = {
@@ -478,7 +591,9 @@ class LibraryRetagJob(RepairJob):
                 track_plans.append(tp)
 
         tag_change_tracks = sum(1 for tp in track_plans if tp['changes'])
-        if (not tag_change_tracks and not cover_action and not lyrics_action) or not track_plans:
+        enrich_only = any(tp.get('full_meta') and not tp['changes'] for tp in track_plans)
+        if (not tag_change_tracks and not cover_action and not lyrics_action
+                and not enrich_only) or not track_plans:
             # Nothing actionable. The second clause covers cover-action albums
             # where no track is reachable/included — creating a finding there
             # gives an unappliable "(0 track(s))" entry.
@@ -493,7 +608,10 @@ class LibraryRetagJob(RepairJob):
         # isfile-checked above) and count it as an auto-fix — no finding.
         if not dry_run:
             res = apply_track_plans(track_plans, cover_action, cover_url, full=(depth == 'full'),
-                                    lyrics_action=lyrics_action)
+                                    lyrics_action=lyrics_action,
+                                    enrich_runtime=build_retag_enrichment_runtime(
+                                        context.config_manager, context.db)
+                                    if depth == 'full' else None)
             if res['written'] or res['cover_written'] or res.get('lyrics_written'):
                 result.auto_fixed += 1
             else:
@@ -517,8 +635,15 @@ class LibraryRetagJob(RepairJob):
             desc += f' {unreachable} track(s) not reachable on disk and skipped.'
 
         # Cover-only findings say so instead of the puzzling "(0 track(s))".
-        title_what = (f'{tag_change_tracks} track(s)' if tag_change_tracks
-                      else f'cover art, {len(track_plans)} track(s)')
+        # Enrichment-only findings (full depth, no tag changes) say that too.
+        if tag_change_tracks:
+            title_what = f'{tag_change_tracks} track(s)'
+        elif cover_action:
+            title_what = f'cover art, {len(track_plans)} track(s)'
+        elif lyrics_action:
+            title_what = f'lyrics, {len(track_plans)} track(s)'
+        else:
+            title_what = f'{len(track_plans)} track(s) (enrichment)'
 
         if context.create_finding:
             inserted = context.create_finding(

@@ -47,6 +47,25 @@ def _primary_track_artist_name(track_info: Dict[str, Any]) -> str:
     return str((track_info or {}).get("artist", "") or "")
 
 
+def _recording_identity(context: Dict[str, Any]) -> tuple[str | None, str | None]:
+    """Return a recording MBID and its comment only when they belong together."""
+    track_info = get_import_track_info(context) or get_import_search_result(context)
+    source_ids = get_import_source_ids(context)
+    source_mbid = source_ids["track_id"] if get_import_source(context).lower() == "musicbrainz" else ""
+    embedded_mbid = (context.get("_embedded_id_tags") or {}).get("MUSICBRAINZ_RECORDING_ID")
+    candidate = embedded_mbid or track_info.get("musicbrainz_recording_id") or source_mbid
+    track_mbid = str(candidate or "").strip().lower() or None
+    if not track_mbid:
+        return None, None
+
+    disambiguation = context.get("_recording_disambiguation")
+    if disambiguation is None and str(
+        track_info.get("musicbrainz_recording_id") or source_mbid or ""
+    ).strip().lower() == track_mbid:
+        disambiguation = track_info.get("disambiguation")
+    return track_mbid, str(disambiguation or "").strip() or None
+
+
 def _stable_soulsync_id(text: str) -> str:
     return str(abs(int(hashlib.md5(text.encode("utf-8", errors="replace")).hexdigest(), 16)) % (10 ** 9))
 
@@ -75,6 +94,7 @@ _SOULSYNC_FILLABLE_COLUMNS = {
                           "itunes_artist_id", "deezer_id", "discogs_id", "soul_id",
                           "hifi_artist_id"}),
     "albums": frozenset({"thumb_url", "genres", "year", "track_count", "duration",
+                         "record_type",
                          "spotify_album_id", "itunes_album_id", "deezer_id",
                          "discogs_id", "soul_id", "hifi_album_id"}),
 }
@@ -378,7 +398,7 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
         deezer_track_id = _embedded("DEEZER_TRACK_ID")
         tidal_track_id = _embedded("TIDAL_TRACK_ID")
         qobuz_track_id = _embedded("QOBUZ_TRACK_ID")
-        musicbrainz_recording_id = _embedded("MUSICBRAINZ_RECORDING_ID")
+        musicbrainz_recording_id, recording_disambiguation = _recording_identity(context)
         audiodb_id = _embedded("AUDIODB_TRACK_ID")
         soul_id = _embedded("SOUL_ID")
         isrc = context.get("_isrc")
@@ -404,6 +424,7 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
             tidal_track_id=tidal_track_id,
             qobuz_track_id=qobuz_track_id,
             musicbrainz_recording_id=musicbrainz_recording_id,
+            recording_disambiguation=recording_disambiguation,
             audiodb_id=audiodb_id,
             soul_id=soul_id,
             isrc=isrc,
@@ -457,6 +478,14 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         if not final_path:
             return
 
+        # #1504: owning user profile for the new rows (from auto-import
+        # breadcrumb, download request, etc.). None = shared.
+        owner_pid = context.get('profile_id')
+        try:
+            owner_pid = int(owner_pid) if owner_pid else None
+        except (TypeError, ValueError):
+            owner_pid = None
+
         album_ctx = get_import_context_album(context)
         track_info = get_import_track_info(context)
         original_search = get_import_original_search(context)
@@ -491,6 +520,23 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             album_name = album_ctx.get("name", "") or original_search.get("album", "")
         if not album_name:
             album_name = track_info.get("name", "Unknown")
+
+        # #1562: the release kind the download pipeline already carries
+        # (post_processing stamps album_info['record_type']). Before this,
+        # the import wrote no kind at all — record_type was only backfilled
+        # by the enrichment sweep, so freshly imported releases were
+        # kind-blind (and the single/album gates lenient-always) until the
+        # workers ran. album_type is the fallback; '' stays unknown.
+        _import_record_type = ""
+        if isinstance(album_info, dict):
+            _import_record_type = (
+                album_info.get("record_type") or album_info.get("album_type") or ""
+            )
+        if not _import_record_type:
+            _import_record_type = (
+                album_ctx.get("record_type") or album_ctx.get("album_type") or ""
+            )
+        _import_record_type = str(_import_record_type).strip().lower()
 
         track_name = get_import_clean_title(
             context,
@@ -621,12 +667,25 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                 cursor.execute("SELECT id FROM artists WHERE id = ?", (artist_id,))
                 if cursor.fetchone():
                     artist_id = _stable_soulsync_id(artist_name.lower().strip() + "::soulsync")
+                # #1504: stamp owner_profile_id only when the column exists —
+                # minimal test schemas / pre-migration DBs don't have it,
+                # and a missing column must not fail the whole insert.
+                try:
+                    _artist_cols = {c[1] for c in cursor.execute("PRAGMA table_info(artists)").fetchall()}
+                except Exception:
+                    _artist_cols = set()
+                _a_cols = ["id", "name", "genres", "thumb_url", "server_source"]
+                _a_vals = ["?", "?", "?", "?", "'soulsync'"]
+                _a_params: list = [artist_id, artist_name, genres_json, image_url]
+                if "owner_profile_id" in _artist_cols:
+                    _a_cols.append("owner_profile_id")
+                    _a_vals.append("?")
+                    _a_params.append(owner_pid)
+                _a_cols += ["created_at", "updated_at"]
+                _a_vals += ["CURRENT_TIMESTAMP", "CURRENT_TIMESTAMP"]
                 cursor.execute(
-                    """
-                    INSERT INTO artists (id, name, genres, thumb_url, server_source, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """,
-                    (artist_id, artist_name, genres_json, image_url),
+                    f"INSERT INTO artists ({', '.join(_a_cols)}) VALUES ({', '.join(_a_vals)})",
+                    _a_params,
                 )
                 if artist_source_col and artist_source_id:
                     try:
@@ -678,6 +737,9 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                         "year": year,
                         "track_count": total_tracks,
                         "duration": album_total_duration_ms,
+                        # Fill-only: never overwrites a kind the enrichment
+                        # workers already wrote.
+                        "record_type": _import_record_type,
                     },
                 )
                 if album_source_col and album_source_id:
@@ -690,13 +752,33 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                     # release its own stable id, so a third one can't collide.
                     _scope = group_id or "soulsync"
                     album_id = _stable_soulsync_id(f"{artist_name}::{album_name}::{_scope}".lower().strip())
+                # #1504: stamp owner_profile_id only when the column exists —
+                # minimal test schemas / pre-migration DBs don't have it,
+                # and a missing column must not fail the whole insert.
+                try:
+                    _album_cols = {c[1] for c in cursor.execute("PRAGMA table_info(albums)").fetchall()}
+                except Exception:
+                    _album_cols = set()
+                _al_cols = ["id", "artist_id", "title", "year", "thumb_url", "genres",
+                            "track_count", "duration", "server_source"]
+                _al_vals = ["?", "?", "?", "?", "?", "?", "?", "?", "'soulsync'"]
+                _al_params: list = [album_id, artist_id, album_name, year, image_url,
+                                    genres_json, total_tracks, album_total_duration_ms]
+                if "owner_profile_id" in _album_cols:
+                    _al_cols.append("owner_profile_id")
+                    _al_vals.append("?")
+                    _al_params.append(owner_pid)
+                # #1562: stamp the kind at import time (same PRAGMA guard as
+                # owner_profile_id — minimal test schemas may lack it).
+                if "record_type" in _album_cols:
+                    _al_cols.append("record_type")
+                    _al_vals.append("?")
+                    _al_params.append(_import_record_type or None)
+                _al_cols += ["created_at", "updated_at"]
+                _al_vals += ["CURRENT_TIMESTAMP", "CURRENT_TIMESTAMP"]
                 cursor.execute(
-                    """
-                    INSERT INTO albums (id, artist_id, title, year, thumb_url, genres, track_count,
-                                        duration, server_source, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """,
-                    (album_id, artist_id, album_name, year, image_url, genres_json, total_tracks, album_total_duration_ms),
+                    f"INSERT INTO albums ({', '.join(_al_cols)}) VALUES ({', '.join(_al_vals)})",
+                    _al_params,
                 )
                 if album_source_col and album_source_id:
                     try:
@@ -731,7 +813,7 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             # so the watchlist scanner's stable-ID match path recognises
             # auto-imported tracks the next time the user adds the artist
             # to a watchlist.
-            track_mbid = (track_info.get("musicbrainz_recording_id") or "").strip().lower() or None
+            track_mbid, recording_disambiguation = _recording_identity(context)
             track_isrc = (track_info.get("isrc") or "").strip().upper() or None
             # Carries whatever the pipeline resolved for this item (a wishlist
             # row's or Auto-Import's own override, or None for "follow the
@@ -751,6 +833,10 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             has_retention_columns = {
                 "acquired_quality_json", "retention_json"
             }.issubset(track_columns)
+            # #1504: stamp owner_profile_id only when the column exists —
+            # minimal test schemas / pre-migration DBs don't have it,
+            # and a missing column must not fail the whole insert.
+            has_track_owner = "owner_profile_id" in track_columns
 
             cursor.execute("SELECT id FROM tracks WHERE file_path = ?", (final_path,))
             existing_track = cursor.fetchone()
@@ -777,39 +863,40 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                 # Retry the INSERT with a deterministic discriminator. The
                 # post-insert source-id UPDATE below reads `track_id`, so
                 # it follows the reminted id automatically.
+                # Build the track INSERT dynamically: retention columns and
+                # owner_profile_id are each included only when present.
+                _t_cols = ["id", "album_id", "artist_id", "title", "track_number",
+                           "duration", "file_path", "bitrate", "file_size", "track_artist",
+                           "musicbrainz_recording_id", "isrc", "quality_profile_id"]
+                _t_vals = ["?"] * 13
+                _t_params: list = list(base_values)
+                if has_retention_columns:
+                    _t_cols += ["acquired_quality_json", "retention_json"]
+                    _t_vals += ["?", "?"]
+                    _t_params += [acquired_quality_json, retention_json]
+                if "recording_disambiguation" in track_columns:
+                    _t_cols.append("recording_disambiguation")
+                    _t_vals.append("?")
+                    _t_params.append(recording_disambiguation)
+                _t_cols.append("server_source")
+                _t_vals.append("'soulsync'")
+                if has_track_owner:
+                    _t_cols.append("owner_profile_id")
+                    _t_vals.append("?")
+                    _t_params.append(owner_pid)
+                _t_cols += ["created_at", "updated_at"]
+                _t_vals += ["CURRENT_TIMESTAMP", "CURRENT_TIMESTAMP"]
+                _t_sql = (f"INSERT INTO tracks ({', '.join(_t_cols)}) "
+                          f"VALUES ({', '.join(_t_vals)})")
                 for _collision_attempt in range(10):
                     try:
-                        if has_retention_columns:
-                            cursor.execute(
-                                """
-                                INSERT INTO tracks (id, album_id, artist_id, title, track_number,
-                                                    duration, file_path, bitrate, file_size, track_artist,
-                                                    musicbrainz_recording_id, isrc, quality_profile_id,
-                                                    acquired_quality_json, retention_json, server_source,
-                                                    created_at, updated_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                                        'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                                """,
-                                base_values + (acquired_quality_json, retention_json),
-                            )
-                        else:
-                            cursor.execute(
-                                """
-                                INSERT INTO tracks (id, album_id, artist_id, title, track_number,
-                                                    duration, file_path, bitrate, file_size, track_artist,
-                                                    musicbrainz_recording_id, isrc, quality_profile_id, server_source,
-                                                    created_at, updated_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                                        'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                                """,
-                                base_values,
-                            )
+                        _t_params[0] = track_id
+                        cursor.execute(_t_sql, _t_params)
                         break
                     except sqlite3.IntegrityError:
                         track_id = _stable_soulsync_id(
                             f"{final_path}::soulsync::{_collision_attempt + 1}"
                         )
-                        base_values = (track_id,) + base_values[1:]
                         logger.warning(
                             "[SoulSync Library] track id collision for %s — "
                             "reminted as %s",
@@ -835,18 +922,28 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                             )
                     except Exception as e:
                         logger.debug("track source-id update failed: %s", e)
-            elif has_retention_columns:
+            else:
                 # A repeated/import-resume write refreshes transformation
                 # provenance for the existing physical row.  Never retain an
                 # old destructive-policy claim after a clean untransformed
                 # import of that same path.
-                cursor.execute(
-                    """UPDATE tracks
-                          SET acquired_quality_json=?, retention_json=?,
-                              updated_at=CURRENT_TIMESTAMP
-                        WHERE id=?""",
-                    (acquired_quality_json, retention_json, existing_track[0]),
-                )
+                if has_retention_columns:
+                    cursor.execute(
+                        """UPDATE tracks
+                              SET acquired_quality_json=?, retention_json=?,
+                                  updated_at=CURRENT_TIMESTAMP
+                            WHERE id=?""",
+                        (acquired_quality_json, retention_json, existing_track[0]),
+                    )
+                if recording_disambiguation and "recording_disambiguation" in track_columns:
+                    cursor.execute(
+                        "UPDATE tracks SET recording_disambiguation = ?, "
+                        "musicbrainz_recording_id = COALESCE(NULLIF(musicbrainz_recording_id, ''), ?) "
+                        "WHERE id = ? AND (musicbrainz_recording_id IS NULL "
+                        "OR musicbrainz_recording_id = '' "
+                        "OR LOWER(musicbrainz_recording_id) = ?)",
+                        (recording_disambiguation, track_mbid, existing_track[0], track_mbid),
+                    )
 
             conn.commit()
             logger.info("[SoulSync Library] Added: %s / %s / %s", artist_name, album_name, track_name)

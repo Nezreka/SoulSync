@@ -94,6 +94,21 @@ def current_library_scope() -> Scope:
     return library_scope_for_profile(get_current_profile_id())
 
 
+def scoped_stream(generator):
+    """a streamed response body runs after the request is gone, so it would
+    read the shared library whatever library the caller is in (#1199).
+    capture the caller's scope now and read through it while the stream runs."""
+    scope = current_library_scope()
+
+    def run():
+        token = set_library_scope(scope)
+        try:
+            yield from generator
+        finally:
+            reset_library_scope(token)
+    return run()
+
+
 def library_artist_id(artist_id, server_source, owner_profile_id=None):
     """Jellyfin artists are server-global; each own library needs its own parent row.
     Album and track IDs remain native so playback and playlist writes are unchanged.

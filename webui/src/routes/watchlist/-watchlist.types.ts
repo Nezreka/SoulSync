@@ -172,6 +172,20 @@ export interface WatchlistGlobalConfig {
    * auto-download off.
    */
   global_auto_download: boolean;
+  /**
+   * #1450: one-edition-per-album preference. "all" (default) is today's
+   * behaviour — every edition is wishlisted / pre-checked; "one_standard"
+   * and "one_complete" reduce each edition group to a single picked edition.
+   * Served by GET/POST /api/watchlist/global-config; the backend validates
+   * the value against the shared enum in core/edition_grouping.py.
+   */
+  edition_preference: 'all' | 'one_standard' | 'one_complete';
+  /**
+   * #1450: tie-break toward the explicit edition when reducing a group to
+   * one. Distinct from content_filter.prefer_explicit (Soulseek candidate
+   * re-ranking) — do not conflate them.
+   */
+  prefer_explicit_edition: boolean;
 }
 
 export interface WatchlistGlobalConfigResponse {

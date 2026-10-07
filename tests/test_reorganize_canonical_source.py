@@ -142,6 +142,7 @@ def test_musicbrainz_release_id_is_used_by_priority_walk(monkeypatch):
         {
             "id": "recording-1",
             "name": "Test Track",
+            "disambiguation": "",
             "artists": [{"name": "Test Artist"}],
             "duration_ms": 180000,
             "track_number": 1,

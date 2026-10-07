@@ -426,6 +426,10 @@ def _normalize_track_result(track: Any, source: str) -> Dict[str, Any]:
         "image_url": str(image_url or ""),
         "track_number": track_number,
         "source": source,
+        # #1536: recording disambiguation from MusicBrainz ("acoustic",
+        # "live"). _extract_value reads dataclass attrs as well as dict
+        # keys, so the Track.disambiguation field survives normalization.
+        "disambiguation": str(_extract_value(track, "disambiguation", default="") or "").strip(),
     }
 
 

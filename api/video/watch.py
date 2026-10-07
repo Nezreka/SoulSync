@@ -348,7 +348,8 @@ def register_routes(bp):
             ok = db.add_movie_to_wishlist(
                 tmdb_id, title, year=(d or {}).get("year") or fb_year,
                 poster_url=(d or {}).get("poster_url") or fb_poster,
-                library_id=lib, server_source=srv, detail_json=blob)
+                library_id=lib, server_source=srv, detail_json=blob,
+                profile_id=_profile())
             if ok:
                 _search_now("movie", tmdb_id)
             return jsonify({"success": ok, "added": 1 if ok else 0})
@@ -384,10 +385,19 @@ def register_routes(bp):
         n = db.add_episodes_to_wishlist(
             tmdb_id, show_title, [ep],
             poster_url=(d or {}).get("poster_url") or fb_poster,
-            library_id=lib, server_source=srv)
+            library_id=lib, server_source=srv, profile_id=_profile())
         if n:
             _search_now("episode", tmdb_id, season_number=season_n, episode_number=episode_n)
         return jsonify({"success": n > 0, "added": n})
+
+
+def _profile() -> int:
+    """The requesting profile for watchlist/wishlist reads/writes."""
+    try:
+        from core.profile_context import get_current_profile_id
+        return int(get_current_profile_id() or 1)
+    except Exception:
+        return 1
 
 
 def _search_now(scope, tmdb_id, **kw):
@@ -395,6 +405,6 @@ def _search_now(scope, tmdb_id, **kw):
     click IS the release-window override, same as the wishlist page's button."""
     try:
         from core.video.wishlist_search import manual_search
-        manual_search(scope, tmdb_id, **kw)
+        manual_search(scope, tmdb_id, profile_id=_profile(), **kw)
     except Exception:
         logger.exception("watch grab: manual search failed for %s %s", scope, tmdb_id)

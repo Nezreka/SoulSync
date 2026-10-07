@@ -142,6 +142,10 @@ def run_listenbrainz_discovery_worker(state_key, deps: ListenbrainzDiscoveryDeps
                     logger.error(f"Matching engine failed for ListenBrainz, falling back to basic query: {e}")
                     search_queries = [f"{cleaned_artist} {cleaned_title}", cleaned_title]
 
+                # deezer's free text can leave the original out entirely (#1565)
+                from core.metadata.song_search import with_song_first_pass
+                _source = with_song_first_pass(itunes_client, cleaned_title, cleaned_artist)
+
                 for query_idx, search_query in enumerate(search_queries):
                     try:
                         logger.debug(f"ListenBrainz query {query_idx + 1}/{len(search_queries)}: {search_query}")
@@ -151,7 +155,7 @@ def run_listenbrainz_discovery_worker(state_key, deps: ListenbrainzDiscoveryDeps
                         if use_spotify and not deps.spotify_rate_limited():
                             search_results = deps.spotify_client.search_tracks(search_query, limit=10)
                         else:
-                            search_results = itunes_client.search_tracks(search_query, limit=10)
+                            search_results = _source.search_tracks(search_query, limit=10)
 
                         if not search_results:
                             continue

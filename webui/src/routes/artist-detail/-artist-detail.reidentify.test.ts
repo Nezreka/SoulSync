@@ -5,6 +5,7 @@ import {
   fetchReidentifySources,
   rankReidentifyResults,
   reidentifyResultBits,
+  reidentifySearchRequest,
 } from './-artist-detail.reidentify';
 
 /** Re-identify (#889): ISRC-first ranking + the staging request. */
@@ -73,5 +74,30 @@ describe('requests', () => {
     await expect(applyReidentifyRequest(9, { source: 's', track_id: 't' }, false)).rejects.toThrow(
       'no staging dir',
     );
+  });
+
+  it('search: the track itself rides along so the server can use the song search (#1565)', async () => {
+    const spy = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ results: [] })),
+    );
+    vi.stubGlobal('fetch', spy);
+    await reidentifySearchRequest('deezer', "How Far I'll Go Auli'i Cravalho", {
+      title: "How Far I'll Go",
+      artist: "Auli'i Cravalho",
+    });
+    const url = String(spy.mock.calls[0][0]);
+    expect(url).toContain(`title=${encodeURIComponent("How Far I'll Go")}`);
+    expect(url).toContain(`artist=${encodeURIComponent("Auli'i Cravalho")}`);
+  });
+
+  it('search: an edited query sends no track, so it stays free text', async () => {
+    const spy = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ results: [] })),
+    );
+    vi.stubGlobal('fetch', spy);
+    await reidentifySearchRequest('deezer', 'something else');
+    expect(String(spy.mock.calls[0][0])).not.toContain('title=');
   });
 });

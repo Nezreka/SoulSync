@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import threading
 import uuid
@@ -25,6 +26,7 @@ __all__ = [
     "save_audio_file",
     "get_image_dimensions",
     "strip_all_non_audio_tags",
+    "strip_musicbrainz_identity_tags",
     "verify_metadata_written",
     "wipe_source_tags",
 ]
@@ -489,4 +491,146 @@ def wipe_source_tags(file_path: str) -> bool:
         return True
     except Exception as exc:
         logger.error("[Tag Wipe] Failed (non-fatal): %s", exc)
+        return False
+
+
+# MusicBrainz ALBUM-identity tags: the fields a media server keys an album on
+# (navidrome groups by album + album artist + musicbrainz release id). Only
+# these are surgical-stripped by strip_musicbrainz_identity_tags below — every
+# per-track tag (title, artist, track number, recording id, ...) is left
+# exactly as it was.
+_MB_ALBUM_IDENTITY_TAGS = (
+    "MUSICBRAINZ_RELEASE_ID",
+    "MUSICBRAINZ_RELEASEGROUPID",
+    "MUSICBRAINZ_ALBUMARTISTID",
+)
+
+# Extra spellings foreign taggers use for the same identity ids, matched
+# case-insensitively alongside the canonical tag-map keys.
+_MB_ALBUM_IDENTITY_EXTRA_KEYS = (
+    # Vorbis/APE variants seen in the wild
+    "MUSICBRAINZ_ALBUMID",
+    "MUSICBRAINZ_RELEASEID",
+    "MUSICBRAINZ_RELEASEGROUPID",
+    "MUSICBRAINZ_ALBUMARTISTID",
+)
+
+
+def _norm_mb_key(key: str) -> str:
+    """Normalize a MusicBrainz tag key/description for comparison: case-,
+    whitespace- and underscore-insensitive ("MusicBrainz Album Id" ==
+    "MUSICBRAINZ_ALBUMID" == "musicbrainz releaseid")."""
+    return re.sub(r"[\s_]+", "", key).casefold()
+
+
+def _strip_apev2_identity_tags(tags) -> int:
+    """Delete album-identity keys from an APEv2 tag object (WavPack, Musepack,
+    Monkey's Audio). mutagen's APEv2 deletion is case-insensitive but
+    whitespace/underscore-sensitive, so iterate the stored keys and match
+    with _norm_mb_key rather than deleting by a differently-spelled key.
+    Returns the number of keys removed."""
+    removed = 0
+    wanted = {_norm_mb_key(k) for k in _MB_ALBUM_IDENTITY_EXTRA_KEYS}
+    for stored_key in list(tags.keys()):
+        if _norm_mb_key(stored_key) in wanted:
+            del tags[stored_key]
+            removed += 1
+    return removed
+
+
+def strip_musicbrainz_identity_tags(file_path: str) -> bool:
+    """Remove only the MusicBrainz ALBUM-identity tags from a file, leaving
+    every other tag untouched.
+
+    #1555: when metadata enhancement throws on a clean/matched import, the
+    # #804 protection preserves the file's existing tags wholesale — which
+    # keeps the Soulseek uploader's FOREIGN MusicBrainz release id on this
+    # one track while its siblings get SoulSync's pinned release id. The
+    # media server then shows the album as two identical-looking duplicate
+    # entries (one per release id). Stripping just the identity ids closes
+    # the split vector without losing the preserved tags #804 protects.
+
+    Returns True when the file is clean (or needed no work). Returns False
+    when the strip could not be completed — including when the atomic save
+    aborted on an audio-integrity check, in which case the original file is
+    untouched. Non-fatal either way: callers must never hold up the pipeline
+    for tag surgery.
+    """
+    try:
+        from core.metadata.source import ID3_TAG_MAP, VORBIS_TAG_MAP, MP4_TAG_MAP
+        symbols = get_mutagen_symbols()
+        if not symbols:
+            return False
+
+        audio = symbols.File(file_path)
+        if audio is None:
+            return False
+
+        stripped = 0
+        tags = getattr(audio, "tags", None)
+        if isinstance(tags, symbols.ID3):
+            # Match TXXX descriptions with the same normalization as the
+            # APEv2 branch: foreign taggers don't use Picard's exact
+            # description spelling ("MUSICBRAINZ_RELEASEID", trailing
+            # spaces, odd casing all occur in the wild on MP3s).
+            wanted_descs = set()
+            for key in _MB_ALBUM_IDENTITY_TAGS:
+                _frame, desc = ID3_TAG_MAP.get(key, ("TXXX", key))
+                wanted_descs.add(_norm_mb_key(str(desc)))
+            # Foreign taggers also write key-style spellings as TXXX
+            # descriptions ("MUSICBRAINZ_RELEASEID"), which normalize
+            # differently from Picard's worded descriptions.
+            wanted_descs.update(_norm_mb_key(k) for k in _MB_ALBUM_IDENTITY_EXTRA_KEYS)
+            for txxx_key in list(tags.keys()):
+                if not txxx_key.startswith("TXXX:"):
+                    continue
+                if _norm_mb_key(txxx_key[5:]) in wanted_descs:
+                    hits = tags.getall(txxx_key)
+                    tags.delall(txxx_key)
+                    stripped += len(hits)
+        elif isinstance(tags, symbols.APEv2):
+            # WavPack / Musepack / Monkey's Audio: the Soulseek lossless set.
+            stripped += _strip_apev2_identity_tags(tags)
+        elif is_vorbis_like(audio, symbols):
+            candidates = []
+            for key in _MB_ALBUM_IDENTITY_TAGS:
+                candidates.append(VORBIS_TAG_MAP.get(key, key))
+            candidates.extend(_MB_ALBUM_IDENTITY_EXTRA_KEYS)
+            for candidate in dict.fromkeys(candidates):
+                if candidate in audio:
+                    stripped += len(audio[candidate])
+                    del audio[candidate]
+        elif isinstance(audio, symbols.MP4):
+            for key in _MB_ALBUM_IDENTITY_TAGS:
+                mp4_key = "----:com.apple.iTunes:" + MP4_TAG_MAP.get(key, key)
+                if mp4_key in audio:
+                    stripped += len(audio[mp4_key])
+                    del audio[mp4_key]
+        else:
+            # Unknown container: nothing we know how to strip — not an error,
+            # but say so out loud so a future split on an exotic container
+            # isn't a mystery.
+            logger.info(
+                "[MB Identity] No strip handler for container %s: %s",
+                type(audio).__name__, os.path.basename(file_path),
+            )
+            return True
+
+        if stripped:
+            if save_audio_file(audio, symbols):
+                logger.info(
+                    "[MB Identity] Stripped %s MusicBrainz album-identity tag(s) from: %s",
+                    stripped, os.path.basename(file_path),
+                )
+            else:
+                # Integrity abort: the original file was left untouched, so
+                # the foreign ids are still there — report honestly.
+                logger.warning(
+                    "[MB Identity] Tag write aborted (audio integrity), "
+                    "file left untouched: %s", os.path.basename(file_path),
+                )
+                return False
+        return True
+    except Exception as exc:
+        logger.error("[MB Identity] Failed (non-fatal): %s", exc)
         return False

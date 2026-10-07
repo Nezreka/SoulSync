@@ -164,6 +164,8 @@ def test_build_album_import_match_payload_uses_generic_track_keys(monkeypatch, t
                     "artist": "Artist One",
                 },
                 "source": "spotify",
+                # #1536: recording disambiguation passes through match normalization.
+                "disambiguation": "",
             },
             "staging_file": {
                 "filename": "Song One.flac",

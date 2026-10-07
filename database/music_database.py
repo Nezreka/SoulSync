@@ -96,6 +96,34 @@ def _row_value(row, column: str, default=None):
     return default if value is None else value
 
 
+# Release-kind markers: "X (Single)" is the single release of X, not a
+# different recording (SeadogsBooty: a library file tagged "Ocean Avenue
+# (Single)" must match the "Ocean Avenue" card, and the card titled
+# "Ocean Avenue (Single)" must match a plain "Ocean Avenue" file tag).
+# End-anchored: the marker is a suffix, never mid-title. "(Single Edit)"
+# is deliberately NOT stripped — a single edit can be a different cut,
+# like the radio-edit markers the track cleaner keeps.
+_SINGLE_KIND_SUFFIX_PATTERNS = (
+    r'\s*\(single\)$',
+    r'\s*\[single\]$',
+    r'\s*-\s*single\s*$',
+)
+
+
+def strip_single_kind_suffix(title: str) -> str:
+    """Remove a trailing release-kind marker ("(Single)", "[Single]", "- Single").
+
+    Single-card lookups only: a "(Single)"-titled row IS the single release,
+    but it is not the album/EP of the same name, so album/EP cards must not
+    strip. Shared by the album-title cleaner (release matching) and the
+    single-completion track check (the card name is the release title there).
+    """
+    cleaned = title or ''
+    for pattern in _SINGLE_KIND_SUFFIX_PATTERNS:
+        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
+
+
 def _deezer_id_conflicts_with_card(db, candidate_album_id, card_source_id) -> bool:
     """Does the library candidate carry a stored Deezer id that conflicts with the card's?
 
@@ -2061,6 +2089,12 @@ class MusicDatabase:
             if track_cols and 'disc_number' not in track_cols:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN disc_number INTEGER DEFAULT 1")
                 logger.info("Repaired missing disc_number column on tracks table (#927)")
+            # #1573: where the media server says the file is. file_path is where
+            # SoulSync opens it; the two differ whenever the containers mount the
+            # music folder under different names. NULL until a scan fills it.
+            if track_cols and 'server_path' not in track_cols:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN server_path TEXT")
+                logger.info("Added server_path column to tracks table (#1573)")
 
             cursor.execute("PRAGMA table_info(albums)")
             album_cols = {c[1] for c in cursor.fetchall()}
@@ -3528,7 +3562,7 @@ class MusicDatabase:
                     added_external = True
             if added_external:
                 logger.info(f"Added external-ID columns to track_downloads: {', '.join(external_id_cols)}")
-            for _col in ('acquired_quality_json', 'retention_json'):
+            for _col in ('acquired_quality_json', 'retention_json', 'recording_disambiguation'):
                 if _col not in td_columns:
                     cursor.execute(f"ALTER TABLE track_downloads ADD COLUMN {_col} TEXT")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_spotify_id ON track_downloads (spotify_track_id)")
@@ -4545,6 +4579,9 @@ class MusicDatabase:
             added_tracks = False
             if 'musicbrainz_recording_id' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN musicbrainz_recording_id TEXT")
+                added_tracks = True
+            if 'recording_disambiguation' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN recording_disambiguation TEXT")
                 added_tracks = True
             if 'musicbrainz_last_attempted' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN musicbrainz_last_attempted TIMESTAMP")
@@ -6362,6 +6399,11 @@ class MusicDatabase:
             "ALTER TABLE profiles ADD COLUMN plex_home_user_id TEXT DEFAULT NULL",
             "ALTER TABLE profiles ADD COLUMN plex_home_user_title TEXT DEFAULT NULL",
             "ALTER TABLE profiles ADD COLUMN plex_home_user_token TEXT DEFAULT NULL",
+            # who signed in with plex as this profile. set ONLY by plex sign-in,
+            # never by the home-user link: that link says where playlists go
+            # and any profile can point it at any unprotected home user, so
+            # it can't prove who someone is
+            "ALTER TABLE profiles ADD COLUMN plex_account_id TEXT DEFAULT NULL",
         ):
             try:
                 cursor.execute(sql)
@@ -6387,6 +6429,46 @@ class MusicDatabase:
                 return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Error saving plex home user for profile {profile_id}: {e}")
+            return False
+
+    def get_profile_by_plex_account(self, plex_account_id: str) -> Optional[Dict[str, Any]]:
+        """the profile a plex account signed in as before (plex sign-in's own
+        record, never the home-user link), or None.
+        {'id', 'name', 'is_admin', 'disabled'}"""
+        if not plex_account_id:
+            return None
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(profiles)")
+                cols = {c[1] for c in cursor.fetchall()}
+                if 'plex_account_id' not in cols:
+                    return None
+                has_disabled = 'disabled' in cols
+                cursor.execute(
+                    f"SELECT id, name, is_admin{', disabled' if has_disabled else ''} FROM profiles "
+                    "WHERE plex_account_id = ? ORDER BY id LIMIT 1", (str(plex_account_id),))
+                row = cursor.fetchone()
+            if not row:
+                return None
+            return {'id': row['id'], 'name': row['name'], 'is_admin': bool(row['is_admin']),
+                    'disabled': bool(row['disabled']) if has_disabled else False}
+        except Exception as e:
+            logger.error(f"Error looking up profile by plex account {plex_account_id}: {e}")
+            return None
+
+    def set_profile_plex_account(self, profile_id: int, plex_account_id: Optional[str]) -> bool:
+        """record (or with None clear) which plex account signs in as a profile"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE profiles SET plex_account_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (str(plex_account_id) if plex_account_id else None, profile_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error saving plex account for profile {profile_id}: {e}")
             return False
 
     def get_profile_plex_home_user(self, profile_id: int) -> Optional[Dict[str, str]]:
@@ -6927,19 +7009,29 @@ class MusicDatabase:
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_listening_dedup_pile "
             "ON listening_history (track_id, played_at, server_source, profile_id)"
         )
+        # which media-server account played it (plex's history says). a play
+        # is filed in the pile of the profile linked to that account, and a
+        # later link or unlink re-files it, so the account has to be kept
+        cursor.execute("PRAGMA table_info(listening_history)")
+        if 'server_account_id' not in [c[1] for c in cursor.fetchall()]:
+            cursor.execute("ALTER TABLE listening_history ADD COLUMN server_account_id TEXT DEFAULT NULL")
+            logger.info("Added server_account_id column to listening_history")
         from core.listening_import.dedup import ensure_import_events_table
         ensure_import_events_table(cursor.connection)
 
     def insert_listening_events(self, events):
         """Insert server/player events through the same matcher as history imports.
 
-        an event's profile_id is its pile, none means the shared one."""
+        an event's profile_id is its pile, none means the shared one. 0 is
+        a real answer (UNCLAIMED: an account linked to nobody), never shared."""
         from core.listening_import.dedup import insert_import_events
         from core.listening_scope import SHARED_OWNER
 
         grouped = {}
         for event in events or []:
-            owner = event.get('profile_id') or SHARED_OWNER
+            owner = event.get('profile_id')
+            if owner is None:
+                owner = SHARED_OWNER
             grouped.setdefault((event.get('server_source') or '', owner), []).append(event)
         inserted = 0
         for (source, owner), batch in grouped.items():
@@ -7058,16 +7150,12 @@ class MusicDatabase:
 
     # ── When you listen (stats P3) ───────────────────────────────────────
     #
-    # TIMEZONE NOTE: played_at is stored as LOCAL naive wall-clock — the web
-    # player writes datetime.now().isoformat() and plex_client writes
-    # item.viewedAt.isoformat(), both local. So strftime('%H', played_at)
-    # already yields the hour the user actually listened, which is precisely
-    # what this chart means. Do NOT "fix" it to UTC.
-    #
-    # (The same fact means the range filters, which compare local timestamps
-    # against SQLite's UTC datetime('now'), are skewed by the server's UTC
-    # offset. Pre-existing, affects every range-scoped stat, and deliberately
-    # not changed here — see STATS_PAGE_PLAN.md.)
+    # TIMEZONE NOTE: played_at is stored utc (core.listening_import.dedup
+    # CANONICAL), the same clock as datetime('now'), so the range filters are
+    # exact. an hour of the day is the listener's though, so the clock reads
+    # played_at in the server's local time ('localtime'). the drill-down in
+    # core/stats/queries.py must read it the same way or a cell's plays
+    # won't match its count.
 
     def get_listening_clock(self, time_range='all', profile_id=None):
         """Plays by weekday x hour — the shape of a listening week.
@@ -7083,8 +7171,8 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(f"""
-                SELECT CAST(strftime('%w', played_at) AS INTEGER) AS weekday,
-                       CAST(strftime('%H', played_at) AS INTEGER) AS hour,
+                SELECT CAST(strftime('%w', played_at, 'localtime') AS INTEGER) AS weekday,
+                       CAST(strftime('%H', played_at, 'localtime') AS INTEGER) AS hour,
                        COUNT(*) AS plays
                 FROM listening_history
                 {where}
@@ -7741,7 +7829,7 @@ class MusicDatabase:
             peak = cursor.fetchone()
 
             cursor.execute(f"""
-                SELECT CAST(strftime('%H', played_at) AS INTEGER) AS h, COUNT(*) AS plays
+                SELECT CAST(strftime('%H', played_at, 'localtime') AS INTEGER) AS h, COUNT(*) AS plays
                 FROM listening_history {window}
                 GROUP BY h HAVING h IS NOT NULL
                 ORDER BY plays DESC, h ASC LIMIT 1
@@ -10517,6 +10605,20 @@ class MusicDatabase:
                     if isinstance(_wrapper_size, int) and _wrapper_size > 0:
                         file_size = _wrapper_size
 
+                # #1573: keep the server's path as reported, and store where
+                # SoulSync itself opens the file. the standalone server scans
+                # SoulSync's own disk, its path already is the local one. when
+                # the file can't be found from here, file_path falls back to
+                # the server's path below, same as before.
+                server_path = file_path
+                if file_path and server_source != 'soulsync':
+                    from core.library.server_paths import local_path_for
+                    try:
+                        from core.settings import config_manager as _cm
+                    except Exception:  # noqa: BLE001 - no config, raw path only
+                        _cm = None
+                    file_path = local_path_for(file_path, _cm) or None
+
                 # Extract per-track artist for compilations/DJ mixes.
                 # Only stored when it differs from the album artist.
                 track_artist = None
@@ -10583,12 +10685,24 @@ class MusicDatabase:
                 title_norm = self._normalize_for_comparison(title) if title else ''
                 track_artist_norm = self._normalize_for_comparison(track_artist) if track_artist else None
 
+                if not file_path and server_path:
+                    # not reachable from here: keep a local path SoulSync set
+                    # earlier if that file is still there, else the server's
+                    if not is_new_track:
+                        cursor.execute("SELECT file_path FROM tracks WHERE id = ?", (track_id,))
+                        _prev = cursor.fetchone()
+                        _prev_path = _prev[0] if _prev else None
+                        if _prev_path and os.path.exists(_prev_path):
+                            file_path = _prev_path
+                    if not file_path:
+                        file_path = server_path
+
                 if is_new_track:
                     cursor.execute("""
                         INSERT INTO tracks
-                        (id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, title_norm, track_artist_norm, owner_profile_id, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (track_id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, title_norm, track_artist_norm or '', owner_profile_id))
+                        (id, album_id, artist_id, title, track_number, disc_number, duration, file_path, server_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, title_norm, track_artist_norm, owner_profile_id, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (track_id, album_id, artist_id, title, track_number, disc_number, duration, file_path, server_path, bitrate, file_size, server_source, track_artist, mbid, title_norm, track_artist_norm or '', owner_profile_id))
                 else:
                     # Update server-provided fields only — preserves spotify_track_id, deezer_id,
                     # isrc, bpm, and all other enrichment data. file_size uses
@@ -10598,16 +10712,21 @@ class MusicDatabase:
                     cursor.execute("""
                         UPDATE tracks
                         SET album_id = ?, artist_id = ?, title = ?, track_number = ?, disc_number = ?,
-                            duration = ?, file_path = COALESCE(?, file_path), bitrate = ?,
+                            duration = ?, file_path = COALESCE(?, file_path),
+                            server_path = COALESCE(?, server_path), bitrate = ?,
                             file_size = COALESCE(?, file_size),
                             server_source = ?,
                             track_artist = COALESCE(?, track_artist),
+                            recording_disambiguation = CASE
+                                WHEN ? IS NOT NULL AND (musicbrainz_recording_id IS NULL
+                                     OR LOWER(?) != LOWER(musicbrainz_recording_id))
+                                THEN NULL ELSE recording_disambiguation END,
                             musicbrainz_recording_id = COALESCE(?, musicbrainz_recording_id),
                             title_norm = ?,
                             track_artist_norm = COALESCE(?, track_artist_norm),
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    """, (album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, title_norm, track_artist_norm, track_id))
+                    """, (album_id, artist_id, title, track_number, disc_number, duration, file_path, server_path, bitrate, file_size, server_source, track_artist, mbid, mbid, mbid, title_norm, track_artist_norm, track_id))
 
                 if is_new_track or track_artist_norm is not None:
                     cursor.execute("DELETE FROM track_credits WHERE track_id = ?", (track_id,))
@@ -10803,13 +10922,19 @@ class MusicDatabase:
         """All library tracks that have a file, for playlist/M3U export.
 
         Returns ``[{path, title, artist, duration}]`` ordered by artist / album / track number.
-        ``duration`` is converted to SECONDS here (the schema stores milliseconds)."""
+        ``duration`` is converted to SECONDS here (the schema stores milliseconds).
+
+        ``path`` is the media server's own path when the scan recorded one: the
+        M3U is read by the server, and file_path is SoulSync's mount (#1573)."""
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.file_path AS path, t.title AS title, ar.name AS artist,
+            cursor.execute("PRAGMA table_info(tracks)")
+            _path_expr = ("COALESCE(NULLIF(t.server_path, ''), t.file_path)"
+                          if any(c[1] == 'server_path' for c in cursor.fetchall()) else "t.file_path")
+            cursor.execute(f"""
+                SELECT {_path_expr} AS path, t.title AS title, ar.name AS artist,
                        t.duration AS duration_ms, t.track_number AS track_number
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
@@ -12370,7 +12495,7 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None, completeness_cache: Optional[Dict[Any, Any]] = None, candidate_tracks: Optional[List[Any]] = None, metadata_source: Optional[str] = None, card_source_id: Optional[str] = None) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
+    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None, completeness_cache: Optional[Dict[Any, Any]] = None, candidate_tracks: Optional[List[Any]] = None, metadata_source: Optional[str] = None, card_source_id: Optional[str] = None, strip_single_kind: bool = False) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
         """
         Check if an album exists in the database with completeness information.
         Enhanced to handle edition matching (standard <-> deluxe variants).
@@ -12390,7 +12515,7 @@ class MusicDatabase:
         """
         try:
             # Try enhanced edition-aware matching first with expected track count for Smart Edition Matching
-            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source, candidate_albums=candidate_albums, strict_discography_match=strict_discography_match, expected_year=expected_year, metadata_source=metadata_source, card_source_id=card_source_id)
+            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source, candidate_albums=candidate_albums, strict_discography_match=strict_discography_match, expected_year=expected_year, metadata_source=metadata_source, card_source_id=card_source_id, strip_single_kind=strip_single_kind)
 
             if not album:
                 return None, 0.0, 0, 0, False, []
@@ -12407,7 +12532,7 @@ class MusicDatabase:
             logger.error(f"Error checking album existence with completeness for '{title}' by '{artist}': {e}")
             return None, 0.0, 0, 0, False, []
     
-    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None, metadata_source: Optional[str] = None, card_source_id: Optional[str] = None) -> Tuple[Optional[DatabaseAlbum], float]:
+    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None, metadata_source: Optional[str] = None, card_source_id: Optional[str] = None, strip_single_kind: bool = False) -> Tuple[Optional[DatabaseAlbum], float]:
         """
         Enhanced album existence check that handles edition variants.
         Matches standard albums with deluxe/platinum/special editions and vice versa.
@@ -12457,7 +12582,7 @@ class MusicDatabase:
                                 logger.debug(f"  Year gate skipped for single exact-title candidate '{title}' (deezer card, #1289)")
                 for album in candidate_albums:
                     ey = None if album is gate_exempt else expected_year
-                    confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=ey)
+                    confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=ey, strip_single_kind=strip_single_kind)
                     if confidence > best_confidence:
                         best_confidence = confidence
                         best_match = album
@@ -12490,7 +12615,7 @@ class MusicDatabase:
 
                     # Score each potential match with Smart Edition Matching
                     for album in albums:
-                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year)
+                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year, strip_single_kind=strip_single_kind)
                         logger.debug(f"  '{album.title}' confidence: {confidence:.3f}")
 
                         if confidence > best_confidence:
@@ -12526,7 +12651,7 @@ class MusicDatabase:
                             logger.debug(f"  Found {len(artist_albums)} total albums for artist fallback")
 
                         for album in artist_albums:
-                            confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year)
+                            confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year, strip_single_kind=strip_single_kind)
                             if confidence > best_confidence:
                                 best_confidence = confidence
                                 best_match = album
@@ -12545,7 +12670,7 @@ class MusicDatabase:
                 try:
                     title_only_albums = self.search_albums(title=title, artist="", limit=20, server_source=server_source)
                     for album in title_only_albums:
-                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year)
+                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count, strict_discography_match=strict_discography_match, expected_year=expected_year, strip_single_kind=strip_single_kind)
                         # Slightly penalize cross-artist matches to prefer same-artist when possible
                         if confidence > best_confidence:
                             best_confidence = confidence
@@ -12682,7 +12807,7 @@ class MusicDatabase:
             return False
         return abs(ey - ay) > tolerance
 
-    def _calculate_album_confidence(self, search_title: str, search_artist: str, db_album: DatabaseAlbum, expected_track_count: Optional[int] = None, strict_discography_match: bool = False, expected_year=None) -> float:
+    def _calculate_album_confidence(self, search_title: str, search_artist: str, db_album: DatabaseAlbum, expected_track_count: Optional[int] = None, strict_discography_match: bool = False, expected_year=None, strip_single_kind: bool = False) -> float:
         """Calculate confidence score for album match with Smart Edition Matching"""
         try:
             # Simple confidence based on string similarity
@@ -12691,8 +12816,8 @@ class MusicDatabase:
             artist_similarity = self._string_similarity(search_artist.lower(), db_artist.lower())
 
             # Also try with cleaned versions (removing edition markers)
-            clean_search_title = self._clean_album_title_for_comparison(search_title)
-            clean_db_title = self._clean_album_title_for_comparison(db_album.title)
+            clean_search_title = self._clean_album_title_for_comparison(search_title, strip_single_kind=strip_single_kind)
+            clean_db_title = self._clean_album_title_for_comparison(db_album.title, strip_single_kind=strip_single_kind)
             clean_title_similarity = self._string_similarity(clean_search_title, clean_db_title)
 
             # Also try with normalized versions (handling diacritics) - fixes #101
@@ -12711,6 +12836,7 @@ class MusicDatabase:
                 normalized_title_similarity,
                 expected_track_count,
                 db_album.track_count,
+                strip_single_kind=strip_single_kind,
             ):
                 logger.debug("  Strict discography match rejected: '%s' -> '%s'", search_title, db_album.title)
                 return 0.0
@@ -12776,6 +12902,7 @@ class MusicDatabase:
         normalized_title_similarity: float,
         expected_track_count: Optional[int],
         db_track_count: Optional[int],
+        strip_single_kind: bool = False,
     ) -> bool:
         """Guard artist-page owned status against generic soundtrack false positives.
 
@@ -12789,8 +12916,8 @@ class MusicDatabase:
         if normalized_search_title and normalized_db_title and normalized_search_title == normalized_db_title:
             return True
 
-        clean_search_title = self._normalize_for_comparison(self._clean_album_title_for_comparison(search_title))
-        clean_db_title = self._normalize_for_comparison(self._clean_album_title_for_comparison(db_title))
+        clean_search_title = self._normalize_for_comparison(self._clean_album_title_for_comparison(search_title, strip_single_kind=strip_single_kind))
+        clean_db_title = self._normalize_for_comparison(self._clean_album_title_for_comparison(db_title, strip_single_kind=strip_single_kind))
         if clean_search_title and clean_db_title and clean_search_title == clean_db_title:
             return True
 
@@ -13181,8 +13308,16 @@ class MusicDatabase:
 
         return cleaned
     
-    def _clean_album_title_for_comparison(self, title: str) -> str:
-        """Clean album title by removing edition markers for comparison"""
+    def _clean_album_title_for_comparison(self, title: str, strip_single_kind: bool = False) -> str:
+        """Clean album title by removing edition markers for comparison.
+
+        `strip_single_kind`: also strip release-kind markers ("(Single)",
+        "[Single]", "- Single" suffixes). Only set for single-card lookups —
+        a "(Single)"-titled row IS the single release, but it is not the
+        album/EP of the same name, so album/EP cards must not strip.
+        Known residual: "(Single Edit)" is not stripped (a single edit is a
+        different cut, like the radio-edit markers the track cleaner keeps).
+        """
         cleaned = title.lower()
 
         # Remove common edition patterns (specific first, then generic catch-alls)
@@ -13207,6 +13342,14 @@ class MusicDatabase:
 
         for pattern in patterns:
             cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+
+        if strip_single_kind:
+            # Release-kind markers, not different recordings — shared with
+            # strip_single_kind_suffix so the row direction and the card
+            # direction strip the exact same markers. Runs after the edition
+            # patterns, so stacked suffixes ("X (Single) (Deluxe Edition)")
+            # still fully strip.
+            cleaned = strip_single_kind_suffix(cleaned)
 
         return cleaned.strip()
     
@@ -20893,6 +21036,7 @@ class MusicDatabase:
                                tidal_track_id: Optional[str] = None,
                                qobuz_track_id: Optional[str] = None,
                                musicbrainz_recording_id: Optional[str] = None,
+                               recording_disambiguation: Optional[str] = None,
                                audiodb_id: Optional[str] = None,
                                soul_id: Optional[str] = None,
                                isrc: Optional[str] = None,
@@ -20933,14 +21077,16 @@ class MusicDatabase:
                  source_size, audio_quality, track_title, track_artist, track_album, status,
                  bit_depth, sample_rate, bitrate,
                  spotify_track_id, itunes_track_id, deezer_track_id, tidal_track_id,
-                 qobuz_track_id, musicbrainz_recording_id, audiodb_id, soul_id, isrc,
+                 qobuz_track_id, musicbrainz_recording_id, recording_disambiguation,
+                 audiodb_id, soul_id, isrc,
                  acquired_quality_json, retention_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (track_id, file_path, source_service, source_username, source_filename,
                   source_size, audio_quality, track_title, track_artist, track_album, status,
                   bit_depth, sample_rate, bitrate,
                   spotify_track_id, itunes_track_id, deezer_track_id, tidal_track_id,
-                  qobuz_track_id, musicbrainz_recording_id, audiodb_id, soul_id, isrc,
+                  qobuz_track_id, musicbrainz_recording_id, recording_disambiguation,
+                  audiodb_id, soul_id, isrc,
                   acquired_quality_json, retention_json))
             conn.commit()
             return cursor.lastrowid
@@ -21042,6 +21188,17 @@ class MusicDatabase:
             for track_col, val in updates.items():
                 set_clauses.append(f"{track_col} = COALESCE(NULLIF({track_col}, ''), ?)")
                 params.append(val)
+            disambiguation = prov.get('recording_disambiguation')
+            prov_mbid = prov.get('musicbrainz_recording_id')
+            if disambiguation and prov_mbid:
+                set_clauses.append(
+                    "recording_disambiguation = CASE "
+                    "WHEN musicbrainz_recording_id IS NULL OR musicbrainz_recording_id = '' "
+                    "OR LOWER(musicbrainz_recording_id) = LOWER(?) "
+                    "THEN COALESCE(NULLIF(recording_disambiguation, ''), ?) "
+                    "ELSE recording_disambiguation END"
+                )
+                params.extend((prov_mbid, disambiguation))
             params.append(track_id)
             cursor.execute(
                 f"UPDATE tracks SET {', '.join(set_clauses)} WHERE id = ?",
@@ -22056,14 +22213,15 @@ class MusicDatabase:
             cursor.execute("""
                 SELECT lh.id, lh.origin, lh.origin_context, lh.created_at,
                        lh.file_path, lh.title, lh.artist_name,
-                       t.play_count AS play_count
+                       t.play_count AS play_count, lh.source_track_id
                 FROM library_history lh
                 LEFT JOIN tracks t ON t.file_path = lh.file_path
                 WHERE lh.event_type = 'download'
                   AND lh.origin IN ('watchlist', 'playlist')
             """)
             cols = ['id', 'origin', 'origin_context', 'created_at',
-                    'file_path', 'title', 'artist_name', 'play_count']
+                    'file_path', 'title', 'artist_name', 'play_count',
+                    'source_track_id']
             rows = [dict(zip(cols, row, strict=True)) for row in cursor.fetchall()]
 
             # Only pay for the fallback map when the exact join actually missed.
@@ -25991,6 +26149,179 @@ class MusicDatabase:
         self._ensure_hifi_instances_table(cursor)
         cursor.execute("SELECT url, priority, enabled FROM hifi_instances WHERE enabled = 1 ORDER BY priority ASC, id ASC")
         return [dict(row) for row in cursor.fetchall()]
+
+
+    def _ensure_music_video_request_schema(self, cursor) -> None:
+        """idempotent: create music_video_requests table if not exists."""
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS music_video_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL,
+                requester_name TEXT,
+                video_id TEXT NOT NULL,
+                url TEXT NOT NULL,
+                title TEXT NOT NULL,
+                channel TEXT,
+                artist TEXT,
+                thumbnail_url TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                admin_response TEXT,
+                resolved_by INTEGER,
+                resolved_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                seen_at TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_mvr_profile ON music_video_requests(profile_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_mvr_status ON music_video_requests(status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_mvr_video ON music_video_requests(video_id)")
+
+    def add_music_video_request(self, *, profile_id: int, requester_name: str,
+                                video_id: str, url: str, title: str,
+                                channel: Optional[str] = None,
+                                artist: Optional[str] = None,
+                                thumbnail_url: Optional[str] = None) -> Optional[int]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_video_request_schema(cursor)
+                cursor.execute(
+                    "INSERT INTO music_video_requests (profile_id, requester_name, video_id, url, "
+                    "title, channel, artist, thumbnail_url, status) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (int(profile_id), requester_name, video_id, url, title,
+                     channel, artist, thumbnail_url, "pending"))
+                conn.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error("Error recording music video request: %s", e)
+            return None
+
+    def list_music_video_requests(self, profile_id: Optional[int] = None,
+                                  status: Optional[str] = None,
+                                  limit: int = 200) -> List[Dict[str, Any]]:
+        """video request history, newest first. profile_id None = everyone's."""
+        where, args = [], []
+        if profile_id is not None:
+            where.append("profile_id = ?")
+            args.append(int(profile_id))
+        if status:
+            where.append("status = ?")
+            args.append(status)
+        sql = ("SELECT * FROM music_video_requests" + (" WHERE " + " AND ".join(where) if where else "") +
+               " ORDER BY created_at DESC, id DESC LIMIT ?")
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_video_request_schema(cursor)
+                cursor.execute(sql, args + [max(1, int(limit))])
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error("Error listing music video requests: %s", e)
+            return []
+
+    def get_music_video_request(self, request_id: int) -> Optional[Dict[str, Any]]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_video_request_schema(cursor)
+                cursor.execute("SELECT * FROM music_video_requests WHERE id = ?", (int(request_id),))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error("Error getting music video request: %s", e)
+            return None
+
+    def delete_music_video_request(self, request_id: int) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_video_request_schema(cursor)
+                cursor.execute("DELETE FROM music_video_requests WHERE id = ?", (int(request_id),))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error deleting music video request: %s", e)
+            return False
+
+    def music_video_downloaded(self, video_id: str) -> bool:
+        """True if this video_id has landed in the library history."""
+        if not video_id:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT 1 FROM library_history WHERE source_track_id = ? LIMIT 1",
+                    (str(video_id),))
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.debug("Error checking music video downloaded: %s", e)
+            return False
+
+    def set_music_video_request_status(self, request_id: int, status: str,
+                                       resolved_by: Optional[int] = None,
+                                       admin_response: Optional[str] = None) -> bool:
+        """Set status; only succeeds if currently pending (prevents races)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_video_request_schema(cursor)
+                cursor.execute(
+                    "UPDATE music_video_requests SET status = ?, resolved_by = ?, "
+                    "admin_response = ?, resolved_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ? AND status = 'pending'",
+                    (status, resolved_by, admin_response, int(request_id)))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error setting music video request status: %s", e)
+            return False
+
+    def mark_music_video_request_available(self, request_id: int) -> bool:
+        """approved -> available, clearing seen_at so the requester's badge
+        lights up. mirrors set_music_request_status for track requests."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_video_request_schema(cursor)
+                cursor.execute(
+                    "UPDATE music_video_requests SET status = 'available', seen_at = NULL "
+                    "WHERE id = ? AND status = 'approved'",
+                    (int(request_id),))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error marking music video request available %s: %s", request_id, e)
+            return False
+
+    def mark_music_video_requests_seen(self, profile_id: int) -> int:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_video_request_schema(cursor)
+                cursor.execute("UPDATE music_video_requests SET seen_at = CURRENT_TIMESTAMP "
+                               "WHERE profile_id = ? AND seen_at IS NULL", (int(profile_id),))
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.debug("mark_music_video_requests_seen failed: %s", e)
+            return 0
+
+    def count_music_video_requests_since(self, profile_id: int, days: int) -> int:
+        """Count video requests filed by a profile in the last N days (for quota)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_video_request_schema(cursor)
+                cursor.execute(
+                    "SELECT COUNT(*) FROM music_video_requests "
+                    "WHERE profile_id = ? AND created_at >= datetime('now', ?)",
+                    (int(profile_id), f"-{int(days)} days"))
+                row = cursor.fetchone()
+                return int(row[0]) if row else 0
+        except Exception as e:
+            logger.error("Error counting music video requests: %s", e)
+            return 0
 
     def get_all_hifi_instances(self) -> List[Dict[str, Any]]:
         """Get all HiFi instances (including disabled) ordered by priority."""

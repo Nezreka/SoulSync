@@ -170,6 +170,10 @@ def run_beatport_discovery_worker(url_hash, deps: BeatportDiscoveryDeps):
                             track_title
                         ]
 
+                # deezer's free text can leave the original out entirely (#1565)
+                from core.metadata.song_search import with_song_first_pass
+                _source = with_song_first_pass(itunes_client_instance, track_title, track_artist)
+
                 for query_idx, search_query in enumerate(search_queries):
                     try:
                         logger.debug(f"Query {query_idx + 1}/{len(search_queries)}: {search_query} ({discovery_source.upper()})")
@@ -179,7 +183,7 @@ def run_beatport_discovery_worker(url_hash, deps: BeatportDiscoveryDeps):
                         if use_spotify and not deps.spotify_rate_limited():
                             search_results = deps.spotify_client.search_tracks(search_query, limit=10)
                         else:
-                            search_results = itunes_client_instance.search_tracks(search_query, limit=10)
+                            search_results = _source.search_tracks(search_query, limit=10)
 
                         if not search_results:
                             continue

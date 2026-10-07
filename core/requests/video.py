@@ -40,6 +40,48 @@ def parse_tmdb_id(value: Any) -> Optional[int]:
     return n if n > 0 else None
 
 
+_YOUTUBE_ID_RE = None
+
+
+def parse_youtube_id(value: Any) -> Optional[str]:
+    """A plausible YouTube video id (11 chars, [A-Za-z0-9_-]) or None.
+
+    The id is the only member-controlled part of a youtube request — the
+    title/poster are still validated and the poster is built server-side —
+    but a garbage id would file a request that can never resolve, so reject
+    it up front."""
+    global _YOUTUBE_ID_RE
+    if _YOUTUBE_ID_RE is None:
+        import re
+        _YOUTUBE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+    s = str(value or "").strip()
+    return s if _YOUTUBE_ID_RE.match(s) else None
+
+
+def parse_season_episode(value: Any) -> Optional[int]:
+    """A season/episode number (non-negative int) or None.
+
+    Season 0 is the specials season — a real, requestable season, so 0 is
+    valid here (unlike a missing value)."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return None
+    return n if n >= 0 else None
+
+
+def episode_request_title(show_title: str, season: int, episode: int) -> str:
+    """'Show Name S02E07' — the request row's display title."""
+    return f"{(show_title or 'Unknown show').strip()[:280]} " \
+           f"S{int(season):02d}E{int(episode):02d}"
+
+
+def youtube_poster_url(youtube_id: str) -> str:
+    """The thumbnail, built server-side from the validated id — no
+    member-controlled URL ever reaches the admin's browser."""
+    return f"https://i.ytimg.com/vi/{youtube_id}/hqdefault.jpg"
+
+
 def request_metadata(kind: str, tmdb_id: int, body: Dict[str, Any],
                      lookup: Callable[[str, int], Optional[Dict[str, Any]]]) -> Dict[str, Any]:
     """title/year/poster from tmdb when it answers, the body only as a
@@ -92,5 +134,6 @@ def sweep_arrivals(db, notify: Callable[[int, str, str], Any]) -> int:
     return marked
 
 
-__all__ = ["monitor_for_new_request", "trusted_poster", "parse_tmdb_id", "request_metadata",
-           "sweep_arrivals"]
+__all__ = ["monitor_for_new_request", "trusted_poster", "parse_tmdb_id",
+           "parse_youtube_id", "parse_season_episode", "episode_request_title",
+           "youtube_poster_url", "request_metadata", "sweep_arrivals"]

@@ -661,7 +661,7 @@ def test_mb_release_preflight_caches_mbid(monkeypatch):
 
     fake_release = {'id': 'mbid-xyz', 'title': 'Test Album'}
 
-    def fake_find_best_release(album, artist, count, svc):
+    def fake_find_best_release(album, artist, count, svc, **_kwargs):
         return fake_release
 
     import core.album_consistency as ac
@@ -699,7 +699,7 @@ def test_mb_release_preflight_is_skipped_for_an_album_already_owned(monkeypatch)
 
     import core.album_consistency as ac
     monkeypatch.setattr(ac, '_find_best_release',
-                        lambda album, artist, count, svc: calls.append(album) or {'id': 'mbid-1'})
+                        lambda album, artist, count, svc, **_k: calls.append(album) or {'id': 'mbid-1'})
     cache = {}
     deps = _build_deps(mb_worker=_FakeMBWorker(svc=_FakeMBSvc()), mb_release_cache=cache)
     _seed_batch('B12', is_album_download=True,
@@ -728,7 +728,7 @@ def test_mb_release_preflight_runs_after_every_track_is_analysed(monkeypatch):
 
     import core.album_consistency as ac
     monkeypatch.setattr(ac, '_find_best_release',
-                        lambda album, artist, count, svc: order.append('preflight') or {'id': 'mbid-1'})
+                        lambda album, artist, count, svc, **_k: order.append('preflight') or {'id': 'mbid-1'})
     deps = _build_deps(mb_worker=_FakeMBWorker(svc=_FakeMBSvc()), mb_release_cache={})
     _seed_batch('B13', is_album_download=True,
                 album_context={'name': 'Album', 'total_tracks': 2},

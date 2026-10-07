@@ -578,6 +578,19 @@ def plausible_size(size_bytes: Optional[int], runtime_minutes: Optional[int]) ->
     return _MIN_BYTES_PER_MINUTE * minutes <= size <= _MAX_BYTES_PER_MINUTE * minutes
 
 
+_TRAILING_BRACKETS_RE = re.compile(r"\s*[\(\[][^\(\)\[\]]*[\)\]]\s*$")
+
+
+def _strip_trailing_brackets(title: str) -> str:
+    """Title without trailing "(...)" / "[...]" groups, unless nothing is left."""
+    stripped = title
+    while True:
+        shorter = _TRAILING_BRACKETS_RE.sub("", stripped)
+        if shorter == stripped or not shorter.strip():
+            return stripped.strip()
+        stripped = shorter
+
+
 def build_queries(book: Dict[str, Any]) -> List[str]:
     """Search strings to try for a book, most specific first.
 
@@ -586,9 +599,16 @@ def build_queries(book: Dict[str, Any]) -> List[str]:
     the relevance scoring re-checks the author afterwards anyway.
 
     Series entries get one extra query — a lot of releases are named
-    "Series 03 - Title" and never mention the book title on its own.
+    "Series 03 - Title" and never mention the book title on its own. A
+    single-digit volume is tried zero-padded as well: indexers match words, so
+    "Series 3" never finds "Series 03".
+
+    A trailing bracketed suffix is dropped from the title first. Localised
+    Audible stores put the series or edition there ("Game On (Lights Out 3)",
+    "Twisted Dreams (German edition)"), release names rarely do, and every word
+    of the query has to be in the release name for the indexer to return it.
     """
-    title = str(book.get("title") or "").strip()
+    title = _strip_trailing_brackets(str(book.get("title") or "").strip())
     if not title:
         return []
 
@@ -605,6 +625,8 @@ def build_queries(book: Dict[str, Any]) -> List[str]:
     queries.append(title)
     if series_title and sequence:
         queries.append(f"{series_title} {sequence}")
+        if sequence.isdigit() and len(sequence) == 1:
+            queries.append(f"{series_title} 0{sequence}")
 
     seen = set()
     unique = []
@@ -667,6 +689,9 @@ class AudiobookRelease:
     is_soundtrack: bool = False
     # "normal" | "short" | "severely_short" | "overshoot" when duration is available.
     duration_verdict: str = ""
+    # "match" | "mismatch" | "unknown": the release's "part k of n" against the
+    # book's own, when the book is itself one part of a set.
+    part_verdict: str = "unknown"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -697,6 +722,7 @@ class AudiobookRelease:
             "dramatized": self.dramatized,
             "duration_seconds": self.duration_seconds,
             "series_verdict": self.series_verdict,
+            "part_verdict": self.part_verdict,
             "is_soundtrack": self.is_soundtrack,
             "duration_verdict": self.duration_verdict,
         }
@@ -875,7 +901,24 @@ def score_release(
     # A title that says it is one piece of a set. This is the cheapest catch
     # there is and needs no bitrate: the uploader already told us.
     part = part_marker(release.title)
-    if part:
+    # a book that is itself sold in parts ("The Reckoning (Part 1 of 2)",
+    # graphicaudio does this) has its own runtime for that part, so a posting
+    # of the same part is the whole thing, and a different part is a
+    # different product, like a different series volume.
+    book_part = part_marker(book.get("title"))
+    if part and book_part:
+        if part == book_part:
+            release.part_verdict = "match"
+            reasons.append(f"same part {part[0]} of {part[1]} as the book")
+        else:
+            release.part_verdict = "mismatch"
+            warnings.append(
+                f"This is part {part[0]} of {part[1]}, the book is part "
+                f"{book_part[0]} of {book_part[1]}."
+            )
+            reasons.append(f"part {part[0]} of {part[1]}, not the book's part {book_part[0]}")
+            score -= 100.0
+    elif part:
         warnings.append(
             f"Names itself part {part[0]} of {part[1]}. If that means the audio was "
             f"split across {part[1]} postings, this is roughly "
@@ -1007,6 +1050,8 @@ def rank_releases(
     # Nor is a different volume in a series. Book 4 is not a worse copy of Book 5,
     # it is a completely different book.
     keep = [r for r in keep if getattr(r, "series_verdict", "unknown") != "mismatch"]
+    # Nor is the other part of a book sold in parts.
+    keep = [r for r in keep if getattr(r, "part_verdict", "unknown") != "mismatch"]
     # Nor is a music soundtrack or film score.
     keep = [r for r in keep if not getattr(r, "is_soundtrack", False)]
     # Nor is a release with reported duration less than 75% of expected runtime.

@@ -47,8 +47,10 @@ def test_wishlist_movies_drop_over_cap(client):  # noqa: F811
     c, db = client
     _movie(db, "m1", "Heat", "R", 949)
     _movie(db, "m2", "Paddington", "PG", 116149)
-    db.add_movie_to_wishlist(949, "Heat")
-    db.add_movie_to_wishlist(116149, "Paddington")
+    # per-profile wishlists: seed both profiles so the member-cap comparison holds
+    for pid in (KID, MEMBER):
+        db.add_movie_to_wishlist(949, "Heat", profile_id=pid)
+        db.add_movie_to_wishlist(116149, "Paddington", profile_id=pid)
     kid = c.get("/api/video/wishlist?kind=movie", headers=_as(KID)).get_json()
     assert [i.get("title") for i in kid["items"]] == ["Paddington"]
     assert len(c.get("/api/video/wishlist?kind=movie", headers=_as(MEMBER)).get_json()["items"]) == 2
@@ -58,8 +60,9 @@ def test_watchlist_shows_drop_over_cap(client):  # noqa: F811
     c, db = client
     _show(db, "s1", "Kids Show", "TV-Y7", 100)
     _show(db, "s2", "Grown Show", "TV-MA", 200)
-    db.add_to_watchlist("show", 100, "Kids Show")
-    db.add_to_watchlist("show", 200, "Grown Show")
+    for pid in (KID, MEMBER):
+        db.add_to_watchlist("show", 100, "Kids Show", profile_id=pid)
+        db.add_to_watchlist("show", 200, "Grown Show", profile_id=pid)
     kid = c.get("/api/video/watchlist?kind=show", headers=_as(KID)).get_json()
     titles = [i.get("title") for i in kid["items"]]
     assert "Grown Show" not in titles and "Kids Show" in titles

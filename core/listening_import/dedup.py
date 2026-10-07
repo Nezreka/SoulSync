@@ -1,5 +1,6 @@
 """Atomic event ingestion with durable, one-to-one source provenance."""
 from datetime import datetime, timezone
+from typing import Optional
 
 from core.listening_scope import SHARED_OWNER
 
@@ -47,6 +48,30 @@ def _text(value):
     return str(value or "").strip().casefold()
 
 
+# a stored play time: utc, "YYYY-MM-DD HH:MM:SS". one clock and one shape, so
+# a play and its last.fm / listenbrainz copy line up, and text range queries
+# on played_at mean what they say
+CANONICAL = "%Y-%m-%d %H:%M:%S"
+
+
+def canonical_played_at(value, *, naive_is_local: bool = False) -> Optional[str]:
+    """a play time as stored: utc, "YYYY-MM-DD HH:MM:SS". a time with no zone
+    is utc by the history's rule, or local when the writer is known to have
+    used local time. None when it can't be read"""
+    if value is None:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        if naive_is_local:
+            dt = dt.astimezone()  # the app's local zone, dst included
+        else:
+            dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).strftime(CANONICAL)
+
+
 def _timestamp(value):
     dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     if dt.tzinfo is None:
@@ -69,6 +94,10 @@ def insert_import_events(database, events, source, profile_id=SHARED_OWNER):
     for event in events:
         if not event.get("title") or not event.get("played_at"):
             continue
+        played_at = canonical_played_at(event["played_at"])
+        if played_at is None:
+            continue
+        event = {**event, "played_at": played_at}
         key = (_text(event["title"]), _text(event.get("artist")), _timestamp(event["played_at"]))
         incoming.setdefault(key, event)
     if not incoming:
@@ -78,6 +107,10 @@ def insert_import_events(database, events, source, profile_id=SHARED_OWNER):
         # Serialize lookup + matching + writes across both importer workers.
         conn.execute("BEGIN IMMEDIATE")
         ensure_import_events_table(conn)
+        # the account column comes with a migration; a table without it just
+        # doesn't record who played
+        has_account = any(c[1] == "server_account_id"
+                          for c in conn.execute("PRAGMA table_info(listening_history)").fetchall())
         low = min(key[2] for key in incoming) - CROSS_SOURCE_TOLERANCE_SECONDS
         high = max(key[2] for key in incoming) + CROSS_SOURCE_TOLERANCE_SECONDS
         # Clean only this window on connections without foreign-key enforcement.
@@ -134,13 +167,16 @@ def insert_import_events(database, events, source, profile_id=SHARED_OWNER):
         for key, event in pending.items():
             history_id = matches.get(key)
             if history_id is None:
-                cursor = conn.execute("""
-                    INSERT OR IGNORE INTO listening_history
-                        (track_id, title, artist, album, played_at, duration_ms, server_source, db_track_id, profile_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (event.get("track_id"), event["title"], event.get("artist", ""),
-                      event.get("album", ""), event["played_at"], event.get("duration_ms", 0),
-                      source, event.get("db_track_id"), owner))
+                values = [event.get("track_id"), event["title"], event.get("artist", ""),
+                          event.get("album", ""), event["played_at"], event.get("duration_ms", 0),
+                          source, event.get("db_track_id"), owner]
+                cols = "track_id, title, artist, album, played_at, duration_ms, server_source, db_track_id, profile_id"
+                if has_account:
+                    cols += ", server_account_id"
+                    values.append(event.get("server_account_id"))
+                cursor = conn.execute(
+                    f"INSERT OR IGNORE INTO listening_history ({cols}) VALUES ({', '.join('?' * len(values))})",
+                    values)
                 if cursor.rowcount:
                     inserted += 1
                     history_id = cursor.lastrowid
@@ -152,6 +188,11 @@ def insert_import_events(database, events, source, profile_id=SHARED_OWNER):
                     if row is None:
                         raise RuntimeError("Could not resolve existing listening event")
                     history_id = row[0]
+            # who played it, when a server says (a play matched onto an older
+            # row learns its account here too)
+            if has_account and event.get("server_account_id"):
+                conn.execute("UPDATE listening_history SET server_account_id = COALESCE(server_account_id, ?) "
+                             "WHERE id = ?", (str(event["server_account_id"]), history_id))
             # A later server event can supply the library link missing from an import.
             if event.get("db_track_id") is not None:
                 conn.execute("UPDATE listening_history SET db_track_id = COALESCE(db_track_id, ?) WHERE id = ?",

@@ -112,6 +112,7 @@ FINDING_TYPE_META = {
     'comma_artist_split':       {'label': 'Combined Artists', 'verb': 'Split Artists'},
     'fake_lossless':            {'label': 'Fake Lossless', 'verb': 'Re-download FLAC'},
     'album_needs_enrichment':   {'label': 'Needs Enrichment', 'verb': None},
+    'album_release_year_mismatch': {'label': 'Album Release Year Mismatch', 'verb': 'Fix Release Year'},
 }
 
 
@@ -167,7 +168,9 @@ JOB_CATEGORIES = {
     'suspect_album_tag_detector': 'Tags & metadata',
     'metadata_gap_filler': 'Tags & metadata',
     'bpm_backfill': 'Tags & metadata',
+    'artist_nfo_backfill': 'Tags & metadata',
     'canonical_version_resolve': 'Tags & metadata',
+    'album_release_year_repair': 'Tags & metadata',
     'missing_cover_art': 'Artwork & lyrics',
     'missing_lyrics': 'Artwork & lyrics',
     # Filling gaps in what you own, rather than repairing what you have.
@@ -613,9 +616,9 @@ class RepairWorker:
         # truth for scheduling; the legacy config remains for the worker's
         # respect_enabled check on manual/Run Now paths.
         try:
-            auto_id = self._get_job_automation_id(job_id)
-            if auto_id:
-                self.db.update_automation(auto_id, enabled=1 if enabled else 0)
+            from core.automation.migrate_repair_jobs import set_system_job_enabled
+            set_system_job_enabled(self.db, getattr(self, '_automation_engine', None),
+                                   job_id, enabled)
         except Exception as e:
             logger.debug("Could not bridge job toggle to automation for %s: %s", job_id, e)
         # Turning a job OFF must also stop it if it's mid-run — otherwise the toggle
@@ -763,15 +766,6 @@ class RepairWorker:
         except Exception as e:
             logger.debug("Could not scan system automations: %s", e)
         return result
-
-    def _get_job_automation_id(self, job_id: str) -> Optional[int]:
-        """Return the system automation ID for a repair job, if seeded.
-
-        Deprecated: use _get_system_automations_by_job() for batch lookups.
-        Kept for backward compatibility.
-        """
-        auto = self._get_system_automations_by_job().get(job_id)
-        return auto["automation_id"] if auto else None
 
     def _get_pending_count_by_job(self) -> dict:
         """Return ``{job_id: pending_count}`` for every job that has
@@ -1086,6 +1080,8 @@ class RepairWorker:
         # Skipped after a failure or a user stop: a partial view is not evidence.
         if run_status == 'completed':
             self.retire_vanished_findings(job_id)
+            if job_id == 'orphan_file_detector':
+                self.retire_tracked_orphan_findings()
 
         duration = time.time() - start_time
 
@@ -1902,6 +1898,48 @@ class RepairWorker:
                 conn.close()
         return retired
 
+    def retire_tracked_orphan_findings(self) -> int:
+        """Close pending orphan findings whose files were imported after detection.
+
+        A completed scan reports only *new* orphans; it does not otherwise
+        reconcile existing findings. Read the current catalogue here so a scan
+        that finds zero orphans can retire its stale pending rows.
+        """
+        from core.repair_jobs.orphan_file_detector import (
+            is_tracked_path, known_file_suffixes,
+        )
+
+        try:
+            suffixes = known_file_suffixes(self.db)
+            conn = self.db._get_connection()
+            try:
+                rows = conn.execute(
+                    "SELECT id, file_path FROM repair_findings "
+                    "WHERE job_id = 'orphan_file_detector' "
+                    "AND finding_type = 'orphan_file' AND status = 'pending' "
+                    "AND file_path IS NOT NULL AND file_path != ''"
+                ).fetchall()
+                tracked = [row[0] for row in rows
+                           if os.path.isfile(row[1])
+                           and is_tracked_path(row[1], suffixes)]
+                if tracked:
+                    conn.executemany(
+                        "UPDATE repair_findings SET status = 'resolved', "
+                        "user_action = 'already_tracked', resolved_at = CURRENT_TIMESTAMP, "
+                        "updated_at = CURRENT_TIMESTAMP "
+                        "WHERE id = ? AND status = 'pending'",
+                        ((finding_id,) for finding_id in tracked),
+                    )
+                    conn.commit()
+                    logger.info("Retired %d orphan finding(s) now tracked in the database",
+                                len(tracked))
+                return len(tracked)
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error("Could not reconcile tracked orphan findings: %s", e, exc_info=True)
+            return 0
+
     def resolve_finding(self, finding_id: int, action: str = None) -> bool:
         """Resolve a finding with an optional action."""
         conn = None
@@ -2093,6 +2131,7 @@ class RepairWorker:
             'comma_artist_split': self._fix_comma_artist_split,
             'suspect_album_tag': self._fix_suspect_album_tag,
             'fake_lossless': self._fix_fake_lossless,
+            'album_release_year_mismatch': self._fix_album_release_year_mismatch,
         }
 
     def _execute_fix(self, finding_type: str, entity_type: str, entity_id: str,
@@ -2495,7 +2534,9 @@ class RepairWorker:
                 spotify_track_data=track_data,
                 failure_reason='Discography backfill — missing from library',
                 source_type='repair',
-                source_info={'job': 'discography_backfill', 'artist': details.get('artist_name', '')}
+                source_info={'job': 'discography_backfill', 'artist': details.get('artist_name', '')},
+                # #1504: stashed by the producer; None -> shared/1.
+                profile_id=details.get('owner_profile_id') or 1,
             )
             track_name = track_data.get('name', '?')
             if success:
@@ -2536,9 +2577,15 @@ class RepairWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
+            # #1504: owner_profile_id may not exist in minimal test schemas;
+            # fall back to NULL (routes to shared) when the column is absent.
+            cursor.execute("PRAGMA table_info(tracks)")
+            _track_cols = {col[1] for col in cursor.fetchall()}
+            _owner_sel = "t.owner_profile_id" if 'owner_profile_id' in _track_cols else "NULL AS owner_profile_id"
+            cursor.execute(f"""
                 SELECT t.id, t.title, t.track_number, t.duration,
                        t.spotify_track_id, t.itunes_track_id, t.deezer_id,
+                       {_owner_sel},
                        ar.name AS artist_name,
                        al.title AS album_title, al.spotify_album_id,
                        al.record_type, al.track_count, al.year, al.thumb_url AS album_thumb
@@ -2615,6 +2662,10 @@ class RepairWorker:
                 'uri': (f"spotify:track:{_from('spotify_track_id')}"
                         if _from('spotify_track_id') else ''),
                 'is_local': False,
+                # #1504: owning profile for wishlist routing (None = shared).
+                # read from the row when available; callers map None -> 1
+                # (the wishlist column is NOT NULL).
+                'owner_profile_id': row['owner_profile_id'] if row is not None else None,
             }
         except Exception as e:
             logger.warning("Track identity lookup failed for track %s: %s", entity_id, e)
@@ -2709,6 +2760,9 @@ class RepairWorker:
                     'provider': details.get('provider'),
                 },
                 quality_profile_id=details.get('quality_profile_id'),
+                # #1504: route to the owning profile's wishlist. this is the
+                # USER profile, not the quality profile above — separate kwargs.
+                profile_id=track_data.get('owner_profile_id') or 1,
             )
             track_name = track_data.get('name', '?')
             if success:
@@ -2768,6 +2822,8 @@ class RepairWorker:
                 failure_reason='Dead file — re-download requested',
                 source_type='redownload',
                 source_info=source_info,
+                # #1504: owning profile's wishlist (None -> shared/1).
+                profile_id=track_data.get('owner_profile_id') or 1,
             )
 
             # Remove dead track entry from DB regardless of whether wishlist already had it
@@ -2837,6 +2893,8 @@ class RepairWorker:
                 failure_reason='Preview clip — re-downloading full track',
                 source_type='redownload',
                 source_info=source_info,
+                # #1504: owning profile's wishlist (None -> shared/1).
+                profile_id=track_data.get('owner_profile_id') or 1,
             )
 
             # Delete the preview file (path resolved like the other delete tools).
@@ -2931,6 +2989,8 @@ class RepairWorker:
                 failure_reason='Corrupt file — re-downloading',
                 source_type='redownload',
                 source_info=source_info,
+                # #1504: owning profile's wishlist (None -> shared/1).
+                profile_id=track_data.get('owner_profile_id') or 1,
             )
 
             # Quarantine the corrupt file (path resolved like the other delete tools).
@@ -3054,6 +3114,8 @@ class RepairWorker:
                 failure_reason=f"Fake lossless detected — spectral cutoff at ~{details.get('detected_cutoff_khz', '?')} kHz",
                 source_type='repair',
                 source_info=source_info,
+                # #1504: owning profile's wishlist (None -> shared/1).
+                profile_id=track_data.get('owner_profile_id') or 1,
             )
             if added:
                 return {'success': True, 'action': 'added_to_wishlist',
@@ -3090,6 +3152,27 @@ class RepairWorker:
             if not os.path.exists(resolved):
                 return {'success': True, 'action': 'already_gone',
                         'message': 'File was already removed'}
+
+            # The file may have entered the catalogue since the finding was
+            # raised. Fail closed if the DB cannot be read: neither action may
+            # move or delete a file whose current status is unknown.
+            from core.repair_jobs.orphan_file_detector import (
+                is_tracked_path, known_file_suffixes,
+            )
+            try:
+                suffixes = known_file_suffixes(self.db)
+            except Exception as e:
+                logger.error("Could not recheck orphan file against tracks: %s", e,
+                             exc_info=True)
+                return {'success': False, 'error':
+                        'Could not verify whether this file is now tracked; no file was changed'}
+            if is_tracked_path(resolved, suffixes):
+                return {'success': True, 'action': 'already_tracked',
+                        'message': 'File is now tracked in the library; no file was changed'}
+            if is_tracked_path(resolved, suffixes, min_depth=1):
+                return {'success': False, 'error':
+                        'Another library track has the same filename, but its album path '
+                        'differs; verify this orphan manually before moving or deleting it'}
 
             if fix_action == 'staging':
                 # Move to staging folder
@@ -3226,7 +3309,8 @@ class RepairWorker:
         # number the tags don't have whenever the file was missing.)
         if entity_id:
             try:
-                self.db.update_track_fields(int(entity_id), {'track_number': int(correct_num)})
+                # track ids are TEXT (navidrome ids carry letters), never cast (#1574)
+                self.db.update_track_fields(entity_id, {'track_number': int(correct_num)})
             except Exception as e:
                 logger.debug("DB track number update failed for entity %s: %s", entity_id, e)
 
@@ -3668,10 +3752,13 @@ class RepairWorker:
                 plan['lyrics_meta'] = t['lyrics_meta']   # read-only lyrics query metadata
             resolved_plans.append(plan)
 
-        from core.repair_jobs.library_retag import apply_track_plans
+        from core.repair_jobs.library_retag import apply_track_plans, build_retag_enrichment_runtime
+        full = (details.get('depth') == 'full')
         res = apply_track_plans(resolved_plans, details.get('cover_action'), details.get('cover_url'),
-                                full=(details.get('depth') == 'full'),
-                                lyrics_action=details.get('lyrics_action', False))
+                                full=full,
+                                lyrics_action=details.get('lyrics_action', False),
+                                enrich_runtime=build_retag_enrichment_runtime(
+                                    self._config_manager, self.db) if full else None)
 
         if res['written'] == 0 and not res['cover_written'] and not res.get('lyrics_written'):
             return {'success': False,
@@ -3726,7 +3813,12 @@ class RepairWorker:
             if updates:
                 conn.close()
                 conn = None
-                self.db.update_track_fields(int(entity_id), updates)
+                # Track primary keys are TEXT after the Plex/Jellyfin ID migration;
+                # Navidrome IDs can contain letters. The DB method accepts the ID
+                # as-is and reports when the track no longer exists.
+                update_result = self.db.update_track_fields(entity_id, updates)
+                if not update_result.get('success'):
+                    return update_result
 
             applied = list(updates.keys()) + list(direct_fields.keys())
             if applied:
@@ -4311,6 +4403,25 @@ class RepairWorker:
             album_title = details.get('album_title', '')
             if expected_title and expected_artist:
                 try:
+                    # #1504: capture the owner BEFORE the row is deleted below.
+                    # (column may be absent in minimal test schemas -> NULL.)
+                    owner_pid = None
+                    if track_id:
+                        try:
+                            oconn = self.db._get_connection()
+                            try:
+                                ocols = {c[1] for c in oconn.execute("PRAGMA table_info(tracks)")}
+                                if 'owner_profile_id' in ocols:
+                                    orow = oconn.execute(
+                                        "SELECT owner_profile_id FROM tracks WHERE id = ?",
+                                        (track_id,),
+                                    ).fetchone()
+                                    if orow and orow[0]:
+                                        owner_pid = int(orow[0])
+                            finally:
+                                oconn.close()
+                        except Exception as exc:
+                            logger.debug("AcoustID owner lookup failed: %s", exc)
                     track_data = {
                         'id': f'acoustid_fix_{uuid.uuid4().hex[:8]}',
                         'name': expected_title,
@@ -4321,6 +4432,9 @@ class RepairWorker:
                         spotify_track_data=track_data,
                         failure_reason='AcoustID mismatch — re-downloading correct track',
                         source_type='repair',
+                        # #1504: the re-downloaded correct track belongs to the
+                        # same library that held the wrong file.
+                        profile_id=owner_pid or 1,
                     )
                     logger.info("Added '%s' by '%s' to wishlist for re-download",
                                 expected_title, expected_artist)
@@ -4392,10 +4506,30 @@ class RepairWorker:
             from core.tag_writer import write_tags_to_file
             from core.imports.file_ops import safe_move_file
             try:
+                # #1504: capture the owner BEFORE the row is dropped, so the
+                # staged file carries a breadcrumb for auto-import.
+                relocate_owner_pid = None
+                if track_id:
+                    try:
+                        ro_conn = self.db._get_connection()
+                        try:
+                            ro_cols = {c[1] for c in ro_conn.execute("PRAGMA table_info(tracks)")}
+                            if 'owner_profile_id' in ro_cols:
+                                ro_row = ro_conn.execute(
+                                    "SELECT owner_profile_id FROM tracks WHERE id = ?",
+                                    (track_id,),
+                                ).fetchone()
+                                if ro_row and ro_row[0]:
+                                    relocate_owner_pid = int(ro_row[0])
+                        finally:
+                            ro_conn.close()
+                    except Exception as exc:
+                        logger.debug("relocate owner lookup failed: %s", exc)
                 dest = relocate_mismatch_to_staging(
                     resolved, staging_path, tag_updates,
                     write_tags=write_tags_to_file, move_file=safe_move_file,
-                    drop_db_row=_drop_row, exists=os.path.exists)
+                    drop_db_row=_drop_row, exists=os.path.exists,
+                    owner_profile_id=relocate_owner_pid)
             except Exception as e:
                 return {'success': False, 'error': f'Relocate failed: {e}'}
             self._cleanup_empty_parents(resolved)   # remove the now-empty wrong folder
@@ -4629,6 +4763,48 @@ class RepairWorker:
         else:
             return {'success': True, 'action': 'already_consistent', 'message': 'All tags already consistent'}
 
+    def _fix_album_release_year_mismatch(self, entity_type, entity_id, file_path, details):
+        """Align album and track release years to canonical release dates and rename folder."""
+        from core.repair_jobs.album_release_year_repair import apply_album_year_fix
+
+        album_id = details.get('album_id')
+        canonical_year = details.get('canonical_year')
+        canonical_date = details.get('canonical_date')
+        tracks = details.get('tracks', [])
+        folder_path = details.get('folder_path')
+        new_folder_name = details.get('new_folder_name')
+
+        if not album_id or not canonical_year:
+            return {'success': False, 'error': 'Missing album_id or canonical_year in finding details'}
+
+        cfg = self._config_manager
+        rename_folders = cfg.get('repair.jobs.album_release_year_repair.rename_folders', True) if cfg else True
+        update_date_tag = cfg.get('repair.jobs.album_release_year_repair.update_date_tag', True) if cfg else True
+
+        res = apply_album_year_fix(
+            db=self.db,
+            album_id=int(album_id),
+            canonical_year=str(canonical_year),
+            canonical_date=canonical_date,
+            tracks=tracks,
+            transfer_folder=self.transfer_folder,
+            config_manager=self._config_manager,
+            rename_folders=rename_folders,
+            update_date_tag=update_date_tag,
+            folder_path=folder_path,
+            new_folder_name=new_folder_name,
+        )
+
+        if res.get('success'):
+            return {
+                'success': True,
+                'action': 'aligned_release_year',
+                'fixed_files': res.get('fixed_files', 0),
+                'renamed_folder': res.get('renamed_folder'),
+                'message': '; '.join(res.get('changes', [])) or f'Aligned year to {canonical_year}',
+            }
+        return {'success': False, 'error': res.get('error') or 'Failed to align album release year'}
+
     # --- Album Completeness Auto-Fill ---
 
     @staticmethod
@@ -4767,6 +4943,24 @@ class RepairWorker:
 
         if not album_id:
             return {'success': False, 'error': 'Missing album_id in finding details'}
+
+        # #1504: the missing tracks belong to the album owner's library.
+        # (column may be absent in minimal test schemas -> NULL/shared.)
+        album_owner_pid = None
+        try:
+            oconn = self.db._get_connection()
+            try:
+                ocols = {c[1] for c in oconn.execute("PRAGMA table_info(albums)")}
+                if 'owner_profile_id' in ocols:
+                    orow = oconn.execute(
+                        "SELECT owner_profile_id FROM albums WHERE id = ?", (str(album_id),)
+                    ).fetchone()
+                    if orow and orow[0]:
+                        album_owner_pid = int(orow[0])
+            finally:
+                oconn.close()
+        except Exception as exc:
+            logger.debug("Incomplete-album owner lookup failed: %s", exc)
 
         # If missing_tracks list is empty (scanner couldn't identify them), try to fetch now
         if not missing_tracks:
@@ -4976,6 +5170,8 @@ class RepairWorker:
                         failure_reason='Missing from incomplete album',
                         source_type='album',
                         source_info=source_info,
+                        # #1504: route to the album owner's wishlist.
+                        profile_id=album_owner_pid or 1,
                     )
                     wishlisted_count += 1
                     track_details.append({
@@ -5461,10 +5657,9 @@ class RepairWorker:
                 # it can MISS for media-server libraries whose stored file_path differs
                 # from the resolved path we just moved, which is exactly the #978
                 # population (so without this the file moves but the DB stays stale).
-                try:
-                    tid = int(entity_id) if entity_id not in (None, '') else None
-                except (TypeError, ValueError):
-                    tid = None
+                # TEXT ids (navidrome) fell back to the path match, which misses
+                # exactly the rows this exists for (#1574)
+                tid = str(entity_id) if entity_id not in (None, '') else None
                 if tid is not None:
                     cursor.execute("UPDATE tracks SET file_path = ? WHERE id = ?", (dst, tid))
                 if tid is None or cursor.rowcount == 0:

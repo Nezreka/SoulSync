@@ -70,6 +70,8 @@ describe('music requests api', () => {
     await expect(fetchMusicRequests(3)).resolves.toEqual({
       pending: [group],
       history: [row],
+      pendingVideos: [],
+      videoHistory: [],
       counts: { pending: 1, approved: 1, available: 0, declined: 0, removed: 0 },
       asksFirst: true,
       quota: null,

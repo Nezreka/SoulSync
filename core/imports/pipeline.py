@@ -76,7 +76,7 @@ from core.runtime_state import (
     tasks_lock,
 )
 from core.metadata.artwork import download_cover_art
-from core.metadata.common import wipe_source_tags
+from core.metadata.common import strip_musicbrainz_identity_tags, wipe_source_tags
 from core.imports.tag_policy import should_wipe_tags_on_enhancement_failure
 from core.imports.quality_replace import is_profile_upgrade
 from core.metadata.enrichment import enhance_file_metadata
@@ -583,6 +583,24 @@ def _persist_verification_status(context, final_path):
                 write_verification_status(str(final_path), status)
     except Exception as _vs_err:
         logger.debug(f"verification-status persist skipped: {_vs_err}")
+
+
+def _maybe_write_artist_nfo(context: dict, final_path: str, config_manager) -> None:
+    """#1449: optional artist.nfo (Jellyfin/Kodi/Emby) in the artist folder.
+
+    Idempotent (skips when the nfo exists) and never raises — a sidecar
+    must not break the import. Called on every path where a file actually
+    lands in the library (normal post-processing, another-thread-won, and
+    stream-processor-variant paths).
+    """
+    try:
+        from core.library.artist_nfo import ensure_artist_nfo_for_track
+        _nfo_ok, _nfo_detail = ensure_artist_nfo_for_track(
+            context.get('_final_processed_path', final_path), config_manager)
+        if _nfo_ok:
+            logger.info(f"artist.nfo written: {_nfo_detail}")
+    except Exception as _nfo_err:  # noqa: BLE001 — best effort sidecar
+        logger.debug(f"artist.nfo write skipped: {_nfo_err}")
 
 
 def _apply_profile_output_transforms(final_path: str, context: dict,
@@ -1441,6 +1459,13 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     "[Metadata] Enhancement failed but import has clean/matched metadata — "
                     "preserving the file's existing tags (not wiping): %s",
                     os.path.basename(file_path))
+                # #1555: the preserved tags can carry the Soulseek uploader's
+                # FOREIGN MusicBrainz album ids. One divergent release id is
+                # enough to split the album into duplicate entries on the
+                # media server while its siblings carry SoulSync's pinned
+                # release id. Strip only the album-identity ids; everything
+                # else stays exactly as the #804 protection requires.
+                strip_musicbrainz_identity_tags(file_path)
 
         # "Force download" is replace-intent: the user explicitly re-downloaded
         # something they already own, so the metadata-protection skip must not
@@ -1558,6 +1583,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 download_cover_art(album_info, os.path.dirname(final_path), context)
                 generate_lrc_file(final_path, context, artist_context, album_info)
                 context['_pipeline_import_succeeded'] = True
+                _maybe_write_artist_nfo(context, final_path, config_manager)
                 return
             expected_dir = os.path.dirname(final_path)
             expected_stem = os.path.splitext(os.path.basename(final_path))[0]
@@ -1583,6 +1609,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 download_cover_art(album_info, expected_dir, context)
                 generate_lrc_file(found_variant, context, artist_context, album_info)
                 context['_pipeline_import_succeeded'] = True
+                _maybe_write_artist_nfo(context, found_variant, config_manager)
                 return
             logger.warning(f"[Pre-Move] Source file gone and no matching file in destination: {os.path.basename(file_path)}")
             raise FileNotFoundError(f"Source file vanished before move and destination does not exist: {file_path}")
@@ -1655,6 +1682,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         _qp_post = _resolve_context_quality_profile(context)
         final_path = _apply_profile_output_transforms(
             final_path, context, _qp_post)
+
+        _maybe_write_artist_nfo(context, final_path, config_manager)
 
         downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
         cleanup_empty_directories(downloads_path, file_path)

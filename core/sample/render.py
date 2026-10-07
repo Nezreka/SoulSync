@@ -12,9 +12,9 @@ Engine selection
   is the render path for *saved* chops.
 * Explicit ``"rubberband"`` / ``"librosa"`` also accepted.
 
-Rubber Band is NOT installed in this dev environment (no CLI, no package),
-so every path here is exercised against the librosa fallback in tests. The
-SoulSync Docker image needs the ``rubberband-cli`` apt package for the
+Engine fallback tests explicitly simulate an absent CLI/package so they also
+work on hosts with Rubber Band installed. The SoulSync Docker image needs the
+``rubberband-cli`` apt package for the
 quality tier — that is the whole install, do not build C++ from source.
 
 Unlike analyze.py (mono), rendering keeps the source channel layout so
@@ -187,6 +187,13 @@ def _apply_librosa(y: Any, sr: int, pitch_st: float, tempo_ratio: float) -> Any:
 def _apply_rubberband_cli(y: Any, sr: int, pitch_st: float, tempo_ratio: float, tmpdir: str) -> Tuple[Any, int]:
     """One-pass pitch+tempo via the rubberband CLI. Returns (audio, sr)."""
     import numpy as np
+
+    # Rubber Band requires at least one ratio option.  A plain chop is a
+    # legitimate no-op render, so do not invoke the CLI just to resample an
+    # unchanged clip (and avoid its usage error on installations where the
+    # binary is present).
+    if abs(pitch_st) < 0.01 and abs(tempo_ratio - 1.0) <= 1e-3:
+        return y, sr
 
     sf = _load_soundfile()
     in_path = os.path.join(tmpdir, f"rb_in_{uuid.uuid4().hex}.wav")

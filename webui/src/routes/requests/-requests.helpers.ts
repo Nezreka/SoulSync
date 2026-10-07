@@ -1,6 +1,8 @@
 import type {
   MusicRequestList,
+  MusicRequestRow,
   MusicRequestStatus,
+  MusicVideoRequest,
   RequestItem,
   RequestQuota,
   RequestTab,
@@ -14,17 +16,40 @@ export const REQUEST_TABS: ReadonlyArray<{ id: RequestTab; label: string }> = [
   { id: 'all', label: 'All' },
 ];
 
-// waiting asks first, then the history newest first
+function isVideoRow(row: MusicRequestRow | MusicVideoRequest): row is MusicVideoRequest {
+  return 'video_id' in row;
+}
+
+// waiting asks first, then the history newest first. videos merge into the
+// same two blocks: track groups keep their server order, video pendings sort
+// newest-first after them, and both histories interleave by resolved_at.
 export function buildRequestItems(list: MusicRequestList): RequestItem[] {
   const pending: RequestItem[] = list.pending.map((group) => ({
     source: 'pending',
     status: 'pending',
     group,
   }));
-  const history: RequestItem[] = [...list.history]
+  // videos have no wishlist to derive a pending queue from, so pending video
+  // asks arrive as stored rows
+  const pendingVideos: RequestItem[] = [...list.pendingVideos]
+    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+    .map(
+      (video): RequestItem =>
+        video.status === 'pending'
+          ? { source: 'video-pending', status: 'pending', video }
+          : { source: 'video-history', status: video.status, video },
+    );
+  const history: RequestItem[] = [...list.history, ...list.videoHistory]
     .sort((a, b) => String(b.resolved_at || '').localeCompare(String(a.resolved_at || '')))
-    .map((row) => ({ source: 'history', status: row.status, row }));
-  return [...pending, ...history];
+    .map((row): RequestItem => {
+      if (isVideoRow(row)) {
+        return row.status === 'pending'
+          ? { source: 'video-pending', status: 'pending', video: row }
+          : { source: 'video-history', status: row.status, video: row };
+      }
+      return { source: 'history', status: row.status, row };
+    });
+  return [...pending, ...pendingVideos, ...history];
 }
 
 const TAB_STATUSES: Record<Exclude<RequestTab, 'all'>, MusicRequestStatus> = {
@@ -34,6 +59,7 @@ const TAB_STATUSES: Record<Exclude<RequestTab, 'all'>, MusicRequestStatus> = {
   declined: 'declined',
 };
 
+// videos share the same status strings, so they land in the right tabs as-is
 export function filterRequestItems(items: RequestItem[], tab: RequestTab): RequestItem[] {
   if (tab === 'all') return items;
   const status = TAB_STATUSES[tab];
@@ -68,29 +94,47 @@ export function statusText(item: RequestItem): string {
 }
 
 export function itemKey(item: RequestItem): string {
+  if (item.source === 'video-pending' || item.source === 'video-history') {
+    return `v:${item.video.id}`;
+  }
   return item.source === 'pending'
     ? `p:${item.group.profile_id}:${item.group.key}`
     : `h:${item.row.id}`;
 }
 
 export function itemTitle(item: RequestItem): string {
+  if (item.source === 'video-pending' || item.source === 'video-history') {
+    return item.video.title || 'Untitled';
+  }
   return (item.source === 'pending' ? item.group.title : item.row.title) || 'Untitled';
 }
 
-export function itemKind(item: RequestItem): 'album' | 'track' {
+export function itemKind(item: RequestItem): 'album' | 'track' | 'video' {
+  if (item.source === 'video-pending' || item.source === 'video-history') return 'video';
   return item.source === 'pending' ? item.group.kind : item.row.kind;
 }
 
 export function itemImage(item: RequestItem): string {
+  if (item.source === 'video-pending' || item.source === 'video-history') {
+    return item.video.thumbnail_url || '';
+  }
   return (item.source === 'pending' ? item.group.image_url : item.row.image_url) || '';
 }
 
 export function itemTracks(item: RequestItem) {
+  if (item.source === 'video-pending' || item.source === 'video-history') return [];
   return item.source === 'pending' ? item.group.tracks : item.row.tracks;
 }
 
-/** artist · 12 tracks for albums, artist · album for a lone track. */
+/**
+ * artist · 12 tracks for albums, artist · album for a lone track,
+ * channel · Music video for videos.
+ */
 export function subLine(item: RequestItem): string {
+  if (item.source === 'video-pending' || item.source === 'video-history') {
+    const channel = item.video.channel;
+    return channel ? `${channel} · Music video` : 'Music video';
+  }
   const artist = item.source === 'pending' ? item.group.artist : item.row.artist;
   const count =
     item.source === 'pending'
@@ -112,11 +156,25 @@ export function subLine(item: RequestItem): string {
 
 /** "Kim asked · 2 days ago" (admins), "You asked · 2 days ago" (members). */
 export function whoAsked(item: RequestItem, isAdmin: boolean, now = Date.now()): string {
-  const name = item.source === 'pending' ? item.group.requester_name : item.row.requester_name;
+  const name =
+    item.source === 'pending'
+      ? item.group.requester_name
+      : item.source === 'history'
+        ? item.row.requester_name
+        : item.video.requester_name;
   const who = isAdmin ? name || 'Someone' : 'You';
-  const when = item.source === 'pending' ? item.group.created_at : item.row.resolved_at;
+  const when =
+    item.source === 'pending'
+      ? item.group.created_at
+      : item.source === 'history'
+        ? item.row.resolved_at
+        : item.source === 'video-pending'
+          ? item.video.created_at
+          : item.video.resolved_at;
   const ago = relativeTime(when, now);
-  if (item.source === 'pending') return ago ? `${who} asked · ${ago}` : `${who} asked`;
+  if (item.source === 'pending' || item.source === 'video-pending') {
+    return ago ? `${who} asked · ${ago}` : `${who} asked`;
+  }
   return ago ? `${who} asked · decided ${ago}` : `${who} asked`;
 }
 

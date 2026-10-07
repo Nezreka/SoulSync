@@ -92,6 +92,8 @@ _RELEASE_KIND_MAP = {
     "compilations": "compilation",
 }
 
+_SHORT_RELEASE_KINDS = frozenset({"single", "ep"})
+
 
 def _normalize_release_kind(value: Any) -> str:
     """Map a raw album_type to a canonical release kind, or "" when unknown."""
@@ -111,6 +113,13 @@ def _release_kinds_compatible(incoming: Any, stored: Any) -> bool:
     incoming_kind = _normalize_release_kind(incoming)
     stored_kind = _normalize_release_kind(stored)
     if not incoming_kind or not stored_kind:
+        return True
+    # single and ep are one class here. spotify files every ep under
+    # album_type 'single' while deezer/itunes write 'ep' for the same release,
+    # and record_type is fill-only, so the row keeps whichever source got there
+    # first. treating them as a mismatch flipped owned eps to missing and
+    # re-downloaded them.
+    if incoming_kind in _SHORT_RELEASE_KINDS and stored_kind in _SHORT_RELEASE_KINDS:
         return True
     return incoming_kind == stored_kind
 
@@ -176,23 +185,40 @@ def _row_release_id(db: Any, album_id: Any) -> str:
 
 
 def _row_album_type(db: Any, album_id: Any) -> str:
-    """The album row's stored album_type, "" when unknown/unreadable."""
-    conn = None
-    try:
-        conn = db._get_connection()
-        row = conn.execute(
-            "SELECT album_type FROM albums WHERE id = ?", (str(album_id),),
-        ).fetchone()
-        return str((row[0] if row else "") or "").strip()
-    except Exception as e:
-        logger.debug("album_type lookup for album %s failed: %s", album_id, e)
-        return ""
-    finally:
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:  # noqa: S110 - cleanup only
-                pass
+    """The album row's stored release type, "" when unknown/unreadable.
+
+    ``record_type`` is the populated column (the Deezer/Spotify/iTunes/
+    JioSaavn enrichment workers backfill it: album / single / ep /
+    compilation); ``album_type`` is legacy and unwritten by current code but
+    still honored when a DB carries it. Each column is queried separately so
+    a missing column never hides the other.
+    """
+    for col in ("record_type", "album_type"):
+        conn = None
+        try:
+            conn = db._get_connection()
+            row = conn.execute(
+                f"SELECT {col} FROM albums WHERE id = ?", (str(album_id),),
+            ).fetchone()
+            # Strip before the truthiness check: a whitespace-only value is
+            # unknown and must fall through to the next column, not return "".
+            val = str(row[0]).strip() if row and row[0] else ""
+            if val:
+                return val.lower()
+        except Exception as e:
+            # Fail-open by design (pinned by
+            # test_db_without_the_column_falls_back_to_file_tags): any
+            # unreadable kind — missing column on legacy DBs, dead
+            # connection, locked DB — keeps today's reuse instead of
+            # splitting folders or breaking an import.
+            logger.debug("%s lookup for album %s failed: %s", col, album_id, e)
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:  # noqa: S110 - cleanup only
+                    pass
+    return ""
 
 
 def _same_release(db: Any, album: Any, sample_file: Optional[str],

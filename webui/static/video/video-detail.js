@@ -1960,6 +1960,17 @@
                 'title="Open on YouTube">YouTube</a>'
             : '';
         var wished = !!ep.wished;
+        // A profile without download rights can't grab or wishlist — it can
+        // ASK for the video instead (the request flow). Owned videos keep
+        // their treatment: nothing left to ask for.
+        var noDl = (typeof canDownload === 'function') && !canDownload() && window.VideoRequests;
+        var ch = (data && data._channel) || {};
+        var reqBtn = (!ep.owned && noDl)
+            ? '<div class="vd-ep-get">' + window.VideoRequests.cardButton({
+                kind: 'youtube', youtubeId: ep.youtube_id, title: ep.title,
+                channel: { youtube_id: ch.youtube_id || data.youtube_id || '',
+                           title: ch.title || data.title || '' } }) + '</div>'
+            : '';
         // Downloaded videos wear the SAME owned treatment as TV episodes (.vd-ep--owned
         // + badge) but KEEP the direct-download button: a server-side delete leaves the
         // ownership ledger intact, and re-grabbing is the sanctioned way back (Boulder).
@@ -1980,12 +1991,13 @@
                         '</div>'
                       : '<div class="vd-ep-get" data-vd-ep-get="' + esc(ep.youtube_id) + '">' +
                             '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
+                            (reqBtn ||
                             '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-yt-grab="' + esc(ep.youtube_id) +
                                 '" title="Download this video now" aria-label="Download video">⭳</button>' +
                             '<button class="vd-ep-getbtn vd-ep-wish' + (wished ? ' vd-ep-wish--done' : '') +
                                 '" type="button" data-vd-yt-wish="' + esc(ep.youtube_id) +
                                 '" title="' + (wished ? 'Remove from wishlist' : 'Add this video to the wishlist') +
-                                '" aria-label="Wishlist video">' + (wished ? '✓' : '＋') + '</button>' +
+                                '" aria-label="Wishlist video">' + (wished ? '✓' : '＋') + '</button>') +
                         '</div>') +
             '<span class="vd-ep-chev" aria-hidden="true">⌄</span></div>' +
             '<div class="vd-ep-extra" data-vd-ep-panel="' + key + '" hidden></div>';
@@ -2055,9 +2067,17 @@
             // stack treats owned rows as upgrade candidates (upgrade-until-
             // cutoff), so re-download / manual search / wishlist must not
             // vanish once something is on disk.
+            // A profile without download rights can't grab or wishlist — on a
+            // TMDB preview or a library show it can ASK for a missing episode
+            // instead (the request flow); owned episodes have nothing to ask.
             ((ep.owned ? '<div class="vd-ep-badge">Owned' + (ep.versions > 1 ? ' ×' + ep.versions : '') + '</div>' : '') +
-             (!window.VideoGrab
-                ? (ep.owned ? '' : '<div class="vd-ep-badge">Missing</div>')
+             ((typeof canDownload === 'function' && !canDownload())
+                ? ((!ep.owned && data && data.tmdb_id && window.VideoRequests)
+                    ? '<div class="vd-ep-get">' + window.VideoRequests.cardButton({
+                        kind: 'episode', tmdbId: data.tmdb_id, season: selectedSeason,
+                        episode: ep.episode_number, title: data.title, year: data.year,
+                        poster: data.poster_url }) + '</div>'
+                    : (ep.owned ? '' : '<div class="vd-ep-badge">Missing</div>'))
                 : '<div class="vd-ep-get" data-vd-ep-get="' + ep.episode_number + '">' +
                     '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
                     '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-ep-grab="' + ep.episode_number +
@@ -2216,7 +2236,10 @@
         var isYt = !!(data && data.source === 'youtube');
         var seasonMissing = season.episodes.filter(function (e) { return !e.owned; });
         if (isYt && (ytFilter.q || ytFilter.state !== 'all' || ytFilter.duration !== 'all')) seasonMissing = [];   // a filtered view isn't "the season"
-        var canAcquire = !!(seasonMissing.length && (isYt || window.VideoGrab));
+        // A profile without download rights gets no acquisition buttons here either —
+        // the server 403s the grab/wishlist endpoints for it (same as the per-row buttons).
+        var canDl = (typeof canDownload !== 'function') || canDownload();
+        var canAcquire = !!(seasonMissing.length && canDl && (isYt || window.VideoGrab));
         // Monitoring and stale-failure resets matter on a COMPLETE season too, so a
         // library show always gets the bar. YouTube never does: it has no episode
         // rows to monitor, and a preview has no library row to act on at all.
@@ -3801,6 +3824,23 @@
         document.addEventListener('soulsync:video-wishlist-changed', function () {
             if (currentKind === 'movie' && data) { data._wl_checked = false; renderActions(data); }
         });
+        // The profile can arrive (or switch) after this page rendered: canDownload()
+        // answers "yes" until the profile is known, so the acquisition buttons may
+        // have been built for the wrong profile — a no-download member saw grab +
+        // wishlist buttons that the server then 403s, instead of the request
+        // buttons. Re-render the permission-dependent UI when the profile lands,
+        // but only when the permission outcome actually changed (avatar/name edits
+        // fire this event too — they must not collapse open episode panels).
+        var _lastCanDl = null;
+        function onProfileChanged() {
+            var canDl = (typeof canDownload === 'function') ? canDownload() : true;
+            if (_lastCanDl === canDl) return;
+            _lastCanDl = canDl;
+            if (!data || !root()) return;
+            renderActions(data);
+            renderEpisodes();
+        }
+        window.addEventListener('ss:webui-profile-context-changed', onProfileChanged);
         // Metadata edited via the Manage panel → re-render the page from the DB
         // (title/genres/summary changed under us). Quiet events (toggles) skip it.
         document.addEventListener('soulsync:video-meta-changed', function (e) {

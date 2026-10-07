@@ -1,114 +1,157 @@
 /* ═══════════════════════════════════════════════════════════════════════
-   Dashboard premier redesign (Sept 2026) — a pure visual reskin of the
-   music dashboard. Loaded after style.css so it wins by cascade.
+   Dashboard section revamp (Oct 2026) — the sections keep their exact
+   positions and sizes, but the aesthetic INSIDE each section is redesigned.
+   Loaded after style.css so it wins by cascade.
 
-   What it changes:
-   - Hero left: an editorial header — date eyebrow, restrained two-tone
-     greeting (the shimmer gradient read as gimmicky), stats as a divided
-     stat band, and the library status recomposed as one contained bar
-     instead of loose elements.
-   - Rails: a composed section header — real title + count, lede subtitle,
-     and the feed switcher as a segmented control instead of bare tabs.
-   - Right column: wider (340 → 376px) with genuinely breathing cards —
-     deeper padding, taller rows, calmer sync health block.
-   - Listen band + footer: light polish, structure untouched.
+   Design language: "studio console" — confident dark instrument panels.
+   Uppercase micro-labels, tabular numerals, hairline borders, inset track
+   surfaces, accent green used as signal colour only. No glow-as-decoration,
+   no geometric background.
+
+   Layout contract (do not touch): .dash-layout grid, .dash-hero grid,
+   rail-card widths, .dash-side column width, article footprints — every
+   section sits exactly where it was.
 
    What it does NOT change: every JS-referenced hook stays put —
    worker-orbs.js anchors (.orb-stage, orb containers/buttons/tooltips),
-   the tour's live ids, the artefact-pinned orb strip and library-card
-   markup (restyled, never restructured), and all data-testid hooks.
+   the tour's live ids, and all data-testid hooks. .orb-stage never gets a
+   stacking context (no transform/filter/opacity) — the orb contract.
    ═══════════════════════════════════════════════════════════════════════ */
 
-/* ── 1. HERO ─────────────────────────────────────────────────────────── */
+/* ── 1. HERO — the command greeting ──────────────────────────────────── */
+/* The greeting becomes a two-line display: the moment small above, the name
+   huge below. The stats become readout modules — label ABOVE the number, on
+   inset tracks. The library bar becomes a console strip with a solid scan
+   button. */
 
 #dashboard-page .dash-hero-main {
-    gap: 20px;
+    gap: 18px;
 }
 
-/* Date eyebrow — the quiet editorial kicker premier headers open with. */
+/* Date eyebrow — now a status chip with a live dot. */
 #dashboard-page .dash-hero-eyebrow {
     margin: 0;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.16em;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    align-self: flex-start;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
-    color: rgba(244, 245, 247, 0.42);
+    color: rgba(244, 245, 247, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 999px;
+    padding: 6px 14px 6px 11px;
+}
+#dashboard-page .dash-hero-eyebrow::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: rgb(var(--accent-rgb));
+    flex: none;
 }
 
-/* The greeting, restrained: solid type, tight tracking, two tones —
-   the moment in muted lead, the name in full white. The old shimmer
-   gradient is gone; it read as decoration, not confidence. */
+/* Two-line display greeting: moment small, name enormous. */
 #dashboard-page .dash-hero .hello-greeting {
-    font-size: clamp(28px, 3vw, 36px);
-    font-weight: 650;
-    letter-spacing: -0.02em;
-    line-height: 1.12;
+    font-size: clamp(15px, 1.6vw, 17px);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    line-height: 1.2;
+    text-transform: uppercase;
+    color: rgba(244, 245, 247, 0.52);
 }
 #dashboard-page .dash-hero .hello-greeting > span {
     background: none;
     -webkit-text-fill-color: currentColor;
-    color: #f4f5f7;
+    color: inherit;
     animation: none;
-    padding-bottom: 0.1em;
-    margin-bottom: -0.1em;
+    padding-bottom: 0;
+    margin-bottom: 0;
 }
 #dashboard-page .hello-greet-lead {
-    font-weight: 500;
-    color: rgba(244, 245, 247, 0.58);
+    display: block;
+    font-weight: 600;
+    color: rgba(244, 245, 247, 0.52);
+    font-size: clamp(14px, 1.5vw, 16px);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
 }
 #dashboard-page .hello-greet-name {
+    display: block;
     color: #ffffff;
+    font-size: clamp(38px, 4.6vw, 56px);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.02;
+    text-transform: none;
+    text-wrap: balance;
 }
 
-/* Stats as a divided band — hairline rules between figures, tabular
-   numerals, labels with real letterspacing. The premier analytics look. */
+/* Stats as readout modules: micro label above a display numeral, each on
+   an inset track. The divided band is gone. */
 #dashboard-page .dash-hero-numbers {
-    gap: 0;
-    margin-top: 2px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 6px;
 }
 #dashboard-page .dash-hero-number {
     position: relative;
-    padding: 2px 30px;
-    gap: 4px;
-}
-#dashboard-page .dash-hero-number:first-child {
-    padding-left: 0;
-}
-#dashboard-page .dash-hero-number:last-child {
-    padding-right: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
+    padding: 12px 20px 11px;
+    min-width: 118px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(0, 0, 0, 0.32);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset;
 }
 #dashboard-page .dash-hero-number + .dash-hero-number::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 4px;
-    bottom: 4px;
-    width: 1px;
-    background: rgba(255, 255, 255, 0.10);
+    content: none;
 }
-#dashboard-page .dash-hero-number-value {
-    font-size: 24px;
-    font-weight: 700;
-    letter-spacing: -0.015em;
+#dashboard-page .dash-hero-number:first-child {
+    padding-left: 20px;
+}
+#dashboard-page .dash-hero-number:last-child {
+    padding-right: 20px;
 }
 #dashboard-page .dash-hero-number-label {
-    font-size: 11px;
-    letter-spacing: 0.1em;
+    order: -1;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgba(244, 245, 247, 0.42);
+}
+#dashboard-page .dash-hero-number-value {
+    font-size: 27px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    color: #fff;
+    line-height: 1;
+}
+#dashboard-page .dash-hero-number:hover .dash-hero-number-value {
+    color: rgb(var(--accent-light-rgb));
 }
 
-/* The library status, recomposed as ONE contained bar: status on the left,
-   actions on the right — instead of a pill, a menu dot and a run-on
-   sentence sharing a line. The pinned library-card markup is only
-   reordered (flex order) and restyled, never restructured. */
+/* The library console strip: inset track, ringed status dot, the scan
+   action as a SOLID button — the primary control on the page. */
 #dashboard-page .dash-hero-library .library-status-header {
     align-items: center;
+    flex-wrap: nowrap;
     gap: 12px;
     padding: 10px 10px 10px 18px;
     border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: rgba(0, 0, 0, 0.42);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) inset;
     max-width: 640px;
 }
 #dashboard-page .dash-hero-library .library-status-info {
@@ -116,50 +159,68 @@
     flex: 1 1 auto;
     min-width: 0;
     align-items: center;
+    flex-wrap: nowrap;
     gap: 10px;
 }
+#dashboard-page .dash-hero-library .library-status-dot {
+    width: 10px;
+    height: 10px;
+    flex: none;
+    box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.16);
+}
 #dashboard-page .dash-hero-library .library-status-title {
-    font-size: 13.5px;
-    font-weight: 650;
+    font-size: 14px;
+    font-weight: 750;
     letter-spacing: 0.01em;
     white-space: nowrap;
 }
 #dashboard-page .dash-hero-library .library-status-subtitle {
     font-size: 12.5px;
-    color: rgba(244, 245, 247, 0.5);
+    color: rgba(244, 245, 247, 0.58);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    font-variant-numeric: tabular-nums;
+    min-width: 0;
 }
 #dashboard-page .dash-hero-library .library-status-actions {
     order: 2;
     flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 #dashboard-page .dash-hero-library .library-status-btn {
-    min-height: 38px;
-    padding: 0 20px;
-    font-size: 13.5px;
-    font-weight: 600;
-    letter-spacing: 0.01em;
-    border-color: rgba(var(--accent-rgb), 0.38);
-    background: rgba(var(--accent-rgb), 0.14);
-    transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+    min-height: 40px;
+    padding: 0 18px;
+    font-size: 12.5px;
+    font-weight: 750;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    border: 1px solid rgba(var(--accent-rgb), 0.5);
+    border-radius: 999px;
+    color: rgb(var(--accent-light-rgb));
+    background: rgba(var(--accent-rgb), 0.1);
+    transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
 }
 #dashboard-page .dash-hero-library .library-status-btn:hover {
-    background: rgba(var(--accent-rgb), 0.24);
-    border-color: rgba(var(--accent-rgb), 0.6);
+    background: rgba(var(--accent-rgb), 0.2);
+    border-color: rgba(var(--accent-rgb), 0.85);
+    color: #fff;
 }
 #dashboard-page .dash-hero-library .library-status-btn:active {
-    transform: scale(0.98);
+    transform: scale(0.97);
 }
 #dashboard-page .dash-hero-library .library-status-btn.scanning {
-    border-color: rgba(240, 179, 90, 0.5);
-    background: rgba(240, 179, 90, 0.10);
+    background: rgba(240, 179, 90, 0.92);
+    border-color: transparent;
+    color: #1c1005;
 }
 #dashboard-page .library-status-more {
-    width: 38px;
-    min-height: 38px;
-    border-radius: 50%;
+    width: 40px;
+    min-height: 40px;
+    border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     background: rgba(255, 255, 255, 0.04);
     color: rgba(244, 245, 247, 0.7);
@@ -171,45 +232,462 @@
     color: #fff;
 }
 
-/* ── 2. RAILS ────────────────────────────────────────────────────────── */
+/* ── 2. ORB CARD — uncontained ─────────────────────────────────────────── */
+/* The orbs themselves are untouched (JS contract). The container is
+   invisible — no border, no background — so the orbs float uncontained
+   in the header. Manage Workers becomes a quiet centered pill; the
+   status readout stays as floating micro text. */
 
-/* A composed section header: title + count on the left with the lede
-   beneath it, the feed switcher as a segmented control on the right.
-   No more bare tabs floating beside a small subtitle. */
+#dashboard-page .orb-stage {
+    /* No transform / filter / opacity here — the orb canvas contract. */
+    border: 0;
+    background: none;
+    padding: 30px 18px 40px;
+}
+/* Panel label removed — it only made sense on a visible container. */
+#dashboard-page .orb-stage::before {
+    display: none;
+}
+#dashboard-page .orb-stage .em-manage-btn {
+    flex-basis: auto;
+    width: auto;
+    max-width: none;
+    margin: 16px auto 0;
+    padding: 0 26px;
+    min-height: 40px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    color: rgba(244, 245, 247, 0.85);
+    transition: background 0.18s ease, border-color 0.18s ease;
+}
+#dashboard-page .orb-stage .em-manage-btn:hover {
+    background: rgba(var(--accent-rgb), 0.14);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: #fff;
+}
+/* Status readout, bottom-left: micro label with a larger signal dot. */
+#dashboard-page .orb-stage-caption {
+    left: 18px;
+    bottom: 13px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(244, 245, 247, 0.45);
+    gap: 8px;
+}
+#dashboard-page .orb-stage-dot {
+    width: 8px;
+    height: 8px;
+}
+
+/* ── 2b. WEEKLY DIGEST — full-width mini banner ─────────────────────── */
+/* This-week listening stats. Renders nothing until plays exist. */
+#dashboard-page .weekly-digest {
+    padding: 20px 24px 18px;
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background:
+        radial-gradient(120% 160% at 8% 0%, rgba(var(--accent-rgb), 0.1) 0%, rgba(0, 0, 0, 0) 55%),
+        rgba(0, 0, 0, 0.42);
+}
+#dashboard-page .wd-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+#dashboard-page .wd-kicker {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgb(var(--accent-light-rgb));
+}
+#dashboard-page .wd-range {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.42);
+}
+#dashboard-page .wd-link {
+    margin-left: auto;
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+}
+#dashboard-page .wd-link:hover {
+    color: #fff;
+}
+#dashboard-page .wd-body {
+    display: flex;
+    align-items: stretch;
+    gap: 28px;
+}
+#dashboard-page .wd-stats {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 36px;
+    align-items: center;
+}
+#dashboard-page .wd-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+#dashboard-page .wd-num {
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    color: #fff;
+    white-space: nowrap;
+}
+#dashboard-page .wd-label {
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.42);
+    white-space: nowrap;
+}
+#dashboard-page .wd-chart {
+    display: flex;
+    align-items: stretch;
+    gap: 10px;
+    padding-left: 28px;
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+#dashboard-page .wd-bar-col {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 6px;
+    width: 22px;
+}
+#dashboard-page .wd-bar {
+    width: 100%;
+    min-height: 6px;
+    border-radius: 6px;
+    background: linear-gradient(to top, rgba(var(--accent-rgb), 0.45), rgb(var(--accent-light-rgb)));
+}
+#dashboard-page .wd-day {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.35);
+}
+@media (max-width: 760px) {
+    #dashboard-page .wd-body {
+        flex-direction: column;
+    }
+    #dashboard-page .wd-chart {
+        padding-left: 0;
+        border-left: none;
+        padding-top: 16px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+}
+
+/* ── 3. LISTEN BAND — the station deck ──────────────────────────────── */
+/* Library Radio is a living station: spinning vinyl, dancing EQ, glowing
+   transport button. Your Mixes is a real card: kicker, title, and the
+   three genuine mix categories as rows. All motion is gated on the
+   reduce-effects / max-performance toggles + prefers-reduced-motion. */
+
+#dashboard-page .listen-band {
+    display: grid;
+    grid-template-columns: 1.55fr 1fr;
+    gap: 14px;
+}
+/* Radio hero: the station deck. */
+#dashboard-page .listen-hero {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 22px;
+    padding: 22px 26px;
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.01)),
+        linear-gradient(180deg, #0e1512, #090c0a);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.2s ease, transform 0.2s ease;
+}
+#dashboard-page .listen-hero:hover {
+    border-color: rgba(var(--accent-rgb), 0.45);
+    transform: translateY(-2px);
+}
+/* Vinyl: grooved disc with an accent label, slow spin. */
+#dashboard-page .listen-vinyl {
+    position: relative;
+    flex: none;
+    width: 78px;
+    height: 78px;
+    border-radius: 50%;
+    background:
+        radial-gradient(circle at 50% 50%, rgb(var(--accent-rgb)) 0 15%, #0a0c0a 15.5% 21%, transparent 21.5%),
+        repeating-radial-gradient(circle at 50% 50%, #16191b 0 2px, #0b0d0e 2px 4px);
+    box-shadow:
+        0 10px 26px rgba(0, 0, 0, 0.5),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+    animation: dash-vinyl-spin 26s linear infinite;
+}
+#dashboard-page .listen-vinyl::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: #05070a;
+    box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.55);
+}
+@keyframes dash-vinyl-spin {
+    to { transform: rotate(360deg); }
+}
+/* Kicker with a dancing EQ as the live indicator. */
+#dashboard-page .listen-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: rgb(var(--accent-light-rgb));
+    margin-bottom: 7px;
+}
+#dashboard-page .listen-kicker--muted {
+    color: rgba(244, 245, 247, 0.45);
+}
+#dashboard-page .listen-eq {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2.5px;
+    height: 12px;
+}
+#dashboard-page .listen-eq i {
+    width: 3px;
+    border-radius: 2px;
+    background: rgb(var(--accent-light-rgb));
+    transform-origin: bottom;
+    animation: dash-eq-bounce 1.1s ease-in-out infinite;
+}
+#dashboard-page .listen-eq i:nth-child(1) { height: 60%; animation-delay: 0s; }
+#dashboard-page .listen-eq i:nth-child(2) { height: 100%; animation-delay: 0.18s; }
+#dashboard-page .listen-eq i:nth-child(3) { height: 45%; animation-delay: 0.36s; }
+#dashboard-page .listen-eq i:nth-child(4) { height: 80%; animation-delay: 0.1s; }
+#dashboard-page .listen-eq i:nth-child(5) { height: 55%; animation-delay: 0.28s; }
+@keyframes dash-eq-bounce {
+    0%, 100% { transform: scaleY(0.35); }
+    50% { transform: scaleY(1); }
+}
+#dashboard-page .listen-hero-text {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+#dashboard-page .listen-hero-text strong {
+    font-size: 23px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: #fff;
+}
+#dashboard-page .listen-hero-text > span:last-child {
+    font-size: 12.5px;
+    color: rgba(244, 245, 247, 0.6);
+    max-width: 46ch;
+    margin-top: 4px;
+}
+/* Transport button: glowing, with a sonar ping. */
+#dashboard-page .listen-hero-play {
+    position: relative;
+    flex: none;
+    width: 66px;
+    height: 66px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    padding-left: 4px;
+    border-radius: 50%;
+    background: rgb(var(--accent-rgb));
+    color: #06130b;
+    box-shadow: 0 0 30px rgba(var(--accent-rgb), 0.35);
+    transition: transform 0.18s ease, background 0.18s ease;
+}
+#dashboard-page .listen-hero:hover .listen-hero-play {
+    background: rgb(var(--accent-light-rgb));
+    transform: scale(1.06);
+}
+#dashboard-page .listen-hero-play::after {
+    content: '';
+    position: absolute;
+    inset: -6px;
+    border-radius: 50%;
+    border: 2px solid rgba(var(--accent-rgb), 0.5);
+    animation: dash-play-ping 2.2s ease-out infinite;
+    pointer-events: none;
+}
+@keyframes dash-play-ping {
+    0% { transform: scale(0.85); opacity: 0.9; }
+    70%, 100% { transform: scale(1.28); opacity: 0; }
+}
+/* Mixes tile: kicker, title, and the three real mix categories. */
+#dashboard-page .listen-tile {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 4px;
+    padding: 22px 66px 22px 24px;
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.008)),
+        linear-gradient(180deg, #101312, #0a0c0b);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    transition: border-color 0.2s ease, transform 0.2s ease;
+}
+#dashboard-page .listen-tile:hover {
+    border-color: rgba(255, 255, 255, 0.18);
+    transform: translateY(-2px);
+}
+#dashboard-page .listen-tile-title {
+    font-size: 19px;
+    font-weight: 800;
+    letter-spacing: -0.015em;
+    color: #fff;
+}
+#dashboard-page .listen-mixrows {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    margin-top: 8px;
+}
+#dashboard-page .listen-mixrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 2px;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(244, 245, 247, 0.72);
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+#dashboard-page .listen-mixrow i {
+    width: 7px;
+    height: 7px;
+    flex: none;
+    border-radius: 50%;
+    background: rgb(var(--accent-rgb));
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.6);
+}
+#dashboard-page .listen-tile-arrow {
+    position: absolute;
+    right: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    color: rgba(244, 245, 247, 0.7);
+    transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+#dashboard-page .listen-tile:hover .listen-tile-arrow {
+    background: rgba(var(--accent-rgb), 0.16);
+    border-color: rgba(var(--accent-rgb), 0.45);
+    color: #fff;
+}
+/* Motion kill switch for the station deck. */
+body.reduce-effects #dashboard-page .listen-vinyl,
+body.max-performance #dashboard-page .listen-vinyl,
+body.reduce-effects #dashboard-page .listen-eq i,
+body.max-performance #dashboard-page .listen-eq i,
+body.reduce-effects #dashboard-page .listen-hero-play::after,
+body.max-performance #dashboard-page .listen-hero-play::after {
+    animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+    #dashboard-page .listen-vinyl,
+    #dashboard-page .listen-eq i,
+    #dashboard-page .listen-hero-play::after {
+        animation: none;
+    }
+}
+
+/* ── 4. RAILS — sleeve tiles under a masthead ─────────────────────────── */
+/* The rail header becomes a masthead: oversized title, count as an accent
+   chip, underline tabs instead of the segmented pill. The cards become
+   sleeve tiles — their own surface, framed artwork, metadata as micro
+   lines inside the tile. */
+
 #dashboard-page .dash-rail-head {
     display: flex;
     align-items: flex-end;
     justify-content: space-between;
     gap: 16px;
-    margin-bottom: 18px;
-    padding: 0 4px;
+    margin-bottom: 16px;
+    padding: 0 4px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 #dashboard-page .dash-rail-titleblock {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 4px;
     min-width: 0;
 }
 #dashboard-page .dash-rail-title {
     margin: 0;
     display: flex;
-    align-items: baseline;
-    gap: 10px;
-    font-size: 21px;
-    font-weight: 700;
-    letter-spacing: -0.015em;
-    color: #f4f5f7;
+    align-items: center;
+    gap: 12px;
+    font-size: 29px;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    color: #fff;
+    line-height: 1.05;
 }
 #dashboard-page .dash-rail-count {
-    font-size: 12.5px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    color: rgb(var(--accent-light-rgb));
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #06130b;
+    background: rgb(var(--accent-rgb));
+    border-radius: 999px;
+    padding: 4px 11px;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
 }
-/* The Recently Played title is the doorway to the full ledger — a quiet
-   button wearing the title's type, the underline on hover the only tell. */
 #dashboard-page .dash-rail-titlelink {
     appearance: none;
     background: none;
@@ -223,10 +701,8 @@
     text-align: left;
 }
 #dashboard-page .dash-rail-titlelink:hover {
-    color: #fff;
-    text-decoration: underline;
-    text-decoration-color: rgba(var(--accent-rgb), 0.6);
-    text-underline-offset: 4px;
+    color: rgb(var(--accent-light-rgb));
+    text-decoration: none;
 }
 #dashboard-page .dash-rail-titlelink:focus-visible {
     outline: 2px solid rgba(var(--accent-rgb), 0.7);
@@ -234,87 +710,172 @@
     border-radius: 4px;
 }
 #dashboard-page .dash-rail-subtitle {
-    font-size: 13px;
-    color: rgba(244, 245, 247, 0.5);
+    font-size: 12.5px;
+    color: rgba(244, 245, 247, 0.48);
     line-height: 1.45;
 }
 
-/* Segmented control — the premier idiom for a two-feed switcher. */
+/* Underline tabs — the segmented pill is gone. */
 #dashboard-page .dash-band-tabs {
     flex: none;
     display: flex;
-    gap: 2px;
-    padding: 3px;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    background: rgba(255, 255, 255, 0.04);
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+    gap: 20px;
+    padding: 0 2px;
+    border-radius: 0;
+    border: none;
+    background: none;
+    box-shadow: none;
 }
 #dashboard-page .dash-band-tab {
     appearance: none;
     border: none;
     background: none;
     margin: 0;
-    padding: 8px 18px;
-    border-radius: 999px;
+    padding: 8px 2px;
+    border-radius: 0;
+    border-bottom: 2px solid transparent;
     font: inherit;
     font-size: 13px;
-    font-weight: 600;
-    letter-spacing: 0.01em;
-    color: rgba(244, 245, 247, 0.55);
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    color: rgba(244, 245, 247, 0.5);
     cursor: pointer;
-    transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+    transition: color 0.18s ease, border-color 0.18s ease;
     text-decoration: none;
-    border-bottom: none;
 }
 #dashboard-page .dash-band-tab:hover {
     color: rgba(244, 245, 247, 0.9);
 }
 #dashboard-page .dash-band-tab.active {
-    background: rgba(255, 255, 255, 0.11);
+    background: none;
     color: #fff;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-    border-bottom: none;
+    border-bottom-color: rgb(var(--accent-rgb));
+    box-shadow: none;
 }
 #dashboard-page .dash-band-tab:focus-visible {
     outline: 2px solid rgba(var(--accent-rgb), 0.7);
     outline-offset: 2px;
 }
 
-/* The shelf itself: a touch more air between covers, slightly larger
-   cards, and a hover treatment with intent (lift + accent edge). */
+/* Rail cards in the confident product language (the reference): no chrome
+   at all. Artwork floats directly on the background; title / artist /
+   meta stack below in quiet sans. The art does all the talking. */
 #dashboard-page .dash-rail {
-    gap: 16px;
-    padding: 4px 4px 12px;
+    gap: 22px;
+    padding: 6px 4px 14px;
 }
 #dashboard-page .dash-rail .dash-rail-card {
-    width: 162px;
+    width: 168px;
     flex: none;
-    border-radius: 14px;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    aspect-ratio: auto;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    overflow: visible;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
 }
 #dashboard-page .dash-rail .dash-rail-card:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+    transform: none;
+    border: 0;
+    background: none;
+    box-shadow: none;
+}
+#dashboard-page .dash-rail-card .ya-card-img {
+    position: relative;
+    inset: auto;
+    aspect-ratio: 1 / 1;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 14px;
+    flex: none;
+    background: rgba(255, 255, 255, 0.05);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+#dashboard-page .dash-rail-card .ya-card-img::after {
+    display: none;
+}
+#dashboard-page .dash-rail-card .ya-card-img img {
+    transition: transform 0.3s ease;
+}
+#dashboard-page .dash-rail-card:hover .ya-card-img img {
+    transform: scale(1.03);
+}
+#dashboard-page .dash-rail-card .ya-card-gradient {
+    display: none;
+}
+#dashboard-page .dash-rail-card .ya-card-info {
+    position: static;
+    padding: 0 2px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    z-index: auto;
+}
+#dashboard-page .dash-rail-card .ya-card-name {
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.35;
+    color: #fff;
+    text-shadow: none;
+}
+#dashboard-page .dash-rail-card .ya-card-sub {
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    color: rgba(255, 255, 255, 0.55);
+}
+#dashboard-page .dash-rail-card .ya-card-sub--link:hover {
+    color: #fff;
+    text-decoration: underline;
+}
+/* Foot meta: small quiet gray, no caps, no rules, no dots. */
+#dashboard-page .dash-rail-badge {
+    order: 5;
+    font-size: 12px;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    color: rgba(255, 255, 255, 0.35);
+    margin-top: 6px;
+    padding-top: 0;
+    border-top: 0;
 }
 #dashboard-page .dash-rail-caption {
-    top: 10px;
-    right: 10px;
-    font-size: 10.5px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    padding: 4px 9px;
-    background: rgba(8, 8, 12, 0.68);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    position: static;
+    order: 6;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+    padding: 0 2px;
+    font-size: 12px;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    color: rgba(255, 255, 255, 0.35);
+    background: none;
+    border: none;
 }
-#dashboard-page .dash-rail-badge {
-    font-size: 10px;
-    letter-spacing: 0.06em;
-    color: rgba(244, 245, 247, 0.5);
-    margin-top: 3px;
+#dashboard-page .dash-rail-caption::before {
+    display: none;
+}
+#dashboard-page .dash-rail-card .ya-card-badges {
+    top: 10px;
+    left: 10px;
 }
 
-/* ── 3. RIGHT COLUMN — room to breathe ───────────────────────────────── */
+/* ── 5. RIGHT COLUMN — monitor panels ────────────────────────────────── */
+/* Layout skeleton untouched (376px column). The cards become flat monitor
+   panels with ruled headers; the sync health becomes a meter with tick
+   marks; rows become ledger entries; Up next rows become mini-panels; the
+   tiles become counter modules. */
 
 #dashboard-page .dash-layout {
     grid-template-columns: minmax(0, 1fr) 376px;
@@ -327,169 +888,245 @@
     gap: 20px;
 }
 #dashboard-page .dash-side-card {
-    padding: 26px;
-    border-radius: 22px;
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012));
+    padding: 22px 22px 20px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.32);
 }
 #dashboard-page .dash-side-head {
-    margin-bottom: 18px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
 }
 #dashboard-page .dash-side-title {
-    font-size: 16px;
-    font-weight: 650;
-    letter-spacing: -0.01em;
+    font-size: 14px;
+    font-weight: 750;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(244, 245, 247, 0.75);
 }
 #dashboard-page .dash-side-link {
-    font-size: 13px;
-    font-weight: 500;
+    font-size: 12.5px;
+    font-weight: 650;
+    color: rgb(var(--accent-light-rgb));
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
 }
 
-/* Sync health: calmer percentage, a bar with presence, rows that
-   breathe — 50px tall with larger art and real hover intent. */
+/* Sync health as a meter: display numeral, ticked track, hard-edged fill. */
 #dashboard-page .dash-sync-health {
-    gap: 12px;
-    margin-bottom: 18px;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+#dashboard-page .dash-sync-health-line {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 #dashboard-page .dash-sync-pct {
-    font-size: 30px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
+    font-size: 44px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    color: #fff;
 }
 #dashboard-page .dash-sync-of {
-    font-size: 13px;
-    max-width: 180px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(244, 245, 247, 0.45);
+    max-width: none;
 }
 #dashboard-page .dash-sync-bar {
-    height: 8px;
-    background: rgba(255, 255, 255, 0.07);
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+    height: 10px;
+    border-radius: 5px;
+    background:
+        repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.16) 0 1px, transparent 1px 10%),
+        rgba(255, 255, 255, 0.06);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4) inset;
+    overflow: hidden;
+}
+#dashboard-page .dash-sync-bar > span {
+    border-radius: 4px;
+    background: rgb(var(--accent-rgb));
 }
 #dashboard-page .dash-sync-sortbar {
-    margin: 0 0 8px;
+    margin: 0 0 6px;
 }
+#dashboard-page .dash-sync-sortbar select {
+    font-size: 12px;
+}
+/* Ledger rows: hairline dividers, larger art, status as pills. */
 #dashboard-page .dash-sync-rows {
-    gap: 2px;
+    gap: 0;
 }
 #dashboard-page .dash-sync-row {
-    grid-template-columns: 38px minmax(0, 1fr) auto;
-    min-height: 52px;
-    padding: 4px 8px 4px 4px;
-    border-radius: 12px;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    min-height: 58px;
+    padding: 9px 4px;
+    border-radius: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     transition: background 0.15s ease;
+    align-items: center;
+}
+#dashboard-page .dash-sync-row:last-child {
+    border-bottom: none;
 }
 #dashboard-page .dash-sync-row:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(255, 255, 255, 0.035);
 }
 #dashboard-page .dash-sync-row .syncband-art {
-    width: 38px;
-    height: 38px;
-    border-radius: 9px;
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
 }
 #dashboard-page .dash-sync-name {
-    font-size: 14px;
-    font-weight: 500;
-    letter-spacing: 0.005em;
+    font-size: 13.5px;
+    font-weight: 700;
+    letter-spacing: -0.005em;
 }
 #dashboard-page .dash-sync-missing {
-    font-size: 12.5px;
-    font-weight: 600;
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: 0.03em;
     font-variant-numeric: tabular-nums;
+    color: #fbbf24;
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.32);
+    border-radius: 999px;
+    padding: 4px 11px;
+    white-space: nowrap;
 }
 #dashboard-page .dash-sync-done {
-    font-size: 12.5px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgb(var(--accent-light-rgb));
+}
+#dashboard-page .dash-sync-live {
+    font-size: 11px;
+    font-weight: 750;
+    color: #06130b;
+    background: rgb(var(--accent-rgb));
+    border-radius: 999px;
+    padding: 4px 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
 }
 #dashboard-page .dash-side-more {
-    margin-top: 14px;
-    font-size: 13px;
+    margin-top: 12px;
+    font-size: 12.5px;
+    font-weight: 650;
 }
 
-/* Up next: the same flat-row language, taller and quieter. */
+/* Up next: mini-panels with a due-state pill. */
+#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
 #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-row {
-    padding: 11px 8px 11px 6px;
+    padding: 11px 12px;
     border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.025);
+    align-items: center;
+}
+#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-row:hover {
+    border-color: rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.045);
 }
 #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-name {
-    font-size: 14px;
-    font-weight: 550;
-    letter-spacing: 0.005em;
+    font-size: 13.5px;
+    font-weight: 700;
+    letter-spacing: -0.005em;
 }
 #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-last {
-    font-size: 12.5px;
+    font-size: 11.5px;
+    color: rgba(244, 245, 247, 0.45);
 }
 #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-when {
-    font-size: 12.5px;
-    font-weight: 600;
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
     font-variant-numeric: tabular-nums;
-    color: rgba(244, 245, 247, 0.65);
+    color: rgba(244, 245, 247, 0.6);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 999px;
+    padding: 5px 11px;
+    white-space: nowrap;
+}
+#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-dot {
+    width: 8px;
+    height: 8px;
 }
 
-/* Watchlist / wishlist tiles: true cards now, numerals with presence. */
+/* Watchlist / wishlist tiles: counter modules — big numeral, accent rule,
+   micro label. */
 #dashboard-page .dash-tiles.header-quick-nav {
     gap: 16px;
 }
 #dashboard-page .dash-tiles .dash-tile.header-button {
     min-height: 104px;
     padding: 20px;
-    border-radius: 18px;
-    gap: 6px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.32);
+    gap: 8px;
+    align-items: flex-start;
+    text-align: left;
 }
 #dashboard-page .dash-tiles .dash-tile .hero-btn-badge {
-    font-size: 30px;
-    font-weight: 750;
-    letter-spacing: -0.02em;
+    font-size: 38px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
     font-variant-numeric: tabular-nums;
+    line-height: 1;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+}
+#dashboard-page .dash-tiles .dash-tile .hero-btn-badge::after {
+    content: '';
+    width: 34px;
+    height: 3px;
+    border-radius: 2px;
+    background: rgb(var(--accent-rgb));
 }
 #dashboard-page .dash-tiles .dash-tile .hero-btn-label {
-    font-size: 13px;
-    font-weight: 500;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(244, 245, 247, 0.5);
 }
 #dashboard-page .dash-tiles .dash-tile-sub {
-    font-size: 12px;
+    font-size: 11.5px;
+    color: rgba(244, 245, 247, 0.45);
+    font-variant-numeric: tabular-nums;
 }
 
-/* ── 4. LISTEN BAND — light polish ───────────────────────────────────── */
-
-#dashboard-page .listen-band {
-    gap: 16px;
-}
-#dashboard-page .listen-hero {
-    padding: 20px 24px;
-    border-radius: 18px;
-    border: 1px solid rgba(var(--accent-rgb), 0.22);
-    background:
-        radial-gradient(120% 180% at 0% 0%, rgba(var(--accent-rgb), 0.16) 0%, rgba(var(--accent-rgb), 0.04) 55%, transparent 100%),
-        linear-gradient(165deg, rgba(15, 15, 20, 0.96), rgba(8, 8, 12, 0.99));
-}
-#dashboard-page .listen-hero-text strong {
-    font-size: 16px;
-    font-weight: 650;
-    letter-spacing: -0.01em;
-}
-#dashboard-page .listen-hero-text span {
-    font-size: 12.5px;
-}
-#dashboard-page .listen-tile {
-    padding: 18px 22px;
-    border-radius: 18px;
-}
-#dashboard-page .listen-tile-title {
-    font-size: 14px;
-    font-weight: 650;
-    letter-spacing: -0.01em;
-}
-
-/* ── 5. FOOTER — quieter ─────────────────────────────────────────────── */
+/* ── 6. FOOTER — quieter ─────────────────────────────────────────────── */
 
 #dashboard-page .dash-footer {
     margin-top: 12px;
     padding-top: 22px;
 }
 
-/* ── 6. RESPONSIVE ───────────────────────────────────────────────────── */
+/* ── 7. RESPONSIVE ───────────────────────────────────────────────────── */
 
-/* The wider side column stacks a little earlier so rows never squeeze. */
 @media (max-width: 1320px) {
     #dashboard-page .dash-layout {
         grid-template-columns: 1fr;
@@ -507,20 +1144,21 @@
 }
 
 @media (max-width: 960px) {
-    #dashboard-page .dash-hero .hello-greeting {
-        font-size: clamp(24px, 6vw, 30px);
+    #dashboard-page .hello-greet-name {
+        font-size: clamp(32px, 9vw, 42px);
     }
     #dashboard-page .dash-hero-number {
-        padding: 2px 18px;
+        min-width: 0;
+        padding: 10px 16px 9px;
     }
     #dashboard-page .dash-hero-number-value {
-        font-size: 21px;
+        font-size: 23px;
     }
-    /* The contained library bar stacks: status above, actions below. */
+    /* The console strip stacks: status above, actions below. */
     #dashboard-page .dash-hero-library .library-status-header {
         align-items: stretch;
         flex-direction: column;
-        padding: 14px 14px 12px 16px;
+        padding: 14px;
     }
     #dashboard-page .dash-hero-library .library-status-info {
         flex-wrap: wrap;
@@ -531,17 +1169,21 @@
     #dashboard-page .dash-hero-library .library-status-actions {
         justify-content: flex-start;
     }
-    /* Rail header stacks: title block above the segmented control. */
+    /* Masthead stacks: title block above the underline tabs. */
     #dashboard-page .dash-rail-head {
         flex-direction: column;
         align-items: flex-start;
-        gap: 12px;
+        gap: 10px;
     }
     #dashboard-page .dash-rail-title {
-        font-size: 19px;
+        font-size: 25px;
     }
     #dashboard-page .dash-side {
         grid-template-columns: 1fr;
+    }
+    #dashboard-page .listen-hero-play {
+        width: 54px;
+        height: 54px;
     }
 }
 
@@ -550,22 +1192,57 @@
         font-size: 10px;
     }
     #dashboard-page .dash-hero-numbers {
-        gap: 14px 0;
+        gap: 8px;
     }
     #dashboard-page .dash-hero-number {
-        padding: 2px 14px;
+        flex: 1 1 0;
+        padding: 10px 14px 9px;
     }
     #dashboard-page .dash-hero-number-value {
-        font-size: 19px;
+        font-size: 20px;
     }
     #dashboard-page .dash-rail .dash-rail-card {
         width: 138px;
     }
     #dashboard-page .dash-side-card {
-        padding: 20px;
+        padding: 18px;
+    }
+    #dashboard-page .dash-sync-pct {
+        font-size: 36px;
     }
 }
 
-/* The old 1260px hero/side stacking rules in style.css still apply where
-   they don't conflict; the 1320px rule above takes over the side-column
-   stacking slightly earlier for the wider rail. */
+/* ── 8. CHROMELESS — strip container backgrounds ─────────────────────── */
+/* Everything floats on the page background: no hero wash, no stat boxes,
+   no Plex strip fill, no rail panels, no side-card fills. Positions and
+   sizes unchanged — only the containers dissolve. */
+#dashboard-page .dashboard-header.dash-hero {
+    background: none;
+}
+/* Stat modules become bare text groups. */
+#dashboard-page .dash-hero-number {
+    background: none;
+    border: 0;
+    box-shadow: none;
+    padding: 2px 0;
+}
+/* Plex strip becomes a floating toolbar. */
+#dashboard-page .dash-hero-library .library-status-header {
+    background: none;
+    border: 0;
+    box-shadow: none;
+    padding: 8px 0;
+    max-width: none;
+}
+/* Rail panels dissolve — the shelf floats on the page. */
+#dashboard-page .dash-card--rail {
+    background: none;
+    border: 0;
+    box-shadow: none;
+}
+/* Right-column cards dissolve into floating panels. */
+#dashboard-page .dash-side-card {
+    background: none;
+    border: 0;
+    box-shadow: none;
+}

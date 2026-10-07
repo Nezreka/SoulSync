@@ -136,9 +136,19 @@ def build_detail_blob(detail: Optional[Dict[str, Any]], film: Dict[str, Any],
 
 
 # ── production seams ──────────────────────────────────────────────────────────
+def _profile() -> int:
+    """The automation owner's profile (the engine sets the background profile
+    to the owner before the run); degrades to admin on any failure."""
+    try:
+        from core.profile_context import get_current_profile_id
+        return int(get_current_profile_id() or 1)
+    except Exception:
+        return 1
+
+
 def _default_fetch_studios() -> List[Dict[str, Any]]:
     from api.video import get_video_db
-    return get_video_db().list_watchlist('studio')
+    return get_video_db().list_watchlist('studio', profile_id=_profile())
 
 
 def _default_fetch_films(company_id: Any) -> List[Dict[str, Any]]:
@@ -165,7 +175,7 @@ def _default_ignored_ids() -> List[Any]:
 
 def _default_wishlisted_status() -> Dict[int, str]:
     from api.video import get_video_db
-    return get_video_db().wishlisted_movie_status()
+    return get_video_db().wishlisted_movie_status(profile_id=_profile())
 
 
 def _default_add_movie(tmdb_id, title, *, year, poster_url, status, detail_json) -> bool:
@@ -173,7 +183,8 @@ def _default_add_movie(tmdb_id, title, *, year, poster_url, status, detail_json)
     from core.video.sources import resolve_video_server
     return get_video_db().add_movie_to_wishlist(
         tmdb_id, title, year=year, poster_url=poster_url, status=status,
-        detail_json=detail_json, server_source=resolve_video_server())
+        detail_json=detail_json, server_source=resolve_video_server(),
+        profile_id=_profile())
 
 
 def auto_video_scan_watchlist_studios(

@@ -59,7 +59,7 @@ def convert_results_to_spotify_tracks(
                 'album': spotify_data['album'],
                 'duration_ms': spotify_data.get('duration_ms', 0),
             }
-            for k in ('source', 'provider', 'isrc', 'release_date'):
+            for k in ('source', 'provider', 'isrc', 'release_date', 'disambiguation'):
                 if spotify_data.get(k) is not None:
                     track[k] = spotify_data[k]
                 elif result.get(k) is not None:
@@ -90,7 +90,7 @@ def convert_results_to_spotify_tracks(
                 'duration_ms': dur,
             }
             match_data = result.get('match_data') or result.get('matched_data') or {}
-            for k in ('source', 'provider', 'isrc', 'release_date'):
+            for k in ('source', 'provider', 'isrc', 'release_date', 'disambiguation'):
                 if result.get(k) is not None:
                     track[k] = result[k]
                 elif isinstance(match_data, dict) and match_data.get(k) is not None:

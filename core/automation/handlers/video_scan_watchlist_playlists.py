@@ -103,9 +103,20 @@ def select_playlist_video_gaps(
 
 
 # ── production seams ──────────────────────────────────────────────────────────
+def _profile() -> int:
+    """The automation owner's profile: the scan reads/writes its owner's
+    watchlist/wishlist (the engine sets the background profile to the owner
+    before the run)."""
+    try:
+        from core.profile_context import get_current_profile_id
+        return int(get_current_profile_id() or 1)
+    except Exception:
+        return 1
+
+
 def _default_fetch_playlists() -> List[Dict[str, Any]]:
     from api.video import get_video_db
-    return get_video_db().list_watchlist_playlists()
+    return get_video_db().list_watchlist_playlists(profile_id=_profile())
 
 
 def _default_fetch_videos(playlist_id: Any) -> List[Dict[str, Any]]:
@@ -127,7 +138,7 @@ def _default_fetch_videos(playlist_id: Any) -> List[Dict[str, Any]]:
 def _default_wishlisted_ids(playlist_id: Any) -> List[Any]:
     # parent_source_id holds the playlist id for playlist-sourced wishlist videos.
     from api.video import get_video_db
-    return get_video_db().wishlisted_video_ids_for_channel(playlist_id)
+    return get_video_db().wishlisted_video_ids_for_channel(playlist_id, profile_id=_profile())
 
 
 def _default_downloaded_ids(playlist_id: Any) -> List[Any]:
@@ -181,7 +192,8 @@ def _default_add_videos(playlist: Dict[str, Any], videos: List[Dict[str, Any]]) 
     """Wishlist under the PLAYLIST as the show (title = playlist name → playlist-as-show)."""
     from api.video import get_video_db
     from core.video.sources import resolve_video_server
-    return get_video_db().add_videos_to_wishlist(playlist, videos, server_source=resolve_video_server())
+    return get_video_db().add_videos_to_wishlist(
+        playlist, videos, server_source=resolve_video_server(), profile_id=_profile())
 
 
 def auto_video_scan_watchlist_playlists(

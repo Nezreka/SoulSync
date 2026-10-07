@@ -4,8 +4,11 @@ import re
 import requests
 import time
 import threading
+from contextlib import nullcontext
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Dict, List, Optional, Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 from core.http_error_status import http_error_status
 from utils.logging_config import get_logger
 
@@ -33,7 +36,13 @@ _ISRC_RE = re.compile(r'^[A-Z0-9]{12}$')
 # Global rate limiting variables
 _last_api_call_time = 0
 _api_call_lock = threading.Lock()
+_server_rate_states = {}
+_adaptive_inflight = threading.BoundedSemaphore(8)
 MIN_API_INTERVAL = 1.05  # MusicBrainz allows about 1 req/sec per egress IP.
+ADAPTIVE_START_RPS = 10.0
+ADAPTIVE_MIN_RPS = 0.5
+ADAPTIVE_GROWTH_WINDOW = 10.0
+MAX_REDIRECTS = 3
 DEFAULT_READ_TIMEOUT = 30.0
 DEFAULT_CONNECT_TIMEOUT = 5.0
 DEFAULT_MAX_RETRIES = 2
@@ -127,6 +136,71 @@ def _server_settings():
         _config_setting('SOULSYNC_MUSICBRAINZ_REQUEST_INTERVAL', 'musicbrainz.request_interval'))
 
 
+def _rate_state(base_url):
+    return _server_rate_states.setdefault(base_url, {
+        'rate': ADAPTIVE_START_RPS,
+        'cooldown_until': 0.0,
+        'successes': 0,
+        'window_started': time.monotonic(),
+        'latencies': [],
+        'best_p95': None,
+    })
+
+
+def _retry_after_seconds(response):
+    """Parse either HTTP Retry-After form; malformed values use normal backoff."""
+    value = getattr(response, 'headers', {}).get('Retry-After') if response is not None else None
+    if not value:
+        return None
+    try:
+        if value.isdecimal():
+            return float(value)
+        when = parsedate_to_datetime(value)
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _record_musicbrainz_result(base_url, interval, *, success=False, retry_delay=0, latency=None):
+    """Share server cooldown and adaptive pacing across client instances."""
+    with _api_call_lock:
+        state = _rate_state(base_url)
+        now = time.monotonic()
+        if retry_delay:
+            state['cooldown_until'] = max(state['cooldown_until'], now + retry_delay)
+            if interval == 0:
+                state['rate'] = max(ADAPTIVE_MIN_RPS, state['rate'] / 2)
+                state['successes'] = 0
+                state['window_started'] = now
+                state['latencies'].clear()
+            return
+        if not success or interval != 0:
+            return
+        state['successes'] += 1
+        if latency is not None:
+            state['latencies'].append(latency)
+        elapsed = now - state['window_started']
+        if elapsed >= ADAPTIVE_GROWTH_WINDOW:
+            latencies = sorted(state['latencies'])
+            if latencies:
+                p95 = latencies[int((len(latencies) - 1) * 0.95)]
+                best = state['best_p95']
+                state['best_p95'] = min(best, p95) if best is not None else p95
+            else:
+                p95 = 0
+            # Response times can climb before the server begins returning 503s.
+            if len(latencies) >= 20 and p95 > max(0.25, (state['best_p95'] or 0) * 3):
+                state['rate'] = max(ADAPTIVE_MIN_RPS, state['rate'] * 0.7)
+            elif state['successes'] >= max(20, state['rate'] * elapsed * 0.8):
+                # Grow only when callers have kept up with the target rate.
+                state['rate'] *= 1.15
+            state['successes'] = 0
+            state['window_started'] = now
+            state['latencies'].clear()
+
+
 def validate_server_settings(raw, raw_interval):
     """Normalize and validate a server URL and interval without network access."""
     try:
@@ -149,24 +223,31 @@ def validate_server_settings(raw, raw_interval):
             raise ValueError('expected finite nonnegative seconds')
     except (ValueError, TypeError) as exc:
         raise ValueError('Invalid musicbrainz.request_interval / SOULSYNC_MUSICBRAINZ_REQUEST_INTERVAL') from exc
-    hostname = parsed.hostname.lower().rstrip('.')
-    if hostname == 'musicbrainz.org' or hostname.endswith('.musicbrainz.org'):
+    if is_public_musicbrainz_server(url):
         interval = max(MIN_API_INTERVAL, interval)
     return url, interval
 
 
-def _wait_for_musicbrainz_slot(interval: float = MIN_API_INTERVAL) -> None:
+def is_public_musicbrainz_server(base_url):
+    hostname = (urlsplit(base_url).hostname or '').lower().rstrip('.')
+    return hostname == 'musicbrainz.org' or hostname.endswith('.musicbrainz.org')
+
+
+def _wait_for_musicbrainz_slot(interval: float = MIN_API_INTERVAL, base_url: str = '') -> None:
     global _last_api_call_time
 
-    with _api_call_lock:
-        current_time = time.monotonic()
-        time_since_last_call = current_time - _last_api_call_time
-
-        if time_since_last_call < interval:
-            sleep_time = interval - time_since_last_call
-            time.sleep(sleep_time)
-
-        _last_api_call_time = time.monotonic()
+    while True:
+        with _api_call_lock:
+            current_time = time.monotonic()
+            state = _rate_state(base_url)
+            effective_interval = 1 / state['rate'] if interval == 0 else interval
+            ready_at = max(_last_api_call_time + effective_interval, state['cooldown_until'])
+            if ready_at <= current_time:
+                _last_api_call_time = current_time
+                break
+            sleep_time = ready_at - current_time
+        # A cooldown may be extended by another caller while we wait.
+        time.sleep(sleep_time)
 
     from core.api_call_tracker import api_call_tracker
     api_call_tracker.record_call('musicbrainz')
@@ -211,22 +292,47 @@ class MusicBrainzClient:
         # Keep this pair local: an in-flight retry stays on its original server.
         base_url, interval = _server_settings()
         url = f"{base_url}{path}"
+        origin = urlsplit(base_url)
         attempts = self.max_retries + 1
         last_exc: Exception | None = None
 
         for attempt in range(attempts):
-            _wait_for_musicbrainz_slot(interval)
             try:
-                response = self.session.get(
-                    url,
-                    params=params,
-                    timeout=(self.connect_timeout, self.read_timeout),
-                    allow_redirects=False,
-                )
-                # Redirects must not send mirror traffic to an unpaced public server.
-                if 300 <= response.status_code < 400:
-                    raise requests.HTTPError(
-                        "MusicBrainz API redirected; configure its final base URL", response=response)
+                request_url = url
+                request_params = params
+                for redirect_count in range(MAX_REDIRECTS + 1):
+                    with _adaptive_inflight if interval == 0 else nullcontext():
+                        _wait_for_musicbrainz_slot(interval, base_url)
+                        started = time.monotonic()
+                        response = self.session.get(
+                            request_url,
+                            params=request_params,
+                            timeout=(self.connect_timeout, self.read_timeout),
+                            allow_redirects=False,
+                        )
+                        latency = time.monotonic() - started
+                    if not 300 <= response.status_code < 400:
+                        break
+                    location = response.headers.get('Location', '')
+                    target = urljoin(getattr(response, 'url', None) or request_url, location)
+                    parsed = urlsplit(target)
+                    # Merged MBIDs redirect to another recording on this server.
+                    # Never send mirror requests to another host or a new API root.
+                    if (response.status_code not in (301, 308)
+                            or parsed.scheme != origin.scheme
+                            or parsed.netloc != origin.netloc
+                            or not parsed.path.startswith(origin.path.rstrip('/') + '/recording/')
+                            or not urlsplit(request_url).path.startswith(origin.path.rstrip('/') + '/recording/')
+                            or redirect_count == MAX_REDIRECTS):
+                        raise requests.HTTPError(
+                            "MusicBrainz API redirected; configure its final base URL", response=response)
+                    if not parsed.query:
+                        original_query = urlsplit(getattr(response, 'url', None) or request_url).query
+                        if original_query:
+                            target = urlunsplit(parsed._replace(query=original_query))
+                    response.close()
+                    request_url = target
+                    request_params = None
                 response.raise_for_status()
                 # A 200 can still carry MusicBrainz's overload message instead
                 # of data (see MusicBrainzBusyError) — catch it here, in one
@@ -238,12 +344,18 @@ class MusicBrainzClient:
                     payload = None
                 if _looks_like_busy_body(payload):
                     raise MusicBrainzBusyError(str(payload.get('error')))
+                _record_musicbrainz_result(base_url, interval, success=True, latency=latency)
                 return response
             except Exception as exc:
                 last_exc = exc
-                if attempt >= self.max_retries or not _is_transient_musicbrainz_error(exc):
+                if not _is_transient_musicbrainz_error(exc):
                     raise
                 backoff = min(8.0, 2.0 * (2 ** attempt))
+                response = getattr(exc, 'response', None)
+                backoff = max(backoff, _retry_after_seconds(response) or 0)
+                _record_musicbrainz_result(base_url, interval, retry_delay=backoff)
+                if attempt >= self.max_retries:
+                    raise
                 logger.warning(
                     "MusicBrainz transient request failure; retrying in %.1fs (%s/%s): %s",
                     backoff,
@@ -380,6 +492,45 @@ class MusicBrainzClient:
 
         except Exception as e:
             logger.error(f"Error searching for release '{album_name}': {e}")
+            if raise_on_error:
+                raise
+            return []
+
+    def search_release_by_barcode(self, barcode: str, limit: int = 5,
+                                  raise_on_error: bool = False) -> List[Dict[str, Any]]:
+        """
+        Search for releases by commercial barcode (UPC / EAN).
+
+        Args:
+            barcode: Barcode string (e.g. UPC-A, EAN-13)
+            limit: Maximum number of results to return
+            raise_on_error: Whether to re-raise transport errors
+
+        Returns:
+            List of matching release dictionaries
+        """
+        clean_barcode = re.sub(r'[^0-9]', '', str(barcode or '')).strip()
+        if not clean_barcode:
+            return []
+
+        try:
+            params = {
+                'query': f'barcode:{clean_barcode}',
+                'fmt': 'json',
+                'limit': limit
+            }
+
+            response = self._get("/release", params=params)
+            response.raise_for_status()
+
+            data = response.json()
+            releases = data.get('releases', [])
+
+            logger.debug(f"Found {len(releases)} releases for barcode: {clean_barcode}")
+            return releases
+
+        except Exception as e:
+            logger.error(f"Error searching for release by barcode '{barcode}': {e}")
             if raise_on_error:
                 raise
             return []
@@ -734,13 +885,16 @@ class MusicBrainzClient:
             logger.error(f"Error fetching release-group {mbid}: {e}")
             return None
 
-    def get_recording(self, mbid: str, includes: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
+    def get_recording(self, mbid: str, includes: Optional[List[str]] = None,
+                      raise_on_error: bool = False) -> Optional[Dict[str, Any]]:
         """
         Get full recording details by MusicBrainz ID
         
         Args:
             mbid: MusicBrainz ID of the recording
             includes: Optional list of additional data to include
+            raise_on_error: Raise server and transport failures so callers can
+                distinguish them from a genuine 404. A 404 still returns None.
             
         Returns:
             Recording data or None if not found
@@ -756,6 +910,10 @@ class MusicBrainzClient:
             return response.json()
             
         except Exception as e:
+            if http_error_status(e) == 404:
+                return None
+            if raise_on_error:
+                raise
             logger.error(f"Error fetching recording {mbid}: {e}")
             return None
 

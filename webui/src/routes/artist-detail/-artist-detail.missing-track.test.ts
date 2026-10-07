@@ -63,6 +63,43 @@ describe('buildWishlistPayload', () => {
     expect(albumData.total_tracks).toBe(2);
     expect(albumData.release_date).toBe('');
   });
+
+  // #1569: a cast album's missing row is sung by someone else; searching with
+  // the page artist (Alan Menken) found nothing and filtered out the real file.
+  it("uses the row's own performers, not the page artist", () => {
+    const { wishlistTrack } = buildWishlistPayload(
+      {
+        id: 'missing-7-1-1',
+        deezer_id: '1913209787',
+        title: 'Arabian Nights (Remastered 2022)',
+        track_number: 1,
+        artists: [{ name: 'Bruce Adler' }],
+      } as EnhancedTrack,
+      { id: 7, tracks: [] } as EnhancedAlbum,
+      { id: 9, name: 'Alan Menken', imageUrl: '' },
+    );
+    expect(wishlistTrack.artists).toEqual([{ name: 'Bruce Adler' }]);
+  });
+
+  it('reads string credits and the canonical track, and falls back on an empty list', () => {
+    const fromSource = buildWishlistPayload(
+      {
+        id: 'r',
+        track_number: 1,
+        artists: [],
+        _sourceTrack: { artists: ['Robin Williams'] },
+      } as unknown as EnhancedTrack,
+      { id: 7 } as EnhancedAlbum,
+      ARTIST,
+    );
+    expect(fromSource.wishlistTrack.artists).toEqual([{ name: 'Robin Williams' }]);
+    const none = buildWishlistPayload(
+      { id: 'r', track_number: 1, artists: [] } as unknown as EnhancedTrack,
+      { id: 7 } as EnhancedAlbum,
+      ARTIST,
+    );
+    expect(none.wishlistTrack.artists).toEqual([{ name: 'Aphex Twin' }]);
+  });
 });
 
 describe('wishlistEnhancedMissingTrack', () => {
@@ -125,6 +162,18 @@ describe('the importer context', () => {
     expect(expected.spotify_track_id).toBe('sp-t');
     expect(expected.track_id).toBe('canon-1');
     expect(expected.artists).toEqual(['Aphex Twin']);
+  });
+
+  it("hands the importer the row's own performers (#1569)", () => {
+    const expected = buildExpectedTrack(
+      {
+        title: 'Arabian Nights',
+        track_number: 1,
+        artists: [{ name: 'Bruce Adler' }],
+      } as EnhancedTrack,
+      'Alan Menken',
+    );
+    expect(expected.artists).toEqual(['Bruce Adler']);
   });
 
   it('resolves the album source id in priority order and the disc count', () => {

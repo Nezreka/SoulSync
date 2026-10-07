@@ -61,7 +61,7 @@ jobs:
           python -m pip install -r requirements-dev.txt
           python -m ruff check --output-format=github .
           python -m compileall api core database services scripts web_server.py wsgi.py beatport_unified_scraper.py
-          python -m pytest
+          python -m pytest -n auto
 
       - name: Set up QEMU
         if: steps.recent.outputs.skip != 'true'

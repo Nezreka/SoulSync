@@ -65,6 +65,7 @@ def _make_soulsync_db():
             file_size INTEGER,
             track_artist TEXT,
             musicbrainz_recording_id TEXT,
+            recording_disambiguation TEXT,
             isrc TEXT,
             quality_profile_id INTEGER,
             server_source TEXT,
@@ -110,6 +111,8 @@ def test_record_soulsync_library_entry_writes_artist_album_and_track(tmp_path, m
             "name": "Song One",
             "track_number": 7,
             "duration_ms": 210000,
+            "musicbrainz_recording_id": "rec-acoustic",
+            "disambiguation": "Connect Sets acoustic",
             "artists": [{"name": "Guest Artist"}],
             "_source": "spotify",
         },
@@ -149,6 +152,8 @@ def test_record_soulsync_library_entry_writes_artist_album_and_track(tmp_path, m
     assert track_row["track_number"] == 7
     assert track_row["duration"] == 210000
     assert track_row["track_artist"] == "Guest Artist"
+    assert track_row["musicbrainz_recording_id"] == "rec-acoustic"
+    assert track_row["recording_disambiguation"] == "Connect Sets acoustic"
     assert track_row["album_id"] == album_row["id"]
     assert track_row["file_path"] == str(final_path)
     # File size in bytes — populates the Library Disk Usage card on Stats.
@@ -158,6 +163,27 @@ def test_record_soulsync_library_entry_writes_artist_album_and_track(tmp_path, m
     # No override on this item — NULL means "follow the app-wide default at
     # read time" (same semantics as wishlist_tracks.quality_profile_id).
     assert track_row["quality_profile_id"] is None
+
+
+def test_recording_identity_does_not_pair_a_stale_selected_comment_with_new_mbid():
+    context = {
+        "source": "musicbrainz",
+        "track_info": {"id": "rec-old", "disambiguation": "acoustic"},
+        "_embedded_id_tags": {"MUSICBRAINZ_RECORDING_ID": "rec-new"},
+    }
+    assert side_effects._recording_identity(context) == ("rec-new", None)
+
+
+def test_recording_identity_keeps_selected_musicbrainz_comment_without_tagging():
+    context = {
+        "source": "musicbrainz",
+        "track_info": {"id": "rec-acoustic", "disambiguation": "acoustic"},
+    }
+    assert side_effects._recording_identity(context) == ("rec-acoustic", "acoustic")
+
+    # A final MusicBrainz response with an empty value is authoritative.
+    context["_recording_disambiguation"] = ""
+    assert side_effects._recording_identity(context) == ("rec-acoustic", None)
 
 
 def test_record_soulsync_library_entry_estimates_opus_bitrate(tmp_path, monkeypatch):

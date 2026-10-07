@@ -490,7 +490,11 @@ CREATE TABLE IF NOT EXISTS video_watchlist (
     -- that are still airing are watched by default WITHOUT a row here.
     state       TEXT NOT NULL DEFAULT 'follow',
     date_added  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(kind, tmdb_id)
+    -- per-profile isolation (music side is per-profile; the video side was
+    -- global, so a non-admin saw the admin's list). Existing rows migrate to
+    -- profile 1 (admin).
+    profile_id  INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(profile_id, kind, tmdb_id)
 );
 CREATE INDEX IF NOT EXISTS idx_video_watchlist_kind ON video_watchlist(kind);
 
@@ -522,19 +526,19 @@ CREATE TABLE IF NOT EXISTS video_wishlist (
     parent_source_id TEXT,                   -- owning channel's youtube id (video rows)
     date_added     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     search_attempts INTEGER DEFAULT 0,       -- consecutive fruitless drain searches (reset on grab)
-    last_search_at  TEXT                     -- when the drain last searched this row
+    last_search_at  TEXT,                    -- when the drain last searched this row
+    -- per-profile isolation (music side is per-profile; the video side was
+    -- global, so a non-admin saw the admin's list). Existing rows migrate to
+    -- profile 1 (admin).
+    profile_id      INTEGER NOT NULL DEFAULT 1
 );
 -- one row per movie, one per (show, season, episode), one per youtube video —
 -- partial uniques so the shapes don't collide and re-adding is an idempotent upsert.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_video_wishlist_movie
-    ON video_wishlist(tmdb_id) WHERE kind = 'movie';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_video_wishlist_episode
-    ON video_wishlist(tmdb_id, season_number, episode_number) WHERE kind = 'episode';
-CREATE INDEX IF NOT EXISTS idx_video_wishlist_show ON video_wishlist(tmdb_id) WHERE kind = 'episode';
--- NOTE: the source_id / parent_source_id partial indexes are created in code
+-- NOTE: the profile-scoped partial indexes are created in code
 -- (VideoDatabase._ensure_indexes) AFTER the column migrations run — they can't
 -- live here because this script runs via executescript() BEFORE the ALTERs, so
--- on an upgraded DB the columns wouldn't exist yet.
+-- on an upgraded DB the profile_id column wouldn't exist yet.
+CREATE INDEX IF NOT EXISTS idx_video_wishlist_show ON video_wishlist(tmdb_id) WHERE kind = 'episode';
 
 -- ── Derived views: Watchlist / Wishlist / Calendar ──────────────────────────
 -- WATCHLIST = things you follow for NEW content: monitored shows + channels.
@@ -816,13 +820,18 @@ CREATE TABLE IF NOT EXISTS video_requests (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     profile_id     INTEGER NOT NULL DEFAULT 1,
     requester_name TEXT,
-    kind           TEXT NOT NULL,                  -- movie | show
-    tmdb_id        INTEGER NOT NULL,
+    kind           TEXT NOT NULL,                  -- movie | show | episode | youtube
+    tmdb_id        INTEGER NOT NULL,             -- 0 for youtube (no tmdb id)
     title          TEXT NOT NULL,
     year           INTEGER,
     poster_url     TEXT,
     note           TEXT,                           -- the requester's "why"
     monitor        TEXT DEFAULT 'future',          -- shows: P2 monitor policy applied on approve
+    season_number  INTEGER,                      -- episode requests: which season
+    episode_number INTEGER,                      -- episode requests: which episode
+    youtube_id     TEXT,                         -- youtube requests: the video id
+    channel_youtube_id TEXT,                    -- youtube requests: channel id
+    channel_title  TEXT,                         -- youtube requests: channel name
     status         TEXT NOT NULL DEFAULT 'pending',-- pending | approved | denied
     admin_response TEXT,
     resolved_by    INTEGER,

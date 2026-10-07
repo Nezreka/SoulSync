@@ -8,6 +8,11 @@ from core.metadata import registry as metadata_registry
 from core.metadata.album_tracks import get_album_tracks_for_source
 from core.metadata.discography import _extract_release_artist_name
 from core.metadata.lookup import MetadataLookupOptions
+# Release-kind compatibility for the single-completion kind gate — the same
+# rule the import folder-reuse fix uses: a known single-vs-album mismatch is
+# never the same release; unknown on either side stays lenient.
+from core.library.existing_album_folder import _release_kinds_compatible
+from database.music_database import strip_single_kind_suffix
 from utils.logging_config import get_logger
 
 logger = get_logger("metadata.completion")
@@ -222,6 +227,37 @@ def _library_album_by_source_id(db, card_source, card_id, candidate_albums, id_m
                     want, card_source, album.id, col)
                 return album
     return None
+
+
+def _stored_release_kind(db: Any, album_id: Any) -> str:
+    """The library album row's known release kind, '' when unknown.
+
+    ``record_type`` is the populated column (enrichment workers backfill it:
+    album / single / ep / compilation); ``album_type`` is legacy/unwritten in
+    current code but checked anyway in case an older DB carries it. Each
+    column is queried separately because ``album_type`` may not exist at all
+    on fresh DBs — one missing column must not hide the other.
+    """
+    for col in ("record_type", "album_type"):
+        try:
+            conn = db._get_connection()
+            try:
+                row = conn.execute(
+                    f"SELECT {col} FROM albums WHERE id = ?", (str(album_id),)
+                ).fetchone()
+            finally:
+                try:
+                    conn.close()
+                except Exception:  # noqa: S110 - cleanup only
+                    pass
+        except Exception:
+            continue
+        # Strip before the truthiness check: a whitespace-only value is
+        # unknown and must fall through to the next column, not return "".
+        val = str(row[0]).strip() if row and row[0] else ""
+        if val:
+            return val.lower()
+    return ""
 
 
 def _get_canonical_memoized(db, local_album_id: Any, canonical_cache: Optional[dict] = None) -> Optional[dict]:
@@ -650,6 +686,7 @@ def check_single_completion(
                         candidate_tracks=candidate_tracks,
                         metadata_source=source_override,
                         card_source_id=single_id,
+                        strip_single_kind=(album_type == 'single'),
                     )
                 except TypeError:
                     db_album, confidence, owned_tracks, expected_tracks, is_complete, formats = db.check_album_exists_with_completeness(
@@ -668,6 +705,9 @@ def check_single_completion(
                 db_album = None
 
             # #1071 identity proof — same rescue as the album path.
+            # (Rescue success is certain proof of the release, so the gates
+            # below skip proven rows.)
+            id_proven = False
             if db_album is None:
                 _proven = _library_album_by_source_id(
                     db, source_chain[0] if source_chain else None,
@@ -676,6 +716,7 @@ def check_single_completion(
                 if _proven is not None:
                     db_album = _proven
                     confidence = 1.0
+                    id_proven = True
                     try:
                         owned_tracks, expected_tracks, is_complete, formats = db.check_album_completeness(
                             _proven.id, total_tracks if total_tracks > 0 else None,
@@ -683,21 +724,86 @@ def check_single_completion(
                     except TypeError:
                         owned_tracks, expected_tracks, is_complete, formats = db.check_album_completeness(
                             _proven.id, total_tracks if total_tracks > 0 else None)
+
+            # Single-type cards (2-3 track singles reach this branch): the
+            # same release-kind gate + track-count guard as the 1-track path.
+            # A single is never satisfied by a known album-kind row or a 4+
+            # track row — the reported bug shape, one branch over. Unknown
+            # kinds/counts stay lenient. EP-type cards keep today's behavior.
+            if db_album is not None and not id_proven and album_type == 'single':
+                _ep_stored_kind = _stored_release_kind(db, getattr(db_album, 'id', None))
+                _ep_killed = False
+                if not _release_kinds_compatible('single', _ep_stored_kind):
+                    logger.debug(
+                        "Single '%s': library row '%s' is a known %s, not the single — missing",
+                        single_name, getattr(db_album, 'title', '?'),
+                        _ep_stored_kind or 'unknown')
+                    _ep_killed = True
                 else:
-                    # EP is not in the library at all — mark missing immediately without
-                    # making expensive external HTTP calls to count tracks on an unowned EP.
-                    return {
-                        "id": single_id,
-                        "name": single_name,
-                        "status": "missing",
-                        "owned_tracks": 0,
-                        "expected_tracks": total_tracks or 0,
-                        "completion_percentage": 0,
-                        "confidence": 0.0,
-                        "found_in_db": False,
-                        "type": album_type,
-                        "formats": [],
-                    }
+                    # Count guard, scaled to the card's own size: a
+                    # single-shaped card (<=3 tracks) is never a 4+ track
+                    # row; a larger card is never a row larger than itself.
+                    # Unknown row counts stay lenient. An unknown CARD size
+                    # stays lenient for EP-shaped rows — but a single is
+                    # never an album-shaped row (>6 tracks, the codebase EP
+                    # cutoff), even when the card can't be sized: without
+                    # this, unknown count + unknown kind lets the
+                    # 0.6-edition completeness rule bless the album row as
+                    # the single — the reported bug, one branch over. A row
+                    # positively known as a single is still trusted (the
+                    # #1289 12-track-single shape).
+                    _ep_row_tc = getattr(db_album, 'track_count', None) or 0
+                    if total_tracks > 0 and _ep_row_tc > max(total_tracks, 3):
+                        logger.debug(
+                            "Single '%s': library row '%s' has %s tracks — not the single",
+                            single_name, getattr(db_album, 'title', '?'),
+                            getattr(db_album, 'track_count', '?'))
+                        _ep_killed = True
+                    elif (total_tracks == 0 and _ep_row_tc > 6
+                            and _ep_stored_kind != 'single'):
+                        logger.debug(
+                            "Single '%s': library row '%s' has %s tracks and the card "
+                            "size is unknown — not the single",
+                            single_name, getattr(db_album, 'title', '?'),
+                            getattr(db_album, 'track_count', '?'))
+                        _ep_killed = True
+                if _ep_killed:
+                    # Gate killed the fuzzy match — re-run the #1071 rescue
+                    # before giving up (same tie-break hazard as the 1-track
+                    # path).
+                    _proven = _library_album_by_source_id(
+                        db, source_chain[0] if source_chain else None,
+                        single_id, candidate_albums,
+                        id_map_cache=album_source_ids_cache)
+                    if _proven is not None:
+                        db_album = _proven
+                        confidence = 1.0
+                        id_proven = True
+                        try:
+                            owned_tracks, expected_tracks, is_complete, formats = db.check_album_completeness(
+                                _proven.id, total_tracks if total_tracks > 0 else None,
+                                completeness_cache=completeness_cache)
+                        except TypeError:
+                            owned_tracks, expected_tracks, is_complete, formats = db.check_album_completeness(
+                                _proven.id, total_tracks if total_tracks > 0 else None)
+                    else:
+                        db_album = None
+
+            if db_album is None:
+                # EP is not in the library at all — mark missing immediately without
+                # making expensive external HTTP calls to count tracks on an unowned EP.
+                return {
+                    "id": single_id,
+                    "name": single_name,
+                    "status": "missing",
+                    "owned_tracks": 0,
+                    "expected_tracks": total_tracks or 0,
+                    "completion_percentage": 0,
+                    "confidence": 0.0,
+                    "found_in_db": False,
+                    "type": album_type,
+                    "formats": [],
+                }
 
             if total_tracks == 0:
                 card_source = source_chain[0] if source_chain else None
@@ -752,25 +858,148 @@ def check_single_completion(
                 "formats": formats,
             }
         else:
+            # Release-aware ownership for 1-track singles (discord, SeadogsBooty:
+            # Yellowcard's "Ocean Avenue" single vs the album's title track).
+            # A single whose song is also on an album is still missing unless
+            # the SINGLE release itself is in the library. The old track-wide
+            # check_track_exists credited the album copy, so the artist page
+            # said OWNED while the download analysis (owned_release_tracks,
+            # release-level) correctly said missing.
+            db_track = None
+            confidence = 0.0
+            single_owned = False
             try:
                 from core.settings import config_manager
 
                 active_server = config_manager.get_active_media_server()
-                db_track, confidence = db.check_track_exists(
-                    title=single_name,
-                    artist=artist_name,
-                    confidence_threshold=0.7,
-                    server_source=active_server,
-                    candidate_tracks=candidate_tracks,
-                )
+
+                if completeness_cache is None and candidate_albums and candidate_tracks and hasattr(db, 'build_candidate_completeness_cache'):
+                    completeness_cache = db.build_candidate_completeness_cache(candidate_albums, candidate_tracks)
+
+                expected_year = _release_year_of(single_data)
+                try:
+                    db_album, album_confidence, _o, _e, _c, _f = db.check_album_exists_with_completeness(
+                        title=single_name,
+                        artist=artist_name,
+                        expected_track_count=1,
+                        confidence_threshold=0.7,
+                        server_source=active_server,
+                        candidate_albums=candidate_albums,
+                        strict_discography_match=True,
+                        expected_year=expected_year,
+                        completeness_cache=completeness_cache,
+                        candidate_tracks=candidate_tracks,
+                        metadata_source=source_override,
+                        card_source_id=single_id,
+                        strip_single_kind=(album_type == 'single'),
+                    )
+                except TypeError:
+                    db_album, album_confidence, _o, _e, _c, _f = db.check_album_exists_with_completeness(
+                        title=single_name,
+                        artist=artist_name,
+                        expected_track_count=1,
+                        confidence_threshold=0.7,
+                        server_source=active_server,
+                        candidate_albums=candidate_albums,
+                        strict_discography_match=True,
+                        expected_year=expected_year,
+                    )
+
+                id_proven = False
+
+                def _run_id_rescue():
+                    # #1071 identity proof — the card's provider id equaling
+                    # a library row's stored id for that source is certain
+                    # proof of the same release. Returns (row, confidence,
+                    # proven).
+                    _proven = _library_album_by_source_id(
+                        db, source_chain[0] if source_chain else None,
+                        single_id, candidate_albums,
+                        id_map_cache=album_source_ids_cache)
+                    if _proven is not None:
+                        return _proven, 1.0, True
+                    return None, None, False
+
+                if db_album is None:
+                    _proven, _conf, _ok = _run_id_rescue()
+                    if _ok:
+                        db_album, album_confidence, id_proven = _proven, _conf, True
+
+                if db_album is not None and not id_proven:
+                    _stored_kind = _stored_release_kind(db, getattr(db_album, 'id', None))
+                    # Release-kind gate (single cards only): a single is never
+                    # satisfied by a known album-kind row — the #1289 Deezer
+                    # reissue-date exemption can skip the year gate for a
+                    # same-titled album. Unknown kinds stay lenient.
+                    if album_type == 'single' and not _release_kinds_compatible(album_type, _stored_kind):
+                        logger.debug(
+                            "Single '%s': library row '%s' is a known %s, not the single — missing",
+                            single_name, getattr(db_album, 'title', '?'),
+                            _stored_kind or 'unknown')
+                        db_album = None
+                    # Track-count guard: a 1-track card is never the same
+                    # release as a 4+ track row (codebase single/EP/album
+                    # cutoffs: <=3 single, <=6 EP). Unknown counts stay lenient.
+                    elif (getattr(db_album, 'track_count', None) or 0) > 3:
+                        logger.debug(
+                            "Single '%s': library row '%s' has %s tracks — not the single",
+                            single_name, getattr(db_album, 'title', '?'),
+                            getattr(db_album, 'track_count', '?'))
+                        db_album = None
+                    if db_album is None:
+                        # The gate killed the fuzzy match — but the id proof
+                        # is the stronger signal (a same-year reissue album +
+                        # single can tie at confidence 1.0 with the album
+                        # returned first). Re-run the rescue before giving up.
+                        _proven, _conf, _ok = _run_id_rescue()
+                        if _ok:
+                            db_album, album_confidence, id_proven = _proven, _conf, True
+
+                if db_album is not None:
+                    # Owned only if the single's track is ON THAT RELEASE —
+                    # score the title against the release's tracks, never the
+                    # whole artist library.
+                    _album_id = getattr(db_album, 'id', None)
+                    release_tracks = [t for t in (candidate_tracks or [])
+                                      if getattr(t, 'album_id', None) == _album_id]
+                    if not release_tracks and _album_id is not None:
+                        try:
+                            release_tracks = db.get_candidate_tracks_for_albums([_album_id]) or []
+                        except Exception:
+                            release_tracks = []
+                    if release_tracks:
+                        # The card name may carry the release-kind marker the
+                        # library file tags don't ("Ocean Avenue (Single)" vs
+                        # "Ocean Avenue") — strip it with the same single-kind
+                        # stripper the release lookup uses, or the track check
+                        # vetoes the 1.0-confidence release match. Single cards
+                        # only: an album/EP card keeps its literal title.
+                        _lookup_title = (
+                            strip_single_kind_suffix(single_name)
+                            if album_type == 'single' else single_name
+                        )
+                        db_track, confidence = db.check_track_exists(
+                            title=_lookup_title,
+                            artist=artist_name,
+                            confidence_threshold=0.7,
+                            server_source=active_server,
+                            candidate_tracks=release_tracks,
+                        )
+                        single_owned = db_track is not None
+                    else:
+                        # Release matched but its tracks aren't enumerable;
+                        # the release itself is in the library — credit it.
+                        single_owned = True
+                        confidence = album_confidence
             except Exception as db_error:
                 logger.error(f"Database error for single '{single_name}': {db_error}")
                 db_track, confidence = None, 0.0
+                single_owned = False
 
-            owned_tracks = 1 if db_track else 0
+            owned_tracks = 1 if single_owned else 0
             expected_tracks = 1
-            completion_percentage = 100 if db_track else 0
-            status = "completed" if db_track else "missing"
+            completion_percentage = 100 if single_owned else 0
+            status = "completed" if single_owned else "missing"
 
             if db_track and db_track.file_path:
                 import os
@@ -796,7 +1025,7 @@ def check_single_completion(
                 "expected_tracks": expected_tracks,
                 "completion_percentage": round(completion_percentage, 1),
                 "confidence": round(confidence, 2) if confidence else 0.0,
-                "found_in_db": db_track is not None,
+                "found_in_db": single_owned,
                 "type": album_type,
                 "formats": formats,
             }
@@ -887,6 +1116,20 @@ def iter_artist_discography_completion_events(
             logger.debug("Failed pre-fetching album source IDs: %s", _s_err)
 
     _loop_start = _time_metadata.perf_counter()
+    # #1550: resolve the artist's effective watchlist filter preferences ONCE
+    # for the whole stream (not per release — get_watchlist_artists is a full
+    # table scan). missing releases the scan would deliberately skip get
+    # labeled with the exclusion reason instead of a bare "missing".
+    _wl_content_settings = None
+    try:
+        from core.metadata.discography_filters import (
+            attach_watchlist_exclusion,
+            resolve_watchlist_content_settings,
+        )
+
+        _wl_content_settings = resolve_watchlist_content_settings(db, resolved_artist_name)
+    except Exception as _wl_err:
+        logger.debug("watchlist exclusion labels disabled: %s", _wl_err)
     for album in albums:
         try:
             completion_data = check_album_completion(
@@ -906,6 +1149,15 @@ def iter_artist_discography_completion_events(
             )
             completion_data['type'] = 'album_completion'
             completion_data['container_type'] = 'albums'
+            if _wl_content_settings is not None:
+                try:
+                    attach_watchlist_exclusion(
+                        completion_data,
+                        _wl_content_settings,
+                        album.get('name', ''),
+                    )
+                except Exception as _exc1550a:
+                    logger.debug("watchlist exclusion label skipped: %s", _exc1550a)
             processed_count += 1
             completion_data['progress'] = round((processed_count / total_items) * 100, 1) if total_items else 100
             yield completion_data
@@ -936,6 +1188,21 @@ def iter_artist_discography_completion_events(
             )
             completion_data['type'] = 'single_completion'
             completion_data['container_type'] = 'singles'
+            # #1550: a release the user's own watchlist filters exclude
+            # (e.g. a remix with include_remixes off, or singles with
+            # include_singles off) is deliberately skipped by the scan but
+            # shows here as bare "missing" — which reads as a broken
+            # scanner. label it with the exclusion reason so the user sees
+            # WHY the scan will never pick it up.
+            if _wl_content_settings is not None:
+                try:
+                    attach_watchlist_exclusion(
+                        completion_data,
+                        _wl_content_settings,
+                        single.get('name', ''),
+                    )
+                except Exception as _exc1550s:
+                    logger.debug("watchlist exclusion label skipped: %s", _exc1550s)
             processed_count += 1
             completion_data['progress'] = round((processed_count / total_items) * 100, 1) if total_items else 100
             yield completion_data

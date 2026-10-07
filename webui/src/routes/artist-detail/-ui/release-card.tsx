@@ -81,7 +81,10 @@ export function ReleaseCard({ release, isMusicBrainz, isSourceArtist, onOpen, on
       </button>
 
       {overlay ? (
-        <div className={`completion-overlay ${overlay.className}`}>
+        <div
+          className={`completion-overlay ${overlay.className}`}
+          title={overlay.title ?? undefined}
+        >
           <span className="completion-status">{overlay.label}</span>
         </div>
       ) : null}

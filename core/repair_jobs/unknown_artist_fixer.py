@@ -11,6 +11,7 @@ import sys
 import uuid
 
 from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
+from core.imports.paths import config_root_path
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -145,6 +146,7 @@ class UnknownArtistFixerJob(RepairJob):
             placeholders, names = self._unknown_sql(context)
             cursor.execute(f"""
                 SELECT t.id, t.title, t.file_path, t.track_number, t.duration,
+                       t.owner_profile_id,
                        ar.id as artist_id, ar.name as artist_name,
                        al.id as album_id, al.title as album_title, al.year,
                        al.thumb_url as album_thumb,
@@ -193,11 +195,22 @@ class UnknownArtistFixerJob(RepairJob):
 
             # Resolve actual file on disk via the shared library resolver
             # (picks up library.music_paths + Plex library locations).
+            # #1504: pass the owning library root when known.
             from core.library.path_resolver import resolve_library_file_path
+            _owner_root = None
+            _owner_pid = track.get('owner_profile_id')
+            if _owner_pid:
+                try:
+                    _lib = context.db.get_profile_library(int(_owner_pid))
+                    if _lib.get('mode') == 'own' and _lib.get('root'):
+                        _owner_root = config_root_path(_lib['root'])
+                except Exception as exc:
+                    logger.debug("owner root lookup failed: %s", exc)
             resolved = resolve_library_file_path(
                 file_path,
                 transfer_folder=transfer,
                 config_manager=context.config_manager,
+                library_root=_owner_root,
             )
             if not resolved or not os.path.exists(resolved):
                 result.skipped += 1
@@ -504,6 +517,17 @@ class UnknownArtistFixerJob(RepairJob):
                    expected_rel, transfer, fix_tags, reorganize_files):
         """Apply the fix: re-tag file, move to correct path, update DB."""
         track_id = track['id']
+        # #1504: the fixed file belongs in the owning profile's library,
+        # not necessarily the shared transfer folder.
+        target_root = transfer
+        owner_pid = track.get('owner_profile_id')
+        if owner_pid:
+            try:
+                lib = context.db.get_profile_library(int(owner_pid))
+                if lib.get('mode') == 'own' and lib.get('root'):
+                    target_root = config_root_path(lib['root'])
+            except Exception as exc:
+                logger.debug("own-library root lookup failed: %s", exc)
 
         # Step 1: Write corrected tags to file
         if fix_tags:
@@ -532,7 +556,7 @@ class UnknownArtistFixerJob(RepairJob):
         # Step 2: Move file to correct location
         final_path = resolved_path
         if reorganize_files and expected_rel:
-            expected_abs = os.path.normpath(os.path.join(transfer, expected_rel))
+            expected_abs = os.path.normpath(os.path.join(target_root, expected_rel))
             current_norm = os.path.normpath(resolved_path)
 
             if current_norm.lower() != expected_abs.lower():
@@ -576,6 +600,7 @@ class UnknownArtistFixerJob(RepairJob):
 
                     # Clean up empty directories — never a configured root (staging /
                     # download / transfer), even when nested and empty (#976).
+                    # #1504: also never an own-library root.
                     try:
                         from core.imports.file_ops import protected_root_dirs
                         protected = {os.path.normpath(p) for p in protected_root_dirs() if p}
@@ -584,6 +609,11 @@ class UnknownArtistFixerJob(RepairJob):
                     parent = os.path.dirname(current_norm)
                     transfer_norm = os.path.normpath(transfer)
                     protected.add(transfer_norm)
+                    # #1504: protect the target library root (own or shared) too.
+                    try:
+                        protected.add(os.path.normpath(target_root))
+                    except Exception as exc:
+                        logger.debug("protect target root failed: %s", exc)
                     for _ in range(5):
                         if (parent and os.path.isdir(parent)
                                 and os.path.normpath(parent) not in protected
@@ -617,10 +647,19 @@ class UnknownArtistFixerJob(RepairJob):
                         corrected_artist.strip() or 'unknown'
                     )
                     new_artist_id = f"artist_local_{safe_artist_name}_{uuid.uuid4().hex[:8]}"
-                    cursor.execute(
-                        "INSERT INTO artists (id, name) VALUES (?, ?)",
-                        (new_artist_id, corrected_artist),
-                    )
+                    # #1504: the retagged artist belongs to the same library
+                    # as the track being fixed.
+                    try:
+                        cursor.execute(
+                            "INSERT INTO artists (id, name, owner_profile_id) VALUES (?, ?, ?)",
+                            (new_artist_id, corrected_artist, owner_pid),
+                        )
+                    except Exception:
+                        # older/minimal schemas without the column
+                        cursor.execute(
+                            "INSERT INTO artists (id, name) VALUES (?, ?)",
+                            (new_artist_id, corrected_artist),
+                        )
 
                 # Update track's artist_id and file_path
                 cursor.execute("""
@@ -646,6 +685,18 @@ class UnknownArtistFixerJob(RepairJob):
                 # Update album artist_id to match
                 cursor.execute("UPDATE albums SET artist_id = ? WHERE id = ?",
                                (new_artist_id, track['album_id']))
+
+                # #1504: the retagged album belongs to the same library as
+                # the track being fixed.
+                if owner_pid:
+                    try:
+                        cursor.execute(
+                            "UPDATE albums SET owner_profile_id = ? WHERE id = ?",
+                            (int(owner_pid), track['album_id']),
+                        )
+                    except Exception as exc:
+                        # older/minimal schemas without the column
+                        logger.debug("album owner stamp failed: %s", exc)
 
                 conn.commit()
                 logger.info(f"DB updated: track {track_id} → artist '{corrected_artist}'")

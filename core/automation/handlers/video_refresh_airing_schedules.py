@@ -22,12 +22,55 @@ from typing import Any, Callable, Dict, List, Optional
 
 from core.automation.deps import AutomationDeps
 
+from core.automation.handlers.video_run_guard import VideoRunGuard
+
+# Overlap guard: the engine skips a run while this is True (busy).
+_RUN_GUARD = VideoRunGuard(timeout_seconds=7200)  # refresh can take a while
+
+
+def is_refresh_already_running() -> bool:
+    """Guard for the engine: True if a refresh run is in progress."""
+    return _RUN_GUARD()
+
+
 
 def _default_fetch_shows() -> List[Dict[str, Any]]:
     """Production wiring: the still-airing watchlist shows that live in the library."""
     from api.video import get_video_db
+    from core.profile_context import get_current_profile_id
     from core.video.sources import resolve_video_server
-    return get_video_db().watchlist_continuing_shows(resolve_video_server())
+    from core.automation.handlers.video_profile_fanout import extra_profiles
+    try:
+        pid = int(get_current_profile_id() or 1)
+    except Exception:
+        pid = 1
+    db = get_video_db()
+    server = resolve_video_server()
+    shows = db.watchlist_continuing_shows(server, profile_id=pid)
+    # the watchlist is per-profile: the admin-owned run also refreshes the
+    # shows other profiles follow, each show once.
+    try:
+        others = extra_profiles(pid, db.watchlist_profile_ids(['show']))
+    except Exception:   # noqa: BLE001 - can't list followers: refresh the owner's like before
+        others = []
+    seen = {s.get('library_id') for s in shows}
+    for other in others:
+        for s in db.watchlist_continuing_shows(server, profile_id=other) or []:
+            if s.get('library_id') not in seen:
+                seen.add(s.get('library_id'))
+                shows.append(s)
+    return shows
+
+
+def _stamp_refresh() -> bool:
+    """Stamp the receipt: the calendar reads this to say whether the window it
+    is drawing is current. Returns False if the stamp could not be written."""
+    try:
+        from api.video import get_video_db
+        get_video_db().mark_airing_schedule_refreshed()
+        return True
+    except Exception:   # noqa: BLE001 - a missing receipt must not fail the run
+        return False
 
 
 def _default_refresh_show(library_id: Any) -> Dict[str, Any]:
@@ -56,52 +99,52 @@ def auto_video_refresh_airing_schedules(
     the airing automation's calendar read is current.
 
     Returns ``{'status': 'completed', 'refreshed': int, 'failed': int, 'shows': int, ...}``."""
-    fetch_shows = fetch_shows or _default_fetch_shows
-    refresh_show = refresh_show or _default_refresh_show
-    automation_id = config.get('_automation_id')
-    try:
-        deps.update_progress(automation_id, phase='Finding shows to refresh…', progress=8,
-                             log_line='Reading your watchlist for still-airing shows', log_type='info')
-        shows = fetch_shows() or []
-        total = len(shows)
-        if not total:
-            deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
-                                 log_line='No airing shows on your watchlist to refresh', log_type='success')
-            return {'status': 'completed', 'refreshed': 0, 'failed': 0, 'shows': 0,
-                    '_manages_own_progress': True}
+    with _RUN_GUARD:
+        fetch_shows = fetch_shows or _default_fetch_shows
+        refresh_show = refresh_show or _default_refresh_show
+        automation_id = config.get('_automation_id')
+        try:
+            deps.update_progress(automation_id, phase='Finding shows to refresh…', progress=8,
+                                 log_line='Reading your watchlist for still-airing shows', log_type='info')
+            shows = fetch_shows() or []
+            total = len(shows)
+            if not total:
+                # Nothing to refresh means the calendar is trivially current — stamp
+                # it, otherwise "empty watchlist" degrades into "stale" forever.
+                _stamp_refresh()
+                deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
+                                     log_line='No airing shows on your watchlist to refresh', log_type='success')
+                return {'status': 'completed', 'refreshed': 0, 'failed': 0, 'shows': 0,
+                        '_manages_own_progress': True}
 
-        refreshed = failed = 0
-        for i, s in enumerate(shows):
-            title = s.get('title') or ('show %s' % s.get('library_id'))
-            deps.update_progress(
-                automation_id, phase='Refreshing TV schedules…', progress=10 + int(i / total * 85),
-                log_line="Pulling the latest episodes for '%s'  (%d/%d)" % (title, i + 1, total),
-                log_type='info')
-            try:
-                ok = bool((refresh_show(s.get('library_id')) or {}).get('ok'))
-            except Exception:   # noqa: BLE001 - one show failing must not stop the rest
-                ok = False
-            if ok:
-                refreshed += 1
-            else:
-                failed += 1
+            refreshed = failed = 0
+            for i, s in enumerate(shows):
+                title = s.get('title') or ('show %s' % s.get('library_id'))
+                deps.update_progress(
+                    automation_id, phase='Refreshing TV schedules…', progress=10 + int(i / total * 85),
+                    log_line="Pulling the latest episodes for '%s'  (%d/%d)" % (title, i + 1, total),
+                    log_type='info')
+                try:
+                    ok = bool((refresh_show(s.get('library_id')) or {}).get('ok'))
+                except Exception:   # noqa: BLE001 - one show failing must not stop the rest
+                    ok = False
+                if ok:
+                    refreshed += 1
+                else:
+                    failed += 1
 
-        # Stamp the receipt: the calendar reads this to say whether the window it
-        # is drawing is current. Only on a run that actually refreshed something -
-        # a run that failed every show has not made the calendar any truer.
-        if refreshed:
-            try:
-                from api.video import get_video_db
-                get_video_db().mark_airing_schedule_refreshed()
-            except Exception:   # noqa: BLE001 - a missing receipt must not fail the run
+            # Stamp the receipt if anything got fresher. A run that failed every show
+            # has not made the calendar any truer — no stamp. (The zero-show early
+            # return above stamps: nothing to refresh is trivially current.)
+            if refreshed and not _stamp_refresh():
                 deps.update_progress(automation_id, log_type='warning',
                                      log_line='Schedules refreshed, but the calendar '
                                               'freshness stamp could not be written')
-        done = 'Refreshed %d show schedule(s)' % refreshed + (' · %d failed' % failed if failed else '')
-        deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
-                             log_line=done, log_type='success')
-        return {'status': 'completed', 'refreshed': refreshed, 'failed': failed, 'shows': total,
-                '_manages_own_progress': True}
-    except Exception as e:  # noqa: BLE001
-        deps.update_progress(automation_id, status='error', phase='Error', log_line=str(e), log_type='error')
-        return {'status': 'error', 'error': str(e), '_manages_own_progress': True}
+            done = 'Refreshed %d show schedule(s)' % refreshed + (' · %d failed' % failed if failed else '')
+            deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
+                                 log_line=done, log_type='success')
+            return {'status': 'completed', 'refreshed': refreshed, 'failed': failed, 'shows': total,
+                    '_manages_own_progress': True}
+        except Exception as e:  # noqa: BLE001
+            deps.update_progress(automation_id, status='error', phase='Error', log_line=str(e), log_type='error')
+            return {'status': 'error', 'error': str(e), '_manages_own_progress': True}

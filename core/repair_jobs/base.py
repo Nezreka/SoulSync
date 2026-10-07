@@ -120,6 +120,33 @@ def walk_library(root: str):
         yield dirpath, dirnames, [f for f in filenames if not is_appledouble(f)]
 
 
+def all_library_roots(context) -> list:
+    """Every library root a walking maintenance job should cover: the shared
+    transfer folder first, then each own-library root. #1504: walking only
+    the shared folder left own libraries invisible to maintenance jobs.
+
+    Returns a list of absolute paths. Own roots that are missing/empty are
+    skipped. The shared root is always first so default behavior (no own
+    libraries) is exactly today's single-root walk.
+    """
+    roots = []
+    transfer = getattr(context, 'transfer_folder', None)
+    if transfer:
+        roots.append(transfer)
+    try:
+        db = getattr(context, 'db', None)
+        if db and hasattr(db, 'get_own_library_profiles'):
+            for prof in db.get_own_library_profiles() or []:
+                root = prof.get('root')
+                if root and os.path.isdir(root):
+                    # avoid double-walking if an own root equals shared
+                    if os.path.normpath(root) not in {os.path.normpath(r) for r in roots}:
+                        roots.append(root)
+    except Exception as exc:
+        logger.debug("all_library_roots own-profile lookup failed: %s", exc)
+    return roots
+
+
 # hand-tagged releases ("tag it yourself"): the user typed every tag for a
 # bootleg or live recording no service knows. jobs that would match it to a
 # service, renumber it, or offer to delete it must leave it alone.
@@ -163,6 +190,20 @@ def not_locked_sql(cursor, table: str, alias: str = '') -> str:
     col = f"{alias}.metadata_locked" if alias else 'metadata_locked'
     return f" AND COALESCE({col}, 0) = 0"
 
+
+
+# a discover playlist leaves one or two loose tracks per artist. that's not
+# the user asking for the artist, so jobs that fill a whole discography or
+# album need a stronger sign (#1572). the watchlist is the deliberate one.
+
+def watchlist_artist_names(cursor) -> set:
+    """casefolded names of every watched artist, any profile. no table (old
+    schema, test double) means nobody is watched"""
+    try:
+        cursor.execute("SELECT artist_name FROM watchlist_artists")
+        return {str(r[0]).strip().casefold() for r in cursor.fetchall() if r[0]}
+    except Exception:  # noqa: BLE001
+        return set()
 
 @dataclass
 class JobResult:

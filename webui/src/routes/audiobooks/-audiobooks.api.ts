@@ -675,7 +675,7 @@ export async function restoreRecycledBook(name: string): Promise<{ ok: boolean; 
     return { ok: Boolean(data?.success), error: data?.error || '' };
   } catch (err) {
     console.error('Failed to restore the book:', err);
-    return { ok: false, error: 'Request failed' };
+    return { ok: false, error: err instanceof Error ? err.message : 'Request failed' };
   }
 }
 
@@ -776,7 +776,9 @@ export async function grabRelease(
     return { ok: Boolean(data?.success), error: data?.error || '', ref: data?.ref || '' };
   } catch (err) {
     console.error('Failed to grab the release:', err);
-    return { ok: false, error: 'Request failed', ref: '' };
+    // readJson put the server's reason on the error (already owned, the
+    // download client refused, disk full). "Request failed" hid all of them.
+    return { ok: false, error: err instanceof Error ? err.message : 'Request failed', ref: '' };
   }
 }
 

@@ -1,11 +1,16 @@
 """Tests for the BPM backfill repair job (#1476)."""
+import json
 import sys
 import os
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from core.repair_jobs.bpm_backfill import BpmBackfillJob
 from core.repair_jobs import get_all_jobs
+from core.repair_worker import RepairWorker
+from database.music_database import MusicDatabase
 
 
 def test_job_registered():
@@ -48,3 +53,47 @@ def test_estimate_scope_counts_missing_bpm():
     job = BpmBackfillJob()
     # 2 tracks with missing BPM (NULL and 0); empty title excluded
     assert job.estimate_scope(FakeContext()) == 2
+
+
+@pytest.mark.parametrize('track_id', ['navidrome-track-abc', '42'])
+def test_fix_finding_writes_bpm_for_text_track_id(tmp_path, track_id):
+    """Both opaque and digit-only track IDs must survive the fix path."""
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    with db._get_connection() as conn:
+        conn.execute("INSERT INTO artists (id, name) VALUES ('artist-1', 'Artist')")
+        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES ('album-1', 'artist-1', 'Album')")
+        conn.execute(
+            "INSERT INTO tracks (id, album_id, artist_id, title, server_source) "
+            "VALUES (?, 'album-1', 'artist-1', 'Song', 'navidrome')", (track_id,)
+        )
+        finding_id = conn.execute(
+            "INSERT INTO repair_findings "
+            "(job_id, finding_type, entity_type, entity_id, title, details_json) "
+            "VALUES ('bpm_backfill', 'bpm_backfill', 'track', ?, 'Missing BPM', ?)",
+            (track_id, json.dumps({'track_id': track_id, 'found_fields': {'bpm': 112.3}})),
+        ).lastrowid
+
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = db
+    worker._config_manager = None
+    result = worker.fix_finding(finding_id)
+
+    with db._get_connection() as conn:
+        track = conn.execute('SELECT bpm FROM tracks WHERE id = ?', (track_id,)).fetchone()
+        finding = conn.execute('SELECT status FROM repair_findings WHERE id = ?', (finding_id,)).fetchone()
+    assert result['success'] is True
+    assert track['bpm'] == 112.3
+    assert finding['status'] == 'resolved'
+
+
+def test_metadata_fix_does_not_claim_success_when_track_is_gone(tmp_path):
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = db
+
+    result = worker._fix_metadata_gap(
+        'track', 'missing-track-id', None, {'found_fields': {'bpm': 112.3}}
+    )
+
+    assert result['success'] is False
+    assert 'not found' in result['error']

@@ -140,9 +140,16 @@ def test_endpoint_is_conservative_and_additive():
     # other-source fetches carry NO artist name — the per-source lookup has an
     # internal search-by-name fallback, and a stale id must mean "no gap-fill",
     # never a name search that could pick the wrong artist
-    assert "def _fetch(source, source_artist_id, name='')" in fn
+    # (#1450: _fetch grew a dedup_variants keyword so the BASE fetch can mirror
+    # the page's dedup setting; others keep the default)
+    assert "def _fetch(source, source_artist_id, name='', dedup_variants=True)" in fn
     assert "_fetch(source, artist_source_ids[source])" in fn      # others: nameless
     assert "name=artist_name" in fn                               # base keeps the name
+    # #1450: the base fetch mirrors the page's dedup setting so the
+    # edition-supersede computation sees the same release set the page
+    # annotated; other sources keep the deduped default
+    assert "dedup_variants=base_dedup_variants" in fn
+    assert fn.count("dedup_variants=base_dedup_variants") == 2    # both base paths
     # #1068 follow-up: with no explicit base_source, the base resolves the way
     # the PAGE does (no override → ragnarlotus's library-source setting picks),
     # and the answering source is read back and excluded from gap candidates

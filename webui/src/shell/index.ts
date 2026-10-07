@@ -49,6 +49,7 @@ import {
 import {
   closeDownloadOriginsModal,
   deleteSelectedOriginEntries,
+  removeSelectedOriginEntries,
   openDownloadOriginsModal,
   switchDownloadOriginTab,
   toggleAllOriginEntries,
@@ -56,6 +57,7 @@ import {
   toggleOriginGroup,
 } from './origin-history';
 import './server-activity';
+import { initPlexSignIn } from './plex-signin';
 import {
   closeServiceSwitchModal,
   openServiceSwitchModal,
@@ -63,12 +65,20 @@ import {
   setActiveSource,
   switchServiceSwitchTab,
 } from './service-switch';
+import {
+  bootSidebarWeather,
+  getWeatherPreview,
+  initSidebarWeather,
+  setWeatherPreview,
+  weatherPreviewPresets,
+} from './sidebar-weather';
 import { closeTrackDetail, openTrackDetail } from './track-detail';
 import {
   closeWatchlistHistoryModal,
   openWatchlistHistoryModal,
   toggleWatchlistHistoryRun,
 } from './watchlist-history';
+import { initWeatherPreviewSettings } from './weather-preview-settings';
 
 /** every name the rest of the app may reach through window. */
 export const SHELL_WINDOW_EXPORTS = {
@@ -87,6 +97,7 @@ export const SHELL_WINDOW_EXPORTS = {
   toggleOriginEntry,
   toggleAllOriginEntries,
   deleteSelectedOriginEntries,
+  removeSelectedOriginEntries,
   // watchlist-history.js (ported aug 26)
   openWatchlistHistoryModal,
   closeWatchlistHistoryModal,
@@ -128,7 +139,25 @@ export const SHELL_WINDOW_EXPORTS = {
   patchChatMessages,
   // the Discover inbox badge (sept 26)
   refreshDiscoverInboxBadge,
+  // the sidebar weather line + particle scene (oct 6)
+  initSidebarWeather,
+  // re-runnable boot, called from settings.js after a location/enabled change
+  bootSidebarWeather,
+  // settings > advanced > developer: preview any sky in this tab
+  getWeatherPreview,
+  setWeatherPreview,
+  weatherPreviewPresets,
 } as const;
 
 Object.assign(window, SHELL_WINDOW_EXPORTS);
 startDiscoverInboxBadge();
+initSidebarWeather();
+const onReady = () => {
+  initWeatherPreviewSettings();
+  void initPlexSignIn();
+};
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', onReady, { once: true });
+} else {
+  onReady();
+}

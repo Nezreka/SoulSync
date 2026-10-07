@@ -116,6 +116,9 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='dashboard-premier.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='profiles.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='docs.css', v=static_v) }}">
+    <!-- Sidebar weather: time/temp/condition line, forecast popover, particle
+         scene. Additive — only #sidebar-weather-* selectors inside. -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='sidebar-weather.css', v=static_v) }}">
     <style id="soulsync-initial-appearance">
         :root {
             --accent-rgb: {{ initial_accent_rgb }};
@@ -197,6 +200,11 @@
                     autocomplete="current-password" maxlength="200" style="letter-spacing: normal;"
                     onkeydown="if(event.key==='Enter') submitLogin()">
                 <button id="login-submit" class="launch-pin-submit" onclick="submitLogin()">Sign in</button>
+                <!-- shown when sign in with plex is on (webui/src/shell/plex-signin.ts) -->
+                <div id="login-plex" class="login-plex" hidden>
+                    <span class="login-plex-or">or</span>
+                    <button id="login-plex-button" type="button" class="login-plex-button">Sign in with Plex</button>
+                </div>
                 <p id="login-error" class="launch-pin-error" style="display: none;"></p>
                 <button class="launch-pin-forgot" onclick="showLoginRecovery()">Forgot password?</button>
             </div>
@@ -327,6 +335,7 @@
                         </svg>
                     </button>
                 </div>
+                <!-- sidebar weather mounts here (#sidebar-weather-line) -->
             </div>
             <!-- Everything below the header scrolls as ONE block. The header used to
                  be a sticky child of the scrolling .sidebar, which put it in its own
@@ -3779,16 +3788,24 @@
                                                         as settings are saved.</small>
                                                 </div>
                                                 <div class="form-group">
-                                                    <label for="musicbrainz-request-interval">MusicBrainz request
-                                                        interval (seconds)</label>
-                                                    <input type="number" id="musicbrainz-request-interval" min="0"
-                                                        step="any" value="1.05"
-                                                        aria-describedby="musicbrainz-interval-help">
-                                                    <small class="settings-hint" id="musicbrainz-interval-help">Use 0.1
-                                                        for up to 10 requests/second on your server, or 0 for no delay.
+                                                    <label for="musicbrainz-rate-mode">MusicBrainz request rate</label>
+                                                    <select id="musicbrainz-rate-mode"
+                                                        onchange="updateMusicBrainzRateControls()"
+                                                        aria-describedby="musicbrainz-rate-help">
+                                                        <option value="fixed">Fixed limit</option>
+                                                        <option value="adaptive">No limit (adaptive)</option>
+                                                    </select>
+                                                    <label for="musicbrainz-request-rate">Maximum requests/second</label>
+                                                    <input type="number" id="musicbrainz-request-rate" min="0.001"
+                                                        step="any" value="1" aria-describedby="musicbrainz-rate-help">
+                                                    <small class="settings-hint" id="musicbrainz-rate-help">For a fixed
+                                                        limit, enter requests/second (for example, 10). With No limit
+                                                        (adaptive), SoulSync will try to find the maximum number of
+                                                        requests/second your server can handle. Only use this when you
+                                                        host the MusicBrainz server yourself and it has no other traffic.
                                                         Public MusicBrainz always keeps its rate limit. Environment
                                                         overrides take precedence over these fields. Your server needs
-                                                        search indexes; use its final URL without redirects.</small>
+                                                        search indexes; use its final URL.</small>
                                                 </div>
 
                                             </div>
@@ -4337,6 +4354,9 @@
                                                 <div class="form-actions">
                                                     <button id="plex-config-action-button" class="detect-button"
                                                         onclick="clearPlexConfiguration()">Clear Configuration</button>
+                                                    <button id="plex-relink-button" class="detect-button"
+                                                        onclick="startPlexRelink()"
+                                                        title="Get a fresh token through plex.tv/link. Your server URL stays as it is.">Re-link with Plex</button>
                                                 </div>
                                             </div>
                                             <div id="plex-setup">
@@ -5094,6 +5114,18 @@
                                                         slskd when over 200 entries.
                                                         Disable if you want to keep manual searches in slskd's
                                                         queue.</small>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>slskd Cleanup Scope:</label>
+                                                    <select id="soulseek-cleanup-scope">
+                                                        <option value="own">Only SoulSync's own transfers</option>
+                                                        <option value="all">Everything in slskd</option>
+                                                    </select>
+                                                    <small class="settings-hint">Which transfers and searches cleanup
+                                                        removes. Leave on "own" if other apps (Lidarr, another
+                                                        SoulSync, slskd's own UI) share this slskd. "Everything" clears
+                                                        all clients' finished downloads and is only safe when SoulSync
+                                                        is the only user.</small>
                                                 </div>
                                                 <div class="form-actions" style="margin-top: 8px;">
                                                     <button class="test-button"
@@ -7163,7 +7195,7 @@
                                                 <div class="form-group">
                                                     <label class="checkbox-label">
                                                         <input type="checkbox" id="auto-disambiguation" checked>
-                                                        Automatically add release disambiguation to the album folder
+                                                        Automatically add disambiguation to folder and filenames
                                                     </label>
                                                     <span class="info-icon" role="button" tabindex="0"
                                                         title="What's this?" onclick="toggleSettingHelp(this)"
@@ -7172,8 +7204,12 @@
                                                         release carries a MusicBrainz disambiguation (edition note)
                                                         and your template doesn't place
                                                         <code>$disambiguation</code> itself, it is added to the
-                                                        album folder automatically. This keeps same-named releases
-                                                        in their own folders — turn it off and your template is
+                                                        album folder automatically. When a recording carries its own
+                                                        disambiguation (version note, like &ldquo;acoustic&rdquo;)
+                                                        and your template doesn't place
+                                                        <code>$track_disambiguation</code> itself, it is added to the
+                                                        track filename automatically. This keeps same-named releases
+                                                        and same-titled recordings apart — turn it off and your template is
                                                         respected exactly as written.</small>
                                                 </div>
 
@@ -7194,8 +7230,12 @@
                                                         <code>$disambiguation</code> (the release's edition note, like
                                                         &ldquo;baby punk version&rdquo;; added to the album folder
                                                         automatically when your template leaves it out, unless
-                                                        &ldquo;Automatically add release disambiguation&rdquo;
-                                                        above is turned off). The
+                                                        &ldquo;Automatically add disambiguation&rdquo;
+                                                        above is turned off),
+                                                        <code>$track_disambiguation</code> (the recording's version
+                                                        note, like &ldquo;acoustic&rdquo;; added to the filename
+                                                        automatically when your template leaves it out, unless the
+                                                        same toggle above is turned off). The
                                                         three disc variables work in a folder segment as well as in the
                                                         filename and are empty on a single-disc album, so
                                                         <code>$albumartist/$album/Disc $discnum/$track - $title</code>
@@ -7885,6 +7925,18 @@
                                                     left alone —
                                                     no needless renames. Turn off to match the metadata source exactly.
                                                 </div>
+                                                <label class="toggle-row" style="margin-top: 10px;">
+                                                    <input type="checkbox" id="write-artist-nfo">
+                                                    <span>Write artist.nfo (Jellyfin / Kodi / Emby)</span>
+                                                </label>
+                                                <div class="help-text" style="margin-top: 6px;">
+                                                    When an import creates an artist folder, also write a Kodi-format
+                                                    <em>artist.nfo</em> containing the artist's name and MusicBrainz
+                                                    artist ID, so Jellyfin / Kodi / Emby identify the artist instead
+                                                    of guessing by name. An existing <em>artist.nfo</em> with a
+                                                    different ID is never overwritten. To backfill folders you
+                                                    already have, run the <em>Artist NFO Backfill</em> repair job.
+                                                </div>
                                             </div>
 
                                         </div>
@@ -8305,7 +8357,7 @@
                                                                     onchange="toggleServiceTags(this, 'musicbrainz')">
                                                                 MusicBrainz
                                                             </label>
-                                                            <span class="tag-service-count">18 tags</span>
+                                                            <span class="tag-service-count">19 tags</span>
                                                         </div>
                                                         <div class="tag-service-body" style="display:none;">
                                                             <label class="checkbox-label"><input type="checkbox"
@@ -8320,6 +8372,9 @@
                                                             <label class="checkbox-label"><input type="checkbox"
                                                                     data-config="musicbrainz.tags.release_comment" checked>
                                                                 Release Comment</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="musicbrainz.tags.recording_comment" checked>
+                                                                Recording Comment</label>
                                                             <label class="checkbox-label"><input type="checkbox"
                                                                     data-config="musicbrainz.tags.release_group_id"
                                                                     checked> Release Group ID</label>
@@ -8381,6 +8436,19 @@
                                                                     data-config="musicbrainz.tags.genres" checked>
                                                                 Genres</label>
                                                         </div>
+                                                    </div>
+
+                                                    <label class="toggle-row" style="margin: 8px 0 2px;">
+                                                        <input type="checkbox" id="mb-use-original-date-for-date">
+                                                        <span>Use original release date for DATE</span>
+                                                    </label>
+                                                    <div class="help-text" style="margin-top: 6px;">
+                                                        Beets-style: write the MusicBrainz release-group's
+                                                        first-release-date as the DATE tag instead of the downloaded
+                                                        edition's date (a 2016 reissue of a 2010 album gets 2010).
+                                                        The original date is still kept in ORIGINALDATE either way,
+                                                        and a more precise same-year date is never replaced by a
+                                                        vaguer one.
                                                     </div>
 
                                                     <!-- Deezer -->
@@ -9157,6 +9225,31 @@
                                                         for instances exposed to the internet.
                                                     </div>
                                                 </div>
+
+                                                <div class="form-group">
+                                                    <label class="toggle-label">
+                                                        <input type="checkbox" id="security-plex-signin">
+                                                        <span>Sign in with Plex</span>
+                                                    </label>
+                                                    <div class="setting-help-text">
+                                                        Adds a "Sign in with Plex" button to the sign-in screen. Anyone
+                                                        with access to your Plex server signs in with their Plex account
+                                                        (SoulSync never sees their password), and their playlists sync to
+                                                        their own Plex account. The server's owner signs in as the admin.
+                                                        New Plex profiles start with Discover, Search, Library, Wishlist,
+                                                        Stats, Help and Issues; widen them per person under Profiles.
+                                                        Needs Plex as a media server and internet access to plex.tv.
+                                                    </div>
+                                                    <label class="toggle-label" style="margin-top: 8px;">
+                                                        <input type="checkbox" id="security-plex-signin-auto-create" checked>
+                                                        <span>Let new Plex users sign up (off: only people who already
+                                                            have a Plex profile here can sign in)</span>
+                                                    </label>
+                                                    <label class="toggle-label">
+                                                        <input type="checkbox" id="security-plex-signin-can-download">
+                                                        <span>New Plex profiles can download (off: request-only)</span>
+                                                    </label>
+                                                </div>
                                             </div>
 
                                             <!-- ── Reverse proxy & remote access ── -->
@@ -9652,6 +9745,121 @@
                                             </div>
                                         </div>
                                     </div><!-- end Artwork Cache body -->
+
+                                    <!-- Sidebar Weather (collapsible tile) -->
+                                    <div class="settings-section-header collapsed" data-stg="advanced"
+                                        onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
+                                        role="button" tabindex="0" aria-expanded="false">
+                                        <span class="settings-section-arrow">&#9660;</span>
+                                        <h3>Sidebar Weather</h3>
+                                        <span class="settings-section-hint">Time, temp &amp; forecast line</span>
+                                    </div>
+                                    <div class="settings-section-body collapsed" data-stg="advanced">
+                                        <div class="settings-group" data-stg="advanced">
+
+                                            <div class="form-group">
+                                                <label>Location:</label>
+                                                <div style="display: flex; gap: 8px;">
+                                                    <input type="text" id="sw-location"
+                                                        placeholder="ZIP or city, e.g. 97501 or Medford">
+                                                    <button class="test-button"
+                                                        onclick="saveSidebarWeatherLocation()">Save</button>
+                                                    <button class="test-button"
+                                                        onclick="clearSidebarWeatherLocation()">Clear</button>
+                                                </div>
+                                                <div class="help-text">
+                                                    No API keys, no setup beyond this — the server looks up the
+                                                    location and fetches the forecast (Open-Meteo, cached 30 min).
+                                                    Clear to turn the feature off.
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label for="sw-enabled"
+                                                    style="display:flex;align-items:center;gap:8px;">
+                                                    <input type="checkbox" id="sw-enabled" checked
+                                                        onchange="toggleSidebarWeatherEnabled()">
+                                                    Show weather in the sidebar
+                                                </label>
+                                            </div>
+                                            <div class="help-text">
+                                                Master switch for the weather line, forecast popover and particle
+                                                scene. The scene also respects your OS "reduce motion" setting.
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label for="sw-holidays"
+                                                    style="display:flex;align-items:center;gap:8px;">
+                                                    <input type="checkbox" id="sw-holidays" checked>
+                                                    Holiday decorations
+                                                </label>
+                                            </div>
+                                            <div class="help-text">
+                                                Halloween, Thanksgiving, Christmas, New Year's and Lunar New Year
+                                                in the sidebar around each, by your location's date. Christmas Day
+                                                always snows.
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label for="sw-celsius"
+                                                    style="display:flex;align-items:center;gap:8px;">
+                                                    <input type="checkbox" id="sw-celsius"
+                                                        onchange="saveSidebarWeatherUnits()">
+                                                    Use &deg;C instead of &deg;F
+                                                </label>
+                                            </div>
+                                            <div class="help-text">
+                                                Auto-detected from the location (&deg;F for US, &deg;C elsewhere) —
+                                                flip it here if you prefer the other.
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label>Status:</label>
+                                                <span id="sw-status" class="readonly-field">Loading...</span>
+                                            </div>
+                                        </div>
+                                    </div><!-- end Sidebar Weather body -->
+
+                                    <!-- Developer (collapsible tile): tools for checking how things look.
+                                         Wired by webui/src/shell/weather-preview-settings.ts. Nothing here
+                                         is saved; it only changes what this browser tab shows. -->
+                                    <div class="settings-section-header collapsed" data-stg="advanced"
+                                        onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
+                                        role="button" tabindex="0" aria-expanded="false">
+                                        <span class="settings-section-arrow">&#9660;</span>
+                                        <h3>Developer</h3>
+                                        <span class="settings-section-hint">Preview tools, nothing saved</span>
+                                    </div>
+                                    <div class="settings-section-body collapsed" data-stg="advanced">
+                                        <div class="settings-group" data-stg="advanced">
+                                            <div class="form-group">
+                                                <label for="sw-preview-preset">Weather preview:</label>
+                                                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                                    <select id="sw-preview-preset">
+                                                        <option value="">Live weather</option>
+                                                    </select>
+                                                    <select id="sw-preview-holiday" aria-label="Holiday">
+                                                        <option value="">Holiday by date</option>
+                                                        <option value="none">No holiday</option>
+                                                    </select>
+                                                    <input type="date" id="sw-preview-date"
+                                                        aria-label="Pretend date">
+                                                    <button class="test-button" id="sw-preview-reset"
+                                                        type="button">Back to live</button>
+                                                </div>
+                                                <div class="help-text">
+                                                    Shows any sky or holiday in the sidebar so you can check how it
+                                                    looks. Only this browser tab sees it and nothing is saved; the
+                                                    weather line reads "Preview" while it's on. The date pretends
+                                                    it's another day, which sets the season and the holiday.
+                                                </div>
+                                            </div>
+                                            <div class="form-group">
+                                                <label>Status:</label>
+                                                <span id="sw-preview-status" class="readonly-field">Live weather</span>
+                                            </div>
+                                        </div>
+                                    </div><!-- end Developer body -->
 
                                     <div class="settings-experimental-break" data-stg="advanced" role="separator"
                                         aria-label="Experimental features">

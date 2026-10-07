@@ -1,0 +1,483 @@
+/* Sidebar Weather — additive styles only.
+ *
+ * These selectors are unique to the weather feature. No existing sidebar,
+ * header, nav or settings rules are modified here; the canvas sits behind
+ * the header/nav by DOM order (first child of .sidebar, siblings paint
+ * above it at the same z-index), and pointer-events:none keeps it out of
+ * the way entirely.
+ */
+
+/* The time/temp/condition line under the profile row. Right-aligned inside
+ * the column-flex .sidebar-header. */
+#sidebar-weather-line {
+    align-self: flex-end;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    color: #aeb4c2;
+    font-family: inherit;
+    font-size: 11.5px;
+    line-height: 1;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    padding: 4px 7px;
+    margin: 2px -7px -2px 0;
+    border-radius: 7px;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+#sidebar-weather-line:hover {
+    background: rgba(255, 255, 255, 0.07);
+    color: #ffffff;
+}
+
+#sidebar-weather-line:focus-visible {
+    outline: 2px solid rgba(139, 124, 246, 0.65);
+    outline-offset: 2px;
+}
+
+/* Collapsed sidebar: the line would be clipped to nothing by
+ * .sidebar-header{overflow:hidden} — hide it outright so it never half-renders,
+ * and the JS particle loop is fully stopped while collapsed (it restarts on
+ * expand via a data-sidebar MutationObserver). */
+html[data-sidebar="collapsed"] #sidebar-weather-line {
+    display: none;
+}
+
+#sidebar-weather-line svg {
+    width: 13px;
+    height: 13px;
+    flex: 0 0 13px;
+    color: #9fc3e8;
+}
+
+/* Forecast popover: fixed, positioned by JS. Opens above the weather line when
+ * there is room (bottom edge touches the line's top), below it when the line
+ * sits too close to the viewport top. The max-height + overflow guard covers
+ * the case where neither side fits. */
+#sidebar-weather-popover {
+    position: fixed;
+    z-index: 9999;
+    min-width: 236px;
+    max-width: 300px;
+    max-height: min(60vh, 360px);
+    overflow-y: auto;
+    padding: 8px 14px;
+    background: rgba(17, 17, 21, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: #e9e9ee;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.sidebar-weather-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 0;
+}
+
+.sidebar-weather-row + .sidebar-weather-row {
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.sidebar-weather-glyph {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    display: inline-flex;
+    color: #9fc3e8;
+}
+
+.sidebar-weather-glyph svg {
+    width: 100%;
+    height: 100%;
+}
+
+.sidebar-weather-day {
+    font-weight: 600;
+    min-width: 46px;
+    color: #ffffff;
+}
+
+.sidebar-weather-temps {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+    color: #ffffff;
+    white-space: nowrap;
+}
+
+.sidebar-weather-cond {
+    color: #b6b6c0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 108px;
+}
+
+.sidebar-weather-precip {
+    color: #7fb3e8;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* Particle scene: first child of .sidebar, full-bleed, behind header/nav
+ * (DOM order does the stacking — every .sidebar child already paints at
+ * z-index 1, so this earliest sibling sits underneath). The faint dark
+ * gradient is the scrim: it deepens the background behind the particles so
+ * nav text stays crisp. */
+#sidebar-weather-scene,
+.sidebar-weather-scene {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    background: linear-gradient(180deg,
+            rgba(0, 0, 0, 0) 0%,
+            rgba(0, 0, 0, 0.05) 45%,
+            rgba(0, 0, 0, 0.16) 100%);
+}
+
+/* the scene fades in on mount, and a refresh crossfades old into new. a
+ * refresh drops the id from the outgoing canvas, so this lives on the
+ * class. keep the duration in sync with SCENE_FADE_MS in sidebar-weather.ts */
+.sidebar-weather-scene {
+    opacity: 0;
+    transition: opacity 1.6s ease;
+}
+
+.sidebar-weather-scene.is-visible {
+    opacity: 1;
+}
+
+/* ── holiday decorations (webui/src/shell/sidebar-holiday.ts) ───────────────
+ * art attached to the sidebar's own furniture: the header's empty bottom-left,
+ * hung from the divider above Support, perched on the Service Status card.
+ * the anchors only become positioned while a holiday is up. */
+#app-sidebar.has-holiday .sidebar-header,
+#app-sidebar.has-holiday .status-section {
+    position: relative;
+}
+
+.sidebar-holiday {
+    position: absolute;
+    pointer-events: none;
+    user-select: none;
+}
+
+.sidebar-holiday .holiday-art {
+    display: block;
+    width: 100%;
+    height: auto;
+    opacity: 0.92;
+    transition: filter 1.2s ease, opacity 1.2s ease;
+}
+
+/* by night the art sits back in the dark; the lit things glow on their own */
+#app-sidebar.holiday-night .sidebar-holiday .holiday-art {
+    filter: brightness(0.78) saturate(0.9);
+}
+
+html[data-sidebar="collapsed"] .sidebar-holiday {
+    display: none;
+}
+
+/* header: a small scene in the empty bottom-left, under the profile row */
+.sidebar-holiday--header {
+    left: 18px;
+    right: 18px;
+    bottom: 8px;
+    height: 130px;
+}
+
+/* divider above Support: a line to hang things from */
+.sidebar-holiday--divider {
+    top: 100%;
+    left: 0;
+    right: 0;
+    height: 0;
+}
+
+/* the top edge of the Service Status card: a shelf */
+.sidebar-holiday--card {
+    bottom: 100%;
+    left: 12px;
+    right: 12px;
+    height: 0;
+}
+
+/* pumpkins */
+.holiday-pumpkin {
+    position: absolute;
+    bottom: -2px;
+    display: block;
+}
+.holiday-pumpkin--sm { width: 30px; left: 0; bottom: 0; }
+.holiday-pumpkin--md { width: 30px; right: 30px; }
+.holiday-pumpkin--lg { width: 40px; right: 2px; }
+
+/* the candle: light through the carved face, flickering, only at night */
+.holiday-candle {
+    position: absolute;
+    left: 18%;
+    right: 18%;
+    top: 30%;
+    bottom: 12%;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, rgba(255, 196, 92, 0.9), rgba(255, 128, 30, 0.35) 60%, rgba(255, 110, 20, 0) 100%);
+    mix-blend-mode: screen;
+    opacity: 0;
+    z-index: 1;
+    transition: opacity 1.2s ease;
+}
+#app-sidebar.holiday-night .holiday-candle {
+    opacity: 1;
+    animation: holiday-flicker 2.6s infinite steps(1, end), holiday-flicker-soft 0.9s infinite ease-in-out alternate;
+}
+#app-sidebar.holiday-night .holiday-pumpkin.is-carved .holiday-art {
+    filter: brightness(0.95) drop-shadow(0 0 7px rgba(255, 140, 40, 0.45));
+}
+
+@keyframes holiday-flicker {
+    0%, 100% { filter: brightness(1); }
+    37% { filter: brightness(0.82); }
+    41% { filter: brightness(1.08); }
+    73% { filter: brightness(0.9); }
+}
+@keyframes holiday-flicker-soft {
+    from { transform: scale(0.96); }
+    to { transform: scale(1.04); }
+}
+
+/* bats: one crosses the header at night, one roosts under the divider */
+.holiday-bat {
+    position: absolute;
+    display: block;
+}
+.holiday-bat-wings {
+    display: block;
+    transform-origin: 50% 40%;
+}
+.holiday-bat--cross {
+    width: 26px;
+    left: 110%;
+    bottom: 64px;
+    opacity: 0;
+}
+#app-sidebar.holiday-night .holiday-bat--cross {
+    animation: holiday-bat-cross 24s infinite linear;
+}
+#app-sidebar.holiday-night .holiday-bat--cross .holiday-bat-wings {
+    animation: holiday-flap 0.18s infinite ease-in-out alternate;
+}
+@keyframes holiday-bat-cross {
+    0% { left: 108%; bottom: 70px; opacity: 1; }
+    8% { bottom: 92px; }
+    16% { bottom: 58px; }
+    24% { bottom: 84px; }
+    32% { left: -24%; bottom: 66px; opacity: 1; }
+    32.01%, 100% { left: 108%; opacity: 0; }
+}
+@keyframes holiday-flap {
+    from { transform: scaleY(1); }
+    to { transform: scaleY(0.38) translateY(2px); }
+}
+
+.holiday-bat--roost {
+    width: 26px;
+    right: 30px;
+    top: 1px;
+    transform-origin: 50% 0;
+    animation: holiday-sway 5.5s infinite ease-in-out alternate;
+}
+/* asleep: hanging upside down, wings folded in */
+.holiday-bat--roost .holiday-bat-wings {
+    transform: rotate(180deg) scaleX(0.62);
+}
+
+/* lanterns hang from the divider on cords and sway with the wind */
+.holiday-lantern {
+    position: absolute;
+    top: 0;
+    width: 22px;
+    transform-origin: 50% 0;
+    animation: holiday-sway var(--holiday-sway-time, 4.2s) infinite ease-in-out alternate;
+}
+.holiday-lantern--left { left: 24px; }
+.holiday-lantern--right { right: 24px; width: 20px; animation-delay: -1.7s; }
+.holiday-cord {
+    display: block;
+    width: 1px;
+    height: 9px;
+    margin: 0 auto;
+    background: linear-gradient(180deg, rgba(212, 170, 90, 0.2), rgba(212, 170, 90, 0.7));
+}
+.holiday-lantern-glow {
+    position: absolute;
+    left: -60%;
+    right: -60%;
+    top: 4px;
+    bottom: -30%;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, rgba(255, 92, 60, 0.32), rgba(255, 150, 60, 0.12) 55%, rgba(255, 120, 60, 0) 100%);
+    opacity: 0.35;
+    transition: opacity 1.2s ease;
+}
+#app-sidebar.holiday-night .holiday-lantern-glow {
+    opacity: 1;
+    animation: holiday-glow 3.4s infinite ease-in-out alternate;
+}
+#app-sidebar.holiday-night .holiday-lantern .holiday-art {
+    filter: brightness(1) drop-shadow(0 0 6px rgba(255, 110, 60, 0.5));
+}
+@keyframes holiday-sway {
+    from { transform: rotate(calc(var(--holiday-sway, 3deg) * -1)); }
+    to { transform: rotate(var(--holiday-sway, 3deg)); }
+}
+@keyframes holiday-glow {
+    from { opacity: 0.75; }
+    to { opacity: 1; }
+}
+
+/* the turkey struts along the card's top edge, stops to peck, turns back */
+.holiday-turkey {
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    width: 36px;
+    animation: holiday-strut 28s infinite ease-in-out;
+}
+.holiday-turkey-bob {
+    display: block;
+    position: relative;
+    transform-origin: 50% 100%;
+    animation: holiday-step 0.55s infinite ease-in-out alternate;
+}
+.holiday-turkey-right,
+.holiday-turkey-left {
+    position: relative;
+}
+.holiday-turkey-left {
+    position: absolute;
+    inset: auto 0 0 0;
+}
+.holiday-turkey-right { animation: holiday-face-right 28s infinite steps(1, end); }
+.holiday-turkey-left { animation: holiday-face-left 28s infinite steps(1, end); }
+@keyframes holiday-strut {
+    0%, 6% { left: 0; }
+    38%, 50% { left: calc(100% - 36px); }
+    82%, 100% { left: 0; }
+}
+@keyframes holiday-face-right {
+    0% { opacity: 1; }
+    44% { opacity: 0; }
+    94% { opacity: 1; }
+}
+@keyframes holiday-face-left {
+    0% { opacity: 0; }
+    44% { opacity: 1; }
+    94% { opacity: 0; }
+}
+@keyframes holiday-step {
+    from { transform: translateY(0) rotate(-1.5deg); }
+    to { transform: translateY(-1.5px) rotate(1.5deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sidebar-holiday,
+    .sidebar-holiday * {
+        animation: none !important;
+    }
+    .holiday-bat--cross {
+        display: none;
+    }
+}
+
+/* the weather line reached into the header corner: the corner art steps aside */
+#app-sidebar.holiday-header-crowded .sidebar-holiday--header .holiday-pumpkin {
+    display: none;
+}
+
+/* christmas: the tree on the card, its lights twinkling at night */
+.holiday-tree {
+    position: absolute;
+    right: 4px;
+    bottom: -2px;
+    width: 38px;
+    display: block;
+}
+.holiday-light {
+    position: absolute;
+    width: 4px;
+    height: 4px;
+    margin: -2px 0 0 -2px;
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 1.2s ease;
+}
+.holiday-light--gold { background: #ffd879; box-shadow: 0 0 4px 1px rgba(255, 210, 110, 0.9); }
+.holiday-light--red { background: #ff8a7a; box-shadow: 0 0 4px 1px rgba(255, 110, 90, 0.85); }
+.holiday-light--blue { background: #a6ccff; box-shadow: 0 0 4px 1px rgba(140, 190, 255, 0.85); }
+.holiday-light--star {
+    width: 7px;
+    height: 7px;
+    margin: -3.5px 0 0 -3.5px;
+    background: #fff2c4;
+    box-shadow: 0 0 8px 3px rgba(255, 220, 130, 0.85);
+}
+#app-sidebar.holiday-night .holiday-light {
+    opacity: 1;
+    animation: holiday-twinkle 2.4s infinite ease-in-out;
+}
+#app-sidebar.holiday-night .holiday-light--star {
+    animation: holiday-glow 3s infinite ease-in-out alternate;
+}
+#app-sidebar.holiday-night .holiday-tree .holiday-art {
+    filter: brightness(0.85) drop-shadow(0 0 6px rgba(255, 210, 120, 0.3));
+}
+@keyframes holiday-twinkle {
+    0%, 100% { opacity: 1; }
+    45% { opacity: 0.25; }
+    60% { opacity: 0.95; }
+}
+
+/* the ornaments hang like the lanterns, a little smaller, a cool glint */
+.holiday-lantern--ornament { width: 18px; }
+/* the right one hangs further in, so the tree on the card has its own air */
+.holiday-lantern--ornament.holiday-lantern--right { width: 17px; right: 40px; }
+.holiday-lantern--ornament .holiday-cord { height: 12px; }
+.holiday-lantern--ornament .holiday-lantern-glow {
+    background: radial-gradient(closest-side, rgba(255, 236, 200, 0.22), rgba(255, 236, 200, 0) 100%);
+}
+
+/* santa crosses the header at night, left to right, now and then */
+.holiday-sleigh {
+    position: absolute;
+    width: 66px;
+    left: -40%;
+    bottom: 70px;
+    opacity: 0;
+    display: block;
+}
+#app-sidebar.holiday-night .holiday-sleigh {
+    animation: holiday-sleigh 40s infinite linear;
+}
+@keyframes holiday-sleigh {
+    0% { left: -45%; bottom: 62px; opacity: 1; transform: rotate(-4deg); }
+    10% { bottom: 82px; transform: rotate(-2deg); }
+    20% { bottom: 74px; transform: rotate(-5deg); }
+    28% { left: 112%; bottom: 92px; opacity: 1; }
+    28.01%, 100% { left: -45%; opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .holiday-sleigh { display: none; }
+}

@@ -537,3 +537,77 @@ describe('ArtistHero watchlist effect stability', () => {
     expect(checkCalls()).toBeGreaterThan(first);
   });
 });
+
+/**
+ * The artist page's "Add to Watchlist" button: not watching → the settings
+ * modal opens (no blind add); watching → one click removes (unchanged).
+ */
+describe('ArtistHero watchlist button opens the settings modal', () => {
+  it('opens the settings modal instead of adding blindly', async () => {
+    const addCalls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/api/watchlist/add')) addCalls.push(url);
+        return new Response(JSON.stringify({ success: true, is_watching: false }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+    render(
+      <ArtistHero
+        artist={{ name: 'Aphex Twin' }}
+        discography={{}}
+        isSourceArtist={false}
+        streamCounts={undefined}
+        streamCompleted={false}
+        enrichment={undefined}
+        watchlist={{ id: 'sp1', name: 'Aphex Twin' }}
+      />,
+    );
+    await screen.findByText('Add to Watchlist');
+    fireEvent.click(document.getElementById('library-artist-watchlist-btn') as HTMLElement);
+    expect(await screen.findByText('Watch Aphex Twin')).toBeTruthy();
+    expect(addCalls).toEqual([]);
+  });
+
+  it('still removes with one click while watching', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.endsWith('/api/watchlist/check')) {
+          return new Response(JSON.stringify({ success: true, is_watching: true }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(
+          JSON.stringify({ success: true, watching: false, message: 'Removed.' }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }),
+    );
+    render(
+      <ArtistHero
+        artist={{ name: 'Aphex Twin' }}
+        discography={{}}
+        isSourceArtist={false}
+        streamCounts={undefined}
+        streamCompleted={false}
+        enrichment={undefined}
+        watchlist={{ id: 'sp1', name: 'Aphex Twin' }}
+      />,
+    );
+    await screen.findByText('Watching...');
+    fireEvent.click(document.getElementById('library-artist-watchlist-btn') as HTMLElement);
+    await vi.waitFor(() =>
+      expect(calls.some((u) => u.endsWith('/api/watchlist/remove'))).toBe(true),
+    );
+    expect(document.getElementById('watchadd-modal-overlay')).toBeNull();
+  });
+});

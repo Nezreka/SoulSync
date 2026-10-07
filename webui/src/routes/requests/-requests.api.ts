@@ -56,6 +56,8 @@ export async function fetchMusicRequests(profileId: number): Promise<MusicReques
   return {
     pending: payload.pending ?? [],
     history: payload.history ?? [],
+    pendingVideos: payload.pending_videos ?? [],
+    videoHistory: payload.video_history ?? [],
     counts: normalizeCounts(payload.counts),
     asksFirst: payload.asks_first === true,
     quota: normalizeQuota(payload.quota),
@@ -127,11 +129,83 @@ export async function deleteMusicRequest(profileId: number, requestId: number): 
   assertOk(payload, 'Could not remove that request');
 }
 
+/** remove a finished video request from history (own, or any as admin). */
+export async function deleteMusicVideoRequest(profileId: number, requestId: number): Promise<void> {
+  const payload = await readJson<Ok>(
+    apiClient.delete(`requests/music/videos/${requestId}`, { headers: headersFor(profileId) }),
+  );
+  assertOk(payload, 'Could not remove that request');
+}
+
 export async function markMusicRequestsSeen(profileId: number): Promise<void> {
   const payload = await readJson<Ok>(
     apiClient.post('requests/music/seen', { headers: headersFor(profileId) }),
   );
   assertOk(payload, 'Could not mark requests seen');
+}
+
+export interface FileMusicVideoRequestBody {
+  video_id: string;
+  url: string;
+  title: string;
+  channel?: string;
+  thumbnail_url?: string;
+}
+
+/**
+ * A profile that asks first files a video request (never a download). The
+ * server answers {success, id}, {success:false, already:true} for a duplicate
+ * pending ask, or {success:false, in_library:true} when it's already saved.
+ */
+export async function fileMusicVideoRequest(
+  profileId: number,
+  body: FileMusicVideoRequestBody,
+): Promise<{ id?: number; already?: boolean }> {
+  const payload = await readJson<Ok & { id?: number; already?: boolean }>(
+    apiClient.post('requests/music/videos', { headers: headersFor(profileId), json: body }),
+  );
+  assertOk(payload, 'Could not request that video');
+  return { id: payload.id, already: payload.already };
+}
+
+/** admin: approving starts the download to the music library. */
+export async function approveMusicVideoRequest(
+  profileId: number,
+  requestId: number,
+): Promise<void> {
+  const payload = await readJson<Ok>(
+    apiClient.post(`requests/music/videos/${requestId}/approve`, {
+      headers: headersFor(profileId),
+    }),
+  );
+  assertOk(payload, 'Could not approve that request');
+}
+
+export async function declineMusicVideoRequest(
+  profileId: number,
+  requestId: number,
+  response?: string,
+): Promise<void> {
+  const payload = await readJson<Ok>(
+    apiClient.post(`requests/music/videos/${requestId}/decline`, {
+      headers: headersFor(profileId),
+      json: response ? { response } : {},
+    }),
+  );
+  assertOk(payload, 'Could not decline that request');
+}
+
+/** a member takes back their own waiting video request. */
+export async function withdrawMusicVideoRequest(
+  profileId: number,
+  requestId: number,
+): Promise<void> {
+  const payload = await readJson<Ok>(
+    apiClient.post(`requests/music/videos/${requestId}/withdraw`, {
+      headers: headersFor(profileId),
+    }),
+  );
+  assertOk(payload, 'Could not withdraw that request');
 }
 
 export function musicRequestsQueryOptions(profileId: number) {

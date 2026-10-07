@@ -71,7 +71,12 @@ def register_routes(bp):
         detail = db.movie_detail(item_id) if kind == "movie" else db.show_detail(item_id)
         if not detail:
             return jsonify({"error": "not found"}), 404
-        state = db.acquisition_state(kind, item_id, tmdb_id=detail.get("tmdb_id"))
+        try:
+            from core.profile_context import get_current_profile_id
+            _pid = int(get_current_profile_id() or 1)
+        except Exception:
+            _pid = 1
+        state = db.acquisition_state(kind, item_id, tmdb_id=detail.get("tmdb_id"), profile_id=_pid)
         return jsonify({"success": True, **state})
 
     @bp.route("/episode/monitor", methods=["POST"])

@@ -26,6 +26,10 @@ export interface DiscogRelease {
   explicit?: boolean;
   album_type?: string;
   _type: string;
+  /** #1450: stamped by the backend (GET /api/artist-detail). The modal
+   *  pre-checks only preferred editions; a missing flag reads as preferred
+   *  (gap-fill cards and stale responses predate it). */
+  edition_preferred?: boolean;
   /** Gap-fill releases resolve from THEIR source (#1067). */
   _gap_source?: string | null;
 }
@@ -43,8 +47,17 @@ export interface DiscogModalData {
  * page (discord, SeadogsBooty: deezer page showed 2 EPs, the download pulled
  * musicbrainz's Underground fan club EPs). now it lists exactly what the page
  * rendered, gap cards included with their own source.
+ *
+ * #1450: `editionSuperseded` holds base-release ids whose edition_preferred
+ * stamp the combined base+gap edition group overturned. Those cards get
+ * edition_preferred=false here, so discogCardView's
+ * `edition_preferred !== false && !isOwned` pre-check flips them off while
+ * genuinely flag-less cards (stale responses) keep reading as preferred.
  */
-export function releasesFromPageDiscography(discography: Discography): DiscogRelease[] {
+export function releasesFromPageDiscography(
+  discography: Discography,
+  editionSuperseded?: Set<unknown>,
+): DiscogRelease[] {
   const releases: DiscogRelease[] = [];
   for (const [bucket, type] of [
     ['albums', 'album'],
@@ -52,14 +65,16 @@ export function releasesFromPageDiscography(discography: Discography): DiscogRel
     ['singles', 'single'],
   ] as const) {
     for (const release of discography[bucket] ?? []) {
-      releases.push({
+      const entry: DiscogRelease = {
         ...release,
         name: release.name || release.title || 'Unknown Release',
         image_url: release.image_url || undefined,
         total_tracks: Number(release.track_count) || Number(release._gap_track_count) || undefined,
         _type: type,
         _gap_source: (release._gap_source as string | undefined) || undefined,
-      });
+      };
+      if (editionSuperseded?.has(release.id)) entry.edition_preferred = false;
+      releases.push(entry);
     }
   }
   return releases;
@@ -73,8 +88,9 @@ export async function loadDiscographyForModal(
   libraryArtistId: unknown,
   artistName: string,
   pageDiscography: Discography,
+  editionSuperseded?: Set<unknown>,
 ): Promise<DiscogModalData | null> {
-  const releases = releasesFromPageDiscography(pageDiscography);
+  const releases = releasesFromPageDiscography(pageDiscography, editionSuperseded);
   if (releases.length === 0) return null;
 
   let metadataArtistId: string | null = null;
@@ -100,7 +116,9 @@ export interface DiscogCardView {
   tracks: number;
   statusClass: '' | 'owned' | 'partial';
   statusIcon: '' | '✓' | '◐';
-  /** Unowned releases come pre-checked (767). */
+  /** #1450: unowned releases come pre-checked (767) ONLY when the backend
+   *  marks them the preferred edition (edition_preferred !== false);
+   *  the other editions of the same album stay visible and hand-checkable. */
   checkedByDefault: boolean;
   isLive: boolean;
   isCompilation: boolean;
@@ -122,13 +140,18 @@ export function discogCardView(
   const isOwned = status === 'completed';
   const isPartial = status === 'partial' || status === 'nearly_complete';
   const flags = classifyReleaseContent(release as never);
+  // #1450: the backend stamps edition_preferred on every release it serves
+  // ("all" stamps true everywhere, preserving today's behaviour). A missing
+  // flag (gap-fill cards, stale responses) reads as preferred so those
+  // releases keep today's pre-check.
+  const editionPreferred = release.edition_preferred !== false;
   return {
     albumName: release.name || release.title || '',
     year: release.release_date ? release.release_date.substring(0, 4) : '',
     tracks: release.total_tracks || release.track_count || 0,
     statusClass: isOwned ? 'owned' : isPartial ? 'partial' : '',
     statusIcon: isOwned ? '✓' : isPartial ? '◐' : '',
-    checkedByDefault: !isOwned,
+    checkedByDefault: editionPreferred && !isOwned,
     isLive: flags.isLive,
     isCompilation: flags.isCompilation,
     isFeatured: flags.isFeatured,
@@ -170,7 +193,7 @@ export function discogCardVisible(
   return true;
 }
 
-/** The footer line + submit label (826-840). asksFirst: a profile without
+/** The footer line + submit labels (826-840). asksFirst: a profile without
  * download rights, whose wishlist adds are requests. */
 export function discogFooter(
   selection: { tracks: number }[],
@@ -178,18 +201,26 @@ export function discogFooter(
 ): {
   info: string;
   submitText: string;
+  bothText: string;
   disabled: boolean;
 } {
   const releases = selection.length;
   const tracks = selection.reduce((sum, s) => sum + (s.tracks || 0), 0);
+  const submitText =
+    releases === 0
+      ? 'Select releases'
+      : asksFirst
+        ? `Request ${releases}`
+        : `Add ${releases} to Wishlist`;
   return {
     info: `${releases} release${releases !== 1 ? 's' : ''} · ${tracks} tracks`,
-    submitText:
+    submitText,
+    bothText:
       releases === 0
         ? 'Select releases'
         : asksFirst
-          ? `Request ${releases}`
-          : `Add ${releases} to Wishlist`,
+          ? `Request ${releases} + Watch`
+          : `Wishlist + Watchlist`,
     disabled: releases === 0,
   };
 }
@@ -271,12 +302,126 @@ export interface DiscogAlbumUpdate {
   [key: string]: unknown;
 }
 
+export interface FailedRelease {
+  album_id: unknown;
+  name: string;
+  source: string | null;
+  album_type?: string;
+  error: string;
+}
+
+export interface DiscogTotals {
+  total_added: number;
+  total_skipped: number;
+  failed_releases: FailedRelease[];
+}
+
+/**
+ * The "Future releases" section of the Download Discography modal: the
+ * per-artist watchlist settings the combined "Wishlist + Watchlist" button
+ * applies after the download stream finishes. Plain booleans, exactly like
+ * the watchlist page's config modal — the include_* columns have no
+ * "follow global" state (that tri-state exists only on auto_download_pref).
+ */
+export interface FutureReleases {
+  include_albums: boolean;
+  include_eps: boolean;
+  include_singles: boolean;
+  include_live: boolean;
+  include_remixes: boolean;
+  include_acoustic: boolean;
+  include_compilations: boolean;
+  include_instrumentals: boolean;
+  /** null = follow the global auto-download setting */
+  auto_download_pref: 'on' | 'off' | null;
+}
+
+/**
+ * One-time defaults for the Future releases section, taken from the
+ * download filter state the modal opened with: "I'm excluding live
+ * versions now" becomes "keep excluding them later". Independent after
+ * that — changing a download filter does not rewrite these.
+ */
+export function defaultFutureReleases(filters: DiscogFilters): FutureReleases {
+  return {
+    include_albums: filters.album,
+    include_eps: filters.ep,
+    include_singles: filters.single,
+    include_live: filters.live,
+    include_remixes: false,
+    include_acoustic: false,
+    include_compilations: filters.compilations,
+    include_instrumentals: false,
+    auto_download_pref: null,
+  };
+}
+
+/**
+ * Watch-then-configure, for the combined "Wishlist + Watchlist" button.
+ * Runs AFTER the download stream completes so a watchlist failure can never
+ * roll back queued downloads; each half reports its own outcome.
+ */
+export async function watchArtistWithSettings(
+  artistId: unknown,
+  artistName: string,
+  settings: FutureReleases,
+): Promise<{ watching: boolean; message: string }> {
+  const checkResponse = await fetch('/api/watchlist/check', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ artist_id: artistId }),
+  });
+  const checkData = await checkResponse.json();
+  if (!checkData.success) {
+    throw new Error(checkData.error || 'Failed to check watchlist status');
+  }
+  let watching = Boolean(checkData.is_watching);
+  let message = '';
+
+  if (!watching) {
+    const addResponse = await fetch('/api/watchlist/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ artist_id: artistId, artist_name: artistName }),
+    });
+    const addData = await addResponse.json();
+    if (!addData.success) throw new Error(addData.error || 'Failed to add to watchlist');
+    watching = true;
+    message = String(addData.message ?? '');
+    if (typeof window.updateWatchlistCount === 'function') window.updateWatchlistCount();
+  }
+
+  const configResponse = await fetch(
+    `/api/watchlist/artist/${encodeURIComponent(String(artistId))}/config`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        include_albums: settings.include_albums,
+        include_eps: settings.include_eps,
+        include_singles: settings.include_singles,
+        include_live: settings.include_live,
+        include_remixes: settings.include_remixes,
+        include_acoustic: settings.include_acoustic,
+        include_compilations: settings.include_compilations,
+        include_instrumentals: settings.include_instrumentals,
+        auto_download_pref: settings.auto_download_pref,
+      }),
+    },
+  );
+  const configData = await configResponse.json();
+  if (!configData.success) {
+    throw new Error(configData.error || 'Failed to save watchlist settings');
+  }
+  return { watching, message };
+}
+
 /** POST + NDJSON stream (936-986): per-album updates, then the completion line. */
 export async function streamDiscographyDownload(
   artistId: unknown,
   payload: DiscographyDownloadPayload,
   onAlbum: (update: DiscogAlbumUpdate) => void,
-  onComplete: (totals: { total_added: number; total_skipped: number }) => void,
+  onComplete: (totals: DiscogTotals) => void,
 ): Promise<void> {
   const response = await fetch(`/api/artist/${artistId}/download-discography`, {
     method: 'POST',
@@ -302,6 +447,7 @@ export async function streamDiscographyDownload(
           onComplete({
             total_added: data.total_added || 0,
             total_skipped: data.total_skipped || 0,
+            failed_releases: Array.isArray(data.failed_releases) ? data.failed_releases : [],
           });
         } else {
           onAlbum(data);

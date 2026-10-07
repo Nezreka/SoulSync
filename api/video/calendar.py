@@ -13,6 +13,16 @@ from flask import jsonify, request
 
 from utils.logging_config import get_logger
 
+def _profile() -> int:
+    """The requesting profile: the video watchlist/wishlist are per-profile
+    (like the music side) — a non-admin must never see the admin's lists."""
+    try:
+        from core.profile_context import get_current_profile_id
+        return int(get_current_profile_id() or 1)
+    except Exception:
+        return 1
+
+
 logger = get_logger("video.calendar")
 
 
@@ -54,12 +64,14 @@ def register_routes(bp):
             scope = (request.args.get("scope") or "watchlist").lower()
             eps = db.calendar_upcoming(start.isoformat(), end.isoformat(),
                                        server_source=resolve_video_server(),
-                                       watchlist_only=(scope != "all"))
+                                       watchlist_only=(scope != "all"),
+                                       profile_id=_profile())
 
             # Movie release events (wishlisted movies): cinema + home-availability
             # dates in the same window — Radarr's calendar lane, plus the per-type
             # client filter Radarr never shipped.
-            movies = db.calendar_movie_releases(start.isoformat(), end.isoformat())
+            movies = db.calendar_movie_releases(start.isoformat(), end.isoformat(),
+                                                profile_id=_profile())
 
             # kids profiles: episodes go by their show's rating, movie events by
             # the library's. before the counts, so the day dots agree.
@@ -134,7 +146,8 @@ def register_routes(bp):
             from core.video.sources import resolve_video_server
             eps = get_video_db().calendar_upcoming(
                 start.isoformat(), end.isoformat(),
-                server_source=resolve_video_server(), watchlist_only=(scope != "all"))
+                server_source=resolve_video_server(), watchlist_only=(scope != "all"),
+                profile_id=_profile())
             from .kids import filter_library_items, video_cap
             eps = filter_library_items(get_video_db(), eps, video_cap(), "show", id_key="show_id")
             lines = ["BEGIN:VCALENDAR", "VERSION:2.0",
@@ -166,7 +179,8 @@ def register_routes(bp):
             # Movie release events (wishlisted movies) — whole-day, typed.
             if (request.args.get("movies") or "1") != "0":
                 _MOVIE_LABEL = {"cinema": "In Cinemas", "available": "Home Release"}
-                for m in get_video_db().calendar_movie_releases(start.isoformat(), end.isoformat()):
+                for m in get_video_db().calendar_movie_releases(
+                        start.isoformat(), end.isoformat(), profile_id=_profile()):
                     day = m["date"].replace("-", "")
                     title = m["title"] or "?"
                     if m.get("year"):

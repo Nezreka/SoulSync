@@ -96,6 +96,8 @@ def _seed_old_downloading_task(tasks, batches):
 
 def test_h1_fetch_failure_returns_sentinel_not_empty_dict(monkeypatch):
     """The poll itself failing must be distinguishable from 'no transfers'."""
+    monkeypatch.setattr(dm.config_manager, "get", lambda key, default=None:
+                        "soulseek" if key == "download_source.mode" else default)
     monkeypatch.setattr(dm, "download_orchestrator", _ExplodingOrchestrator())
     monkeypatch.setattr(dm, "_make_context_key", _legacy_key_fn)
     mon = dm.WebUIDownloadMonitor()
@@ -109,6 +111,8 @@ def test_h1_fetch_failure_returns_sentinel_not_empty_dict(monkeypatch):
 
 def test_h1_failed_poll_does_not_restart_healthy_download(monkeypatch):
     """End to end: a failed poll leaves a healthy >90s download alone."""
+    monkeypatch.setattr(dm.config_manager, "get", lambda key, default=None:
+                        "soulseek" if key == "download_source.mode" else default)
     monkeypatch.setattr(dm, "download_orchestrator", _ExplodingOrchestrator())
     monkeypatch.setattr(dm, "_make_context_key", _legacy_key_fn)
     tasks, batches = {}, {}
@@ -126,6 +130,16 @@ def test_h1_failed_poll_does_not_restart_healthy_download(monkeypatch):
     assert "stuck_retry_count" not in tasks["t1"]
     assert tasks["t1"].get("download_id") == "dl-1"
     assert "used_sources" not in tasks["t1"]  # peer must not be blacklisted
+
+
+def test_h1_engine_poll_failure_keeps_transfers_unknown(monkeypatch):
+    """Streaming-engine failures must not restart transfers as if they vanished."""
+    monkeypatch.setattr(dm.config_manager, "get", lambda key, default=None:
+                        "youtube" if key == "download_source.mode" else default)
+    monkeypatch.setattr(dm, "download_orchestrator", _ExplodingOrchestrator())
+    mon = dm.WebUIDownloadMonitor()
+    mon.monitoring = True
+    assert mon._get_live_transfers() is dm._LIVE_TRANSFERS_FETCH_FAILED
 
 
 # ---------------------------------------------------------------------------

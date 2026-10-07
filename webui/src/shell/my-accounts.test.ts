@@ -9,7 +9,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '@/test/msw';
 
-import { closeMyAccountsModal, openMyAccountsModal, openPersonalSettings } from './my-accounts';
+import {
+  _maPlexConnect,
+  closeMyAccountsModal,
+  openMyAccountsModal,
+  openPersonalSettings,
+} from './my-accounts';
 
 type Conns = Record<string, { connected: boolean; account: string | null }>;
 
@@ -260,6 +265,93 @@ describe('My Account', () => {
     pick.value = '2';
     pick.dispatchEvent(new Event('change', { bubbles: true }));
     expect(pin.hidden).toBe(false);
+  });
+
+  it('plex offers connect with plex to everyone, home users or not', async () => {
+    // a shared friend: no plex home users on the server, still gets a way in
+    mockAccount({ server: 'plex' });
+    server.use(
+      http.get('/api/plex/music-libraries', () => HttpResponse.json({ libraries: ['Music'] })),
+      http.get('/api/profiles/me/plex-home-users', () => HttpResponse.json({ users: [] })),
+    );
+    await opened();
+    click('[data-ma="toggle"][data-id="server"]');
+    const primary = body().querySelectorAll('.ma-btn-primary[data-ma^="plex"]');
+    expect([...primary].map((b) => (b as HTMLElement).dataset.ma)).toEqual(['plex-connect']);
+    expect(document.getElementById('ma-plex-user')).toBeNull();
+  });
+
+  it('connect with plex waits for plex, then links and says who', async () => {
+    mockAccount({ server: 'plex' });
+    let checks = 0;
+    server.use(
+      http.get('/api/plex/music-libraries', () => HttpResponse.json({ libraries: [] })),
+      http.get('/api/profiles/me/plex-home-users', () => HttpResponse.json({ users: [] })),
+      http.post('/api/profiles/me/plex-connect/start', () =>
+        HttpResponse.json({ success: true, url: 'https://app.plex.tv/auth#?x' }),
+      ),
+      http.post('/api/profiles/me/plex-connect/check', () => {
+        checks += 1;
+        return HttpResponse.json(
+          checks < 2
+            ? { success: true, pending: true }
+            : { success: true, pending: false, title: 'maxnrose' },
+        );
+      }),
+    );
+    const popup = { location: { href: '' }, closed: false, close: vi.fn() };
+    const ok = await _maPlexConnect(
+      null,
+      () => popup as unknown as Window,
+      async () => {},
+    );
+    expect(ok).toBe(true);
+    expect(popup.location.href).toBe('https://app.plex.tv/auth#?x');
+    expect(popup.close).toHaveBeenCalled();
+    expect(toasts).toContain('Connected to Plex as maxnrose');
+  });
+
+  it('connect with plex shows the server refusal', async () => {
+    server.use(
+      http.post('/api/profiles/me/plex-connect/start', () =>
+        HttpResponse.json({ success: true, url: 'https://app.plex.tv/auth#?x' }),
+      ),
+      http.post('/api/profiles/me/plex-connect/check', () =>
+        HttpResponse.json(
+          { success: false, error: 'That Plex account is connected to another SoulSync profile' },
+          { status: 403 },
+        ),
+      ),
+    );
+    const popup = { location: { href: '' }, closed: false, close: vi.fn() };
+    expect(
+      await _maPlexConnect(
+        null,
+        () => popup as unknown as Window,
+        async () => {},
+      ),
+    ).toBe(false);
+    expect(toasts).toContain('That Plex account is connected to another SoulSync profile');
+  });
+
+  it('connect with plex stops when plex is closed without approving', async () => {
+    server.use(
+      http.post('/api/profiles/me/plex-connect/start', () =>
+        HttpResponse.json({ success: true, url: 'https://app.plex.tv/auth#?x' }),
+      ),
+      http.post('/api/profiles/me/plex-connect/check', () =>
+        HttpResponse.json({ success: true, pending: true }),
+      ),
+    );
+    const popup = { location: { href: '' }, closed: true, close: vi.fn() };
+    expect(
+      await _maPlexConnect(
+        null,
+        () => popup as unknown as Window,
+        async () => {},
+      ),
+    ).toBe(false);
+    expect(toasts).toContain('Connecting with Plex was cancelled');
   });
 
   it('the admin is pointed at Settings', async () => {

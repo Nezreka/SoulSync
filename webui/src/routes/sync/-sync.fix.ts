@@ -33,6 +33,7 @@ export interface FixTrack {
   track_number?: number;
   disc_number?: number;
   release_date?: string;
+  disambiguation?: string;
   [key: string]: unknown;
 }
 
@@ -161,6 +162,9 @@ export function buildUpdateMatchBody(
   if (track.track_number !== undefined) spotifyTrack.track_number = track.track_number;
   if (track.disc_number !== undefined) spotifyTrack.disc_number = track.disc_number;
   if (track.release_date !== undefined) spotifyTrack.release_date = track.release_date;
+  if (track.disambiguation !== undefined) {
+    spotifyTrack.disambiguation = track.disambiguation;
+  }
 
   return {
     identifier: sourceId,

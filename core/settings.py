@@ -554,6 +554,11 @@ class ConfigManager:
                 # this many GB free (0 = off). A fresh LXC install left on the
                 # default paths otherwise fills its 8GB root until it hangs.
                 "min_free_disk_gb": 5.0,
+                # 'own' touches only transfers/searches this client created
+                # when cleaning slskd (it may be shared with Lidarr's slskd
+                # plugin or another SoulSync). 'all' clears every client's
+                # state, the pre-#1499 behavior for single-client installs.
+                "cleanup_scope": "own",
             },
             "download_source": {
                 "max_mb_per_minute": 0,  # Optional advertised music size limit; 0 = off
@@ -737,7 +742,14 @@ class ConfigManager:
                 "session_key": "",
                 "scrobble_enabled": False,
                 "username": "",
-                "listening_sync_enabled": False
+                "listening_sync_enabled": False,
+                "tags": {
+                    # #1513: when no genre source yields a genre, fall back to
+                    # the artist's Last.fm top tags. opt-in, off by default.
+                    # Requires metadata_enhancement.tags.genre_merge to be on
+                    # (the fallback hooks into the genre-merge block).
+                    "artist_genre_fallback": False,
+                }
             },
             "genius": {
                 "access_token": ""
@@ -799,7 +811,13 @@ class ConfigManager:
             "musicbrainz": {
                 "base_url": "https://musicbrainz.org/ws/2",
                 "request_interval": 1.05,
-                "embed_tags": True
+                "embed_tags": True,
+                # #1451: beets-style "original date as DATE" (opt-in, default
+                # off). When True, the release-group first-release-date is
+                # written as DATE/TDRC instead of the downloaded edition's
+                # date. Independent precision guard (never downgrade a more
+                # precise same-year date) always applies.
+                "use_original_date_for_date": False,
             },
             "jiosaavn": {
                 "embed_tags": True,
@@ -875,6 +893,12 @@ class ConfigManager:
                 # alone — no cosmetic rename churn on already-organized files.
                 # Turn off to canonicalize casing to the metadata source.
                 "reorganize_preserve_casing": True,
+                # #1449: write a Kodi-format artist.nfo (artist name +
+                # MusicBrainz artist ID) into the artist folder when an
+                # import creates it. Jellyfin/Kodi/Emby use it to identify
+                # the artist instead of guessing by name. Off by default —
+                # the Artist NFO Backfill repair job covers existing folders.
+                "write_artist_nfo": False,
             },
             "file_organization": {
                 "enabled": True,

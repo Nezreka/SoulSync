@@ -35731,6 +35731,11 @@ div.artist-hero-badge {
     color: rgba(255, 255, 255, 0.95);
 }
 
+.fix-result-disambiguation {
+    font-size: 12px;
+    color: rgba(var(--accent-rgb), 0.9);
+}
+
 .fix-result-artist {
     font-size: 13px;
     color: rgba(255, 255, 255, 0.7);
@@ -54449,6 +54454,133 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .discog-submit-btn:hover { filter: brightness(1.15); box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.3); }
 .discog-submit-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: none; }
 .discog-submit-icon { font-size: 14px; }
+
+/* Combined "Wishlist + Watchlist" button: green accent to read as the
+   watchlist-flavored action next to the standard submit. */
+.discog-both-btn {
+    background: linear-gradient(135deg, #1DB954, rgba(29,185,84,0.65));
+    min-width: 0;
+}
+.discog-both-btn:hover { filter: brightness(1.15); box-shadow: 0 4px 16px rgba(29,185,84,0.35); }
+
+/* Future releases section (Download Discography modal) */
+.discog-future {
+    border-top: 1px solid rgba(255,255,255,0.07);
+    padding: 14px 20px;
+    background: rgba(255,255,255,0.015);
+}
+.discog-future-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.discog-future-icon { font-size: 18px; }
+.discog-future-title { font-size: 13px; font-weight: 700; color: #fff; }
+.discog-future-sub { font-size: 12px; color: rgba(255,255,255,0.45); }
+.discog-future-rows { display: flex; flex-direction: column; gap: 8px; margin-top: 2px; }
+.discog-future-row { display: flex; align-items: center; gap: 10px; }
+.discog-future-row > .discog-future-label { flex-shrink: 0; width: 108px; margin-bottom: 0; }
+.discog-future-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+.discog-future-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: rgba(255,255,255,0.4); margin-bottom: 2px; }
+.discog-future-select {
+    background: rgba(255,255,255,0.06); color: #fff; border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px; padding: 7px 10px; font-size: 13px; font-family: inherit; cursor: pointer;
+    max-width: 220px;
+}
+.discog-future-select option { background: #1a1a1a; }
+
+/* Failed-release + watch notes in the progress footer */
+.discog-watch-note { margin-top: 4px; color: rgba(255,255,255,0.75); }
+.discog-failed { margin-top: 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.discog-retry-btn {
+    background: rgba(255,255,255,0.08); color: #fff; border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 6px; padding: 4px 12px; font-size: 12px; font-weight: 700; cursor: pointer;
+    font-family: inherit;
+}
+.discog-retry-btn:hover { background: rgba(255,255,255,0.14); }
+
+/* Watchlist add modal (artist detail page) */
+.watchadd-modal-overlay {
+    position: fixed; inset: 0; z-index: 1000;
+    background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+}
+.watchadd-modal-overlay.visible { opacity: 1; pointer-events: auto; }
+.watchadd-modal {
+    width: min(520px, calc(100vw - 40px)); max-height: calc(100vh - 80px);
+    overflow-y: auto; border-radius: 14px;
+    background: linear-gradient(180deg, #1e1e24, #141419);
+    border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+    padding: 20px 22px;
+}
+.watchadd-hero {
+    position: relative; overflow: hidden;
+    margin: -20px -22px 16px; padding: 24px 22px 18px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.watchadd-hero-bg {
+    position: absolute; inset: -14px;
+    background-size: cover; background-position: center 25%;
+    filter: blur(16px) brightness(0.55) saturate(1.3);
+    transform: scale(1.12); pointer-events: none;
+}
+.watchadd-hero-bg::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(180deg, rgba(20,20,26,0.2) 0%, rgba(20,20,26,0.9) 100%);
+}
+.watchadd-hero-content {
+    position: relative; z-index: 1;
+    display: flex; align-items: center; gap: 14px;
+}
+.watchadd-hero-photo {
+    width: 62px; height: 62px; border-radius: 14px; object-fit: cover; flex-shrink: 0;
+    border: 1px solid rgba(255,255,255,0.16);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.55);
+}
+.watchadd-hero-photo-fallback {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px; background: rgba(255,255,255,0.07);
+}
+.watchadd-hero-text { min-width: 0; }
+.watchadd-hero-text .watchadd-title { font-size: 18px; }
+.watchadd-hero .watchadd-close {
+    position: absolute; top: 10px; right: 12px; z-index: 2; margin: 0;
+    background: rgba(0,0,0,0.35); border-radius: 50%; width: 30px; height: 30px;
+    display: flex; align-items: center; justify-content: center;
+}
+.watchadd-icon { font-size: 22px; }
+.watchadd-title { font-size: 16px; font-weight: 700; color: #fff; }
+.watchadd-sub { font-size: 12px; color: rgba(255,255,255,0.45); }
+.watchadd-close {
+    margin-left: auto; background: none; border: none; color: rgba(255,255,255,0.5);
+    font-size: 22px; cursor: pointer; line-height: 1; padding: 4px;
+}
+.watchadd-close:hover { color: #fff; }
+.watchadd-rows { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.watchadd-row { display: flex; align-items: center; gap: 10px; }
+.watchadd-row > .watchadd-label { flex-shrink: 0; width: 108px; margin-bottom: 0; }
+.watchadd-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+/* Off-state pills in these two modals need to read as tappable options,
+ * not plain text: give them a quiet button frame. Scoped here so the
+ * watchlist page's own filter bar keeps its borderless look. */
+.discog-future-pills .watchlist-filter-btn:not(.active),
+.watchadd-pills .watchlist-filter-btn:not(.active) {
+    border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(255,255,255,0.04);
+    color: rgba(255,255,255,0.6);
+}
+.watchadd-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: rgba(255,255,255,0.4); margin-bottom: 2px; }
+.watchadd-opt { display: flex; align-items: center; gap: 8px; font-size: 13px; color: rgba(255,255,255,0.8); cursor: pointer; }
+.watchadd-opt input[type="checkbox"] { accent-color: #1DB954; width: 15px; height: 15px; cursor: pointer; }
+.watchadd-download { margin-top: 10px; }
+.watchadd-select {
+    background: rgba(255,255,255,0.06); color: #fff; border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px; padding: 7px 10px; font-size: 13px; font-family: inherit; cursor: pointer;
+}
+.watchadd-select option { background: #1a1a1a; }
+.watchadd-error {
+    background: rgba(255,80,80,0.1); border: 1px solid rgba(255,80,80,0.3);
+    color: #ff8080; border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-bottom: 12px;
+}
+.watchadd-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
 
 /* Progress view */
 .discog-progress { padding: 14px 20px; overflow-y: auto; flex: 1; min-height: 0; }
@@ -88894,4 +89026,45 @@ body.src-modal-open { overflow: hidden; }
 
 @media (prefers-reduced-motion: reduce) {
     #dashboard-page .dash-hero-library .scanning .library-status-dot { animation: none; }
+}
+/* sign in with plex on the login screen (webui/src/shell/plex-signin.ts) */
+.login-plex {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    margin-top: 14px;
+}
+.login-plex[hidden] {
+    display: none;
+}
+.login-plex-or {
+    text-align: center;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.4);
+}
+.login-plex-button {
+    padding: 12px 16px;
+    border-radius: 10px;
+    border: 1px solid rgba(229, 160, 13, 0.55);
+    background: rgba(229, 160, 13, 0.12);
+    color: #f3c35b;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+.login-plex-button:hover:not(:disabled) {
+    background: rgba(229, 160, 13, 0.22);
+    border-color: rgba(229, 160, 13, 0.85);
+}
+.login-plex-button:focus-visible {
+    outline: 2px solid #e5a00d;
+    outline-offset: 2px;
+}
+.login-plex-button:disabled {
+    opacity: 0.6;
+    cursor: wait;
 }

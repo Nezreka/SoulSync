@@ -1,13 +1,13 @@
-**SoulSync 3.5.0 is out** :musical_note:
+**SoulSync 3.5.1 is out** :musical_note:
 
-Video Discover got the full music-side treatment: story blocks, trailers, genre art, a hero badge, story tickers, and tiles that fade in with your posters. Video detail pages now have an "I have this" button for when auto-matching misses, and rematching a video actually refreshes its artwork.
+Sign in with Plex: everyone you share your server with can log in with their own Plex account, and their playlists land in their own Plex. Profiles can also connect Plex from My Account (thanks SeadogsBooty).
 
-Sync went per-profile: server playlists show whose is whose, mirrors with the same name stop overwriting each other, and deleted tracks get noticed on the next sync. Non-admin automations re-arm after a restart instead of running once and dying quietly.
+Listening history is per person now. Plex plays go to whoever played them, so the kids' plays stay out of your stats, mixes and Last.fm, and plays stop counting twice when your scrobbles come back from Last.fm or ListenBrainz (existing history gets cleaned up once, with a backup first). Kids profiles can play library music again.
 
-Under the hood: providers stop false rate-limiting when an ID contains 429 or 503, canonical lookups send each provider its own artist ID (no more 400 invalid mbid from MusicBrainz), singles stop merging into same-named album folders, your custom single path template is honored, lossy copies keep native tags and cover art, and the companion extension gets a chat tab plus video badges.
+Download Discography has a Wishlist + Watchlist button, and a new edition preference stops the watchlist grabbing both standard and deluxe. Non-admin profiles can request music videos and single episodes. The dashboard got a refresh, and the sidebar shows live weather with holiday decorations.
 
-Since those notes were drafted there's more: a big clarity pass from discussion #1289 — safer defaults (sync defaults to Reconcile so Navidrome edits survive, "Transfer is my permanent library" on by default), clearer language across the app (Discovery → Identify), and an honesty overhaul of the import inbox (partial imports, stale rows, match stealing). Repair jobs now run on the automation engine, there's a new BPM backfill job, and manual match opens with a worklist of everything unmatched.
+Playlist sync: playlist-named download batches, new mirrors get their server playlist on the first sync, mirrored tracks are identified by their own Deezer or Spotify ID, and ListenBrainz weekly playlists stop getting stuck (thanks @ifedan-ed).
 
-Also in: a community fix batch (wishlist album scope, discography substring matching, working AudioDB key, Audible marketplace setting), playlist sync no longer re-downloads what you deleted unless you ask (Sync vs Sync + download), video calendar cards show their full status, Deezer reissue years stop marking owned albums missing, and new v1 API endpoints powering the extension's mini player.
+Tagging and fixes: Deezer stops picking karaoke or reprise versions (thanks @cremonies), MP3s get their MusicBrainz recording ID, Navidrome libraries mounted under a different path stop breaking playlist writes, singles stop showing owned because the album has the song, audiobooks import from single-file torrents (thanks SeadogsBooty) and take the right part of a multi-part book, Soulseek cleanup only touches its own transfers (thanks @splitsec2), plus repair fixes from @mandos21 and @nick2000713.
 
-Full notes on GitHub. Enjoy! :tada:
+Full notes on GitHub.

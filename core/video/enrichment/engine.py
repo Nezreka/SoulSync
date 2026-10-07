@@ -27,13 +27,19 @@ _OMDB_RETRY_SECONDS = 6 * 3600
 
 
 def _latest_seasons(season_nums, keep: int = 2):
-    """The most recent ``keep`` regular seasons (highest season numbers, specials /
-    season 0 excluded) — the only seasons where a still-airing show gains new episodes.
-    The nightly airing refresh scopes to these so it stops re-pulling long-finished
-    seasons every night. Falls back to the full list when there are no regular seasons
-    (a specials-only show)."""
-    regular = sorted({n for n in (season_nums or []) if isinstance(n, int) and n > 0}, reverse=True)
-    return regular[:keep] if regular else list(season_nums or [])
+    """The most recent ``keep`` regular seasons (highest season numbers) plus season 0
+    (specials) if present — a still-airing show gains new episodes in its current
+    season(s), and newly announced specials land in season 0. The nightly airing
+    refresh scopes to these so it stops re-pulling long-finished seasons every night.
+    Falls back to the full list when there are no regular seasons (a specials-only
+    show)."""
+    nums = set(season_nums or [])
+    regular = sorted({n for n in nums if isinstance(n, int) and n > 0}, reverse=True)
+    out = regular[:keep] if regular else list(season_nums or [])
+    # Newly announced specials are never picked up if season 0 is excluded.
+    if 0 in nums and 0 not in out:
+        out = [0] + out
+    return out
 
 
 class VideoEnrichmentEngine:
@@ -268,7 +274,7 @@ class VideoEnrichmentEngine:
         try:
             nums = [s["season_number"] for s in (result.get("metadata") or {}).get("seasons") or []]
             if recent_seasons_only:
-                nums = _latest_seasons(nums)    # only the current season(s) gain new episodes
+                nums = _latest_seasons(nums)    # current season(s) + specials gain new episodes
             # mark_synced only when we pulled the FULL season list — a scoped refresh must
             # not claim the show is fully synced (the background pass finishes the rest).
             w._cascade_episodes(show_id, result["id"], nums,

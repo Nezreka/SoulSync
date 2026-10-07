@@ -7,7 +7,7 @@ from core.metadata_service import (
     MetadataLookupOptions,
 )
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, watchlist_artist_names
 from core.watchlist_scanner import (
     is_acoustic_version,
     is_compilation_album,
@@ -34,6 +34,9 @@ class DiscographyBackfillJob(RepairJob):
         'instrumentals, and compilations are excluded by default.\n\n'
         'Settings:\n'
         '- Max Artists Per Run: Limit how many artists to process per scan (default: 50)\n'
+        '- Min Album Tracks Owned: Only backfill artists you own at least this many tracks of '
+        'on one album, so a few tracks from a playlist don\'t pull in a whole discography. '
+        'Watchlist artists always count. 0 checks every artist (default: 3)\n'
         '- Auto Add To Wishlist: When on, missing tracks are pushed to the wishlist during the scan as well as logged as findings\n'
         '- Include Albums / EPs / Singles: Which release types to check\n'
         '- Include Live / Remixes / Acoustic / Compilations / Instrumentals: Content type filters'
@@ -47,6 +50,8 @@ class DiscographyBackfillJob(RepairJob):
     default_settings = {
         '_section_core': 'Core',
         'max_artists_per_run': 50,
+        # one or two playlist grabs are not "this artist is in my library" (#1572)
+        'min_album_tracks_owned': 3,
         # When on, missing tracks are added to the wishlist during the scan in
         # addition to creating findings. When off (default), only findings are
         # created; the user reviews them and decides per-track in the repair UI.
@@ -71,7 +76,8 @@ class DiscographyBackfillJob(RepairJob):
         max_artists = settings.get('max_artists_per_run', 50)
 
         # Fetch all library artists with their metadata source IDs
-        artists = self._get_library_artists(context)
+        artists = self._get_library_artists(
+            context, min_album_tracks=int(settings.get('min_album_tracks_owned', 3) or 0))
         if not artists:
             logger.info("No artists in library to scan")
             return result
@@ -142,6 +148,8 @@ class DiscographyBackfillJob(RepairJob):
         """
         artist_name = artist['name']
         result.scanned += 1
+        # #1504: owning profile for wishlist routing (None -> shared).
+        artist_owner_pid = artist.get('owner_profile_id') or None
 
         # Build source ID map for more accurate lookups. Primary fallback
         # relies on artist-name search when a source ID is missing.
@@ -338,6 +346,8 @@ class DiscographyBackfillJob(RepairJob):
                                 'album_name': release_name,
                                 'album_image_url': release_image,
                                 'source': source,
+                                # #1504: owning profile for wishlist routing.
+                                'owner_profile_id': artist_owner_pid,
                             },
                         )
                         if inserted:
@@ -362,6 +372,8 @@ class DiscographyBackfillJob(RepairJob):
                                         'artist': artist_name,
                                         'auto_added': True,
                                     },
+                                    # #1504: route to the artist owner's wishlist.
+                                    profile_id=artist_owner_pid or 1,
                                 )
                             except Exception as wl_err:
                                 logger.debug("Auto-add to wishlist failed for '%s': %s", track_name, wl_err)
@@ -413,8 +425,11 @@ class DiscographyBackfillJob(RepairJob):
         finally:
             conn.close()
 
-    def _get_library_artists(self, context):
-        """Get all artists from the library database with source IDs."""
+    def _get_library_artists(self, context, min_album_tracks=0):
+        """Get all artists from the library database with source IDs.
+
+        With ``min_album_tracks`` set, only artists owning that many tracks on
+        one album, or on the watchlist, are returned (#1572)."""
         conn = None
         try:
             conn = context.db._get_connection()
@@ -431,6 +446,9 @@ class DiscographyBackfillJob(RepairJob):
                 select.append("itunes_artist_id")
             if 'deezer_id' in columns:
                 select.append("deezer_id")
+            # #1504: owning profile so backfill findings/wishlist route correctly.
+            if 'owner_profile_id' in columns:
+                select.append("owner_profile_id")
 
             # Only artists actually IN the library — those you own at least one track
             # or album by. The `artists` table also carries bare rows for featured/
@@ -449,7 +467,21 @@ class DiscographyBackfillJob(RepairJob):
                   )
                 ORDER BY name
             """)
-            return [dict(row) for row in cursor.fetchall()]
+            artists = [dict(row) for row in cursor.fetchall()]
+            if min_album_tracks > 0:
+                cursor.execute("""
+                    SELECT DISTINCT artist_id FROM (
+                        SELECT artist_id, album_id FROM tracks
+                        WHERE COALESCE(file_path, '') != '' AND album_id IS NOT NULL
+                        GROUP BY artist_id, album_id
+                        HAVING COUNT(*) >= ?)
+                """, (min_album_tracks,))
+                committed = {str(r[0]) for r in cursor.fetchall()}
+                watched = watchlist_artist_names(cursor)
+                artists = [a for a in artists
+                           if str(a['id']) in committed
+                           or str(a['name']).strip().casefold() in watched]
+            return artists
         except Exception as e:
             logger.error("Error fetching library artists: %s", e, exc_info=True)
             return []

@@ -281,7 +281,11 @@ class VideoEnrichmentWorker:
 
         ``mark_synced=False`` skips flagging the show episodes-synced — for a scoped
         refresh (e.g. the nightly airing job pulling only the current season), which
-        must not claim the FULL history was pulled."""
+        must not claim the FULL history was pulled.
+
+        Air dates are OVERWRITTEN (not gap-filled) when this worker is the TMDB
+        one: TMDB is the schedule source of truth, and a rescheduled premiere
+        must move."""
         seasons = season_numbers
         if not seasons:
             try:
@@ -293,8 +297,13 @@ class VideoEnrichmentWorker:
             try:
                 data = self.client.season_episodes(tv_id, snum)
                 if data and data.get("episodes"):
-                    self.db.backfill_episodes(show_id, snum, data["episodes"],
-                                              data.get("overview"), data.get("poster_url"))
+                    self.db.backfill_episodes(
+                        show_id, snum, data["episodes"],
+                        data.get("overview"), data.get("poster_url"),
+                        # TMDB is the schedule source of truth: a rescheduled
+                        # premiere must move. Other providers (TVDB) stay
+                        # gap-fill so they never clobber TMDB's data.
+                        overwrite_air_date=(self.service == "tmdb"))
             except Exception:
                 logger.exception("episode backfill failed: show %s season %s", show_id, snum)
         if mark_synced:
