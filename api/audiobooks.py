@@ -1216,7 +1216,7 @@ def create_audiobooks_blueprint() -> Blueprint:
             ensure_started(force=True)
         except Exception as exc:                            # noqa: BLE001
             logger.debug("Could not wake the download monitor: %s", exc)
-        return jsonify({"success": True, "ref": ref})
+        return jsonify({"success": True, "ref": ref, "adopted": bool(result.get("adopted"))})
 
     @bp.route("/downloads", methods=["GET"])
     def downloads():

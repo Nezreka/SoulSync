@@ -782,18 +782,33 @@ export async function clearBlocklist(): Promise<boolean> {
 export async function grabRelease(
   asin: string,
   release: AudiobookReleaseCandidate,
-): Promise<{ ok: boolean; error: string; ref: string }> {
+): Promise<{ ok: boolean; error: string; ref: string; adopted: boolean }> {
   try {
-    const data = await readJson<{ success?: boolean; error?: string; ref?: string }>(
-      audiobookClient.post('audiobooks/grab', { json: { asin, release } }),
-    );
+    const data = await readJson<{
+      success?: boolean;
+      error?: string;
+      ref?: string;
+      adopted?: boolean;
+    }>(audiobookClient.post('audiobooks/grab', { json: { asin, release } }));
     // The ref is how the row that was clicked follows its own download.
-    return { ok: Boolean(data?.success), error: data?.error || '', ref: data?.ref || '' };
+    // `adopted`: the client already had this torrent, so it was picked up
+    // where it is instead of being added again.
+    return {
+      ok: Boolean(data?.success),
+      error: data?.error || '',
+      ref: data?.ref || '',
+      adopted: Boolean(data?.adopted),
+    };
   } catch (err) {
     console.error('Failed to grab the release:', err);
     // readJson put the server's reason on the error (already owned, the
     // download client refused, disk full). "Request failed" hid all of them.
-    return { ok: false, error: err instanceof Error ? err.message : 'Request failed', ref: '' };
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Request failed',
+      ref: '',
+      adopted: false,
+    };
   }
 }
 

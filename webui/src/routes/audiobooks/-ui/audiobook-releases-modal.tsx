@@ -180,7 +180,13 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
     if (result.ok && result.ref) {
       setGrabbedRefs((prev) => ({ ...prev, [key]: result.ref }));
     }
-    setMessage(result.ok ? 'Sent to your download client.' : result.error || 'Grab failed.');
+    setMessage(
+      !result.ok
+        ? result.error || 'Grab failed.'
+        : result.adopted
+          ? 'Already in your download client. Picking it up from there, and it imports once complete.'
+          : 'Sent to your download client.',
+    );
   };
 
   /**

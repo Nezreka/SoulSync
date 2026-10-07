@@ -111,13 +111,16 @@ def grab_torrent(url_or_magnet: str, *, save_path: Optional[str] = None,
             category=_category("torrent"),
             save_path=save_path,
             fallback_magnet=fallback_magnet,
+            adopt_existing=True,
         ))
     except Exception as exc:                                # noqa: BLE001
         logger.warning("Audiobook torrent add failed: %s", exc, exc_info=True)
         return {"ok": False, "error": f"Torrent client: {exc}"}
     if not ref:
         return {"ok": False, "error": "The torrent client didn't accept the release."}
-    return {"ok": True, "ref": str(ref)}
+    from core.torrent_clients.base import AdoptedRef
+    # the client already had it: tracked from where it is, finished or not
+    return {"ok": True, "ref": str(ref), "adopted": isinstance(ref, AdoptedRef)}
 
 
 def grab_usenet(url_or_nzb: Any, *, save_path: Optional[str] = None) -> Dict[str, Any]:

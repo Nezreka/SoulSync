@@ -1,7 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 
-import { pollReleaseSearch, startReleaseSearch } from '../-audiobooks.api';
+import {
+  fetchDownloads,
+  grabRelease,
+  pollReleaseSearch,
+  startReleaseSearch,
+} from '../-audiobooks.api';
 import { AudiobookReleasesModal } from './audiobook-releases-modal';
 
 vi.mock('../-audiobooks.api', () => ({
@@ -67,4 +72,28 @@ it('searching the untouched default runs the full automatic search, not a narrow
   fireEvent.click(screen.getByRole('button', { name: 'Search' }));
   await waitFor(() => expect(startReleaseSearch).toHaveBeenCalledTimes(2));
   expect(startReleaseSearch).toHaveBeenLastCalledWith('B1', '');
+});
+
+it('says so when the client already had the torrent', async () => {
+  vi.mocked(pollReleaseSearch).mockResolvedValue({
+    releases: [
+      {
+        title: 'The Reckoning M4B',
+        guid: 'g1',
+        protocol: 'torrent',
+        indexer: 'MAM',
+        size_bytes: 1,
+        reasons: [],
+      } as never,
+    ],
+    stage: '',
+    complete: true,
+    error: '',
+    expired: false,
+  });
+  vi.mocked(grabRelease).mockResolvedValue({ ok: true, error: '', ref: 'h', adopted: true });
+  vi.mocked(fetchDownloads).mockResolvedValue([]);
+  render(<AudiobookReleasesModal asin="B1" title="The Reckoning" onClose={() => {}} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Download' }));
+  expect(await screen.findByText(/Already in your download client/)).toBeTruthy();
 });
