@@ -86,4 +86,24 @@ describe('playLibraryTrack', () => {
     await playLibraryTrack({ id: 3, title: 'Song', exact_path: true }, 'LP', 'Band');
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('stops at a kids-limits refusal instead of falling back to a stream', async () => {
+    // a hide_explicit profile asking for an explicit track gets 403 restricted.
+    // the shared fetch hook toasts it; a streaming fallback would be refused
+    // too and add a second, confusing error
+    fetchMock.mockImplementation(async (url: string) =>
+      String(url).includes('/api/library/play')
+        ? new Response(JSON.stringify({ success: false, error: 'restricted', restricted: true }), {
+            status: 403,
+          })
+        : respondJson(String(url)),
+    );
+    await playLibraryTrack({ id: 1, title: 'Song', file_path: '/a/first.mp3' }, 'LP', 'Band');
+    const streamed = fetchMock.mock.calls.filter(([u]) =>
+      String(u).includes('/api/enhanced-search/stream-track'),
+    );
+    expect(streamed).toHaveLength(0);
+    expect(startAudioPlayback).not.toHaveBeenCalled();
+    expect(window.showToast).not.toHaveBeenCalled();
+  });
 });

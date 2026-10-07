@@ -10921,6 +10921,9 @@ def _get_file_not_found_error(file_path):
     return 'File not found on disk'
 
 
+from api.content_guard import VOUCHED_KEY as _CONTENT_GUARD_VOUCHED  # noqa: E402
+
+
 @app.route('/api/library/play', methods=['POST'])
 def library_play_track():
     """Start playing a track directly from the user's library (no download needed)."""
@@ -10965,7 +10968,11 @@ def library_play_track():
                 "file_path": None if stream_url else file_path,
                 "stream_url": stream_url,
                 "error_message": None,
-                "is_library": True
+                "is_library": True,
+                # the kids guard checked this exact file before the route
+                # ran; /stream/audio serves it to them only while it's still
+                # what the session plays
+                _CONTENT_GUARD_VOUCHED: stream_url or file_path,
             })
 
         return jsonify({"success": True, "message": "Library track ready for playback"})
@@ -23451,7 +23458,7 @@ app.register_blueprint(_bp_mr())
 
 # kids profiles: explicit music can't play and drops out of search/tracklists
 from api.content_guard import register as _reg_content_guard
-_reg_content_guard(app, get_database=get_database)
+_reg_content_guard(app, get_database=get_database, get_stream_state=_current_stream_state)
 
 # profile housekeeping: admin audit log, sign out everywhere, invites, avatars
 from api.profile_admin import configure as _cfg_pa, create_blueprint as _bp_pa
