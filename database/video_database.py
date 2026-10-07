@@ -478,6 +478,63 @@ def _art_url(kind: str, item_id, art: str | None) -> str:
 
 
 
+def _landed_copies(conn, kind: str) -> dict:
+    """what soulsync itself already put in the library, from the download
+    history: {key: [(resolution, dest_path), ...]} newest first. key is
+    ('movie', tmdb) or ('episode', tmdb, season, episode).
+
+    the drain's owned check reads the library (the media server's scan), and
+    that lags, or never sees a library at all when it isn't picked. so a
+    below-cutoff grab landed, its wish stayed open for an upgrade, the drain
+    saw nothing owned, and grabbed the same release again every hour (shark
+    tank S18E02 34 times in two days, a jellyfin user's specials the same)."""
+    if kind == "movie":
+        sql = ("SELECT 'movie', COALESCE(CASE WHEN h.media_source='tmdb' "
+               "  THEN CAST(h.media_id AS INTEGER) END, m.tmdb_id), NULL, NULL, "
+               "COALESCE(h.resolution, h.quality_label), h.dest_path "
+               "FROM video_download_history h LEFT JOIN movies m "
+               "  ON h.media_source='library' AND CAST(m.id AS TEXT)=CAST(h.media_id AS TEXT) "
+               "WHERE h.outcome='completed' AND h.dest_path IS NOT NULL "
+               "  AND h.kind='movie' ORDER BY h.id DESC")
+    else:
+        sql = ("SELECT 'episode', COALESCE(CASE WHEN h.media_source='tmdb' "
+               "  THEN CAST(h.media_id AS INTEGER) END, s.tmdb_id), "
+               "h.season_number, h.episode_number, "
+               "COALESCE(h.resolution, h.quality_label), h.dest_path "
+               "FROM video_download_history h LEFT JOIN shows s "
+               "  ON h.media_source='library' AND CAST(s.id AS TEXT)=CAST(h.media_id AS TEXT) "
+               "WHERE h.outcome='completed' AND h.dest_path IS NOT NULL "
+               "  AND h.season_number IS NOT NULL AND h.episode_number IS NOT NULL "
+               "ORDER BY h.id DESC")
+    out: dict = {}
+    for k, tmdb, sn, en, res, path in conn.execute(sql).fetchall():
+        if tmdb is None or not res:
+            continue
+        key = ("movie", int(tmdb)) if k == "movie" else ("episode", int(tmdb), int(sn), int(en))
+        out.setdefault(key, []).append((str(res), str(path)))
+    return out
+
+
+def _with_landed_copies(rows: list, landed: dict, key_fn, exists=os.path.isfile) -> list:
+    """count a copy soulsync placed as owned while its file is still there.
+    a deleted file stops counting, so it can be grabbed again"""
+    if not landed:
+        return rows
+    for r in rows:
+        for res, path in landed.get(key_fn(r)) or []:
+            try:
+                there = exists(path)
+            except (OSError, ValueError):
+                there = False
+            if not there:
+                continue
+            r["owned"] = 1
+            have = str(r.get("owned_resolutions") or "")
+            r["owned_resolutions"] = f"{have},{res}" if have else res
+            break
+    return rows
+
+
 def _dedupe_wishlist_by_media(rows: list, key_fn) -> list:
     """One row per wished media item.
 
@@ -7046,6 +7103,8 @@ class VideoDatabase:
                 # Unknown release date → allow (the year check on the release still guards).
                 "AND (w.release_date IS NULL OR w.release_date <= date('now', '+7 days')) "
                 "ORDER BY w.year DESC, w.id DESC", _pargs)]
+            rows = _with_landed_copies(rows, _landed_copies(conn, "movie"),
+                                       lambda r: ("movie", int(r["tmdb_id"])))
             # Per-profile wishlists can hold the same movie twice; the drain
             # feeds the shared library, so collapse to one row per movie.
             return _dedupe_wishlist_by_media(rows, lambda r: ("movie", r.get("tmdb_id")))
@@ -7156,6 +7215,10 @@ class VideoDatabase:
                 # can't exist. Unknown air date → allow (can't prove it's future).
                 "AND (w.air_date IS NULL OR w.air_date <= date('now', '+7 days')) "
                 "ORDER BY w.air_date DESC, w.id DESC", _pargs)]
+            rows = _with_landed_copies(
+                rows, _landed_copies(conn, "episode"),
+                lambda r: ("episode", int(r["show_tmdb_id"]), int(r["season_number"]),
+                           int(r["episode_number"])))
             # Per-profile wishlists can hold the same episode twice; the drain
             # feeds the shared library, so collapse to one row per episode.
             return _dedupe_wishlist_by_media(rows, lambda r: ("episode", r.get("show_tmdb_id"), r.get("season_number"), r.get("episode_number")))
