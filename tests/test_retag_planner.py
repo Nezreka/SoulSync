@@ -92,6 +92,34 @@ def test_no_changes_when_everything_matches():
     assert plan['db_data'] == {}
 
 
+def test_compilation_track_artist_is_repaired_independently_of_album_artist():
+    album = {'name': 'Soundtrack', 'artists': [{'name': 'Various Artists'}]}
+    source = {'name': 'Living Waters', 'artists': [{'name': 'Philip Glass'}],
+              'track_number': 12, 'disc_number': 1}
+    current = {'title': 'Living Waters', 'album': 'Soundtrack',
+               'album_artist': 'Various Artists', 'track_artist': 'Frédéric Chopin',
+               'track_number': 12, 'disc_number': 1}
+
+    plan = rp.plan_track(current, source, album)
+
+    assert plan['changes'] == {
+        'track_artist': {'old': 'Frédéric Chopin', 'new': 'Philip Glass'}}
+    assert plan['db_data'] == {'track_artist': 'Philip Glass'}
+
+
+def test_track_artist_credit_keeps_all_source_performers():
+    album = {'name': 'Soundtrack', 'artists': [{'name': 'Various Artists'}]}
+    source = {'name': 'Duet', 'artists': [{'name': 'First'}, {'name': 'Second'}],
+              'track_number': 1, 'disc_number': 1}
+    current = {'title': 'Duet', 'album': 'Soundtrack',
+               'album_artist': 'Various Artists', 'track_artist': 'First',
+               'track_number': 1, 'disc_number': 1}
+
+    plan = rp.plan_track(current, source, album)
+
+    assert plan['db_data']['track_artist'] == 'First; Second'
+
+
 def test_source_blank_field_never_written():
     album = {'name': 'Real Album', 'artists': [{'name': 'Real Artist'}]}  # no year/genres
     current = {'title': 'Real Title', 'album_artist': 'Real Artist', 'album': 'Real Album',

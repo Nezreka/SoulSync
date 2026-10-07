@@ -3863,7 +3863,8 @@ class RepairWorker:
         album_title = details.get('db_album_title')
         target_path = details.get('target_path') or ''
         allowed_track_fields = {'title', 'track_number', 'disc_number',
-                                'musicbrainz_recording_id', 'recording_disambiguation'}
+                                'musicbrainz_recording_id', 'recording_disambiguation',
+                                'track_artist', 'album_id'}
         if not isinstance(db_track_updates, dict) or not set(db_track_updates) <= allowed_track_fields:
             return {'success': False, 'error': 'Invalid library track metadata proposal'}
         if not track_id or not (db_data or db_track_updates or album_title or target_path):
@@ -3881,9 +3882,12 @@ class RepairWorker:
             cursor = conn.cursor()
             locked = ('COALESCE(metadata_locked, 0)' if self._has_column(cursor, 'tracks',
                                                                             'metadata_locked') else '0')
+            track_artist = ('track_artist' if self._has_column(cursor, 'tracks',
+                                                               'track_artist') else 'NULL')
             row = cursor.execute(
                 f'''SELECT file_path, {locked}, title, track_number, disc_number,
-                           musicbrainz_recording_id, recording_disambiguation
+                           musicbrainz_recording_id, recording_disambiguation,
+                           {track_artist}, album_id
                     FROM tracks WHERE id = ?''',
                 (track_id,)).fetchone()
             if not row or row[1]:
@@ -3892,7 +3896,8 @@ class RepairWorker:
             scanned_db = details.get('current_library_metadata') or {}
             current_db = dict(zip(('title', 'track_number', 'disc_number',
                                    'musicbrainz_recording_id',
-                                   'recording_disambiguation'), row[2:7], strict=True))
+                                   'recording_disambiguation', 'track_artist',
+                                   'album_id'), row[2:9], strict=True))
             if any(current_db.get(key) != scanned_db.get(key)
                    for key in db_track_updates if key in scanned_db):
                 return {'success': False, 'error': 'Track metadata changed; rescan before applying'}
@@ -4049,10 +4054,14 @@ class RepairWorker:
         if (not row or tuple(row) != ('complete', details.get('source'),
                                        details.get('release_id'))):
             return {'success': False, 'error': 'Complete-album intent is no longer active'}
-        from core.library.reconciliation_evidence import folder_audio_path_digest
+        from core.library.reconciliation_evidence import (
+            album_folders_audio_path_digest, folder_audio_path_digest,
+        )
         folder = details.get('album_folder')
-        if (not folder or folder_audio_path_digest(folder) !=
-                details.get('folder_audio_path_digest')):
+        album_folders = details.get('album_folders') or []
+        current_digest = (album_folders_audio_path_digest(album_folders)
+                          if album_folders else folder_audio_path_digest(folder))
+        if (not folder or current_digest != details.get('folder_audio_path_digest')):
             return {'success': False, 'error': 'The album files changed; rescan before requesting'}
         slots = details.get('missing_tracks') or []
         if len(slots) != 1:

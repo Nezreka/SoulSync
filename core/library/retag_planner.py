@@ -44,6 +44,18 @@ def _first_artist(obj: Any) -> str:
     return str(arts).strip() if arts else ''
 
 
+def _artist_credit(obj: Any) -> str:
+    artists = _get(obj, 'artists', 'artist', 'artist_name')
+    if not isinstance(artists, list):
+        return _first_artist(obj)
+    names = []
+    for artist in artists:
+        name = artist.get('name') if isinstance(artist, dict) else artist
+        if str(name or '').strip():
+            names.append(str(name).strip())
+    return '; '.join(dict.fromkeys(names))
+
+
 def _genres_list(obj: Any) -> List[str]:
     g = _get(obj, 'genres', 'genre')
     if isinstance(g, list):
@@ -126,7 +138,7 @@ def match_source_tracks(
 def _target_for_track(source_track: Any, album_meta: Dict[str, Any]) -> Dict[str, Any]:
     """Normalized target tag values from the source for one track."""
     album_artist = _first_artist(album_meta)
-    track_artist = _first_artist(source_track) or album_artist
+    track_artist = _artist_credit(source_track) or album_artist
     return {
         'title': (_get(source_track, 'name', 'title', 'track_name') or '').strip(),
         'artist': album_artist,                 # album-level artist
@@ -153,6 +165,24 @@ def _display(value) -> str:
     if isinstance(value, list):
         return ', '.join(str(v) for v in value)
     return '' if value is None else str(value)
+
+
+def _artist_credit_includes(credit: str, artist: str) -> bool:
+    """Accept a fuller local credit when the source exposes one performer."""
+    def folded(value: str) -> str:
+        return ' '.join(re.sub(r'[^\w]+', ' ', value.casefold()).split())
+
+    current = folded(credit)
+    expected = folded(artist)
+    if not current or not expected:
+        return False
+    if current == expected:
+        return True
+    # Require visible collaboration punctuation before treating a longer
+    # credit as a superset; ordinary substrings are not artist agreement.
+    return bool(re.search(r'\s(?:&|and|feat\.?|featuring|with|;|,)\s', credit,
+                          flags=re.IGNORECASE) and
+                re.search(rf'(?<!\w){re.escape(expected)}(?!\w)', current))
 
 
 def _is_empty(value) -> bool:
@@ -210,6 +240,26 @@ def plan_track(current_tags: Dict[str, Any], source_track: Any, album_meta: Dict
             db_data['track_number'] = new_val
         elif field == 'disc_number':
             db_data['disc_number'] = new_val
+
+    # The recording artist is a separate tag from the album artist. This is
+    # essential on compilations and soundtracks, and it can be wrong even when
+    # the album-level artist already agrees.
+    target_track_artist = target.get('track_artist') or ''
+    current_track_artist = (current_tags.get('track_artist') or
+                            current_tags.get('artist') or
+                            current_tags.get('album_artist') or '')
+    album_artist_change_sets_same_credit = (
+        'artist' in changes and target_track_artist == target.get('artist')
+    )
+    if (target_track_artist and
+            not _artist_credit_includes(current_track_artist, target_track_artist) and
+            not album_artist_change_sets_same_credit and
+            not (mode == MODE_FILL_MISSING and current_track_artist)):
+        changes['track_artist'] = {
+            'old': _display(current_track_artist),
+            'new': _display(target_track_artist),
+        }
+        db_data['track_artist'] = target_track_artist
 
     # Always carry track_count alongside a track_number write (writers want both).
     if 'track_number' in db_data and target.get('track_count'):

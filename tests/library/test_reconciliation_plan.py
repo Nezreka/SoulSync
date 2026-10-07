@@ -113,6 +113,70 @@ def test_tied_acoustid_links_are_resolved_by_complete_album_evidence():
     assert result['extra_files'] == []
 
 
+def test_tied_acoustid_identity_is_resolved_when_another_file_owns_that_slot():
+    tied = [
+        {'mbid': 'first-id', 'title': 'First Song', 'artist': 'Artist', 'score': 0.99},
+        {'mbid': 'second-id', 'title': 'Second Song', 'artist': 'Artist', 'score': 0.99},
+    ]
+    files = [
+        _file('First Song', '/album/01 - First Song.flac', 200000, tied[0]),
+        _file('Second Song', '/album/02 - Second Song.flac', 201000, tied[1]),
+    ]
+    files[0]['acoustid']['recordings'] = tied
+    slots = [
+        {'title': 'First Song', 'artist': 'Artist',
+         'recording_mbid': 'first-id', 'duration_ms': 200000},
+        {'title': 'Second Song', 'artist': 'Artist',
+         'recording_mbid': 'second-id', 'duration_ms': 201000},
+    ]
+
+    result = reconcile_folder(files, slots)
+
+    assert all(pair['confidence'] == 'clear' for pair in result['pairs'])
+
+
+def test_tied_acoustid_identity_stays_ambiguous_when_other_slot_has_no_owner():
+    tied = [
+        {'mbid': 'first-id', 'title': 'First Song', 'artist': 'Artist', 'score': 0.99},
+        {'mbid': 'second-id', 'title': 'Second Song', 'artist': 'Artist', 'score': 0.99},
+    ]
+    file = _file('First Song', '/album/01 - First Song.flac', 200000, tied[0])
+    file['acoustid']['recordings'] = tied
+    slots = [
+        {'title': 'First Song', 'artist': 'Artist',
+         'recording_mbid': 'first-id', 'duration_ms': 200000},
+        {'title': 'Second Song', 'artist': 'Artist',
+         'recording_mbid': 'second-id', 'duration_ms': 201000},
+    ]
+
+    pair = reconcile_folder([file], slots)['pairs'][0]
+
+    assert pair['confidence'] == 'ambiguous'
+
+
+def test_metadata_only_owner_does_not_resolve_a_competing_audio_identity():
+    tied = [
+        {'mbid': 'first-id', 'title': 'First Song', 'artist': 'Artist', 'score': 0.99},
+        {'mbid': 'second-id', 'title': 'Second Song', 'artist': 'Artist', 'score': 0.99},
+    ]
+    files = [
+        _file('First Song', '/album/01 - First Song.flac', 200000, tied[0]),
+        _file('Second Song', '/album/02 - Second Song.flac', 201000),
+    ]
+    files[0]['acoustid']['recordings'] = tied
+    slots = [
+        {'title': 'First Song', 'artist': 'Artist',
+         'recording_mbid': 'first-id', 'duration_ms': 200000},
+        {'title': 'Second Song', 'artist': 'Artist',
+         'recording_mbid': 'second-id', 'duration_ms': 201000},
+    ]
+
+    first_pair = next(pair for pair in reconcile_folder(files, slots)['pairs']
+                      if pair['file_index'] == 0)
+
+    assert first_pair['confidence'] == 'ambiguous'
+
+
 def test_actual_duplicate_leaves_the_wrongly_labelled_slot_missing():
     tied = [
         {'mbid': 'play-id', 'title': 'Play Crack the Sky',

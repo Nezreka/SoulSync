@@ -81,6 +81,28 @@ def slot_version_markers(slot: dict) -> frozenset[str]:
     return frozenset(markers)
 
 
+def display_title_compatible(local_title: str, slot: dict) -> bool:
+    """Keep useful local qualifier text when MB confirms the same version.
+
+    Release track titles are often bare while the recording disambiguation
+    carries ``live``, ``demo`` or similar detail. In that case a local title
+    such as ``Home (Live)`` is more useful than the bare release title and is
+    still the same recording identity.
+    """
+    slot_title = str(slot.get('title') or slot.get('name') or '')
+    if _title_score(local_title, slot_title) >= 0.83:
+        return True
+    left, right = normalize(local_title), normalize(slot_title)
+    if not left or not right:
+        return False
+    ratio = SequenceMatcher(None, left, right).ratio()
+    if ratio < 0.83 or not titles_plausibly_same(left, right, ratio):
+        return False
+    if numeric_tokens_differ(local_title, slot_title):
+        return False
+    return recording_version_markers(local_title) == slot_version_markers(slot)
+
+
 def versions_compatible(file: dict, slot: dict) -> bool:
     """Require symmetric version evidence, including stored MB comments."""
     if file_version_markers(file) != slot_version_markers(slot):
@@ -238,6 +260,7 @@ def reconcile_folder(files: list[dict], slots: list[dict]) -> dict[str, Any]:
                 'missing_slots': list(range(len(slots)))}
     weighted = [[_pair_weight(file, slot, slots) for slot in slots] for file in files]
     assigned = assign_max_weight([[weight for weight, _ in row] for row in weighted])
+    assigned_by_slot = {slot_index: file_index for file_index, slot_index in assigned}
     pairs = []
     for file_index, slot_index in assigned:
         weight, reasons = weighted[file_index][slot_index]
@@ -267,16 +290,56 @@ def reconcile_folder(files: list[dict], slots: list[dict]) -> dict[str, Any]:
             recording for recording in recordings
             if float(recording.get('score') or 0) >= top_score
         ]
-        competing_release_slot = any(
-            not _recording_supports_slot(recording, slot)
-            and any(
-                other_index != slot_index
+        def unresolved_alternative(
+            other_index: int, other: dict, *, assigned_slot_index=slot_index,
+            candidate_file_index=file_index, candidate_recordings=top_recordings,
+        ) -> bool:
+            if other_index == assigned_slot_index:
+                return False
+            delta = _duration_delta_ms(files[candidate_file_index], other)
+            if delta is not None and delta > 15000:
+                return False
+            if not any(_recording_supports_slot(recording, other)
+                       for recording in candidate_recordings):
+                return False
+            owner_index = assigned_by_slot.get(other_index)
+            if owner_index is None or owner_index == candidate_file_index:
+                return True
+            owner = files[owner_index]
+            owner_tags = owner.get('tags') or {}
+            owner_support = sum((
+                _title_score(str(owner_tags.get('title') or ''),
+                             str(other.get('title') or '')) >= 0.83,
+                _title_score(_filename_title(str(owner.get('path') or '')),
+                             str(other.get('title') or '')) >= 0.83,
+                bool(owner_tags.get('mbid') and _recording_id(other)
+                     and owner_tags['mbid'] == _recording_id(other)),
+            ))
+            owner_delta = _duration_delta_ms(owner, other)
+            owner_weight = weighted[owner_index][other_index][0]
+            contender_weight = weighted[candidate_file_index][other_index][0]
+            owner_recordings = (owner.get('acoustid') or {}).get('recordings') or []
+            owner_top_score = max((float(recording.get('score') or 0)
+                                   for recording in owner_recordings), default=0)
+            owner_audio_supports_slot = any(
+                float(recording.get('score') or 0) >= owner_top_score
                 and _recording_supports_slot(recording, other)
-                and ((_duration_delta_ms(files[file_index], other) is None) or
-                     _duration_delta_ms(files[file_index], other) <= 15000)
-                for other_index, other in enumerate(slots)
+                for recording in owner_recordings
             )
-            for recording in top_recordings
+            # The alternative identity is already accounted for when another
+            # local file independently names that slot, fits its duration, and
+            # scores at least as well. The album-level one-to-one assignment is
+            # then stronger evidence than an AcoustID many-to-many link.
+            return not (
+                owner_support >= 2
+                and owner_audio_supports_slot
+                and (owner_delta is None or owner_delta <= 3000)
+                and owner_weight >= contender_weight
+            )
+
+        competing_release_slot = any(
+            unresolved_alternative(other_index, other)
+            for other_index, other in enumerate(slots)
         )
         fingerprint_context_resolves = (
             ambiguous_fingerprint and top_supports_slot

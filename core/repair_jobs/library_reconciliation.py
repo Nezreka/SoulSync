@@ -11,6 +11,7 @@ import os
 import re
 import hashlib
 import json
+import time
 from collections import Counter, defaultdict
 from functools import partial
 from typing import Any
@@ -19,9 +20,11 @@ from core.auto_import_worker import _read_file_tags
 from core.imports.staging import AUDIO_EXTENSIONS
 from core.library.path_resolver import resolve_library_file_path
 from core.library_reorganize import _safe_filename
-from core.library.reconciliation_evidence import ReconciliationEvidence, folder_audio_path_digest
+from core.library.reconciliation_evidence import (
+    ReconciliationEvidence, album_folders_audio_path_digest,
+)
 from core.library.reconciliation_plan import (
-    reconcile_folder, _title_score, file_version_markers,
+    reconcile_folder, _title_score, display_title_compatible, file_version_markers,
 )
 from core.library.retag_planner import plan_track
 from core.matching.audio_verification import fingerprint_is_ambiguous, normalize
@@ -45,6 +48,9 @@ _WATCHLIST_REMOVAL_PREFIX = '.watchlist-removal-'
 _ALBUM_EDITION_WORD = re.compile(
     r'\b(?:anniversary|bit|cd|deluxe|edition|expanded|khz|limited|lp|master|mono|'
     r'pressing|reissue|remaster(?:ed)?|special|stereo|target|vinyl)\b', re.I)
+_SOUNDTRACK_SUFFIX = re.compile(
+    r'\s*[\[(]?(?:original\s+(?:motion\s+picture|television)\s+)?soundtrack[\])]?$|'
+    r'\s*[\[(]?music\s+from\s+the\s+(?:motion\s+picture|film)[\])]?$', re.I)
 
 
 def _suggest_filename(path: str, slot: dict) -> str:
@@ -67,11 +73,11 @@ def _suggest_filename(path: str, slot: dict) -> str:
             number = str(track).zfill(len(digits))
         else:
             number = digits
-        title = (old_title if _title_score(old_title, slot['title']) >= 0.83
+        title = (old_title if display_title_compatible(old_title, slot)
                  else _safe_filename(slot['title']))
         proposed = f'{number}{separator}{title}{extension}'
     else:
-        title = (stem if _title_score(stem, slot['title']) >= 0.83
+        title = (stem if display_title_compatible(stem, slot)
                  else _safe_filename(slot['title']))
         proposed = f'{title}{extension}'
     return os.path.join(os.path.dirname(path), proposed) if proposed != os.path.basename(path) else ''
@@ -105,6 +111,114 @@ def _group_disc_folders(folders: dict[str, list[str]], tracks: dict,
             merged.extend(groups.pop(folder))
         groups[parent] = merged
     return groups
+
+
+def _album_identity_title(value: object) -> str:
+    """Album title used only to find conservative soundtrack fragments."""
+    title = _SOUNDTRACK_SUFFIX.sub('', str(value or '').strip()).strip(' -–—()[]')
+    return normalize(title)
+
+
+def _album_has_release_id(album: dict | None) -> bool:
+    if not album:
+        return False
+    return bool((album.get('canonical_source') and album.get('canonical_album_id')) or
+                any(album.get(column) for column in _SOURCES))
+
+
+def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
+                           albums: dict) -> tuple[dict[str, list[str]], dict[str, object]]:
+    """Join DB-backed folder fragments only when one release is authoritative.
+
+    Folders assigned to the same album row are one logical album. A second,
+    narrow rule absorbs tiny soundtrack fragments into one large linked
+    soundtrack when titles, owner and unused track positions agree. The
+    returned mapping marks the only mixed-ID groups the scanner may accept.
+    """
+    groups = {folder: list(paths) for folder, paths in folders.items()}
+
+    def album_ids(paths):
+        return {tracks[os.path.normpath(path)]['album_id'] for path in paths
+                if os.path.normpath(path) in tracks and
+                tracks[os.path.normpath(path)].get('album_id') is not None}
+
+    by_album: dict[object, list[str]] = defaultdict(list)
+    for folder, paths in groups.items():
+        ids = album_ids(paths)
+        if len(ids) == 1:
+            by_album[next(iter(ids))].append(folder)
+    for album_folders in by_album.values():
+        if len(album_folders) < 2:
+            continue
+        representative = min(album_folders,
+                             key=lambda folder: (-len(groups[folder]), folder))
+        merged = []
+        for folder in album_folders:
+            merged.extend(groups.pop(folder))
+        groups[representative] = merged
+
+    def positions(paths):
+        values = set()
+        for path in paths:
+            row = tracks.get(os.path.normpath(path)) or {}
+            try:
+                track_number = int(row.get('track_number') or 0)
+                disc_number = int(row.get('disc_number') or 1)
+            except (TypeError, ValueError):
+                return set()
+            if track_number <= 0:
+                return set()
+            values.add((disc_number, track_number))
+        return values
+
+    buckets: dict[tuple[object, str], list[str]] = defaultdict(list)
+    for folder, paths in groups.items():
+        ids = album_ids(paths)
+        if len(ids) != 1:
+            continue
+        album = albums.get(next(iter(ids))) or {}
+        key = _album_identity_title(album.get('album_title'))
+        if key:
+            buckets[(album.get('owner_profile_id') or 1, key)].append(folder)
+
+    trusted: dict[str, object] = {}
+    for bucket in buckets.values():
+        anchors = []
+        for folder in bucket:
+            ids = album_ids(groups[folder])
+            album_id = next(iter(ids))
+            album = albums.get(album_id) or {}
+            title = str(album.get('album_title') or '')
+            if (len(groups[folder]) >= 8 and _album_has_release_id(album) and
+                    'soundtrack' in title.casefold()):
+                anchors.append((folder, album_id))
+        if len(anchors) != 1:
+            continue
+        anchor_folder, anchor_id = anchors[0]
+        anchor_album = albums.get(anchor_id) or {}
+        anchor_positions = positions(groups[anchor_folder])
+        if not anchor_positions:
+            continue
+        fragments = []
+        for folder in bucket:
+            if folder == anchor_folder:
+                continue
+            paths = groups[folder]
+            ids = album_ids(paths)
+            fragment_id = next(iter(ids))
+            fragment_album = albums.get(fragment_id) or {}
+            fragment_positions = positions(paths)
+            if (len(paths) <= 3 and not _album_has_release_id(fragment_album) and
+                    (fragment_album.get('owner_profile_id') or 1) ==
+                    (anchor_album.get('owner_profile_id') or 1) and
+                    fragment_positions and not (anchor_positions & fragment_positions)):
+                fragments.append(folder)
+                anchor_positions.update(fragment_positions)
+        if fragments:
+            for folder in fragments:
+                groups[anchor_folder].extend(groups.pop(folder))
+            trusted[anchor_folder] = anchor_id
+    return groups, trusted
 
 
 def _retire_stale_findings(db, observed: set[tuple[str, str, str]]) -> None:
@@ -164,12 +278,16 @@ def _normalize_slot(item: dict, source: str) -> dict:
             return default
 
     artists = item.get('artists') or []
-    artist = next((a.get('name') for a in artists if isinstance(a, dict) and a.get('name')), '')
-    if not artist and artists and isinstance(artists[0], str):
-        artist = artists[0]
+    artist_names = [str(a.get('name')).strip() for a in artists
+                    if isinstance(a, dict) and str(a.get('name') or '').strip()]
+    artist_names.extend(str(a).strip() for a in artists
+                        if not isinstance(a, dict) and str(a or '').strip())
+    artist_names = list(dict.fromkeys(artist_names))
+    artist = artist_names[0] if artist_names else ''
     return {
         'title': item.get('name') or item.get('title') or '',
         'artist': artist or '',
+        'artist_names': artist_names,
         'track_number': positive_int(item.get('track_number')),
         'disc_number': positive_int(item.get('disc_number'), 1),
         'duration_ms': positive_int(item.get('duration_ms'), 0),
@@ -205,6 +323,35 @@ def _score_release_candidates(files: list[dict], candidates: list[tuple[str, str
         scored.append((clear, matched, -len(plan['extra_files']),
                        source, release_id, slots, plan))
     return scored
+
+
+def _search_release_candidates(album: dict | None, context: JobContext,
+                               search_cache: dict) -> list[tuple[str, str]]:
+    """Bounded Picard-style title/artist fallback for albums with no usable ID."""
+    if not album or not context.mb_client:
+        return []
+    title = str(album.get('album_title') or '').strip()
+    artist = str(album.get('artist_name') or '').strip()
+    if not title:
+        return []
+    key = (title.casefold(), artist.casefold())
+    if key not in search_cache:
+        try:
+            search_cache[key] = context.mb_client.search_release(
+                title, artist_name=artist or None, limit=4)
+        except Exception as exc:
+            logger.debug('Could not search MusicBrainz release %r by %r: %s',
+                         title, artist, exc)
+            search_cache[key] = []
+    candidates = []
+    for row in search_cache[key] or []:
+        release_id = str(row.get('id') or '')
+        score = float(row.get('score') or 0)
+        release_title = str(row.get('title') or '')
+        if (release_id and score >= 90 and
+                normalize(title) == normalize(release_title)):
+            candidates.append(('musicbrainz', release_id))
+    return candidates[:4]
 
 
 def _album_titles_compatible(current: str, release: str) -> bool:
@@ -459,7 +606,10 @@ class LibraryReconciliationJob(RepairJob):
             if canonical and 'canonical_locked' in columns:
                 canonical += ', al.canonical_locked'
             owner = ', al.owner_profile_id' if 'owner_profile_id' in columns else ''
+            record_type = ', al.record_type' if 'record_type' in columns else ''
             locked = ', t.metadata_locked' if 'metadata_locked' in track_columns else ''
+            track_artist = (', t.track_artist' if 'track_artist' in track_columns
+                            else ', NULL AS track_artist')
             recording_disambiguation = (
                 ', t.recording_disambiguation'
                 if 'recording_disambiguation' in track_columns
@@ -474,8 +624,8 @@ class LibraryReconciliationJob(RepairJob):
             cursor = conn.execute(f'''
                 SELECT t.id, t.file_path, t.title, t.album_id, t.track_number,
                        t.disc_number, t.duration, t.musicbrainz_recording_id,
-                       al.title AS album_title{artist}{canonical}{owner}{locked}{size}{bitrate}
-                       {recording_disambiguation}{extras}
+                       al.title AS album_title{artist}{canonical}{owner}{record_type}{locked}{size}{bitrate}
+                       {recording_disambiguation}{track_artist}{extras}
                 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
                 {artist_join}
                 WHERE t.file_path IS NOT NULL AND t.file_path != ''
@@ -611,6 +761,7 @@ class LibraryReconciliationJob(RepairJob):
             conn.close()
 
     def scan(self, context: JobContext) -> JobResult:
+        scan_started = time.perf_counter()
         result = JobResult()
         client = context.acoustid_client
         if client is None:
@@ -646,6 +797,8 @@ class LibraryReconciliationJob(RepairJob):
                     if os.path.splitext(name)[1].lower() in AUDIO_EXTENSIONS:
                         folders[dirpath].append(os.path.join(dirpath, name))
         folders = _group_disc_folders(folders, tracks, roots)
+        folders, trusted_logical_groups = _group_logical_albums(folders, tracks, albums)
+        inventory_seconds = time.perf_counter() - scan_started
         observed: set[tuple[str, str, str]] = set()
         completed = True
         album_folder_counts: Counter[object] = Counter()
@@ -655,6 +808,7 @@ class LibraryReconciliationJob(RepairJob):
                 tracks[os.path.normpath(path)].get('album_id') is not None})
         release_cache = {}
         release_meta_cache = {}
+        release_search_cache = {}
         exact_musicbrainz_releases: set[str] = set()
         cache = ReconciliationEvidence(context.db, client)
         lookup_error_reported = False
@@ -684,11 +838,19 @@ class LibraryReconciliationJob(RepairJob):
                         if not lookup_error_reported:
                             result.errors += 1
                             lookup_error_reported = True
-                        evidence_error = audio.get('error') or 'AcoustID lookup failed'
-                        break
+                        if audio.get('fingerprint_key'):
+                            # A service lookup failure is transient and can
+                            # affect every remaining file. Preserve this
+                            # logical album instead of replacing good findings
+                            # with unavailable-evidence noise.
+                            evidence_error = audio.get('error') or 'AcoustID lookup failed'
+                            break
+                        # A decoder/fingerprint failure belongs to this file.
+                        # Keep auditing the rest of the album and surface this
+                        # track as uncertain rather than hiding every sibling.
                     playlists = (list(playlist_membership.get(str(db_row['id']), []))
                                  if db_row else [])
-                    files.append({'path': path, 'tags': _read_file_tags(path),
+                    files.append({'path': path, 'tags': cache.read_tags(path, _read_file_tags),
                                   'acoustid': audio, 'db': db_row,
                                   'playlists': playlists,
                                   'size_bytes': stat.st_size, 'mtime_ns': stat.st_mtime_ns})
@@ -709,7 +871,8 @@ class LibraryReconciliationJob(RepairJob):
                     continue
                 album_counts = Counter(f['db']['album_id'] for f in files
                                        if f.get('db') and f['db'].get('album_id') is not None)
-                if len(album_counts) > 1:
+                trusted_anchor_id = trusted_logical_groups.get(folder)
+                if len(album_counts) > 1 and trusted_anchor_id is None:
                     if emit(
                         job_id=self.job_id, finding_type='reconciliation_unresolved',
                         severity='warning', entity_type='folder', entity_id=folder,
@@ -720,7 +883,8 @@ class LibraryReconciliationJob(RepairJob):
                                  'evidence_signature': _evidence_signature(files, list(album_counts))}):
                         result.findings_created += 1
                     continue
-                album_id = album_counts.most_common(1)[0][0] if album_counts else None
+                album_id = (trusted_anchor_id if trusted_anchor_id is not None else
+                            album_counts.most_common(1)[0][0] if album_counts else None)
                 album = albums.get(album_id)
                 if album_id is not None and album_folder_counts[album_id] > 1:
                     if emit(
@@ -748,6 +912,15 @@ class LibraryReconciliationJob(RepairJob):
                         if candidate not in candidates]
                     scored.extend(_score_release_candidates(
                         files, additional, release_cache, exact_musicbrainz_releases))
+                if not scored or max(row[1] for row in scored) == 0:
+                    searched = [candidate for candidate in _search_release_candidates(
+                        album, context, release_search_cache) if candidate not in candidates]
+                    exact_musicbrainz_releases.update(
+                        release_id for source, release_id in searched
+                        if source == 'musicbrainz')
+                    candidates.extend(searched)
+                    scored.extend(_score_release_candidates(
+                        files, searched, release_cache, exact_musicbrainz_releases))
                 if not scored:
                     if emit(
                         job_id=self.job_id, finding_type='reconciliation_unresolved',
@@ -870,10 +1043,13 @@ class LibraryReconciliationJob(RepairJob):
                     'release_artist_names': release_artist_names,
                     'release_disambiguation': release_meta.get('disambiguation') or '',
                     'profile_id': album.get('owner_profile_id') if album else 1,
-                    'album_folder': folder, 'source': source, 'release_id': release_id,
+                    'album_folder': folder,
+                    'album_folders': sorted({os.path.dirname(file['path']) for file in files}),
+                    'source': source, 'release_id': release_id,
                     'exact_release_id': exact_release_id,
                     'release_track_count': len(slots), 'local_file_count': len(files),
-                    'folder_audio_path_digest': folder_audio_path_digest(folder),
+                    'folder_audio_path_digest': album_folders_audio_path_digest(
+                        [os.path.dirname(file['path']) for file in files]),
                     'evidence_signature': _evidence_signature(files, (source, release_id)),
                     'playlist_tracks': [
                         {'file': os.path.basename(file['path']),
@@ -937,8 +1113,9 @@ class LibraryReconciliationJob(RepairJob):
                         continue
                     target = {'name': slot['title'], 'track_number': slot['track_number'],
                               'disc_number': slot['disc_number'],
-                              'artists': [{'name': slot['artist']}]
-                              if slot['artist'] else []}
+                              'artists': [{'name': name}
+                                          for name in slot.get('artist_names') or
+                                          ([slot['artist']] if slot['artist'] else [])]}
                     current_album_title = tags.get('album') or ''
                     metadata_album_title = (current_album_title
                         if _album_titles_compatible(current_album_title, release_title)
@@ -947,7 +1124,7 @@ class LibraryReconciliationJob(RepairJob):
                     # join phrases in this adapter. Keep a complete local
                     # collaboration credit rather than reducing it to one
                     # artist or inventing punctuation.
-                    current_album_artist = tags.get('artist') or ''
+                    current_album_artist = tags.get('album_artist') or ''
                     metadata_artist = (current_album_artist
                         if len(release_artist_names) > 1 and current_album_artist
                         else common['artist_name'])
@@ -962,7 +1139,7 @@ class LibraryReconciliationJob(RepairJob):
                     if _album_titles_compatible(current_album_title, release_title):
                         changed.pop('album', None)
                         tag_plan['db_data'].pop('album_title', None)
-                    if _title_score(tags.get('title') or '', slot['title']) >= 0.83:
+                    if display_title_compatible(tags.get('title') or '', slot):
                         changed.pop('title', None)
                         tag_plan['db_data'].pop('title', None)
                     confirmed_mbid = (slot['recording_mbid'] if source == 'musicbrainz' and
@@ -980,7 +1157,8 @@ class LibraryReconciliationJob(RepairJob):
                         tag_plan['db_data']['musicbrainz_recording_id'] = confirmed_mbid
                     db_updates = {}
                     row = file.get('db') or {}
-                    if (row and _title_score(row.get('title') or '', slot['title']) < 0.83):
+                    if (row and not display_title_compatible(
+                            row.get('title') or '', slot)):
                         db_updates['title'] = slot['title']
                         changed['library_title'] = {
                             'old': row.get('title') or '', 'new': slot['title']}
@@ -989,6 +1167,21 @@ class LibraryReconciliationJob(RepairJob):
                             db_updates[field] = slot[field]
                             changed[f'library_{field}'] = {
                                 'old': str(row.get(field) or ''), 'new': str(slot[field])}
+                    target_track_artist = tag_plan['db_data'].get('track_artist')
+                    if (row and target_track_artist and
+                            row.get('track_artist') != target_track_artist):
+                        db_updates['track_artist'] = target_track_artist
+                        changed['library_track_artist'] = {
+                            'old': row.get('track_artist') or '',
+                            'new': target_track_artist,
+                        }
+                    if (row and trusted_anchor_id is not None and
+                            row.get('album_id') != album_id):
+                        db_updates['album_id'] = album_id
+                        changed['library_album_assignment'] = {
+                            'old': str(row.get('album_id') or ''),
+                            'new': str(album_id),
+                        }
                     if (row and confirmed_mbid and
                             row.get('musicbrainz_recording_id') != confirmed_mbid):
                         db_updates['musicbrainz_recording_id'] = confirmed_mbid
@@ -1019,6 +1212,10 @@ class LibraryReconciliationJob(RepairJob):
                         db_album_title = release_title
                         changed['library_album_title'] = {
                             'old': album.get('album_title') or '', 'new': release_title}
+                    if set(changed) == {'library_recording_disambiguation'}:
+                        # This internal evidence improves later comparisons,
+                        # but does not warrant a review decision by itself.
+                        continue
                     if not changed or not file.get('db'):
                         continue
                     if file['db'].get('metadata_locked'):
@@ -1050,7 +1247,8 @@ class LibraryReconciliationJob(RepairJob):
                                    key: row.get(key) for key in
                                    ('title', 'track_number', 'disc_number',
                                     'musicbrainz_recording_id',
-                                    'recording_disambiguation')},
+                                    'recording_disambiguation', 'track_artist',
+                                    'album_id')},
                                'fingerprint_key': file['acoustid'].get('fingerprint_key'),
                                'size_bytes': file['size_bytes'], 'mtime_ns': file['mtime_ns'],
                                'match_reasons': pair['reasons'],
@@ -1169,12 +1367,20 @@ class LibraryReconciliationJob(RepairJob):
                 cache.checkpoint()
                 _retire_stale_findings(context.db, observed)
         finally:
+            elapsed_seconds = time.perf_counter() - scan_started
+            cache.metrics['inventory_seconds'] = round(inventory_seconds, 3)
+            cache.metrics['elapsed_seconds'] = round(elapsed_seconds, 3)
             logger.info('Library reconciliation: %d files, %d findings, %d fingerprints, '
-                        '%d fingerprint hits, %d lookups, %d lookup hits, %d releases',
+                        '%d fingerprint hits, %d lookups, %d lookup hits, %d tag reads, '
+                        '%d tag hits, %d releases in %.1fs (inventory %.1fs, fingerprint %.1fs, '
+                        'lookup %.1fs, tags %.1fs)',
                         result.scanned, result.findings_created,
                         cache.metrics['fingerprints'], cache.metrics['fingerprint_hits'],
                         cache.metrics['lookups'], cache.metrics['lookup_hits'],
-                        len(release_cache))
+                        cache.metrics['tag_reads'], cache.metrics['tag_hits'],
+                        len(release_cache), elapsed_seconds, inventory_seconds,
+                        cache.metrics['fingerprint_seconds'], cache.metrics['lookup_seconds'],
+                        cache.metrics['tag_seconds'])
             cache.close()
         if context.report_progress:
             context.report_progress(log_line=f'Reconciliation cache: {cache.metrics}')

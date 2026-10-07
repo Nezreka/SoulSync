@@ -122,7 +122,7 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
     fuzzy matching".
     """
     result = {
-        'title': '', 'artist': '', 'album': '',
+        'title': '', 'artist': '', 'album_artist': '', 'track_artist': '', 'album': '',
         'track_number': 0, 'disc_number': 1, 'year': '',
         'genres': [], 'isrc': '', 'mbid': '', 'duration_ms': 0,
         'spotify_track_id': '',
@@ -148,7 +148,11 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
                 # artist often includes features like "Kendrick Lamar, Drake"
                 # which fragment consensus when grouping tracks into an album).
                 # Fall back to artist for files that lack albumartist.
-                result['artist'] = (tags.get('albumartist', [''])[0] or tags.get('artist', [''])[0] or '').strip()
+                album_artist = (tags.get('albumartist', [''])[0] or '').strip()
+                track_artist = (tags.get('artist', [''])[0] or '').strip()
+                result['album_artist'] = album_artist
+                result['track_artist'] = track_artist
+                result['artist'] = album_artist or track_artist
                 result['album'] = (tags.get('album', [''])[0] or '').strip()
                 # Date/year — try 'date' first, fall back to 'year'
                 date_str = (tags.get('date', [''])[0] or tags.get('year', [''])[0] or '').strip()

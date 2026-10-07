@@ -16,7 +16,8 @@ from core.library.reconciliation_evidence import ReconciliationEvidence
 from core.repair_jobs.base import JobContext
 from core.repair_jobs.library_reconciliation import (
     LibraryReconciliationJob, _album_titles_compatible, _candidate_evidence,
-    _candidate_shape, _group_disc_folders, _normalize_slot, _same_recording_copies,
+    _candidate_shape, _group_disc_folders, _group_logical_albums, _normalize_slot,
+    _same_recording_copies, _search_release_candidates,
     _suggest_filename,
 )
 from core.repair_worker import RepairWorker
@@ -101,6 +102,21 @@ def test_musicbrainz_slot_keeps_recording_disambiguation():
     }, 'musicbrainz')
 
     assert slot['recording_disambiguation'] == 'Connect Sets acoustic'
+
+
+def test_filename_keeps_version_text_confirmed_by_recording_disambiguation():
+    slot = {'title': 'Home', 'track_number': 1, 'disc_number': 1,
+            'recording_disambiguation': 'live'}
+
+    assert _suggest_filename('/album/01 - Home (Live).flac', slot) == ''
+
+
+def test_filename_does_not_keep_a_different_recording_version():
+    slot = {'title': 'Home', 'track_number': 1, 'disc_number': 1,
+            'recording_disambiguation': 'demo'}
+
+    assert _suggest_filename('/album/01 - Home (Live).flac', slot) == \
+        '/album/01 - Home.flac'
 
 
 def test_album_title_compatibility_preserves_edition_detail_only_for_same_album():
@@ -492,6 +508,30 @@ def test_audio_evidence_cache_survives_rename_but_retries_errors(tmp_path):
         cache.close()
 
 
+def test_tag_cache_reuses_unchanged_file_and_invalidates_on_write(tmp_path):
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    path = tmp_path / 'Lucky.flac'
+    path.write_bytes(b'one')
+    client = _Acoustid({})
+    calls = 0
+
+    def loader(_path):
+        nonlocal calls
+        calls += 1
+        return {'title': f'Lucky {calls}'}
+
+    cache = ReconciliationEvidence(db, client)
+    try:
+        assert cache.read_tags(str(path), loader)['title'] == 'Lucky 1'
+        assert cache.read_tags(str(path), loader)['title'] == 'Lucky 1'
+        path.write_bytes(b'changed contents')
+        assert cache.read_tags(str(path), loader)['title'] == 'Lucky 2'
+        assert cache.metrics['tag_reads'] == 2
+        assert cache.metrics['tag_hits'] == 1
+    finally:
+        cache.close()
+
+
 def test_audio_lookup_error_is_retried_after_cache_reopen(tmp_path, monkeypatch):
     monkeypatch.setattr('core.library.reconciliation_evidence.time.sleep', lambda _delay: None)
     db = MusicDatabase(str(tmp_path / 'music.db'))
@@ -598,6 +638,54 @@ def test_api_error_skips_affected_folder_without_repeating_failed_requests(tmp_p
     assert not result.stopped_early
     assert client.fingerprints == 1
     assert findings == []
+
+
+def test_file_fingerprint_error_does_not_hide_the_rest_of_its_album(tmp_path, monkeypatch):
+    import core.repair_jobs.library_reconciliation as module
+
+    root = tmp_path / 'music'
+    root.mkdir()
+    failed = root / '01 - Failed.flac'
+    good = root / '02 - Good.flac'
+    failed.write_bytes(b'failed fixture')
+    good.write_bytes(b'good fixture')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, failed)
+    with db._get_connection() as conn:
+        conn.execute("""INSERT INTO tracks
+            (id, album_id, artist_id, title, track_number, file_path)
+            VALUES (2, 10, 1, 'Good', 2, ?)""", (str(good),))
+        conn.commit()
+    client = _Acoustid({good.name: {
+        'mbid': 'good-id', 'title': 'Good', 'artist': 'Artist', 'score': 0.99}})
+    original_fingerprint = client.fingerprint_audio_file
+    client.fingerprint_audio_file = lambda path: (
+        {'status': 'error', 'error': 'fpcalc could not decode this file'}
+        if path == str(failed) else original_fingerprint(path))
+    monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
+    monkeypatch.setattr(module, '_read_file_tags', lambda path: {
+        'title': 'Failed' if path == str(failed) else 'Good',
+        'artist': 'Lamb of God', 'album': 'Ashes of the Wake',
+        'track_number': 1 if path == str(failed) else 2,
+        'disc_number': 1, 'duration_ms': 200000,
+    })
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args: [
+        {'id': 'failed-id', 'name': 'Failed', 'track_number': 1,
+         'disc_number': 1, 'duration_ms': 200000},
+        {'id': 'good-id', 'name': 'Good', 'track_number': 2,
+         'disc_number': 1, 'duration_ms': 200000},
+    ])
+    monkeypatch.setattr(module, 'get_album_for_source', lambda *_args: {
+        'name': 'Ashes of the Wake'})
+    findings = []
+    context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
+                         acoustid_client=client,
+                         create_finding=lambda **finding: findings.append(finding) or True)
+
+    result = LibraryReconciliationJob().scan(context)
+
+    assert result.scanned == 2
+    assert any(finding['title'] == 'Confirm: Failed' for finding in findings)
 
 
 def test_api_error_preserves_affected_folder_but_retires_other_stale_findings(
@@ -730,6 +818,63 @@ def test_disc_subfolders_are_one_release_audit_without_merging_unrelated_folders
     assert grouped['/music/Other/Disc 1'] == folders['/music/Other/Disc 1']
 
 
+def test_logical_album_groups_same_db_album_across_arbitrary_folders():
+    folders = {
+        '/music/Artist/Album': ['/music/Artist/Album/01.flac'],
+        '/music/Artist/Album extra': ['/music/Artist/Album extra/02.flac'],
+    }
+    tracks = {path: {'album_id': 10, 'track_number': index, 'disc_number': 1}
+              for index, path in enumerate(
+                  (folders['/music/Artist/Album'][0],
+                   folders['/music/Artist/Album extra'][0]), start=1)}
+
+    grouped, trusted = _group_logical_albums(folders, tracks, {
+        10: {'album_title': 'Album', 'owner_profile_id': 1}})
+
+    assert len(grouped) == 1
+    assert set(next(iter(grouped.values()))) == set(path for paths in folders.values()
+                                                    for path in paths)
+    assert trusted == {}
+
+
+def test_logical_album_absorbs_only_unlinked_nonoverlapping_soundtrack_fragments():
+    main = [f'/music/Various Artists/The Truman Show/{index:02}.flac'
+            for index in (*range(1, 7), *range(8, 12))]
+    living = '/music/Philip Glass/The Truman Show/12.flac'
+    beginning = '/music/Chopin/The Truman Show/07.flac'
+    other = '/music/Other/The Truman Show/01.flac'
+    folders = {
+        '/music/Various Artists/The Truman Show': main,
+        '/music/Philip Glass/The Truman Show': [living],
+        '/music/Chopin/The Truman Show': [beginning],
+        '/music/Other/The Truman Show': [other],
+    }
+    tracks = {}
+    for path in main:
+        tracks[path] = {'album_id': 10, 'track_number': int(path[-7:-5]),
+                        'disc_number': 1}
+    tracks[living] = {'album_id': 11, 'track_number': 12, 'disc_number': 1}
+    tracks[beginning] = {'album_id': 12, 'track_number': 7, 'disc_number': 1}
+    tracks[other] = {'album_id': 13, 'track_number': 1, 'disc_number': 1}
+    albums = {
+        10: {'album_title': 'The Truman Show (Original Motion Picture Soundtrack)',
+             'owner_profile_id': 1, 'musicbrainz_release_id': 'release'},
+        11: {'album_title': 'The Truman Show', 'owner_profile_id': 1},
+        12: {'album_title': 'The Truman Show', 'owner_profile_id': 1},
+        # An explicit source ID and overlapping position make this a separate
+        # legitimate release even though its display title is identical.
+        13: {'album_title': 'The Truman Show', 'owner_profile_id': 1,
+             'spotify_album_id': 'other-release'},
+    }
+
+    grouped, trusted = _group_logical_albums(folders, tracks, albums)
+
+    anchor = '/music/Various Artists/The Truman Show'
+    assert set(grouped[anchor]) == set([*main, living, beginning])
+    assert grouped['/music/Other/The Truman Show'] == [other]
+    assert trusted == {anchor: 10}
+
+
 def test_filename_plan_preserves_numbering_and_harmless_title_flavor():
     assert _suggest_filename('/music/0201 - Wrong.flac', {
         'title': 'Hourglass', 'disc_number': 2, 'track_number': 2,
@@ -767,6 +912,30 @@ def test_release_discovery_samples_distinct_files_not_three_ids_from_first_file(
         files, None, context, include_audio=True)
     assert calls == ['best-0', 'best-1', 'best-2']
     assert candidates == [('musicbrainz', 'shared-release')]
+
+
+def test_release_title_search_is_bounded_and_rejects_fuzzy_title_hits():
+    calls = []
+
+    class MusicBrainz:
+        def search_release(self, title, artist_name, limit):
+            calls.append((title, artist_name, limit))
+            return [
+                {'id': 'exact', 'title': 'Unknown Album', 'score': 100},
+                {'id': 'fuzzy', 'title': 'Unknown Album Live', 'score': 99},
+                {'id': 'weak', 'title': 'Unknown Album', 'score': 89},
+            ]
+
+    context = JobContext(db=None, transfer_folder='', config_manager=None,
+                         mb_client=MusicBrainz())
+    album = {'album_title': 'Unknown Album', 'artist_name': 'Known Artist'}
+    cache = {}
+
+    assert _search_release_candidates(album, context, cache) == [
+        ('musicbrainz', 'exact')]
+    assert _search_release_candidates(album, context, cache) == [
+        ('musicbrainz', 'exact')]
+    assert calls == [('Unknown Album', 'Known Artist', 4)]
 
 
 def test_wrong_audio_defers_completion_intent_until_assignment_is_settled(tmp_path, monkeypatch):
@@ -1060,6 +1229,39 @@ def test_audio_backed_retag_writes_real_flac_and_track_row(tmp_path, monkeypatch
                               FROM tracks WHERE id = 1''').fetchone()
     assert tuple(row) == ('Hourglass', 2, 'hourglass-id',
                           'alternate studio recording', str(target_path))
+
+
+def test_reviewed_soundtrack_fragment_can_join_the_anchor_album(tmp_path):
+    root = tmp_path / 'music'
+    root.mkdir()
+    path = root / '12 - Living Waters.flac'
+    path.write_bytes(b'audio fixture')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, path)
+    with db._get_connection() as conn:
+        conn.execute("""INSERT INTO albums
+            (id, title, artist_id, server_source)
+            VALUES (11, 'The Truman Show', 1, 'test')""")
+        conn.execute('UPDATE tracks SET album_id = 11 WHERE id = 1')
+        conn.commit()
+    worker = RepairWorker(database=db, transfer_folder=str(root))
+    stat = path.stat()
+    details = {
+        'album_id': '10',
+        'source': 'spotify',
+        'release_id': 'ashes-release',
+        'track_id': 1,
+        'size_bytes': stat.st_size,
+        'mtime_ns': stat.st_mtime_ns,
+        'current_library_metadata': {'album_id': '11'},
+        'db_track_updates': {'album_id': '10'},
+    }
+
+    result = worker._fix_reconciliation_metadata('track', '1', str(path), details)
+
+    assert result['success'], result
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT album_id FROM tracks WHERE id = 1').fetchone()[0] == '10'
 
 
 def test_exact_release_title_repairs_rated_r_album_and_file_tags(tmp_path, monkeypatch):

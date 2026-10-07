@@ -36,12 +36,22 @@ def folder_audio_path_digest(folder: str) -> str:
     return hashlib.sha256('\n'.join(sorted(paths)).encode()).hexdigest()
 
 
+def album_folders_audio_path_digest(folders: list[str]) -> str:
+    """Guard a logical album that may currently span physical folders."""
+    entries = [(os.path.normpath(folder), folder_audio_path_digest(folder))
+               for folder in sorted(set(folders))]
+    return hashlib.sha256(json.dumps(entries, separators=(',', ':')).encode()).hexdigest()
+
+
 class ReconciliationEvidence:
     def __init__(self, db, acoustid_client):
         self.conn = db._get_connection()
         self.client = acoustid_client
         self.metrics = {'fingerprints': 0, 'fingerprint_hits': 0,
-                        'lookups': 0, 'lookup_hits': 0}
+                        'lookups': 0, 'lookup_hits': 0,
+                        'tag_reads': 0, 'tag_hits': 0,
+                        'fingerprint_seconds': 0.0, 'lookup_seconds': 0.0,
+                        'tag_seconds': 0.0}
         self.lookup_error = None
         self.consecutive_lookup_errors = 0
         self.conn.executescript('''
@@ -56,6 +66,10 @@ class ReconciliationEvidence:
             );
             CREATE INDEX IF NOT EXISTS idx_reconcile_lookup_expiry
                 ON reconcile_acoustid_results(expires_at);
+            CREATE TABLE IF NOT EXISTS reconcile_file_tags (
+                file_path TEXT PRIMARY KEY, size_bytes INTEGER NOT NULL,
+                mtime_ns INTEGER NOT NULL, tags_json TEXT NOT NULL
+            );
         ''')
         self.conn.execute('DELETE FROM reconcile_acoustid_results WHERE expires_at <= ?',
                           (int(time.time()),))
@@ -66,6 +80,36 @@ class ReconciliationEvidence:
 
     def checkpoint(self):
         self.conn.commit()
+
+    def read_tags(self, file_path: str, loader) -> dict[str, Any]:
+        """Read tags once per unchanged file and persist the JSON-safe result."""
+        try:
+            stat = os.stat(file_path)
+        except OSError:
+            return loader(file_path)
+        row = self.conn.execute('''
+            SELECT tags_json FROM reconcile_file_tags
+            WHERE file_path = ? AND size_bytes = ? AND mtime_ns = ?
+        ''', (file_path, stat.st_size, stat.st_mtime_ns)).fetchone()
+        if row:
+            try:
+                tags = json.loads(row[0])
+                if isinstance(tags, dict):
+                    self.metrics['tag_hits'] += 1
+                    return tags
+            except (TypeError, ValueError):
+                pass
+        started = time.perf_counter()
+        tags = loader(file_path)
+        self.metrics['tag_seconds'] += time.perf_counter() - started
+        self.metrics['tag_reads'] += 1
+        self.conn.execute('''
+            INSERT OR REPLACE INTO reconcile_file_tags
+                (file_path, size_bytes, mtime_ns, tags_json)
+            VALUES (?, ?, ?, ?)
+        ''', (file_path, stat.st_size, stat.st_mtime_ns,
+              json.dumps(tags, sort_keys=True, default=str)))
+        return tags
 
     def identify(self, file_path: str) -> dict[str, Any]:
         try:
@@ -80,7 +124,9 @@ class ReconciliationEvidence:
             duration, fingerprint = row
             self.metrics['fingerprint_hits'] += 1
         else:
+            started = time.perf_counter()
             generated = self.client.fingerprint_audio_file(file_path)
+            self.metrics['fingerprint_seconds'] += time.perf_counter() - started
             self.metrics['fingerprints'] += 1
             if generated.get('status') != 'ok':
                 return {**generated, 'recordings': []}
@@ -114,14 +160,18 @@ class ReconciliationEvidence:
         if self.lookup_error is not None:
             return {**self.lookup_error, 'fingerprint_key': key, 'deferred': True}
 
-        for delay in (*_LOOKUP_RETRY_DELAYS, None):
-            result = self.client.lookup_fingerprint_with_status(fingerprint, duration)
-            self.metrics['lookups'] += 1
-            if result.get('status') != 'error' or result.get('invalid_key') or delay is None:
-                break
-            logger.warning('AcoustID lookup failed; retrying in %ss: %s',
-                           delay, result.get('error') or 'unknown error')
-            time.sleep(delay)
+        started = time.perf_counter()
+        try:
+            for delay in (*_LOOKUP_RETRY_DELAYS, None):
+                result = self.client.lookup_fingerprint_with_status(fingerprint, duration)
+                self.metrics['lookups'] += 1
+                if result.get('status') != 'error' or result.get('invalid_key') or delay is None:
+                    break
+                logger.warning('AcoustID lookup failed; retrying in %ss: %s',
+                               delay, result.get('error') or 'unknown error')
+                time.sleep(delay)
+        finally:
+            self.metrics['lookup_seconds'] += time.perf_counter() - started
         if result.get('status') in ('ok', 'no_match'):
             self.consecutive_lookup_errors = 0
             ttl = 30 * 86400 if result['status'] == 'ok' else 86400
