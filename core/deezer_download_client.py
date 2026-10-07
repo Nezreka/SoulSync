@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import struct
+import re
 import threading
 import time
 import uuid
@@ -860,6 +861,54 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             logger.debug(f"get_track_result failed for Deezer {track_id}: {e}")
             return None
 
+    @staticmethod
+    def _name_key(value: str) -> str:
+        import unicodedata
+        folded = unicodedata.normalize('NFKD', str(value or '')).encode('ascii', 'ignore').decode()
+        return re.sub(r'[^a-z0-9]+', '', folded.casefold())
+
+    def _hinted_tracks(self) -> List[TrackResult]:
+        """the song a download is for, straight from deezer: its own track id
+        when the task came from deezer, and a track:"title" search kept to the
+        track's own artist. deezer's free-text search ranks reprises, karaoke
+        and key-shifted copies above the original and can leave it out
+        (#1582); the artist filter is done here because deezer's artist:""
+        filter is broken (#1295). once per download task, not per query"""
+        from core.downloads.track_hint import current_track_hint
+        hint = current_track_hint()
+        if not hint:
+            return []
+        if '_deezer' in hint:
+            return list(hint['_deezer'])
+        out: List[TrackResult] = []
+        tid = hint.get('deezer_id')
+        if tid:
+            tr = self.get_track_result(str(tid))
+            if tr:
+                out.append(tr)
+        title = str(hint.get('title') or '').replace('"', ' ').strip()
+        want_artist = self._name_key(hint.get('artist') or '')
+        if title and want_artist:
+            try:
+                resp = self._api_get(
+                    'https://api.deezer.com/search',
+                    params={'q': f'track:"{title}"', 'limit': 50},
+                    timeout=getattr(self._config, 'get_source_search_timeout', lambda: None)() or 10,
+                )
+                resp.raise_for_status()
+                for item in (resp.json() or {}).get('data', []) or []:
+                    artist = item.get('artist') if isinstance(item.get('artist'), dict) else {}
+                    got = self._name_key(artist.get('name') or '')
+                    if not got or (want_artist not in got and got not in want_artist):
+                        continue
+                    tr = self._item_to_track_result(item)
+                    if tr and all(tr.filename != o.filename for o in out):
+                        out.append(tr)
+            except Exception as e:
+                logger.debug("Deezer title-scoped search failed for %r: %s", title, e)
+        hint['_deezer'] = list(out)
+        return out
+
     async def search(self, query: str, timeout: int = None,
                      progress_callback=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
         """Search Deezer for tracks matching the query."""
@@ -888,6 +937,13 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                 tr = self._item_to_track_result(item)
                 if tr:
                     results.append(tr)
+
+            # the plain search can miss the song itself (#1582): put the
+            # track's own id and a title-scoped match first when we know them
+            hinted = self._hinted_tracks()
+            if hinted:
+                have = {r.filename.split('||', 1)[0] for r in hinted}
+                results = hinted + [r for r in results if r.filename.split('||', 1)[0] not in have]
 
             logger.info(f"Deezer search for '{query}' returned {len(results)} results")
             return results, []

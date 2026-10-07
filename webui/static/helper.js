@@ -3460,8 +3460,8 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
-    '3.5.1': [
-        { date: 'October 2026 · 3.5.1' },
+    '3.5.2': [
+        { date: 'October 2026 · 3.5.2' },
         { title: 'Sign in with Plex', desc: 'Turn it on in Settings and everyone you share Plex with can log in with their own Plex account. The server owner signs in as admin, anyone else gets their own profile, and their playlists land in their own Plex. Settings also has Re-link with Plex for a fresh token.', page: 'settings' },
         { title: 'Connect with Plex in My Account', desc: 'A profile that signs in with a password, like a shared friend or a kid, can connect its own Plex account for its playlists and listening history.' },
         { title: 'Listening history per person', desc: 'Plex plays go to whoever played them, so the kids\' plays stay out of your stats, mixes, discover and Last.fm. Linking someone later moves their plays to them.', page: 'stats' },
@@ -3483,6 +3483,10 @@ const WHATS_NEW = {
         { title: 'Soulseek cleanup scope', desc: 'Cleanup only removes this client\'s own transfers and searches, with a scope setting for single-client installs (#1501, #1524).', page: 'settings' },
         { title: 'Deezer matching fixes', desc: 'Identification, re-identify and enrichment stop picking karaoke or reprise versions over the original song, and MP3s get their MusicBrainz recording ID (#1565).' },
         { title: 'Every profile\'s video follows', desc: 'Followed people, studios, channels, playlists and shows are scanned for every profile, not just admin.' },
+        { title: 'Duplicates keep your playlists', desc: 'Each copy in a duplicate finding shows which server playlists it is in, and Keep Best keeps that copy, so cleaning up never pulls songs out of a playlist.', page: 'tools' },
+        { title: 'Deezer finds the original song', desc: 'Deezer downloads also look the track up by its own ID and its own artist, so a soundtrack song no longer comes back as the reprise or karaoke version, or not at all (#1582).' },
+        { title: 'Explicit tracks pass verification', desc: 'AcoustID verification stopped quarantining every track titled Explicit (#1579).' },
+        { title: 'Video downloads stop repeating', desc: 'The video wishlist counts copies SoulSync already placed, so it stops grabbing the same release every hour. Usenet grabs import instead of sitting at 100%, and mixed Jellyfin libraries show up to pick.' },
         { title: 'Earlier versions', desc: '3.5.0 brought the video discover overhaul, per-profile sync and discover, and repair jobs on the automation engine.' },
     ],
     '3.5.0': [
@@ -3537,13 +3541,15 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: '3.5.1: sign in with plex, your own listening history, watchlist + editions and more',
+        title: '3.5.2: sign in with plex, your own listening history, watchlist + editions and more',
         description: 'Sign in with Plex, listening history that is yours, live sidebar weather, Download Discography learns about watchlists and editions, music videos and episodes become requestable, the dashboard gets a new look, and a stack of tagging, playlist sync and download fixes.',
         features: [
             'Sign in with Plex for everyone you share your server with, Re-link with Plex in Settings, and Connect with Plex in My Account.',
             'Listening history per person: Plex plays go to whoever played them, and plays stop counting twice when scrobbles come back.',
             'Kids profiles play library music again.',
             'Sidebar weather: the real sky, holiday decorations, and a developer preview (#1575, #1576).',
+            'Duplicates keep the copy a playlist points at; Deezer finds the original song (#1582); explicit tracks pass AcoustID (#1579).',
+            'Video: no more hourly re-grabs of the same release, usenet grabs import, mixed Jellyfin libraries can be picked.',
             'Library paths keep the server path and SoulSync\'s own; mirrored tracks identified by ID; duplicate and repair fixes (#1566 to #1574).',
             'Wishlist + Watchlist button in Download Discography, with per-artist watchlist settings in the modal (#1553).',
             'Edition preference: one edition per album instead of standard and deluxe both downloading (#1561).',
@@ -3587,7 +3593,7 @@ const VERSION_MODAL_SECTIONS = [
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '3.5.1';
+    return btn ? btn.textContent.trim().replace('v', '') : '3.5.2';
 }
 
 // Compare two semver-ish strings ("2.4.0" vs "2.4.1" vs "2.39"). Returns

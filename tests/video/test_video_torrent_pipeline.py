@@ -407,3 +407,50 @@ def test_usenet_is_prowlarr_only(monkeypatch):
                         lambda ctx: (_ for _ in ()).throw(AssertionError("EXT.to ran for usenet")))
     cands, err = w._search_one_source("usenet", {"title": "X"}, "movie")
     assert cands is None and "Prowlarr" in err
+
+
+def test_a_usenet_job_folder_is_the_content_itself(tmp_path):
+    """sabnzbd's storage / nzbget's FinalDir is the job's own folder. looking
+    for <folder>/<job name> inside it found nothing, so every usenet grab sat
+    at 100% and then failed as "the file never appeared". real files"""
+    job = tmp_path / "complete" / "Some.Movie.2024.1080p.WEB-DL"
+    job.mkdir(parents=True)
+    (job / "some.movie.2024.1080p.mkv").write_bytes(b"x" * 1000)
+    (job / "sample.mkv").write_bytes(b"x" * 10)
+    status = _St(state="completed", progress=1.0, save_path=str(job),
+                 name="Some.Movie.2024.1080p.WEB-DL")
+    upd = cd.process_client_download(
+        {"client_ref": "SABnzbd_nzo_1", "source": "usenet", "id": 3},
+        get_status=lambda s, r: status, resolve_path=lambda p: p,
+        find_video=cd.find_video_file)
+    assert upd["status"] == "completed"
+    assert upd["dest_path"] == str(job / "some.movie.2024.1080p.mkv")
+
+
+def test_a_usenet_parent_folder_still_scopes_to_the_job(tmp_path):
+    """a client that reports the shared parent still gets name scoping, so a
+    neighbour's bigger file never leaks in"""
+    shared = tmp_path / "complete"
+    ours = shared / "Some.Movie.2024.1080p"
+    ours.mkdir(parents=True)
+    (ours / "movie.mkv").write_bytes(b"x" * 100)
+    other = shared / "Other.Movie.2160p"
+    other.mkdir()
+    (other / "big.mkv").write_bytes(b"y" * 9000)
+    status = _St(state="completed", progress=1.0, save_path=str(shared), name="Some.Movie.2024.1080p")
+    upd = cd.process_client_download(
+        {"client_ref": "n1", "source": "usenet", "id": 4},
+        get_status=lambda s, r: status, resolve_path=lambda p: p, find_video=cd.find_video_file)
+    assert upd["dest_path"] == str(ours / "movie.mkv")
+
+
+def test_a_torrent_save_path_is_still_the_shared_folder(tmp_path):
+    """torrents keep the strict scoping: their save_path IS the shared dir"""
+    shared = tmp_path / "dl"
+    shared.mkdir()
+    (shared / "neighbour.mkv").write_bytes(b"y" * 9000)
+    status = _St(state="seeding", progress=1.0, save_path=str(shared), name="Our.Torrent")
+    upd = cd.process_client_download(
+        {"client_ref": "h2", "source": "torrent", "id": 5},
+        get_status=lambda s, r: status, resolve_path=lambda p: p, find_video=cd.find_video_file)
+    assert upd == {"progress": 100.0}          # keeps waiting, never takes the neighbour

@@ -94,6 +94,14 @@ def process_client_download(dl: dict, *, get_status: Callable[[str, str], Any],
         reported = getattr(status, "save_path", None) or getattr(status, "incomplete_path", None)
         save = resolve_path(reported)
         name = getattr(status, "name", None)
+        # a usenet client reports the job's OWN folder (sab ``storage``, nzbget
+        # FinalDir/DestDir), not the shared parent a torrent client reports.
+        # looking for save/name inside it found nothing, so every usenet grab sat
+        # at 100% until the stall timer failed it. scope by name only when that
+        # subfolder really is there
+        if str(dl.get("source") or "").lower() == "usenet" and save and name \
+                and not _scoped_content(save, name):
+            name = None
     # A season pack is a FOLDER of episodes. Falling through to find_video here would pick
     # its largest file, hand that one episode to the importer, and leave the rest on disk —
     # and since a pack row carries no single episode identity, the importer then rejects it

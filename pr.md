@@ -1,6 +1,6 @@
-# soulsync 3.5.1: `dev` → `main`
+# soulsync 3.5.2: `dev` → `main`
 
-sign in with plex, listening history that's yours (the kids' plays stay out of your stats, and plays stop counting twice), download discography learns about watchlists and editions, music videos and episodes become requestable, the dashboard gets a new look and the sidebar gets live weather, plus a big stack of tagging, playlist sync and download fixes. scope: everything merged since 3.5.0 went to main (#1496).
+sign in with plex, listening history that's yours (the kids' plays stay out of your stats, and plays stop counting twice), download discography learns about watchlists and editions, music videos and episodes become requestable, the dashboard gets a new look and the sidebar gets live weather, plus a big stack of tagging, playlist sync and download fixes. scope: everything merged since 3.5.0 went to main (#1496). dev went to main early as 3.5.1 by accident, so 3.5.2 is that release plus everything that landed since.
 
 ## sign in with plex
 
@@ -32,6 +32,10 @@ sign in with plex, listening history that's yours (the kids' plays stay out of y
 - an audiobook sold in parts takes its own part instead of either one, and the download button shows the server's reason when it fails.
 - five library v2 review fixes from @nick2000713: the live/commentary cleaner keeps interludes and intros, an exact stem match beats a fuzzy one, a tools job toggle arms its timer, the album year fix restores the folder if the database update fails, and suspect album tags stop flagging normal wishlist albums (#1570).
 - acoustid verification stops quarantining every explicit track. musicbrainz never writes "explicit" in a recording title, so a deezer album named "(Album Version Explicit)" failed the version gate on every copy from every peer and kept re-downloading. explicit counts as the original for verification now, clean edits stay strict (thanks @mateusguilherme) (#1579).
+- the duplicate detector shows which copy a server playlist points at ("In playlist: ..."), and keep best keeps that copy, so cleaning up duplicates no longer drops songs out of playlists (thanks jadux on discord).
+- deezer downloads find the original song. its plain search ranks the reprise and karaoke copies first and can leave the original out ("How Far I'll Go"), so the downloader now also fetches the track by its own deezer id and searches the title with the track's own artist (thanks @cremonies) (#1582).
+- the video wishlist stops re-downloading what soulsync just placed. a below-cutoff grab kept its wish for an upgrade, but the drain only knew what the media server had scanned, so it grabbed the same release every hour (one episode 34 times in two days). it now counts its own landed copies while the file is there. jellyfin libraries set up as mixed movies and shows show up to pick now too.
+- usenet video grabs import instead of sitting at 100%. sabnzbd and nzbget report the job's own folder, and the monitor was looking for the job name inside it.
 - the db updater's progress stops flipping between "tracks" and "artists" (thanks SeadogsBooty on discord).
 
 ## download discography and watchlist
@@ -102,4 +106,4 @@ sign in with plex, listening history that's yours (the kids' plays stay out of y
 ## validation
 
 - every fix shipped with regression tests and green neighboring suites, per its PR.
-- full suite on the 3.5.1 bump head: 22624 passed, 0 failed (run twice, before and after the cleaner fix). the late additions above (plex sign-in onward) shipped with their own tests and mutation checks; the full suite gets re-run on the final head before the merge.
+- full suite on the first 3.5.1 bump head: 22624 passed, 0 failed (run twice, before and after the cleaner fix). the late additions above (plex sign-in onward) shipped with their own tests and mutation checks; the full suite gets re-run on the final head before the merge.

@@ -1234,8 +1234,12 @@ class JellyfinVideoSource:
 
     def _views(self, collection_type: str, name=None):
         resp = self._req(f"/Users/{self.uid}/Views") or {}
+        # a library made as "mixed movies and shows" has no collection type
+        # (or 'mixed'), so it never showed up to pick and an anime library set
+        # up that way was never scanned. it can hold either, so it counts as
+        # both; the scans ask for Series / Movie items inside it anyway
         views = [v for v in resp.get("Items", [])
-                 if (v.get("CollectionType") or "").lower() == collection_type]
+                 if (v.get("CollectionType") or "mixed").lower() in (collection_type, "mixed")]
         if name:
             views = [v for v in views if v.get("Name") == name]
         return views
