@@ -42,6 +42,7 @@ function fakeCtx(spy = false) {
     moveTo: fn(),
     lineTo: fn(),
     quadraticCurveTo: fn(),
+    arc: fn(),
     stroke: fn(),
     fill: fn(),
     save: fn(),
@@ -400,5 +401,40 @@ describe('a clear night', () => {
   it('no satellite by day or under cloud', () => {
     expect(Math.max(...watch({ isDay: true }, 40).glow)).toBe(0);
     expect(Math.max(...watch({ isDay: false, cloudCover: 0.8 }, 40).glow)).toBe(0);
+  });
+});
+
+describe("new year's fireworks", () => {
+  function watch(cond: Partial<SceneConditions>, fireworks: number, seconds = 20) {
+    const eng = createWeatherScene(
+      fakeCtx() as unknown as CanvasRenderingContext2D,
+      { ...CALM, ...cond },
+      seeded(),
+      {
+        fireworks,
+      },
+    );
+    eng.resize(260, 900, 2);
+    let t = 0;
+    let peak = 0;
+    for (let i = 0; i < seconds * 60; i++) {
+      t += 1 / 60;
+      eng.frame(1 / 60, t);
+      peak = Math.max(peak, eng.stats().sparks);
+    }
+    return peak;
+  }
+
+  it('bloom at night, a fuller show at midnight', () => {
+    const evening = watch({ isDay: false }, 0.35);
+    const midnight = watch({ isDay: false }, 1);
+    expect(evening).toBeGreaterThan(30);
+    expect(midnight).toBeGreaterThan(evening);
+  });
+
+  it('never by day, never without the holiday, and capped', () => {
+    expect(watch({ isDay: true }, 1)).toBe(0);
+    expect(watch({ isDay: false }, 0)).toBe(0);
+    expect(watch({ isDay: false }, 1, 60)).toBeLessThanOrEqual(520);
   });
 });

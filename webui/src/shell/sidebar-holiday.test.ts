@@ -61,6 +61,25 @@ describe('holiday decorations', () => {
     ]);
   });
 
+  it('christmas: santa crosses the header, ornaments hang from the divider, the tree lit on the card', () => {
+    mountHoliday('christmas', DAY);
+    expect(arts('.sidebar-header')).toEqual(['/static/holidays/sleigh.webp']);
+    expect(arts('.sidebar-spacer')).toEqual([
+      '/static/holidays/ornament-red.webp',
+      '/static/holidays/ornament-blue.webp',
+    ]);
+    expect(arts('[data-music-only]')).toEqual(['/static/holidays/tree.webp']);
+    // the star and the baubles, twinkling out of step
+    const lights = document.querySelectorAll('[data-music-only] .holiday-light');
+    expect(lights.length).toBe(11);
+    expect(new Set([...lights].map((l) => (l as HTMLElement).style.animationDelay)).size).toBe(11);
+  });
+
+  it("new year's hangs nothing: the fireworks are painted on the sky", () => {
+    mountHoliday('new-year', DAY);
+    expect(document.querySelectorAll('.sidebar-holiday').length).toBe(0);
+  });
+
   it('never takes clicks or screen-reader attention', () => {
     mountHoliday('halloween', DAY);
     for (const el of document.querySelectorAll('.sidebar-holiday')) {

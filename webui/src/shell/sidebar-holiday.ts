@@ -57,9 +57,9 @@ function pumpkin(name: string, size: string, carved: boolean): HTMLElement {
   return wrap;
 }
 
-function lantern(name: string, side: 'left' | 'right'): HTMLElement {
+function lantern(name: string, side: 'left' | 'right', kind = ''): HTMLElement {
   const wrap = document.createElement('span');
-  wrap.className = `holiday-lantern holiday-lantern--${side}`;
+  wrap.className = `holiday-lantern holiday-lantern--${side}${kind ? ` holiday-lantern--${kind}` : ''}`;
   const cord = document.createElement('span');
   cord.className = 'holiday-cord';
   const glow = document.createElement('span');
@@ -75,6 +75,46 @@ function bat(name: string, cls: string): HTMLElement {
   wings.className = 'holiday-bat-wings';
   wings.appendChild(img(name, 'holiday-art'));
   flier.appendChild(wings);
+  return flier;
+}
+
+/**
+ * the tree's lights: tiny glows set over its baubles and candles (as a
+ * fraction of the art's box), twinkling out of step at night
+ */
+const TREE_LIGHTS: Array<[number, number, string]> = [
+  [0.5, 0.06, 'star'],
+  [0.42, 0.24, 'gold'],
+  [0.62, 0.29, 'red'],
+  [0.3, 0.4, 'blue'],
+  [0.56, 0.44, 'gold'],
+  [0.74, 0.5, 'red'],
+  [0.38, 0.56, 'gold'],
+  [0.24, 0.66, 'red'],
+  [0.6, 0.64, 'blue'],
+  [0.8, 0.7, 'gold'],
+  [0.46, 0.74, 'red'],
+];
+
+function tree(): HTMLElement {
+  const wrap = document.createElement('span');
+  wrap.className = 'holiday-tree';
+  wrap.appendChild(img('tree', 'holiday-art'));
+  TREE_LIGHTS.forEach(([x, y, color], i) => {
+    const light = document.createElement('span');
+    light.className = `holiday-light holiday-light--${color}`;
+    light.style.left = `${(x * 100).toFixed(1)}%`;
+    light.style.top = `${(y * 100).toFixed(1)}%`;
+    light.style.animationDelay = `${(-i * 0.73).toFixed(2)}s`;
+    wrap.appendChild(light);
+  });
+  return wrap;
+}
+
+function sleigh(): HTMLElement {
+  const flier = document.createElement('span');
+  flier.className = 'holiday-sleigh';
+  flier.appendChild(img('sleigh', 'holiday-art'));
   return flier;
 }
 
@@ -124,6 +164,23 @@ function build(
       ];
     case 'thanksgiving':
       return [{ anchor: 'card', el: deco('card', holiday, turkey()) }];
+    case 'christmas':
+      return [
+        { anchor: 'header', el: deco('header', holiday, sleigh()) },
+        {
+          anchor: 'divider',
+          el: deco(
+            'divider',
+            holiday,
+            lantern('ornament-red', 'left', 'ornament'),
+            lantern('ornament-blue', 'right', 'ornament'),
+          ),
+        },
+        { anchor: 'card', el: deco('card', holiday, tree()) },
+      ];
+    case 'new-year':
+      // the fireworks are painted on the scene canvas, no art to hang
+      return [];
     case 'lunar-new-year':
       return [
         {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { holidayOn, localDate, thanksgivingDate } from './holidays';
+import { fireworksLevel, holidayOn, isChristmasDay, localDate, thanksgivingDate } from './holidays';
 
 /** the holiday calendar: short windows, the right days, the moving ones right */
 describe('holidayOn', () => {
@@ -48,5 +48,38 @@ describe('localDate', () => {
     const now = Date.UTC(2026, 10, 1, 3, 0);
     expect(localDate(-25200, now)).toEqual([2026, 10, 31]);
     expect(localDate(0, now)).toEqual([2026, 11, 1]);
+  });
+});
+
+describe('christmas and new year', () => {
+  const id = (y: number, m: number, d: number) => holidayOn(y, m, d, 'US')?.id ?? null;
+
+  it('christmas runs the week before through boxing day; the eve and the day are the big ones', () => {
+    expect(id(2026, 12, 17)).toBeNull();
+    expect(id(2026, 12, 18)).toBe('christmas');
+    expect(holidayOn(2026, 12, 24)?.isDay).toBe(true);
+    expect(holidayOn(2026, 12, 25)?.isDay).toBe(true);
+    expect(holidayOn(2026, 12, 26)?.isDay).toBe(false);
+    expect(id(2026, 12, 27)).toBeNull();
+  });
+
+  it('only christmas day itself snows', () => {
+    expect(isChristmasDay(12, 25)).toBe(true);
+    expect(isChristmasDay(12, 24)).toBe(false);
+  });
+
+  it("new year's is the eve and the day", () => {
+    expect(id(2026, 12, 30)).toBeNull();
+    expect(holidayOn(2026, 12, 31)?.id).toBe('new-year');
+    expect(holidayOn(2026, 12, 31)?.isDay).toBe(true);
+    expect(id(2027, 1, 1)).toBe('new-year');
+    expect(id(2027, 1, 2)).toBeNull();
+  });
+
+  it('the fireworks build to a show either side of midnight', () => {
+    expect(fireworksLevel(12, 31, 21 * 60)).toBe(0.35);
+    expect(fireworksLevel(12, 31, 23 * 60 + 45)).toBe(1);
+    expect(fireworksLevel(1, 1, 15)).toBe(1);
+    expect(fireworksLevel(1, 1, 45)).toBe(0.35);
   });
 });

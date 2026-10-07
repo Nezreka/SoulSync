@@ -7,7 +7,7 @@
  * lunisolar calendar and has no simple formula).
  */
 
-export type HolidayId = 'halloween' | 'thanksgiving' | 'lunar-new-year';
+export type HolidayId = 'halloween' | 'thanksgiving' | 'christmas' | 'new-year' | 'lunar-new-year';
 
 export interface HolidayInfo {
   id: HolidayId;
@@ -19,6 +19,8 @@ export interface HolidayInfo {
 export const HOLIDAY_LABELS: Record<HolidayId, string> = {
   halloween: 'Halloween',
   thanksgiving: 'Thanksgiving',
+  christmas: 'Christmas',
+  'new-year': "New Year's",
   'lunar-new-year': 'Lunar New Year',
 };
 
@@ -88,6 +90,17 @@ export function holidayOn(
     }
   }
 
+  // christmas: the week before through boxing day; the eve and the day are
+  // the big ones (santa flies the eve, the day itself always snows)
+  if (m === 12 && d >= 18 && d <= 26) {
+    return { id: 'christmas', label: HOLIDAY_LABELS.christmas, isDay: d === 24 || d === 25 };
+  }
+
+  // new year's: the eve and the day, the eve the big night
+  if ((m === 12 && d === 31) || (m === 1 && d === 1)) {
+    return { id: 'new-year', label: HOLIDAY_LABELS['new-year'], isDay: m === 12 };
+  }
+
   // lunar new year: from the eve through the first few days. january dates
   // can belong to this year's festival, so check this year's start only
   const lny = LUNAR_NEW_YEAR[y];
@@ -111,4 +124,19 @@ export function localDate(
 ): [number, number, number] {
   const d = new Date(nowMs + utcOffsetSeconds * 1000);
   return [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()];
+}
+
+/** christmas day: the one day it snows no matter what the sky says */
+export function isChristmasDay(m: number, d: number): boolean {
+  return m === 12 && d === 25;
+}
+
+/**
+ * how busy the new year's fireworks are: a fuller show in the half hour
+ * either side of midnight on the eve, a gentle scatter the rest of the night
+ */
+export function fireworksLevel(m: number, d: number, minutes: number): number {
+  const nearMidnight =
+    (m === 12 && d === 31 && minutes >= 23 * 60 + 30) || (m === 1 && d === 1 && minutes <= 30);
+  return nearMidnight ? 1 : 0.35;
 }

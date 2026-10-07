@@ -406,3 +406,78 @@ html[data-sidebar="collapsed"] .sidebar-holiday {
 #app-sidebar.holiday-header-crowded .sidebar-holiday--header .holiday-pumpkin {
     display: none;
 }
+
+/* christmas: the tree on the card, its lights twinkling at night */
+.holiday-tree {
+    position: absolute;
+    right: 4px;
+    bottom: -2px;
+    width: 38px;
+    display: block;
+}
+.holiday-light {
+    position: absolute;
+    width: 4px;
+    height: 4px;
+    margin: -2px 0 0 -2px;
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 1.2s ease;
+}
+.holiday-light--gold { background: #ffd879; box-shadow: 0 0 4px 1px rgba(255, 210, 110, 0.9); }
+.holiday-light--red { background: #ff8a7a; box-shadow: 0 0 4px 1px rgba(255, 110, 90, 0.85); }
+.holiday-light--blue { background: #a6ccff; box-shadow: 0 0 4px 1px rgba(140, 190, 255, 0.85); }
+.holiday-light--star {
+    width: 7px;
+    height: 7px;
+    margin: -3.5px 0 0 -3.5px;
+    background: #fff2c4;
+    box-shadow: 0 0 8px 3px rgba(255, 220, 130, 0.85);
+}
+#app-sidebar.holiday-night .holiday-light {
+    opacity: 1;
+    animation: holiday-twinkle 2.4s infinite ease-in-out;
+}
+#app-sidebar.holiday-night .holiday-light--star {
+    animation: holiday-glow 3s infinite ease-in-out alternate;
+}
+#app-sidebar.holiday-night .holiday-tree .holiday-art {
+    filter: brightness(0.85) drop-shadow(0 0 6px rgba(255, 210, 120, 0.3));
+}
+@keyframes holiday-twinkle {
+    0%, 100% { opacity: 1; }
+    45% { opacity: 0.25; }
+    60% { opacity: 0.95; }
+}
+
+/* the ornaments hang like the lanterns, a little smaller, a cool glint */
+.holiday-lantern--ornament { width: 18px; }
+/* the right one hangs further in, so the tree on the card has its own air */
+.holiday-lantern--ornament.holiday-lantern--right { width: 17px; right: 40px; }
+.holiday-lantern--ornament .holiday-cord { height: 12px; }
+.holiday-lantern--ornament .holiday-lantern-glow {
+    background: radial-gradient(closest-side, rgba(255, 236, 200, 0.22), rgba(255, 236, 200, 0) 100%);
+}
+
+/* santa crosses the header at night, left to right, now and then */
+.holiday-sleigh {
+    position: absolute;
+    width: 66px;
+    left: -40%;
+    bottom: 70px;
+    opacity: 0;
+    display: block;
+}
+#app-sidebar.holiday-night .holiday-sleigh {
+    animation: holiday-sleigh 40s infinite linear;
+}
+@keyframes holiday-sleigh {
+    0% { left: -45%; bottom: 62px; opacity: 1; transform: rotate(-4deg); }
+    10% { bottom: 82px; transform: rotate(-2deg); }
+    20% { bottom: 74px; transform: rotate(-5deg); }
+    28% { left: 112%; bottom: 92px; opacity: 1; }
+    28.01%, 100% { left: -45%; opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .holiday-sleigh { display: none; }
+}

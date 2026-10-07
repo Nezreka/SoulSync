@@ -17,6 +17,8 @@ import {
   glyphSvg,
   lineGlyph,
   refreshSidebarWeather,
+  sceneConditions,
+  sceneExtras,
   setWeatherPreview,
   shouldRenderWeather,
   type PopoverGeom,
@@ -1197,5 +1199,76 @@ describe('holidays in the sidebar', () => {
     expect(document.getElementById('app-sidebar')!.classList.contains('holiday-night')).toBe(true);
     setWeatherPreview({ preset: 'clear-noon', date: null, holiday: 'halloween' });
     expect(document.getElementById('app-sidebar')!.classList.contains('holiday-night')).toBe(false);
+  });
+});
+
+describe("christmas day snow and new year's fireworks", () => {
+  afterEach(() => {
+    sessionStorage.clear();
+    vi.useRealTimers();
+  });
+
+  // medford is utc-7 in the payload
+  const at = (y: number, m: number, d: number, h: number, min = 0) =>
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.UTC(y, m - 1, d, h + 7, min) });
+  const clear = { ...BASE_PAYLOAD, scene: 'clear' as const };
+
+  it('christmas day snows even under a clear sky; the days around it do not', () => {
+    at(2026, 12, 25, 10);
+    expect(sceneConditions(clear).precip).toBe('snow');
+    at(2026, 12, 23, 10);
+    expect(sceneConditions(clear).precip).toBe('none');
+  });
+
+  it('it is christmas: even real rain turns to snow', () => {
+    at(2026, 12, 25, 10);
+    const rainy = {
+      ...BASE_PAYLOAD,
+      snapshot: {
+        ...BASE_PAYLOAD.snapshot!,
+        current: { ...BASE_PAYLOAD.snapshot!.current, weather_code: 63 },
+      },
+    };
+    expect(sceneConditions(rainy).precip).toBe('snow');
+  });
+
+  it('real snow keeps its own weight', () => {
+    at(2026, 12, 25, 10);
+    const blizzard = {
+      ...BASE_PAYLOAD,
+      snapshot: {
+        ...BASE_PAYLOAD.snapshot!,
+        current: { ...BASE_PAYLOAD.snapshot!.current, weather_code: 75 },
+      },
+    };
+    expect(sceneConditions(blizzard).intensity).toBeGreaterThan(0.8);
+  });
+
+  it('the decorations switch off means no fake snow either', () => {
+    at(2026, 12, 25, 10);
+    expect(sceneConditions({ ...clear, holidays: false }).precip).toBe('none');
+  });
+
+  it("new year's eve: a scatter in the evening, the show around midnight", () => {
+    at(2026, 12, 31, 21);
+    expect(sceneExtras(clear).fireworks).toBe(0.35);
+    at(2026, 12, 31, 23, 50);
+    expect(sceneExtras(clear).fireworks).toBe(1);
+    at(2026, 12, 30, 23, 50);
+    expect(sceneExtras(clear).fireworks).toBe(0);
+  });
+
+  it('forcing a holiday in the preview shows its biggest moment', () => {
+    at(2026, 7, 14, 12);
+    sessionStorage.setItem(
+      'soulsync-weather-preview',
+      JSON.stringify({ preset: '', date: null, holiday: 'christmas' }),
+    );
+    expect(sceneConditions(clear).precip).toBe('snow');
+    sessionStorage.setItem(
+      'soulsync-weather-preview',
+      JSON.stringify({ preset: '', date: null, holiday: 'new-year' }),
+    );
+    expect(sceneExtras(clear).fireworks).toBe(1);
   });
 });

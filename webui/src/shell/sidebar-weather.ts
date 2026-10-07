@@ -14,7 +14,14 @@
  *   as-is rather than adding a client-side tz database for a sub-hour glitch.
  */
 
-import { HOLIDAY_LABELS, holidayOn, localDate, type HolidayId } from './holidays';
+import {
+  fireworksLevel,
+  HOLIDAY_LABELS,
+  holidayOn,
+  isChristmasDay,
+  localDate,
+  type HolidayId,
+} from './holidays';
 import { mountHoliday, unmountHoliday } from './sidebar-holiday';
 import {
   conditionsFromWeather,
@@ -23,6 +30,7 @@ import {
   SCENE_PRESETS,
   windStrength,
   type SceneConditions,
+  type SceneExtras,
 } from './weather-scene';
 
 export interface WeatherDailyRow {
@@ -645,7 +653,7 @@ function startScene(
   const rawCtx = canvas.getContext('2d');
   if (!rawCtx) return () => canvas.remove();
   const ctx: CanvasRenderingContext2D = rawCtx;
-  const engine = createWeatherScene(ctx, sceneConditions(data));
+  const engine = createWeatherScene(ctx, sceneConditions(data), Math.random, sceneExtras(data));
 
   function fit(): void {
     const r = sidebar.getBoundingClientRect();
@@ -884,17 +892,51 @@ export function setWeatherPreview(preview: WeatherPreview | null): void {
   syncHoliday();
 }
 
-/** the holiday showing now: a forced one, else by the (pretend) date */
-export function currentHoliday(data: WeatherResponse): HolidayId | null {
+interface HolidayMoment {
+  id: HolidayId;
+  /** christmas day: it snows whatever the sky says */
+  snow: boolean;
+  /** new year's fireworks, 0..1 */
+  fireworks: number;
+}
+
+/**
+ * the holiday showing now and what its moment calls for. a forced holiday
+ * (developer preview) shows its biggest moment: christmas day's snow, the
+ * midnight fireworks. otherwise the (pretend) date decides
+ */
+function holidayMoment(data: WeatherResponse): HolidayMoment | null {
   const preview = getWeatherPreview();
   if (preview?.holiday === 'none') return null;
-  if (preview?.holiday && preview.holiday in HOLIDAY_LABELS) return preview.holiday as HolidayId;
+  if (preview?.holiday && preview.holiday in HOLIDAY_LABELS) {
+    const id = preview.holiday as HolidayId;
+    return { id, snow: id === 'christmas', fireworks: id === 'new-year' ? 1 : 0 };
+  }
   if (data.holidays === false && !preview?.date) return null;
   const pretend = preview ? previewDate(preview) : null;
+  const offset = data.snapshot?.utc_offset_seconds ?? 0;
   const [y, m, d] = pretend
     ? [pretend.getUTCFullYear(), pretend.getUTCMonth() + 1, pretend.getUTCDate()]
-    : localDate(data.snapshot?.utc_offset_seconds ?? 0);
-  return holidayOn(y, m, d, data.location?.country_code ?? null)?.id ?? null;
+    : localDate(offset);
+  const id = holidayOn(y, m, d, data.location?.country_code ?? null)?.id;
+  if (!id) return null;
+  const local = new Date(Date.now() + offset * 1000);
+  const minutes = local.getUTCHours() * 60 + local.getUTCMinutes();
+  return {
+    id,
+    snow: id === 'christmas' && isChristmasDay(m, d),
+    fireworks: id === 'new-year' ? fireworksLevel(m, d, minutes) : 0,
+  };
+}
+
+/** the holiday showing now: a forced one, else by the (pretend) date */
+export function currentHoliday(data: WeatherResponse): HolidayId | null {
+  return holidayMoment(data)?.id ?? null;
+}
+
+/** what the holiday adds to the scene canvas (exported for tests) */
+export function sceneExtras(data: WeatherResponse): SceneExtras {
+  return { fireworks: holidayMoment(data)?.fireworks ?? 0 };
 }
 
 /** put up (or take down) the holiday's decorations, lit for the hour */
@@ -923,8 +965,24 @@ function previewDate(p: WeatherPreview): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-/** what the scene paints: the preview when one is on, else the real sky */
-function sceneConditions(data: WeatherResponse): SceneConditions {
+/** what the scene paints: the preview when one is on, else the real sky (exported for tests) */
+export function sceneConditions(data: WeatherResponse): SceneConditions {
+  const sky = skyConditions(data);
+  // christmas day snows, it's christmas. real snow keeps its own weight
+  if (holidayMoment(data)?.snow && sky.precip !== 'snow') {
+    return {
+      ...sky,
+      precip: 'snow',
+      intensity: 0.38,
+      sky: sky.sky === 'fog' ? 'fog' : 'overcast',
+      cloudCover: Math.max(sky.cloudCover, 0.75),
+      thunder: false,
+    };
+  }
+  return sky;
+}
+
+function skyConditions(data: WeatherResponse): SceneConditions {
   const latitude = data.location?.latitude ?? 0;
   const preview = getWeatherPreview();
   if (preview && SCENE_PRESETS[preview.preset]) {

@@ -97,6 +97,8 @@ describe('the weather preview controls', () => {
       'none',
       'halloween',
       'thanksgiving',
+      'christmas',
+      'new-year',
       'lunar-new-year',
     ]);
 

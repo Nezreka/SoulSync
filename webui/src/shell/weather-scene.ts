@@ -442,10 +442,43 @@ const TRAIL = 72;
 const TRAIL_STEP = 1 / 60;
 const STREAM_RGB = '214,226,244';
 
+export interface SceneExtras {
+  /** new year's fireworks, 0 none .. 1 the midnight show. night only */
+  fireworks?: number;
+}
+
+interface Rocket {
+  x: number;
+  y: number;
+  vy: number;
+  burstAt: number;
+  rgb: string;
+}
+
+interface Spark {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  age: number;
+  life: number;
+  rgb: string;
+}
+
+const FIREWORK_RGB = [
+  '255,214,140',
+  '255,150,176',
+  '150,222,255',
+  '196,168,255',
+  '255,240,214',
+  '170,255,196',
+];
+
 export function createWeatherScene(
   ctx: Ctx,
   cond: SceneConditions,
   rng: Rng = Math.random,
+  extras: SceneExtras = {},
 ): WeatherSceneEngine {
   let w = 260;
   let h = 900;
@@ -829,6 +862,8 @@ export function createWeatherScene(
       }
     }
 
+    updateFireworks(dt);
+
     if (storm) {
       nextFlash -= dt;
       if (nextFlash <= 0 && flashSeq.length === 0) {
@@ -1120,6 +1155,129 @@ export function createWeatherScene(
     ctx.restore();
   }
 
+  /* ---------------- fireworks (new year's) ---------------- */
+
+  const fireworks = night ? clamp(extras.fireworks ?? 0, 0, 1) : 0;
+  const rockets: Rocket[] = [];
+  const sparks: Spark[] = [];
+  const bursts: Array<{ x: number; y: number; age: number; rgb: string }> = [];
+  let nextRocket = fireworks > 0 ? rand(0.4, 1.6) : Infinity;
+
+  function updateFireworks(dt: number): void {
+    if (fireworks <= 0) return;
+    nextRocket -= dt;
+    if (nextRocket <= 0) {
+      // the midnight show fires every second or two; the rest of the night
+      // a firework now and then, far off
+      nextRocket = lerp(rand(4, 9), rand(0.7, 1.8), fireworks);
+      rockets.push({
+        x: rand(0.18, 0.82) * w,
+        y: h + 10,
+        vy: -rand(380, 470),
+        burstAt: rand(0.1, 0.42) * h,
+        rgb: FIREWORK_RGB[Math.floor(rng() * FIREWORK_RGB.length)],
+      });
+    }
+    for (let i = rockets.length - 1; i >= 0; i--) {
+      const r = rockets[i];
+      r.y += r.vy * dt;
+      r.vy *= Math.pow(0.6, dt); // slows as it climbs
+      if (r.y <= r.burstAt) {
+        rockets.splice(i, 1);
+        burst(r.x, r.y, r.rgb);
+      }
+    }
+    // gravity pulls, the air holds them back
+    const drag = Math.pow(0.35, dt);
+    for (let i = sparks.length - 1; i >= 0; i--) {
+      const p = sparks[i];
+      p.age += dt;
+      if (p.age >= p.life) {
+        sparks.splice(i, 1);
+        continue;
+      }
+      p.vx *= drag;
+      p.vy = p.vy * drag + 34 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+    }
+    for (let i = bursts.length - 1; i >= 0; i--) {
+      bursts[i].age += dt;
+      if (bursts[i].age > 0.5) bursts.splice(i, 1);
+    }
+  }
+
+  function burst(x: number, y: number, rgb: string): void {
+    const n = Math.round(rand(56, 80));
+    const max = rand(120, 170);
+    // now and then a second colour through the bloom
+    const second = rng() < 0.4 ? FIREWORK_RGB[Math.floor(rng() * FIREWORK_RGB.length)] : rgb;
+    for (let i = 0; i < n && sparks.length < 520; i++) {
+      const a = rng() * Math.PI * 2;
+      // a range of speeds fills the bloom like a real peony; one speed
+      // for all draws a thin mechanical ring
+      const v = max * (0.35 + 0.65 * Math.sqrt(rng()));
+      sparks.push({
+        x,
+        y,
+        vx: Math.cos(a) * v,
+        vy: Math.sin(a) * v,
+        age: 0,
+        life: rand(1.4, 2.4),
+        rgb: rng() < 0.3 ? second : rgb,
+      });
+    }
+    bursts.push({ x, y, age: 0, rgb });
+  }
+
+  function drawFireworks(): void {
+    if (fireworks <= 0 || (!rockets.length && !sparks.length && !bursts.length)) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    // the bloom's flash: a soft glow that's gone in half a second
+    for (const b of bursts) {
+      const a = 0.16 * (1 - b.age / 0.5);
+      const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, 70);
+      g.addColorStop(0, `rgba(${b.rgb},${a.toFixed(3)})`);
+      g.addColorStop(1, `rgba(${b.rgb},0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(b.x - 70, b.y - 70, 140, 140);
+    }
+    // rockets: a glowing head with a short fading tail, wobbling as it climbs
+    for (const r of rockets) {
+      const tail = ctx.createLinearGradient(r.x, r.y, r.x, r.y + 26);
+      tail.addColorStop(0, `rgba(${r.rgb},0.55)`);
+      tail.addColorStop(1, `rgba(${r.rgb},0)`);
+      ctx.strokeStyle = tail;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(r.x, r.y);
+      ctx.lineTo(r.x + Math.sin(r.y * 0.05) * 1.5, r.y + 26);
+      ctx.stroke();
+      ctx.fillStyle = `rgba(${r.rgb},0.9)`;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, 1.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // sparks: a streak along the motion, brightest young, crackling as they die
+    for (const p of sparks) {
+      const k = 1 - p.age / p.life;
+      let a = Math.pow(k, 1.2) * 0.95;
+      if (k < 0.3) a *= 0.45 + 0.55 * Math.abs(Math.sin(p.age * 38 + p.x));
+      // born together at one point, they'd add up to a white blot: ease in
+      a *= smoothstep(0, 0.12, p.age);
+      const len = 0.07;
+      ctx.strokeStyle = `rgba(${p.rgb},${a.toFixed(3)})`;
+      ctx.lineWidth = 1.1 + 0.9 * k;
+      ctx.beginPath();
+      ctx.moveTo(p.x - p.vx * len, p.y - p.vy * len);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   /* ---------------- api ---------------- */
 
   return {
@@ -1145,6 +1303,7 @@ export function createWeatherScene(
       drawRain();
       drawSnow();
       drawWind(t);
+      drawFireworks();
       drawLightning();
     },
     stats(): Record<string, number> {
@@ -1156,6 +1315,8 @@ export function createWeatherScene(
         leaves: leafList.length,
         stars: stars.length,
         planet: planet ? 1 : 0,
+        sparks: sparks.length,
+        rockets: rockets.length,
         satellite: satelliteGlow,
         flash,
         driftX,
