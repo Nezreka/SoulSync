@@ -26,23 +26,30 @@ from pathlib import Path
 _CSS = Path(__file__).resolve().parents[1] / "webui" / "static" / "style.css"
 
 _RULE = re.compile(r"([^{}]+)\{([^{}]*)\}")
-_BASE_OPACITY_ZERO = re.compile(r"(^|[;\s])opacity:\s*0\s*;")
-_ANIMATION = re.compile(r"animation:\s*([^;]+);")
+_COMMENT = re.compile(r"/\*.*?\*/", re.S)
+_OPACITY = re.compile(r"(?:^|[;\s])opacity:\s*([^;]+);")
+_ANIMATION = re.compile(r"(?:^|[;\s])animation:\s*([^;]+);")
+
+
+def _effective(pattern: re.Pattern[str], body: str) -> str | None:
+    """The value that wins inside one rule: the LAST declaration, not the first."""
+    values = pattern.findall(body)
+    return values[-1].strip() if values else None
 
 
 def _offenders() -> list[tuple[str, str]]:
     src = _CSS.read_text(encoding="utf-8", errors="replace")
     bad = []
     for match in _RULE.finditer(src):
-        selector, body = match.group(1).strip(), match.group(2)
+        selector, body = match.group(1).strip(), _COMMENT.sub("", match.group(2))
         if selector.startswith("@") or "keyframes" in selector:
             continue
-        if not _BASE_OPACITY_ZERO.search(body):
+        if _effective(_OPACITY, body) != "0":
             continue
-        anim = _ANIMATION.search(body)
+        anim = _effective(_ANIMATION, body)
         if not anim:
             continue
-        shorthand = " ".join(anim.group(1).split())
+        shorthand = " ".join(anim.split())
         # Run-once fades only. An infinite loop with no fill mode is a
         # decorative effect and is allowed to vanish when it stops.
         if "forwards" not in shorthand and "both" not in shorthand:

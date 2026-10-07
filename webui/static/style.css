@@ -21239,10 +21239,11 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
             rgba(138, 43, 226, 0.35) 50%,
             rgba(255, 20, 147, 0.35) 100%);
     background-size: 200% 200%;
-    animation: gradientShift 8s ease infinite;
     z-index: 0;
-    opacity: 0;
-    animation: fadeInRow 1s ease-out forwards, gradientShift 8s ease infinite;
+    /* the resting opacity is the fade's end value, so Max Performance (which
+       kills animations) still shows the gradient */
+    opacity: 0.7;
+    animation: fadeInRow 1s ease-out both, gradientShift 8s ease infinite;
 }
 
 @keyframes gradientShift {
