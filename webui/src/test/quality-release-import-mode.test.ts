@@ -90,7 +90,7 @@ it('saves an explicit opt-out after viewing an opted-in profile', async () => {
   expect(posts[0].profile.release_import_mode).toBe('requested_tracks');
 });
 
-it('offers both policies within Quality and explains profile checks and fallback', () => {
+it('offers both policies within Quality and explains the normal import pipeline', () => {
   const select = document.getElementById('quality-release-import-mode') as HTMLSelectElement;
   expect(select).not.toBeNull();
   expect(select.closest('[data-stg]')?.getAttribute('data-stg')).toBe('quality');
@@ -99,8 +99,8 @@ it('offers both policies within Quality and explains profile checks and fallback
     'complete_album',
   ]);
   const help = select.closest('.form-group')?.textContent || '';
-  expect(help).toContain('this profile');
-  expect(help).toContain('AcoustID');
+  expect(help).toContain('this quality profile');
+  expect(help).toContain('normal download and import pipeline');
   expect(help).toContain('requested track');
 });
 
