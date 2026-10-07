@@ -3757,6 +3757,18 @@ function setPlexConfigActionButton(isManualConfig) {
     }
 }
 
+// Re-link: Plex is already configured and the user wants a fresh token
+// through plex.tv/link without clearing anything. The PIN box lives in the
+// setup area (hidden once configured), so re-link shows that area on its own.
+let _plexPinRelink = false;
+
+function startPlexRelink() {
+    _plexPinRelink = true;
+    const plexSetup = document.getElementById('plex-setup');
+    if (plexSetup) plexSetup.style.display = '';
+    startPlexPinAuth();
+}
+
 async function startPlexPinAuth() {
     const setupButtons = document.getElementById('plex-setup-buttons');
     const authFlow = document.getElementById('plex-pin-auth-flow');
@@ -3824,9 +3836,31 @@ async function pollPlexPinAuthStatus() {
 
         if (result.success) {
             stopPlexPinAuthPolling();
-            if (statusEl) statusEl.textContent = 'Authorization complete! Saving Plex configuration...';
-            document.getElementById('plex-url').value = result.found_url || '';
-            document.getElementById('plex-token').value = result.token || '';
+            const urlEl = document.getElementById('plex-url');
+            const currentUrl = (urlEl?.value || '').trim();
+            if (_plexPinRelink && currentUrl) {
+                // Re-link keeps the URL that already works (a docker host or a
+                // reverse proxy Plex can't discover) and only saves the new
+                // token once it's proven to reach that server.
+                if (statusEl) statusEl.textContent = 'Authorized. Checking the new token against your server...';
+                const check = await fetch('/api/plex/verify-token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: currentUrl, token: result.token || '' })
+                }).then((r) => r.json()).catch(() => ({ success: false }));
+                if (!check.success) {
+                    if (statusEl) statusEl.textContent = (check.error || "The new token couldn't reach your server")
+                        + '. Nothing was changed.';
+                    showToast("Re-link didn't change anything: that Plex account can't reach your server", 'error');
+                    return;
+                }
+                document.getElementById('plex-token').value = result.token || '';
+            } else {
+                if (statusEl) statusEl.textContent = 'Authorization complete! Saving Plex configuration...';
+                if (urlEl) urlEl.value = result.found_url || '';
+                document.getElementById('plex-token').value = result.token || '';
+            }
+            _plexPinRelink = false;
             if (typeof saveSettings === 'function') {
                 await saveSettings(true);
             }
@@ -3859,11 +3893,19 @@ function cancelPlexPinAuth() {
     const authFlow = document.getElementById('plex-pin-auth-flow');
     if (setupButtons) setupButtons.style.display = '';
     if (authFlow) authFlow.style.display = 'none';
+    if (_plexPinRelink) {
+        // back to the configured view, nothing changed
+        _plexPinRelink = false;
+        const plexSetup = document.getElementById('plex-setup');
+        if (plexSetup) plexSetup.style.display = 'none';
+    }
 }
 
 function restartPlexPinAuth() {
+    const relink = _plexPinRelink;
     cancelPlexPinAuth();
-    startPlexPinAuth();
+    if (relink) startPlexRelink();
+    else startPlexPinAuth();
 }
 
 async function clearPlexConfiguration() {

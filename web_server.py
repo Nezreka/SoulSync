@@ -4934,6 +4934,27 @@ def detect_media_server_endpoint():
         add_activity_item("", "Auto-Detect Failed", f"No {server_type} server found", "Now")
         return jsonify({"success": False, "error": f"No {server_type} server found on common local addresses."})
 
+@app.route('/api/plex/verify-token', methods=['POST'])
+@admin_only
+def verify_plex_token():
+    """does this token reach this server url? for re-linking an already
+    configured plex: the new token is only saved when it works against the
+    server soulsync uses now, so linking the wrong plex account can't
+    overwrite a working connection. admin only: it connects to the url given"""
+    try:
+        data = request.get_json(silent=True) or {}
+        url = str(data.get('url') or '').strip()
+        token = str(data.get('token') or '').strip()
+        if not url or not token:
+            return jsonify({"success": False, "error": "url and token are required"}), 400
+        from plexapi.server import PlexServer
+        server = PlexServer(url, token, timeout=10)
+        return jsonify({"success": True, "server_name": server.friendlyName})
+    except Exception as e:
+        logger.info(f"Plex re-link: new token does not reach the configured server: {e}")
+        return jsonify({"success": False, "error": "That Plex account can't reach the server at this URL"})
+
+
 @app.route('/api/plex/pin/start', methods=['POST'])
 def start_plex_pin_auth():
     try:
