@@ -1503,8 +1503,12 @@ class AutoImportWorker:
             if not client or not hasattr(client, 'search_tracks'):
                 return None
 
-            query = f"{artist} {title}" if artist else title
-            results = client.search_tracks(query, limit=5)
+            # search_song picks the best query per source (Deezer: the exact-title
+            # filter plus a plain search). A plain "artist title" search with
+            # limit=5 returned only the reprise and karaoke copies for some songs,
+            # so the real one never reached the scoring below.
+            from core.metadata.song_search import search_song
+            results = search_song(client, title, artist, limit=10)
             if not results:
                 return None
 
