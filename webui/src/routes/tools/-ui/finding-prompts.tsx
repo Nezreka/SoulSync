@@ -466,7 +466,7 @@ function WitnessMeDialog({
     >
       <div
         style={{
-          background: 'var(--bg-secondary, #1e1e2e)',
+          background: 'var(--bg-secondary)',
           border: '2px solid var(--danger)',
           borderRadius: '12px',
           padding: '28px',

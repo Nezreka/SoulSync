@@ -75,6 +75,9 @@
     --text-secondary: #9aa0aa;
     --text-muted: var(--text-3);
     --bg-primary: #0b0b0f;
+    /* Solid raised panel (dialogs, menus). Read for a long time with this value
+       as its fallback before anything defined it. */
+    --bg-secondary: #1e1e2e;
 
     /* ── Status ─────────────────────────────────────────────────────── */
     --danger-rgb: 239, 68, 68;

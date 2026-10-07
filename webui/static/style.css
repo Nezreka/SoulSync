@@ -48519,7 +48519,7 @@ tr.tag-diff-same {
     top: 100%;
     right: 0;
     margin-top: 4px;
-    background: #1e1e2e;
+    background: var(--bg-secondary);
     border: 1px solid var(--white-a10);
     border-radius: 10px;
     padding: 4px;
