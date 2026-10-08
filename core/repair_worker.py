@@ -1596,9 +1596,11 @@ class RepairWorker:
     }
 
     def get_review_cases(self, *, status: str = 'pending', page: int = 0,
-                         limit: int = 30, q: str = '', job_id: str = '') -> dict:
+                         limit: int = 30, q: str = '', job_id: str = '',
+                         category: str = '', risk: str = '') -> dict:
         return repair_review_queue.list_cases(
-            self.db, status=status, page=page, limit=limit, q=q, job_id=job_id)
+            self.db, status=status, page=page, limit=limit, q=q, job_id=job_id,
+            category=category, risk=risk)
 
     def get_review_case(self, case_id: str, *, status: str = 'pending',
                         job_id: str = '') -> Optional[dict]:
@@ -1630,6 +1632,27 @@ class RepairWorker:
                 return self.fix_finding(finding_id, fix_action=fix_action,
                                         review_approved=True)
             return {'success': False, 'error': 'Unsupported review action'}
+
+    def apply_review_decision_group(self, case_id: str, category: str, *,
+                                    action: str) -> dict:
+        """Apply one album-level convention decision to its current actions."""
+        allowed = {'numbering', 'title_conventions', 'metadata'}
+        if category not in allowed or action not in ('fix', 'dismiss'):
+            return {'success': False, 'error': 'Unsupported grouped decision'}
+        case = self.get_review_case(case_id, job_id='library_reconciliation')
+        if not case:
+            return {'success': False, 'stale': True, 'error': 'Review case changed'}
+        findings = [item for item in case['items'] if item.get('category') == category]
+        if not findings:
+            return {'success': False, 'stale': True, 'error': 'Decision is no longer current'}
+        applied = 0
+        for item in findings:
+            result = self.apply_review_decision(
+                case_id, item['id'], evidence_token=item['evidence_token'], action=action)
+            if not result.get('success'):
+                return {**result, 'applied': applied, 'total': len(findings)}
+            applied += 1
+        return {'success': True, 'applied': applied, 'total': len(findings)}
 
     def start_review_safe(self, *, case_id: str = '', organize: bool = False) -> dict:
         """Apply the planner-approved reconciliation subset in the background."""

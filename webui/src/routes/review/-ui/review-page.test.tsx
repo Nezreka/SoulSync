@@ -191,6 +191,142 @@ describe('library reconciliation review queue', () => {
     expect(screen.queryByText(/"release_id"/)).toBeNull();
   });
 
+  it('shows one album decision above a complete persisted track assignment', async () => {
+    const numberingFinding = {
+      ...finding,
+      finding_type: 'reconciliation_metadata',
+      title: 'Retag Hourglass',
+      file_path: '/music/Album/02.flac',
+      details: {
+        album_id: 10,
+        album_title: 'Album',
+        artist_name: 'Artist',
+        confidence: 'clear',
+        changes: { track_number: { old: 1, new: 2 } },
+      },
+      review_tier: 'manual',
+    };
+    const decision = {
+      id: 'numbering',
+      category: 'numbering',
+      label: 'Numbering convention',
+      risk: 'manual',
+      summary: '1 track or disc position change shares one convention choice.',
+      finding_ids: [7],
+      action_count: 1,
+    };
+    const plan = {
+      ready: 0,
+      manual: 1,
+      destructive: 0,
+      blocked: 0,
+      total: 1,
+      status: 'needs_review',
+      blocker_reasons: ['The release uses a different disc or track numbering scheme'],
+      can_apply_ready: false,
+      can_organize: false,
+      decision_count: 1,
+      categories: ['numbering'],
+      decisions: [decision],
+    };
+    fetchMock.mockImplementation((url: string) => {
+      const common = auxiliary(url);
+      if (common) return Promise.resolve(common);
+      if (url.startsWith('/api/repair/review-queue?'))
+        return Promise.resolve(
+          reply({
+            items: [
+              {
+                case_id: 'album:1:10',
+                album: 'Album',
+                artist: 'Artist',
+                pending: 1,
+                priority: 1,
+                finding_types: ['reconciliation_metadata'],
+                error_count: 0,
+                plan,
+              },
+            ],
+            total: 1,
+            page: 0,
+            limit: 30,
+          }),
+        );
+      if (url.startsWith('/api/repair/review-queue/album%3A1%3A10?'))
+        return Promise.resolve(
+          reply({
+            case_id: 'album:1:10',
+            album: 'Album',
+            artist: 'Artist',
+            album_id: 10,
+            folder: '/music/Album',
+            count: 1,
+            status: 'pending',
+            plan,
+            decisions: [decision],
+            items: [numberingFinding],
+            album_plan: {
+              state: 'review',
+              source: 'musicbrainz',
+              release_id: 'digital-release',
+              intent_scope: 'partial',
+              counts: {
+                confirmed: 1,
+                changed: 1,
+                uncertain: 0,
+                missing: 0,
+                not_owned: 1,
+                extra: 0,
+              },
+              categories: ['numbering', 'partial_albums'],
+              candidates: [
+                {
+                  source: 'musicbrainz',
+                  release_id: 'digital-release',
+                  clear: 2,
+                  matched: 2,
+                  total_slots: 3,
+                  missing: 1,
+                  extra: 0,
+                  continuous_numbering: true,
+                },
+              ],
+              assignments: [
+                {
+                  status: 'confirmed',
+                  file_path: '/music/Album/01.flac',
+                  file: '01.flac',
+                  current_title: 'One',
+                  slot_title: 'One',
+                },
+                {
+                  status: 'change',
+                  file_path: '/music/Album/02.flac',
+                  file: '02.flac',
+                  current_title: 'Hourglass',
+                  slot_title: 'Hourglass',
+                  finding_id: 7,
+                  changes: { track_number: { old: 1, new: 2 } },
+                },
+                { status: 'not_owned', slot_title: 'Bonus Track' },
+              ],
+            },
+          }),
+        );
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(<ReviewPage />);
+
+    expect(await screen.findByRole('heading', { name: 'Track assignment' })).toBeTruthy();
+    expect(screen.getByText('Numbering convention')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Use selected release numbering' })).toBeTruthy();
+    expect(screen.getByText('digital-release')).toBeTruthy();
+    expect(screen.getByText('Continuous digital numbering')).toBeTruthy();
+    expect(screen.getByText('○ 1 outside collection')).toBeTruthy();
+    expect(screen.getByText('✓ 2 settled release slots')).toBeTruthy();
+  });
+
   it('shows why the last scan stopped and can queue a rerun', async () => {
     fetchMock.mockImplementation((url: string, options?: RequestInit) => {
       if (url === '/api/repair/history?limit=50')

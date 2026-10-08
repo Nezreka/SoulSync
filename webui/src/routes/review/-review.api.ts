@@ -10,6 +10,68 @@ export interface ReviewPlan {
   blocker_reasons: string[];
   can_apply_ready: boolean;
   can_organize: boolean;
+  decision_count?: number;
+  categories?: string[];
+  decisions?: ReviewDecision[];
+}
+
+export interface ReviewDecision {
+  id: string;
+  category: string;
+  label: string;
+  risk: 'ready' | 'manual' | 'destructive' | 'blocked';
+  summary: string;
+  finding_ids: number[];
+  action_count: number;
+}
+
+export interface AlbumAssignment {
+  status: 'confirmed' | 'change' | 'uncertain' | 'missing' | 'not_owned' | 'extra' | 'duplicate';
+  file_path?: string;
+  file?: string;
+  finding_id?: number;
+  review_tier?: string;
+  current_title?: string;
+  current_track_number?: number | string | null;
+  current_disc_number?: number | string | null;
+  slot_title?: string;
+  slot_track_number?: number | string | null;
+  slot_disc_number?: number | string | null;
+  title_difference?: string;
+  confidence?: string;
+  changes?: Record<string, { old?: unknown; new?: unknown }>;
+  audio_title?: string;
+  audio_artist?: string;
+  audio_score?: number | null;
+  duration_delta_ms?: number | null;
+  playlists?: string[];
+}
+
+export interface AlbumReconciliationPlan {
+  state: 'confirmed' | 'changes' | 'review' | 'release_conflict';
+  source?: string;
+  release_id?: string;
+  intent_scope?: string;
+  counts: {
+    confirmed: number;
+    changed: number;
+    uncertain: number;
+    missing: number;
+    not_owned?: number;
+    extra: number;
+  };
+  categories: string[];
+  assignments: AlbumAssignment[];
+  candidates?: Array<{
+    source: string;
+    release_id: string;
+    clear: number;
+    matched: number;
+    total_slots: number;
+    missing: number;
+    extra: number;
+    continuous_numbering: boolean;
+  }>;
 }
 
 export interface ReviewCaseSummary {
@@ -47,6 +109,8 @@ export interface ReviewCase {
   status: string;
   album_id?: string | number | null;
   plan?: ReviewPlan;
+  decisions?: ReviewDecision[];
+  album_plan?: AlbumReconciliationPlan | null;
   items: ReviewFinding[];
 }
 
@@ -71,13 +135,37 @@ async function readJson<T>(response: Response): Promise<T> {
   return body;
 }
 
-export async function fetchReviewQueue(page = 0, q = ''): Promise<ReviewQueuePage> {
+export async function fetchReviewQueue(
+  page = 0,
+  q = '',
+  category = '',
+  risk = '',
+): Promise<ReviewQueuePage> {
   const params = new URLSearchParams({
     page: String(page),
     q,
     job_id: 'library_reconciliation',
   });
+  if (category) params.set('category', category);
+  if (risk) params.set('risk', risk);
   return readJson<ReviewQueuePage>(await fetch(`/api/repair/review-queue?${params}`));
+}
+
+export async function applyReviewDecisionGroup(
+  caseId: string,
+  category: string,
+  action: 'fix' | 'dismiss',
+): Promise<{ success: boolean; applied?: number; total?: number; error?: string }> {
+  return readJson(
+    await fetch(
+      `/api/repair/review-queue/${encodeURIComponent(caseId)}/decisions/${encodeURIComponent(category)}/apply`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      },
+    ),
+  );
 }
 
 export async function fetchReviewCase(caseId: string): Promise<ReviewCase> {

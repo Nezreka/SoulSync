@@ -10,6 +10,7 @@ from flask import Flask
 
 from core.repair_review_identity import missing_slot_key, review_case_key
 from core.repair_review_queue import classify_case, get_case, list_cases, safe_finding_ids
+from core.library.reconciliation_store import ensure_schema, persist_album_plan, retire_unseen_plans
 from core.repair_worker import RepairWorker
 from database.music_database import MusicDatabase
 
@@ -118,7 +119,10 @@ def test_album_plan_separates_safe_metadata_from_numbering_and_file_actions():
 
     plan = classify_case(items)
 
-    assert plan == {
+    assert {key: plan[key] for key in (
+        'ready', 'manual', 'destructive', 'blocked', 'total', 'status',
+        'blocker_reasons', 'can_apply_ready', 'can_organize',
+    )} == {
         'ready': 1, 'manual': 1, 'destructive': 1, 'blocked': 0,
         'total': 3, 'status': 'needs_review',
         'blocker_reasons': [
@@ -127,6 +131,8 @@ def test_album_plan_separates_safe_metadata_from_numbering_and_file_actions():
         ],
         'can_apply_ready': True, 'can_organize': False,
     }
+    assert plan['decision_count'] == 3
+    assert plan['categories'] == ['extra_files', 'metadata', 'numbering']
     assert [item['review_tier'] for item in items] == ['ready', 'manual', 'destructive']
 
 
@@ -142,6 +148,104 @@ def test_release_choice_blocks_metadata_from_bulk_apply():
     assert plan['ready'] == 0
     assert plan['blocked'] == 1
     assert items[1]['review_reason'] == 'The selected release must be resolved first'
+
+
+def test_title_flavor_is_safe_but_recording_version_change_is_manual():
+    items = [
+        {'id': 1, 'finding_type': 'reconciliation_metadata',
+         'details': {'changes': {'title': {'new': 'Song'}}, 'confidence': 'clear',
+                     'title_difference_kind': 'flavor'}},
+        {'id': 2, 'finding_type': 'reconciliation_metadata',
+         'details': {'changes': {'title': {'new': 'Song (Live)'}}, 'confidence': 'clear',
+                     'title_difference_kind': 'version'}},
+    ]
+
+    plan = classify_case(items)
+
+    assert [item['review_tier'] for item in items] == ['ready', 'manual']
+    assert plan['categories'] == ['title_conventions', 'title_issues']
+
+
+def test_material_title_conflict_is_not_hidden_inside_numbering_group():
+    items = [{
+        'id': 1, 'finding_type': 'reconciliation_metadata',
+        'details': {
+            'changes': {
+                'title': {'new': 'Song (Live)'},
+                'track_number': {'new': 2},
+            },
+            'confidence': 'clear', 'title_difference_kind': 'version',
+        },
+    }]
+
+    plan = classify_case(items)
+
+    assert plan['decisions'][0]['category'] == 'title_issues'
+    assert plan['decisions'][0]['risk'] == 'manual'
+
+
+def test_queue_category_filters_return_album_context_not_only_matching_rows():
+    db = _Database()
+    details = {'album_id': 10, 'album_title': 'Album'}
+    db.add(1, '/music/Album/01.flac', {
+        **details, 'changes': {'title': {'new': 'One'}}, 'confidence': 'clear',
+        'title_difference_kind': 'flavor',
+    }, job_id='library_reconciliation', kind='reconciliation_metadata')
+    db.add(2, '/music/Album/02.flac', {
+        **details, 'changes': {'track_number': {'new': 2}}, 'confidence': 'clear',
+    }, job_id='library_reconciliation', kind='reconciliation_metadata')
+
+    filtered = list_cases(db, job_id='library_reconciliation', category='title_conventions')
+
+    assert filtered['total'] == 1
+    assert filtered['items'][0]['pending'] == 2
+    assert filtered['items'][0]['plan']['categories'] == ['numbering', 'title_conventions']
+
+
+def test_case_includes_persisted_successful_assignments_around_the_open_action():
+    db = _Database()
+    details = {'album_id': 10, 'profile_id': 1, 'album_title': 'Album'}
+    db.add(1, '/music/Album/02.flac', {
+        **details, 'changes': {'track_number': {'new': 2}}, 'confidence': 'clear',
+    }, job_id='library_reconciliation', kind='reconciliation_metadata')
+    case_id = persist_album_plan(db, {**details, 'evidence_signature': 'evidence'}, {
+        'source': 'musicbrainz', 'release_id': 'release-id',
+        'assignments': [
+            {'status': 'confirmed', 'file_path': '/music/Album/01.flac',
+             'current_title': 'One', 'slot_title': 'One'},
+            {'status': 'change', 'file_path': '/music/Album/02.flac',
+             'current_title': 'Two', 'slot_title': 'Two',
+             'changes': {'track_number': {'old': 1, 'new': 2}}},
+        ],
+    })
+
+    case = get_case(db, case_id, job_id='library_reconciliation')
+
+    assert len(case['album_plan']['assignments']) == 2
+    assert case['album_plan']['counts'] == {
+        'confirmed': 1, 'changed': 1, 'uncertain': 0,
+        'missing': 0, 'not_owned': 0, 'extra': 0,
+    }
+    changed = case['album_plan']['assignments'][1]
+    assert changed['finding_id'] == 1
+    assert changed['review_tier'] == 'manual'
+
+
+def test_stale_plan_retirement_handles_more_than_sqlite_parameter_limit():
+    db = _Database()
+    ensure_schema(db.conn)
+    rows = [(f'album:1:{index}', '{}', f'sig-{index}') for index in range(1100)]
+    db.conn.executemany('''
+        INSERT INTO reconcile_album_plans
+            (case_id, plan_json, evidence_signature)
+        VALUES (?, ?, ?)
+    ''', rows)
+    db.conn.commit()
+
+    retire_unseen_plans(db, {'album:1:1099'})
+
+    assert db.conn.execute(
+        'SELECT case_id FROM reconcile_album_plans').fetchall() == [('album:1:1099',)]
 
 
 def test_safe_finding_ids_returns_only_planner_approved_metadata():
@@ -230,6 +334,28 @@ def test_review_http_api_returns_exact_case_and_rejects_stale_apply(monkeypatch)
     assert response.status_code == 200
     assert response.json == {'started': True, 'total': 4}
     assert calls == [{'case_id': case_id, 'organize': True}]
+
+
+def test_grouped_title_convention_decision_applies_every_current_action():
+    db = _Database()
+    for finding_id in (1, 2):
+        db.add(finding_id, f'/music/Album/{finding_id:02}.flac', {
+            'album_id': 10, 'album_title': 'Album', 'confidence': 'clear',
+            'title_difference_kind': 'flavor',
+            'changes': {'title': {'new': f'Song {finding_id}'}},
+        }, job_id='library_reconciliation', kind='reconciliation_metadata')
+    case_id = list_cases(db, job_id='library_reconciliation')['items'][0]['case_id']
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = db
+    worker._review_apply_lock = threading.Lock()
+    applied = []
+    worker.fix_finding = lambda finding_id, **_kwargs: (
+        applied.append(finding_id) or {'success': True})
+
+    result = worker.apply_review_decision_group(case_id, 'title_conventions', action='fix')
+
+    assert result == {'success': True, 'applied': 2, 'total': 2}
+    assert applied == [1, 2]
 
 
 def test_accepted_reconciliation_exception_reopens_when_audio_evidence_changes(tmp_path):

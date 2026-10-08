@@ -14,10 +14,13 @@ from typing import Any
 
 from core.matching.assignment import assign_max_weight
 from core.matching.audio_verification import fingerprint_is_ambiguous, normalize
+from core.text.fold import fold_title
 from core.text.title_match import numeric_tokens_differ, recording_version_markers, titles_plausibly_same
 
 
 _LEADING_POSITION = re.compile(r'^\s*(?:\d+[-_. ]+){1,2}')
+_EDITORIAL_TITLE_SUFFIX = re.compile(
+    r'\s*[\(\[]\s*(?:bonus\s+track|bonus)\s*[\)\]]\s*$', re.IGNORECASE)
 
 
 def _title_score(a: str, b: str) -> float:
@@ -101,6 +104,39 @@ def display_title_compatible(local_title: str, slot: dict) -> bool:
     if numeric_tokens_differ(local_title, slot_title):
         return False
     return recording_version_markers(local_title) == slot_version_markers(slot)
+
+
+def title_difference_kind(local_title: str, slot: dict) -> str:
+    """Classify display-title drift while retaining recording versions."""
+    slot_title = str(slot.get('title') or slot.get('name') or '')
+    if local_title == slot_title:
+        return 'exact'
+    if fold_title(local_title, drop_brackets=False) == fold_title(
+            slot_title, drop_brackets=False):
+        return 'typography'
+    local_clean = _EDITORIAL_TITLE_SUFFIX.sub('', str(local_title or '')).strip()
+    slot_clean = _EDITORIAL_TITLE_SUFFIX.sub('', slot_title).strip()
+    local_versions = recording_version_markers(local_clean)
+    slot_versions = slot_version_markers({**slot, 'title': slot_clean})
+    if local_versions != slot_versions:
+        return 'version'
+    if numeric_tokens_differ(local_clean, slot_clean):
+        return 'material'
+    if local_versions:
+        # Both sides identify the same named performance/version, but one
+        # carries useful display detail that the other omits. Preserve it.
+        return 'version_detail'
+    if (fold_title(local_clean) == fold_title(slot_clean) or
+            display_title_compatible(local_clean, {**slot, 'title': slot_clean})):
+        return 'flavor'
+    return 'material'
+
+
+def semantic_title_key(slot: dict) -> tuple[str, tuple[str, ...]]:
+    """Release-comparison key that ignores harmless provider title flavor."""
+    title = _EDITORIAL_TITLE_SUFFIX.sub(
+        '', str(slot.get('title') or slot.get('name') or '')).strip()
+    return fold_title(title), tuple(sorted(slot_version_markers({**slot, 'title': title})))
 
 
 def versions_compatible(file: dict, slot: dict) -> bool:

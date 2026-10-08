@@ -1,6 +1,6 @@
 """Library-shaped examples from the user's reconciliation investigations."""
 
-from core.library.reconciliation_plan import reconcile_folder
+from core.library.reconciliation_plan import reconcile_folder, title_difference_kind
 
 
 def _file(title, path, duration_ms, recording=None):
@@ -361,3 +361,17 @@ def test_material_version_marker_is_distinct_but_subtitle_flavor_can_match():
     subtitle = [_file('Song (Serenade From the Stars)',
                       '/album/01 - Song (Serenade From the Stars).flac', 200000)]
     assert len(reconcile_folder(subtitle, studio_slot)['pairs']) == 1
+
+
+def test_title_differences_separate_display_flavor_from_recording_identity():
+    bare = {'title': 'Song'}
+    assert title_difference_kind('Song (Serenade From the Stars)', bare) == 'flavor'
+    assert title_difference_kind('SONG', bare) == 'typography'
+    assert title_difference_kind('Song (Live)', bare) == 'version'
+    assert title_difference_kind('Song (Live 1977)', {'title': 'Song (Live 1978)'}) == 'material'
+
+
+def test_matching_musicbrainz_disambiguation_preserves_useful_version_detail():
+    slot = {'title': 'Home', 'recording_disambiguation': 'live'}
+
+    assert title_difference_kind('Home (Live)', slot) == 'version_detail'

@@ -67,7 +67,9 @@ def repair_review_queue_list():
         return jsonify(worker.get_review_cases(
             status=status, page=_safe_int(request.args.get('page')),
             limit=_safe_int(request.args.get('limit'), 30),
-            q=request.args.get('q') or '', job_id=request.args.get('job_id') or ''))
+            q=request.args.get('q') or '', job_id=request.args.get('job_id') or '',
+            category=request.args.get('category') or '',
+            risk=request.args.get('risk') or ''))
     except Exception as exc:
         logger.error('Error loading review queue: %s', exc, exc_info=True)
         return jsonify({'error': 'Could not load review queue'}), 500
@@ -112,6 +114,22 @@ def repair_review_queue_apply(case_id, finding_id):
     except Exception as exc:
         logger.error('Error applying review decision: %s', exc, exc_info=True)
         return jsonify({'error': 'Could not apply review decision'}), 500
+
+
+@bp.route('/api/repair/review-queue/<path:case_id>/decisions/<category>/apply', methods=['POST'])
+def repair_review_queue_apply_decision(case_id, category):
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify({'error': 'Repair worker unavailable'}), 503
+    data = request.get_json(silent=True) or {}
+    try:
+        result = worker.apply_review_decision_group(
+            case_id, category, action=str(data.get('action') or ''))
+        status = 409 if result.get('stale') else 200 if result.get('success') else 400
+        return jsonify(result), status
+    except Exception as exc:
+        logger.error('Error applying grouped review decision: %s', exc, exc_info=True)
+        return jsonify({'error': 'Could not apply grouped review decision'}), 500
 
 
 @bp.route('/api/repair/review-queue/apply-ready', methods=['POST'])

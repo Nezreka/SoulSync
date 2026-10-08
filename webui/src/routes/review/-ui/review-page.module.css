@@ -94,6 +94,25 @@
   border: 1px solid #44495b;
   color: #fff;
 }
+.queueFilters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+.queueFilters label {
+  margin: 0;
+  font-size: 11px;
+}
+.queueFilters select {
+  width: 100%;
+  margin-top: 5px;
+  padding: 8px;
+  border: 1px solid #44495b;
+  border-radius: 9px;
+  background: #10121b;
+  color: #eef0f7;
+}
 .caseList {
   display: grid;
   gap: 6px;
@@ -127,6 +146,20 @@
   color: #a5adbf;
   overflow-wrap: anywhere;
 }
+.caseCategories {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 3px;
+}
+.caseCategories i {
+  padding: 2px 6px;
+  border: 1px solid #4c5268;
+  border-radius: 999px;
+  color: #c8c2f5;
+  font-size: 9px;
+  font-style: normal;
+}
 .pagination {
   font-size: 12px;
   color: #abb2c4;
@@ -159,6 +192,250 @@
 .review {
   padding: clamp(20px, 2vw, 36px);
   min-height: 65vh;
+}
+
+.decisionBoard,
+.trackMatrix,
+.findingDetail {
+  margin-top: 20px;
+  border: 1px solid #3b4053;
+  border-radius: 14px;
+  background: #151824;
+  padding: 18px;
+}
+.sectionHeading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 14px;
+  color: #aeb5c8;
+}
+.sectionHeading h3 {
+  color: #f2f3f8;
+  margin: 3px 0 0;
+  font-size: 19px;
+}
+.decisionGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+}
+.decisionGrid article {
+  border: 1px solid #4a4e63;
+  border-radius: 12px;
+  background: #1c1f2d;
+  overflow: hidden;
+}
+.decisionGrid article[data-risk='manual'] {
+  border-color: #856a38;
+  background: #282316;
+}
+.decisionGrid article[data-risk='destructive'] {
+  border-color: #925163;
+  background: #2b1d24;
+}
+.decisionGrid article[data-risk='ready'] {
+  border-color: #38775e;
+  background: #17271f;
+}
+.decisionSelect {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  color: #edf0f7;
+  text-align: left;
+  padding: 14px;
+  cursor: pointer;
+}
+.decisionSelect small {
+  display: block;
+  color: #aab2c4;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+.decisionSelect b {
+  min-width: 28px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #34384c;
+  text-align: center;
+}
+.decisionIcon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #625024;
+  color: #ffe2a2;
+}
+.decisionActions {
+  display: flex;
+  gap: 8px;
+  padding: 0 14px 14px 52px;
+  flex-wrap: wrap;
+}
+.decisionActions button {
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid #51566d;
+  background: #292d3e;
+  color: #eef0f7;
+  cursor: pointer;
+}
+.decisionActions button:first-child {
+  border-color: #467d68;
+  background: #1c3a2f;
+  color: #c6f5dc;
+}
+.matrixCounts {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.matrixCounts span {
+  border: 1px solid #4a5064;
+  border-radius: 999px;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+.matrixCounts span[data-status='confirmed'] {
+  color: #bdf0d2;
+  border-color: #38775e;
+}
+.matrixCounts span[data-status='uncertain'],
+.matrixCounts span[data-status='change'] {
+  color: #ffe0a3;
+  border-color: #856a38;
+}
+.matrixCounts span[data-status='missing'],
+.matrixCounts span[data-status='extra'] {
+  color: #ffc4d0;
+  border-color: #925163;
+}
+.matrixCounts span[data-status='not-owned'] {
+  color: #bdc5d7;
+  border-color: #596075;
+}
+.releaseContext {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -3px 0 12px;
+}
+.releaseContext span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border: 1px solid #42485c;
+  border-radius: 8px;
+  color: #aeb6c9;
+  background: #1c1f2c;
+  font-size: 12px;
+}
+.releaseContext code {
+  color: #d6d0ff;
+  font-size: 11px;
+}
+.trackTable {
+  border: 1px solid #363b4d;
+  border-radius: 11px;
+  overflow-x: auto;
+}
+.trackTableHead,
+.matrixRow {
+  display: grid;
+  grid-template-columns:
+    88px 70px minmax(170px, 1.2fr) minmax(170px, 1.2fr) minmax(150px, 1fr)
+    minmax(110px, 0.8fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 840px;
+}
+.trackTableHead {
+  padding: 9px 12px;
+  background: #232636;
+  color: #98a1b6;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.matrixRow {
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-top: 1px solid #343849;
+  background: #191c28;
+  color: #e8ebf3;
+  text-align: left;
+}
+.matrixRow:not(:disabled) {
+  cursor: pointer;
+}
+.matrixRow[data-status='uncertain'],
+.matrixRow[data-status='change'] {
+  box-shadow: inset 3px 0 #d5a23f;
+  background: #242116;
+}
+.matrixRow[data-status='extra'],
+.matrixRow[data-status='missing'],
+.matrixRow[data-status='duplicate'] {
+  box-shadow: inset 3px 0 #cc6277;
+  background: #271a20;
+}
+.matrixRow[data-status='not_owned'] {
+  box-shadow: inset 3px 0 #697187;
+  background: #1d202c;
+}
+.matrixRow[data-status='confirmed'] {
+  box-shadow: inset 3px 0 #43a77c;
+  background: #17251f;
+}
+.matrixRow span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  color: #b4bccd;
+}
+.matrixRow strong {
+  display: block;
+  color: #f0f2f7;
+  font-size: 13px;
+}
+.matrixRow small {
+  display: block;
+  color: #8f98ad;
+  margin-top: 2px;
+}
+.matrixRow i {
+  display: inline-block;
+  border: 1px solid #5a6075;
+  border-radius: 999px;
+  padding: 3px 7px;
+  font-style: normal;
+  font-size: 11px;
+}
+.confirmedAssignments {
+  min-width: 840px;
+  border-top: 1px solid #343849;
+}
+.confirmedAssignments > summary {
+  padding: 10px 12px;
+  color: #b9e8cf;
+  background: #1b2923;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+.findingDetail > .decisionHeader:first-child {
+  margin-top: 0;
 }
 .albumHeader {
   border-bottom: 1px solid #373b4d;

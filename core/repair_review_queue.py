@@ -12,6 +12,8 @@ import hashlib
 import os
 from typing import Any
 
+from core.library.reconciliation_store import load_album_plan
+
 
 _SEVERITY = "CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END"
 _DETAILS = "CASE WHEN json_valid(details_json) THEN details_json ELSE '{}' END"
@@ -23,6 +25,83 @@ _GLOBAL_BLOCKER_TYPES = frozenset({'reconciliation_release'})
 _POSITION_CHANGE_KEYS = frozenset({
     'track_number', 'disc_number', 'library_track_number', 'library_disc_number',
 })
+
+
+def finding_category(item: dict[str, Any]) -> str:
+    """User-facing reconciliation category, independent of scanner wording."""
+    finding_type = str(item.get('finding_type') or '')
+    details = item.get('details') if isinstance(item.get('details'), dict) else {}
+    changes = details.get('changes') if isinstance(details.get('changes'), dict) else {}
+    if finding_type == 'reconciliation_release':
+        return 'release_conflicts'
+    if finding_type == 'reconciliation_intent':
+        return 'partial_albums'
+    if finding_type == 'reconciliation_missing':
+        return 'missing_tracks'
+    if finding_type in _DESTRUCTIVE_TYPES:
+        return 'duplicates' if finding_type == 'reconciliation_duplicate' else 'extra_files'
+    if finding_type == 'reconciliation_unresolved':
+        return 'audio_conflicts'
+    # A possibly different recording version is the controlling decision even
+    # when its atomic repair also carries track-number or filename changes.
+    # The grouped numbering button must never conceal a material title edit.
+    if details.get('title_difference_kind') in ('material', 'version'):
+        return 'title_issues'
+    if _POSITION_CHANGE_KEYS.intersection(changes):
+        return 'numbering'
+    if details.get('title_difference_kind') in ('typography', 'flavor'):
+        return 'title_conventions'
+    return 'metadata'
+
+
+_CATEGORY_LABELS = {
+    'metadata': 'Safe metadata', 'title_conventions': 'Title conventions',
+    'title_issues': 'Title identity',
+    'numbering': 'Numbering convention', 'release_conflicts': 'Release or edition',
+    'audio_conflicts': 'Audio assignment', 'missing_tracks': 'Missing tracks',
+    'extra_files': 'Extra files', 'duplicates': 'Duplicate files',
+    'partial_albums': 'Album intent',
+}
+
+
+def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse repeated actions into the actual album-level questions."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        category = finding_category(item)
+        item['category'] = category
+        # Numbering and convention changes are one album question. Safe
+        # metadata is one inspectable bulk action. Other findings retain their
+        # individual decisions because their supported actions can differ.
+        if category in ('numbering', 'title_conventions', 'metadata'):
+            key = category
+        else:
+            key = f'{category}:{item.get("id")}'
+        grouped.setdefault(key, []).append(item)
+    decisions = []
+    for key, rows in grouped.items():
+        category = finding_category(rows[0])
+        tiers = [str(row.get('review_tier') or 'manual') for row in rows]
+        risk = ('destructive' if 'destructive' in tiers else
+                'manual' if 'manual' in tiers else
+                'blocked' if 'blocked' in tiers else 'ready')
+        if category == 'numbering':
+            summary = f'{len(rows)} track or disc position changes share one convention choice.'
+        elif category == 'title_conventions':
+            summary = f'{len(rows)} title wording changes preserve the identified recordings.'
+        elif category == 'metadata':
+            summary = f'{len(rows)} evidence-supported metadata actions are ready.'
+        else:
+            summary = rows[0].get('description') or 'Review the supporting evidence.'
+        decisions.append({
+            'id': key, 'category': category,
+            'label': _CATEGORY_LABELS.get(category, category.replace('_', ' ').title()),
+            'risk': risk, 'summary': summary,
+            'finding_ids': [row.get('id') for row in rows],
+            'action_count': len(rows),
+        })
+    risk_rank = {'manual': 0, 'destructive': 1, 'blocked': 2, 'ready': 3}
+    return sorted(decisions, key=lambda row: (risk_rank.get(row['risk'], 9), row['label']))
 
 
 def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tuple[str, str]:
@@ -44,6 +123,8 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
         }.get(finding_type, 'This finding requires a decision')
     if global_blocked:
         return 'blocked', 'The selected release must be resolved first'
+    if details.get('title_difference_kind') in ('material', 'version'):
+        return 'manual', 'The title may identify a different song or recording version'
     if _POSITION_CHANGE_KEYS.intersection(changes):
         return 'manual', 'The release uses a different disc or track numbering scheme'
     if details.get('confidence') not in (None, '', 'clear'):
@@ -66,6 +147,7 @@ def classify_case(items: list[dict[str, Any]]) -> dict[str, Any]:
         counts[tier] += 1
         if tier != 'ready' and reason not in reasons:
             reasons.append(reason)
+    decisions = build_decisions(items)
     return {
         **counts,
         'total': len(items),
@@ -75,6 +157,9 @@ def classify_case(items: list[dict[str, Any]]) -> dict[str, Any]:
         'can_apply_ready': counts['ready'] > 0,
         'can_organize': bool(items and not counts['manual'] and
                              not counts['destructive'] and not counts['blocked']),
+        'decision_count': len(decisions),
+        'categories': sorted({row['category'] for row in decisions}),
+        'decisions': decisions,
     }
 
 
@@ -85,7 +170,8 @@ def evidence_token(row) -> str:
 
 
 def list_cases(db, *, status: str = 'pending', page: int = 0,
-               limit: int = 30, q: str = '', job_id: str = '') -> dict[str, Any]:
+               limit: int = 30, q: str = '', job_id: str = '',
+               category: str = '', risk: str = '') -> dict[str, Any]:
     page = max(0, int(page))
     limit = min(100, max(1, int(limit)))
     conn = db._get_connection()
@@ -100,6 +186,54 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
             search = "AND (title LIKE ? OR file_path LIKE ? OR details_json LIKE ?)"
             needle = f'%{q.strip()}%'
             params.extend([needle] * 3)
+        category_conditions = {
+            'numbering': ("""finding_type = 'reconciliation_metadata'
+                AND COALESCE(json_extract(%s, '$.title_difference_kind'), '')
+                    NOT IN ('material','version') AND (
+                json_type(%s, '$.changes.track_number') IS NOT NULL OR
+                json_type(%s, '$.changes.disc_number') IS NOT NULL OR
+                json_type(%s, '$.changes.library_track_number') IS NOT NULL OR
+                json_type(%s, '$.changes.library_disc_number') IS NOT NULL)""" %
+                (_DETAILS, _DETAILS, _DETAILS, _DETAILS, _DETAILS)),
+            'title_conventions': "json_extract(%s, '$.title_difference_kind') IN ('typography','flavor')" % _DETAILS,
+            'title_issues': "json_extract(%s, '$.title_difference_kind') IN ('material','version')" % _DETAILS,
+            'release_conflicts': "finding_type = 'reconciliation_release'",
+            'audio_conflicts': "finding_type = 'reconciliation_unresolved'",
+            'missing_tracks': "finding_type = 'reconciliation_missing'",
+            'partial_albums': "finding_type = 'reconciliation_intent'",
+            'duplicates': "finding_type = 'reconciliation_duplicate'",
+            'extra_files': "finding_type = 'reconciliation_extra'",
+            'metadata': ("finding_type = 'reconciliation_metadata' AND "
+                         "COALESCE(json_extract(%s, '$.title_difference_kind'), '') "
+                         "NOT IN ('typography','flavor','material','version') AND "
+                         "json_type(%s, '$.changes.track_number') IS NULL AND "
+                         "json_type(%s, '$.changes.disc_number') IS NULL AND "
+                         "json_type(%s, '$.changes.library_track_number') IS NULL AND "
+                         "json_type(%s, '$.changes.library_disc_number') IS NULL" %
+                         (_DETAILS, _DETAILS, _DETAILS, _DETAILS, _DETAILS)),
+        }
+        if category in category_conditions:
+            search += f' AND ({category_conditions[category]})'
+        position_condition = ("""(
+            json_type(%s, '$.changes.track_number') IS NOT NULL OR
+            json_type(%s, '$.changes.disc_number') IS NOT NULL OR
+            json_type(%s, '$.changes.library_track_number') IS NOT NULL OR
+            json_type(%s, '$.changes.library_disc_number') IS NOT NULL)""" %
+            (_DETAILS, _DETAILS, _DETAILS, _DETAILS))
+        if risk == 'ready':
+            search += (" AND finding_type = 'reconciliation_metadata' AND NOT " +
+                       position_condition +
+                       " AND COALESCE(json_extract(" + _DETAILS +
+                       ", '$.confidence'), 'clear') IN ('','clear')" +
+                       " AND COALESCE(json_extract(" + _DETAILS +
+                       ", '$.title_difference_kind'), '') NOT IN ('material','version')")
+        elif risk == 'destructive':
+            search += " AND finding_type IN ('reconciliation_extra','reconciliation_duplicate')"
+        elif risk == 'manual':
+            search += (" AND (finding_type NOT IN ('reconciliation_metadata',"
+                       "'reconciliation_extra','reconciliation_duplicate') OR " +
+                       position_condition + " OR json_extract(" + _DETAILS +
+                       ", '$.title_difference_kind') IN ('material','version'))")
         where = f"status = ? {job_filter} {search}"
         total = conn.execute(
             f"SELECT COUNT(DISTINCT review_case_key) FROM repair_findings WHERE {where}",
@@ -120,6 +254,9 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
                   AND COALESCE(json_extract(
                       CASE WHEN json_valid(f.details_json) THEN f.details_json ELSE '{{}}' END,
                       '$.confidence'), 'clear') IN ('', 'clear')
+                  AND COALESCE(json_extract(
+                      CASE WHEN json_valid(f.details_json) THEN f.details_json ELSE '{{}}' END,
+                      '$.title_difference_kind'), '') NOT IN ('material', 'version')
                   AND json_type(CASE WHEN json_valid(f.details_json)
                                      THEN f.details_json ELSE '{{}}' END,
                                 '$.changes.track_number') IS NULL
@@ -177,7 +314,8 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
                        json_type({_DETAILS}, '$.changes.track_number'),
                        json_type({_DETAILS}, '$.changes.disc_number'),
                        json_type({_DETAILS}, '$.changes.library_track_number'),
-                       json_type({_DETAILS}, '$.changes.library_disc_number')
+                       json_type({_DETAILS}, '$.changes.library_disc_number'),
+                       json_extract({_DETAILS}, '$.title_difference_kind')
                 FROM repair_findings
                 WHERE status = ? AND review_case_key IN ({placeholders})
                   AND (? = '' OR job_id = ?)
@@ -185,7 +323,7 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
             grouped: dict[str, list[dict[str, Any]]] = {}
             for (case_key, finding_type, last_error, confidence,
                  track_number, disc_number, library_track_number,
-                 library_disc_number) in detail_rows:
+                 library_disc_number, title_kind) in detail_rows:
                 position_values = (
                     ('track_number', track_number), ('disc_number', disc_number),
                     ('library_track_number', library_track_number),
@@ -193,6 +331,7 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
                 )
                 details = {
                     'confidence': confidence,
+                    'title_difference_kind': title_kind,
                     'changes': {key: True for key, value in position_values if value is not None},
                 }
                 grouped.setdefault(case_key, []).append({
@@ -244,6 +383,37 @@ def get_case(db, case_id: str, *, status: str = 'pending',
         first = items[0]
         label = next((item['details'] for item in items
                       if item['details'].get('album_title') or item['details'].get('album')), {})
+        album_plan = load_album_plan(conn, case_id)
+        if album_plan:
+            finding_by_path = {item.get('file_path'): item for item in items
+                               if item.get('file_path')}
+            for item in items:
+                if item.get('finding_type') != 'reconciliation_duplicate':
+                    continue
+                for copy in item['details'].get('duplicate_copies') or []:
+                    if isinstance(copy, dict) and copy.get('file_path'):
+                        finding_by_path[str(copy['file_path'])] = item
+            missing_findings = {}
+            for item in items:
+                if item.get('finding_type') != 'reconciliation_missing':
+                    continue
+                for slot in item['details'].get('missing_tracks') or []:
+                    key = (str(slot.get('source_track_id') or ''),
+                           str(slot.get('disc_number') or 1),
+                           str(slot.get('track_number') or 0),
+                           str(slot.get('name') or ''))
+                    missing_findings[key] = item
+            for assignment in album_plan.get('assignments') or []:
+                finding = finding_by_path.get(assignment.get('file_path'))
+                if not finding and assignment.get('status') == 'missing':
+                    key = (str(assignment.get('source_track_id') or ''),
+                           str(assignment.get('slot_disc_number') or 1),
+                           str(assignment.get('slot_track_number') or 0),
+                           str(assignment.get('slot_title') or ''))
+                    finding = missing_findings.get(key)
+                if finding:
+                    assignment['finding_id'] = finding['id']
+                    assignment['review_tier'] = finding.get('review_tier')
         return {
             'case_id': case_id,
             'album': label.get('album_title') or label.get('album') or label.get('album_name'),
@@ -259,6 +429,8 @@ def get_case(db, case_id: str, *, status: str = 'pending',
             'album_id': next((item['details'].get('album_id') for item in items
                               if item['details'].get('album_id') is not None), None),
             'plan': plan,
+            'album_plan': album_plan,
+            'decisions': plan['decisions'],
         }
     finally:
         conn.close()
@@ -279,7 +451,8 @@ def safe_finding_ids(db, *, case_id: str = '') -> tuple[list[int], list[str]]:
                    json_type({_DETAILS}, '$.changes.track_number'),
                    json_type({_DETAILS}, '$.changes.disc_number'),
                    json_type({_DETAILS}, '$.changes.library_track_number'),
-                   json_type({_DETAILS}, '$.changes.library_disc_number')
+                   json_type({_DETAILS}, '$.changes.library_disc_number'),
+                   json_extract({_DETAILS}, '$.title_difference_kind')
             FROM repair_findings
             WHERE job_id = 'library_reconciliation' AND status = 'pending'
               {case_filter}
@@ -289,7 +462,8 @@ def safe_finding_ids(db, *, case_id: str = '') -> tuple[list[int], list[str]]:
         conn.close()
     grouped: dict[str, list[dict[str, Any]]] = {}
     for (finding_id, key, finding_type, last_error, confidence,
-         track_number, disc_number, library_track_number, library_disc_number) in rows:
+         track_number, disc_number, library_track_number, library_disc_number,
+         title_kind) in rows:
         position_values = (
             ('track_number', track_number), ('disc_number', disc_number),
             ('library_track_number', library_track_number),
@@ -297,6 +471,7 @@ def safe_finding_ids(db, *, case_id: str = '') -> tuple[list[int], list[str]]:
         )
         details = {
             'confidence': confidence,
+            'title_difference_kind': title_kind,
             'changes': {name: True for name, value in position_values if value is not None},
         }
         grouped.setdefault(key, []).append({

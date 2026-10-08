@@ -18,7 +18,7 @@ from core.repair_jobs.library_reconciliation import (
     LibraryReconciliationJob, _album_titles_compatible, _candidate_evidence,
     _candidate_rank, _candidate_shape, _group_disc_folders, _group_logical_albums,
     _has_unexplained_identified_extras, _normalize_slot,
-    _same_recording_copies, _search_release_candidates,
+    _release_group_candidates, _same_recording_copies, _search_release_candidates,
     _suggest_filename,
 )
 from core.repair_worker import RepairWorker
@@ -91,8 +91,8 @@ def test_candidate_shape_sorts_numbered_and_unnumbered_missing_slots():
     shape = _candidate_shape((0, 0, 0, 'musicbrainz', 'release', slots, plan))
 
     assert shape[2] == (
-        (1, False, 2, 'numbered', ''),
-        (1, True, 0, 'unnumbered', ''),
+        (1, False, 2, ('numbered', ()), ''),
+        (1, True, 0, ('unnumbered', ()), ''),
     )
 
 
@@ -437,6 +437,20 @@ def test_lone_playlist_track_is_treated_as_partial_album_intent(tmp_path, monkey
 
     assert result.findings_created == 0
     assert worker.get_review_cases(job_id='library_reconciliation')['total'] == 0
+    with db._get_connection() as conn:
+        saved = conn.execute(
+            'SELECT intent_scope, state, confirmed_count, missing_count, plan_json '
+            'FROM reconcile_album_plans'
+        ).fetchone()
+    assert saved['intent_scope'] == 'partial'
+    assert saved['state'] == 'confirmed'
+    assert saved['confirmed_count'] == 1
+    assert saved['missing_count'] == 0
+    document = json.loads(saved['plan_json'])
+    assert document['counts']['not_owned'] == 1
+    assert document['assignments'][0]['playlists'] == ['Imported playlist']
+    assert {row['status'] for row in document['assignments']} == {
+        'confirmed', 'not_owned'}
 
 
 def test_musicbrainz_release_group_missing_request_uses_exact_edition(tmp_path, monkeypatch):
@@ -1088,6 +1102,35 @@ def test_release_title_search_is_bounded_and_rejects_fuzzy_title_hits():
     assert _search_release_candidates(album, context, cache) == [
         ('musicbrainz', 'exact')]
     assert calls == [('Unknown Album', 'Known Artist', 4)]
+
+
+def test_digital_edition_discovery_accepts_a_release_group_seed():
+    class MusicBrainz:
+        def get_release(self, _mbid, includes):
+            assert includes == ['release-groups']
+            return None
+
+        def get_release_group(self, mbid):
+            return {'id': mbid}
+
+        def browse_release_group_releases(self, mbid, limit):
+            assert (mbid, limit) == ('group-id', 100)
+            return [
+                {'id': 'cd', 'media': [
+                    {'format': 'CD', 'track-count': 5},
+                    {'format': 'CD', 'track-count': 5},
+                ]},
+                {'id': 'digital', 'status': 'Official', 'media': [
+                    {'format': 'Digital Media', 'track-count': 10},
+                ]},
+            ]
+
+    context = JobContext(db=None, transfer_folder='', config_manager=None,
+                         mb_client=MusicBrainz())
+
+    assert _release_group_candidates(
+        'group-id', [{} for _ in range(10)], context, {}) == [
+            ('musicbrainz', 'digital'), ('musicbrainz', 'cd')]
 
 
 def test_wrong_audio_defers_completion_intent_until_assignment_is_settled(tmp_path, monkeypatch):
