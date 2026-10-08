@@ -158,7 +158,8 @@ def run_mirrored_playlist_pipeline(
                 automation_id,
                 [pl for pl in playlists if pl.get('id')],
                 sync_one_fn=lambda pl: sync_one_fn(
-                    {'playlist_id': str(pl['id']), '_automation_id': None},
+                    {'playlist_id': str(pl['id']), '_automation_id': None,
+                     'user_initiated': bool(config.get('user_initiated'))},
                     deps,
                 ),
                 sync_id_for_fn=lambda pl: f"auto_mirror_{pl['id']}",

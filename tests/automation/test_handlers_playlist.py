@@ -815,6 +815,39 @@ class TestSyncPlaylist:
         assert sync_calls
         assert sync_calls[0][1].get('skip_wishlist_add') is True
 
+    def test_user_initiated_rides_to_run_sync_task(self):
+        """#1603: the playlist's own Sync & download click is a user add, a
+        schedule is not."""
+        discovered_track = {
+            'extra_data': json.dumps({
+                'discovered': True,
+                'matched_data': {
+                    'id': 'spot-1', 'name': 'Track', 'artists': [{'name': 'X'}],
+                    'album': {'name': 'Album'}, 'duration_ms': 200000,
+                },
+            }),
+            'artist_name': 'X',
+        }
+        for config, expected in (({'playlist_id': '1', 'user_initiated': True}, True),
+                                 ({'playlist_id': '1'}, False)):
+            db = _StubDB(
+                playlists=[{'id': 1, 'name': 'P'}],
+                playlist_tracks={1: [discovered_track]},
+            )
+            sync_calls: List[tuple] = []
+            deps = _build_deps(
+                get_database=lambda db=db: db,
+                run_sync_task=lambda *a, **k: sync_calls.append((a, k)),
+            )
+            auto_sync_playlist(config, deps)
+            for _ in range(50):
+                if sync_calls:
+                    break
+                import time
+                time.sleep(0.01)
+            assert sync_calls
+            assert sync_calls[0][1].get('user_initiated') is expected
+
     def test_unchanged_since_last_sync_returns_skipped(self):
         discovered_track = {
             'source_track_id': 'spot-1',

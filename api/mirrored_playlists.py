@@ -519,6 +519,9 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False, pro
                 'refresh_only': bool(refresh_only),
                 'profile_id': int(profile_id),
                 '_automation_id': _playlist_pipeline_state_key(playlist_id, profile_id),
+                # the user clicked Sync & download, so tracks they once removed
+                # from the wishlist come back; schedules keep the ignore-list (#1603)
+                'user_initiated': True,
             },
             deps,
             refresh_fn=auto_refresh_mirrored,
