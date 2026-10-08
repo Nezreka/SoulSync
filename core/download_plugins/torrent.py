@@ -77,6 +77,7 @@ from core.download_plugins.album_bundle import (
 )
 from core.download_plugins.base import DownloadSourcePlugin
 from core.download_plugins.candidate_store import get_candidate_store
+from core.download_plugins.release_identity import dedupe_prowlarr_releases, torrent_hash_evidence, release_sources, release_evidence as get_release_evidence
 from core.download_plugins.torrent_stall import (
     StallTracker,
     get_min_seeders,
@@ -211,7 +212,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         return self._project_results(results)
 
     def _project_results(
-        self, results: List[ProwlarrSearchResult]
+        self, results: List[ProwlarrSearchResult], *, release_evidence=None
     ) -> Tuple[List[TrackResult], List[AlbumResult]]:
         """Turn Prowlarr releases into TrackResult / AlbumResult
         shaped objects. One TrackResult + one AlbumResult per
@@ -220,7 +221,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         without downloading the actual torrent."""
         tracks: List[TrackResult] = []
         albums: List[AlbumResult] = []
-        for result in results:
+        for result in dedupe_prowlarr_releases(results):
+            evidence = release_evidence or get_release_evidence(result)
             if result.protocol != 'torrent':
                 continue
             # Prefer the .torrent URL over the magnet (#1139). A magnet gives
@@ -240,15 +242,16 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             # params, so only an opaque server-side token travels (P0-03).
             token = get_candidate_store().put(
                 _encode_candidate(download_url, result.magnet_uri),
-                metadata={'categories': list(result.categories or [])},
+                metadata={'categories': list(evidence.categories or []),
+                          'release_title': evidence.title},
             )
             filename = f"{token}{_FILENAME_SEP}{result.title}"
             audio_quality = audio_quality_from_release(
-                result.title,
-                result.categories,
+                evidence.title,
+                evidence.categories,
             )
             quality = audio_quality.format
-            parsed_artist, parsed_title = _parse_release_title(result.title)
+            parsed_artist, parsed_title = _parse_release_title(evidence.title)
             tr = TrackResult(
                 username='torrent',
                 filename=filename,
@@ -281,9 +284,15 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                     'publish_date': result.publish_date,
                     'protocol': 'torrent',
                     'release_title': result.title,
+                    'info_hash': torrent_hash_evidence(result)[0],
+                    'hash_conflict': torrent_hash_evidence(result)[1],
                     'categories': list(result.categories or []),
                 },
             )
+            tr._release_sources = [
+                source for raw in result._release_sources
+                for source in self._project_results([raw], release_evidence=evidence)[0]
+            ]
             tracks.append(tr)
             albums.append(AlbumResult(
                 username='torrent',
@@ -338,7 +347,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         if allowed_formats:
             ok, why = evaluate_release(
                 allowed_formats,
-                display_name,
+                candidate_metadata.get('release_title') or display_name,
                 categories=candidate_metadata.get('categories'),
             )
             if not ok:
@@ -366,7 +375,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
 
         thread = threading.Thread(
             target=self._download_thread,
-            args=(download_id, download_url, display_name, fallback_magnet,
+            args=(download_id, download_url, candidate_metadata.get('release_title') or display_name, fallback_magnet,
                   allowed_formats, candidate_metadata.get('categories')),
             daemon=True,
             name=f'torrent-dl-{download_id[:8]}',
@@ -408,7 +417,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                         display_name, rejected.reason)
             self._mark_error(
                 download_id,
-                f"Does not match the quality profile: {rejected.reason}")
+                f"Does not match the quality profile: {rejected.reason}", failure_kind='content')
             return
         except Exception as e:
             self._mark_error(download_id, f"add_torrent failed: {e}")
@@ -601,13 +610,14 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         if completed_hash:
             self._apply_seed_policy(completed_hash, torrent_name)
 
-    def _mark_error(self, download_id: str, message: str) -> None:
+    def _mark_error(self, download_id: str, message: str, *, failure_kind='transport') -> None:
         logger.error("Torrent download %s failed: %s", download_id[:8], message)
         with self._lock:
             row = self.active_downloads.get(download_id)
             if row is not None:
                 row['state'] = 'Completed, Errored'
                 row['error'] = message
+                row['failure_kind'] = failure_kind
 
     def _apply_seed_policy(self, torrent_hash: str, title: Optional[str]) -> None:
         """Route a completed grab per the seed-enforcement mode. 'client' writes
@@ -814,41 +824,40 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                     picked.title, picked.size / 1_048_576, picked.seeders, picked.indexer_name)
         _emit('queued', release=picked.title, size=picked.size, seeders=picked.seeders)
 
-        # Phase 2: hand to adapter. Fetch the .torrent server-side first —
-        # the client often can't reach Prowlarr itself (split containers).
-        try:
-            from core.torrent_clients.base import ReleaseRejected, add_torrent_smart
+        # Phase 2: try the preserved indexer endpoints for this release.
+        # A fetch/add error can be endpoint-specific. A verified content
+        # rejection is terminal for the whole identified release.
+        from core.torrent_clients.base import ReleaseRejected, add_torrent_smart
 
-            # #1149: the title got us this far; the FILE LIST is the evidence.
-            # This runs inside add_torrent_smart because that is where the
-            # fetched payload already lives, so verification costs no extra
-            # request and happens strictly before the client is handed
-            # anything.
-            def _verify(names):
-                if not allowed_formats:
-                    return True, ''
-                return evaluate_release(
-                    allowed_formats,
-                    picked.title,
-                    file_names=names,
-                    categories=getattr(picked, 'categories', None),
-                )
+        def _verify(names):
+            if not allowed_formats:
+                return True, ''
+            return evaluate_release(
+                allowed_formats, get_release_evidence(picked).title, file_names=names,
+                categories=getattr(get_release_evidence(picked), 'categories', None),
+            )
 
-            torrent_id = run_async(add_torrent_smart(
-                adapter, download_url, fallback_magnet=picked.magnet_uri,
-                verify_files=_verify))
-        except ReleaseRejected as rejected:
-            logger.info("[Torrent album] Refused '%s' after reading its file list: %s",
-                        picked.title, rejected.reason)
-            result['error'] = f'Release does not match the quality profile: {rejected.reason}'
-            # Fallback-eligible: the next source may have a release that does.
-            result['fallback'] = True
-            return result
-        except Exception as e:
-            result['error'] = f'Torrent client refused the release: {e}'
-            return result
+        torrent_id = None
+        for source in release_sources(picked):
+            source_url = source.download_url or source.magnet_uri
+            if not source_url:
+                continue
+            try:
+                torrent_id = run_async(add_torrent_smart(
+                    adapter, source_url, fallback_magnet=source.magnet_uri,
+                    verify_files=_verify))
+            except ReleaseRejected as rejected:
+                logger.info("[Torrent album] Refused '%s' after reading its file list: %s",
+                            picked.title, rejected.reason)
+                result['error'] = f'Release does not match the quality profile: {rejected.reason}'
+                result['fallback'] = True
+                return result
+            except Exception:  # endpoint unavailable; keep its URLs out of logs
+                torrent_id = None
+            if torrent_id:
+                break
         if not torrent_id:
-            result['error'] = 'Torrent client refused the release'
+            result['error'] = 'Torrent client refused the release on every indexer source'
             return result
 
         # Phase 3: poll until complete. The lifted helper handles
@@ -1276,7 +1285,7 @@ async def prowlarr_search_with_variants(
                 results.append(result)
     if not results and first_error is not None:
         raise first_error
-    return results
+    return dedupe_prowlarr_releases(results)
 
 
 async def _prowlarr_search_query_with_variants(
@@ -1443,4 +1452,6 @@ def _row_to_status(row: Dict[str, Any]) -> DownloadStatus:
         time_remaining=None,
         file_path=row.get('file_path'),
         audio_files=row.get('audio_files') or None,
+        error=row.get('error'),
+        failure_kind=row.get('failure_kind'),
     )

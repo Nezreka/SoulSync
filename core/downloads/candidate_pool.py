@@ -9,6 +9,7 @@ with the reason they lost, capped so a 400-hit Soulseek search doesn't ship
 from __future__ import annotations
 
 import os
+from copy import copy
 from typing import Any, Callable, Iterable, Optional
 
 from core.downloads.decisions import Decision, reject, rejection_counts
@@ -65,6 +66,14 @@ def candidate_row(candidate, decision: Decision, *, source_name: str, query: str
     }
 
 
+
+def _collapse_release_pairs(pairs):
+    from core.download_plugins.release_identity import dedupe_release_candidates
+    by_endpoint = {(item[0].username, item[0].filename): item for item in pairs}
+    return [(c, *by_endpoint[(c.username, c.filename)][1:])
+            for c in dedupe_release_candidates([item[0] for item in pairs])]
+
+
 def build_source_rows(
     evaluated: Iterable[tuple],
     *,
@@ -115,6 +124,7 @@ def build_source_rows(
         (accepted if decision.accepted else rejected).append((candidate, decision, query))
 
     accepted.sort(key=lambda t: -(t[1].score or 0))
+    accepted = _collapse_release_pairs(accepted)
     rejected.sort(key=lambda t: float('inf') if t[1].score is None else -t[1].score)
     counts = rejection_counts(d for _, d, _ in rejected)
     shown = rejected[:max(0, reject_cap)]
@@ -184,11 +194,29 @@ def summarize_pool(pairs: Iterable[tuple], chosen_key: Optional[tuple] = None,
             picked[key] = (candidate, decision)
 
     chosen = picked.pop(tuple(chosen_key), None) if chosen_key else None
+    if chosen is None and chosen_key:
+        from core.download_plugins.release_identity import release_sources
+        for root_key, (root, decision) in list(picked.items()):
+            endpoint = next((s for s in release_sources(root)
+                             if (s.username, s.filename) == tuple(chosen_key)), None)
+            if endpoint is not None:
+                # The root's validated metadata/quality belongs to this release;
+                # the selected endpoint supplies its opaque download token.
+                selected = copy(root)
+                selected.username, selected.filename = endpoint.username, endpoint.filename
+                chosen = (selected, decision)
+                picked.pop(root_key)
+                break
     rest = sorted(
         picked.values(),
         key=lambda t: (not t[1].accepted,
                        float('inf') if t[1].score is None else -t[1].score),
     )
+    grouped = _collapse_release_pairs(([chosen] if chosen else []) + rest)
+    if chosen:
+        chosen, rest = grouped[0], grouped[1:]
+    else:
+        rest = grouped
     rejected = [d for _, d in rest if not d.accepted]
     return {
         'chosen': _brief(*chosen) if chosen else None,

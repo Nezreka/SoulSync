@@ -165,6 +165,139 @@ def test_scene_artist_hint_requires_evidence_in_actual_release():
 
 
 @pytest.mark.parametrize('protocol', ['torrent', 'usenet'])
+@pytest.mark.parametrize('release_name,album', [('Shared Song', None), ('Shared Album', 'Shared Album')])
+def test_release_artist_containment_does_not_accept_another_band(monkeypatch, protocol, release_name, album):
+    """An anonymized live cover release must fail even with an exact title."""
+    from types import SimpleNamespace
+    from core.downloads import validation
+    from core.matching_engine import MusicMatchingEngine
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    plugin = TorrentDownloadPlugin() if protocol == 'torrent' else UsenetDownloadPlugin()
+    release = f'Signal Duo Experience-{release_name}-16BIT-44-KHZ-WEB-FLAC-2022-GROUP'
+    tracks, _ = plugin._project_results([_make_torrent_result(title=release, protocol=protocol)])
+    expected = SimpleNamespace(name='Shared Song', artists=['Signal Duo'], duration_ms=180_000, album=album)
+    reasons = {}
+
+    assert validation._score_streaming_candidates(tracks, expected, reasons) == []
+    assert reasons[id(tracks[0])][1].code == 'artist_mismatch'
+
+
+@pytest.mark.parametrize('protocol', ['torrent', 'usenet'])
+@pytest.mark.parametrize('artist', ['Signal Duo', 'The Signal Duo', 'Signal Duo feat. Guest Singer', 'Guest Singer & Signal Duo'])
+def test_release_artist_gate_keeps_real_artist_and_featured_credits(monkeypatch, protocol, artist):
+    from types import SimpleNamespace
+    from core.downloads import validation
+    from core.matching_engine import MusicMatchingEngine
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    plugin = TorrentDownloadPlugin() if protocol == 'torrent' else UsenetDownloadPlugin()
+    release = f'{artist}-Shared Song-16BIT-44-KHZ-WEB-FLAC-2022-GROUP'
+    tracks, _ = plugin._project_results([_make_torrent_result(title=release, protocol=protocol)])
+    expected = SimpleNamespace(name='Shared Song', artists=['Signal Duo'], duration_ms=180_000, album=None)
+
+    assert validation._score_streaming_candidates(tracks, expected) == tracks
+
+
+@pytest.mark.parametrize('remove', [False, True])
+@pytest.mark.parametrize('clear_after_cancel', [False, True])
+def test_usenet_cancel_during_submission_cleans_up_late_job(monkeypatch, remove, clear_after_cancel):
+    """A remote ID arriving after cancel must not resurrect an orphan download."""
+    import core.download_plugins.usenet as module
+    plugin = UsenetDownloadPlugin()
+    plugin.active_downloads['dl'] = {'id': 'dl', 'state': 'Initializing', 'job_id': None}
+    removals, polls = [], []
+    stopped = [False]
+    plugin.set_shutdown_check(lambda: stopped[0])
+
+    class Adapter:
+        def is_configured(self): return True
+        async def add_nzb(self, url):
+            await plugin.cancel_download('dl', remove=remove)
+            if clear_after_cancel:
+                await plugin.clear_all_completed_downloads()
+            return 'late-job'
+        async def remove(self, job_id, delete_files=False):
+            removals.append((job_id, delete_files))
+            return True
+        async def get_status(self, job_id):
+            polls.append(job_id)
+            stopped[0] = True
+            return None
+
+    monkeypatch.setattr(module, 'get_active_usenet_adapter', lambda: Adapter())
+    monkeypatch.setattr(module, 'run_async', asyncio.run)
+    monkeypatch.setattr(module.time, 'sleep', lambda *_: None)
+    plugin._download_thread('dl', 'https://indexer.invalid/synthetic.nzb')
+
+    assert removals == [('late-job', remove)]
+    assert polls == []
+    if remove or clear_after_cancel:
+        assert 'dl' not in plugin.active_downloads
+    else:
+        assert plugin.active_downloads['dl']['state'] == 'Cancelled'
+
+
+def test_usenet_cancel_during_status_poll_cannot_restore_downloading(monkeypatch):
+    import core.download_plugins.usenet as module
+    plugin = UsenetDownloadPlugin()
+    plugin.active_downloads['dl'] = {'id': 'dl', 'state': 'Initializing', 'job_id': None}
+    stopped = [False]
+    plugin.set_shutdown_check(lambda: stopped[0])
+
+    class Adapter:
+        def is_configured(self): return True
+        async def add_nzb(self, url): return 'job'
+        async def remove(self, job_id, delete_files=False): return True
+        async def get_status(self, job_id):
+            await plugin.cancel_download('dl', remove=False)
+            stopped[0] = True
+            return UsenetStatus(id='job', name='Release', state='downloading', progress=0.25,
+                                size=100, downloaded=25, download_speed=1)
+
+    monkeypatch.setattr(module, 'get_active_usenet_adapter', lambda: Adapter())
+    monkeypatch.setattr(module, 'run_async', asyncio.run)
+    monkeypatch.setattr(module.time, 'sleep', lambda *_: None)
+    plugin._download_thread('dl', 'https://indexer.invalid/synthetic.nzb')
+    assert plugin.active_downloads['dl']['state'] == 'Cancelled'
+
+
+def test_usenet_submit_failure_after_cancel_preserves_cancelled_state(monkeypatch):
+    import core.download_plugins.usenet as module
+    plugin = UsenetDownloadPlugin()
+    plugin.active_downloads['dl'] = {'id': 'dl', 'state': 'Initializing', 'job_id': None}
+
+    class Adapter:
+        def is_configured(self): return True
+        async def add_nzb(self, url):
+            await plugin.cancel_download('dl', remove=False)
+            return None
+
+    monkeypatch.setattr(module, 'get_active_usenet_adapter', lambda: Adapter())
+    monkeypatch.setattr(module, 'run_async', asyncio.run)
+    plugin._download_thread('dl', 'https://indexer.invalid/synthetic.nzb')
+    assert plugin.active_downloads['dl']['state'] == 'Cancelled'
+
+
+def test_usenet_cancel_during_file_collection_cannot_restore_success(monkeypatch, tmp_path):
+    import core.download_plugins.usenet as module
+    plugin = UsenetDownloadPlugin()
+    plugin.active_downloads['dl'] = {'id': 'dl', 'state': 'InProgress, Downloading', 'job_id': 'job'}
+
+    class Adapter:
+        async def remove(self, job_id, delete_files=False): return True
+
+    def collect(path):
+        asyncio.run(plugin.cancel_download('dl', remove=False))
+        return [tmp_path / 'Song.flac']
+
+    monkeypatch.setattr(module, 'get_active_usenet_adapter', lambda: Adapter())
+    monkeypatch.setattr(module, 'collect_audio_after_extraction', collect)
+    plugin._finalize_download('dl', str(tmp_path))
+    assert plugin.active_downloads['dl']['state'] == 'Cancelled'
+
+
+@pytest.mark.parametrize('protocol', ['torrent', 'usenet'])
 def test_scene_artist_hint_does_not_override_explicit_artist_boundary(monkeypatch, protocol):
     from types import SimpleNamespace
     from core.downloads import validation
@@ -278,6 +411,7 @@ def test_torrent_project_results_encodes_token_and_title_in_filename() -> None:
     assert _decode_candidate(get_candidate_store().resolve(token))[0] == 'https://x/y.torrent'
     assert get_candidate_store().resolve_with_metadata(token)[1] == {
         'categories': [3040],
+        'release_title': 'Danny Brown - Atrocity Exhibition [FLAC]',
     }
     assert display == 'Danny Brown - Atrocity Exhibition [FLAC]'
 
@@ -705,6 +839,7 @@ def test_usenet_project_encodes_token_in_filename() -> None:
     assert get_candidate_store().resolve(token) == 'https://x/y.nzb'
     assert get_candidate_store().resolve_with_metadata(token)[1] == {
         'categories': [3010],
+        'release_title': 'Some Artist - Some Album',
     }
     assert display == 'Some Artist - Some Album'
     # Artist + title should be parsed out, not auto-extracted from filename.

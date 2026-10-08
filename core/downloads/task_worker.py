@@ -155,7 +155,9 @@ def _try_cached_candidates(task_id, batch_id, track, deps):
         exhausted = {str(s).lower() for s in (task.get('exhausted_download_sources') or ())}
         slow_fallback_key = task.get('_slow_fallback_source_key')
         task_track_info = task.get('track_info')
+        used_release_sources = set(task.get('used_release_sources') or ())
 
+    from core.download_plugins.release_identity import release_sources, candidate_endpoint_id
     remaining = []
     slow_fallback = None
     for c in cached:
@@ -163,7 +165,10 @@ def _try_cached_candidates(task_id, batch_id, track, deps):
         if not uname or not fname:
             continue
         source_key = f"{uname}_{fname}"
-        if source_key in used:
+        if not any(
+                f'{_cand_user_file(s)[0]}_{_cand_user_file(s)[1]}' not in used
+                and candidate_endpoint_id(s) not in used_release_sources
+                for s in release_sources(c)):
             if source_key == slow_fallback_key:
                 slow_fallback = c
             continue

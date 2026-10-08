@@ -439,6 +439,20 @@ def _filter_prowlarr_by_quality(candidates, profile_id=None, why=None):
     return filtered
 
 
+def _release_artist_matches(expected_artists, candidate_artist):
+    """Require a whole artist credit, rather than a name inside another band."""
+    from difflib import SequenceMatcher
+    from core.matching.artist_aliases import artist_names_match
+
+    def similarity(expected, actual):
+        wanted = matching_engine.normalize_string(expected).removeprefix('the ')
+        found = matching_engine.normalize_string(actual).removeprefix('the ')
+        return SequenceMatcher(None, wanted, found).ratio() if wanted and found else 0.0
+
+    return any(artist_names_match(artist, candidate_artist, threshold=0.80,
+                                 similarity=similarity)[0] for artist in expected_artists if artist)
+
+
 def _score_streaming_candidates(results, spotify_track, why=None):
     """Match-filter structured-metadata hits (YouTube, Tidal, torrent, …)."""
     source_label = results[0].username.replace('_dl', '').title()
@@ -620,7 +634,8 @@ def _score_streaming_candidates(results, spotify_track, why=None):
                                   "no artist evidence and the title has words beyond the song",
                                   confidence)
                         continue
-            elif r.username in ('torrent', 'usenet') and _best_artist < 0.5:
+            elif r.username in ('torrent', 'usenet') and not _release_artist_matches(
+                    expected_artists, _cand_artist_raw):
                 logger.info(
                     "[%s] Rejecting candidate due to artist mismatch: "
                     "expected=%s candidate=%r title=%r",

@@ -1,0 +1,116 @@
+[
+  {
+    "guid": "indexer-1-release-6",
+    "title": "Example_Artist-Example_Album-24-88-WEB-FLAC-2013-GROUPA",
+    "indexerId": 1,
+    "indexer": "Indexer 1",
+    "protocol": "usenet",
+    "size": 1733529000,
+    "categories": [
+      {
+        "id": 3000
+      },
+      {
+        "id": 103000
+      },
+      {
+        "id": 3040
+      },
+      {
+        "id": 103040
+      }
+    ],
+    "publishDate": "2023-03-26T20:53:49Z",
+    "downloadUrl": "https://indexer-1.invalid/release-6.nzb"
+  },
+  {
+    "guid": "indexer-2-release-43",
+    "title": "Example_Artist - Example_Album - 2013 (CD - FLAC)",
+    "indexerId": 2,
+    "indexer": "Indexer 2",
+    "protocol": "usenet",
+    "size": 539766364,
+    "categories": [
+      {
+        "id": 3040
+      },
+      {
+        "id": 103040
+      }
+    ],
+    "publishDate": "2013-05-15T19:45:00Z",
+    "downloadUrl": "https://indexer-2.invalid/release-43.nzb"
+  },
+  {
+    "guid": "indexer-3-release-24",
+    "title": "Example_Artist-Example_Album-24-88-WEB-FLAC-2013-GROUPA",
+    "indexerId": 3,
+    "indexer": "Indexer 3",
+    "protocol": "usenet",
+    "size": 1706459787,
+    "categories": [
+      {
+        "id": 3000
+      },
+      {
+        "id": 103000
+      },
+      {
+        "id": 3040
+      },
+      {
+        "id": 103040
+      }
+    ],
+    "publishDate": "2023-03-26T21:31:19Z",
+    "downloadUrl": "https://indexer-3.invalid/release-24.nzb"
+  },
+  {
+    "guid": "indexer-6-release-16",
+    "title": "Example_Artist-Example_Album-24-88-WEB-FLAC-2013-GROUPA",
+    "indexerId": 6,
+    "indexer": "Indexer 6",
+    "protocol": "usenet",
+    "size": 1706459787,
+    "categories": [
+      {
+        "id": 3000
+      },
+      {
+        "id": 103000
+      },
+      {
+        "id": 3040
+      },
+      {
+        "id": 103040
+      }
+    ],
+    "publishDate": "2023-03-26T18:31:19Z",
+    "downloadUrl": "https://indexer-6.invalid/release-16.nzb"
+  },
+  {
+    "guid": "indexer-6-release-21",
+    "title": "Example_Artist - Example_Album - 2013 (CD - FLAC)",
+    "indexerId": 6,
+    "indexer": "Indexer 6",
+    "protocol": "usenet",
+    "size": 539766364,
+    "categories": [
+      {
+        "id": 3000
+      },
+      {
+        "id": 103000
+      },
+      {
+        "id": 3040
+      },
+      {
+        "id": 103040
+      }
+    ],
+    "publishDate": "2013-05-15T17:45:00Z",
+    "downloadUrl": "https://indexer-6.invalid/release-21.nzb"
+  }
+]
