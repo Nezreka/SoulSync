@@ -29,6 +29,11 @@ logger = get_logger("audiobook_quality")
 # it and pays several times the size.
 DEFAULT_FORMAT_ORDER: List[str] = ["m4b", "m4a", "mp3", "opus", "ogg", "flac"]
 
+# Every format a release can be identified as, from a title or from Soulseek's
+# file extensions. An allowed-formats setting is read against this, so a value
+# that names no real format reads as "no restriction" rather than refusing all.
+KNOWN_FORMATS = frozenset(DEFAULT_FORMAT_ORDER) | {"aac", "wav", "wma"}
+
 # The spread between the best and worst format, shared out over the order. Kept
 # well under the relevance weight: a beautifully formatted wrong book is still
 # the wrong book.
@@ -42,6 +47,9 @@ DEFAULTS: Dict[str, Any] = {
     # GraphicAudio and the like. On by default because they are still shown
     # today, merely outranked — turning this off is what removes them.
     "allow_dramatized": True,
+    # Formats a release may be in at all. Empty means every format: a list
+    # that named all six would quietly refuse any format added later.
+    "allowed_formats": [],
 }
 
 
@@ -71,6 +79,13 @@ def profile() -> Dict[str, Any]:
         except (TypeError, ValueError):
             values[key] = 0
     values["allow_dramatized"] = bool(values.get("allow_dramatized", True))
+    allowed = values.get("allowed_formats") or []
+    if isinstance(allowed, str):
+        allowed = allowed.split(",")
+    values["allowed_formats"] = [
+        fmt for fmt in dict.fromkeys(str(f).strip().lower().lstrip(".") for f in allowed)
+        if fmt in KNOWN_FORMATS
+    ]
     return values
 
 
@@ -98,6 +113,14 @@ def rejection(release: Any, prof: Optional[Dict[str, Any]] = None) -> str:
 
     if not prof["allow_dramatized"] and getattr(release, "dramatized", False):
         return "Dramatised adaptations are turned off in your audiobook quality profile."
+
+    # A release whose format is unknown (a torrent title that does not say) is
+    # let through: refusing it would hide most torrents, and the bitrate and
+    # completeness checks still apply to it.
+    allowed = prof["allowed_formats"]
+    audio_format = str(getattr(release, "audio_format", "") or "").lower()
+    if allowed and audio_format and audio_format not in allowed:
+        return f"{audio_format.upper()} is not one of the formats you allow."
 
     implied = getattr(release, "implied_kbps", None)
     floor = prof["min_bitrate_kbps"]

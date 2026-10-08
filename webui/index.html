@@ -7679,6 +7679,29 @@
                                                 </div>
 
                                                 <div class="form-group">
+                                                    <label>Allowed Formats:</label>
+                                                    <div id="audiobook-allowed-formats"
+                                                        style="display: grid; grid-template-columns: repeat(3, minmax(0, max-content)); gap: 0 24px;">
+                                                        <label class="checkbox-label"><input type="checkbox" value="m4b"><span>M4B</span></label>
+                                                        <label class="checkbox-label"><input type="checkbox" value="m4a"><span>M4A</span></label>
+                                                        <label class="checkbox-label"><input type="checkbox" value="mp3"><span>MP3</span></label>
+                                                        <label class="checkbox-label"><input type="checkbox" value="opus"><span>Opus</span></label>
+                                                        <label class="checkbox-label"><input type="checkbox" value="ogg"><span>OGG</span></label>
+                                                        <label class="checkbox-label"><input type="checkbox" value="flac"><span>FLAC</span></label>
+                                                    </div>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Releases in a
+                                                        format that is switched off are never shown or downloaded.
+                                                        Preferred Format only ranks, so with M4B preferred an MP3 is
+                                                        still grabbed when no M4B turns up; switch MP3 off here to
+                                                        wait for an M4B instead. A release whose format cannot be told
+                                                        from its title is still allowed. Switching every format off is
+                                                        the same as allowing them all.</small>
+                                                </div>
+
+                                                <div class="form-group">
                                                     <label>Reject Below:</label>
                                                     <input type="number" id="audiobook-min-bitrate" min="0" max="512"
                                                         step="1" placeholder="0">
