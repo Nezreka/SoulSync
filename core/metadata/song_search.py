@@ -141,10 +141,11 @@ def search_typed_query(client: Any, query: str, limit: int = 10, **kwargs) -> Li
             # Deezer only RANKS by the artist words (its artist filter is broken),
             # so covers by other artists can still lead: put the artist's own
             # tracks first, and trust the scoped list only if there are any.
+            # other artists' scoped hits (covers) go after the plain results.
             by_artist = [t for t in scoped if credits_artist(getattr(t, "artists", None), split[0])]
             if by_artist:
                 rest = [t for t in scoped if t not in by_artist]
-                return merge_by_id(by_artist, rest, plain, limit=limit)
+                return merge_by_id(by_artist, plain, rest, limit=limit)
             return None
 
         names = [a for t in plain for a in (getattr(t, "artists", None) or []) if isinstance(a, str)]

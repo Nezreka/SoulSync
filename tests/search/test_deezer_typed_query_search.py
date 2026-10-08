@@ -232,3 +232,45 @@ def test_no_artist_in_the_plain_results_means_no_extra_request():
     out = search_typed_query(client, "Taylor Swift Love Story", limit=10)
     assert out == [COVER]
     assert client.queries == ["Taylor Swift Love Story"]
+
+
+# ── other artists' scoped hits rank after the plain results ──────────────────
+
+TS_LIVE = _track(4, "Love Story (Live)", "Taylor Swift")
+
+
+def test_covers_from_the_scoped_list_go_after_the_plain_results():
+    class Scoped(FakeDeezerScopedCovers):
+        def search_tracks(self, query="", limit=20, **kwargs):
+            self.queries.append(query)
+            return [COVER, TS_ORIGINAL] if query.startswith("track:") else [TS_LIVE]
+
+    out = search_typed_query(Scoped(), "Taylor Swift Love Story", limit=10)
+    assert [t.id for t in out] == ["3", "4", "1"]
+
+
+def test_library_match_modal_puts_covers_after_the_plain_results(monkeypatch):
+    import requests
+
+    from core.library import service_search
+
+    class Resp:
+        def __init__(self, data):
+            self._d = data
+
+        def json(self):
+            return {"data": self._d}
+
+    def get(url, params=None, timeout=None):
+        if params["q"].startswith("track:"):
+            return Resp([_item(1, "Love Story", "Vitamin String Quartet"),
+                         _item(3, "Love Story", "Taylor Swift")])
+        return Resp([_item(4, "Love Story (Live)", "Taylor Swift")])
+
+    monkeypatch.setattr(requests, "get", get)
+    import core.deezer_throttle as throttle
+
+    monkeypatch.setattr(throttle, "wait_for_slot", lambda *a, **k: True)
+
+    out = service_search._search_service("deezer", "track", "Taylor Swift Love Story")
+    assert [r["id"] for r in out] == ["3", "4", "1"]

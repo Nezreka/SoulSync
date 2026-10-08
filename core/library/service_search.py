@@ -239,11 +239,12 @@ def _deezer_exact_title_first(query, plain, req_lib, limit=8):
             return None
         scoped = get('track', scoped_query, limit)
         # Deezer only RANKS by the artist words (its artist filter is broken), so
-        # covers by other artists can still lead: the artist's own tracks go first.
+        # covers by other artists can still lead: the artist's own tracks go first,
+        # then the plain results, and other artists' scoped hits only after those.
         by_artist = [i for i in scoped if credits_artist([(i.get('artist') or {}).get('name')], split[0])]
         if by_artist:
             rest = [i for i in scoped if i not in by_artist]
-            return merge_by_id(by_artist, rest, plain, limit=limit)
+            return merge_by_id(by_artist, plain, rest, limit=limit)
         return None
 
     names = [(i.get('artist') or {}).get('name') for i in plain if isinstance(i.get('artist'), dict)]
