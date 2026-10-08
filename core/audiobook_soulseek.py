@@ -29,6 +29,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -441,6 +442,48 @@ def landing_path(folder: str, client: Any = None) -> str:
     if not root:
         return ""
     return os.path.join(root, folder)
+
+
+def remove_landed(path: str, client: Any = None) -> bool:
+    """Delete a book's downloaded copy from slskd's folder, once it is imported.
+
+    Only ever something strictly inside the download root: never the root
+    itself, and never a path that resolves outside it. A single-file book takes
+    its folder with it only when that leaves the folder empty, because a lone
+    book usually sits in a shared folder like "Audiobooks".
+    """
+    if not path:
+        return False
+    try:
+        if client is None:
+            client = _shared_client()
+        root = str(getattr(client, "download_path", "") or "")
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("Could not read the Soulseek download path: %s", exc)
+        return False
+    if not root:
+        return False
+
+    root = os.path.realpath(root)
+    target = os.path.realpath(path)
+    if target == root or os.path.commonpath([root, target]) != root:
+        logger.warning("Not removing %s: it is outside the Soulseek download folder", path)
+        return False
+    try:
+        if os.path.isdir(target):
+            shutil.rmtree(target)
+        elif os.path.isfile(target):
+            os.remove(target)
+            parent = os.path.dirname(target)
+            if parent != root and not os.listdir(parent):
+                os.rmdir(parent)
+        else:
+            return False
+    except OSError as exc:
+        logger.warning("Could not remove the downloaded copy %s: %s", target, exc)
+        return False
+    logger.info("Removed the downloaded copy %s", target)
+    return True
 
 
 # ---------------------------------------------------------------------------

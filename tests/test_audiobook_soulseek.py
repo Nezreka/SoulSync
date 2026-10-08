@@ -500,3 +500,52 @@ def test_all_known_short_chapter_durations_still_reject_incomplete_release():
     assert release.duration_seconds == 60 * 60
     assert rank_releases([release], BOOK, 0.0, "any") == []
     assert release.duration_verdict == "severely_short"
+
+
+# ---------------------------------------------------------------------------
+# Removing an imported copy
+# ---------------------------------------------------------------------------
+
+def _root_client(root):
+    return SimpleNamespace(download_path=str(root))
+
+
+def test_removing_a_landed_folder(tmp_path):
+    from core.audiobook_soulseek import remove_landed
+
+    book = tmp_path / "Book"
+    book.mkdir()
+    (book / "01.mp3").write_bytes(b"a")
+    assert remove_landed(str(book), client=_root_client(tmp_path)) is True
+    assert not book.exists()
+
+
+def test_the_download_root_itself_is_never_removed(tmp_path):
+    from core.audiobook_soulseek import remove_landed
+
+    assert remove_landed(str(tmp_path), client=_root_client(tmp_path)) is False
+    assert tmp_path.exists()
+
+
+def test_nothing_outside_the_download_root_is_removed(tmp_path):
+    from core.audiobook_soulseek import remove_landed
+
+    root = tmp_path / "downloads"
+    root.mkdir()
+    outside = tmp_path / "library"
+    outside.mkdir()
+    assert remove_landed(str(root / ".." / "library"), client=_root_client(root)) is False
+    assert outside.exists()
+
+
+def test_a_single_file_book_takes_only_an_emptied_folder_with_it(tmp_path):
+    from core.audiobook_soulseek import remove_landed
+
+    shared = tmp_path / "Audiobooks"
+    shared.mkdir()
+    (shared / "one.m4b").write_bytes(b"a")
+    (shared / "two.m4b").write_bytes(b"b")
+    assert remove_landed(str(shared / "one.m4b"), client=_root_client(tmp_path)) is True
+    assert shared.exists() and (shared / "two.m4b").exists()
+    assert remove_landed(str(shared / "two.m4b"), client=_root_client(tmp_path)) is True
+    assert not shared.exists()
