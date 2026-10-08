@@ -500,3 +500,112 @@ def test_all_known_short_chapter_durations_still_reject_incomplete_release():
     assert release.duration_seconds == 60 * 60
     assert rank_releases([release], BOOK, 0.0, "any") == []
     assert release.duration_verdict == "severely_short"
+
+
+# ---------------------------------------------------------------------------
+# Transfers something else cleared out of slskd
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def seen():
+    from core import audiobook_soulseek
+
+    audiobook_soulseek._seen.clear()
+    yield audiobook_soulseek._seen
+    audiobook_soulseek._seen.clear()
+
+
+def _polling(download_path, *rounds):
+    """A client whose transfer list is each round in turn."""
+    client = MagicMock()
+    client.download_path = str(download_path)
+    listed = list(rounds)
+
+    async def everything():
+        return listed.pop(0)
+
+    client.get_all_downloads = everything
+    return client
+
+
+def _chapter(ident, name, state, size=100, transferred=100):
+    item = _status(ident, state, size, transferred)
+    item.filename = rf"Books\Book\{name}"
+    item.username = "peer"
+    return item
+
+
+def test_chapters_cleared_after_finishing_still_count_as_finished(tmp_path, seen):
+    # The music side's "clean completed downloads" sweeps slskd on a timer. A
+    # book whose first chapters it cleared never looked whole again.
+    client = _polling(
+        tmp_path,
+        [_chapter("a", "01.mp3", "Completed, Succeeded"), _chapter("b", "02.mp3", "InProgress", 100, 40)],
+        [_chapter("b", "02.mp3", "Completed, Succeeded")],
+    )
+    ref = encode_refs(["a", "b"], "peer", "Book")
+    assert status_for(ref, client=client)["state"] == "downloading"
+    rolled = status_for(ref, client=client)
+    assert rolled["state"] == "done"
+    assert rolled["finished"] == 2
+
+
+def test_a_book_cleared_in_full_is_still_done(tmp_path, seen):
+    # The case that failed a finished book as "no longer in the client".
+    client = _polling(
+        tmp_path,
+        [_chapter("a", "01.mp3", "Completed, Succeeded"), _chapter("b", "02.mp3", "Completed, Succeeded")],
+        [],
+    )
+    ref = encode_refs(["a", "b"], "peer", "Book")
+    status_for(ref, client=client)
+    assert status_for(ref, client=client)["state"] == "done"
+
+
+def test_a_chapter_cleared_between_polls_counts_when_its_file_landed(tmp_path, seen):
+    (tmp_path / "Book").mkdir()
+    (tmp_path / "Book" / "02.mp3").write_bytes(b"x" * 100)
+    client = _polling(
+        tmp_path,
+        [_chapter("a", "01.mp3", "Completed, Succeeded"), _chapter("b", "02.mp3", "InProgress", 100, 40)],
+        [],
+    )
+    ref = encode_refs(["a", "b"], "peer", "Book")
+    status_for(ref, client=client)
+    rolled = status_for(ref, client=client)
+    assert rolled["state"] == "done"
+    assert rolled["finished"] == 2
+
+
+def test_a_chapter_that_vanished_without_its_file_is_a_failure(tmp_path, seen):
+    # Removed rather than finished: it will never complete now, and waiting on
+    # it would hold the book on "downloading" forever.
+    (tmp_path / "Book").mkdir()
+    (tmp_path / "Book" / "02.mp3").write_bytes(b"x" * 40)       # partial
+    client = _polling(
+        tmp_path,
+        [_chapter("a", "01.mp3", "Completed, Succeeded"), _chapter("b", "02.mp3", "InProgress", 100, 40)],
+        [],
+    )
+    ref = encode_refs(["a", "b"], "peer", "Book")
+    status_for(ref, client=client)
+    rolled = status_for(ref, client=client)
+    assert rolled["finished"] == 1
+    assert rolled["failed"] == 1
+
+
+def test_a_transfer_never_seen_is_still_unknown(tmp_path, seen):
+    client = _polling(tmp_path, [])
+    assert status_for(encode_refs(["a"], "peer", "Book"), client=client)["state"] == "unavailable"
+
+
+def test_a_filename_ref_survives_being_cleared(tmp_path, seen):
+    # slskd sometimes hands back no transfer id, and the ref is the remote path.
+    client = _polling(
+        tmp_path,
+        [_chapter("uuid-1", "01.mp3", "Completed, Succeeded")],
+        [],
+    )
+    ref = encode_refs([r"Books\Book\01.mp3"], "peer", "Book")
+    status_for(ref, client=client)
+    assert status_for(ref, client=client)["state"] == "done"
