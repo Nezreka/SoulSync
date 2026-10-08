@@ -16,7 +16,8 @@ from core.library.reconciliation_evidence import ReconciliationEvidence
 from core.repair_jobs.base import JobContext
 from core.repair_jobs.library_reconciliation import (
     LibraryReconciliationJob, _album_titles_compatible, _candidate_evidence,
-    _candidate_rank, _candidate_shape, _group_disc_folders, _group_logical_albums,
+    _candidate_rank, _candidate_shape, _candidate_shapes_equivalent,
+    _group_disc_folders, _group_logical_albums,
     _has_unexplained_identified_extras, _normalize_slot,
     _release_group_candidates, _same_recording_copies, _search_release_candidates,
     _suggest_filename,
@@ -94,6 +95,43 @@ def test_candidate_shape_sorts_numbered_and_unnumbered_missing_slots():
         (1, False, 2, ('numbered', ()), ''),
         (1, True, 0, ('unnumbered', ()), ''),
     )
+
+
+def test_release_shapes_treat_missing_provider_disambiguation_as_unknown():
+    plan = {'pairs': [
+        {'file_index': 0, 'slot_index': 0, 'confidence': 'clear'},
+        {'file_index': 1, 'slot_index': 1, 'confidence': 'clear'},
+    ], 'missing_slots': [], 'extra_files': []}
+    musicbrainz_slots = [
+        {'title': 'The Bronze', 'track_number': 1, 'disc_number': 1,
+         'recording_disambiguation': 'remastered album version'},
+        {'title': 'How to Handle a Rope', 'track_number': 2, 'disc_number': 1,
+         'recording_disambiguation': 'album version'},
+    ]
+    provider_slots = [
+        {'title': 'The Bronze (Bonus Track)', 'track_number': 1, 'disc_number': 1},
+        {'title': 'How to Handle a Rope (A Lesson in the Lariat)',
+         'track_number': 2, 'disc_number': 1},
+    ]
+    mb = (2, 2, 0, 'musicbrainz', 'mb', musicbrainz_slots, plan)
+    provider = (2, 2, 0, 'itunes', 'itunes', provider_slots, plan)
+
+    assert _candidate_shapes_equivalent(mb, provider)
+
+
+def test_release_shapes_keep_two_explicit_recording_versions_distinct():
+    plan = {'pairs': [{'file_index': 0, 'slot_index': 0, 'confidence': 'clear'}],
+            'missing_slots': [], 'extra_files': []}
+    live_1977 = (1, 1, 0, 'musicbrainz', 'a', [{
+        'title': 'Song', 'track_number': 1, 'disc_number': 1,
+        'recording_disambiguation': 'live 1977',
+    }], plan)
+    live_1978 = (1, 1, 0, 'musicbrainz', 'b', [{
+        'title': 'Song', 'track_number': 1, 'disc_number': 1,
+        'recording_disambiguation': 'live 1978',
+    }], plan)
+
+    assert not _candidate_shapes_equivalent(live_1977, live_1978)
 
 
 def test_musicbrainz_slot_keeps_recording_disambiguation():

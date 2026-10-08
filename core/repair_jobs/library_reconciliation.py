@@ -787,6 +787,43 @@ def _candidate_shape(scored: tuple) -> tuple:
     return len(slots), pairs, missing, tuple(sorted(plan['extra_files']))
 
 
+def _candidate_shapes_equivalent(left: tuple, right: tuple) -> bool:
+    """Compare release mappings without treating absent detail as conflict.
+
+    MusicBrainz often supplies a recording comment or version marker that
+    iTunes/Deezer omit. Missing provider detail is unknown, not evidence of a
+    different edition. Two explicit, different markers or comments still keep
+    the releases distinct.
+    """
+    left_shape, right_shape = _candidate_shape(left), _candidate_shape(right)
+    if left_shape[0] != right_shape[0] or left_shape[3] != right_shape[3]:
+        return False
+
+    def compatible_slot(a: tuple, b: tuple, prefix_length: int) -> bool:
+        if a[:prefix_length] != b[:prefix_length]:
+            return False
+        left_title, right_title = a[prefix_length], b[prefix_length]
+        if left_title[0] != right_title[0]:
+            return False
+        left_markers, right_markers = left_title[1], right_title[1]
+        if left_markers and right_markers and left_markers != right_markers:
+            return False
+        left_comment, right_comment = a[prefix_length + 1], b[prefix_length + 1]
+        return not left_comment or not right_comment or left_comment == right_comment
+
+    left_pairs = sorted(left_shape[1], key=lambda row: (*row[:4], row[4][0]))
+    right_pairs = sorted(right_shape[1], key=lambda row: (*row[:4], row[4][0]))
+    if (len(left_pairs) != len(right_pairs) or
+            any(not compatible_slot(a, b, 4)
+                for a, b in zip(left_pairs, right_pairs, strict=True))):
+        return False
+    left_missing = sorted(left_shape[2], key=lambda row: (*row[:3], row[3][0]))
+    right_missing = sorted(right_shape[2], key=lambda row: (*row[:3], row[3][0]))
+    return (len(left_missing) == len(right_missing) and
+            all(compatible_slot(a, b, 3)
+                for a, b in zip(left_missing, right_missing, strict=True)))
+
+
 def _same_recording_copies(files: list[dict], indexes: list[int]) -> bool:
     """Require shared strong audio identity and compatible lengths."""
     if len(indexes) < 2:
@@ -1349,7 +1386,7 @@ class LibraryReconciliationJob(RepairJob):
                              if _candidate_rank(files, row, numbering_mode) ==
                              _candidate_rank(files, scored[0], numbering_mode)]
                 equivalent_tie = (len(tied_rows) > 1 and
-                                  all(_candidate_shape(row) == _candidate_shape(tied_rows[0])
+                                  all(_candidate_shapes_equivalent(row, tied_rows[0])
                                       for row in tied_rows[1:]))
                 # A stored but unlocked release is a useful ordering hint. It
                 # cannot erase a real edition decision when equally fitting
