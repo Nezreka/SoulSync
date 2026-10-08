@@ -1171,6 +1171,51 @@ def _recover_youtube(db_provider) -> None:
         logger.exception("youtube recovery pass failed")
 
 
+_RUNTIME_REQUEUE_KEY = "runtime_rule_requeue_v1"
+
+
+def requeue_runtime_rejects(db) -> int:
+    """Once: give the episodes the old runtime rule failed another import.
+
+    Episodes used to be rejected when the file ran under 65% of the runtime TV
+    metadata listed, and that metadata is often a placeholder or a slot length
+    (Name That Tune S06E02 at 159 min, Halloween Baking Championship S12E04 at
+    85). The rule is now Sonarr's sample check, so those files pass. The newest
+    row per episode goes back to downloading, and the monitor runs the normal
+    import against the file the client still holds. Older duplicate rows for the
+    same episode stay as they were. Returns how many rows it requeued."""
+    if db.get_setting(_RUNTIME_REQUEUE_KEY):
+        return 0
+    seen, requeued = set(), 0
+    for dl in db.list_video_downloads(limit=2000):   # newest first within a status
+        if dl.get("status") != "import_failed" or dl.get("kind") != "show":
+            continue
+        error = str(dl.get("error") or "")
+        if not (error.startswith("Runs ") and "truncated download or the wrong file" in error):
+            continue
+        ctx = _search_ctx_of(dl)
+        key = (dl.get("media_id") or dl.get("title"), ctx.get("season"), ctx.get("episode"))
+        if key in seen:
+            continue
+        seen.add(key)
+        db.update_video_download(dl["id"], status="downloading", error=None,
+                                 completed_at=None, progress_at=None)
+        requeued += 1
+    db.set_setting(_RUNTIME_REQUEUE_KEY, "1")
+    if requeued:
+        logger.info("requeued %d episode(s) the old runtime rule had failed", requeued)
+    return requeued
+
+
+def _search_ctx_of(dl) -> dict:
+    import json as _json
+    try:
+        ctx = _json.loads(dl.get("search_ctx") or "{}")
+    except (TypeError, ValueError):
+        ctx = {}
+    return ctx if isinstance(ctx, dict) else {}
+
+
 def _run(db_provider) -> None:
     logger.info("video download monitor started")
     try:
@@ -1179,6 +1224,12 @@ def _run(db_provider) -> None:
             _sweep_import_temps(db)   # reap .tmp.<hex> / .part litter from crashed imports
     except Exception:
         logger.exception("video import temp sweep failed")
+    try:
+        db = db_provider()
+        if db is not None:
+            requeue_runtime_rejects(db)
+    except Exception:
+        logger.exception("video runtime-reject requeue failed")
     while True:
         try:
             db = db_provider()
