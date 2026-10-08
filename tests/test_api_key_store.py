@@ -224,3 +224,66 @@ def test_v1_revoke_racing_a_create_through_the_routes_stays_revoked():
         t.join()
     labels = sorted(k["label"] for k in cfg.data["api_keys"])
     assert labels == ["admin", "new"]
+
+
+# ---- auth's last_used_at write ----------------------------------------------
+
+def test_a_revoke_during_a_key_request_stays_revoked(monkeypatch):
+    # require_api_key reads the key list, then (throttled) writes last_used_at
+    # back. It used to write the list it read, so a revoke landing between the
+    # read and the write was undone and the revoked key worked again.
+    import api.auth as auth
+
+    monkeypatch.setattr(auth, "_last_persisted_usage", {})
+
+    class RevokeMidRequest(_Cfg):
+        armed = False
+
+        def get(self, name, default=None):
+            value = super().get(name, default)
+            if self.armed:
+                self.armed = False
+                key_store.revoke_key(self, victim["id"])
+            return value
+
+    cfg = RevokeMidRequest()
+    raw, admin = key_store.create_key(cfg, "admin")
+    _, victim = key_store.create_key(cfg, "victim")
+    cfg.armed = True
+    app = _v1_app_with(cfg)
+
+    resp = app.test_client().get("/api/v1/api-keys", headers={"Authorization": f"Bearer {raw}"})
+    assert resp.status_code == 200
+    assert [k["id"] for k in cfg.data["api_keys"]] == [admin["id"]]
+    assert cfg.data["api_keys"][0]["last_used_at"] is not None
+
+
+def test_last_used_at_is_persisted_without_touching_other_keys(monkeypatch):
+    import api.auth as auth
+
+    monkeypatch.setattr(auth, "_last_persisted_usage", {})
+    cfg = _Cfg()
+    raw, _ = key_store.create_key(cfg, "a")
+    _, other = key_store.create_key(cfg, "b")
+    before = cfg.data["api_keys"]
+    app = _v1_app_with(cfg)
+
+    app.test_client().get("/api/v1/api-keys", headers={"Authorization": f"Bearer {raw}"})
+    assert cfg.data["api_keys"] is not before  # a fresh list was written
+    stamped = {k["label"]: k["last_used_at"] for k in cfg.data["api_keys"]}
+    assert stamped["a"] is not None and stamped["b"] is None
+
+
+@pytest.mark.parametrize("bad", ["not-a-dict", None, 42])
+def test_malformed_entry_does_not_break_key_auth(bad, monkeypatch):
+    import api.auth as auth
+
+    monkeypatch.setattr(auth, "_last_persisted_usage", {})
+    cfg = _Cfg()
+    raw, _ = key_store.create_key(cfg, "a")
+    cfg.data["api_keys"] = [bad] + cfg.data["api_keys"]
+    app = _v1_app_with(cfg)
+
+    resp = app.test_client().get("/api/v1/api-keys", headers={"Authorization": f"Bearer {raw}"})
+    assert resp.status_code == 200
+    assert cfg.data["api_keys"][0] == bad

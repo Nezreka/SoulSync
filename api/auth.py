@@ -77,12 +77,12 @@ def require_api_key(f):
                              "or ?api_key= query parameter.", 401)
 
         config_mgr = current_app.soulsync["config_manager"]
-        stored_keys = config_mgr.get("api_keys", [])
+        stored_keys = config_mgr.get("api_keys", []) or []
         key_hash = _hash_key(api_key)
 
         matched = None
         for stored in stored_keys:
-            if stored.get("key_hash") == key_hash:
+            if isinstance(stored, dict) and stored.get("key_hash") == key_hash:
                 matched = stored
                 break
 
@@ -94,7 +94,10 @@ def require_api_key(f):
         now = datetime.now(timezone.utc)
         matched["last_used_at"] = now.isoformat()
         if _should_persist_usage(key_hash, now):
-            config_mgr.set("api_keys", stored_keys)
+            # through key_store, not set(stored_keys): that list was read before
+            # this request and writing it back would undo a revoke since then
+            from . import key_store
+            key_store.record_use(config_mgr, key_hash, matched["last_used_at"])
 
         # a key is minted by an admin and acts with admin rights. the session
         # gates ran first and may have left no profile (login/pin mode, or a
@@ -140,7 +143,7 @@ def request_has_valid_api_key() -> bool:
         return False
     stored_keys = config_mgr.get("api_keys", []) or []
     key_hash = _hash_key(api_key)
-    return any(s.get("key_hash") == key_hash for s in stored_keys)
+    return any(isinstance(s, dict) and s.get("key_hash") == key_hash for s in stored_keys)
 
 
 def apply_api_key_request_context() -> bool:

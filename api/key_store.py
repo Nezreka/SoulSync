@@ -63,6 +63,20 @@ def bootstrap_key(cfg, label="Default"):
     return raw_key, record
 
 
+def record_use(cfg, key_hash, when):
+    """Persist a key's last_used_at. Re-reads the list under the lock and
+    writes that, never a list read before the request, so a key revoked in
+    the meantime stays revoked. Writes nothing when the key is gone."""
+    with _keys_lock:
+        keys = list(cfg.get("api_keys", []) or [])
+        for i, k in enumerate(keys):
+            if isinstance(k, dict) and k.get("key_hash") == key_hash:
+                keys[i] = {**k, "last_used_at": when}
+                cfg.set("api_keys", keys)
+                return True
+    return False
+
+
 def revoke_key(cfg, key_id):
     """Remove a key by id. Returns False when no key has that id."""
     with _keys_lock:
