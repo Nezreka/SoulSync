@@ -2104,6 +2104,35 @@
   color: rgba(255, 255, 255, 0.42);
 }
 
+/* owned: a green tick, and a faint green edge so a row of them reads as
+   "done" at a glance; the current book's accent border still wins */
+.seriesLinkOwned:not(.seriesLinkCurrent) {
+  border-color: rgba(74, 222, 128, 0.22);
+}
+
+.seriesOwned,
+.seriesEdition {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px 3px 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 680;
+  white-space: nowrap;
+}
+
+.seriesOwned {
+  color: #08130c;
+  background: rgba(74, 222, 128, 0.94);
+}
+
+.seriesEdition {
+  color: rgba(74, 222, 128, 0.9);
+  border: 1px solid rgba(74, 222, 128, 0.35);
+}
+
 .seriesCurrentTag {
   flex-shrink: 0;
   font-size: 10px;
