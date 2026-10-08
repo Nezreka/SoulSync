@@ -1303,3 +1303,55 @@ def test_a_typed_query_reaches_the_search(client, catalog, wishlist_db):
     assert start.call_args.kwargs["query"] == "The Reckoning Part 1 of 2 GraphicAudio"
     # the box starts from what the automatic search leads with
     assert body["default_query"]
+
+
+# ---------------------------------------------------------------------------
+# Match & import from the clients tab
+# ---------------------------------------------------------------------------
+
+_HASH = "ABCDEF0123456789ABCDEF0123456789ABCDEF01"
+
+
+def _adopt(client, **overrides):
+    body = {"source": "torrent", "client_ref": _HASH, "asin": "B1",
+            "release_title": "Andy.Weir.-.Project.Hail.Mary.M4B", "size_bytes": 900}
+    body.update(overrides)
+    return client.post("/api/audiobooks/adopt", json=body)
+
+
+def test_adopting_follows_the_download_like_a_grab(client, catalog, wishlist_db):
+    catalog.get_book.return_value = _item(asin="B1")
+    resp = _adopt(client)
+    assert resp.status_code == 200 and resp.get_json()["success"] is True
+    # the monitor walks exactly these rows, so this is what makes it import
+    [row] = wishlist_db.get_downloads(active_only=True)
+    assert row["client_id"] == _HASH.lower()
+    assert row["source"] == "torrent"
+    assert row["asin"] == "B1"
+    assert row["title"] == "Project Hail Mary"
+
+
+def test_adopting_moves_a_wishlisted_row_along(client, catalog, wishlist_db):
+    catalog.get_book.return_value = _item(asin="B1")
+    client.post("/api/audiobooks/wishlist", json={"asin": "B1"})
+    _adopt(client)
+    assert wishlist_db.get_wishlist()[0]["status"] == "grabbed"
+
+
+def test_adopting_the_same_download_twice_is_refused(client, catalog, wishlist_db):
+    catalog.get_book.return_value = _item(asin="B1")
+    assert _adopt(client).status_code == 200
+    # either case: clients report info-hashes both ways
+    assert _adopt(client, client_ref=_HASH.lower()).status_code == 409
+    assert len(wishlist_db.get_downloads(active_only=True)) == 1
+
+
+@pytest.mark.parametrize("overrides", [{"source": "soulseek"}, {"client_ref": ""}, {"asin": ""}])
+def test_adopting_without_the_essentials_is_a_400(client, catalog, wishlist_db, overrides):
+    assert _adopt(client, **overrides).status_code == 400
+    assert wishlist_db.get_downloads() == []
+
+
+def test_adopting_an_unknown_book_is_a_404(client, catalog, wishlist_db):
+    catalog.get_book.return_value = None
+    assert _adopt(client).status_code == 404

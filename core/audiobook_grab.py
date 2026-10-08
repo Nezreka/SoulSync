@@ -227,3 +227,63 @@ def _field(release: Any, name: str) -> Any:
     if isinstance(release, dict):
         return release.get(name)
     return getattr(release, name, None)
+
+
+def record_grab(db: Any, *, asin: str, ref: str, client_ref: str, release: Dict[str, Any],
+                title: str = "", author: str = "", cover_url: str = "",
+                book: Optional[Dict[str, Any]] = None, profile_id: Any = None) -> None:
+    """Write down a grab so the monitor follows it to the library.
+
+    Shared by a normal grab and a clients-tab match, so a matched download is
+    tracked exactly like a grabbed one: same records, same monitor, same
+    failure handling.
+
+    Two records, deliberately. The audiobook database keeps the history and
+    the completeness bookkeeping; the shared runtime state puts the book on the
+    existing Downloads page with the existing cards, flagged so
+    is_music_batch() keeps the music engine off it.
+    """
+    if ref:
+        from core.audiobook_download_state import register_download
+
+        book_info = book or {}
+        series_list = book_info.get("series") or []
+        protocol = str(release.get("protocol") or "")
+        register_download(
+            task_id=ref,
+            title=str(book_info.get("title") or title or release.get("title") or ""),
+            author=(book_info.get("author_names") or [author])[0],
+            series=str((series_list[0] or {}).get("title") or "") if series_list else "",
+            artwork_url=str(book_info.get("cover_url") or cover_url or ""),
+            protocol=protocol,
+            size_bytes=int(release.get("size_bytes") or 0),
+            username=str(release.get("indexer") or "") if protocol.lower() == "soulseek" else "",
+            release_title=str(release.get("title") or ""),
+        )
+        db.record_download(
+            download_id=ref,
+            asin=asin,
+            title=str(title or release.get("title") or ""),
+            source=protocol,
+            client_id=client_ref,
+            release_title=str(release.get("title") or ""),
+            release_guid=str(release.get("guid") or ""),
+            indexer=str(release.get("indexer") or ""),
+            author=author,
+            bytes_total=int(release.get("size_bytes") or 0),
+            book=book,
+        )
+
+    if asin:
+        from core.audiobook_database import STATUS_GRABBED
+        # Only moves a row that already exists: grabbing something that was
+        # never wishlisted must not silently add it.
+        db.mark_wishlist_status(asin, STATUS_GRABBED, profile_id=profile_id)
+
+    # Something is now downloading, so start watching for it to finish even if
+    # the monitor was asleep at boot.
+    try:
+        from core.audiobook_download_monitor import ensure_started
+        ensure_started(force=True)
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("Could not wake the download monitor: %s", exc)

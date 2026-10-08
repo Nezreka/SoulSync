@@ -122,6 +122,8 @@ def create_video_blueprint() -> Blueprint:
 
         if writing and not getattr(g, "can_download", True) and _p(
                 "/api/video/downloads/grab", "/api/video/downloads/retry",
+                # clients-tab match & import: following a download is a grab
+                "/api/video/downloads/adopt",
                 "/api/video/youtube/download",
                 # the tab's bulk action — spends the same disk and bandwidth as
                 # the per-row grab above, so it takes the same permission

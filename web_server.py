@@ -23223,41 +23223,29 @@ app.register_blueprint(_bp_quar())
 # Download-client hub - the Clients tab on the downloads page (api/clients.py).
 def _client_known_items():
     """What SoulSync itself dispatched, per client, so hub rows can say what
-    they are. Video side keys off video_downloads.client_ref (torrent hash /
-    nzo id) or (username, filename) for soulseek grabs; music side off the
-    in-memory download_tasks. Best effort - a broken half never hides the
-    other's labels."""
-    known = {'torrent': {}, 'usenet': {}, 'slskd': {}}
-    try:
+    they are (and the clients tab only offers match & import on the rest).
+    Composed in core/client_match.py; this only hands it the live sources."""
+    from core.client_match import compose_known
+
+    def _video_rows():
         from api.video import get_video_db
-        for dl in get_video_db().list_video_downloads(limit=200):
-            if not isinstance(dl, dict):
-                continue
-            label = {'kind': dl.get('kind') or 'video',
-                     'title': dl.get('title') or dl.get('release_title') or ''}
-            ref = str(dl.get('client_ref') or '').strip()
-            source = dl.get('source')
-            if source == 'torrent' and ref:
-                known['torrent'][ref.lower()] = label
-            elif source == 'usenet' and ref:
-                known['usenet'][ref] = label
-            elif source == 'soulseek' and dl.get('username') and dl.get('filename'):
-                known['slskd'][(dl['username'], dl['filename'])] = label
-    except Exception as _vk_exc:
-        logger.debug(f"[Clients] video known-items unavailable: {_vk_exc}")
-    try:
+        return get_video_db().list_video_downloads(limit=200)
+
+    def _music_tasks():
         with tasks_lock:
-            tasks_snapshot = [t for t in download_tasks.values() if isinstance(t, dict)]
-        for t in tasks_snapshot:
-            username, filename = t.get('username'), t.get('filename')
-            if not username or not filename:
-                continue
-            ti = t.get('track_info') if isinstance(t.get('track_info'), dict) else {}
-            known['slskd'][(username, filename)] = {
-                'kind': 'track', 'title': ti.get('name') or t.get('track_name') or ''}
-    except Exception as _mk_exc:
-        logger.debug(f"[Clients] music known-items unavailable: {_mk_exc}")
-    return known
+            return [t for t in download_tasks.values() if isinstance(t, dict)]
+
+    def _audiobook_rows():
+        from core.audiobook_database import get_audiobook_db
+        return get_audiobook_db().get_downloads()
+
+    return compose_known(
+        video_rows=_video_rows,
+        music_tasks=_music_tasks,
+        audiobook_rows=_audiobook_rows,
+        torrent_plugin=lambda: download_orchestrator.client('torrent'),
+        usenet_plugin=lambda: download_orchestrator.client('usenet'),
+    )
 
 from api.clients import configure as _cfg_cl, create_blueprint as _bp_cl
 # the orchestrator, NOT SoulseekClient - web_server never binds a global
