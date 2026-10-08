@@ -365,4 +365,81 @@ def create_blueprint() -> Blueprint:
             "usenet": str(config_manager.get('usenet_client.url', '') or ''),
         })
 
+    # ── match & import ────────────────────────────────────────────────────
+    # audiobooks and video are matched through their own sides' adopt routes,
+    # which write the same records their grabs write. music has no monitor that
+    # follows a client job, so its matches are kept and followed here.
+
+    @bp.route('/api/clients/match/suggest', methods=['GET'])
+    @_json_guard
+    def match_suggest():
+        from core.client_match import suggest_from_name
+        return jsonify({"success": True, **suggest_from_name(request.args.get('name') or '')})
+
+    @bp.route('/api/clients/match/files', methods=['GET'])
+    @_json_guard
+    def match_files():
+        """Whether SoulSync can read this download's files, so the match window
+        can say so before anything is promised. A download still running may
+        not have a folder yet; that is "not yet", not "never"."""
+        import os
+        client = (request.args.get('client') or '').strip().lower()
+        ref = (request.args.get('id') or '').strip()
+        if client not in ('torrent', 'usenet') or not ref:
+            return jsonify({"success": False, "error": "client and id are required"}), 400
+        if client == 'torrent':
+            from core.torrent_clients import get_active_adapter
+        else:
+            from core.usenet_clients import get_active_adapter
+        adapter = get_active_adapter()
+        if not adapter:
+            return jsonify({"success": False, "error": f"no {client} client configured"}), 400
+        status = _run(adapter.get_status(ref))
+        if status is None:
+            return jsonify({"success": False, "error": "the client does not know this download"}), 404
+        reported = getattr(status, 'content_path', None) or getattr(status, 'save_path', None) or ''
+        from core.download_plugins.album_bundle import resolve_reported_save_path
+        local = resolve_reported_save_path(reported) if reported else ''
+        visible = bool(local) and os.path.exists(local)
+        return jsonify({"success": True, "reported_path": reported, "local_path": local or '',
+                        "visible": visible})
+
+    @bp.route('/api/clients/match/music', methods=['POST'])
+    @_json_guard
+    def match_music():
+        """Follow a client download to the library as an album or a track.
+        Body: {client, id, kind: album|track, match: {id, name, artist, source,
+        image_url}, release_title}."""
+        import json
+        from flask import g
+        from api.helpers import download_permission_error
+        from core.client_match import (MUSIC_KINDS, card_register, ensure_watcher,
+                                       music_store)
+        denied = download_permission_error()
+        if denied is not None:
+            return denied
+        payload = request.get_json(silent=True) or {}
+        client = str(payload.get('client') or '').strip().lower()
+        ref = str(payload.get('id') or '').strip()
+        kind = str(payload.get('kind') or '').strip().lower()
+        match = payload.get('match') if isinstance(payload.get('match'), dict) else {}
+        if client not in ('torrent', 'usenet') or not ref:
+            return jsonify({"success": False, "error": "Missing the download to match."}), 400
+        if kind not in MUSIC_KINDS or not match.get('id') or not match.get('source'):
+            return jsonify({"success": False, "error": "Pick the album or track this is."}), 400
+        store = music_store()
+        if store.following(client, ref):
+            return jsonify({"success": False,
+                            "error": "SoulSync is already following this download."}), 409
+        keep = {k: match.get(k) for k in ('id', 'name', 'artist', 'source', 'image_url', 'album')}
+        match_id = store.add(client=client, client_ref=ref, kind=kind, match=keep,
+                             release_title=str(payload.get('release_title') or ''),
+                             profile_id=getattr(g, 'profile_id', None))
+        card_register({"id": match_id, "client": client, "kind": kind,
+                       "match_json": json.dumps(keep),
+                       "release_title": payload.get('release_title') or ''})
+        from flask import current_app
+        ensure_watcher(current_app._get_current_object())
+        return jsonify({"success": True, "id": match_id})
+
     return bp

@@ -12,6 +12,12 @@ already owns, and the per-kind adopters.
 
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import sqlite3
+import threading
+import time
 from typing import Any, Dict, Iterable, Optional
 
 from utils.logging_config import get_logger
@@ -124,7 +130,8 @@ def music_task_known(tasks: Iterable[Dict[str, Any]]) -> Dict[str, Dict[Any, Dic
 
 
 def compose_known(*, video_rows, music_tasks, audiobook_rows,
-                  torrent_plugin, usenet_plugin) -> Dict[str, Dict[Any, Dict[str, str]]]:
+                  torrent_plugin, usenet_plugin,
+                  music_matches=lambda: []) -> Dict[str, Dict[Any, Dict[str, str]]]:
     """Every label, from getters. Best effort per source: one that fails never
     hides another's labels."""
     known: Dict[str, Dict[Any, Dict[str, str]]] = {"torrent": {}, "usenet": {}, "slskd": {}}
@@ -133,6 +140,7 @@ def compose_known(*, video_rows, music_tasks, audiobook_rows,
         ("music", lambda: music_task_known(music_tasks())),
         ("audiobook", lambda: audiobook_known(audiobook_rows())),
         ("plugin", lambda: plugin_known(torrent_plugin(), usenet_plugin())),
+        ("music match", lambda: music_match_known(music_matches())),
     )
     for name, build in parts:
         try:
@@ -140,3 +148,488 @@ def compose_known(*, video_rows, music_tasks, audiobook_rows,
         except Exception as exc:  # noqa: BLE001 - labels are best effort
             logger.debug("[Clients] %s known-items unavailable: %s", name, exc)
     return known
+
+
+# ---------------------------------------------------------------------------
+# music: a download in the client, matched to an album or a track
+# ---------------------------------------------------------------------------
+#
+# audiobooks and video already have a monitor that follows a client job to the
+# library, so matching one only writes the record that monitor reads. music has
+# none: its torrent and usenet plugins follow a download from inside the worker
+# that started it. so a music match is kept here, durably (a restart must not
+# lose it, losing records is how this feature started), and a small watcher
+# follows it: wait for the client to finish, copy the audio out (the original
+# keeps seeding), import the copy with the import page's own album / single
+# import, and report on the downloads page the way audiobooks do.
+
+MUSIC_KINDS = ("album", "track")
+MATCH_BATCH_ID = "client-matches"
+_ACTIVE = ("waiting", "importing")
+# client misses before a match gives up, counted only while the client answers
+_GIVE_UP_AFTER_MISSES = 6
+_POLL_SECONDS = 15
+# the private folder copies are imported from, inside the download folder: the
+# import validator allows it and the auto-import worker never scans it
+_COPY_DIR = ".soulsync-matches"
+
+
+def ensure_schema(cursor) -> None:
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS client_music_matches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client TEXT NOT NULL,
+            client_ref TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            match_json TEXT NOT NULL,
+            release_title TEXT,
+            profile_id INTEGER,
+            status TEXT NOT NULL DEFAULT 'waiting',
+            error TEXT,
+            created_at REAL,
+            updated_at REAL
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_client_music_matches_ref "
+                   "ON client_music_matches (client, client_ref)")
+
+
+class MusicMatchStore:
+    """The durable list of music matches, in the music database."""
+
+    def __init__(self, connect):
+        self._connect = connect
+
+    def _rows(self, sql, args=()):
+        conn = self._connect()
+        try:
+            conn.row_factory = sqlite3.Row
+            return [dict(r) for r in conn.execute(sql, args).fetchall()]
+        finally:
+            conn.close()
+
+    def add(self, *, client, client_ref, kind, match, release_title="", profile_id=None) -> int:
+        now = time.time()
+        conn = self._connect()
+        try:
+            cur = conn.execute(
+                "INSERT INTO client_music_matches (client, client_ref, kind, match_json, "
+                "release_title, profile_id, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?)",
+                (client, client_ref, kind, json.dumps(match), release_title, profile_id, now, now))
+            conn.commit()
+            return int(cur.lastrowid)
+        finally:
+            conn.close()
+
+    def active(self):
+        return self._rows("SELECT * FROM client_music_matches WHERE status IN ('waiting', 'importing') "
+                          "ORDER BY id")
+
+    def recent(self, limit=200):
+        return self._rows("SELECT * FROM client_music_matches ORDER BY id DESC LIMIT ?", (int(limit),))
+
+    def following(self, client, client_ref) -> bool:
+        ref = str(client_ref or "").lower()
+        return any(str(r["client_ref"]).lower() == ref and r["client"] == client for r in self.active())
+
+    def update(self, match_id, **fields):
+        if not fields:
+            return
+        fields["updated_at"] = time.time()
+        cols = ", ".join(f"{k} = ?" for k in fields)
+        conn = self._connect()
+        try:
+            conn.execute(f"UPDATE client_music_matches SET {cols} WHERE id = ?",  # noqa: S608 - keys are ours
+                         (*fields.values(), match_id))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def music_store() -> MusicMatchStore:
+    from database.music_database import get_database
+    return MusicMatchStore(get_database()._get_connection)
+
+
+def music_match_known(rows) -> Dict[str, Dict[str, Dict[str, str]]]:
+    """Matches still being followed, so their cards say so instead of offering
+    another match."""
+    known: Dict[str, Dict[str, Dict[str, str]]] = {"torrent": {}, "usenet": {}}
+    for row in rows or []:
+        if row.get("status") not in _ACTIVE or row.get("client") not in known:
+            continue
+        try:
+            match = json.loads(row.get("match_json") or "{}")
+        except (TypeError, ValueError):
+            match = {}
+        ref = str(row.get("client_ref") or "")
+        key = ref.lower() if row["client"] == "torrent" else ref
+        known[row["client"]][key] = _label(row.get("kind") or "album", _match_title(match))
+    return known
+
+
+def _match_title(match: Dict[str, Any]) -> str:
+    artist, name = str(match.get("artist") or ""), str(match.get("name") or "")
+    return f"{artist} - {name}" if artist and name else (name or artist)
+
+
+# ── the downloads page card, the same shared state audiobooks write ─────────
+
+_CARD_FLAGS = {"is_music": False, "managed_externally": True,
+               "batch_type": "client_match", "source_page": "Clients"}
+
+
+def _card_key(match_id) -> str:
+    return f"client-match-{match_id}"
+
+
+def card_register(row: Dict[str, Any]) -> None:
+    from core.runtime_state import download_batches, download_tasks, tasks_lock
+    try:
+        match = json.loads(row.get("match_json") or "{}")
+    except (TypeError, ValueError):
+        match = {}
+    key = _card_key(row["id"])
+    with tasks_lock:
+        batch = download_batches.get(MATCH_BATCH_ID)
+        if batch is None:
+            batch = {"queue": [], "active_count": 0, "max_concurrent": 1, "queue_index": 0,
+                     "playlist_id": MATCH_BATCH_ID, "playlist_name": "Matched downloads",
+                     "phase": "downloading"}
+            download_batches[MATCH_BATCH_ID] = batch
+        # re-stamped every time: a batch that lost these would be picked up by
+        # the music workers on their next pass
+        batch.update(_CARD_FLAGS)
+        if key not in batch["queue"]:
+            batch["queue"].append(key)
+        if key in download_tasks:
+            return
+        title = str(match.get("name") or row.get("release_title") or "Matched download")
+        download_tasks[key] = {
+            "status": "queued",
+            "track_info": {"title": title, "name": title, "track_name": title,
+                           "artist": str(match.get("artist") or ""),
+                           "artist_name": str(match.get("artist") or ""),
+                           "album": title if row.get("kind") == "album" else str(match.get("album") or ""),
+                           "album_name": title if row.get("kind") == "album" else str(match.get("album") or ""),
+                           "artwork_url": str(match.get("image_url") or "")},
+            "playlist_id": MATCH_BATCH_ID, "batch_id": MATCH_BATCH_ID,
+            "track_index": max(0, len(batch["queue"]) - 1),
+            "download_source": f"Matched ({row.get('client')})",
+            "quality": str(row.get("client") or ""),
+            "progress": 0.0, "speed": 0.0, "bytes_transferred": 0, "size": 0,
+            "status_change_time": time.time(), "cancel_requested": False,
+            "error_message": None, "username": "",
+            "release_title": str(row.get("release_title") or ""),
+        }
+
+
+def card_update(match_id, *, status=None, progress=None, speed=None, size=None,
+                done=None, error=None) -> None:
+    from core.runtime_state import download_tasks, tasks_lock
+    with tasks_lock:
+        task = download_tasks.get(_card_key(match_id))
+        if not task:
+            return
+        if status and task["status"] != status:
+            task["status"] = status
+            task["status_change_time"] = time.time()
+        if progress is not None:
+            task["progress"] = max(0.0, min(100.0, float(progress)))
+        if speed is not None:
+            task["speed"] = max(0.0, float(speed))
+        if size:
+            task["size"] = int(size)
+        if done is not None:
+            task["bytes_transferred"] = int(done)
+        if error is not None:
+            task["error_message"] = error or None
+        if status == "completed":
+            task["progress"] = 100.0
+
+
+def card_cancelled(match_id) -> bool:
+    from core.runtime_state import download_tasks, tasks_lock
+    with tasks_lock:
+        task = download_tasks.get(_card_key(match_id))
+        return bool(task and (task.get("cancel_requested") or task.get("status") == "cancelled"))
+
+
+# ── copying out of the client and importing the copy ────────────────────────
+
+def _audio_files(path: str) -> list:
+    from core.imports.staging import AUDIO_EXTENSIONS
+    if os.path.isfile(path):
+        return [path] if os.path.splitext(path)[1].lower() in AUDIO_EXTENSIONS else []
+    found = []
+    for root, _dirs, files in os.walk(path):
+        for name in sorted(files):
+            if os.path.splitext(name)[1].lower() in AUDIO_EXTENSIONS:
+                found.append(os.path.join(root, name))
+    return found
+
+
+def copy_audio(source: str, dest: str) -> list:
+    """Copy every audio file under ``source`` into ``dest``, keeping the folder
+    layout (disc folders matter to the matcher). Copies, never moves: the
+    original is the client's and keeps seeding."""
+    os.makedirs(dest, exist_ok=True)
+    base = source if os.path.isdir(source) else os.path.dirname(source)
+    copied = []
+    for path in _audio_files(source):
+        target = os.path.join(dest, os.path.relpath(path, base))
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        shutil.copy2(path, target)
+        copied.append(target)
+    return copied
+
+
+def import_copy(kind: str, match: Dict[str, Any], folder: str, files: list, runtime) -> Dict[str, Any]:
+    """Import the copied files with the import page's own album / single import.
+    Returns {ok, imported, error}."""
+    if kind == "album":
+        from core.imports.album import build_album_import_match_payload
+        from core.imports.routes import album_process
+        payload = build_album_import_match_payload(
+            str(match.get("id") or ""), album_name=str(match.get("name") or ""),
+            album_artist=str(match.get("artist") or ""), file_paths=files,
+            source=str(match.get("source") or "") or None, root=folder)
+        if not payload.get("success"):
+            return {"ok": False, "imported": 0, "error": payload.get("error") or "Could not load that album."}
+        matches = [m for m in payload.get("matches") or [] if m.get("staging_file")]
+        if not matches:
+            return {"ok": False, "imported": 0,
+                    "error": "None of the files matched that album's tracks."}
+        result, status = album_process(runtime, {"album": payload["album"], "matches": matches,
+                                                 "source": payload.get("source")})
+        processed = int(result.get("processed") or 0) if isinstance(result, dict) else 0
+        if status >= 400 or not processed:
+            return {"ok": False, "imported": processed,
+                    "error": (result or {}).get("error") or "The import failed."}
+        return {"ok": True, "imported": processed, "error": ""}
+
+    # a single: the largest audio file is the track, anything else is extras
+    from core.imports.routes import process_single_import_file
+    track_file = max(files, key=lambda p: os.path.getsize(p))
+    outcome, message = process_single_import_file(runtime, {
+        "full_path": track_file, "filename": os.path.basename(track_file),
+        "manual_match": {"id": str(match.get("id") or ""), "source": str(match.get("source") or "")},
+    })
+    if outcome == "error":
+        return {"ok": False, "imported": 0, "error": message}
+    return {"ok": True, "imported": 1, "error": ""}
+
+
+def _leftovers_to_staging(folder: str) -> int:
+    """Whatever the import did not take moves into the import folder, so it
+    shows on the import page instead of hiding in a private folder."""
+    from core.imports.staging import get_staging_path
+    left = _audio_files(folder)
+    if left:
+        target = os.path.join(get_staging_path(), os.path.basename(folder.rstrip(os.sep)))
+        for path in left:
+            dest = os.path.join(target, os.path.relpath(path, folder))
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.move(path, dest)
+    shutil.rmtree(folder, ignore_errors=True)
+    return len(left)
+
+
+# ── the watcher ─────────────────────────────────────────────────────────────
+
+def _status(client: str, ref: str):
+    import asyncio
+    if client == "torrent":
+        from core.torrent_clients import get_active_adapter
+    else:
+        from core.usenet_clients import get_active_adapter
+    adapter = get_active_adapter()
+    if adapter is None:
+        return None, False
+    try:
+        return asyncio.run(adapter.get_status(ref)), True
+    except Exception:  # noqa: BLE001 - a poll that fails is "unknown right now"
+        return None, False
+
+
+def _is_complete(status) -> bool:
+    state = str(getattr(status, "state", "") or "").lower()
+    progress = float(getattr(status, "progress", 0) or 0)
+    return state in ("completed", "seeding") or progress >= 1.0 or progress >= 100.0
+
+
+def _copy_root() -> str:
+    # built exactly the way the import validator builds its download root, so
+    # the copy is always inside a folder it accepts
+    from core.settings import config_manager
+    from core.imports.paths import docker_resolve_path
+    base = docker_resolve_path(config_manager.get("soulseek.download_path", "./downloads"))
+    return os.path.join(base, _COPY_DIR)
+
+
+def process_match(row: Dict[str, Any], store: MusicMatchStore, *, get_status=_status,
+                  resolve=None, runtime_factory=None, misses: Optional[Dict[int, int]] = None) -> str:
+    """Advance one match by a tick. Returns its status afterwards."""
+    misses = misses if misses is not None else {}
+    match_id = row["id"]
+    if card_cancelled(match_id):
+        store.update(match_id, status="cancelled", error="Cancelled by you")
+        card_update(match_id, status="cancelled")
+        return "cancelled"
+
+    status, reachable = get_status(row["client"], row["client_ref"])
+    if status is None:
+        if reachable:
+            misses[match_id] = misses.get(match_id, 0) + 1
+            if misses[match_id] >= _GIVE_UP_AFTER_MISSES:
+                misses.pop(match_id, None)
+                error = "The download client no longer has this download."
+                store.update(match_id, status="failed", error=error)
+                card_update(match_id, status="failed", error=error)
+                return "failed"
+        return row["status"]
+    misses.pop(match_id, None)
+
+    progress = float(getattr(status, "progress", 0) or 0)
+    card_update(match_id, status="downloading", progress=progress * 100 if progress <= 1 else progress,
+                speed=getattr(status, "download_speed", 0), size=getattr(status, "size", 0),
+                done=getattr(status, "downloaded", 0))
+    if not _is_complete(status):
+        return row["status"]
+
+    reported = getattr(status, "content_path", None) or getattr(status, "save_path", None)
+    if resolve is None:
+        from core.download_plugins.album_bundle import resolve_reported_save_path as resolve
+    path = resolve(reported) if reported else None
+    if not path or not os.path.exists(path):
+        # finished but not visible from here (yet): keep waiting, and say why
+        card_update(match_id, error=f"Waiting to see the files at {reported or 'the client path'}")
+        return row["status"]
+
+    store.update(match_id, status="importing", error="")
+    card_update(match_id, status="importing", error="")
+    folder = os.path.join(_copy_root(), f"{match_id}-{_safe_name(row.get('release_title'))}")
+    try:
+        files = copy_audio(path, folder)
+        if not files:
+            raise RuntimeError("No audio files in this download.")
+        match = json.loads(row.get("match_json") or "{}")
+        runtime = runtime_factory(row) if runtime_factory else _default_runtime(row)
+        result = import_copy(row["kind"], match, folder, files, runtime)
+    except Exception as exc:  # noqa: BLE001 - a failed import is a failed match, never a crash
+        logger.warning("music match %s failed: %s", match_id, exc, exc_info=True)
+        result = {"ok": False, "imported": 0, "error": str(exc)}
+    left = _leftovers_to_staging(folder) if os.path.isdir(folder) else 0
+    note = f" {left} file{'s' if left != 1 else ''} left on the import page." if left else ""
+    if result["ok"]:
+        store.update(match_id, status="completed", error=note.strip())
+        card_update(match_id, status="completed", error=note.strip())
+        return "completed"
+    error = (result.get("error") or "The import failed.") + note
+    store.update(match_id, status="failed", error=error)
+    card_update(match_id, status="failed", error=error)
+    return "failed"
+
+
+def _safe_name(text) -> str:
+    keep = "".join(c if c.isalnum() or c in " ._-()[]" else "_" for c in str(text or "match"))
+    return keep.strip()[:80] or "match"
+
+
+def _default_runtime(row):
+    from api.import_routes import _build_import_route_runtime
+    runtime = _build_import_route_runtime()
+    if row.get("profile_id"):
+        runtime.profile_id = row["profile_id"]
+    return runtime
+
+
+class MusicMatchWatcher:
+    """The timer around process_match, one pass every few seconds."""
+
+    def __init__(self, app=None):
+        self._app = app
+        self._thread: Optional[threading.Thread] = None
+        self._stop = threading.Event()
+        self._misses: Dict[int, int] = {}
+
+    def start(self) -> bool:
+        if self._thread and self._thread.is_alive():
+            return False
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._loop, name="client-music-matches", daemon=True)
+        self._thread.start()
+        return True
+
+    def tick(self) -> int:
+        store = music_store()
+        rows = store.active()
+        for row in rows:
+            card_register(row)   # cards are runtime state; a restart drops them
+            process_match(row, store, misses=self._misses)
+        return len(rows)
+
+    def _loop(self):
+        while not self._stop.is_set():
+            try:
+                if self._app is not None:
+                    with self._app.app_context():
+                        busy = self.tick()
+                else:
+                    busy = self.tick()
+            except Exception:  # noqa: BLE001 - the loop must outlive one bad pass
+                logger.exception("music match pass failed")
+                busy = 1
+            if not busy:
+                return   # nothing to follow: sleep until the next match wakes it
+            self._stop.wait(_POLL_SECONDS)
+
+
+_watcher: Optional[MusicMatchWatcher] = None
+
+
+def ensure_watcher(app=None) -> bool:
+    global _watcher
+    if _watcher is None:
+        _watcher = MusicMatchWatcher(app)
+    elif app is not None and _watcher._app is None:
+        _watcher._app = app
+    return _watcher.start()
+
+
+# ---------------------------------------------------------------------------
+# a first guess from the release name, so the match window opens filled in
+# ---------------------------------------------------------------------------
+
+_BOOK_WORDS = ("m4b", "audiobook", "unabridged", "abridged", "narrated", "read by", "graphicaudio")
+_MUSIC_WORDS = ("flac", "mp3", "320kbps", "320", "v0", "24bit", "16bit", "24-96", "24-192",
+                "16-44", "alac", "lossless", "discography", "vinyl", "cdda")
+
+
+def suggest_from_name(name: str) -> Dict[str, Any]:
+    """{kind, query, year, season, episode}: a guess the user corrects. kind is
+    None when nothing in the name says what it is."""
+    import re
+    from core.video.release_parse import parse_release, search_title
+
+    raw = str(name or "")
+    parsed = parse_release(raw) or {}
+    words = set(re.split(r"[\s._\-\[\]()]+", raw.lower()))
+    lowered = raw.lower()
+    query = search_title(raw) or raw
+    season, episode, year = parsed.get("season"), parsed.get("episode"), parsed.get("year")
+
+    if season is not None and episode is not None:
+        kind = "episode"
+    elif season is not None:
+        kind = "season"
+    elif any(w in words or (" " in w and w in lowered) for w in _BOOK_WORDS):
+        kind = "audiobook"
+    elif any(w in words for w in _MUSIC_WORDS):
+        kind = "album"
+    elif parsed.get("resolution") or parsed.get("codec"):
+        kind = "movie"
+    else:
+        kind = None
+    return {"kind": kind, "query": query, "year": year, "season": season, "episode": episode}

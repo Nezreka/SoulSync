@@ -1867,6 +1867,12 @@ class MusicDatabase:
                 _ensure_artist_credits(cursor)
             except Exception as e:
                 logger.error(f"track_artist_credits schema init failed: {e}")
+            # clients-tab music matches: a download followed to the import page
+            try:
+                from core.client_match import ensure_schema as _ensure_client_matches
+                _ensure_client_matches(cursor)
+            except Exception as e:
+                logger.error(f"client_music_matches schema init failed: {e}")
             self._normalize_genres_to_json(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.

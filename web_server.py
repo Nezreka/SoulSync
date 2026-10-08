@@ -23239,12 +23239,17 @@ def _client_known_items():
         from core.audiobook_database import get_audiobook_db
         return get_audiobook_db().get_downloads()
 
+    def _music_match_rows():
+        from core.client_match import music_store
+        return music_store().recent()
+
     return compose_known(
         video_rows=_video_rows,
         music_tasks=_music_tasks,
         audiobook_rows=_audiobook_rows,
         torrent_plugin=lambda: download_orchestrator.client('torrent'),
         usenet_plugin=lambda: download_orchestrator.client('usenet'),
+        music_matches=_music_match_rows,
     )
 
 from api.clients import configure as _cfg_cl, create_blueprint as _bp_cl
@@ -23603,6 +23608,14 @@ try:
     _ensure_video_download_monitor(_get_video_db)
 except Exception:
     logger.warning("could not start the video download monitor at boot", exc_info=True)
+
+# Clients-tab music matches waiting on their download: resume following them at
+# boot. It stops by itself when nothing is pending.
+try:
+    from core.client_match import ensure_watcher as _ensure_client_match_watcher
+    _ensure_client_match_watcher(app)
+except Exception:
+    logger.warning("could not start the clients-tab match watcher at boot", exc_info=True)
 
 
 def _emit_rate_monitor_loop():
