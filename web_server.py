@@ -20052,6 +20052,7 @@ from core.discovery.endpoints import (  # noqa: E402
     playlist_name_attr_or_unknown as _pl_name_attr_or_unknown,
     playlist_name_strict as _pl_name_strict,
     playlist_name_safe as _pl_name_safe,
+    source_skipped_counts as _source_skipped_counts,
 )
 
 # ── per-source playlist systems live in api/source_playlists.py now ──────────
@@ -24148,6 +24149,9 @@ def _emit_discovery_progress_loop():
                             'results': state.get('discovery_results', state.get('results', [])),
                             'complete': state.get('phase') == 'discovered',
                         }
+                        skipped = _source_skipped_counts(state)
+                        if skipped:
+                            payload['source_skipped'] = skipped
                         socketio.emit('discovery:progress', payload, room=f'discovery:{pid}')
                     except Exception as e:
                         logger.debug("discovery progress emit failed: %s", e)

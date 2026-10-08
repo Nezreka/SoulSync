@@ -21,6 +21,7 @@ import {
   modalTitle,
   progressLineText,
   seededProgress,
+  skippedNoteText,
 } from './-sync.modal-core';
 import { SYNC_SOURCES } from './-sync.sources';
 import { freshSourceState } from './-sync.state';
@@ -177,5 +178,22 @@ describe('buildDownloadTracks (the two-format builder, 10727-10753)', () => {
     expect(SYNC_SERVICES).toContain(
       ".filter(result => result.spotify_data || (result.spotify_track && result.status_class === 'found'))",
     );
+  });
+});
+
+describe('skippedNoteText (#1613: 364 / 364 on a 395 track playlist)', () => {
+  it('says nothing when nothing was skipped', () => {
+    expect(skippedNoteText(undefined, 'Tidal')).toBeNull();
+    expect(skippedNoteText({ videos: 0, unavailable: 0 }, 'Tidal')).toBeNull();
+  });
+
+  it('names the missing tracks and videos', () => {
+    expect(skippedNoteText({ unavailable: 29, videos: 2 }, 'Tidal')).toBe(
+      "29 tracks couldn't be loaded from Tidal (removed or not available in your region) · 2 videos skipped",
+    );
+    expect(skippedNoteText({ unavailable: 1 }, 'Tidal')).toBe(
+      "1 track couldn't be loaded from Tidal (removed or not available in your region)",
+    );
+    expect(skippedNoteText({ videos: 1 }, 'Tidal')).toBe('1 video skipped');
   });
 });

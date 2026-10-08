@@ -425,3 +425,39 @@ describe('chrome', () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 });
+
+describe('skipped entries (#1613)', () => {
+  it('says why the matched line is short of the playlist', () => {
+    render(
+      <DiscoveryModal
+        config={SYNC_SOURCES.tidal}
+        state={makeState('tidal', {
+          phase: 'discovered',
+          spotifyMatches: 364,
+          spotifyTotal: 364,
+          rows: [FOUND_ROW],
+          sourceSkipped: { unavailable: 29, videos: 2 },
+        })}
+        standalone={false}
+        {...noopHandlers}
+      />,
+    );
+    expect(
+      screen.getByText(
+        "29 tracks couldn't be loaded from Tidal (removed or not available in your region) · 2 videos skipped",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('stays quiet when nothing was skipped', () => {
+    const { container } = render(
+      <DiscoveryModal
+        config={SYNC_SOURCES.tidal}
+        state={makeState('tidal', { phase: 'discovered', rows: [FOUND_ROW] })}
+        standalone={false}
+        {...noopHandlers}
+      />,
+    );
+    expect(container.querySelector('.progress-skipped-note')).toBeNull();
+  });
+});

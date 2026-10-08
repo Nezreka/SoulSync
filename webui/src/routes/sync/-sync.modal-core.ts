@@ -140,6 +140,26 @@ export function progressLineText(matches: number, total: number, percent: number
 }
 
 /**
+ * Why the matched line can read 364 / 364 on a 395 track playlist (#1613):
+ * the source never handed some entries over. null when nothing was skipped.
+ */
+export function skippedNoteText(
+  skipped: { videos?: number; unavailable?: number } | undefined,
+  sourceLabel: string,
+): string | null {
+  const unavailable = skipped?.unavailable ?? 0;
+  const videos = skipped?.videos ?? 0;
+  const parts: string[] = [];
+  if (unavailable > 0) {
+    parts.push(
+      `${unavailable} ${unavailable === 1 ? 'track' : 'tracks'} couldn't be loaded from ${sourceLabel} (removed or not available in your region)`,
+    );
+  }
+  if (videos > 0) parts.push(`${videos} ${videos === 1 ? 'video' : 'videos'} skipped`);
+  return parts.length ? parts.join(' · ') : null;
+}
+
+/**
  * Modal-open progress seeding (9512-9527): stored progress, else computed from
  * results/track counts; matches fall back to counting found rows.
  */

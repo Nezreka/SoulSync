@@ -21061,6 +21061,14 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     text-align: center;
 }
 
+/* entries the source never handed over, so N / N isn't read as the whole playlist (#1613) */
+.youtube-discovery-modal .progress-skipped-note {
+    margin-top: 6px;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 12px;
+    text-align: center;
+}
+
 .youtube-discovery-modal .discovery-table-container {
     flex: 1;
     overflow: auto;

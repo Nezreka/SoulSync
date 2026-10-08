@@ -57,6 +57,7 @@ import {
   matchLineNumbers,
   progressLineText,
   seededProgress,
+  skippedNoteText,
 } from '../-sync.modal-core';
 import { syncPercent } from '../-sync.state';
 import { OrganizeToggle } from './organize-toggle';
@@ -444,6 +445,7 @@ export function DiscoveryModal(props: DiscoveryModalProps) {
   const sourceLabel = modalSourceLabel(config.id, fakeHash, mirroredSource);
   const metadataLabel = metadataSourceLabel();
   const seeded = seededProgress(state);
+  const skippedNote = skippedNoteText(state.sourceSkipped, sourceLabel);
   const tracks = playlistTracks(state);
   // Seed with the playlist's own count (9518); once payloads flow, their
   // authoritative spotify_total wins (the live painter, 10113) — results can
@@ -493,6 +495,7 @@ export function DiscoveryModal(props: DiscoveryModalProps) {
                   )
                 : initialProgressText(state.phase)}
             </div>
+            {skippedNote && <div className="progress-skipped-note">{skippedNote}</div>}
           </div>
 
           <div className="discovery-table-container">

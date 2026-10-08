@@ -46,6 +46,8 @@ export interface SourcePlaylistState {
   discoveryProgress: number;
   spotifyMatches: number;
   spotifyTotal: number;
+  /** playlist entries the source never handed over (#1613). */
+  sourceSkipped?: SourceSkipped;
   convertedSpotifyPlaylistId?: string;
   downloadProcessId?: string;
   syncPlaylistId?: string;
@@ -88,8 +90,15 @@ export function freshSourceState(
   };
 }
 
+/** tidal videos and tracks outside the account's region, dropped before discovery. */
+export interface SourceSkipped {
+  videos?: number;
+  unavailable?: number;
+}
+
 /** The payload shape shared by discovery frames (socket) and status polls. */
 export interface DiscoveryPayload {
+  source_skipped?: SourceSkipped;
   error?: string;
   phase?: string;
   progress?: number;
@@ -125,6 +134,9 @@ export function applyDiscovery(
     discoveryProgress: payload.progress ?? state.discoveryProgress,
     spotifyMatches: payload.spotify_matches ?? state.spotifyMatches,
     spotifyTotal: payload.spotify_total ?? state.spotifyTotal,
+    // the backend leaves source_skipped off when nothing was skipped, so a
+    // payload carrying results speaks for it either way
+    sourceSkipped: payload.results !== undefined ? payload.source_skipped : state.sourceSkipped,
   };
 }
 
