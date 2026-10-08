@@ -6802,7 +6802,20 @@ body.np-modal-open #helper-float-btn {
 body:has(.download-missing-modal[style*="display: flex"]) #gsearch-bar,
 body:has(.download-missing-modal[style*="display: flex"]) #gsearch-aura,
 body:has(.download-missing-modal[style*="display: flex"]) #notif-bell-btn,
-body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
+body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn,
+body:has(.download-missing-modal[style*="display: flex"]) #activity-float-btn,
+body:has(.download-missing-modal[style*="display: flex"]) .hamburger-btn {
+    display: none !important;
+}
+
+/* and the discover mix modal: on a phone the hamburger sat on its title and
+   the floating buttons on its track list */
+body:has(#mix-modal-overlay) #gsearch-bar,
+body:has(#mix-modal-overlay) #gsearch-aura,
+body:has(#mix-modal-overlay) #notif-bell-btn,
+body:has(#mix-modal-overlay) #helper-float-btn,
+body:has(#mix-modal-overlay) #activity-float-btn,
+body:has(#mix-modal-overlay) .hamburger-btn {
     display: none !important;
 }
 
