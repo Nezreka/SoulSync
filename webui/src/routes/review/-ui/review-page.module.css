@@ -56,11 +56,16 @@
   color: #f5f5fa;
   cursor: pointer;
 }
-.headerTools .safeAction,
+.headerTools .safeAction {
+  border-color: #456454;
+  background: #222e29;
+  color: #c9e8d7;
+}
 .planActions .primary {
-  border-color: #3b765f;
-  background: #1d3b30;
-  color: #c9f8df;
+  border-color: #43866a;
+  background: #20503f;
+  color: #d4fbe5;
+  font-weight: 700;
 }
 .workspace {
   display: grid;
@@ -136,8 +141,9 @@
   background: #25283a;
 }
 .selectedCase {
-  border-color: #826ef0;
-  background: #2a2545;
+  border-color: #62598d;
+  background: #242536;
+  box-shadow: inset 3px 0 #8975e8;
 }
 .caseButton span,
 .selectedCase span,
@@ -156,7 +162,7 @@
   padding: 2px 6px;
   border: 1px solid #4c5268;
   border-radius: 999px;
-  color: #c8c2f5;
+  color: #b9bdd0;
   font-size: 9px;
   font-style: normal;
 }
@@ -203,11 +209,19 @@
   background: #151824;
   padding: 18px;
 }
+.decisionBoard {
+  border-color: #514b63;
+  background: #141620;
+  box-shadow: 0 12px 32px rgb(7 8 13 / 16%);
+}
+.trackMatrix {
+  background: #141620;
+}
 .sectionHeading {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 16px;
+  gap: 14px;
   margin-bottom: 14px;
   color: #aeb5c8;
 }
@@ -215,6 +229,12 @@
   color: #f2f3f8;
   margin: 3px 0 0;
   font-size: 19px;
+}
+.sectionHeading p {
+  max-width: 680px;
+  margin: 6px 0 0;
+  color: #aeb6c9;
+  line-height: 1.4;
 }
 .decisionGrid {
   display: grid;
@@ -228,16 +248,18 @@
   overflow: hidden;
 }
 .decisionGrid article[data-risk='manual'] {
-  border-color: #856a38;
-  background: #282316;
+  border-color: #685a3a;
+  background: #1e1e20;
+  box-shadow: inset 3px 0 #b98b38;
 }
 .decisionGrid article[data-risk='destructive'] {
-  border-color: #925163;
-  background: #2b1d24;
+  border-color: #744653;
+  background: #211b20;
+  box-shadow: inset 3px 0 #bb586d;
 }
 .decisionGrid article[data-risk='ready'] {
   border-color: #38775e;
-  background: #17271f;
+  background: #19231f;
 }
 .decisionSelect {
   width: 100%;
@@ -409,13 +431,13 @@
 .matrixRow[data-status='uncertain'],
 .matrixRow[data-status='change'] {
   box-shadow: inset 3px 0 #d5a23f;
-  background: #242116;
+  background: #211f1a;
 }
 .matrixRow[data-status='extra'],
 .matrixRow[data-status='missing'],
 .matrixRow[data-status='duplicate'] {
   box-shadow: inset 3px 0 #cc6277;
-  background: #271a20;
+  background: #221a1e;
 }
 .matrixRow[data-status='not_owned'] {
   box-shadow: inset 3px 0 #697187;
@@ -453,19 +475,28 @@
   font-style: normal;
   font-size: 11px;
 }
+.proposedAssignments,
 .confirmedAssignments {
   min-width: 840px;
   border-top: 1px solid #343849;
 }
+.proposedAssignments > summary,
 .confirmedAssignments > summary {
   padding: 10px 12px;
-  color: #b9e8cf;
-  background: #1b2923;
   cursor: pointer;
   font-size: 12px;
   font-weight: 650;
 }
+.proposedAssignments > summary {
+  color: #f0d39a;
+  background: #242117;
+}
+.confirmedAssignments > summary {
+  color: #b9e8cf;
+  background: #1b2923;
+}
 .trackTable > .findingDetail,
+.proposedAssignments > .findingDetail,
 .confirmedAssignments > .findingDetail {
   min-width: 840px;
   margin: 0;
@@ -507,6 +538,17 @@
   border: 1px solid #3b4053;
   border-radius: 13px;
   background: #151824;
+}
+.albumPlan[data-state='ready'] {
+  border-color: #3e725c;
+  background: #15231d;
+}
+.safeChangesPanel {
+  border-color: #3a594c;
+  background: #161e1b;
+}
+.safeChangesPanel .planSummary strong {
+  font-size: 17px;
 }
 .planSummary {
   display: flex;
@@ -773,13 +815,6 @@
 .problemCard {
   padding: 18px;
 }
-.sectionHeading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 14px;
-}
 .sectionHeading h4,
 .changesCard h4,
 .problemCard h4 {
@@ -788,11 +823,6 @@
   gap: 8px;
   margin: 0;
   font-size: 17px;
-}
-.sectionHeading p {
-  color: #aeb6c9;
-  margin: 6px 0 0;
-  line-height: 1.4;
 }
 .sectionHeading > span {
   color: #8f98ad;
@@ -1304,12 +1334,13 @@
   color: #dcffe9;
 }
 .scanStatus {
-  border: 1px solid #4b5168;
-  border-radius: 10px;
-  background: #222638;
-  color: #d7def0;
-  padding: 11px 14px;
-  margin-bottom: 18px;
+  border: 1px solid #353a4c;
+  border-radius: 8px;
+  background: #181b27;
+  color: #9fa8bb;
+  padding: 8px 11px;
+  margin-bottom: 16px;
+  font-size: 12px;
 }
 .empty {
   color: #b0b8c9;

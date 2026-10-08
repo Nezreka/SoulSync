@@ -16,6 +16,7 @@ import {
   type ReconciliationRun,
   type ReconciliationScanStatus,
   type ReviewCase,
+  type ReviewCaseSummary,
   type ReviewDecision,
   type ReviewFinding,
   type ReviewPlan,
@@ -60,6 +61,22 @@ const categoryOptions = [
 ] as const;
 
 const categoryLabels = Object.fromEntries(categoryOptions.filter(([value]) => value));
+
+function caseStatusSummary(item: ReviewCaseSummary): string {
+  if (!item.plan) {
+    return `${item.pending} pending action${item.pending === 1 ? '' : 's'}`;
+  }
+  if (item.plan.status === 'ready') {
+    return `Ready · ${item.pending} action${item.pending === 1 ? '' : 's'}`;
+  }
+  const reviewCount = (item.plan.decisions || []).filter(
+    (decision) => decision.risk !== 'ready',
+  ).length;
+  const reviewLabel = reviewCount
+    ? `${reviewCount} decision${reviewCount === 1 ? '' : 's'}`
+    : 'Needs review';
+  return `${reviewLabel} · ${item.pending} action${item.pending === 1 ? '' : 's'}`;
+}
 
 function findingHeading(finding: ReviewFinding): string {
   const details = finding.details && typeof finding.details === 'object' ? finding.details : {};
@@ -532,7 +549,7 @@ export function ReviewPage() {
     (row) => !['confirmed', 'not_owned', 'settled'].includes(row.status),
   );
   const versionConflictAssignments = pendingAssignments
-    .filter((row) => row.relationship === 'version_conflict')
+    .filter((row) => row.relationship === 'version_conflict' && row.status !== 'change')
     .sort((left, right) => {
       const relationship = (left.relationship_key || '').localeCompare(
         right.relationship_key || '',
@@ -543,7 +560,7 @@ export function ReviewPage() {
   const attentionAssignments = [
     ...versionConflictAssignments,
     ...pendingAssignments
-      .filter((row) => row.relationship !== 'version_conflict')
+      .filter((row) => row.relationship !== 'version_conflict' && row.status !== 'change')
       .sort((left, right) => {
         const order: Record<string, number> = {
           uncertain: 0,
@@ -556,6 +573,7 @@ export function ReviewPage() {
         return (order[left.status] ?? 9) - (order[right.status] ?? 9);
       }),
   ];
+  const changeAssignments = pendingAssignments.filter((row) => row.status === 'change');
   const settledAssignments = assignments.filter((row) =>
     ['confirmed', 'not_owned', 'settled'].includes(row.status),
   );
@@ -566,15 +584,17 @@ export function ReviewPage() {
   const activeDecision = active
     ? decisions.find((decision) => decision.finding_ids.includes(active.id))
     : undefined;
+  const reviewDecisions = decisions.filter((decision) => decision.risk !== 'ready');
+  const readyDecisions = decisions.filter((decision) => decision.risk === 'ready');
+  const reviewActionCount = reviewDecisions.reduce(
+    (total, decision) => total + decision.action_count,
+    0,
+  );
   const activeAssignment = active
     ? assignments.find((row) => row.finding_id === active.id)
     : undefined;
-  const primaryDecision = decisions.length === 1 ? decisions[0] : undefined;
-  const showDecisionBoard = !(
-    plan.status === 'ready' &&
-    decisions.length === 1 &&
-    decisions[0]?.risk === 'ready'
-  );
+  const primaryReadyDecision = readyDecisions.length === 1 ? readyDecisions[0] : undefined;
+  const showDecisionBoard = reviewDecisions.length > 0;
 
   const selectFinding = (findingId: number | null) => {
     setActiveId(findingId);
@@ -744,6 +764,50 @@ export function ReviewPage() {
     }
   };
 
+  const readyActionControls =
+    reviewCase && plan.ready > 0 ? (
+      <div className={styles.planActions}>
+        <button
+          type="button"
+          className={styles.primary}
+          disabled={applyBusy}
+          onClick={() => void applyReady(reviewCase.case_id)}
+        >
+          Apply {plan.ready} ready change
+          {plan.ready === 1 ? '' : 's'}
+        </button>
+        {plan.can_organize && reviewCase.album_id != null && (
+          <button
+            type="button"
+            disabled={applyBusy}
+            onClick={() => void applyReady(reviewCase.case_id, true)}
+          >
+            Apply and organize folder
+          </button>
+        )}
+        {!(plan.status === 'ready' && readyChangeGroups.length === 1 && assignments.length > 0) && (
+          <details className={styles.readyChanges}>
+            <summary>Review ready changes</summary>
+            <div className={styles.readyChangeGroups}>
+              {readyChangeGroups.map((group) => (
+                <button
+                  key={group.key}
+                  type="button"
+                  onClick={() => selectFinding(group.findingIds[0] ?? null)}
+                >
+                  <strong>{group.label}</strong>
+                  <span>
+                    {group.count} track{group.count === 1 ? '' : 's'}
+                    {group.valueSummary ? ` · ${group.valueSummary}` : ''}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </details>
+        )}
+      </div>
+    ) : null;
+
   const selectedActionDetail =
     active && reviewCase ? (
       <SelectedActionDetail
@@ -820,7 +884,9 @@ export function ReviewPage() {
             Refresh queue
           </button>
           <div className={styles.headerCount}>
-            {queue ? `${queue.total} cases need attention` : 'Loading cases…'}
+            {queue
+              ? `${queue.total} album${queue.total === 1 ? '' : 's'} in queue`
+              : 'Loading albums…'}
           </div>
         </div>
       </header>
@@ -846,7 +912,7 @@ export function ReviewPage() {
       )}
 
       <div className={styles.workspace}>
-        <aside className={styles.sidebar} aria-label="Albums needing review">
+        <aside className={styles.sidebar} aria-label="Reconciliation albums">
           <label htmlFor="review-search">Find album or track</label>
           <input
             id="review-search"
@@ -900,9 +966,7 @@ export function ReviewPage() {
                 <strong>{item.album || 'Unassigned files'}</strong>
                 <span>{item.artist || item.case_id.split(':')[0]}</span>
                 <small>
-                  {item.plan
-                    ? `${item.plan.decision_count ?? item.pending} decision${(item.plan.decision_count ?? item.pending) === 1 ? '' : 's'} · ${item.pending} action${item.pending === 1 ? '' : 's'}`
-                    : `${item.pending} decision${item.pending === 1 ? '' : 's'}`}
+                  {caseStatusSummary(item)}
                   {item.error_count ? ` · ${item.error_count} failed` : ''}
                 </small>
                 {item.plan?.categories?.length ? (
@@ -989,97 +1053,50 @@ export function ReviewPage() {
                 </div>
               </div>
 
-              <section className={styles.albumPlan} aria-label="Album reconciliation plan">
-                <div className={styles.planSummary}>
-                  <div>
-                    <div className={styles.eyebrow}>Album reconciliation</div>
-                    <strong>
-                      {plan.status === 'ready'
-                        ? 'Ready to reconcile'
-                        : primaryDecision
-                          ? `${primaryDecision.label} needs a decision`
-                          : `${plan.decision_count ?? plan.manual + plan.destructive + plan.blocked} decisions need review`}
-                    </strong>
-                    <p>
-                      {primaryDecision?.summary ||
-                        plan.blocker_reasons[0] ||
-                        'All proposed changes are supported by the album and audio evidence.'}
-                    </p>
+              {plan.status === 'ready' && (
+                <section
+                  className={styles.albumPlan}
+                  data-state="ready"
+                  aria-label="Album reconciliation plan"
+                >
+                  <div className={styles.planSummary}>
+                    <div>
+                      <div className={styles.eyebrow}>Album reconciliation</div>
+                      <strong>Ready to reconcile</strong>
+                      <p>
+                        {primaryReadyDecision?.summary ||
+                          'All proposed changes are supported by the album and audio evidence.'}
+                      </p>
+                    </div>
+                    <div className={styles.planBadges}>
+                      <span data-tone="good">✓ {plan.ready} ready</span>
+                    </div>
                   </div>
-                  <div className={styles.planBadges}>
-                    {plan.ready > 0 && <span data-tone="good">✓ {plan.ready} ready</span>}
-                    {plan.manual > 0 && <span data-tone="warning">! {plan.manual} review</span>}
-                    {plan.destructive > 0 && (
-                      <span data-tone="danger">× {plan.destructive} file action</span>
-                    )}
-                    {plan.blocked > 0 && <span data-tone="muted">○ {plan.blocked} blocked</span>}
-                  </div>
-                </div>
-                {plan.ready > 0 && (
-                  <div className={styles.planActions}>
-                    <button
-                      type="button"
-                      className={styles.primary}
-                      disabled={applyBusy}
-                      onClick={() => void applyReady(reviewCase.case_id)}
-                    >
-                      Apply {plan.ready} ready change
-                      {plan.ready === 1 ? '' : 's'}
-                    </button>
-                    {plan.can_organize && reviewCase.album_id != null && (
-                      <button
-                        type="button"
-                        disabled={applyBusy}
-                        onClick={() => void applyReady(reviewCase.case_id, true)}
-                      >
-                        Apply and organize folder
-                      </button>
-                    )}
-                    {!(
-                      plan.status === 'ready' &&
-                      readyChangeGroups.length === 1 &&
-                      assignments.length > 0
-                    ) && (
-                      <details className={styles.readyChanges}>
-                        <summary>Review ready changes</summary>
-                        <div className={styles.readyChangeGroups}>
-                          {readyChangeGroups.map((group) => (
-                            <button
-                              key={group.key}
-                              type="button"
-                              onClick={() => selectFinding(group.findingIds[0] ?? null)}
-                            >
-                              <strong>{group.label}</strong>
-                              <span>
-                                {group.count} track{group.count === 1 ? '' : 's'}
-                                {group.valueSummary ? ` · ${group.valueSummary}` : ''}
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      </details>
-                    )}
-                  </div>
-                )}
-              </section>
+                  {readyActionControls}
+                  {active &&
+                    activeDecision?.risk === 'ready' &&
+                    !activeAssignment &&
+                    selectedActionDetail}
+                </section>
+              )}
 
               {decisions.length > 0 && showDecisionBoard && (
                 <section className={styles.decisionBoard} aria-label="Album decisions">
                   <div className={styles.sectionHeading}>
                     <div>
-                      <div className={styles.eyebrow}>Decisions</div>
+                      <div className={styles.eyebrow}>Resolve first</div>
                       <h3>
-                        {decisions.length} question
-                        {decisions.length === 1 ? '' : 's'} for this album
+                        {reviewDecisions.length} decision
+                        {reviewDecisions.length === 1 ? ' needs' : 's need'} your input
                       </h3>
+                      <p>These choices control the album plan and its dependent track actions.</p>
                     </div>
                     <span>
-                      {reviewCase.count} resulting action
-                      {reviewCase.count === 1 ? '' : 's'}
+                      {reviewActionCount} affected action{reviewActionCount === 1 ? '' : 's'}
                     </span>
                   </div>
                   <div className={styles.decisionGrid}>
-                    {decisions.map((decision) => {
+                    {reviewDecisions.map((decision) => {
                       const selected = active ? decision.finding_ids.includes(active.id) : false;
                       return (
                         <Fragment key={decision.id}>
@@ -1169,6 +1186,32 @@ export function ReviewPage() {
                 </section>
               )}
 
+              {plan.status !== 'ready' && plan.ready > 0 && (
+                <section
+                  className={`${styles.albumPlan} ${styles.safeChangesPanel}`}
+                  data-state="supporting"
+                  aria-label="Independent safe changes"
+                >
+                  <div className={styles.planSummary}>
+                    <div>
+                      <div className={styles.eyebrow}>Safe changes</div>
+                      <strong>
+                        {plan.ready} independent change{plan.ready === 1 ? ' is' : 's are'} ready
+                      </strong>
+                      <p>These can be applied without resolving the decisions above.</p>
+                    </div>
+                    <div className={styles.planBadges}>
+                      <span data-tone="good">✓ {plan.ready} ready</span>
+                    </div>
+                  </div>
+                  {readyActionControls}
+                  {active &&
+                    activeDecision?.risk === 'ready' &&
+                    !activeAssignment &&
+                    selectedActionDetail}
+                </section>
+              )}
+
               {assignments.length > 0 && (
                 <section
                   className={styles.trackMatrix}
@@ -1180,18 +1223,26 @@ export function ReviewPage() {
                       <h3>Track assignment</h3>
                     </div>
                     <div className={styles.matrixCounts}>
-                      <span data-status="confirmed">
-                        ✓ {reviewCase.album_plan?.counts.confirmed || 0} confirmed
-                      </span>
-                      <span data-status="change">
-                        ↻ {reviewCase.album_plan?.counts.changed || 0} changes
-                      </span>
-                      <span data-status="uncertain">
-                        ! {reviewCase.album_plan?.counts.uncertain || 0} uncertain
-                      </span>
-                      <span data-status="missing">
-                        − {reviewCase.album_plan?.counts.missing || 0} missing
-                      </span>
+                      {(reviewCase.album_plan?.counts.confirmed || 0) > 0 && (
+                        <span data-status="confirmed">
+                          ✓ {reviewCase.album_plan?.counts.confirmed} confirmed
+                        </span>
+                      )}
+                      {(reviewCase.album_plan?.counts.changed || 0) > 0 && (
+                        <span data-status="change">
+                          ↻ {reviewCase.album_plan?.counts.changed} changes
+                        </span>
+                      )}
+                      {(reviewCase.album_plan?.counts.uncertain || 0) > 0 && (
+                        <span data-status="uncertain">
+                          ! {reviewCase.album_plan?.counts.uncertain} uncertain
+                        </span>
+                      )}
+                      {(reviewCase.album_plan?.counts.missing || 0) > 0 && (
+                        <span data-status="missing">
+                          − {reviewCase.album_plan?.counts.missing} missing
+                        </span>
+                      )}
                       {(reviewCase.album_plan?.counts.not_owned || 0) > 0 && (
                         <span data-status="not-owned">
                           ○ {reviewCase.album_plan?.counts.not_owned} outside collection
@@ -1202,9 +1253,11 @@ export function ReviewPage() {
                           ✓ {reviewCase.album_plan?.counts.settled} already reviewed
                         </span>
                       )}
-                      <span data-status="extra">
-                        + {reviewCase.album_plan?.counts.extra || 0} extra
-                      </span>
+                      {(reviewCase.album_plan?.counts.extra || 0) > 0 && (
+                        <span data-status="extra">
+                          + {reviewCase.album_plan?.counts.extra} extra
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className={styles.releaseContext}>
@@ -1245,6 +1298,35 @@ export function ReviewPage() {
                         {row.finding_id === active?.id && compactSelectedActionDetail}
                       </Fragment>
                     ))}
+                    {changeAssignments.length > 6 ? (
+                      <details
+                        className={styles.proposedAssignments}
+                        open={activeAssignment?.status === 'change' || undefined}
+                      >
+                        <summary>↻ {changeAssignments.length} proposed track changes</summary>
+                        {changeAssignments.map((row, index) => (
+                          <Fragment key={`${row.file_path || row.slot_title}-${index}`}>
+                            <AssignmentRow
+                              row={row}
+                              onSelect={selectFinding}
+                              selected={row.finding_id === active?.id}
+                            />
+                            {row.finding_id === active?.id && compactSelectedActionDetail}
+                          </Fragment>
+                        ))}
+                      </details>
+                    ) : (
+                      changeAssignments.map((row, index) => (
+                        <Fragment key={`${row.file_path || row.slot_title}-${index}`}>
+                          <AssignmentRow
+                            row={row}
+                            onSelect={selectFinding}
+                            selected={row.finding_id === active?.id}
+                          />
+                          {row.finding_id === active?.id && compactSelectedActionDetail}
+                        </Fragment>
+                      ))
+                    )}
                     {settledAssignments.length > 0 && (
                       <details className={styles.confirmedAssignments}>
                         <summary>✓ {settledAssignments.length} settled release slots</summary>

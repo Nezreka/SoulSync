@@ -358,6 +358,12 @@ describe('library reconciliation review queue', () => {
     render(<ReviewPage />);
 
     expect(await screen.findByRole('heading', { name: 'Track assignment' })).toBeTruthy();
+    const decisionHeading = screen.getByRole('heading', { name: '1 decision needs your input' });
+    const trackHeading = screen.getByRole('heading', { name: 'Track assignment' });
+    expect(
+      decisionHeading.compareDocumentPosition(trackHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.queryByLabelText('Album reconciliation plan')).toBeNull();
     expect(screen.getByText('Numbering convention')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Use continuous numbering' })).toBeTruthy();
     expect(screen.getByText('digital-release')).toBeTruthy();
@@ -518,6 +524,115 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByText('1 track · Various Artists → Lamb of God')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Apply 1 ready change' }));
     await waitFor(() => expect(screen.getByText('1 ready change applied.')).toBeTruthy());
+  });
+
+  it('puts required choices before independent safe changes on a mixed album', async () => {
+    const manualFinding = {
+      ...finding,
+      finding_type: 'reconciliation_intent',
+      title: 'Is Album meant to be complete?',
+      review_tier: 'manual',
+    };
+    const readyFinding = {
+      ...finding,
+      id: 8,
+      finding_type: 'reconciliation_metadata',
+      title: 'Retag Track One',
+      review_tier: 'ready',
+      details: {
+        album_id: 10,
+        album_title: 'Album',
+        artist_name: 'Artist',
+        changes: { artist: { old: 'artist', new: 'Artist' } },
+      },
+    };
+    const decisions = [
+      {
+        id: 'intent',
+        category: 'album_completeness',
+        label: 'Album completeness',
+        risk: 'manual',
+        summary: 'Choose whether this album should be complete.',
+        finding_ids: [7],
+        action_count: 1,
+      },
+      {
+        id: 'metadata',
+        category: 'metadata',
+        label: 'Artist update',
+        risk: 'ready',
+        summary: '1 track: artist → Artist.',
+        finding_ids: [8],
+        action_count: 1,
+      },
+    ];
+    const plan = {
+      ready: 1,
+      manual: 1,
+      destructive: 0,
+      blocked: 0,
+      total: 2,
+      status: 'needs_review',
+      blocker_reasons: ['Choose whether the album should be complete'],
+      can_apply_ready: true,
+      can_organize: false,
+      decision_count: 2,
+      categories: ['album_completeness', 'metadata'],
+      decisions,
+    };
+    fetchMock.mockImplementation((url: string) => {
+      const common = auxiliary(url);
+      if (common) return Promise.resolve(common);
+      if (url.startsWith('/api/repair/review-queue?'))
+        return Promise.resolve(
+          reply({
+            items: [
+              {
+                case_id: 'album:1:mixed',
+                album: 'Album',
+                artist: 'Artist',
+                pending: 2,
+                priority: 1,
+                finding_types: ['reconciliation_intent', 'reconciliation_metadata'],
+                error_count: 0,
+                plan,
+              },
+            ],
+            total: 1,
+            page: 0,
+            limit: 30,
+          }),
+        );
+      if (url.startsWith('/api/repair/review-queue/album%3A1%3Amixed?'))
+        return Promise.resolve(
+          reply({
+            case_id: 'album:1:mixed',
+            album: 'Album',
+            artist: 'Artist',
+            album_id: 10,
+            folder: '/music/Artist/Album',
+            count: 2,
+            status: 'pending',
+            plan,
+            decisions,
+            items: [manualFinding, readyFinding],
+          }),
+        );
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(<ReviewPage />);
+
+    const choices = await screen.findByRole('heading', {
+      name: '1 decision needs your input',
+    });
+    const safeChanges = screen.getByLabelText('Independent safe changes');
+    expect(
+      choices.compareDocumentPosition(safeChanges) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.getByText('1 affected action')).toBeTruthy();
+    expect(screen.getAllByText('Album completeness').length).toBeGreaterThan(0);
+    expect(screen.queryByText('2 questions for this album')).toBeNull();
   });
 
   it('renders findings that do not have release candidates', async () => {
