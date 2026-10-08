@@ -32,6 +32,7 @@ This catalogue records the real-library cases used while designing and tuning th
 | Lamb of God — *Sacrament* | Several providers returned differently shaped releases, though one MusicBrainz release completely fit all 11 files. | Do not create a release decision when only one candidate fully fits. |
 | Joep Beving — *Trilogy* | A multidisc physical release numbers each disc separately, while the desired digital convention numbers all 46 tracks continuously. | Proactively search for a fitting digital edition and present one album-wide numbering choice. |
 | Katy Kirby — *Katy Kirby on Audiotree Live* | Apple reports “Katy Kirby on Audiotree Live (Audiotree Live) - EP”; Deezer repeats the same parenthetical. Removing only “- EP” proposed awkward redundant metadata. | Treat a trailing qualifier that merely repeats words already in the album title as source flavor and preserve the cleaner local title. Keep the exact provider release ID. |
+| Duran Duran — *Rio* | Apple release `693584837` fits all nine tracks but calls the album “Rio (Columbia House),” while every local tag and the folder use “Rio.” | Keep the exact release identity for track matching while preserving the clean local display title. Retailer, record-club, and pressing-plant qualifiers do not become album tags automatically. |
 | The Spiritual Sound | Multiple MusicBrainz releases assign the same ten files equally. | Show the edition ambiguity and disambiguation fields; avoid pretending audio can distinguish catalogue-equivalent editions. |
 
 ## Numbering conventions and discs
@@ -104,3 +105,4 @@ Examples encountered: Snow Patrol’s *Up to Now* should remain partial; the sin
 8. Accepted exceptions reopen when their audio, release, folder, or evidence signature changes.
 9. A scan interrupted before completion preserves previous plans and findings; a successful scan retires stale ones.
 10. The review queue must distinguish algorithmic uncertainty from presentation state. A selected row should reveal its detail without changing the underlying confidence or risk classification.
+11. Headings describe the proposed outcome (“Use continuous numbering,” “Link MusicBrainz recording IDs”), not the planner's internal category or finding count.

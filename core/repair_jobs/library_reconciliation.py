@@ -50,6 +50,10 @@ _WATCHLIST_REMOVAL_PREFIX = '.watchlist-removal-'
 _ALBUM_EDITION_WORD = re.compile(
     r'\b(?:anniversary|bit|cd|deluxe|edition|expanded|khz|limited|lp|master|mono|'
     r'pressing|reissue|remaster(?:ed)?|special|stereo|target|vinyl)\b', re.I)
+_ALBUM_MATERIAL_QUALIFIER = re.compile(
+    r"\b(?:acoustic|anniversary|bit|collector(?:s|'s)?|deluxe|demo|edition|expanded|"
+    r'instrumental|khz|live|master|mono|remix|reissue|remaster(?:ed)?|special|'
+    r'stereo|soundtrack|version)\b', re.I)
 _SOUNDTRACK_SUFFIX = re.compile(
     r'\s*[\[(]?(?:original\s+(?:motion\s+picture|television)\s+)?soundtrack[\])]?$|'
     r'\s*[\[(]?music\s+from\s+the\s+(?:motion\s+picture|film)[\])]?$', re.I)
@@ -580,12 +584,16 @@ def _search_release_candidates(album: dict | None, context: JobContext,
 
 def _album_titles_compatible(current: str, release: str) -> bool:
     """Keep local edition detail when both names share the same album identity."""
-    def without_repeated_qualifier(value: str) -> str:
+    def trailing_qualifier(value: str) -> tuple[str, str] | None:
         match = (re.match(r'^(.*?)\s+\(([^()]*)\)\s*$', value.strip()) or
                  re.match(r'^(.*?)\s+\[([^\[\]]*)\]\s*$', value.strip()))
-        if not match:
+        return match.groups() if match else None
+
+    def without_repeated_qualifier(value: str) -> str:
+        qualified = trailing_qualifier(value)
+        if not qualified:
             return value
-        base, qualifier = match.groups()
+        base, qualifier = qualified
         base_words = normalize(base)
         qualifier_words = normalize(qualifier)
         if qualifier_words and f' {qualifier_words} ' in f' {base_words} ':
@@ -597,14 +605,38 @@ def _album_titles_compatible(current: str, release: str) -> bool:
     release_normalized = normalize(cleaned_release)
     if not current_normalized or not release_normalized:
         return False
+    release_qualifier = trailing_qualifier(cleaned_release)
+    if release_qualifier:
+        release_base, qualifier = release_qualifier
+        if (current_normalized == normalize(release_base) and
+                not _ALBUM_MATERIAL_QUALIFIER.search(qualifier)):
+            # Retailer, pressing-plant and record-club labels identify the
+            # catalog release. They are not useful display-title metadata.
+            return True
     if current_normalized == release_normalized:
         # Preserve detail already present locally, but still allow a selected
-        # release to add an edition suffix the local title does not carry.
+        # release to add a meaningful edition suffix the local title does not carry.
         return len(current.strip()) >= len(cleaned_release.strip())
     if current_normalized.startswith(f'{release_normalized} '):
         local_detail = current_normalized[len(release_normalized):].strip()
         return bool(_ALBUM_EDITION_WORD.search(local_detail))
     return False
+
+
+def _display_album_title(files: list[dict], library_title: str,
+                         release_title: str) -> str:
+    """Prefer one consistent, clean local title over catalog-only qualifiers."""
+    tag_titles = [str((file.get('tags') or {}).get('album') or '').strip()
+                  for file in files]
+    tag_titles = [title for title in tag_titles if title]
+    if tag_titles:
+        normalized = {re.sub(r'\s+', ' ', title).casefold() for title in tag_titles}
+        if (len(normalized) == 1 and
+                _album_titles_compatible(tag_titles[0], release_title)):
+            return tag_titles[0]
+    if library_title and _album_titles_compatible(library_title, release_title):
+        return library_title
+    return release_title
 
 
 def _candidate_evidence(files: list[dict], scored: tuple) -> dict:
@@ -1587,12 +1619,8 @@ class LibraryReconciliationJob(RepairJob):
                                  (album.get('album_title') if album else '') or
                                  os.path.basename(folder))
                 library_album_title = album.get('album_title') if album else ''
-                display_release_title = (
-                    library_album_title
-                    if library_album_title and
-                    _album_titles_compatible(library_album_title, release_title)
-                    else release_title
-                )
+                display_release_title = _display_album_title(
+                    files, library_album_title, release_title)
                 release_artists = release_meta.get('artists') or []
                 release_artist_names = [
                     artist.get('name') if isinstance(artist, dict) else str(artist)
@@ -1612,6 +1640,7 @@ class LibraryReconciliationJob(RepairJob):
                     'album_folder': folder,
                     'album_folders': sorted({os.path.dirname(file['path']) for file in files}),
                     'source': source, 'release_id': release_id,
+                    'numbering_mode': numbering_mode,
                     'exact_release_id': exact_release_id,
                     'release_track_count': len(slots), 'local_file_count': len(files),
                     'folder_audio_path_digest': album_folders_audio_path_digest(

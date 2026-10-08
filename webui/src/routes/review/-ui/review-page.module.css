@@ -241,6 +241,9 @@
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
   gap: 10px;
 }
+.decisionGrid[data-single='true'] {
+  display: block;
+}
 .decisionGrid article {
   border: 1px solid #4a4e63;
   border-radius: 12px;
@@ -260,6 +263,25 @@
 .decisionGrid article[data-risk='ready'] {
   border-color: #38775e;
   background: #19231f;
+}
+.decisionGrid[data-single='true'] article {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+.decisionGrid[data-single='true'] .decisionSelect {
+  width: auto;
+  border: 1px solid #5a526f;
+  border-radius: 9px;
+  background: #202131;
+  padding: 9px 12px;
+}
+.decisionGrid[data-single='true'] .decisionIcon {
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
 }
 .decisionSelect {
   width: 100%;
@@ -301,6 +323,9 @@
   gap: 8px;
   padding: 0 14px 14px 52px;
   flex-wrap: wrap;
+}
+.decisionGrid[data-single='true'] .decisionActions {
+  padding: 0;
 }
 .decisionActions button {
   max-width: 100%;

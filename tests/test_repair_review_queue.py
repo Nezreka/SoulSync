@@ -444,6 +444,44 @@ def test_title_convention_filter_excludes_artist_only_typography_change():
     assert metadata_result['items'][0]['plan']['categories'] == ['metadata']
 
 
+def test_numbering_decision_describes_the_resulting_scheme():
+    rows = [{
+        'finding_type': 'reconciliation_metadata',
+        'details': {
+            'numbering_mode': 'digital',
+            'changes': {
+                'track_number': {'old': str(index), 'new': str(index + 10)},
+                'disc_number': {'old': '2', 'new': '1'},
+            },
+        },
+    } for index in range(1, 4)]
+
+    decision = classify_case(rows)['decisions'][0]
+
+    assert decision['label'] == 'Use continuous track numbering'
+    assert decision['summary'] == (
+        'Renumber 3 tracks as one sequence instead of restarting at each disc.')
+
+
+def test_recording_id_only_album_says_what_ready_changes_do():
+    rows = [{
+        'finding_type': 'reconciliation_metadata',
+        'details': {
+            'confidence': 'clear',
+            'changes': {
+                'musicbrainz_recording_id': {'old': '', 'new': f'mbid-{index}'},
+                'library_recording_mbid': {'old': '', 'new': f'mbid-{index}'},
+            },
+        },
+    } for index in range(1, 4)]
+
+    decision = classify_case(rows)['decisions'][0]
+
+    assert decision['label'] == 'Link MusicBrainz recording IDs'
+    assert decision['summary'] == (
+        'Link 3 tracks to their confirmed MusicBrainz recordings.')
+
+
 def test_stale_plan_retirement_handles_more_than_sqlite_parameter_limit():
     db = _Database()
     ensure_schema(db.conn)

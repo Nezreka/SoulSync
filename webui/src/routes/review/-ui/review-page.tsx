@@ -108,6 +108,26 @@ function statusLabel(status: string) {
   );
 }
 
+function decisionReviewLabel(decision: ReviewDecision): string {
+  const count = decision.action_count;
+  switch (decision.category) {
+    case 'release_conflicts':
+      return 'Compare release options';
+    case 'album_completeness':
+      return 'Review missing tracks';
+    case 'audio_conflicts':
+      return `Review ${count} track assignment${count === 1 ? '' : 's'}`;
+    case 'title_issues':
+      return `Review ${count} title difference${count === 1 ? '' : 's'}`;
+    case 'duplicates':
+      return `Choose between ${count} duplicate ${count === 1 ? 'set' : 'sets'}`;
+    case 'extra_files':
+      return `Review ${count} unmatched file${count === 1 ? '' : 's'}`;
+    default:
+      return 'Review affected changes';
+  }
+}
+
 function AssignmentRow({
   row,
   onSelect,
@@ -586,6 +606,7 @@ export function ReviewPage() {
     : undefined;
   const reviewDecisions = decisions.filter((decision) => decision.risk !== 'ready');
   const readyDecisions = decisions.filter((decision) => decision.risk === 'ready');
+  const singleReviewDecision = reviewDecisions.length === 1 ? reviewDecisions[0] : undefined;
   const reviewActionCount = reviewDecisions.reduce(
     (total, decision) => total + decision.action_count,
     0,
@@ -1061,8 +1082,10 @@ export function ReviewPage() {
                 >
                   <div className={styles.planSummary}>
                     <div>
-                      <div className={styles.eyebrow}>Album reconciliation</div>
-                      <strong>Ready to reconcile</strong>
+                      <div className={styles.eyebrow}>Ready to apply</div>
+                      <strong>
+                        {primaryReadyDecision?.label || `${plan.ready} supported changes are ready`}
+                      </strong>
                       <p>
                         {primaryReadyDecision?.summary ||
                           'All proposed changes are supported by the album and audio evidence.'}
@@ -1084,41 +1107,57 @@ export function ReviewPage() {
                 <section className={styles.decisionBoard} aria-label="Album decisions">
                   <div className={styles.sectionHeading}>
                     <div>
-                      <div className={styles.eyebrow}>Resolve first</div>
+                      <div className={styles.eyebrow}>Decision required</div>
                       <h3>
-                        {reviewDecisions.length} decision
-                        {reviewDecisions.length === 1 ? ' needs' : 's need'} your input
+                        {singleReviewDecision?.label ||
+                          `${reviewDecisions.length} decisions need your input`}
                       </h3>
-                      <p>These choices control the album plan and its dependent track actions.</p>
+                      <p>
+                        {singleReviewDecision?.summary ||
+                          'Resolve these choices before applying their dependent track actions.'}
+                      </p>
                     </div>
-                    <span>
-                      {reviewActionCount} affected action{reviewActionCount === 1 ? '' : 's'}
-                    </span>
+                    {!singleReviewDecision && (
+                      <span>
+                        {reviewActionCount} affected action{reviewActionCount === 1 ? '' : 's'}
+                      </span>
+                    )}
                   </div>
-                  <div className={styles.decisionGrid}>
+                  <div
+                    className={styles.decisionGrid}
+                    data-single={singleReviewDecision ? 'true' : undefined}
+                  >
                     {reviewDecisions.map((decision) => {
                       const selected = active ? decision.finding_ids.includes(active.id) : false;
+                      const isDirectSingleNumbering =
+                        Boolean(singleReviewDecision) && decision.category === 'numbering';
                       return (
                         <Fragment key={decision.id}>
                           <article data-risk={decision.risk} data-selected={selected || undefined}>
-                            <button
-                              type="button"
-                              className={styles.decisionSelect}
-                              onClick={() => selectFinding(decision.finding_ids[0] ?? null)}
-                            >
-                              <span className={styles.decisionIcon} aria-hidden="true">
-                                {decision.risk === 'ready'
-                                  ? '✓'
-                                  : decision.risk === 'destructive'
-                                    ? '×'
-                                    : '!'}
-                              </span>
-                              <span>
-                                <strong>{decision.label}</strong>
-                                <small>{decision.summary}</small>
-                              </span>
-                              <b>{decision.action_count}</b>
-                            </button>
+                            {!isDirectSingleNumbering && (
+                              <button
+                                type="button"
+                                className={styles.decisionSelect}
+                                onClick={() => selectFinding(decision.finding_ids[0] ?? null)}
+                              >
+                                <span className={styles.decisionIcon} aria-hidden="true">
+                                  {decision.risk === 'ready'
+                                    ? '✓'
+                                    : decision.risk === 'destructive'
+                                      ? '×'
+                                      : '!'}
+                                </span>
+                                <span>
+                                  <strong>
+                                    {singleReviewDecision
+                                      ? decisionReviewLabel(decision)
+                                      : decision.label}
+                                  </strong>
+                                  {!singleReviewDecision && <small>{decision.summary}</small>}
+                                </span>
+                                {!singleReviewDecision && <b>{decision.action_count}</b>}
+                              </button>
+                            )}
                             {['numbering', 'title_conventions', 'metadata'].includes(
                               decision.category,
                             ) && (

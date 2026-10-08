@@ -17,6 +17,7 @@ from core.repair_jobs.base import JobContext
 from core.repair_jobs.library_reconciliation import (
     LibraryReconciliationJob, _album_titles_compatible, _candidate_evidence,
     _candidate_rank, _candidate_shape, _candidate_shapes_equivalent,
+    _display_album_title,
     _group_disc_folders, _group_logical_albums,
     _has_unexplained_identified_extras, _normalize_slot, _numbered_slot,
     _promote_album_context_candidate,
@@ -53,6 +54,16 @@ def test_album_title_keeps_clean_local_name_when_source_repeats_its_qualifier():
     )
     assert not _album_titles_compatible('Album', 'Album (Deluxe Edition)')
     assert not _album_titles_compatible('Olive', 'Olive (live)')
+
+
+def test_album_title_keeps_clean_name_when_source_adds_catalog_qualifier():
+    assert _album_titles_compatible('Rio', 'Rio (Columbia House)')
+    assert _album_titles_compatible('Album', 'Album (EDC Blackburn Ltd.)')
+    assert not _album_titles_compatible('Album', 'Album (Deluxe Edition)')
+    assert _display_album_title(
+        [{'tags': {'album': 'Rio'}}, {'tags': {'album': 'Rio'}}],
+        'Rio (Columbia House)', 'Rio (Columbia House)',
+    ) == 'Rio'
 
 
 def test_candidate_evidence_displays_the_acoustid_recording_that_supports_the_slot():

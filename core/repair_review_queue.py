@@ -30,6 +30,9 @@ _TITLE_CHANGE_KEYS = frozenset({'title', 'library_title', 'filename'})
 _TRACK_ARTIST_CHANGE_KEYS = frozenset({
     'artist', 'track_artist', 'library_track_artist',
 })
+_RECORDING_ID_CHANGE_KEYS = frozenset({
+    'musicbrainz_recording_id', 'library_recording_mbid',
+})
 
 
 def _change_value(change: Any, key: str) -> str:
@@ -48,6 +51,14 @@ def _uniform_change_summary(rows: list[dict[str, Any]]) -> tuple[str, str] | Non
                           for change in changes):
         return None
     field_sets = [set(change) for change in changes]
+    if all(fields and fields <= _RECORDING_ID_CHANGE_KEYS for fields in field_sets):
+        count = len(rows)
+        return (
+            'Link MusicBrainz recording IDs',
+            f'Link {count} track{"s" if count != 1 else ""} to '
+            f'{"their" if count != 1 else "its"} confirmed MusicBrainz '
+            f'recording{"s" if count != 1 else ""}.',
+        )
     if (all(fields <= _TRACK_ARTIST_CHANGE_KEYS for fields in field_sets) and
             all('track_artist' in fields or 'artist' in fields for fields in field_sets)):
         expanded = False
@@ -89,6 +100,46 @@ def _uniform_change_summary(rows: list[dict[str, Any]]) -> tuple[str, str] | Non
                 f'{old or "empty"} → {new or "empty"}.')
     return (f'{label} update',
             f'{count} track{"s" if count != 1 else ""} update {label.lower()}.')
+
+
+def _numbering_change_summary(rows: list[dict[str, Any]]) -> tuple[str, str]:
+    """Describe the resulting numbering scheme, rather than its implementation."""
+    modes = {
+        str(row.get('details', {}).get('numbering_mode') or '')
+        for row in rows if isinstance(row.get('details'), dict)
+    }
+    modes.discard('')
+    mode = next(iter(modes)) if len(modes) == 1 else ''
+    if not mode:
+        old_discs: set[str] = set()
+        new_discs: set[str] = set()
+        for row in rows:
+            details = row.get('details') if isinstance(row.get('details'), dict) else {}
+            changes = details.get('changes') if isinstance(details.get('changes'), dict) else {}
+            for field in ('disc_number', 'library_disc_number'):
+                change = changes.get(field)
+                if not isinstance(change, dict):
+                    continue
+                old_discs.add(_change_value(change, 'old'))
+                new_discs.add(_change_value(change, 'new'))
+        if new_discs == {'1'} and any(value not in ('', '1') for value in old_discs):
+            mode = 'digital'
+        elif any(value not in ('', '1') for value in new_discs) and old_discs <= {'', '1'}:
+            mode = 'release'
+    count = len(rows)
+    tracks = f'{count} track{"s" if count != 1 else ""}'
+    if mode == 'digital':
+        return (
+            'Use continuous track numbering',
+            f'Renumber {tracks} as one sequence instead of restarting at each disc.',
+        )
+    if mode == 'release':
+        return (
+            'Use per-disc track numbering',
+            f'Renumber {tracks} by disc, restarting the track count on each disc.',
+        )
+    return ('Update track numbering',
+            f'Change the positions of {tracks} to match the selected release.')
 
 
 def finding_category(item: dict[str, Any]) -> str:
@@ -150,7 +201,7 @@ def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 'manual' if 'manual' in tiers else
                 'blocked' if 'blocked' in tiers else 'ready')
         if category == 'numbering':
-            summary = f'{len(rows)} track or disc position changes share one convention choice.'
+            decision_label, summary = _numbering_change_summary(rows)
         elif category == 'title_conventions':
             summary = f'{len(rows)} title wording changes preserve the identified recordings.'
         elif category == 'metadata':
