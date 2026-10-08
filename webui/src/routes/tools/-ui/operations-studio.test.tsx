@@ -258,7 +258,9 @@ describe('OperationsStudio (Simple Mode)', () => {
     expect(screen.getByText('⏹ Stop Operation')).not.toBeNull();
   });
 
-  it('navigates with severity filtering when Quarantine or Suggestions is clicked', async () => {
+  it('opens the biggest type in each bucket when Quarantine or Suggestions is clicked', async () => {
+    // the buckets are destructive / fixable, not severity. a severity filter
+    // showed something other than what the card counted (orphans are 'info')
     const onShowFindings = vi.fn();
     render(
       <OperationsStudio
@@ -275,11 +277,14 @@ describe('OperationsStudio (Simple Mode)', () => {
       expect(screen.getByText('Review Suggestions ➔')).not.toBeNull();
     });
 
+    await waitFor(() => {
+      expect(screen.getByText('Review Suggestions ➔').closest('button')?.disabled).toBe(false);
+    });
     fireEvent.click(screen.getByText('Review Suggestions ➔'));
-    expect(onShowFindings).toHaveBeenCalledWith('', { severity: 'info' });
+    expect(onShowFindings).toHaveBeenCalledWith('', { findingType: 'canonical_version' });
 
     fireEvent.click(screen.getByText('🛡️ Inspect Quarantine ➔'));
-    expect(onShowFindings).toHaveBeenCalledWith('', { severity: 'error' });
+    expect(onShowFindings).toHaveBeenCalledWith('', { findingType: 'corrupt_audio' });
   });
 
   it('renders all 1-Click Playbooks', () => {
