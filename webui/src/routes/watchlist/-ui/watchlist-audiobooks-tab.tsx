@@ -31,6 +31,13 @@ function cardLink(role: 'author' | 'narrator' | 'series', name: string) {
   return { to: '/audiobooks/author/$name' as const, params: { name } };
 }
 
+/** A backfill follow carries a sentinel date from before audiobooks existed; say what it means. */
+function watchingLine(since: string | undefined, role: 'author' | 'narrator' | 'series') {
+  if (!since) return ROLE_LABEL[role];
+  if (since < '1970-01-01') return `${ROLE_LABEL[role]} · every volume`;
+  return `Watching since ${since}`;
+}
+
 const ROLE_LABEL = { author: 'Author', narrator: 'Narrator', series: 'Series' } as const;
 
 function relativeTime(seconds: number): string {
@@ -149,7 +156,8 @@ export function WatchlistAudiobooksTab({ searchFilter = '' }: WatchlistAudiobook
         }}
       >
         <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>
-          Checked once a day. Only books published after you followed an author are picked up.
+          Checked once a day. Authors and narrators: only books published after you followed.
+          Series: every missing volume, or new books only if you chose that.
         </p>
         <button
           type="button"
@@ -250,7 +258,7 @@ export function WatchlistAudiobooksTab({ searchFilter = '' }: WatchlistAudiobook
                     {author.name}
                   </div>
                   <div className={styles.podcastAuthor}>
-                    {author.since_date ? `Watching since ${author.since_date}` : ROLE_LABEL[role]}
+                    {watchingLine(author.since_date, role)}
                   </div>
 
                   <div className={styles.podcastBadgesRow}>
