@@ -2,7 +2,11 @@ import { useEffect, useState } from 'react';
 
 import type { AudiobookFollowedAuthor } from '@/routes/audiobooks/-audiobooks.types';
 
-import { unfollowAuthor, updateFollowedAuthor } from '@/routes/audiobooks/-audiobooks.api';
+import {
+  followRole,
+  unfollowAuthor,
+  updateFollowedAuthor,
+} from '@/routes/audiobooks/-audiobooks.api';
 
 import styles from './watchlist-page.module.css';
 
@@ -42,11 +46,15 @@ export function AudiobookAuthorSettingsModal({
 
   const save = async () => {
     setSaving(true);
-    await updateFollowedAuthor(author.name, {
-      auto_wishlist: autoWishlist ? 1 : 0,
-      narrator_mode: narratorMode,
-      since_date: sinceDate,
-    });
+    await updateFollowedAuthor(
+      author.name,
+      {
+        auto_wishlist: autoWishlist ? 1 : 0,
+        narrator_mode: narratorMode,
+        since_date: sinceDate,
+      },
+      followRole(author),
+    );
     setSaving(false);
     onSaved();
     onClose();
@@ -62,7 +70,7 @@ export function AudiobookAuthorSettingsModal({
     });
     if (confirmed === false) return;
     setRemoving(true);
-    await unfollowAuthor(author.name);
+    await unfollowAuthor(author.name, followRole(author));
     setRemoving(false);
     onSaved();
     onClose();
@@ -181,8 +189,8 @@ export function AudiobookAuthorSettingsModal({
                 <div>
                   <div className={styles.dangerTitle}>Remove from Watchlist</div>
                   <div className={styles.dangerSub}>
-                    Stop watching this author for new releases. Anything already downloaded or
-                    wishlisted is untouched.
+                    Stop watching this {followRole(author)} for new releases. Anything already
+                    downloaded or wishlisted is untouched.
                   </div>
                 </div>
                 <button

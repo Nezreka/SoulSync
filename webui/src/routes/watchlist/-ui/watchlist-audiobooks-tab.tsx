@@ -5,6 +5,7 @@ import type { AudiobookFollowedAuthor } from '@/routes/audiobooks/-audiobooks.ty
 
 import {
   fetchFollowedAuthors,
+  followRole,
   runAuthorScan,
   unfollowAuthor,
 } from '@/routes/audiobooks/-audiobooks.api';
@@ -15,6 +16,22 @@ import { AudiobookAuthorSettingsModal } from './audiobook-author-settings-modal'
 // ways; reusing the classes means one card design to maintain and any future
 // change to it lands on both.
 import styles from './watchlist-page.module.css';
+
+/**
+ * Where a card goes. Authors and narrators have a page of their own; a series
+ * does not, so it opens the catalogue search for its name.
+ */
+function cardLink(role: 'author' | 'narrator' | 'series', name: string) {
+  if (role === 'series') {
+    return { to: '/audiobooks' as const, search: { q: name, type: 'title' as const } };
+  }
+  if (role === 'narrator') {
+    return { to: '/audiobooks/narrator/$name' as const, params: { name } };
+  }
+  return { to: '/audiobooks/author/$name' as const, params: { name } };
+}
+
+const ROLE_LABEL = { author: 'Author', narrator: 'Narrator', series: 'Series' } as const;
 
 function relativeTime(seconds: number): string {
   if (!seconds) return 'never';
@@ -70,10 +87,11 @@ export function WatchlistAudiobooksTab({ searchFilter = '' }: WatchlistAudiobook
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [openMenu]);
 
-  const remove = async (name: string) => {
+  const remove = async (author: AudiobookFollowedAuthor) => {
     setOpenMenu(null);
-    await unfollowAuthor(name);
-    setAuthors((prev) => prev.filter((a) => a.name !== name));
+    const role = followRole(author);
+    await unfollowAuthor(author.name, role);
+    setAuthors((prev) => prev.filter((a) => !(a.name === author.name && followRole(a) === role)));
   };
 
   const scanNow = async () => {
@@ -158,14 +176,15 @@ export function WatchlistAudiobooksTab({ searchFilter = '' }: WatchlistAudiobook
       ) : (
         <div className={styles.podcastsGrid}>
           {filtered.map((author) => {
-            const isMenuOpen = openMenu === author.name;
+            const role = followRole(author);
+            const rowKey = `${role}:${author.name}`;
+            const isMenuOpen = openMenu === rowKey;
             const autoOn = author.auto_wishlist !== 0;
 
             return (
               <Link
-                key={author.name}
-                to="/audiobooks/author/$name"
-                params={{ name: author.name }}
+                key={rowKey}
+                {...cardLink(role, author.name)}
                 className={styles.podcastCard}
                 aria-label={author.name}
               >
@@ -195,7 +214,7 @@ export function WatchlistAudiobooksTab({ searchFilter = '' }: WatchlistAudiobook
                       className={styles.podcastMenuBtn}
                       title="Author options"
                       aria-label="Author options"
-                      onClick={() => setOpenMenu(isMenuOpen ? null : author.name)}
+                      onClick={() => setOpenMenu(isMenuOpen ? null : rowKey)}
                     >
                       •••
                     </button>
@@ -216,7 +235,7 @@ export function WatchlistAudiobooksTab({ searchFilter = '' }: WatchlistAudiobook
                         <button
                           type="button"
                           className={`${styles.podcastDropdownItem} ${styles.podcastDropdownItemDanger}`}
-                          onClick={() => void remove(author.name)}
+                          onClick={() => void remove(author)}
                         >
                           <span>🗑️</span>
                           <span>Remove from Watchlist</span>
@@ -231,7 +250,7 @@ export function WatchlistAudiobooksTab({ searchFilter = '' }: WatchlistAudiobook
                     {author.name}
                   </div>
                   <div className={styles.podcastAuthor}>
-                    {author.since_date ? `Watching since ${author.since_date}` : 'Author'}
+                    {author.since_date ? `Watching since ${author.since_date}` : ROLE_LABEL[role]}
                   </div>
 
                   <div className={styles.podcastBadgesRow}>
