@@ -1472,36 +1472,94 @@ class DeezerClient:
             logger.error(f"Error searching for artist '{artist_name}': {e}")
             return None
 
+    @staticmethod
+    def _fold_title(text: str) -> str:
+        """Lowercase, drop accents and punctuation, for exact-title compare."""
+        import unicodedata
+        text = unicodedata.normalize("NFKD", str(text or ""))
+        text = "".join(ch for ch in text if not unicodedata.combining(ch)).lower()
+        text = re.sub("['\u2019\u2018`]", "", text)
+        return re.sub(r"[\W_]+", " ", text).strip()
+
+    def _pick_album_by_title(self, results: List[Dict[str, Any]], artist_name: str,
+                             album_title: str) -> Optional[Dict[str, Any]]:
+        """Pick the result whose title is exactly ``album_title`` (folded).
+
+        With an artist, the exact-title result by that artist wins. For
+        "Various Artists" (or no artist) the title alone decides, the first
+        exact-title result by Various Artists first. None when no result has the
+        exact title, so the caller falls back to its older behavior.
+        """
+        wanted = self._fold_title(album_title)
+        if not wanted:
+            return None
+        exact = [r for r in results if self._fold_title(r.get('title', '')) == wanted]
+        if not exact:
+            return None
+
+        def credit(r):
+            return str((r.get('artist') or {}).get('name') or '')
+
+        artist = (artist_name or '').strip()
+        if not artist:
+            return exact[0]
+        if self._fold_title(artist) in ('various artists', 'various', 'va'):
+            for r in exact:
+                if self._fold_title(credit(r)) == 'various artists':
+                    return r
+            return exact[0]
+        for r in exact:
+            if artist_name_matches(artist, credit(r)):
+                return r
+        return None
+
+    def _album_search_request(self, query: str, limit: Optional[int] = None):
+        params = {'q': query}
+        if limit:
+            params['limit'] = limit
+        response = self.session.get(f"{self.BASE_URL}/search/album", params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        if 'error' in data:
+            logger.error(f"Deezer API error searching album '{query}': {data['error']}")
+            return None
+        return data.get('data', []) or []
+
     @rate_limited
     def search_album(self, artist_name: str, album_title: str) -> Optional[Dict[str, Any]]:
         """
         Search for an album by artist name and album title (enrichment interface).
 
+        A plain "{artist} {album}" query lets other albums by the same artist
+        (or, for "Various Artists", other compilations) outrank the one asked
+        for, so taking results[0] picked the wrong album. The title goes in
+        album:"..." with 50 results and the exact-title album is chosen; the
+        plain query stays as the fallback when nothing matches exactly.
+
         Args:
-            artist_name: Name of the artist
-            album_title: Title of the album
+            artist_name: Name of the artist (may be empty)
+            album_title: Title of the album (may be empty)
 
         Returns:
             Album dict from Deezer or None if not found
         """
         try:
-            query = f"{artist_name} {album_title}"
-            response = self.session.get(
-                f"{self.BASE_URL}/search/album",
-                params={'q': query},
-                timeout=10
-            )
-            response.raise_for_status()
+            result = None
+            if album_title and album_title.strip():
+                try:
+                    results = self._album_search_request(
+                        self._build_advanced_query(album=album_title), limit=50)
+                    result = self._pick_album_by_title(results or [], artist_name, album_title)
+                except Exception as e:
+                    logger.debug("album:\"title\" search failed, using plain query: %s", e)
 
-            data = response.json()
-            if 'error' in data:
-                logger.error(f"Deezer API error searching album '{query}': {data['error']}")
-                return None
+            if result is None:
+                query = f"{artist_name} {album_title}"
+                results = self._album_search_request(query)
+                if results:
+                    result = results[0]
 
-            results = data.get('data', [])
-            if results and len(results) > 0:
-                result = results[0]
-                # Cache the album entity
+            if result:
                 try:
                     cache = get_metadata_cache()
                     cache.store_entity('deezer', 'album', str(result.get('id', '')), result)
