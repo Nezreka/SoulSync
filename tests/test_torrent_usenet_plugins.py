@@ -164,6 +164,22 @@ def test_scene_artist_hint_requires_evidence_in_actual_release():
     assert _parse_release_title(release, artist_hint='Wanted Artist') == ('Other Artist', 'Song')
 
 
+@pytest.mark.parametrize('release,expected', [
+    ('Adele-30-24BIT-44-1KHZ-WEB-FLAC-2021-OBZEN', ('Adele', '30')),
+    ('Daft_Punk-Random_Access_Memories-24BIT-96KHZ-WEB-FLAC-2013-GROUP', ('Daft Punk', 'Random Access Memories')),
+    ('Artist-Album-24BIT-48KHZ-WEB-FLAC-2020-GROUP', ('Artist', 'Album')),
+])
+def test_scene_sample_rate_spellings_stay_out_of_the_title(release, expected):
+    assert _parse_release_title(release) == expected
+
+
+@pytest.mark.parametrize('hint', [None, 'Linkin Park'])
+def test_scene_album_dash_is_not_the_artist_boundary(hint):
+    release = 'Linkin_Park-Hybrid_Theory_-_20th_Anniversary_Edition-WEB-FLAC-2020-GROUP'
+    assert _parse_release_title(release, artist_hint=hint) == (
+        'Linkin Park', 'Hybrid Theory - 20th Anniversary Edition')
+
+
 @pytest.mark.parametrize('protocol', ['torrent', 'usenet'])
 @pytest.mark.parametrize('release_name,album', [('Shared Song', None), ('Shared Album', 'Shared Album')])
 def test_release_artist_containment_does_not_accept_another_band(monkeypatch, protocol, release_name, album):
@@ -311,6 +327,45 @@ def test_scene_artist_hint_does_not_override_explicit_artist_boundary(monkeypatc
 
     assert validation._score_streaming_candidates(tracks, expected) == []
     assert tracks[0].artist == 'G-Eazy'
+
+
+@pytest.mark.parametrize('protocol', ['torrent', 'usenet'])
+@pytest.mark.parametrize('release,name,album', [
+    ('G-Eazy-Lets_Get_Lost-WEB-FLAC-2014-GROUP', 'Lets Get Lost', None),
+    ('G-Eazy-These_Things_Happen-WEB-FLAC-2014-GROUP', "Let's Get Lost", 'These Things Happen'),
+])
+def test_requested_title_marks_the_scene_boundary_of_a_longer_artist(monkeypatch, protocol, release, name, album):
+    from types import SimpleNamespace
+    from core.downloads import validation
+    from core.matching_engine import MusicMatchingEngine
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    plugin = TorrentDownloadPlugin() if protocol == 'torrent' else UsenetDownloadPlugin()
+    tracks, _ = plugin._project_results([_make_torrent_result(title=release, protocol=protocol)])
+    expected = SimpleNamespace(name=name, artists=['G'], duration_ms=180_000, album=album)
+
+    assert validation._score_streaming_candidates(tracks, expected) == []
+    assert tracks[0].artist == 'G-Eazy'
+
+
+@pytest.mark.parametrize('release,hints,expected', [
+    ('Jay-Z-The_Blueprint-WEB-FLAC-2001-GROUP', ('The Blueprint',), ('Jay-Z', 'The Blueprint')),
+    ('a-ha-Hunting_High_and_Low-WEB-FLAC-1985-GROUP', ('Take On Me', 'Hunting High and Low'), ('a-ha', 'Hunting High and Low')),
+    ('Artist-Song-Live-WEB-FLAC-2024-GROUP', ('Song',), ('Artist', 'Song-Live')),
+])
+def test_scene_title_hint_needs_the_name_to_end_with_it(release, hints, expected):
+    assert _parse_release_title(release, title_hints=hints) == expected
+
+
+@pytest.mark.parametrize('release,expected', [
+    ('Artist-Album-WEB-2023-GROUP', ('Artist', 'Album')),
+    ('Artist-Album-WEB-FLAC-2023-MOD_ACE', ('Artist', 'Album')),
+    ('Artist-Album-2CD-FLAC-2023-GROUP', ('Artist', 'Album')),
+    ('Artist-Single-CDS-FLAC-2023-GROUP', ('Artist', 'Single')),
+    ('Artist-Album-VLS-FLAC-2023-GROUP', ('Artist', 'Album')),
+])
+def test_more_scene_suffix_forms_stay_out_of_the_title(release, expected):
+    assert _parse_release_title(release) == expected
 
 
 def test_adapter_state_mapping_covers_complete_states() -> None:

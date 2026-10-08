@@ -1146,17 +1146,45 @@ def _decode_filename(filename: str) -> Tuple[Optional[str], str]:
     return (url, display)
 
 
+_SCENE_SOURCE = r'(?:WEB|\d*CD[SM]?|VINYL|VLS|SACD|DVD)'
+_SCENE_CODEC = r'(?:FLAC|ALAC|APE|WAV|MP3|AAC|OGG|OPUS)'
 _SCENE_AUDIO_SUFFIX = re.compile(
     r'-(?:(?:16|24|32)[-_ ]?BIT-)?'
-    r'(?:\d{2,3}(?:[._]\d+)?-KHZ-)?'
-    r'(?:(?:WEB|CD|VINYL|SACD|DVD)-(?:FLAC|ALAC|APE|WAV|MP3|AAC|OGG|OPUS)(?:-(?:19|20)\d{2})?'
-    r'|(?:FLAC|ALAC|APE|WAV|MP3|AAC|OGG|OPUS)-(?:19|20)\d{2})'
-    r'(?:-[A-Z0-9]+)?$',
+    r'(?:\d{2,3}(?:[._-]\d{1,3})?-?KHZ-)?'
+    rf'(?:{_SCENE_SOURCE}-{_SCENE_CODEC}(?:-(?:19|20)\d{{2}})?'
+    rf'|{_SCENE_CODEC}-(?:19|20)\d{{2}}'
+    rf'|{_SCENE_SOURCE}-(?:19|20)\d{{2}})'
+    r'(?:-[A-Z0-9_]+)?$',
     re.IGNORECASE,
 )
 
 
-def _parse_release_title(title: str, *, artist_hint: Optional[str] = None) -> Tuple[str, str]:
+def _scene_boundary(name: str, artist_hint: Optional[str], title_hints) -> List[str]:
+    """Split an unspaced scene name ``Artist-Album`` into its two parts.
+
+    A hyphenated artist ("Jay-Z", "G-Eazy") makes the first hyphen a guess.
+    The requested song or album ending the name is evidence for the boundary,
+    then the requested artist starting it; only then the first hyphen.
+    """
+    for hint in title_hints or ():
+        words = re.findall(r'[^\W_]+', str(hint or ''))
+        if words:
+            pattern = r'[\W_]*'.join(map(re.escape, words))
+            match = re.fullmatch(rf'(.+?)[\s_]*-[\s_]*({pattern})', name, re.IGNORECASE)
+            if match:
+                return [match.group(1), match.group(2)]
+    if artist_hint:
+        # The requested artist is useful only if the actual release starts
+        # with that full name followed by a separator.
+        hint_pattern = re.escape(artist_hint.strip()).replace(r'\ ', r'[ ._]+')
+        match = re.match(rf'^{hint_pattern}[\s_]*-[\s_]*(.+)$', name, re.IGNORECASE)
+        if match:
+            return [artist_hint.strip(), match.group(1)]
+    return name.split('-', 1)
+
+
+def _parse_release_title(title: str, *, artist_hint: Optional[str] = None,
+                         title_hints=()) -> Tuple[str, str]:
     """Split a release title into ``(artist, title)`` using the
     ``Artist - Title`` / ``Artist - Album`` convention almost every
     indexer follows. Scene releases also use ``Artist-Album-WEB-FLAC-...``;
@@ -1177,20 +1205,17 @@ def _parse_release_title(title: str, *, artist_hint: Optional[str] = None) -> Tu
     cleaned = re.sub(r'\s*[\[\(][^\]\)]*[\]\)]\s*$', '', title.strip())
     scene_suffix = _SCENE_AUDIO_SUFFIX.search(cleaned)
     if scene_suffix:
-        cleaned = cleaned[:scene_suffix.start()].replace('_', ' ').strip()
+        # Underscores become spaces only after the split, so an album's own
+        # "_-_" is not mistaken for the artist boundary.
+        cleaned = cleaned[:scene_suffix.start()].strip()
     # Prefer a spaced boundary: it preserves hyphenated artist names such
     # as "Jay-Z - Album". A hint must never shorten an explicit artist name.
     parts = re.split(r'\s+-\s+|\s+-(?=\S)|(?<=\S)-\s+', cleaned, maxsplit=1)
     if len(parts) == 1 and scene_suffix:
-        if artist_hint:
-            # With no spaces, "Jay-Z-Album" cannot identify the boundary on
-            # its own. The requested artist is useful only if the actual
-            # release starts with that full name followed by a separator.
-            hint_pattern = re.escape(artist_hint.strip()).replace(r'\ ', r'[ ._]+')
-            match = re.match(rf'^{hint_pattern}\s*-\s*(.+)$', cleaned, re.IGNORECASE)
-            if match:
-                return artist_hint.strip(), match.group(1).strip()
-        parts = cleaned.split('-', 1)
+        parts = _scene_boundary(cleaned, artist_hint, title_hints)
+    if scene_suffix:
+        cleaned = cleaned.replace('_', ' ').strip()
+        parts = [part.replace('_', ' ') for part in parts]
     if len(parts) == 2:
         artist = parts[0].strip()
         rest = parts[1].strip()

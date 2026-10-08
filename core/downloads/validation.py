@@ -491,13 +491,21 @@ def _score_streaming_candidates(results, spotify_track, why=None):
             if release_title:
                 from core.download_plugins.torrent import _parse_release_title
                 # Scene artist names can themselves contain bare hyphens.
-                # Resolve the boundary against real release-prefix evidence
-                # before the artist gate, without substituting a wanted name.
+                # Resolve the boundary against real evidence before the artist
+                # gate: the requested song/album ending the name ("G-Eazy-
+                # Lets_Get_Lost" is not by "G"), else the requested artist
+                # starting it. Never substitute a wanted name.
+                title_hints = (expected_title, getattr(spotify_track, 'album', None))
+                parsed = _parse_release_title(release_title, title_hints=title_hints)
+                if parsed == _parse_release_title(release_title):
+                    parsed = None
                 for artist in sorted((a for a in expected_artists if a), key=len, reverse=True):
-                    parsed_artist, parsed_title = _parse_release_title(release_title, artist_hint=artist)
-                    if parsed_artist.casefold() == artist.casefold():
-                        r.artist, r.title, r.album = parsed_artist, parsed_title, parsed_title
+                    hinted = _parse_release_title(release_title, artist_hint=artist, title_hints=title_hints)
+                    if hinted[0].casefold() == artist.casefold():
+                        parsed = hinted
                         break
+                if parsed and parsed[0]:
+                    r.artist, r.title, r.album = parsed[0], parsed[1], parsed[1]
         # Torrent/usenet release projections sometimes only have the indexer name
         # in the artist field when a title did not parse as "Artist - Release".
         # Treat that as unknown artist, not as a real mismatch.
