@@ -29,6 +29,8 @@ import asyncio
 import json
 import os
 import re
+import threading
+from collections import OrderedDict
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -519,6 +521,68 @@ def aggregate(statuses: Sequence[Any], expected: int = 0) -> Dict[str, Any]:
     }
 
 
+# The last state each transfer was seen in. slskd forgets a finished transfer
+# as soon as anything clears completed downloads, and the music side's cleanup
+# does that on a timer without knowing a book is mid-folder. A book whose early
+# chapters were cleared then never looked finished, and once the rest were
+# cleared too it was failed as "no longer in the client", with every file
+# already on disk. Bounded, because nothing tells this module a book is over.
+_SEEN_LIMIT = 5000
+_seen: "OrderedDict[str, SimpleNamespace]" = OrderedDict()
+_seen_lock = threading.Lock()
+
+
+def _remember(ref: str, status: Any) -> None:
+    snapshot = SimpleNamespace(
+        id=ref,
+        filename=str(getattr(status, "filename", "") or ""),
+        state=str(getattr(status, "state", "") or ""),
+        size=int(getattr(status, "size", 0) or 0),
+        transferred=int(getattr(status, "transferred", 0) or 0),
+        speed=0,
+    )
+    with _seen_lock:
+        _seen[ref] = snapshot
+        _seen.move_to_end(ref)
+        while len(_seen) > _SEEN_LIMIT:
+            _seen.popitem(last=False)
+
+
+def _on_disk(landing: str, filename: str, size: int) -> bool:
+    """Whether a cleared transfer's file is sitting where slskd puts it."""
+    if not landing or not filename:
+        return False
+    # a single-file book's landing path is the file itself
+    path = landing if os.path.isfile(landing) else os.path.join(landing, _basename(filename))
+    try:
+        return os.path.isfile(path) and (size <= 0 or os.path.getsize(path) >= size)
+    except OSError:
+        return False
+
+
+def _cleared(ref: str, landing: str) -> Optional[SimpleNamespace]:
+    """What became of a transfer slskd no longer lists, if it was ever seen.
+
+    Seen finished or failed: that, unchanged. Seen still running: it finished
+    between polls if its file is on disk at full size, and otherwise it was
+    removed, which is a failure — it will never finish now. Never seen: None,
+    since there is nothing to judge it by.
+    """
+    with _seen_lock:
+        last = _seen.get(ref)
+    if last is None:
+        return None
+    if _state_of(last) != "running":
+        return last
+    finished = _on_disk(landing, last.filename, last.size)
+    settled = SimpleNamespace(**vars(last))
+    settled.state = "Completed, Succeeded" if finished else "Completed, Errored"
+    if finished:
+        settled.transferred = settled.size
+    _remember(ref, settled)
+    return settled
+
+
 def status_for(client_id: Any, client: Any = None) -> Optional[Dict[str, Any]]:
     """Where a Soulseek book has got to, or None when slskd cannot be asked."""
     unpacked = decode_refs(client_id)
@@ -544,19 +608,28 @@ def status_for(client_id: Any, client: Any = None) -> Optional[Dict[str, Any]]:
     # slskd can acknowledge enqueue without returning a transfer ID. The
     # shared client then returns the full remote filename. Match that fallback
     # only within the submitting peer, never by basename or folder alone.
-    filenames = {ref.replace("\\", "/") for ref in wanted if "\\" in ref or "/" in ref}
+    filenames = {ref.replace("\\", "/"): ref for ref in wanted if "\\" in ref or "/" in ref}
     peer = unpacked["username"]
     mine = []
+    listed = set()
     for status in everything or []:
         transfer_id = str(getattr(status, "id", ""))
         filename = str(getattr(status, "filename", "")).replace("\\", "/")
         username = str(getattr(status, "username", ""))
         if transfer_id in wanted or (peer and username == peer and filename in filenames):
             mine.append(status)
+            ref = transfer_id if transfer_id in wanted else filenames[filename]
+            listed.add(ref)
+            _remember(ref, status)
+    landing = landing_path(unpacked["folder"], client)
+    for ref in wanted - listed:
+        settled = _cleared(ref, landing)
+        if settled is not None:
+            mine.append(settled)
     rolled = aggregate(mine, expected=len(wanted))
     if not mine:
         rolled["state"] = "unavailable"
-    rolled["save_path"] = landing_path(unpacked["folder"], client)
+    rolled["save_path"] = landing
     return rolled
 
 
