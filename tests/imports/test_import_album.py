@@ -82,7 +82,7 @@ def test_build_album_import_match_payload_uses_generic_track_keys(monkeypatch, t
     monkeypatch.setattr(
         import_album,
         "collect_staging_files",
-        lambda file_paths=None: [
+        lambda file_paths=None, root=None: [
             {
                 "filename": "Song One.flac",
                 "full_path": str(staging_root / "Song One.flac"),
@@ -193,7 +193,7 @@ def test_build_album_import_match_payload_idless_tracks_no_collision(monkeypatch
     monkeypatch.setattr(
         import_album,
         "collect_staging_files",
-        lambda file_paths=None: [
+        lambda file_paths=None, root=None: [
             {"filename": "01 One.flac", "full_path": str(staging_root / "01 One.flac"),
              "title": "One", "artist": "Artist", "album": "Album", "track_number": 1, "disc_number": 1},
             {"filename": "02 Two.flac", "full_path": str(staging_root / "02 Two.flac"),
