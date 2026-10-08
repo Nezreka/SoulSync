@@ -171,6 +171,52 @@ def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
             values.add((disc_number, track_number))
         return values
 
+    # A box set can be split between files in the release folder and a Disc N
+    # child while the media-server scan assigns those two locations different
+    # album rows. Join only this physical parent/child shape, with the same
+    # normalized album title and at most one authoritative release identity.
+    # Position overlap is tolerated only when that release anchor exists:
+    # split media-server rows often carry damaged disc numbers, and those are
+    # exactly what reconciliation must repair. Without an anchor, positions
+    # must remain disjoint to avoid merging coincidentally named copies.
+    trusted: dict[str, object] = {}
+    for child in sorted(list(groups)):
+        if child not in groups or not _DISC_FOLDER.match(os.path.basename(child)):
+            continue
+        parent = os.path.dirname(child)
+        if parent not in groups:
+            continue
+        parent_ids, child_ids = album_ids(groups[parent]), album_ids(groups[child])
+        if len(parent_ids) != 1 or len(child_ids) != 1 or parent_ids == child_ids:
+            continue
+        parent_id, child_id = next(iter(parent_ids)), next(iter(child_ids))
+        parent_album, child_album = albums.get(parent_id) or {}, albums.get(child_id) or {}
+        if (_album_identity_title(parent_album.get('album_title')) !=
+                _album_identity_title(child_album.get('album_title'))):
+            continue
+
+        def release_identity(album):
+            if album.get('canonical_source') and album.get('canonical_album_id'):
+                return album['canonical_source'], str(album['canonical_album_id'])
+            for column, source in _SOURCES.items():
+                if album.get(column):
+                    return source, str(album[column])
+            return None
+
+        identities = {identity for identity in
+                      (release_identity(parent_album), release_identity(child_album))
+                      if identity}
+        if len(identities) > 1:
+            continue
+        parent_positions, child_positions = positions(groups[parent]), positions(groups[child])
+        if (not parent_positions or not child_positions or
+                (parent_positions & child_positions and not identities)):
+            continue
+        anchor_id = (child_id if release_identity(child_album) and
+                     not release_identity(parent_album) else parent_id)
+        groups[parent].extend(groups.pop(child))
+        trusted[parent] = anchor_id
+
     buckets: dict[tuple[object, str], list[str]] = defaultdict(list)
     for folder, paths in groups.items():
         ids = album_ids(paths)
@@ -181,7 +227,6 @@ def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
         if key:
             buckets[(album.get('owner_profile_id') or 1, key)].append(folder)
 
-    trusted: dict[str, object] = {}
     for bucket in buckets.values():
         anchors = []
         for folder in bucket:
@@ -328,6 +373,113 @@ def _score_release_candidates(files: list[dict], candidates: list[tuple[str, str
         scored.append((clear, matched, -len(plan['extra_files']),
                        source, release_id, slots, plan))
     return scored
+
+
+def _numbering_fit(files: list[dict], scored: tuple) -> int:
+    """How closely a candidate preserves the library's existing positions."""
+    _clear, _matched, _extras, _source, _release_id, slots, plan = scored
+    fit = 0
+    for pair in plan['pairs']:
+        tags = files[pair['file_index']].get('tags') or {}
+        slot = slots[pair['slot_index']]
+        if tags.get('track_number') == slot.get('track_number'):
+            fit += 2
+        if (tags.get('disc_number') or 1) == (slot.get('disc_number') or 1):
+            fit += 1
+    return fit
+
+
+def _continuous_numbering(scored: tuple) -> int:
+    """Prefer a diskless 1..N tracklist when the user selected digital mode."""
+    slots = scored[5]
+    positions = [slot.get('track_number') for slot in slots]
+    discs = {slot.get('disc_number') or 1 for slot in slots}
+    return int(bool(slots) and discs == {1} and positions == list(range(1, len(slots) + 1)))
+
+
+def _candidate_rank(files: list[dict], scored: tuple, numbering_mode: str) -> tuple:
+    rank = scored[:3]
+    return ((*rank, _continuous_numbering(scored), _numbering_fit(files, scored))
+            if numbering_mode == 'digital' else rank)
+
+
+def _uses_multiple_discs(scored: tuple) -> bool:
+    return len({slot.get('disc_number') or 1 for slot in scored[5]}) > 1
+
+
+def _has_unexplained_identified_extras(files: list[dict], scored: tuple) -> bool:
+    """Whether a plausible album file fits no slot or competing local copy."""
+    plan = scored[6]
+    competing = plan.get('competing_files') or {}
+    unexplained = [index for index in plan['extra_files'] if not competing.get(index)]
+    if not unexplained or scored[1] == 0:
+        return False
+    for index in unexplained:
+        recordings = (files[index].get('acoustid') or {}).get('recordings') or []
+        if ((files[index].get('acoustid') or {}).get('status') != 'ok' or
+                fingerprint_is_ambiguous(recordings) or
+                max((float(row.get('score') or 0) for row in recordings), default=0) < 0.80):
+            return False
+    return True
+
+
+def _systematic_numbering_drift(files: list[dict], scored: tuple) -> bool:
+    _clear, matched, _extras, _source, _release_id, slots, plan = scored
+    if matched < 2:
+        return False
+    changed = 0
+    for pair in plan['pairs']:
+        tags = files[pair['file_index']].get('tags') or {}
+        slot = slots[pair['slot_index']]
+        if (tags.get('track_number') != slot.get('track_number') or
+                (tags.get('disc_number') or 1) != (slot.get('disc_number') or 1)):
+            changed += 1
+    return changed >= 2 and changed * 2 >= matched
+
+
+def _release_group_candidates(release_id: str, files: list[dict], context: JobContext,
+                              cache: dict[str, list[tuple[str, str]]]) -> list[tuple[str, str]]:
+    """Find bounded alternate editions when shape/numbering says to look wider."""
+    if release_id in cache:
+        return cache[release_id]
+    client = context.mb_client
+    if not client:
+        cache[release_id] = []
+        return []
+    try:
+        release = client.get_release(release_id, includes=['release-groups']) or {}
+        group_id = str((release.get('release-group') or {}).get('id') or '')
+        releases = (client.browse_release_group_releases(group_id, limit=100)
+                    if group_id else [])
+    except Exception as exc:
+        logger.debug('Could not expand release group for %s: %s', release_id, exc)
+        releases = []
+
+    def media_shape(row):
+        media = row.get('media') or []
+        count = 0
+        for medium in media:
+            if not isinstance(medium, dict):
+                continue
+            try:
+                count += int(medium.get('track-count') or
+                             len(medium.get('tracks') or []))
+            except (TypeError, ValueError):
+                continue
+        digital = any('digital' in str(medium.get('format') or '').casefold()
+                      for medium in media if isinstance(medium, dict))
+        return count, len(media), digital
+
+    wanted = len(files)
+    releases = [row for row in releases if row.get('id') and row.get('id') != release_id]
+    releases.sort(key=lambda row: (
+        media_shape(row)[0] == wanted,
+        media_shape(row)[2],
+        media_shape(row)[1] == 1,
+        str(row.get('status') or '').casefold() == 'official',
+    ), reverse=True)
+    cache[release_id] = [('musicbrainz', str(row['id'])) for row in releases[:6]]
+    return cache[release_id]
 
 
 def _search_release_candidates(album: dict | None, context: JobContext,
@@ -593,8 +745,26 @@ class LibraryReconciliationJob(RepairJob):
     icon = 'repair-icon-acoustid'
     default_enabled = False
     default_interval_hours = 168
-    default_settings = {'min_acoustid_score': 0.80}
+    default_settings = {
+        'min_acoustid_score': 0.80,
+        # Prefer a one-medium/digital edition when it fits the same audio and
+        # preserves continuous library numbering. Set to "release" to prefer
+        # the linked physical edition and its per-disc positions.
+        'numbering_mode': 'digital',
+    }
+    setting_options = {'numbering_mode': ['digital', 'release']}
     auto_fix = False
+
+    def _get_settings(self, context: JobContext) -> dict:
+        merged = self.default_settings.copy()
+        if context.config_manager:
+            configured = context.config_manager.get(
+                f'repair.jobs.{self.job_id}.settings', {}) or {}
+            if isinstance(configured, dict):
+                merged.update(configured)
+        if merged.get('numbering_mode') not in ('digital', 'release'):
+            merged['numbering_mode'] = 'digital'
+        return merged
 
     def _load_rows(self, context: JobContext, roots: list[str]) -> tuple[dict, dict]:
         """One DB read for path→track and album metadata, with old-schema guards."""
@@ -776,6 +946,8 @@ class LibraryReconciliationJob(RepairJob):
         if not available:
             result.stopped_early = reason or 'AcoustID unavailable'
             return result
+        settings = self._get_settings(context)
+        numbering_mode = settings['numbering_mode']
         roots = all_library_roots(context)
         if not roots or any(not os.path.isdir(root) for root in roots):
             result.stopped_early = 'A configured library root is unavailable'
@@ -814,6 +986,7 @@ class LibraryReconciliationJob(RepairJob):
         release_cache = {}
         release_meta_cache = {}
         release_search_cache = {}
+        release_group_cache = {}
         exact_musicbrainz_releases: set[str] = set()
         cache = ReconciliationEvidence(context.db, client)
         lookup_error_reported = False
@@ -908,7 +1081,8 @@ class LibraryReconciliationJob(RepairJob):
                     exact_musicbrainz_releases=exact_musicbrainz_releases)
                 scored = _score_release_candidates(
                     files, candidates, release_cache, exact_musicbrainz_releases)
-                best_initial = max(scored, key=lambda c: c[:3]) if scored else None
+                best_initial = (max(scored, key=lambda c: _candidate_rank(
+                    files, c, numbering_mode)) if scored else None)
                 if (not best_initial or best_initial[6]['extra_files']
                         or best_initial[6]['missing_slots']):
                     additional = [candidate for candidate in self._release_candidates(
@@ -917,6 +1091,22 @@ class LibraryReconciliationJob(RepairJob):
                         if candidate not in candidates]
                     scored.extend(_score_release_candidates(
                         files, additional, release_cache, exact_musicbrainz_releases))
+                    candidates.extend(additional)
+                best_expanded = (max(scored, key=lambda c: _candidate_rank(
+                    files, c, numbering_mode)) if scored else None)
+                if (best_expanded and best_expanded[3] == 'musicbrainz' and
+                        (best_expanded[6]['extra_files'] or
+                         best_expanded[6]['missing_slots'] or
+                         _systematic_numbering_drift(files, best_expanded) or
+                         (numbering_mode == 'digital' and
+                          _uses_multiple_discs(best_expanded)))):
+                    editions = [candidate for candidate in _release_group_candidates(
+                        best_expanded[4], files, context, release_group_cache)
+                        if candidate not in candidates]
+                    exact_musicbrainz_releases.update(release_id for _, release_id in editions)
+                    candidates.extend(editions)
+                    scored.extend(_score_release_candidates(
+                        files, editions, release_cache, exact_musicbrainz_releases))
                 if not scored or max(row[1] for row in scored) == 0:
                     searched = [candidate for candidate in _search_release_candidates(
                         album, context, release_search_cache) if candidate not in candidates]
@@ -947,14 +1137,15 @@ class LibraryReconciliationJob(RepairJob):
                         result.findings_created += 1
                     cache.checkpoint()
                     continue
-                scored.sort(key=lambda c: c[:3], reverse=True)
+                scored.sort(
+                    key=lambda c: _candidate_rank(files, c, numbering_mode), reverse=True)
                 # Album/source IDs are direct evidence of intended edition.
                 # Prefer the first stored candidate when it fits as well as
                 # the best audio-discovered candidate; sorting by opaque UUID
                 # must never manufacture a human decision.
-                top_score = scored[0][:3]
+                top_score = _candidate_rank(files, scored[0], numbering_mode)
                 linked_row = next((row for candidate in candidates for row in scored
-                                   if row[:3] == top_score and
+                                   if _candidate_rank(files, row, numbering_mode) == top_score and
                                    (row[3], row[4]) == candidate), None)
                 if linked_row:
                     scored.remove(linked_row)
@@ -965,30 +1156,46 @@ class LibraryReconciliationJob(RepairJob):
                                        if (row[3], row[4]) ==
                                        (album.get('canonical_source'),
                                         str(album.get('canonical_album_id') or ''))), None)
-                    if pinned_row and pinned_row[:3] == scored[0][:3]:
+                    if (pinned_row and _candidate_rank(files, pinned_row, numbering_mode) ==
+                            _candidate_rank(files, scored[0], numbering_mode)):
                         scored.remove(pinned_row)
                         scored.insert(0, pinned_row)
                 clear, matched, _extras, source, release_id, slots, plan = scored[0]
                 locked_conflict = bool(album and album.get('canonical_locked') and
-                                       (not pinned_row or pinned_row[:3] != scored[0][:3]))
-                tied_rows = [row for row in scored if row[:3] == scored[0][:3]]
+                                       (not pinned_row or
+                                        _candidate_rank(files, pinned_row, numbering_mode) !=
+                                        _candidate_rank(files, scored[0], numbering_mode)))
+                tied_rows = [row for row in scored
+                             if _candidate_rank(files, row, numbering_mode) ==
+                             _candidate_rank(files, scored[0], numbering_mode)]
                 equivalent_tie = (len(tied_rows) > 1 and
                                   all(_candidate_shape(row) == _candidate_shape(tied_rows[0])
                                       for row in tied_rows[1:]))
-                tied = (len(tied_rows) > 1 and not linked_row and not equivalent_tie)
+                # A stored but unlocked release is a useful ordering hint. It
+                # cannot erase a real edition decision when equally fitting
+                # candidates contain different tracklists or positions.
+                tied = (len(tied_rows) > 1 and not equivalent_tie)
                 if pinned_row and not locked_conflict:
                     tied = False
                 pinned = bool(album and album.get('canonical_source') == source
                               and str(album.get('canonical_album_id') or '') == release_id)
-                if locked_conflict or tied or (matched == 0 and not pinned):
+                edition_conflict = bool(
+                    album_id is not None and album and not album.get('canonical_locked') and
+                    _has_unexplained_identified_extras(files, scored[0])
+                )
+                if locked_conflict or tied or edition_conflict or (matched == 0 and not pinned):
                     issue_type = ('reconciliation_release' if album_id is not None and
-                                  (tied or locked_conflict) else 'reconciliation_unresolved')
+                                  (tied or locked_conflict or edition_conflict)
+                                  else 'reconciliation_unresolved')
                     if locked_conflict:
                         description = ('The locked release does not fit as well as another candidate.'
                                        if pinned_row else
                                        'The locked release tracklist could not be loaded.')
                     elif tied:
                         description = 'Multiple releases fit equally well.'
+                    elif edition_conflict:
+                        description = ('No compared edition accounts for every identified album '
+                                       'file. Confirm the edition before reviewing extra audio.')
                     else:
                         description = 'No release track could be assigned confidently.'
                     if emit(

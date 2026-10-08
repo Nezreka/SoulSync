@@ -113,6 +113,24 @@ def repair_review_queue_apply(case_id, finding_id):
         logger.error('Error applying review decision: %s', exc, exc_info=True)
         return jsonify({'error': 'Could not apply review decision'}), 500
 
+
+@bp.route('/api/repair/review-queue/apply-ready', methods=['POST'])
+def repair_review_queue_apply_ready():
+    """Start the planner-approved reconciliation subset as a background run."""
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify({'error': 'Repair worker not initialized'}), 503
+    data = request.get_json(silent=True) or {}
+    try:
+        result = worker.start_review_safe(
+            case_id=str(data.get('case_id') or ''),
+            organize=bool(data.get('organize')),
+        )
+        return jsonify(result), 200 if result.get('started') else 400
+    except Exception as exc:
+        logger.error('Error starting ready reconciliation changes: %s', exc, exc_info=True)
+        return jsonify({'started': False, 'error': 'Could not start ready changes'}), 500
+
 @bp.route('/api/repair/status', methods=['GET'])
 def repair_status():
     """Get repair worker status"""

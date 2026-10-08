@@ -223,6 +223,103 @@ describe('library reconciliation review queue', () => {
     await waitFor(() => expect(screen.getByText(/Library reconciliation was queued/)).toBeTruthy());
   });
 
+  it('separates ready album changes and applies only the planned subset', async () => {
+    const readyFinding = {
+      ...finding,
+      finding_type: 'reconciliation_metadata',
+      title: 'Retag Laid to Rest',
+      details: {
+        album_id: 10,
+        album_title: 'Ashes of the Wake',
+        artist_name: 'Lamb of God',
+        changes: { album_artist: { old: 'Various Artists', new: 'Lamb of God' } },
+      },
+      review_tier: 'ready',
+      review_reason: 'Audio and release evidence support this metadata repair',
+    };
+    const plan = {
+      ready: 1,
+      manual: 0,
+      destructive: 0,
+      blocked: 0,
+      total: 1,
+      status: 'ready',
+      blocker_reasons: [],
+      can_apply_ready: true,
+      can_organize: true,
+    };
+    fetchMock.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === '/api/repair/finding-types')
+        return Promise.resolve(
+          reply({
+            types: [
+              {
+                type: 'reconciliation_metadata',
+                label: 'Metadata repair',
+                verb: 'Apply repair',
+                fixable: true,
+                destructive: false,
+              },
+            ],
+          }),
+        );
+      if (url === '/api/repair/review-queue/apply-ready') {
+        expect(JSON.parse(String(options?.body))).toEqual({
+          case_id: 'album:1:ashes',
+          organize: false,
+        });
+        return Promise.resolve(reply({ started: true, total: 1 }));
+      }
+      if (url === '/api/repair/bulk-fix/status')
+        return Promise.resolve(reply({ running: false, fixed: 1, failed: 0, total: 1 }));
+      const common = auxiliary(url);
+      if (common) return Promise.resolve(common);
+      if (url.startsWith('/api/repair/review-queue?'))
+        return Promise.resolve(
+          reply({
+            items: [
+              {
+                case_id: 'album:1:ashes',
+                album: 'Ashes of the Wake',
+                artist: 'Lamb of God',
+                pending: 1,
+                priority: 1,
+                finding_types: ['reconciliation_metadata'],
+                error_count: 0,
+                plan,
+              },
+            ],
+            total: 1,
+            page: 0,
+            limit: 30,
+          }),
+        );
+      if (url.startsWith('/api/repair/review-queue/album%3A1%3Aashes?'))
+        return Promise.resolve(
+          reply({
+            case_id: 'album:1:ashes',
+            album: 'Ashes of the Wake',
+            artist: 'Lamb of God',
+            album_id: 10,
+            folder: '/music/Lamb of God/Ashes of the Wake',
+            count: 1,
+            status: 'pending',
+            plan,
+            items: [readyFinding],
+          }),
+        );
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<ReviewPage />);
+
+    expect(await screen.findByText('Ready to reconcile')).toBeTruthy();
+    expect(screen.getAllByText('✓ 1 ready').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Apply 1 ready change' }));
+    await waitFor(() => expect(screen.getByText('1 ready change applied.')).toBeTruthy());
+  });
+
   it('renders findings that do not have release candidates', async () => {
     const noCandidateFinding = {
       ...finding,

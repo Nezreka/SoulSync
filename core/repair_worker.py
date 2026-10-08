@@ -1631,6 +1631,24 @@ class RepairWorker:
                                         review_approved=True)
             return {'success': False, 'error': 'Unsupported review action'}
 
+    def start_review_safe(self, *, case_id: str = '', organize: bool = False) -> dict:
+        """Apply the planner-approved reconciliation subset in the background."""
+        ids, cases = repair_review_queue.safe_finding_ids(self.db, case_id=case_id)
+        if not ids:
+            return {'started': False, 'error': 'No ready reconciliation changes match'}
+        organize_album_ids = []
+        if organize:
+            for key in cases:
+                case = self.get_review_case(key, job_id='library_reconciliation')
+                plan = (case or {}).get('plan') or {}
+                album_id = (case or {}).get('album_id')
+                if album_id is not None and plan.get('can_organize'):
+                    organize_album_ids.append(str(album_id))
+        return self.start_bulk_fix(
+            finding_ids=ids, allow_review_ids=True, review_approved=True,
+            organize_album_ids=organize_album_ids,
+        )
+
     def get_finding_albums(self, group_by: str = 'album', job_id: str = None,
                            status: str = 'pending', finding_type: str = None,
                            q: str = None, limit: int = 200) -> List[dict]:
@@ -6378,7 +6396,8 @@ class RepairWorker:
     def _pending_fixable_ids(self, job_id: str = None, severity: str = None,
                              finding_ids: List[int] = None,
                              finding_type: str = None,
-                             safe_only: bool = False) -> List[int]:
+                             safe_only: bool = False,
+                             allow_review_ids: bool = False) -> List[int]:
         """IDs of pending findings the fix loop can actually fix.
 
         Fixable = has a fix handler — derived from the dispatch map so the
@@ -6393,6 +6412,11 @@ class RepairWorker:
             conn = self.db._get_connection()
             cursor = conn.cursor()
             fixable = set(self._fix_handlers().keys()) - REVIEW_ONLY_FINDING_TYPES
+            if allow_review_ids and finding_ids:
+                # Only the review planner may opt exact, already-classified IDs
+                # back into a bulk run. An unscoped job/type sweep must never
+                # cross this boundary.
+                fixable.add('reconciliation_metadata')
             if safe_only:
                 fixable -= DESTRUCTIVE_FINDING_TYPES
             if finding_type:
@@ -6472,7 +6496,10 @@ class RepairWorker:
 
     def start_bulk_fix(self, job_id: str = None, severity: str = None,
                        finding_ids: List[int] = None, fix_action: str = None,
-                       finding_type: str = None, safe_only: bool = False) -> dict:
+                       finding_type: str = None, safe_only: bool = False,
+                       allow_review_ids: bool = False,
+                       review_approved: bool = False,
+                       organize_album_ids: List[str] = None) -> dict:
         """Start a background bulk-fix run. Only one runs at a time.
 
         ``fix_action`` may only reach ONE finding type per run. The string is
@@ -6496,7 +6523,8 @@ class RepairWorker:
             try:
                 ids = self._pending_fixable_ids(
                     job_id=job_id, severity=severity, finding_ids=finding_ids,
-                    finding_type=finding_type, safe_only=safe_only)
+                    finding_type=finding_type, safe_only=safe_only,
+                    allow_review_ids=allow_review_ids)
             except Exception as e:
                 logger.error("Error starting bulk fix: %s", e, exc_info=True)
                 return {'started': False, 'error': str(e)}
@@ -6528,6 +6556,9 @@ class RepairWorker:
                 'job_id': job_id,
                 'finding_type': finding_type,
                 'safe_only': bool(safe_only),
+                'review_approved': bool(review_approved),
+                'organize_album_ids': list(organize_album_ids or []),
+                'organize_queued': 0,
                 'errors': [],
                 'error': None,
                 # Per-type tallies so a mixed run can say WHAT it is fixing
@@ -6535,7 +6566,9 @@ class RepairWorker:
                 'per_type': {},
             }
             self._bulk_fix_thread = threading.Thread(
-                target=self._run_bulk_fix, args=(list(ids), fix_action),
+                target=self._run_bulk_fix,
+                args=(list(ids), fix_action, review_approved,
+                      list(organize_album_ids or [])),
                 daemon=True, name='repair-bulk-fix')
             self._bulk_fix_thread.start()
             logger.info("Background bulk fix started: %d finding(s)%s",
@@ -6563,7 +6596,9 @@ class RepairWorker:
             if conn:
                 conn.close()
 
-    def _run_bulk_fix(self, ids: List[int], fix_action: str = None):
+    def _run_bulk_fix(self, ids: List[int], fix_action: str = None,
+                      review_approved: bool = False,
+                      organize_album_ids: List[str] = None):
         state = self._bulk_fix_state
         types = self._types_for_findings(ids)
         try:
@@ -6574,7 +6609,13 @@ class RepairWorker:
                                 state['done'], state['total'])
                     break
                 try:
-                    result = self.fix_finding(fid, fix_action=fix_action)
+                    if review_approved:
+                        result = self.fix_finding(
+                            fid, fix_action=fix_action, review_approved=True)
+                    else:
+                        # Preserve the longstanding two-argument call for
+                        # ordinary bulk runs and test/deployment wrappers.
+                        result = self.fix_finding(fid, fix_action=fix_action)
                 except Exception as e:  # fix_finding shouldn't raise, but never kill the run
                     result = {'success': False, 'error': str(e)}
                 state['done'] += 1
@@ -6596,6 +6637,24 @@ class RepairWorker:
                     logger.warning("Bulk fix failed for finding #%s: %s", fid, error_msg)
                     if len(state['errors']) < 20:
                         state['errors'].append({'id': fid, 'error': error_msg})
+            if (organize_album_ids and not state['failed'] and not state['stopped'] and
+                    not state.get('error')):
+                from core.reorganize_queue import get_queue
+                queue = get_queue()
+                for album_id in dict.fromkeys(organize_album_ids):
+                    meta = self.db.get_album_display_meta(album_id)
+                    if not meta:
+                        state['error'] = (
+                            f'Metadata changes applied, but album {album_id} no longer exists; '
+                            'folder organization was not queued')
+                        break
+                    queued = queue.enqueue(
+                        album_id=str(album_id), album_title=meta['album_title'],
+                        artist_id=meta['artist_id'], artist_name=meta['artist_name'],
+                        source=None, metadata_source='tags', rename_only=True,
+                    )
+                    if queued.get('queued') or queued.get('reason') == 'already_queued':
+                        state['organize_queued'] += 1
         except Exception as e:
             logger.error("Background bulk fix crashed: %s", e, exc_info=True)
             state['error'] = str(e)

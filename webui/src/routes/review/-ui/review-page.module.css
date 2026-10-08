@@ -56,6 +56,12 @@
   color: #f5f5fa;
   cursor: pointer;
 }
+.headerTools .safeAction,
+.planActions .primary {
+  border-color: #3b765f;
+  background: #1d3b30;
+  color: #c9f8df;
+}
 .workspace {
   display: grid;
   grid-template-columns: minmax(230px, 300px) minmax(0, 1fr);
@@ -158,6 +164,85 @@
   border-bottom: 1px solid #373b4d;
   padding-bottom: 20px;
   align-items: flex-start;
+}
+.albumPlan {
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid #3b4053;
+  border-radius: 13px;
+  background: #151824;
+}
+.planSummary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.planSummary strong {
+  display: block;
+  margin: 4px 0;
+  font-size: 18px;
+}
+.planSummary p {
+  margin: 0;
+  color: #a9b0c3;
+}
+.planBadges,
+.planActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.planBadges span {
+  border: 1px solid #4c5267;
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.planBadges span[data-tone='good'] {
+  border-color: #3b765f;
+  color: #bff5d8;
+  background: #193329;
+}
+.planBadges span[data-tone='warning'] {
+  border-color: #8b6c37;
+  color: #ffe0a3;
+  background: #3a2d19;
+}
+.planBadges span[data-tone='danger'] {
+  border-color: #9a5262;
+  color: #ffd1da;
+  background: #40232b;
+}
+.planBadges span[data-tone='muted'] {
+  color: #abb2c4;
+  background: #252938;
+}
+.planActions {
+  border-top: 1px solid #303547;
+  margin-top: 14px;
+  padding-top: 14px;
+}
+.planActions button {
+  background: #272b3c;
+  border: 1px solid #4a4e63;
+  border-radius: 9px;
+  padding: 9px 12px;
+  color: #f5f5fa;
+  cursor: pointer;
+}
+.planActions details {
+  color: #b9c1d3;
+  font-size: 13px;
+}
+.planActions summary {
+  cursor: pointer;
+}
+.planActions ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
 }
 .albumHeader h2 {
   font-size: clamp(24px, 2vw, 32px);
@@ -793,15 +878,33 @@
 }
 .trackList {
   border-top: 1px solid #373b4d;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 8px;
   padding-top: 20px;
   margin-top: 22px;
 }
+.trackList section {
+  display: grid;
+  gap: 8px;
+}
+.trackList h4 {
+  margin: 8px 0 0;
+  color: #c6ccda;
+}
+.trackList section > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .trackList button[aria-current] {
   border-color: #a596ff;
   background: #302c4b;
+}
+.trackList button[data-tier='ready'] {
+  border-color: #366a56;
+}
+.trackList button[data-tier='destructive'] {
+  border-color: #82505d;
 }
 .error,
 .notice {
@@ -868,7 +971,8 @@
     grid-column: 1 / -1;
   }
   .header,
-  .albumHeader {
+  .albumHeader,
+  .planSummary {
     flex-wrap: wrap;
   }
 }

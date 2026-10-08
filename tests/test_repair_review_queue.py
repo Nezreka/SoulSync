@@ -9,7 +9,7 @@ import threading
 from flask import Flask
 
 from core.repair_review_identity import missing_slot_key, review_case_key
-from core.repair_review_queue import get_case, list_cases
+from core.repair_review_queue import classify_case, get_case, list_cases, safe_finding_ids
 from core.repair_worker import RepairWorker
 from database.music_database import MusicDatabase
 
@@ -107,6 +107,62 @@ def test_job_filter_excludes_other_findings_even_in_the_same_case():
     assert list_cases(db)['total'] == 2
 
 
+def test_album_plan_separates_safe_metadata_from_numbering_and_file_actions():
+    items = [
+        {'id': 1, 'finding_type': 'reconciliation_metadata',
+         'details': {'changes': {'title': 'Correct title'}, 'confidence': 'clear'}},
+        {'id': 2, 'finding_type': 'reconciliation_metadata',
+         'details': {'changes': {'track_number': 1}, 'confidence': 'clear'}},
+        {'id': 3, 'finding_type': 'reconciliation_extra', 'details': {}},
+    ]
+
+    plan = classify_case(items)
+
+    assert plan == {
+        'ready': 1, 'manual': 1, 'destructive': 1, 'blocked': 0,
+        'total': 3, 'status': 'needs_review',
+        'blocker_reasons': [
+            'The release uses a different disc or track numbering scheme',
+            'This action moves or removes a file and requires review',
+        ],
+        'can_apply_ready': True, 'can_organize': False,
+    }
+    assert [item['review_tier'] for item in items] == ['ready', 'manual', 'destructive']
+
+
+def test_release_choice_blocks_metadata_from_bulk_apply():
+    items = [
+        {'id': 1, 'finding_type': 'reconciliation_release', 'details': {}},
+        {'id': 2, 'finding_type': 'reconciliation_metadata',
+         'details': {'changes': {'title': 'Correct title'}, 'confidence': 'clear'}},
+    ]
+
+    plan = classify_case(items)
+
+    assert plan['ready'] == 0
+    assert plan['blocked'] == 1
+    assert items[1]['review_reason'] == 'The selected release must be resolved first'
+
+
+def test_safe_finding_ids_returns_only_planner_approved_metadata():
+    db = _Database()
+    details = {'album_id': 10, 'album_title': 'Album'}
+    db.add(1, '/music/Album/01.flac',
+           {**details, 'changes': {'title': 'One'}, 'confidence': 'clear'},
+           job_id='library_reconciliation', kind='reconciliation_metadata')
+    db.add(2, '/music/Album/02.flac',
+           {**details, 'changes': {'track_number': 2}, 'confidence': 'clear'},
+           job_id='library_reconciliation', kind='reconciliation_metadata')
+    case_id = list_cases(db, job_id='library_reconciliation')['items'][0]['case_id']
+
+    assert list_cases(db, job_id='library_reconciliation')['ready_total'] == 1
+
+    ids, cases = safe_finding_ids(db, case_id=case_id)
+
+    assert ids == [1]
+    assert cases == [case_id]
+
+
 def test_stale_review_action_cannot_run_fix():
     db = _Database()
     db.add(1, '/music/A/01.flac', {'album_id': 5})
@@ -164,6 +220,16 @@ def test_review_http_api_returns_exact_case_and_rejects_stale_apply(monkeypatch)
                            json={'action': 'fix', 'evidence_token': 'old'})
     assert response.status_code == 409
     assert response.json['stale'] is True
+    calls = []
+    worker.start_review_safe = lambda **kwargs: calls.append(kwargs) or {
+        'started': True, 'total': 4,
+    }
+    response = client.post('/api/repair/review-queue/apply-ready', json={
+        'case_id': case_id, 'organize': True,
+    })
+    assert response.status_code == 200
+    assert response.json == {'started': True, 'total': 4}
+    assert calls == [{'case_id': case_id, 'organize': True}]
 
 
 def test_accepted_reconciliation_exception_reopens_when_audio_evidence_changes(tmp_path):

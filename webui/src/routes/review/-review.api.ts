@@ -1,4 +1,16 @@
-import type { RepairFinding } from '../tools/-tools.types';
+import type { BulkFixStatus, RepairFinding } from '../tools/-tools.types';
+
+export interface ReviewPlan {
+  ready: number;
+  manual: number;
+  destructive: number;
+  blocked: number;
+  total: number;
+  status: 'ready' | 'needs_review';
+  blocker_reasons: string[];
+  can_apply_ready: boolean;
+  can_organize: boolean;
+}
 
 export interface ReviewCaseSummary {
   case_id: string;
@@ -8,11 +20,13 @@ export interface ReviewCaseSummary {
   priority: number;
   finding_types: string[];
   error_count: number;
+  plan?: ReviewPlan;
 }
 
 export interface ReviewQueuePage {
   items: ReviewCaseSummary[];
   total: number;
+  ready_total?: number;
   page: number;
   limit: number;
 }
@@ -20,6 +34,8 @@ export interface ReviewQueuePage {
 export interface ReviewFinding extends RepairFinding {
   evidence_token: string;
   updated_at?: string | null;
+  review_tier?: 'ready' | 'manual' | 'destructive' | 'blocked';
+  review_reason?: string;
 }
 
 export interface ReviewCase {
@@ -29,6 +45,8 @@ export interface ReviewCase {
   folder: string | null;
   count: number;
   status: string;
+  album_id?: string | number | null;
+  plan?: ReviewPlan;
   items: ReviewFinding[];
 }
 
@@ -107,4 +125,21 @@ export async function applyReviewDecision(
       },
     ),
   );
+}
+
+export async function startReadyChanges(
+  caseId?: string,
+  organize = false,
+): Promise<{ started: boolean; total?: number; error?: string; already_running?: boolean }> {
+  return readJson(
+    await fetch('/api/repair/review-queue/apply-ready', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ case_id: caseId || '', organize }),
+    }),
+  );
+}
+
+export async function fetchReviewApplyStatus(): Promise<BulkFixStatus> {
+  return readJson<BulkFixStatus>(await fetch('/api/repair/bulk-fix/status'));
 }

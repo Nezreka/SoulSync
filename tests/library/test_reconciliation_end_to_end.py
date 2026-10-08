@@ -16,7 +16,8 @@ from core.library.reconciliation_evidence import ReconciliationEvidence
 from core.repair_jobs.base import JobContext
 from core.repair_jobs.library_reconciliation import (
     LibraryReconciliationJob, _album_titles_compatible, _candidate_evidence,
-    _candidate_shape, _group_disc_folders, _group_logical_albums, _normalize_slot,
+    _candidate_rank, _candidate_shape, _group_disc_folders, _group_logical_albums,
+    _has_unexplained_identified_extras, _normalize_slot,
     _same_recording_copies, _search_release_candidates,
     _suggest_filename,
 )
@@ -898,6 +899,89 @@ def test_logical_album_groups_same_db_album_across_arbitrary_folders():
     assert set(next(iter(grouped.values()))) == set(path for paths in folders.values()
                                                     for path in paths)
     assert trusted == {}
+
+
+def test_logical_album_joins_parent_and_disc_child_with_different_album_rows():
+    parent = [f'/music/Matchbox Twenty/The Matchbox Twenty Collection/{n:02}.flac'
+              for n in range(1, 41)]
+    disc_one = [f'/music/Matchbox Twenty/The Matchbox Twenty Collection/Disc 1/{n:02}.flac'
+                for n in range(1, 9)]
+    disc_four = [f'/music/Matchbox Twenty/The Matchbox Twenty Collection/Disc 4/{n:02}.flac'
+                 for n in range(1, 10)]
+    folders = {
+        '/music/Matchbox Twenty/The Matchbox Twenty Collection': parent,
+        '/music/Matchbox Twenty/The Matchbox Twenty Collection/Disc 1': disc_one,
+        '/music/Matchbox Twenty/The Matchbox Twenty Collection/Disc 4': disc_four,
+    }
+    tracks = {
+        path: {'album_id': 10, 'track_number': index, 'disc_number': 1}
+        for index, path in enumerate(parent, start=1)
+    }
+    tracks.update({path: {'album_id': 11, 'track_number': index, 'disc_number': 1}
+                   for index, path in enumerate(disc_one, start=1)})
+    tracks.update({path: {'album_id': 11, 'track_number': index, 'disc_number': 4}
+                   for index, path in enumerate(disc_four, start=1)})
+    albums = {
+        10: {'album_title': 'The Matchbox Twenty Collection', 'owner_profile_id': 1,
+             'musicbrainz_release_id': 'collection-release'},
+        11: {'album_title': 'The Matchbox Twenty Collection', 'owner_profile_id': 1},
+    }
+
+    grouped, trusted = _group_logical_albums(folders, tracks, albums)
+
+    anchor = '/music/Matchbox Twenty/The Matchbox Twenty Collection'
+    assert list(grouped) == [anchor]
+    assert len(grouped[anchor]) == 57
+    assert trusted == {anchor: 10}
+
+
+def test_digital_numbering_rank_prefers_continuous_track_numbers():
+    files = [
+        {'tags': {'track_number': number, 'disc_number': 1}}
+        for number in range(1, 5)
+    ]
+    pairs = [{'file_index': index, 'slot_index': index, 'confidence': 'clear'}
+             for index in range(4)]
+    plan = {'pairs': pairs, 'extra_files': [], 'missing_slots': []}
+    continuous_slots = [
+        {'track_number': number, 'disc_number': 1} for number in range(1, 5)
+    ]
+    cd_slots = [
+        {'track_number': 1, 'disc_number': 1},
+        {'track_number': 2, 'disc_number': 1},
+        {'track_number': 1, 'disc_number': 2},
+        {'track_number': 2, 'disc_number': 2},
+    ]
+    continuous = (4, 4, 0, 'musicbrainz', 'digital', continuous_slots, plan)
+    compact_disc = (4, 4, 0, 'musicbrainz', 'cd', cd_slots, plan)
+
+    assert _candidate_rank(files, continuous, 'digital') > \
+        _candidate_rank(files, compact_disc, 'digital')
+    assert _candidate_rank(files, continuous, 'release') == \
+        _candidate_rank(files, compact_disc, 'release')
+
+
+def test_identified_bonus_audio_requires_edition_confirmation_but_duplicate_does_not():
+    files = [
+        {'acoustid': {'status': 'ok', 'recordings': [
+            {'mbid': 'one', 'title': 'One', 'score': 0.99},
+        ]}},
+        {'acoustid': {'status': 'ok', 'recordings': [
+            {'mbid': 'bonus', 'title': 'The Real Song for the Deaf', 'score': 0.99},
+        ]}},
+    ]
+    slots = [{'title': 'One', 'track_number': 1, 'disc_number': 1}]
+    plan = {
+        'pairs': [{'file_index': 0, 'slot_index': 0, 'confidence': 'clear'}],
+        'extra_files': [1], 'missing_slots': [], 'competing_files': {},
+    }
+    candidate = (1, 1, -1, 'musicbrainz', 'short-edition', slots, plan)
+
+    assert _has_unexplained_identified_extras(files, candidate)
+
+    duplicate_plan = {**plan, 'competing_files': {1: [0]}}
+    duplicate_candidate = (*candidate[:6], duplicate_plan)
+    assert not _has_unexplained_identified_extras(files, duplicate_candidate)
 
 
 def test_logical_album_absorbs_only_unlinked_nonoverlapping_soundtrack_fragments():

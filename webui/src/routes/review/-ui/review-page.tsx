@@ -6,9 +6,11 @@ import {
   applyReviewDecision,
   fetchLastReconciliationRun,
   fetchReviewCase,
+  fetchReviewApplyStatus,
   fetchReviewQueue,
   fetchReconciliationScanStatus,
   runReconciliationScan,
+  startReadyChanges,
   type ReconciliationRun,
   type ReconciliationScanStatus,
   type ReviewCase,
@@ -27,6 +29,18 @@ const requireChoice = new Set([
   'reconciliation_release',
 ]);
 
+const emptyPlan = {
+  ready: 0,
+  manual: 0,
+  destructive: 0,
+  blocked: 0,
+  total: 0,
+  status: 'needs_review' as const,
+  blocker_reasons: [] as string[],
+  can_apply_ready: false,
+  can_organize: false,
+};
+
 export function ReviewPage() {
   const [queue, setQueue] = useState<ReviewQueuePage | null>(null);
   const [caseId, setCaseId] = useState(
@@ -40,6 +54,8 @@ export function ReviewPage() {
   const [catalog, setCatalog] = useState<Record<string, FindingTypeInfo>>({});
   const [busy, setBusy] = useState(false);
   const [scanBusy, setScanBusy] = useState(false);
+  const [applyBusy, setApplyBusy] = useState(false);
+  const [applyProgress, setApplyProgress] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [scanStatus, setScanStatus] = useState<ReconciliationScanStatus | null>(null);
@@ -155,6 +171,9 @@ export function ReviewPage() {
     () => reviewCase?.items.find((finding) => finding.id === activeId) || reviewCase?.items[0],
     [reviewCase, activeId],
   );
+  const needsReviewItems =
+    reviewCase?.items.filter((finding) => finding.review_tier !== 'ready') || [];
+  const readyItems = reviewCase?.items.filter((finding) => finding.review_tier === 'ready') || [];
   const itemIndex =
     active && reviewCase ? reviewCase.items.findIndex((f) => f.id === active.id) : -1;
   const caseIndex = queue?.items.findIndex((item) => item.case_id === caseId) ?? -1;
@@ -163,7 +182,8 @@ export function ReviewPage() {
   const typeInfo = active ? catalog[active.finding_type] : undefined;
   const canApply = Boolean(typeInfo?.fixable) && active?.finding_type !== 'suspect_album_tag';
   const duplicateChoice = active?.finding_type === 'reconciliation_duplicate';
-  const suggested = canApply && active && !requireChoice.has(active.finding_type);
+  const suggested = active?.review_tier === 'ready';
+  const plan = reviewCase?.plan || emptyPlan;
 
   const selectCase = (next: string) => {
     setNotice('');
@@ -194,6 +214,59 @@ export function ReviewPage() {
       setError((cause as Error).message);
     } finally {
       setScanBusy(false);
+    }
+  };
+
+  const applyReady = async (scopeCaseId?: string, organize = false) => {
+    const count = scopeCaseId ? plan.ready : 0;
+    const confirmed = window.showConfirmDialog
+      ? await window.showConfirmDialog({
+          title: organize ? 'Apply and organize album' : 'Apply ready changes',
+          message: organize
+            ? `Apply ${count} supported metadata changes, then organize this album folder?`
+            : 'Apply every metadata change in the queue that passed its album safety checks?',
+          confirmText: organize ? 'Apply and organize' : 'Apply ready changes',
+        })
+      : window.confirm(
+          scopeCaseId ? `Apply ${count} ready metadata changes?` : 'Apply all ready changes?',
+        );
+    if (!confirmed) return;
+    setApplyBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const started = await startReadyChanges(scopeCaseId, organize);
+      setApplyProgress(`Applying 0 of ${started.total || count} ready changes…`);
+      const poll = async () => {
+        const status = await fetchReviewApplyStatus();
+        if (status.running) {
+          setApplyProgress(
+            `Applying ${status.done || 0} of ${status.total || started.total || count} ready changes…`,
+          );
+          window.setTimeout(() => void poll(), 750);
+          return;
+        }
+        setApplyBusy(false);
+        setApplyProgress('');
+        if (status.error) {
+          setError(status.error);
+        } else if (status.failed) {
+          setError(`${status.failed} ready change${status.failed === 1 ? '' : 's'} failed.`);
+        } else {
+          const applied = status.fixed || started.total || count;
+          setNotice(
+            organize
+              ? `${applied} change${applied === 1 ? '' : 's'} applied; folder organization was queued.`
+              : `${applied} ready change${applied === 1 ? '' : 's'} applied.`,
+          );
+        }
+        await refresh();
+      };
+      window.setTimeout(() => void poll(), 500);
+    } catch (cause) {
+      setApplyBusy(false);
+      setApplyProgress('');
+      setError((cause as Error).message);
     }
   };
 
@@ -262,6 +335,16 @@ export function ReviewPage() {
         <div className={styles.headerTools}>
           <button
             type="button"
+            className={styles.safeAction}
+            disabled={applyBusy || !queue?.ready_total}
+            onClick={() => void applyReady()}
+          >
+            {applyBusy
+              ? applyProgress || 'Applying…'
+              : `Apply all ready changes (${queue?.ready_total || 0})`}
+          </button>
+          <button
+            type="button"
             disabled={scanBusy || scanStatus?.current_job?.job_id === 'library_reconciliation'}
             onClick={() => void runScan()}
           >
@@ -320,7 +403,9 @@ export function ReviewPage() {
                 <strong>{item.album || 'Unassigned files'}</strong>
                 <span>{item.artist || item.case_id.split(':')[0]}</span>
                 <small>
-                  {item.pending} decision{item.pending === 1 ? '' : 's'}
+                  {item.plan
+                    ? `${item.plan.ready ? `${item.plan.ready} ready · ` : ''}${item.plan.manual + item.plan.destructive + item.plan.blocked} review`
+                    : `${item.pending} decision${item.pending === 1 ? '' : 's'}`}
                   {item.error_count ? ` · ${item.error_count} failed` : ''}
                 </small>
               </button>
@@ -398,9 +483,66 @@ export function ReviewPage() {
                 </div>
               </div>
 
+              <section className={styles.albumPlan} aria-label="Album reconciliation plan">
+                <div className={styles.planSummary}>
+                  <div>
+                    <div className={styles.eyebrow}>Album reconciliation</div>
+                    <strong>
+                      {plan.status === 'ready'
+                        ? 'Ready to reconcile'
+                        : `${plan.manual + plan.destructive + plan.blocked} item${plan.manual + plan.destructive + plan.blocked === 1 ? '' : 's'} need review`}
+                    </strong>
+                    <p>
+                      {plan.blocker_reasons[0] ||
+                        'All proposed changes are supported by the album and audio evidence.'}
+                    </p>
+                  </div>
+                  <div className={styles.planBadges}>
+                    {plan.ready > 0 && <span data-tone="good">✓ {plan.ready} ready</span>}
+                    {plan.manual > 0 && <span data-tone="warning">! {plan.manual} review</span>}
+                    {plan.destructive > 0 && (
+                      <span data-tone="danger">× {plan.destructive} file action</span>
+                    )}
+                    {plan.blocked > 0 && <span data-tone="muted">○ {plan.blocked} blocked</span>}
+                  </div>
+                </div>
+                {plan.ready > 0 && (
+                  <div className={styles.planActions}>
+                    <button
+                      type="button"
+                      className={styles.primary}
+                      disabled={applyBusy}
+                      onClick={() => void applyReady(reviewCase.case_id)}
+                    >
+                      Apply {plan.ready} ready change{plan.ready === 1 ? '' : 's'}
+                    </button>
+                    {plan.can_organize && reviewCase.album_id != null && (
+                      <button
+                        type="button"
+                        disabled={applyBusy}
+                        onClick={() => void applyReady(reviewCase.case_id, true)}
+                      >
+                        Apply and organize folder
+                      </button>
+                    )}
+                    <details>
+                      <summary>Review ready changes</summary>
+                      <ul>
+                        {reviewCase.items
+                          .filter((item) => item.review_tier === 'ready')
+                          .map((item) => (
+                            <li key={item.id}>{item.title}</li>
+                          ))}
+                      </ul>
+                    </details>
+                  </div>
+                )}
+              </section>
+
               <div className={styles.decisionHeader}>
                 <span>
-                  {findingTypeLabel(active.finding_type)} · Decision {itemIndex + 1} of{' '}
+                  {active.review_tier === 'ready' ? 'Ready change' : 'Needs review'} ·{' '}
+                  {findingTypeLabel(active.finding_type)} · Item {itemIndex + 1} of{' '}
                   {reviewCase.count}
                 </span>
                 <span className={styles.severity}>{active.severity}</span>
@@ -434,7 +576,7 @@ export function ReviewPage() {
                       ? 'Both files identify as the same release track. Playlist membership is shown with each copy.'
                       : suggested
                         ? 'Evidence supports a direct repair.'
-                        : 'The evidence still requires a decision.'}
+                        : active.review_reason || 'The evidence still requires a decision.'}
                   </p>
                 </div>
               </section>
@@ -510,16 +652,46 @@ export function ReviewPage() {
                 </button>
               </div>
               <div className={styles.trackList} aria-label="Other decisions on this album">
-                {reviewCase.items.map((finding) => (
-                  <button
-                    type="button"
-                    key={finding.id}
-                    onClick={() => setActiveId(finding.id)}
-                    aria-current={finding.id === active.id ? 'step' : undefined}
-                  >
-                    {findingTypeLabel(finding.finding_type)}: {finding.title}
-                  </button>
-                ))}
+                {needsReviewItems.length > 0 && (
+                  <section>
+                    <h4>Needs review</h4>
+                    <div>
+                      {needsReviewItems.map((finding) => (
+                        <button
+                          type="button"
+                          key={finding.id}
+                          onClick={() => setActiveId(finding.id)}
+                          aria-current={finding.id === active.id ? 'step' : undefined}
+                          data-tier={finding.review_tier || 'manual'}
+                        >
+                          <span aria-hidden="true">
+                            {finding.review_tier === 'destructive' ? '×' : '!'}
+                          </span>{' '}
+                          {findingTypeLabel(finding.finding_type)}: {finding.title}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+                {readyItems.length > 0 && (
+                  <section>
+                    <h4>Ready changes</h4>
+                    <div>
+                      {readyItems.map((finding) => (
+                        <button
+                          type="button"
+                          key={finding.id}
+                          onClick={() => setActiveId(finding.id)}
+                          aria-current={finding.id === active.id ? 'step' : undefined}
+                          data-tier="ready"
+                        >
+                          <span aria-hidden="true">✓</span> {findingTypeLabel(finding.finding_type)}
+                          : {finding.title}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
               </div>
             </>
           ) : queue && queue.total === 0 ? (
