@@ -71,6 +71,7 @@ def app(cfg):
 TRANSPORTS = {
     "bearer": ({"Authorization": f"Bearer {RAW_KEY}"}, ""),
     "bearer_padded": ({"Authorization": f"Bearer  {RAW_KEY} "}, ""),
+    "bearer_lowercase": ({"Authorization": f"bearer {RAW_KEY}"}, ""),
     "x_api_key": ({"X-API-Key": RAW_KEY}, ""),
     "x_api_key_lowercase": ({"x-api-key": RAW_KEY}, ""),
     "query": ({}, f"?api_key={RAW_KEY}"),
@@ -143,14 +144,14 @@ def test_record_without_hash_never_matches(cfg):
     "not-a-dict",
 ])
 def test_bad_record_ahead_of_a_good_one_does_not_block_it(cfg, bad):
-    # compare_digest raises TypeError on a non-ASCII str; a bad record first
-    # in the list used to stop every key after it from matching.
+    # compare_digest raises TypeError on a non-ascii str and .encode() on a
+    # non-str; either way a bad record first must not block the keys after it.
     good = {"id": "k1", "key_hash": KEY_HASH, "label": "bot"}
     cfg.data["api_keys"] = [bad, good]
     assert auth._match_api_key(cfg, RAW_KEY) is good
 
 
-def test_usage_write_does_not_restore_a_key_revoked_mid_request(app, cfg):
+def test_usage_write_does_not_restore_a_key_revoked_mid_request(app, cfg, monkeypatch):
     """The last_used_at write must persist the current list, not the one read
     before the lookup. Revoking during the request used to be undone."""
     real_should_persist = auth._should_persist_usage
@@ -160,13 +161,10 @@ def test_usage_write_does_not_restore_a_key_revoked_mid_request(app, cfg):
         cfg.set("api_keys", [k for k in cfg.get("api_keys") if k["id"] != "k1"])
         return real_should_persist(key_hash, now)
 
-    auth._should_persist_usage, saved = revoke_then_persist, auth._should_persist_usage
-    try:
-        resp = app.test_client().get(
-            "/api/v1/thing", headers={"Authorization": f"Bearer {RAW_KEY}"}
-        )
-    finally:
-        auth._should_persist_usage = saved
+    monkeypatch.setattr(auth, "_should_persist_usage", revoke_then_persist)
+    resp = app.test_client().get(
+        "/api/v1/thing", headers={"Authorization": f"Bearer {RAW_KEY}"}
+    )
 
     assert resp.status_code == 200  # the request itself was already authenticated
     assert cfg.get("api_keys") == []

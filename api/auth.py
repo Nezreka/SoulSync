@@ -66,9 +66,11 @@ def _request_api_key() -> str:
     ``X-API-Key: <key>`` (the header the *arr apps and most dashboards use),
     then the ``?api_key=`` query param (``<img>`` tags can't send headers).
     """
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        api_key = auth_header[len("Bearer "):].strip()
+    # the scheme word is case-insensitive per the http spec, some clients
+    # send "bearer <key>"
+    scheme, _, value = request.headers.get("Authorization", "").partition(" ")
+    if scheme.lower() == "bearer":
+        api_key = value.strip()
         if api_key:
             return api_key
     api_key = request.headers.get("X-API-Key", "").strip()
@@ -83,9 +85,10 @@ def _match_api_key(config_mgr, api_key):
         return None
     key_hash = _hash_key(api_key).encode()
     for stored in config_mgr.get("api_keys", []) or []:
-        # compare_digest raises on a str that isn't ASCII, so one odd record
-        # (say, from an imported config) must be skipped, not allowed to break
-        # every key listed after it.
+        # one odd record (say, from an imported config) must be skipped, not
+        # allowed to break every key listed after it. non-str hashes are skipped
+        # here, and encoding to bytes keeps compare_digest from raising on a
+        # non-ascii str.
         stored_hash = stored.get("key_hash") if isinstance(stored, dict) else None
         if not isinstance(stored_hash, str):
             continue
