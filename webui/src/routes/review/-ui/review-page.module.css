@@ -239,10 +239,6 @@
   border-color: #38775e;
   background: #17271f;
 }
-.decisionGrid article[data-selected='true'] {
-  outline: 2px solid #9b86ff;
-  outline-offset: 2px;
-}
 .decisionSelect {
   width: 100%;
   display: grid;
@@ -433,12 +429,6 @@
   box-shadow: inset 3px 0 #697187;
   background: #1d202b;
 }
-.matrixRow[data-selected='true'] {
-  outline: 2px solid #9b86ff;
-  outline-offset: -2px;
-  position: relative;
-  z-index: 1;
-}
 .matrixRow span {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -480,7 +470,7 @@
   min-width: 840px;
   margin: 0;
   border-width: 2px 0 1px;
-  border-color: #9b86ff #3b4053 #3b4053;
+  border-color: #51586e #3b4053 #3b4053;
   border-radius: 0;
 }
 .decisionGrid > .findingDetail {
@@ -490,6 +480,21 @@
 }
 .findingDetail > .decisionHeader:first-child {
   margin-top: 0;
+}
+.findingDetail[data-compact='true'] {
+  padding: 14px 18px 18px;
+  background: #171a26;
+}
+.findingDetail[data-compact='true'] h3 {
+  margin: 10px 0 4px;
+  font-size: 21px;
+}
+.findingDetail[data-compact='true'] .description {
+  margin: 0;
+  color: #aeb6c9;
+}
+.findingDetail[data-compact='true'] .reconciliationEvidence {
+  margin-top: 14px;
 }
 .albumHeader {
   border-bottom: 1px solid #373b4d;

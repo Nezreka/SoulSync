@@ -46,6 +46,15 @@ class _Acoustid:
         return {'status': 'ok', 'recordings': [self.matches[fingerprint]]}
 
 
+def test_album_title_keeps_clean_local_name_when_source_repeats_its_qualifier():
+    assert _album_titles_compatible(
+        'Katy Kirby on Audiotree Live',
+        'Katy Kirby on Audiotree Live (Audiotree Live)',
+    )
+    assert not _album_titles_compatible('Album', 'Album (Deluxe Edition)')
+    assert not _album_titles_compatible('Olive', 'Olive (live)')
+
+
 def test_candidate_evidence_displays_the_acoustid_recording_that_supports_the_slot():
     files = [{
         'path': '/album/01 - Tautou.mp3',

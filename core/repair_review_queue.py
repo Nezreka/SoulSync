@@ -27,6 +27,9 @@ _POSITION_CHANGE_KEYS = frozenset({
     'track_number', 'disc_number', 'library_track_number', 'library_disc_number',
 })
 _TITLE_CHANGE_KEYS = frozenset({'title', 'library_title', 'filename'})
+_TRACK_ARTIST_CHANGE_KEYS = frozenset({
+    'artist', 'track_artist', 'library_track_artist',
+})
 
 
 def _change_value(change: Any, key: str) -> str:
@@ -41,8 +44,29 @@ def _uniform_change_summary(rows: list[dict[str, Any]]) -> tuple[str, str] | Non
         if isinstance(row.get('details'), dict) else {}
         for row in rows
     ]
-    if not changes or any(not isinstance(change, dict) or len(change) != 1
+    if not changes or any(not isinstance(change, dict) or not change
                           for change in changes):
+        return None
+    field_sets = [set(change) for change in changes]
+    if (all(fields <= _TRACK_ARTIST_CHANGE_KEYS for fields in field_sets) and
+            all('track_artist' in fields or 'artist' in fields for fields in field_sets)):
+        expanded = False
+        for change in changes:
+            for field in ('track_artist', 'artist'):
+                if field not in change:
+                    continue
+                old = fold_title(_change_value(change[field], 'old'), drop_brackets=False)
+                new = fold_title(_change_value(change[field], 'new'), drop_brackets=False)
+                if old and new and old != new and new.startswith(f'{old} '):
+                    expanded = True
+                elif old != new:
+                    return None
+        if expanded:
+            count = len(rows)
+            return ('Featured artist credits',
+                    f'Adding missing featured artists to metadata on {count} '
+                    f'track{"s" if count != 1 else ""}.')
+    if any(len(change) != 1 for change in changes):
         return None
     field = next(iter(changes[0]))
     if any(next(iter(change)) != field for change in changes[1:]):
@@ -74,10 +98,8 @@ def finding_category(item: dict[str, Any]) -> str:
     changes = details.get('changes') if isinstance(details.get('changes'), dict) else {}
     if finding_type == 'reconciliation_release':
         return 'release_conflicts'
-    if finding_type == 'reconciliation_intent':
-        return 'partial_albums'
-    if finding_type == 'reconciliation_missing':
-        return 'missing_tracks'
+    if finding_type in ('reconciliation_intent', 'reconciliation_missing'):
+        return 'album_completeness'
     if finding_type in _DESTRUCTIVE_TYPES:
         return 'duplicates' if finding_type == 'reconciliation_duplicate' else 'extra_files'
     if finding_type == 'reconciliation_unresolved':
@@ -100,9 +122,9 @@ _CATEGORY_LABELS = {
     'metadata': 'Safe metadata', 'title_conventions': 'Title conventions',
     'title_issues': 'Title identity',
     'numbering': 'Numbering convention', 'release_conflicts': 'Release or edition',
-    'audio_conflicts': 'Audio assignment', 'missing_tracks': 'Missing tracks',
+    'audio_conflicts': 'Audio assignment',
     'extra_files': 'Extra files', 'duplicates': 'Duplicate files',
-    'partial_albums': 'Album intent',
+    'album_completeness': 'Album completeness',
 }
 
 
@@ -140,17 +162,19 @@ def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         elif category == 'audio_conflicts':
             summary = (f'{len(rows)} track assignment'
                        f'{"s need" if len(rows) != 1 else " needs"} confirmation.')
-        elif category == 'missing_tracks':
-            summary = (f'{len(rows)} expected track'
-                       f'{"s are" if len(rows) != 1 else " is"} absent.')
+        elif category == 'album_completeness':
+            if any(row.get('finding_type') == 'reconciliation_intent' for row in rows):
+                summary = 'Choose whether this album should be complete.'
+            else:
+                summary = (f'{len(rows)} expected track'
+                           f'{"s are" if len(rows) != 1 else " is"} absent from the '
+                           'intended complete album.')
         elif category == 'extra_files':
             summary = (f'{len(rows)} local file'
                        f'{"s do" if len(rows) != 1 else " does"} not fit the release.')
         elif category == 'duplicates':
             summary = (f'{len(rows)} duplicate-copy decision'
                        f'{"s" if len(rows) != 1 else ""} remain.')
-        elif category == 'partial_albums':
-            summary = 'Choose whether this album should be complete.'
         else:
             summary = rows[0].get('description') or 'Review the supporting evidence.'
         decisions.append({
@@ -161,8 +185,8 @@ def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             'action_count': len(rows),
         })
     category_rank = {
-        'release_conflicts': 0, 'partial_albums': 1, 'numbering': 2,
-        'title_issues': 3, 'audio_conflicts': 4, 'missing_tracks': 5,
+        'release_conflicts': 0, 'album_completeness': 1, 'numbering': 2,
+        'title_issues': 3, 'audio_conflicts': 4,
         'extra_files': 6, 'duplicates': 7, 'title_conventions': 8, 'metadata': 9,
     }
     risk_rank = {'manual': 0, 'destructive': 1, 'blocked': 2, 'ready': 3}
@@ -281,8 +305,8 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
                 (_DETAILS, _DETAILS, _DETAILS, _DETAILS)),
             'release_conflicts': "finding_type = 'reconciliation_release'",
             'audio_conflicts': "finding_type = 'reconciliation_unresolved'",
-            'missing_tracks': "finding_type = 'reconciliation_missing'",
-            'partial_albums': "finding_type = 'reconciliation_intent'",
+            'album_completeness': (
+                "finding_type IN ('reconciliation_intent','reconciliation_missing')"),
             'duplicates': "finding_type = 'reconciliation_duplicate'",
             'extra_files': "finding_type = 'reconciliation_extra'",
             'metadata': ("finding_type = 'reconciliation_metadata' AND "

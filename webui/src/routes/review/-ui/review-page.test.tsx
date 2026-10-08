@@ -61,7 +61,12 @@ const finding = {
           },
         ],
       },
-      { source: 'musicbrainz', release_id: 'release-two', matched: 1, clear: 1 },
+      {
+        source: 'musicbrainz',
+        release_id: 'release-two',
+        matched: 1,
+        clear: 1,
+      },
     ],
   },
   evidence_token: 'current-evidence',
@@ -133,7 +138,9 @@ describe('library reconciliation review queue', () => {
     render(<ReviewPage />);
     await screen.findByRole('heading', { name: 'Album 1' });
     expect(screen.getByText('Page 1 of 3')).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('Jump to page'), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText('Jump to page'), {
+      target: { value: '2' },
+    });
     await screen.findByRole('heading', { name: 'Album 3' });
     expect(screen.getByText('Page 3 of 3')).toBeTruthy();
     expect(screen.getByText(/Album 3 of 3/)).toBeTruthy();
@@ -347,6 +354,8 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByText('✓ 3 settled release slots')).toBeTruthy();
     expect(screen.getAllByText('No action')).toHaveLength(1);
     const selectedRow = screen.getByRole('row', { name: /Hourglass/ });
+    expect(screen.queryByLabelText('Selected action detail')).toBeNull();
+    fireEvent.click(selectedRow);
     const selectedDetail = screen.getByLabelText('Selected action detail');
     expect(selectedRow.nextElementSibling).toBe(selectedDetail);
   });
@@ -392,7 +401,9 @@ describe('library reconciliation review queue', () => {
         album_id: 10,
         album_title: 'Ashes of the Wake',
         artist_name: 'Lamb of God',
-        changes: { album_artist: { old: 'Various Artists', new: 'Lamb of God' } },
+        changes: {
+          album_artist: { old: 'Various Artists', new: 'Lamb of God' },
+        },
       },
       review_tier: 'ready',
       review_reason: 'Audio and release evidence support this metadata repair',
@@ -407,6 +418,19 @@ describe('library reconciliation review queue', () => {
       blocker_reasons: [],
       can_apply_ready: true,
       can_organize: true,
+      decision_count: 1,
+      categories: ['metadata'],
+      decisions: [
+        {
+          id: 'metadata',
+          category: 'metadata',
+          label: 'Album artist update',
+          risk: 'ready',
+          summary: '1 track: Various Artists → Lamb of God.',
+          finding_ids: [7],
+          action_count: 1,
+        },
+      ],
     };
     fetchMock.mockImplementation((url: string, options?: RequestInit) => {
       if (url === '/api/repair/finding-types')
@@ -476,6 +500,7 @@ describe('library reconciliation review queue', () => {
 
     expect(await screen.findByText('Ready to reconcile')).toBeTruthy();
     expect(screen.getAllByText('✓ 1 ready').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('heading', { name: '1 question for this album' })).toBeNull();
     fireEvent.click(screen.getByText('Review ready changes'));
     expect(screen.getByText('Album artist')).toBeTruthy();
     expect(screen.getByText('1 track · Various Artists → Lamb of God')).toBeTruthy();
@@ -572,8 +597,18 @@ describe('library reconciliation review queue', () => {
         acoustid: {
           status: 'ok',
           recordings: [
-            { mbid: 'cold-one', title: 'Cold', artist: 'Chelsea Wolfe', score: 0.99 },
-            { mbid: 'cold-two', title: 'Cold', artist: 'Chelsea Wolfe', score: 0.99 },
+            {
+              mbid: 'cold-one',
+              title: 'Cold',
+              artist: 'Chelsea Wolfe',
+              score: 0.99,
+            },
+            {
+              mbid: 'cold-two',
+              title: 'Cold',
+              artist: 'Chelsea Wolfe',
+              score: 0.99,
+            },
           ],
         },
       },
@@ -691,7 +726,9 @@ describe('library reconciliation review queue', () => {
       throw new Error(`Unexpected request: ${url}`);
     });
     render(<ReviewPage />);
-    const buttons = await screen.findAllByRole('button', { name: 'Pin this release' });
+    const buttons = await screen.findAllByRole('button', {
+      name: 'Pin this release',
+    });
     fireEvent.click(buttons[1]);
     await screen.findByText('Release pinned');
   });

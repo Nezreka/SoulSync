@@ -2,6 +2,7 @@ import type { ReactNode, SVGProps } from 'react';
 
 import type { ReviewFinding } from '../-review.api';
 
+import { ProviderReleaseId } from './provider-release-id';
 import styles from './review-page.module.css';
 
 type Data = Record<string, unknown>;
@@ -253,7 +254,8 @@ function TrackGroups({ pairs }: { pairs: Data[] }) {
         <details className={styles.confirmedGroup}>
           <summary>
             <EvidenceIcon name="check" />
-            {confirmed.length} confirmed match{confirmed.length === 1 ? '' : 'es'}
+            {confirmed.length} confirmed match
+            {confirmed.length === 1 ? '' : 'es'}
             <span>Show</span>
           </summary>
           <TrackRows pairs={confirmed} />
@@ -487,11 +489,10 @@ function ReleaseCandidates({
                     Candidate {index + 1} · {label(candidate.source) || 'Unknown source'}
                   </strong>
                   <small>
-                    {label(candidate.source) === 'musicbrainz' ? (
-                      <MusicBrainzId value={candidate.release_id} kind="release" />
-                    ) : (
-                      label(candidate.release_id)
-                    )}
+                    <ProviderReleaseId
+                      source={label(candidate.source)}
+                      releaseId={label(candidate.release_id)}
+                    />
                   </small>
                 </div>
               </header>
@@ -552,7 +553,8 @@ function ReleaseCandidates({
               {missing.length > 0 && (
                 <details className={styles.issueDetails}>
                   <summary>
-                    {missing.length} missing track{missing.length === 1 ? '' : 's'}
+                    {missing.length} missing track
+                    {missing.length === 1 ? '' : 's'}
                   </summary>
                   <ul>
                     {missing.map((track) => (
@@ -564,7 +566,8 @@ function ReleaseCandidates({
               {extra.length > 0 && (
                 <details className={styles.issueDetails}>
                   <summary>
-                    {extra.length} unassigned file{extra.length === 1 ? '' : 's'}
+                    {extra.length} unassigned file
+                    {extra.length === 1 ? '' : 's'}
                   </summary>
                   <ul>
                     {extra.map((file) => (
@@ -709,11 +712,10 @@ function Facts({ finding, details }: { finding: ReviewFinding; details: Data }) 
             <div>
               <dt>Release ID</dt>
               <dd>
-                {label(details.source) === 'musicbrainz' ? (
-                  <MusicBrainzId value={details.release_id} kind="release" />
-                ) : (
-                  label(details.release_id)
-                )}
+                <ProviderReleaseId
+                  source={label(details.source)}
+                  releaseId={label(details.release_id)}
+                />
               </dd>
             </div>
           )}

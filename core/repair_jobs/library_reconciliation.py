@@ -580,14 +580,27 @@ def _search_release_candidates(album: dict | None, context: JobContext,
 
 def _album_titles_compatible(current: str, release: str) -> bool:
     """Keep local edition detail when both names share the same album identity."""
+    def without_repeated_qualifier(value: str) -> str:
+        match = (re.match(r'^(.*?)\s+\(([^()]*)\)\s*$', value.strip()) or
+                 re.match(r'^(.*?)\s+\[([^\[\]]*)\]\s*$', value.strip()))
+        if not match:
+            return value
+        base, qualifier = match.groups()
+        base_words = normalize(base)
+        qualifier_words = normalize(qualifier)
+        if qualifier_words and f' {qualifier_words} ' in f' {base_words} ':
+            return base.strip()
+        return value
+
+    cleaned_release = without_repeated_qualifier(release or '')
     current_normalized = normalize(current or '')
-    release_normalized = normalize(release or '')
+    release_normalized = normalize(cleaned_release)
     if not current_normalized or not release_normalized:
         return False
     if current_normalized == release_normalized:
         # Preserve detail already present locally, but still allow a selected
         # release to add an edition suffix the local title does not carry.
-        return len(current.strip()) >= len(release.strip())
+        return len(current.strip()) >= len(cleaned_release.strip())
     if current_normalized.startswith(f'{release_normalized} '):
         local_detail = current_normalized[len(release_normalized):].strip()
         return bool(_ALBUM_EDITION_WORD.search(local_detail))
@@ -1573,6 +1586,13 @@ class LibraryReconciliationJob(RepairJob):
                 release_title = (release_meta.get('name') or release_meta.get('title') or
                                  (album.get('album_title') if album else '') or
                                  os.path.basename(folder))
+                library_album_title = album.get('album_title') if album else ''
+                display_release_title = (
+                    library_album_title
+                    if library_album_title and
+                    _album_titles_compatible(library_album_title, release_title)
+                    else release_title
+                )
                 release_artists = release_meta.get('artists') or []
                 release_artist_names = [
                     artist.get('name') if isinstance(artist, dict) else str(artist)
@@ -1583,8 +1603,8 @@ class LibraryReconciliationJob(RepairJob):
                 release_artist = (' & '.join(release_artist_names) if release_artist_names
                                   else (album.get('artist_name') if album else ''))
                 common = {
-                    'album_id': album_id, 'album_title': release_title,
-                    'library_album_title': album.get('album_title') if album else '',
+                    'album_id': album_id, 'album_title': display_release_title,
+                    'library_album_title': library_album_title,
                     'artist_name': release_artist or (album.get('artist_name') if album else ''),
                     'release_artist_names': release_artist_names,
                     'release_disambiguation': release_meta.get('disambiguation') or '',

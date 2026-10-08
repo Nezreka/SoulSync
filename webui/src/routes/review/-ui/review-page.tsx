@@ -23,6 +23,7 @@ import {
 } from '../-review.api';
 import { fetchFindingTypes } from '../../tools/-tools.api';
 import { findingTypeLabel } from '../../tools/-tools.core';
+import { ProviderReleaseId } from './provider-release-id';
 import { ReconciliationEvidence } from './reconciliation-evidence';
 import styles from './review-page.module.css';
 
@@ -53,10 +54,9 @@ const categoryOptions = [
   ['numbering', 'Numbering schemes'],
   ['release_conflicts', 'Release or edition'],
   ['audio_conflicts', 'Audio conflicts'],
-  ['missing_tracks', 'Missing tracks'],
+  ['album_completeness', 'Album completeness'],
   ['duplicates', 'Duplicates'],
   ['extra_files', 'Extra files'],
-  ['partial_albums', 'Album intent'],
 ] as const;
 
 const categoryLabels = Object.fromEntries(categoryOptions.filter(([value]) => value));
@@ -74,21 +74,6 @@ function findingHeading(finding: ReviewFinding): string {
   }
   if (/^Retag\s+/i.test(finding.title)) return `Update metadata: ${expected}`;
   return finding.title;
-}
-
-function ReleaseId({ source, releaseId }: { source?: string; releaseId?: string }) {
-  if (!releaseId) return <code>unknown</code>;
-  return source === 'musicbrainz' ? (
-    <a
-      href={`https://musicbrainz.org/release/${encodeURIComponent(releaseId)}`}
-      target="_blank"
-      rel="noreferrer"
-    >
-      <code>{releaseId}</code>
-    </a>
-  ) : (
-    <code>{releaseId}</code>
-  );
 }
 
 function statusLabel(status: string) {
@@ -221,6 +206,17 @@ function groupReadyChanges(items: ReviewFinding[]): ReadyChangeGroup[] {
     groups.set(key, group);
   }
   return [...groups.values()].map(({ values, ...group }) => {
+    const fields = group.key.split('|');
+    if (
+      fields.includes('track_artist') &&
+      fields.every((field) => ['artist', 'library_track_artist', 'track_artist'].includes(field))
+    ) {
+      return {
+        ...group,
+        label: 'Featured artist credits',
+        valueSummary: 'Adding missing featured artists to metadata',
+      };
+    }
     if (!values.length) return group;
     const first = values[0];
     const same = values.every(
@@ -248,6 +244,7 @@ function SelectedActionDetail({
   onSelect,
   previousId,
   nextId,
+  compact = false,
 }: {
   finding: ReviewFinding;
   itemIndex: number;
@@ -259,6 +256,7 @@ function SelectedActionDetail({
   onSelect: (findingId: number | null) => void;
   previousId?: number;
   nextId?: number;
+  compact?: boolean;
 }) {
   const canApply = Boolean(typeInfo?.fixable) && finding.finding_type !== 'suspect_album_tag';
   const duplicateChoice = finding.finding_type === 'reconciliation_duplicate';
@@ -266,46 +264,56 @@ function SelectedActionDetail({
   return (
     <section
       className={styles.findingDetail}
+      data-compact={compact || undefined}
       id="selected-review-action"
       aria-label="Selected action detail"
     >
       <div className={styles.decisionHeader}>
         <span>
-          Selected action · {suggested ? 'Ready change' : 'Needs review'} ·{' '}
-          {findingTypeLabel(finding.finding_type)} · Item {itemIndex + 1} of {itemCount}
+          {compact ? 'Selected row' : 'Selected action'} ·{' '}
+          {suggested ? 'Ready change' : 'Needs review'} · {findingTypeLabel(finding.finding_type)}
+          {!compact && ` · Item ${itemIndex + 1} of ${itemCount}`}
         </span>
         <span className={styles.severity}>{finding.severity}</span>
       </div>
-      <h3>{findingHeading(finding)}</h3>
+      <h3>
+        {compact
+          ? suggested
+            ? 'Proposed metadata change'
+            : 'Why this assignment needs review'
+          : findingHeading(finding)}
+      </h3>
       <p className={styles.description}>{finding.description || 'Review the evidence below.'}</p>
-      <section
-        className={styles.suggestion}
-        data-tone={suggested ? 'good' : 'warning'}
-        aria-label="Suggested resolution"
-      >
-        <span className={styles.suggestionIcon} aria-hidden="true">
-          {suggested ? '✓' : '!'}
-        </span>
-        <div>
-          <div className={styles.eyebrow}>Suggested resolution</div>
-          <strong>
-            {duplicateChoice
-              ? 'Choose the copy to keep'
-              : suggested
-                ? typeInfo?.verb || 'Apply repair'
-                : canApply
-                  ? 'Choose the correct action after reviewing the evidence'
-                  : 'Review manually'}
-          </strong>
-          <p>
-            {duplicateChoice
-              ? 'Both files identify as the same release track. Playlist membership is shown with each copy.'
-              : suggested
-                ? 'Evidence supports a direct repair.'
-                : finding.review_reason || 'The evidence still requires a decision.'}
-          </p>
-        </div>
-      </section>
+      {!compact && (
+        <section
+          className={styles.suggestion}
+          data-tone={suggested ? 'good' : 'warning'}
+          aria-label="Suggested resolution"
+        >
+          <span className={styles.suggestionIcon} aria-hidden="true">
+            {suggested ? '✓' : '!'}
+          </span>
+          <div>
+            <div className={styles.eyebrow}>Suggested resolution</div>
+            <strong>
+              {duplicateChoice
+                ? 'Choose the copy to keep'
+                : suggested
+                  ? typeInfo?.verb || 'Apply repair'
+                  : canApply
+                    ? 'Choose the correct action after reviewing the evidence'
+                    : 'Review manually'}
+            </strong>
+            <p>
+              {duplicateChoice
+                ? 'Both files identify as the same release track. Playlist membership is shown with each copy.'
+                : suggested
+                  ? 'Evidence supports a direct repair.'
+                  : finding.review_reason || 'The evidence still requires a decision.'}
+            </p>
+          </div>
+        </section>
+      )}
       <ReconciliationEvidence
         finding={finding}
         busy={busy}
@@ -487,9 +495,14 @@ export function ReviewPage() {
         setReviewCase(result);
         setActiveId((current) => {
           if (result.items.some((f) => f.id === current)) return current;
+          const hasStructuredOverview = Boolean(
+            result.decisions?.length ||
+            result.plan?.decisions?.length ||
+            result.album_plan?.assignments?.length,
+          );
+          if (!hasStructuredOverview) return result.items[0]?.id ?? null;
           return (
             result.items.find((finding) => finding.finding_type === 'reconciliation_release')?.id ??
-            result.items[0]?.id ??
             null
           );
         });
@@ -503,7 +516,7 @@ export function ReviewPage() {
   }, [caseId]);
 
   const active = useMemo(
-    () => reviewCase?.items.find((finding) => finding.id === activeId) || reviewCase?.items[0],
+    () => reviewCase?.items.find((finding) => finding.id === activeId),
     [reviewCase, activeId],
   );
   const itemIndex =
@@ -557,6 +570,11 @@ export function ReviewPage() {
     ? assignments.find((row) => row.finding_id === active.id)
     : undefined;
   const primaryDecision = decisions.length === 1 ? decisions[0] : undefined;
+  const showDecisionBoard = !(
+    plan.status === 'ready' &&
+    decisions.length === 1 &&
+    decisions[0]?.risk === 'ready'
+  );
 
   const selectFinding = (findingId: number | null) => {
     setActiveId(findingId);
@@ -745,6 +763,26 @@ export function ReviewPage() {
         nextId={reviewCase.items[itemIndex + 1]?.id}
       />
     ) : null;
+  const compactSelectedActionDetail =
+    active && reviewCase ? (
+      <SelectedActionDetail
+        finding={active}
+        itemIndex={itemIndex}
+        itemCount={reviewCase.count}
+        typeInfo={typeInfo}
+        busy={busy}
+        onAct={(action, choice) => void act(active, action, choice)}
+        onPin={
+          active.finding_type === 'reconciliation_release'
+            ? (pinIndex) => void act(active, 'fix', String(pinIndex))
+            : undefined
+        }
+        onSelect={selectFinding}
+        previousId={reviewCase.items[itemIndex - 1]?.id}
+        nextId={reviewCase.items[itemIndex + 1]?.id}
+        compact
+      />
+    ) : null;
 
   return (
     <main className={`page-shell ${styles.page}`}>
@@ -920,14 +958,15 @@ export function ReviewPage() {
         </aside>
 
         <section className={styles.review} aria-label="Current review case">
-          {reviewCase && active ? (
+          {reviewCase ? (
             <>
               <div className={styles.albumHeader}>
                 <div>
                   <div className={styles.eyebrow}>
                     Album {albumNumber ?? '—'} of {queue?.total ?? '—'}
                     {' · '}
-                    {reviewCase.count} open decision{reviewCase.count === 1 ? '' : 's'}
+                    {reviewCase.count} pending action
+                    {reviewCase.count === 1 ? '' : 's'}
                   </div>
                   <h2>{reviewCase.album || 'Unassigned files'}</h2>
                   <p>{reviewCase.artist || 'Artist not established'}</p>
@@ -984,7 +1023,8 @@ export function ReviewPage() {
                       disabled={applyBusy}
                       onClick={() => void applyReady(reviewCase.case_id)}
                     >
-                      Apply {plan.ready} ready change{plan.ready === 1 ? '' : 's'}
+                      Apply {plan.ready} ready change
+                      {plan.ready === 1 ? '' : 's'}
                     </button>
                     {plan.can_organize && reviewCase.album_id != null && (
                       <button
@@ -1017,23 +1057,24 @@ export function ReviewPage() {
                 )}
               </section>
 
-              {decisions.length > 0 && (
+              {decisions.length > 0 && showDecisionBoard && (
                 <section className={styles.decisionBoard} aria-label="Album decisions">
                   <div className={styles.sectionHeading}>
                     <div>
                       <div className={styles.eyebrow}>Decisions</div>
                       <h3>
-                        {decisions.length} question{decisions.length === 1 ? '' : 's'} for this
-                        album
+                        {decisions.length} question
+                        {decisions.length === 1 ? '' : 's'} for this album
                       </h3>
                     </div>
                     <span>
-                      {reviewCase.count} resulting action{reviewCase.count === 1 ? '' : 's'}
+                      {reviewCase.count} resulting action
+                      {reviewCase.count === 1 ? '' : 's'}
                     </span>
                   </div>
                   <div className={styles.decisionGrid}>
                     {decisions.map((decision) => {
-                      const selected = decision.finding_ids.includes(active.id);
+                      const selected = active ? decision.finding_ids.includes(active.id) : false;
                       return (
                         <Fragment key={decision.id}>
                           <article data-risk={decision.risk} data-selected={selected || undefined}>
@@ -1086,9 +1127,9 @@ export function ReviewPage() {
                           </article>
                           {selected &&
                             !activeAssignment &&
-                            active.finding_type !== 'reconciliation_release' &&
+                            active?.finding_type !== 'reconciliation_release' &&
                             selectedActionDetail}
-                          {selected && active.finding_type === 'reconciliation_release' && (
+                          {selected && active?.finding_type === 'reconciliation_release' && (
                             <section
                               className={styles.releaseDecision}
                               id="selected-review-action"
@@ -1163,7 +1204,7 @@ export function ReviewPage() {
                   <div className={styles.releaseContext}>
                     <span>
                       Selected {reviewCase.album_plan?.source || 'catalog'} release
-                      <ReleaseId
+                      <ProviderReleaseId
                         source={reviewCase.album_plan?.source}
                         releaseId={reviewCase.album_plan?.release_id}
                       />
@@ -1193,9 +1234,9 @@ export function ReviewPage() {
                         <AssignmentRow
                           row={row}
                           onSelect={selectFinding}
-                          selected={row.finding_id === active.id}
+                          selected={row.finding_id === active?.id}
                         />
-                        {row.finding_id === active.id && selectedActionDetail}
+                        {row.finding_id === active?.id && compactSelectedActionDetail}
                       </Fragment>
                     ))}
                     {settledAssignments.length > 0 && (
@@ -1206,9 +1247,9 @@ export function ReviewPage() {
                             <AssignmentRow
                               row={row}
                               onSelect={selectFinding}
-                              selected={row.finding_id === active.id}
+                              selected={row.finding_id === active?.id}
                             />
-                            {row.finding_id === active.id && selectedActionDetail}
+                            {row.finding_id === active?.id && compactSelectedActionDetail}
                           </Fragment>
                         ))}
                       </details>
@@ -1216,7 +1257,7 @@ export function ReviewPage() {
                   </div>
                 </section>
               )}
-              {!activeAssignment && !activeDecision && selectedActionDetail}
+              {active && !activeAssignment && !activeDecision && selectedActionDetail}
             </>
           ) : queue && queue.total === 0 ? (
             <div className={styles.empty}>

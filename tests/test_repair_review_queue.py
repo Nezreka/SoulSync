@@ -192,9 +192,43 @@ def test_album_intent_summary_states_the_album_level_question():
         'id': 1, 'finding_type': 'reconciliation_intent', 'details': {},
     }])
 
-    assert plan['decisions'][0]['label'] == 'Album intent'
+    assert plan['decisions'][0]['label'] == 'Album completeness'
     assert plan['decisions'][0]['summary'] == (
         'Choose whether this album should be complete.')
+
+
+def test_featured_artist_repairs_are_described_as_one_album_wide_change():
+    items = [{
+        'id': finding_id,
+        'finding_type': 'reconciliation_metadata',
+        'details': {
+            'confidence': 'clear',
+            'changes': {
+                'track_artist': {'old': 'Zero 7', 'new': f'Zero 7; Guest {finding_id}'},
+                'library_track_artist': {'old': '', 'new': f'Zero 7; Guest {finding_id}'},
+            },
+        },
+    } for finding_id in range(1, 4)]
+
+    decision = classify_case(items)['decisions'][0]
+
+    assert decision['label'] == 'Featured artist credits'
+    assert decision['summary'] == (
+        'Adding missing featured artists to metadata on 3 tracks.')
+
+
+def test_album_completeness_filter_includes_intent_and_known_missing_tracks():
+    db = _Database()
+    details = {'album_id': 10, 'album_title': 'Album'}
+    db.add(1, None, details, job_id='library_reconciliation',
+           kind='reconciliation_intent')
+    db.add(2, None, {**details, 'album_id': 11}, job_id='library_reconciliation',
+           kind='reconciliation_missing')
+
+    filtered = list_cases(
+        db, job_id='library_reconciliation', category='album_completeness')
+
+    assert filtered['total'] == 2
 
 
 def test_material_title_conflict_is_not_hidden_inside_numbering_group():
