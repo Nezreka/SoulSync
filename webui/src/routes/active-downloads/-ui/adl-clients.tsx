@@ -249,6 +249,20 @@ function SoulsyncChip({ item }: { item: { soulsync?: { kind?: string; title?: st
 
 export type ClientSort = 'default' | 'speed' | 'progress' | 'name' | 'size';
 
+/** Whose downloads to show: everything, the ones SoulSync follows, or the rest. */
+export type OwnerFilter = 'all' | 'soulsync' | 'external';
+
+export function byOwner<T extends { soulsync?: unknown }>(items: T[], owner: OwnerFilter): T[] {
+  if (owner === 'all') return items;
+  return items.filter((item) => Boolean(item.soulsync) === (owner === 'soulsync'));
+}
+
+const OWNER_CHOICES: { key: OwnerFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'soulsync', label: 'SoulSync' },
+  { key: 'external', label: 'Not in SoulSync' },
+];
+
 interface ViewAccessors<T> {
   name: (item: T) => string;
   speed: (item: T) => number;
@@ -300,6 +314,9 @@ const STATE_CHIP_ORDER = [
 
 function ClientToolbar({
   items,
+  owner,
+  onOwner,
+  ownerCounts,
   totalSpeed,
   upSpeed,
   search,
@@ -313,6 +330,9 @@ function ClientToolbar({
   onRefresh,
 }: {
   items: { length: number };
+  owner: OwnerFilter;
+  onOwner: (value: OwnerFilter) => void;
+  ownerCounts: Record<OwnerFilter, number>;
   totalSpeed: number;
   upSpeed?: number;
   search: string;
@@ -327,6 +347,21 @@ function ClientToolbar({
 }) {
   return (
     <div className="adl-client-toolbar">
+      <div className="adl-client-owner-switch" role="radiogroup" aria-label="Whose downloads">
+        {OWNER_CHOICES.map((choice) => (
+          <button
+            key={choice.key}
+            type="button"
+            role="radio"
+            aria-checked={owner === choice.key}
+            className={`adl-client-owner-choice${owner === choice.key ? ' active' : ''}`}
+            onClick={() => onOwner(choice.key)}
+          >
+            {choice.label}
+            <span className="adl-client-owner-count">{ownerCounts[choice.key]}</span>
+          </button>
+        ))}
+      </div>
       <input
         type="text"
         className="adl-client-search"
@@ -698,6 +733,9 @@ export function AdlClientsTab() {
   const [search, setSearch] = useState('');
   const [stateFilter, setStateFilter] = useState('all');
   const [sort, setSort] = useState<ClientSort>('default');
+  // kept across client tabs: "show me what SoulSync isn't following" is a
+  // question about every client at once
+  const [owner, setOwner] = useState<OwnerFilter>('all');
   const [slskdView, setSlskdView] = useState<'downloads' | 'uploads'>('downloads');
   const [links, setLinks] = useState<ClientLinks | null>(null);
   // the download being matched by hand, or null when the window is closed
@@ -770,7 +808,7 @@ export function AdlClientsTab() {
   /* filtered views per kind */
   const slskdSource =
     slskdView === 'uploads' ? (slskd.overview?.uploads ?? []) : (slskd.overview?.items ?? []);
-  const slskdVisible = applyView(slskdSource, search, stateFilter, sort, {
+  const slskdVisible = applyView(byOwner(slskdSource, owner), search, stateFilter, sort, {
     name: (t) => t.filename,
     speed: (t) => t.speed,
     size: (t) => t.size,
@@ -778,20 +816,32 @@ export function AdlClientsTab() {
     state: (t) => t.state,
     haystack: (t) => t.username,
   });
-  const torrentVisible = applyView(torrent.overview?.items ?? [], search, stateFilter, sort, {
-    name: (t) => t.name,
-    speed: (t) => t.download_speed,
-    size: (t) => t.size,
-    progress: (t) => t.progress,
-    state: (t) => t.state,
-  });
-  const usenetVisible = applyView(usenet.overview?.items ?? [], search, stateFilter, sort, {
-    name: (t) => t.name,
-    speed: (t) => t.download_speed,
-    size: (t) => t.size,
-    progress: (t) => t.progress,
-    state: (t) => t.state,
-  });
+  const torrentVisible = applyView(
+    byOwner(torrent.overview?.items ?? [], owner),
+    search,
+    stateFilter,
+    sort,
+    {
+      name: (t) => t.name,
+      speed: (t) => t.download_speed,
+      size: (t) => t.size,
+      progress: (t) => t.progress,
+      state: (t) => t.state,
+    },
+  );
+  const usenetVisible = applyView(
+    byOwner(usenet.overview?.items ?? [], owner),
+    search,
+    stateFilter,
+    sort,
+    {
+      name: (t) => t.name,
+      speed: (t) => t.download_speed,
+      size: (t) => t.size,
+      progress: (t) => t.progress,
+      state: (t) => t.state,
+    },
+  );
 
   /** "Details" for a card SoulSync already follows; the card itself also opens. */
   const detailsButton = (expanded: boolean, toggle: () => void) => (
@@ -807,10 +857,42 @@ export function AdlClientsTab() {
     </button>
   );
 
+  /** slskd lists files, but a release is a folder: the target is every
+   * transfer from this peer in this folder that SoulSync isn't following. */
+  const soulseekFolder = (item: ClientSlskdItem): MatchTarget => {
+    const dirOf = (path: string) => path.replace(/[\\/][^\\/]*$/, '');
+    const dir = dirOf(item.filename);
+    const files = (slskd.overview?.items ?? []).filter(
+      (other) =>
+        other.username === item.username && dirOf(other.filename) === dir && !other.soulsync,
+    );
+    return {
+      client: 'soulseek',
+      id: '',
+      name: dir.split(/[\\/]/).pop() || item.filename,
+      size: files.reduce((sum, file) => sum + (file.size || 0), 0),
+      folder: {
+        username: item.username,
+        files: files.map((file) => ({ filename: file.filename, size: file.size })),
+      },
+    };
+  };
+
   const slskdRow = (item: ClientSlskdItem, readOnly: boolean) => {
     const key = `soulseek:${slskdView}:${item.username}:${item.id}`;
     const expanded = openCards.has(key);
     const toggle = () => toggleCard(key);
+    const matchable = !readOnly && !item.soulsync;
+    const cancel: MenuAction = {
+      label: 'Cancel transfer',
+      danger: true,
+      onSelect: () =>
+        void runAction(
+          'Cancel',
+          () => slskdClientCancel(item.id, item.username, true),
+          slskd.reload,
+        ),
+    };
     return (
       <ClientRow
         key={`${readOnly ? 'up' : 'dl'}:${item.username}:${item.id}`}
@@ -842,22 +924,13 @@ export function AdlClientsTab() {
         expanded={expanded}
         onToggle={toggle}
         owner={<SoulsyncChip item={item} />}
-        primary={detailsButton(expanded, toggle)}
+        primary={matchable ? matchButton(soulseekFolder(item)) : detailsButton(expanded, toggle)}
         menu={
           readOnly
             ? []
-            : [
-                {
-                  label: 'Cancel transfer',
-                  danger: true,
-                  onSelect: () =>
-                    void runAction(
-                      'Cancel',
-                      () => slskdClientCancel(item.id, item.username, true),
-                      slskd.reload,
-                    ),
-                },
-              ]
+            : matchable
+              ? [{ label: expanded ? 'Hide details' : 'Details', onSelect: toggle }, cancel]
+              : [cancel]
         }
       />
     );
@@ -983,6 +1056,12 @@ export function AdlClientsTab() {
         ? (torrent.overview?.items ?? [])
         : (usenet.overview?.items ?? []);
   const stateCounts = bucketCounts(activeAll as { state: string }[], (item) => item.state);
+  const owned = (activeAll as { soulsync?: unknown }[]).filter((item) => item.soulsync).length;
+  const ownerCounts: Record<OwnerFilter, number> = {
+    all: activeAll.length,
+    soulsync: owned,
+    external: activeAll.length - owned,
+  };
   const downSpeed = activeVisible.reduce(
     (sum, item) =>
       sum +
@@ -1106,6 +1185,9 @@ export function AdlClientsTab() {
       {activeHealth === 'ok' ? (
         <ClientToolbar
           items={activeVisible}
+          owner={owner}
+          onOwner={setOwner}
+          ownerCounts={ownerCounts}
           totalSpeed={downSpeed}
           upSpeed={upSpeed}
           search={search}
@@ -1204,7 +1286,11 @@ export function AdlClientsTab() {
         onMatched={(message) => {
           setMatching(null);
           toast(message, 'success');
-          void (matching?.client === 'usenet' ? usenet.reload() : torrent.reload());
+          void (matching?.client === 'usenet'
+            ? usenet.reload()
+            : matching?.client === 'soulseek'
+              ? slskd.reload()
+              : torrent.reload());
         }}
       />
     </div>

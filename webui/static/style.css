@@ -80362,6 +80362,46 @@ select.ma-input { appearance: auto; }
     border-color: rgba(var(--accent-rgb), 0.5);
 }
 
+/* whose downloads: all, the ones soulsync follows, the rest */
+.adl-client-owner-switch {
+    display: inline-flex;
+    gap: 3px;
+    padding: 3px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.adl-client-owner-choice {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 11px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.62);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.adl-client-owner-choice:hover {
+    color: #fff;
+}
+
+.adl-client-owner-choice.active {
+    background: rgba(var(--accent-rgb), 0.16);
+    color: rgb(var(--accent-rgb));
+}
+
+.adl-client-owner-count {
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.45);
+}
+
 .adl-client-state-chips {
     display: flex;
     gap: 5px;

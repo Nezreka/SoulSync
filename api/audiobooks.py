@@ -1187,8 +1187,10 @@ def create_audiobooks_blueprint() -> Blueprint:
         already in the download client, as if it had been grabbed here.
 
         Body: {source: torrent|usenet, client_ref, asin, release_title,
-        size_bytes}. Writes the same records a grab writes, so the monitor
-        imports it once the client says it is complete.
+        size_bytes}, or for a soulseek folder {source: soulseek, username,
+        files: [remote filename, ...], asin, ...}. Writes the same records a
+        grab writes, so the monitor imports it once the client says it is
+        complete.
         """
         denied = _download_denied()
         if denied is not None:
@@ -1199,8 +1201,15 @@ def create_audiobooks_blueprint() -> Blueprint:
         body = request.get_json(silent=True) or {}
         source = str(body.get("source") or "").lower()
         client_ref = str(body.get("client_ref") or "").strip()
+        if source == "soulseek":
+            # the transfers are already in slskd: pack them the way a soulseek
+            # grab does, so the same status / landing-path code follows them
+            from core.client_match import soulseek_job
+            files = [str(f) for f in (body.get("files") or []) if f]
+            username = str(body.get("username") or "").strip()
+            client_ref = soulseek_job(username, files) if username and files else ""
         asin = str(body.get("asin") or "").strip()
-        if source not in ("torrent", "usenet") or not client_ref:
+        if source not in ("torrent", "usenet", "soulseek") or not client_ref:
             return jsonify({"success": False, "error": "Missing the download to match."}), 400
         if not asin:
             return jsonify({"success": False, "error": "Pick the book this download is."}), 400
@@ -1216,9 +1225,14 @@ def create_audiobooks_blueprint() -> Blueprint:
                 "owned": True,
                 "error": "That book is already in your library. Send force to import it anyway.",
             }), 409
-        # torrent refs are info-hashes, which clients report in either case
-        ref = client_ref.lower() if source == "torrent" else client_ref
-        if any(str(row.get("client_id") or "").lower() == ref.lower()
+        # torrent refs are info-hashes, which clients report in either case.
+        # a soulseek folder gets a short stable id; its transfers ride in
+        # client_ref, the same split a soulseek grab makes
+        import hashlib
+        ref = (f"slsk:{hashlib.sha1(client_ref.encode()).hexdigest()[:16]}" if source == "soulseek"
+               else client_ref.lower() if source == "torrent" else client_ref)
+        stored = client_ref if source == "soulseek" else ref
+        if any(str(row.get("client_id") or "").lower() == stored.lower()
                for row in db.get_downloads(active_only=True)):
             return jsonify({"success": False,
                             "error": "SoulSync is already following this download."}), 409
@@ -1228,7 +1242,7 @@ def create_audiobooks_blueprint() -> Blueprint:
             db,
             asin=asin,
             ref=ref,
-            client_ref=ref,
+            client_ref=stored,
             release={"protocol": source,
                      "title": str(body.get("release_title") or ""),
                      "size_bytes": int(body.get("size_bytes") or 0)},

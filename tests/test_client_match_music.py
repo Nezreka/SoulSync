@@ -120,9 +120,8 @@ def test_a_finished_download_is_copied_imported_and_keeps_seeding(store, folders
     out = cm.process_match(row, store, get_status=lambda c, r: (_status(path=str(folders.download)), True),
                            resolve=lambda p: p, runtime_factory=lambda r: None)
     assert out == "completed"
-    # audio only, layout kept, from a private copy
-    assert {os.path.relpath(f, seen["folder"]) for f in seen["files"]} == {
-        os.path.join("CD1", "01 15 Step.flac"), "02 Bodysnatchers.flac"}
+    # audio only (the .nfo stays behind), into a private copy
+    assert {os.path.basename(f) for f in seen["files"]} == {"01 15 Step.flac", "02 Bodysnatchers.flac"}
     assert seen["folder"].startswith(str(folders.copies))
     # the client's files are untouched, so the torrent keeps seeding
     assert (folders.download / "CD1" / "01 15 Step.flac").exists()
@@ -267,3 +266,29 @@ def test_the_release_name_gives_a_first_guess(name, kind, query):
     assert guess["kind"] == kind
     if query:
         assert guess["query"] == query
+
+
+# ── soulseek folders ────────────────────────────────────────────────────────
+
+def test_a_soulseek_folder_is_packed_like_an_audiobook_grab():
+    from core.audiobook_soulseek import decode_refs
+    ref = cm.soulseek_job("peer", ["Music\\Radiohead\\In Rainbows\\01.flac",
+                                   "Music\\Radiohead\\In Rainbows\\02.flac"])
+    assert decode_refs(ref)["folder"] == "In Rainbows"
+    # one file points at the file, never a shared folder it happens to sit in
+    lone = cm.soulseek_job("peer", ["Music\\Singles\\Airbag.flac"])
+    assert decode_refs(lone)["folder"] == os.path.join("Singles", "Airbag.flac")
+    assert cm.soulseek_keys(ref) == [("peer", "Music\\Radiohead\\In Rainbows\\01.flac"),
+                                     ("peer", "Music\\Radiohead\\In Rainbows\\02.flac")]
+
+
+def test_a_soulseek_music_match_is_followed_and_imported(store, folders, monkeypatch):
+    ref = cm.soulseek_job("peer", ["Music\\In Rainbows\\01 15 Step.flac"])
+    row = _add(store, client="soulseek", client_ref=ref)
+    monkeypatch.setattr(cm, "import_copy",
+                        lambda kind, match, folder, files, runtime: {"ok": True, "imported": 1, "error": ""})
+    out = cm.process_match(row, store, get_status=lambda c, r: (_status(path=str(folders.download)), True),
+                           resolve=lambda p: p, runtime_factory=lambda r: None)
+    assert out == "completed"
+    known = cm.music_match_known([{**row, "status": "waiting"}])
+    assert known["slskd"][("peer", "Music\\In Rainbows\\01 15 Step.flac")]["kind"] == "album"

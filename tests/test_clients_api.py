@@ -415,3 +415,33 @@ def test_the_files_route_says_whether_soulsync_can_see_them(monkeypatch, tmp_pat
     assert body['visible'] is True and body['reported_path'] == '/client/Movie.2026.1080p'
     monkeypatch.setattr(bundle, 'resolve_reported_save_path', lambda p: str(tmp_path / 'nope'))
     assert c.get('/api/clients/match/files?client=torrent&id=ABCDEF').get_json()['visible'] is False
+
+
+def test_a_soulseek_music_match_packs_its_folder(monkeypatch, tmp_path):
+    from core.audiobook_soulseek import decode_refs
+    c, store = _match_client(monkeypatch, tmp_path)
+    files = ["Music\\Radiohead\\In Rainbows\\01.flac", "Music\\Radiohead\\In Rainbows\\02.flac"]
+    body = {**_MUSIC, "client": "soulseek", "id": "", "username": "peer", "files": files}
+    assert c.post('/api/clients/match/music', json=body).get_json()['success'] is True
+    [row] = store.active()
+    assert row['client'] == 'soulseek'
+    assert decode_refs(row['client_ref'])['refs'] == files
+    assert c.post('/api/clients/match/music', json=body).status_code == 409
+
+
+def test_a_matched_soulseek_transfer_is_labelled_by_its_id_or_filename(monkeypatch):
+    from core.download_plugins.types import DownloadStatus as DS
+    rows = [DS(id='t1', filename='a\\x.flac', username='peer', state='InProgress', progress=10,
+               size=1, transferred=0, speed=0),
+            DS(id='t2', filename='a\\y.flac', username='peer', state='InProgress', progress=10,
+               size=1, transferred=0, speed=0)]
+
+    class _Slskd(_FakeSlskd):
+        async def get_all_downloads(self):
+            return rows
+
+    known = {'slskd': {('id', 't1'): {'kind': 'audiobook', 'title': 'Dune'},
+                       ('peer', 'a\\y.flac'): {'kind': 'album', 'title': 'In Rainbows'}}}
+    c = _client(monkeypatch, slskd=_Slskd(), known=known)
+    items = c.get('/api/clients/slskd').get_json()['items']
+    assert [i.get('soulsync', {}).get('title') for i in items] == ['Dune', 'In Rainbows']

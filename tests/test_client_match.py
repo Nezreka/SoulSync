@@ -27,9 +27,16 @@ def test_a_failed_audiobook_download_is_up_for_matching_again():
     assert known["torrent"] == {}
 
 
-def test_soulseek_audiobook_folders_are_not_client_rows():
-    known = audiobook_known([{"source": "soulseek", "client_id": "{...}", "status": "downloading"}])
-    assert known == {"torrent": {}, "usenet": {}}
+def test_soulseek_audiobook_folders_label_every_transfer():
+    # a grab remembers transfer ids; a clients-tab match remembers filenames
+    from core.audiobook_soulseek import encode_refs
+    known = audiobook_known([
+        {"source": "soulseek", "client_id": encode_refs(["t1", "t2"], "peer", "Book"),
+         "title": "Dune", "status": "downloading"},
+        {"source": "soulseek", "client_id": encode_refs(["Books\\Dune\\01.mp3"], "peer2", "Dune"),
+         "title": "Dune", "status": "staged"},
+    ])
+    assert set(known["slskd"]) == {("id", "t1"), ("id", "t2"), ("peer2", "Books\\Dune\\01.mp3")}
 
 
 class _Plugin:

@@ -36,18 +36,57 @@ def _label(kind: str, title: Any) -> Dict[str, str]:
     return {"kind": kind, "title": str(title or "")}
 
 
-def audiobook_known(rows: Iterable[Dict[str, Any]]) -> Dict[str, Dict[str, Dict[str, str]]]:
+def soulseek_keys(client_ref: Any) -> list:
+    """The slskd rows behind one soulseek job, as the clients tab keys them:
+    (username, remote filename) for a filename ref, ("id", transfer id) for a
+    transfer id. A soulseek job is a folder of transfers packed by
+    core.audiobook_soulseek.encode_refs."""
+    from core.audiobook_soulseek import decode_refs
+    unpacked = decode_refs(client_ref)
+    keys = []
+    for ref in unpacked["refs"]:
+        if "\\" in ref or "/" in ref:
+            keys.append((unpacked["username"], ref))
+        else:
+            keys.append(("id", ref))
+    return keys
+
+
+def soulseek_job(username: str, filenames: Iterable[str]) -> str:
+    """Pack transfers already in slskd into one job ref, the shape an audiobook
+    soulseek grab writes, so the same status / cancel / landing-path code
+    follows it. Remote filenames are the refs: the transfers were not started
+    here, so there are no ids to remember, and core.audiobook_soulseek
+    matches a filename ref within its peer."""
+    import re
+    from core.audiobook_soulseek import encode_refs
+    names = [str(n) for n in filenames if n]
+    folder = ""
+    if names:
+        parts = [p for p in re.split(r"[\\/]+", names[0]) if p]
+        folder = parts[-2] if len(parts) >= 2 else ""
+        if len(names) == 1 and folder:
+            # a lone file: point at the file, not a shared folder it sits in
+            folder = os.path.join(folder, parts[-1])
+    return encode_refs(names, username, folder)
+
+
+def audiobook_known(rows: Iterable[Dict[str, Any]]) -> Dict[str, Dict[Any, Dict[str, str]]]:
     """Client refs of audiobook downloads that are still soulsync's."""
-    known: Dict[str, Dict[str, Dict[str, str]]] = {"torrent": {}, "usenet": {}}
+    known: Dict[str, Dict[Any, Dict[str, str]]] = {"torrent": {}, "usenet": {}, "slskd": {}}
     for row in rows or []:
         if str(row.get("status") or "").lower() in _DEAD_STATES:
             continue
         source = str(row.get("source") or "").lower()
         ref = str(row.get("client_id") or "").strip()
-        if source not in known or not ref:
+        if not ref:
             continue
-        key = ref.lower() if source == "torrent" else ref
-        known[source][key] = _label("audiobook", row.get("title") or row.get("release_title"))
+        label = _label("audiobook", row.get("title") or row.get("release_title"))
+        if source == "soulseek":
+            for key in soulseek_keys(ref):
+                known["slskd"][key] = label
+        elif source in ("torrent", "usenet"):
+            known[source][ref.lower() if source == "torrent" else ref] = label
     return known
 
 
@@ -255,17 +294,22 @@ def music_store() -> MusicMatchStore:
 def music_match_known(rows) -> Dict[str, Dict[str, Dict[str, str]]]:
     """Matches still being followed, so their cards say so instead of offering
     another match."""
-    known: Dict[str, Dict[str, Dict[str, str]]] = {"torrent": {}, "usenet": {}}
+    known: Dict[str, Dict[Any, Dict[str, str]]] = {"torrent": {}, "usenet": {}, "slskd": {}}
     for row in rows or []:
-        if row.get("status") not in _ACTIVE or row.get("client") not in known:
+        client = row.get("client")
+        if row.get("status") not in _ACTIVE or client not in ("torrent", "usenet", "soulseek"):
             continue
         try:
             match = json.loads(row.get("match_json") or "{}")
         except (TypeError, ValueError):
             match = {}
+        label = _label(row.get("kind") or "album", _match_title(match))
         ref = str(row.get("client_ref") or "")
-        key = ref.lower() if row["client"] == "torrent" else ref
-        known[row["client"]][key] = _label(row.get("kind") or "album", _match_title(match))
+        if client == "soulseek":
+            for key in soulseek_keys(ref):
+                known["slskd"][key] = label
+        else:
+            known[client][ref.lower() if client == "torrent" else ref] = label
     return known
 
 
@@ -371,18 +415,14 @@ def _audio_files(path: str) -> list:
 
 
 def copy_audio(source: str, dest: str) -> list:
-    """Copy every audio file under ``source`` into ``dest``, keeping the folder
-    layout (disc folders matter to the matcher). Copies, never moves: the
-    original is the client's and keeps seeding."""
-    os.makedirs(dest, exist_ok=True)
-    base = source if os.path.isdir(source) else os.path.dirname(source)
-    copied = []
-    for path in _audio_files(source):
-        target = os.path.join(dest, os.path.relpath(path, base))
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        shutil.copy2(path, target)
-        copied.append(target)
-    return copied
+    """Copy every audio file under ``source`` into ``dest`` with the album
+    bundle's own staging copy (temp file, then rename, so nothing ever sees a
+    half-written file). Copies, never moves: the original is the client's and
+    keeps seeding. The matcher reads disc numbers from tags, so the copy is
+    flat, the same as an album bundle's."""
+    from pathlib import Path
+    from core.download_plugins.album_bundle import copy_audio_files_atomically
+    return copy_audio_files_atomically([Path(p) for p in _audio_files(source)], Path(dest))
 
 
 def import_copy(kind: str, match: Dict[str, Any], folder: str, files: list, runtime) -> Dict[str, Any]:
@@ -440,6 +480,16 @@ def _leftovers_to_staging(folder: str) -> int:
 
 def _status(client: str, ref: str):
     import asyncio
+    if client == "soulseek":
+        # the same folder-of-transfers reader audiobook soulseek grabs use
+        from core.audiobook_download_monitor import _SoulseekStatus
+        from core.audiobook_soulseek import _shared_client, status_for
+        rolled = status_for(ref)
+        if rolled is None:
+            return None, False
+        if rolled.get("state") == "unavailable":
+            return None, _shared_client() is not None
+        return _SoulseekStatus(rolled), True
     if client == "torrent":
         from core.torrent_clients import get_active_adapter
     else:

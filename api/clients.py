@@ -262,7 +262,9 @@ def create_blueprint() -> Blueprint:
             for d in items:
                 row = asdict(d)
                 row.pop('audio_files', None)
-                hit = known.get((d.username, d.filename))
+                # a transfer soulsync started is known by its id; one it
+                # matched afterwards, by its remote filename
+                hit = known.get((d.username, d.filename)) or known.get(('id', str(d.id)))
                 if hit:
                     row['soulsync'] = hit
                 rows.append(row)
@@ -385,6 +387,18 @@ def create_blueprint() -> Blueprint:
         import os
         client = (request.args.get('client') or '').strip().lower()
         ref = (request.args.get('id') or '').strip()
+        if client == 'soulseek':
+            # slskd recreates the peer's folder under its own download root
+            from core.audiobook_soulseek import decode_refs, landing_path
+            from core.client_match import soulseek_job
+            files = request.args.getlist('file')
+            username = (request.args.get('username') or '').strip()
+            if not username or not files:
+                return jsonify({"success": False, "error": "username and file are required"}), 400
+            folder = decode_refs(soulseek_job(username, files))['folder']
+            local = landing_path(folder)
+            return jsonify({"success": True, "reported_path": folder, "local_path": local or '',
+                            "visible": bool(local) and os.path.exists(local)})
         if client not in ('torrent', 'usenet') or not ref:
             return jsonify({"success": False, "error": "client and id are required"}), 400
         if client == 'torrent':
@@ -421,9 +435,16 @@ def create_blueprint() -> Blueprint:
         payload = request.get_json(silent=True) or {}
         client = str(payload.get('client') or '').strip().lower()
         ref = str(payload.get('id') or '').strip()
+        if client == 'soulseek':
+            # a folder of transfers already in slskd, packed the way an
+            # audiobook soulseek grab is, so the same reader follows it
+            from core.client_match import soulseek_job
+            files = [str(f) for f in (payload.get('files') or []) if f]
+            username = str(payload.get('username') or '').strip()
+            ref = soulseek_job(username, files) if username and files else ''
         kind = str(payload.get('kind') or '').strip().lower()
         match = payload.get('match') if isinstance(payload.get('match'), dict) else {}
-        if client not in ('torrent', 'usenet') or not ref:
+        if client not in ('torrent', 'usenet', 'soulseek') or not ref:
             return jsonify({"success": False, "error": "Missing the download to match."}), 400
         if kind not in MUSIC_KINDS or not match.get('id') or not match.get('source'):
             return jsonify({"success": False, "error": "Pick the album or track this is."}), 400

@@ -201,6 +201,8 @@ def test_only_the_acquisition_routes_write_anything():
     # supposed to be read-only.
     allowed_writers = {"/api/audiobooks/wishlist", "/api/audiobooks/wishlist/<asin>",
                        "/api/audiobooks/wishlist/search", "/api/audiobooks/wishlist/<asin>/search", "/api/audiobooks/grab",
+                       # clients-tab match & import: records a download like a grab
+                       "/api/audiobooks/adopt",
                        # Following an author is acquisition too: it is what
                        # feeds the wishlist without the user asking again.
                        "/api/audiobooks/watchlist", "/api/audiobooks/watchlist/<path:name>",

@@ -1355,3 +1355,21 @@ def test_adopting_without_the_essentials_is_a_400(client, catalog, wishlist_db, 
 def test_adopting_an_unknown_book_is_a_404(client, catalog, wishlist_db):
     catalog.get_book.return_value = None
     assert _adopt(client).status_code == 404
+
+
+def test_adopting_a_soulseek_folder_packs_it_like_a_grab(client, catalog, wishlist_db):
+    from core.audiobook_soulseek import decode_refs
+    catalog.get_book.return_value = _item(asin="B1")
+    files = ["Books\\Andy Weir\\Project Hail Mary\\01.mp3", "Books\\Andy Weir\\Project Hail Mary\\02.mp3"]
+    resp = client.post("/api/audiobooks/adopt", json={
+        "source": "soulseek", "username": "peer", "files": files, "asin": "B1",
+        "release_title": "Project Hail Mary", "size_bytes": 10})
+    assert resp.status_code == 200
+    [row] = wishlist_db.get_downloads(active_only=True)
+    assert row["source"] == "soulseek" and row["download_id"].startswith("slsk:")
+    # the monitor reads this with the same decode a soulseek grab's row gets
+    assert decode_refs(row["client_id"]) == {"username": "peer", "refs": files,
+                                             "folder": "Project Hail Mary"}
+    again = client.post("/api/audiobooks/adopt", json={
+        "source": "soulseek", "username": "peer", "files": files, "asin": "B1"})
+    assert again.status_code == 409

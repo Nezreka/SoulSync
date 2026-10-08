@@ -1998,3 +1998,44 @@ def test_adopting_needs_a_download_and_a_match(tmp_path, monkeypatch):
 def test_adopting_takes_the_download_permission(tmp_path):
     c = _client_as(tmp_path, is_admin=True, can_download=False)
     assert c.post("/api/video/downloads/adopt", json={}).status_code == 403
+
+
+def test_adopting_a_soulseek_movie_follows_its_biggest_video_file(tmp_path, monkeypatch):
+    import api.video as videoapi
+    client = _adopt_client(tmp_path, monkeypatch)
+    try:
+        files = [{"filename": "Movies\\Heat (1995)\\Heat.1995.1080p.mkv", "size": 9000},
+                 {"filename": "Movies\\Heat (1995)\\Sample\\heat-sample.mkv", "size": 50},
+                 {"filename": "Movies\\Heat (1995)\\Heat.nfo", "size": 1}]
+        r = client.post("/api/video/downloads/adopt", json={
+            "source": "soulseek", "username": "peer", "files": files, "kind": "movie",
+            "title": "Heat", "media_id": 949, "media_source": "tmdb",
+            "search_ctx": {"scope": "movie", "title": "Heat"}})
+        assert r.get_json()["ok"] is True
+        [row] = client.get("/api/video/downloads/active").get_json()["downloads"]
+        assert row["source"] == "soulseek" and row["username"] == "peer"
+        assert row["filename"] == "Movies\\Heat (1995)\\Heat.1995.1080p.mkv"
+        assert client.post("/api/video/downloads/adopt", json={
+            "source": "soulseek", "username": "peer", "files": files[:1], "kind": "movie",
+            "title": "Heat"}).status_code == 409
+    finally:
+        videoapi._video_db = None
+
+
+def test_adopting_a_soulseek_season_makes_one_row_per_episode(tmp_path, monkeypatch):
+    import json as _json
+    import api.video as videoapi
+    client = _adopt_client(tmp_path, monkeypatch)
+    try:
+        files = [{"filename": f"TV\\Ted Lasso\\S04\\Ted.Lasso.S04E0{n}.1080p.mkv", "size": 100}
+                 for n in (1, 2)] + [{"filename": "TV\\Ted Lasso\\S04\\extras.mkv", "size": 5}]
+        r = client.post("/api/video/downloads/adopt", json={
+            "source": "soulseek", "username": "peer", "files": files, "kind": "show",
+            "title": "Ted Lasso", "media_id": 97546, "media_source": "tmdb",
+            "search_ctx": {"scope": "season", "title": "Ted Lasso", "season": 4}})
+        assert len(r.get_json()["ids"]) == 2
+        rows = client.get("/api/video/downloads/active").get_json()["downloads"]
+        episodes = sorted(_json.loads(d["search_ctx"])["episode"] for d in rows)
+        assert episodes == [1, 2]
+    finally:
+        videoapi._video_db = None

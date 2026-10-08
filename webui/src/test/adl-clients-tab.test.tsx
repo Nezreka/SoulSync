@@ -633,3 +633,119 @@ describe('card layout guards', () => {
     expect(css).toMatch(/@media \(max-width: 760px\) \{[^@]*?\.adl-client-text \{\s*flex: 1 1 0;/);
   });
 });
+
+describe('soulseek and the owner filter', () => {
+  const SLSKD_FOLDER = {
+    success: true,
+    configured: true,
+    connected: true,
+    items: [
+      {
+        id: 'a1',
+        filename: 'Music\\Radiohead\\In Rainbows\\01 15 Step.flac',
+        username: 'peer',
+        state: 'Completed, Succeeded',
+        progress: 100,
+        size: 30,
+        transferred: 30,
+        speed: 0,
+      },
+      {
+        id: 'a2',
+        filename: 'Music\\Radiohead\\In Rainbows\\02 Bodysnatchers.flac',
+        username: 'peer',
+        state: 'Completed, Succeeded',
+        progress: 100,
+        size: 40,
+        transferred: 40,
+        speed: 0,
+      },
+      {
+        id: 'b1',
+        filename: 'Music\\Other\\x.flac',
+        username: 'peer',
+        state: 'InProgress',
+        progress: 10,
+        size: 5,
+        transferred: 1,
+        speed: 1,
+      },
+      {
+        id: 'c1',
+        filename: 'Music\\Mine\\song.flac',
+        username: 'peer2',
+        state: 'InProgress',
+        progress: 10,
+        size: 5,
+        transferred: 1,
+        speed: 1,
+        soulsync: { kind: 'track', title: 'Song' },
+      },
+    ],
+  };
+
+  it('filters to what soulsync follows, or to the rest', async () => {
+    mockAll({ slskd: SLSKD_FOLDER });
+    const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(container.textContent).toContain('15 Step'));
+    expect(screen.getByRole('radio', { name: /Not in SoulSync\s*3/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: /^SoulSync\s*1/ }));
+    expect(container.textContent).not.toContain('15 Step');
+    expect(container.textContent).toContain('song.flac');
+    fireEvent.click(screen.getByRole('radio', { name: /Not in SoulSync/ }));
+    expect(container.textContent).toContain('15 Step');
+    expect(container.textContent).not.toContain('Mine');
+  });
+
+  it('matches a soulseek download as its whole folder', async () => {
+    mockAll({ slskd: SLSKD_FOLDER });
+    let sent: unknown;
+    let filesQuery = '';
+    server.use(
+      http.get('/api/clients/match/suggest', () =>
+        HttpResponse.json({
+          success: true,
+          kind: 'album',
+          query: 'In Rainbows',
+          year: null,
+          season: null,
+          episode: null,
+        }),
+      ),
+      http.get('/api/clients/match/files', ({ request }) => {
+        filesQuery = new URL(request.url).search;
+        return HttpResponse.json({ success: true, visible: true, reported_path: 'In Rainbows' });
+      }),
+      http.get('/api/import/search/albums', () =>
+        HttpResponse.json({
+          success: true,
+          albums: [{ id: 'alb1', name: 'In Rainbows', artist: 'Radiohead', source: 'deezer' }],
+        }),
+      ),
+      http.post('/api/clients/match/music', async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({ success: true, id: 1 });
+      }),
+    );
+    const { container } = render(<AdlClientsTab />);
+    await waitFor(() => expect(container.textContent).toContain('15 Step'));
+    // the soulsync-followed row leads with details, the others with matching
+    expect(screen.getAllByRole('button', { name: 'Match & import' })).toHaveLength(3);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Match & import' })[0] as HTMLElement);
+    fireEvent.click(await screen.findByRole('radio', { name: /In Rainbows\s*Radiohead/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Match & import' }));
+    await waitFor(() => expect(sent).toBeTruthy());
+    expect(sent).toMatchObject({
+      client: 'soulseek',
+      kind: 'album',
+      username: 'peer',
+      // both files of the folder, not the other folder from the same peer
+      files: [
+        'Music\\Radiohead\\In Rainbows\\01 15 Step.flac',
+        'Music\\Radiohead\\In Rainbows\\02 Bodysnatchers.flac',
+      ],
+      match: { id: 'alb1', source: 'deezer' },
+    });
+    expect(decodeURIComponent(filesQuery)).toContain('username=peer');
+  });
+});

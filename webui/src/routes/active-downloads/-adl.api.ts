@@ -537,14 +537,26 @@ export interface MatchFiles {
   reportedPath: string;
 }
 
+/** A Soulseek match is a folder: who it is from and the transfers in it. */
+export interface SoulseekFolder {
+  username: string;
+  files: { filename: string; size: number }[];
+}
+
 /** Whether SoulSync can read the download's files. null when it couldn't ask. */
 export async function fetchMatchFiles(
-  client: 'torrent' | 'usenet',
+  client: 'torrent' | 'usenet' | 'soulseek',
   id: string,
+  folder?: SoulseekFolder,
 ): Promise<MatchFiles | null> {
   try {
+    const searchParams = new URLSearchParams({ client, id });
+    if (folder) {
+      searchParams.set('username', folder.username);
+      for (const file of folder.files) searchParams.append('file', file.filename);
+    }
     const data = await readJson<{ visible?: boolean; reported_path?: string } & AdlResult>(
-      apiClient.get('clients/match/files', { searchParams: { client, id } }),
+      apiClient.get('clients/match/files', { searchParams }),
     );
     if (!data.success) return null;
     return { visible: Boolean(data.visible), reportedPath: data.reported_path || '' };
@@ -591,8 +603,11 @@ async function submitMatch(call: () => ResponsePromise): Promise<MatchOutcome> {
 }
 
 export function adoptAudiobook(body: {
-  source: 'torrent' | 'usenet';
+  source: 'torrent' | 'usenet' | 'soulseek';
   client_ref: string;
+  /** soulseek only: the folder's peer and remote filenames */
+  username?: string;
+  files?: string[];
   asin: string;
   release_title: string;
   size_bytes: number;
@@ -601,8 +616,11 @@ export function adoptAudiobook(body: {
 }
 
 export function adoptVideo(body: {
-  source: 'torrent' | 'usenet';
+  source: 'torrent' | 'usenet' | 'soulseek';
   client_ref: string;
+  /** soulseek only: the folder's peer and files */
+  username?: string;
+  files?: { filename: string; size: number }[];
   kind: 'movie' | 'show';
   title: string;
   year?: string | number | null;
@@ -623,8 +641,11 @@ export function adoptVideo(body: {
 }
 
 export function matchMusic(body: {
-  client: 'torrent' | 'usenet';
+  client: 'torrent' | 'usenet' | 'soulseek';
   id: string;
+  /** soulseek only: the folder's peer and remote filenames */
+  username?: string;
+  files?: string[];
   kind: 'album' | 'track';
   match: {
     id: string;

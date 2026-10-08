@@ -13,7 +13,7 @@ import { DialogBody, DialogFooter, DialogFrame, DialogHeader } from '@/component
 import { searchAudiobooks } from '@/routes/audiobooks/-audiobooks.api';
 import { searchImportAlbums, searchImportTracks } from '@/routes/import/-import.api';
 
-import type { MatchFiles, MatchKind, MatchOutcome } from '../-adl.api';
+import type { MatchFiles, MatchKind, MatchOutcome, SoulseekFolder } from '../-adl.api';
 
 import {
   adoptAudiobook,
@@ -26,11 +26,21 @@ import {
 import styles from './adl-match.module.css';
 
 export interface MatchTarget {
-  client: 'torrent' | 'usenet';
+  client: 'torrent' | 'usenet' | 'soulseek';
+  /** the client's job id; empty for a soulseek folder, which is its files */
   id: string;
-  /** the release name the client shows */
+  /** the release name the client shows, or the soulseek folder's name */
   name: string;
   size: number;
+  /** soulseek: the folder's peer and every transfer in it */
+  folder?: SoulseekFolder;
+}
+
+/** The soulseek extras each side's route takes, when the target is a folder. */
+function soulseekNames(t: MatchTarget) {
+  return t.folder
+    ? { username: t.folder.username, files: t.folder.files.map((f) => f.filename) }
+    : {};
 }
 
 const KINDS: { kind: MatchKind; label: string }[] = [
@@ -91,6 +101,7 @@ async function runSearch(kind: MatchKind, query: string): Promise<Hit[]> {
         matchMusic({
           client: t.client,
           id: t.id,
+          ...soulseekNames(t),
           kind: 'album',
           match: {
             id: a.id,
@@ -114,6 +125,7 @@ async function runSearch(kind: MatchKind, query: string): Promise<Hit[]> {
         matchMusic({
           client: t.client,
           id: t.id,
+          ...soulseekNames(t),
           kind: 'track',
           match: {
             id: tr.id,
@@ -144,6 +156,7 @@ async function runSearch(kind: MatchKind, query: string): Promise<Hit[]> {
         adoptAudiobook({
           source: t.client,
           client_ref: t.id,
+          ...soulseekNames(t),
           asin: b.asin,
           release_title: t.name,
           size_bytes: t.size,
@@ -161,6 +174,7 @@ async function runSearch(kind: MatchKind, query: string): Promise<Hit[]> {
       adoptVideo({
         source: t.client,
         client_ref: t.id,
+        ...(t.folder ? { username: t.folder.username, files: t.folder.files } : {}),
         kind: wanted,
         title: h.title,
         year: h.year,
@@ -238,7 +252,7 @@ export function AdlMatchModal({
       if (guess.episode != null) setEpisode(guess.episode);
       void search(guess.kind, guess.query);
     });
-    void fetchMatchFiles(target.client, target.id).then((found) => {
+    void fetchMatchFiles(target.client, target.id, target.folder).then((found) => {
       if (live) setFiles(found);
     });
     return () => {
