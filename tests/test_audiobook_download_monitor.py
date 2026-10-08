@@ -1040,3 +1040,128 @@ def test_a_real_answer_resets_the_miss_count(db, monkeypatch):
                 tick(db=db)
 
     assert db.get_downloads()[0]["status"] == "unavailable"     # the count started over
+
+
+# ---------------------------------------------------------------------------
+# Clearing the Soulseek download folder after an import
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def slskd_root(tmp_path):
+    """A Soulseek download folder, as the shared client reports it."""
+    root = tmp_path / "downloads"
+    root.mkdir()
+    with patch("core.audiobook_soulseek._shared_client",
+               return_value=SimpleNamespace(download_path=str(root))):
+        yield root
+
+
+def _landed(root, folder, *names):
+    path = root / folder
+    path.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (path / name).write_bytes(b"audio")
+    return path
+
+
+def _soulseek_download(db, download_id, folder, status=None):
+    from core.audiobook_soulseek import encode_refs
+
+    db.record_download(download_id, "B1", "The Final Empire", "soulseek",
+                       client_id=encode_refs([f"{download_id}-ref"], "peer", folder))
+    if status:
+        db.update_download(download_id, status=status)
+
+
+def _import_soulseek(db, save_path, setting=True):
+    with patch("core.audiobook_download_monitor._get_status",
+               return_value=_status("completed", save_path=str(save_path))), \
+         patch("core.audiobook_download_monitor._resolve_path", side_effect=_identity_path), \
+         patch("core.audiobook_download_monitor._check_complete", side_effect=_whole_book), \
+         patch("core.audiobook_download_monitor._organize",
+               return_value={"ok": True, "path": "/library/Sanderson/Book"}), \
+         patch("core.audiobook_download_monitor._discard_enabled", return_value=setting):
+        return tick(db=db)
+
+
+def test_an_imported_soulseek_book_leaves_no_copy_behind(db, slskd_root):
+    # The organizer copies, so every book used to sit in the library AND in
+    # the download folder.
+    landed = _landed(slskd_root, "The Final Empire", "01.mp3", "02.mp3", "cover.jpg")
+    _wishlisted(db)
+    _soulseek_download(db, "d1", "The Final Empire")
+
+    assert _import_soulseek(db, landed)["completed"] == 1
+    assert not landed.exists()
+
+
+def test_a_failed_release_of_the_same_book_is_cleared_with_it(db, slskd_root):
+    # A folder of chapters that downloaded, was failed anyway, and was never
+    # going to be looked at again.
+    landed = _landed(slskd_root, "The Final Empire (2006)", "book.m4b")
+    failed = _landed(slskd_root, "Sanderson, Brandon - The Final Empire - Mistborn 1", "01.mp3")
+    _wishlisted(db)
+    _soulseek_download(db, "old", "Sanderson, Brandon - The Final Empire - Mistborn 1", status="failed")
+    _soulseek_download(db, "d1", "The Final Empire (2006)")
+
+    _import_soulseek(db, landed)
+
+    assert not failed.exists()
+
+
+def test_a_failed_release_folder_without_the_title_is_left_alone(db, slskd_root):
+    # Folder names collide ("CD 01", "Audiobooks"): without the title in it,
+    # there is no telling whose files these are.
+    landed = _landed(slskd_root, "The Final Empire", "book.m4b")
+    generic = _landed(slskd_root, "CD 01", "01.mp3")
+    _wishlisted(db)
+    _soulseek_download(db, "old", "CD 01", status="failed")
+    _soulseek_download(db, "d1", "The Final Empire")
+
+    _import_soulseek(db, landed)
+
+    assert generic.exists()
+
+
+def test_a_folder_another_download_is_writing_into_is_left_alone(db, slskd_root):
+    from core.audiobook_soulseek import encode_refs
+
+    landed = _landed(slskd_root, "The Final Empire", "book.m4b")
+    _wishlisted(db)
+    _soulseek_download(db, "d1", "The Final Empire")
+    db.record_download("d2", "B2", "Another Book", "soulseek",
+                       client_id=encode_refs(["r2"], "peer", "The Final Empire"))
+    db.update_download("d2", status="downloading")
+
+    with patch("core.audiobook_download_monitor._get_status",
+               side_effect=lambda source, ref: _status("completed", save_path=str(landed))
+               if "d1-ref" in ref else _status("downloading")), \
+         patch("core.audiobook_download_monitor._resolve_path", side_effect=_identity_path), \
+         patch("core.audiobook_download_monitor._check_complete", side_effect=_whole_book), \
+         patch("core.audiobook_download_monitor._organize",
+               return_value={"ok": True, "path": "/library/Sanderson/Book"}):
+        tick(db=db)
+
+    assert landed.exists()
+
+
+def test_the_setting_keeps_the_downloaded_copy(db, slskd_root):
+    landed = _landed(slskd_root, "The Final Empire", "book.m4b")
+    _wishlisted(db)
+    _soulseek_download(db, "d1", "The Final Empire")
+
+    _import_soulseek(db, landed, setting=False)
+
+    assert landed.exists()
+
+
+def test_a_torrent_import_keeps_its_files_to_seed(db, tmp_path):
+    seeding = tmp_path / "torrents" / "The Final Empire"
+    seeding.mkdir(parents=True)
+    (seeding / "book.m4b").write_bytes(b"audio")
+    _wishlisted(db)
+    db.record_download("d1", "B1", "The Final Empire", "torrent", client_id="hash-1")
+
+    _import_soulseek(db, seeding)
+
+    assert seeding.exists()

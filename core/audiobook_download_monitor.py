@@ -17,6 +17,8 @@ Nothing here touches the music batches, worker pool, wishlist or database.
 from __future__ import annotations
 
 import asyncio
+import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -484,6 +486,8 @@ def tick(db: Any = None) -> Dict[str, int]:
                     download_id=row["download_id"], origin="soulsync",
                 )
             logger.info("Audiobook imported: %s -> %s", row.get("title"), imported_path)
+            if source == "soulseek":
+                _discard_soulseek_copies(database, row, str(patch.get("save_path") or ""))
         elif patch.get("status") == "staged":
             # "importing" on the card, and deliberately NOT an error: the book is
             # waiting for the rest of itself, which is a normal state a torrent
@@ -501,6 +505,76 @@ def tick(db: Any = None) -> Dict[str, int]:
                     error=str(patch.get("error") or ""),
                 )
     return summary
+
+
+def _discard_enabled() -> bool:
+    try:
+        from core.settings import config_manager
+        return bool(config_manager.get("audiobooks.delete_imported_downloads", True))
+    except Exception:                                       # noqa: BLE001
+        return True
+
+
+def _words(text: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", str(text or "").lower()))
+
+
+def _discard_soulseek_copies(database: Any, row: Dict[str, Any], imported_from: str) -> int:
+    """Delete what Soulseek left in the download folder once a book is imported.
+
+    The organizer copies rather than moves, so every imported book left a full
+    second copy behind, and so did every release of it that failed on the way
+    (a folder of chapters cleared mid-download, a peer that stalled at 90%).
+
+    The imported folder is safe to remove whole: the organizer takes every
+    audio file under it, so it holds nothing that did not go into the library.
+    A failed release's folder is only removed when its name carries the book's
+    title, so a different book that happens to share the folder name is never
+    touched. A folder an active download is still writing into is left alone.
+    Soulseek only: a torrent's files are what it seeds from, and a usenet
+    client tidies its own folders.
+    """
+    if not _discard_enabled():
+        return 0
+    from core.audiobook_soulseek import decode_refs, landing_path, remove_landed
+
+    removed = 0
+    try:
+        def landing_of(other: Dict[str, Any]) -> str:
+            return landing_path(decode_refs(other.get("client_id")).get("folder") or "")
+
+        in_use = {
+            os.path.realpath(path)
+            for path in (landing_of(other) for other in database.get_downloads(active_only=True)
+                         if str(other.get("source") or "").lower() == "soulseek"
+                         and other.get("download_id") != row.get("download_id"))
+            if path
+        }
+
+        targets = [imported_from] if imported_from else []
+        asin = str(row.get("asin") or "")
+        title = _words(row.get("title") or "")
+        if asin and title:
+            pattern = re.compile(rf"\b{re.escape(title)}\b")
+            for other in database.get_downloads():
+                if (other.get("download_id") == row.get("download_id")
+                        or str(other.get("asin") or "") != asin
+                        or str(other.get("source") or "").lower() != "soulseek"
+                        or other.get("status") not in ("failed", "cancelled")):
+                    continue
+                landing = landing_of(other)
+                if landing and pattern.search(_words(os.path.basename(landing))):
+                    targets.append(landing)
+
+        for target in dict.fromkeys(targets):
+            if os.path.realpath(target) in in_use:
+                continue
+            if remove_landed(target):
+                removed += 1
+    except Exception as exc:                                # noqa: BLE001
+        # the book is in the library; a copy left behind is only clutter
+        logger.warning("Could not clear the downloaded copies of %s: %s", row.get("title"), exc)
+    return removed
 
 
 def cancel_downloads(task_ids=None, db=None):
