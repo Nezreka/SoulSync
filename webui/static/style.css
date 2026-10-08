@@ -83163,7 +83163,7 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     background: rgba(255,255,255,0.035); color: inherit;
     transition: transform .12s ease, border-color .12s ease,
                 background .12s ease, box-shadow .12s ease;
-    --tile-glow: 29,185,84;   /* each game overrides its own hue below */
+    --tile-glow: var(--accent-rgb);   /* each game overrides its own hue below */
 }
 .chat-arc-tile::before {
     content: ''; position: absolute; inset: 0 0 auto 0; height: 3px;
