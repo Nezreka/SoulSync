@@ -19,9 +19,9 @@ from core.repair_jobs.library_reconciliation import (
     _candidate_rank, _candidate_shape, _candidate_shapes_equivalent,
     _group_disc_folders, _group_logical_albums,
     _has_unexplained_identified_extras, _normalize_slot,
-    _promote_linked_candidate,
+    _promote_album_context_candidate,
     _release_group_candidates, _same_recording_copies, _search_release_candidates,
-    _suggest_filename,
+    _single_file_album_context_conflict, _suggest_filename,
 )
 from core.repair_worker import RepairWorker
 from database.music_database import MusicDatabase
@@ -1014,7 +1014,7 @@ def test_digital_numbering_rank_prefers_continuous_track_numbers():
         _candidate_rank(files, compact_disc, 'release')
 
 
-def test_album_linked_compilation_beats_equally_fitting_original_album():
+def test_title_searched_compilation_beats_equally_fitting_original_album():
     plan = {'pairs': [{'file_index': 0, 'slot_index': 0, 'confidence': 'clear'}],
             'extra_files': [], 'missing_slots': []}
     compilation = (1, 1, 0, 'musicbrainz', 'soundtracks-box',
@@ -1023,20 +1023,36 @@ def test_album_linked_compilation_beats_equally_fitting_original_album():
                       [{'track_number': 17, 'disc_number': 1}], plan)
     scored = [original_album, compilation]
 
-    _promote_linked_candidate(scored, [('musicbrainz', 'soundtracks-box')])
+    _promote_album_context_candidate(scored, [('musicbrainz', 'soundtracks-box')])
 
     assert scored == [compilation, original_album]
 
 
-def test_linked_release_does_not_override_better_audio_assignment():
+def test_album_context_does_not_override_better_audio_assignment():
     plan = {'pairs': [], 'extra_files': [], 'missing_slots': []}
     linked = (1, 1, 0, 'musicbrainz', 'linked', [], plan)
     better = (2, 2, 0, 'musicbrainz', 'better', [], plan)
     scored = [better, linked]
 
-    _promote_linked_candidate(scored, [('musicbrainz', 'linked')])
+    _promote_album_context_candidate(scored, [('musicbrainz', 'linked')])
 
     assert scored == [better, linked]
+
+
+def test_lone_compilation_track_does_not_become_original_soundtrack_album():
+    album = {'album_title': 'Philip Glass Soundtracks Vol. II'}
+
+    assert _single_file_album_context_conflict(album, {
+        'name': 'The Truman Show: Music From the Motion Picture',
+    })
+
+
+def test_lone_track_accepts_compatible_album_title_flavor():
+    album = {'album_title': 'The Truman Show (Original Motion Picture Soundtrack)'}
+
+    assert not _single_file_album_context_conflict(album, {
+        'name': 'The Truman Show: Music From the Motion Picture',
+    })
 
 
 def test_identified_bonus_audio_requires_edition_confirmation_but_duplicate_does_not():
@@ -1566,6 +1582,66 @@ def test_exact_release_title_repairs_rated_r_album_and_file_tags(tmp_path, monke
     with db._get_connection() as conn:
         title = conn.execute('SELECT title FROM albums WHERE id = 10').fetchone()[0]
     assert title == 'Rated R'
+
+
+def test_lone_compilation_track_does_not_spawn_original_album_plan(tmp_path, monkeypatch):
+    import core.repair_jobs.library_reconciliation as module
+
+    class _MB:
+        def get_recording(self, _mbid, includes=None):
+            return {'releases': [{'id': 'truman-release'}]}
+
+        def search_release(self, *_args, **_kwargs):
+            return []
+
+    root = tmp_path / 'music'
+    root.mkdir()
+    path = root / '01 - The Truman Show - Raising the Sail.flac'
+    path.write_bytes(b'audio fixture')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, path)
+    with db._get_connection() as conn:
+        conn.execute("UPDATE artists SET name = 'Philip Glass' WHERE id = 1")
+        conn.execute("UPDATE albums SET title = 'Philip Glass Soundtracks Vol. II', "
+                     "canonical_source = NULL, canonical_album_id = NULL WHERE id = 10")
+        conn.execute("UPDATE tracks SET title = 'The Truman Show - Raising the Sail' "
+                     "WHERE id = 1")
+        conn.commit()
+    worker = RepairWorker(database=db)
+    client = _Acoustid({path.name: {
+        'mbid': 'raising-id', 'title': 'Raising the Sail',
+        'artist': 'Philip Glass', 'score': 0.99,
+    }})
+    monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
+    monkeypatch.setattr(module, '_read_file_tags', lambda _path: {
+        'title': 'The Truman Show - Raising the Sail', 'artist': 'Philip Glass',
+        'album': 'Philip Glass Soundtracks Vol. II', 'track_number': 1,
+        'disc_number': 1, 'duration_ms': 200000,
+    })
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args, **_kwargs: [{
+        'id': 'raising-id', 'name': 'Raising the Sail',
+        'artists': [{'name': 'Philip Glass'}], 'track_number': 17,
+        'disc_number': 1, 'duration_ms': 200000,
+    }])
+    monkeypatch.setattr(module, 'get_album_for_source', lambda *_args, **_kwargs: {
+        'name': 'The Truman Show: Music From the Motion Picture',
+        'artists': [{'name': 'Philip Glass'}],
+    })
+    context = JobContext(
+        db=db, transfer_folder=str(root), config_manager=None,
+        acoustid_client=client, mb_client=_MB(),
+        create_finding=worker._create_finding,
+    )
+
+    result = LibraryReconciliationJob().scan(context)
+    queue = worker.get_review_cases(job_id='library_reconciliation')
+    finding = worker.get_review_case(
+        queue['items'][0]['case_id'], job_id='library_reconciliation')['items'][0]
+
+    assert result.findings_created == 1
+    assert finding['finding_type'] == 'reconciliation_unresolved'
+    assert finding['title'] == 'Confirm album: Philip Glass Soundtracks Vol. II'
+    assert 'changes' not in finding['details']
 
 
 def test_reconciliation_preserves_edition_title_and_complete_artist_credit(

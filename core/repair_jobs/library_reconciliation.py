@@ -405,23 +405,40 @@ def _candidate_rank(files: list[dict], scored: tuple, numbering_mode: str) -> tu
             if numbering_mode == 'digital' else rank)
 
 
-def _promote_linked_candidate(scored: list[tuple],
-                              linked_candidates: list[tuple[str, str]]) -> None:
-    """Prefer the album-linked release when its audio fit is equally good.
-
-    Numbering remains a useful edition preference, but it cannot turn one
-    recording from a known compilation into the original album merely because
-    that album has a shorter, continuous tracklist.  A candidate that matches
-    more files, or leaves fewer identified extras, still wins.
-    """
-    if not scored or not linked_candidates:
+def _promote_album_context_candidate(
+        scored: list[tuple], context_candidates: list[tuple[str, str]]) -> None:
+    """Prefer a title-derived candidate when one file has equal audio fit."""
+    if not scored or not context_candidates:
         return
     best_audio_fit = scored[0][:3]
-    linked = next((row for candidate in linked_candidates for row in scored
-                   if row[:3] == best_audio_fit and (row[3], row[4]) == candidate), None)
-    if linked is not None and linked is not scored[0]:
-        scored.remove(linked)
-        scored.insert(0, linked)
+    contextual = next((row for candidate in context_candidates for row in scored
+                       if row[:3] == best_audio_fit and
+                       (row[3], row[4]) == candidate), None)
+    if contextual is not None and contextual is not scored[0]:
+        scored.remove(contextual)
+        scored.insert(0, contextual)
+
+
+def _single_file_album_context_conflict(album: dict | None,
+                                        release_meta: dict | None) -> bool:
+    """A lone recording cannot silently replace a differently named album."""
+    current = str((album or {}).get('album_title') or '').strip()
+    release = str((release_meta or {}).get('name') or
+                  (release_meta or {}).get('title') or '').strip()
+    if not current or not release or _album_titles_compatible(current, release):
+        return False
+    return _title_score(_album_identity_title(current),
+                        _album_identity_title(release)) < 0.86
+
+
+def _release_metadata(scored: tuple, cache: dict, exact_releases: set[str]) -> dict:
+    source, release_id = scored[3], scored[4]
+    key = (source, release_id)
+    if key not in cache:
+        exact = source == 'musicbrainz' and release_id in exact_releases
+        cache[key] = ((get_album_for_source(source, release_id, exact_release=True)
+                       if exact else get_album_for_source(source, release_id)) or {})
+    return cache[key]
 
 
 def _has_unexplained_identified_extras(files: list[dict], scored: tuple) -> bool:
@@ -1376,11 +1393,57 @@ class LibraryReconciliationJob(RepairJob):
                     continue
                 scored.sort(
                     key=lambda c: _candidate_rank(files, c, numbering_mode), reverse=True)
-                # Album/source IDs are direct evidence of intended edition.
-                # Prefer it whenever the audio assignment is equally good;
-                # digital numbering is an edition preference, not evidence
-                # that a compilation track belongs to its original album.
-                _promote_linked_candidate(scored, linked_candidates)
+                # A single fingerprint proves the recording, but that same
+                # recording can occur on an original album and many later
+                # compilations. If the best audio-derived release contradicts
+                # the local album context, make one exact title search. Only
+                # an equally fitting title result may replace it; otherwise
+                # surface the album identity conflict instead of retagging the
+                # file and inventing a nearly complete album's missing tracks.
+                release_meta = {}
+                if len(files) == 1 and album and not linked_candidates:
+                    release_meta = _release_metadata(
+                        scored[0], release_meta_cache, exact_musicbrainz_releases)
+                    if _single_file_album_context_conflict(album, release_meta):
+                        searched = [candidate for candidate in _search_release_candidates(
+                            album, context, release_search_cache)
+                            if candidate not in candidates]
+                        exact_musicbrainz_releases.update(
+                            release_id for source, release_id in searched
+                            if source == 'musicbrainz')
+                        if searched:
+                            candidates.extend(searched)
+                            scored.extend(_score_release_candidates(
+                                files, searched, release_cache, exact_musicbrainz_releases))
+                            scored.sort(key=lambda c: _candidate_rank(
+                                files, c, numbering_mode), reverse=True)
+                            _promote_album_context_candidate(scored, searched)
+                            release_meta = _release_metadata(
+                                scored[0], release_meta_cache, exact_musicbrainz_releases)
+                    if _single_file_album_context_conflict(album, release_meta):
+                        if emit(
+                            job_id=self.job_id, finding_type='reconciliation_unresolved',
+                            severity='info', entity_type='album', entity_id=str(album_id),
+                            file_path=files[0]['path'],
+                            title=f'Confirm album: {album.get("album_title") or os.path.basename(folder)}',
+                            description=('The audio identifies the recording, but no equally '
+                                         'fitting release matches the local album context.'),
+                            details={
+                                'album_id': album_id,
+                                'album_title': album.get('album_title') or os.path.basename(folder),
+                                'profile_id': album.get('owner_profile_id') or 1,
+                                'artist_name': album.get('artist_name') or '',
+                                'album_folder': folder, 'file_count': 1,
+                                'checked_files': _checked_file_evidence(files),
+                                'candidates': [_candidate_evidence(files, row)
+                                               for row in scored[:6]],
+                                'evidence_signature': _evidence_signature(
+                                    files, [(row[3], row[4], row[0], row[1])
+                                            for row in scored]),
+                            }):
+                            result.findings_created += 1
+                        cache.checkpoint()
+                        continue
                 pinned_row = None
                 if album and album.get('canonical_locked'):
                     pinned_row = next((row for row in scored
@@ -1462,15 +1525,8 @@ class LibraryReconciliationJob(RepairJob):
                         result.findings_created += 1
                     cache.checkpoint()
                     continue
-                release_key = (source, release_id)
-                if release_key not in release_meta_cache:
-                    is_exact_release = (source == 'musicbrainz' and
-                                        release_id in exact_musicbrainz_releases)
-                    release_meta_cache[release_key] = (
-                        get_album_for_source(source, release_id, exact_release=True)
-                        if is_exact_release else
-                        get_album_for_source(source, release_id)) or {}
-                release_meta = release_meta_cache[release_key]
+                release_meta = _release_metadata(
+                    scored[0], release_meta_cache, exact_musicbrainz_releases)
                 # MusicBrainz album IDs can be release-group IDs. Its album
                 # adapter picks a concrete representative release and exposes
                 # that ID here; a missing-track request must target that exact
