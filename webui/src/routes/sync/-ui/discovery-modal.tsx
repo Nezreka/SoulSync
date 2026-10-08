@@ -300,10 +300,13 @@ function FooterActions(props: DiscoveryModalProps) {
     onRediscover,
     onRetryFailed,
   } = props;
-  // The vanilla's gates (9603-9605): results presence, COUNTER-only matches,
-  // and the converted-playlist fallback that keeps Download available.
+  // The vanilla's gates (9603-9605): results presence, matches, and the
+  // converted-playlist fallback that keeps Download available. matches count
+  // the found rows when the counter is 0, same as the progress line: a cached
+  // open has no worker to count them, so it said "4 / 4 tracks matched" with
+  // Push and Download hidden until a re-identify (#1603).
   const hasResults = state.rows.length > 0;
-  const hasMatches = state.spotifyMatches > 0;
+  const hasMatches = seededProgress(state).matches > 0;
   const hasConverted = Boolean(state.convertedSpotifyPlaylistId);
   // retryFailedMirroredDiscovery counts every row that is NOT found (9684).
   const failedCount = state.rows.filter((r) => r.status_class !== 'found').length;
