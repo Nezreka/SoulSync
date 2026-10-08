@@ -16,8 +16,8 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .automx {
-  --automx-accent: var(--accent-rgb, 29, 185, 84);
-  --automx-accent-light: var(--accent-light-rgb, 134, 239, 172);
+  --automx-accent: var(--accent-rgb);
+  --automx-accent-light: var(--accent-light-rgb);
   --automx-danger: 244, 63, 94;
   --automx-warn: 245, 158, 11;
   --automx-ok: 34, 197, 94;

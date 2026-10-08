@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 _CSS = Path(__file__).resolve().parents[1] / "webui" / "static" / "style.css"
+_TOKENS = _CSS.with_name("tokens.css")
 
 
 def _css():
@@ -73,7 +74,8 @@ def test_the_two_columns_add_up_to_the_whole_width():
     )
 
     # and at the real column width the split leaves the tiles usable
-    column = int(re.search(r"--settings-max-width:\s*(\d+)px", css).group(1))
+    tokens = _TOKENS.read_text(encoding="utf-8")
+    column = int(re.search(r"--settings-max-width:\s*(\d+)px", tokens).group(1))
     tiles = column - panel - gap
     assert tiles + gap + panel == column
     assert tiles >= 920, (

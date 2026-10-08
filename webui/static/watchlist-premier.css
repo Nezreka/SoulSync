@@ -4,7 +4,7 @@
    ========================================================================== */
 
 .watchlist-page-container {
-  --wl-bg-radial: radial-gradient(circle at 18% -10%, rgba(var(--accent-rgb, 29, 185, 84), 0.12) 0%, transparent 45%),
+  --wl-bg-radial: radial-gradient(circle at 18% -10%, rgba(var(--accent-rgb), 0.12) 0%, transparent 45%),
                   radial-gradient(circle at 85% 15%, rgba(64, 120, 255, 0.08) 0%, transparent 40%);
   --wl-surface: rgba(20, 24, 33, 0.75);
   --wl-surface-elevated: rgba(26, 32, 45, 0.92);
@@ -20,8 +20,8 @@
   --wl-radius-sm: 8px;
   --wl-radius-full: 9999px;
   --wl-shadow-card: 0 4px 20px -2px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--wl-line);
-  --wl-shadow-hover: 0 12px 32px -4px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--wl-line-highlight), 0 0 24px -6px rgba(var(--accent-rgb, 29, 185, 84), 0.22);
-  --wl-accent-glow: 0 0 18px rgba(var(--accent-rgb, 29, 185, 84), 0.35);
+  --wl-shadow-hover: 0 12px 32px -4px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--wl-line-highlight), 0 0 24px -6px rgba(var(--accent-rgb), 0.22);
+  --wl-accent-glow: 0 0 18px rgba(var(--accent-rgb), 0.35);
 
   position: relative;
   max-width: 1540px;
@@ -65,7 +65,7 @@
 }
 
 .watchlist-page-container .watchlist-page-title svg {
-  filter: drop-shadow(0 0 10px rgba(var(--accent-rgb, 29, 185, 84), 0.5));
+  filter: drop-shadow(0 0 10px rgba(var(--accent-rgb), 0.5));
 }
 
 .watchlist-page-container .watchlist-page-meta {
@@ -89,10 +89,10 @@
 }
 
 .watchlist-page-container .wl-meta-chip--accent {
-  background: rgba(var(--accent-rgb, 29, 185, 84), 0.12);
-  border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.3);
-  color: rgb(var(--accent-rgb, 29, 185, 84));
-  box-shadow: 0 0 12px rgba(var(--accent-rgb, 29, 185, 84), 0.15);
+  background: rgba(var(--accent-rgb), 0.12);
+  border-color: rgba(var(--accent-rgb), 0.3);
+  color: rgb(var(--accent-rgb));
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.15);
 }
 
 /* --------------------------------------------------------------------------
@@ -133,15 +133,15 @@
 
 /* Primary CTA Button */
 .watchlist-page-container .wl-chip--cta {
-  background: linear-gradient(135deg, rgb(var(--accent-rgb, 29, 185, 84)) 0%, #12833b 100%);
+  background: linear-gradient(135deg, rgb(var(--accent-rgb)) 0%, #12833b 100%);
   color: #ffffff;
   border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow: 0 4px 14px rgba(var(--accent-rgb, 29, 185, 84), 0.35);
+  box-shadow: 0 4px 14px rgba(var(--accent-rgb), 0.35);
 }
 
 .watchlist-page-container .wl-chip--cta:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(var(--accent-rgb, 29, 185, 84), 0.5);
+  box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.5);
   filter: brightness(1.05);
 }
 
@@ -165,8 +165,8 @@
 }
 
 .watchlist-page-container .wl-chip--slate.wl-chip--active {
-  background: rgba(var(--accent-rgb, 29, 185, 84), 0.15);
-  border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.4);
+  background: rgba(var(--accent-rgb), 0.15);
+  border-color: rgba(var(--accent-rgb), 0.4);
   color: #ffffff;
 }
 
@@ -224,7 +224,7 @@
 }
 
 .watchlist-page-container .watchlist-last-scan-strip svg {
-  color: rgb(var(--accent-rgb, 29, 185, 84));
+  color: rgb(var(--accent-rgb));
   flex-shrink: 0;
 }
 
@@ -273,9 +273,9 @@
 }
 
 .watchlist-page-container .watchlist-attention-card.is-active {
-  background: rgba(var(--accent-rgb, 147, 51, 234), 0.16) !important;
-  border-color: rgba(var(--accent-rgb, 147, 51, 234), 0.5) !important;
-  box-shadow: 0 0 12px rgba(var(--accent-rgb, 147, 51, 234), 0.22) !important;
+  background: rgba(var(--accent-rgb), 0.16) !important;
+  border-color: rgba(var(--accent-rgb), 0.5) !important;
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.22) !important;
 }
 
 .watchlist-page-container .watchlist-attention-label {
@@ -308,7 +308,7 @@
 }
 
 .watchlist-page-container .watchlist-attention-card.is-active .watchlist-attention-value {
-  background: rgba(var(--accent-rgb, 147, 51, 234), 0.35) !important;
+  background: rgba(var(--accent-rgb), 0.35) !important;
   color: #ffffff !important;
 }
 
@@ -358,7 +358,7 @@
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: rgb(var(--accent-rgb, 29, 185, 84));
+  color: rgb(var(--accent-rgb));
 }
 
 .watchlist-page-container .watchlist-add-copy span:last-child {
@@ -400,8 +400,8 @@
 
 .watchlist-page-container .watchlist-add-input:focus {
   outline: none;
-  border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.5);
-  box-shadow: 0 0 16px rgba(var(--accent-rgb, 29, 185, 84), 0.15);
+  border-color: rgba(var(--accent-rgb), 0.5);
+  box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.15);
 }
 
 .watchlist-page-container .watchlist-add-status {
@@ -466,8 +466,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(var(--accent-rgb, 29, 185, 84), 0.15);
-  color: rgb(var(--accent-rgb, 29, 185, 84));
+  background: rgba(var(--accent-rgb), 0.15);
+  color: rgb(var(--accent-rgb));
   font-size: 18px;
   font-weight: 700;
 }
@@ -507,7 +507,7 @@
 }
 
 .watchlist-page-container .watchlist-add-result-action:hover:not(:disabled) {
-  background: rgb(var(--accent-rgb, 29, 185, 84));
+  background: rgb(var(--accent-rgb));
   border-color: transparent;
   color: #ffffff;
 }
@@ -645,8 +645,8 @@
 }
 
 .watchlist-page-container .watchlist-search-input:focus {
-  border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.5) !important;
-  box-shadow: 0 0 18px rgba(var(--accent-rgb, 29, 185, 84), 0.15) !important;
+  border-color: rgba(var(--accent-rgb), 0.5) !important;
+  box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.15) !important;
   background: var(--wl-surface-elevated) !important;
 }
 
@@ -670,8 +670,8 @@
 }
 
 .watchlist-page-container .watchlist-sort-select:focus {
-  border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.5);
-  box-shadow: 0 0 14px rgba(var(--accent-rgb, 29, 185, 84), 0.15);
+  border-color: rgba(var(--accent-rgb), 0.5);
+  box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.15);
 }
 
 /* --------------------------------------------------------------------------
@@ -707,7 +707,7 @@
 .watchlist-page-container .watchlist-batch-count {
   font-size: 12px;
   font-weight: 700;
-  color: rgb(var(--accent-rgb, 29, 185, 84));
+  color: rgb(var(--accent-rgb));
 }
 
 .watchlist-page-container .watchlist-batch-remove-btn {
@@ -794,9 +794,9 @@
 }
 
 .watchlist-page-container .watchlist-artist-card--active {
-  background: linear-gradient(135deg, rgba(var(--accent-rgb, 29, 185, 84), 0.12), rgba(26, 32, 45, 0.95)) !important;
-  border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.45) !important;
-  box-shadow: 0 0 20px rgba(var(--accent-rgb, 29, 185, 84), 0.2) !important;
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.12), rgba(26, 32, 45, 0.95)) !important;
+  border-color: rgba(var(--accent-rgb), 0.45) !important;
+  box-shadow: 0 0 20px rgba(var(--accent-rgb), 0.2) !important;
 }
 
 /* Card Artwork */
@@ -875,7 +875,7 @@
 }
 
 .watchlist-artists-grid--rows .watchlist-card-name:hover {
-  color: rgb(var(--accent-rgb, 29, 185, 84)) !important;
+  color: rgb(var(--accent-rgb)) !important;
 }
 
 .watchlist-card-meta {
@@ -1258,8 +1258,8 @@
   width: 120px !important;
   height: 120px !important;
   border-radius: 50% !important;
-  border: 3px solid rgba(var(--accent-rgb, 147, 51, 234), 0.5) !important;
-  box-shadow: 0 0 30px rgba(var(--accent-rgb, 147, 51, 234), 0.35) !important;
+  border: 3px solid rgba(var(--accent-rgb), 0.5) !important;
+  box-shadow: 0 0 30px rgba(var(--accent-rgb), 0.35) !important;
   object-fit: cover !important;
 }
 
@@ -1320,10 +1320,10 @@
 }
 
 .watchlist-artist-detail-overlay .watchlist-detail-discography-btn {
-  background: linear-gradient(135deg, rgba(var(--accent-rgb, 147, 51, 234), 0.9), rgba(var(--accent-rgb, 147, 51, 234), 0.7)) !important;
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.9), rgba(var(--accent-rgb), 0.7)) !important;
   color: #ffffff !important;
   border: 1px solid rgba(255, 255, 255, 0.2) !important;
-  box-shadow: 0 4px 20px rgba(var(--accent-rgb, 147, 51, 234), 0.35) !important;
+  box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.35) !important;
 }
 
 .watchlist-artist-detail-overlay .watchlist-detail-settings-btn {
