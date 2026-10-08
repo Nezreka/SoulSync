@@ -1493,10 +1493,10 @@ class DeezerClient:
                              album_title: str) -> Optional[Dict[str, Any]]:
         """Pick the result whose title is exactly ``album_title`` (folded).
 
-        With an artist, the exact-title result by that artist wins. For
-        "Various Artists" (or no artist) the title alone decides, the first
-        exact-title result by Various Artists first. None when no result has the
-        exact title, so the caller falls back to its older behavior.
+        With an artist, the exact-title result by that artist wins. With no
+        artist the title alone decides. For "Various Artists" the exact-title
+        result credited to Various Artists wins, else a lone exact title. None
+        otherwise, so the caller falls back to its older behavior.
         """
         wanted = self._fold_title(album_title)
         if not wanted:
@@ -1515,7 +1515,10 @@ class DeezerClient:
             for r in exact:
                 if self._fold_title(credit(r)) == 'various artists':
                     return r
-            return exact[0]
+            # no VA credit: a lone exact title is the album (a soundtrack deezer
+            # credits to its composer). several means a generic title like
+            # "Greatest Hits" where any one would be a guess, so fall back
+            return exact[0] if len(exact) == 1 else None
         for r in exact:
             if artist_name_matches(artist, credit(r)):
                 return r

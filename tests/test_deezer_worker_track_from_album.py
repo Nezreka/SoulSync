@@ -154,3 +154,32 @@ def test_tracklist_fetch_waits_for_a_shared_budget_slot(monkeypatch):
     monkeypatch.setattr(throttle, 'wait_for_slot', lambda *a, **k: slots.append(1) or True)
     c.get_album_tracks_raw(9)
     assert slots == [1]
+
+# ── _process_track tries the album tracklist before the artist search ───────
+
+def _process(monkeypatch, tracklist, search_hit=None):
+    monkeypatch.setattr('core.deezer_worker.honor_stored_match', lambda **kw: None)
+    w = _worker('356502127', tracklist)
+    w.stats = {'matched': 0, 'not_found': 0, 'errors': 0}
+    w.name_similarity_threshold = 0.80
+    w.client.search_track.return_value = search_hit
+    w.client.get_track_raw.side_effect = lambda tid: {'id': tid, 'bpm': 120}
+    w._verify_artist_id = MagicMock()
+    w._mark_status = MagicMock()
+    w._update_track = MagicMock()
+    w._process_track(7, 'A Whole New World', 'Various Artists', {'type': 'track'})
+    return w
+
+
+def test_process_track_matches_from_album_without_searching(monkeypatch):
+    w = _process(monkeypatch, ALBUM)
+    w.client.search_track.assert_not_called()
+    assert w._update_track.call_args.args[1]['id'] == 2
+    assert w.stats['matched'] == 1
+
+
+def test_process_track_falls_back_to_search_when_not_on_album(monkeypatch):
+    hit = {'id': 99, 'title': 'A Whole New World', 'artist': {'id': 8, 'name': 'Brad Kane'}}
+    w = _process(monkeypatch, [ALBUM[0]], search_hit=hit)
+    w.client.search_track.assert_called_once_with('Various Artists', 'A Whole New World')
+    assert w._update_track.call_args.args[1]['id'] == 99

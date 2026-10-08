@@ -76,3 +76,17 @@ def test_empty_title_uses_plain_query(client):
 
 def test_punctuation_and_case_fold(client):
     assert _call(client, 'various artists', 'brave original soundtrack')['id'] == 3410931
+
+def test_various_artists_takes_a_lone_exact_title_credited_to_someone(client):
+    # deezer credits plenty of soundtracks to the composer, not VA
+    from core.deezer_client import DeezerClient as D
+    only = [_album(5, 'Brave (Original Soundtrack)', 'Patrick Doyle')]
+    assert D._pick_album_by_title(client, only, 'Various Artists', 'Brave (Original Soundtrack)')['id'] == 5
+
+
+def test_various_artists_generic_title_is_not_a_guess(client):
+    # several same-titled albums and none by VA: any pick would be a guess
+    from core.deezer_client import DeezerClient as D
+    many = [_album(5, 'Greatest Hits', 'Queen'), _album(6, 'Greatest Hits', 'ABBA')]
+    assert D._pick_album_by_title(client, many, 'Various Artists', 'Greatest Hits') is None
+
