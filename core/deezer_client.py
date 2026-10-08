@@ -929,6 +929,11 @@ class DeezerClient:
                 'artists': [artist_name]
             },
             'is_album_track': (album_data.get('nb_tracks', 0) if isinstance(album_data, dict) else 0) > 1,
+            # the download tagger and the bpm backfill read these off the top
+            # level, and only ever found them in raw_data, so neither got a
+            # deezer bpm or isrc
+            'bpm': track_data.get('bpm') or 0,
+            'isrc': track_data.get('isrc') or '',
             'raw_data': track_data
         }
 

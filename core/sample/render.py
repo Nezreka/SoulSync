@@ -31,6 +31,7 @@ import tempfile
 import uuid
 from typing import Any, Dict, Optional, Tuple
 
+from core.sample.analyze import ffmpeg_bin
 from utils.logging_config import get_logger
 
 logger = get_logger("sample.render")
@@ -83,7 +84,7 @@ def decode_stereo(file_path: str) -> Tuple[Any, int]:
     except Exception:
         logger.info("soundfile could not read %s — falling back to ffmpeg", file_path)
     proc = subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", file_path, "-f", "wav", "-"],
+        [ffmpeg_bin(), "-v", "error", "-i", file_path, "-f", "wav", "-"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
@@ -117,7 +118,7 @@ def decode_region(file_path: str, start_s: float, end_s: float) -> Tuple[Any, in
     except Exception:
         logger.info("soundfile could not read %s — falling back to ffmpeg", file_path)
     proc = subprocess.run(
-        ["ffmpeg", "-v", "error", "-ss", f"{start_s:.6f}", "-t", f"{end_s - start_s:.6f}",
+        [ffmpeg_bin(), "-v", "error", "-ss", f"{start_s:.6f}", "-t", f"{end_s - start_s:.6f}",
          "-i", file_path, "-f", "wav", "-"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

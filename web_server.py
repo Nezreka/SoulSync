@@ -1783,6 +1783,26 @@ def library_tracks_web():
         return jsonify({"success": False, "data": None, "error": str(e)}), 500
 
 
+@app.route('/api/library/tracks/recent', methods=['GET'])
+def library_recent_tracks_web():
+    """Newest library tracks for the Sample Studio panel before you search.
+
+    /api/library/recently-added is the dashboard's album rail, which is why
+    this has its own path.
+    """
+    try:
+        from api.sample import recent_library_tracks
+
+        try:
+            limit = min(100, max(1, int(request.args.get('limit') or 50)))
+        except (TypeError, ValueError):
+            limit = 50
+        return jsonify({"success": True, "data": {"tracks": recent_library_tracks(limit)}, "error": None})
+    except Exception as e:
+        logger.error(f"web /api/library/tracks/recent failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
 @app.route('/api/sample/analysis', methods=['GET'])
 def sample_analysis_web():
     try:

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import os
+import shutil
 import subprocess
 from typing import Any, Dict, List, Tuple
 
@@ -59,6 +60,23 @@ def _load_soundfile():
         raise ImportError("soundfile is required for sample analysis (pip install soundfile)") from exc
 
 
+def ffmpeg_bin() -> str:
+    """ffmpeg on PATH, else the copy soulsync downloads into tools/.
+
+    a bare "ffmpeg" only worked where it was on PATH, so on installs that
+    rely on tools/ffmpeg every mp3/m4a failed to analyze or draw.
+    """
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    tools_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tools")
+    for name in ("ffmpeg.exe", "ffmpeg") if os.name == "nt" else ("ffmpeg",):
+        cand = os.path.join(tools_dir, name)
+        if os.path.isfile(cand):
+            return cand
+    raise RuntimeError("ffmpeg isn't installed, so mp3/m4a/opus files can't be decoded")
+
+
 def _decode_via_ffmpeg(file_path: str, target_sr: int = 44100) -> Tuple[Any, int]:
     """Decode any format ffmpeg understands to mono float32 via a wav pipe.
 
@@ -69,7 +87,7 @@ def _decode_via_ffmpeg(file_path: str, target_sr: int = 44100) -> Tuple[Any, int
     sf = _load_soundfile()
     try:
         proc = subprocess.run(
-            ["ffmpeg", "-v", "error", "-i", file_path, "-ac", "1", "-ar", str(target_sr), "-f", "wav", "-"],
+            [ffmpeg_bin(), "-v", "error", "-i", file_path, "-ac", "1", "-ar", str(target_sr), "-f", "wav", "-"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=False,
