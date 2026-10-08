@@ -1,5 +1,6 @@
 """Single/Album Deduplicator Job — flags singles that also exist on albums in the library."""
 
+import os
 import re
 from collections import defaultdict
 from core.text.fold import folded_similarity as _folded_similarity
@@ -63,7 +64,8 @@ class SingleAlbumDedupJob(RepairJob):
             cursor.execute("""
                 SELECT t.id, t.title, ar.name, al.title, al.record_type, al.track_count,
                        t.file_path, t.bitrate, t.duration, al.thumb_url, ar.thumb_url,
-                       t.track_number, ar.id
+                       t.track_number, ar.id,
+                       (SELECT COUNT(*) FROM tracks t2 WHERE t2.album_id = t.album_id)
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -97,7 +99,7 @@ class SingleAlbumDedupJob(RepairJob):
         for row in tracks:
             (track_id, title, artist_name, album_title, album_type,
              total_track_count, file_path, bitrate, duration,
-             album_thumb, artist_thumb, track_number, artist_id) = row
+             album_thumb, artist_thumb, track_number, artist_id, owned_count) = row
 
             # same reason, for a hand-tagged file whose row isn't locked yet
             if is_hand_tagged_path(file_path, hand_tagged):
@@ -111,7 +113,10 @@ class SingleAlbumDedupJob(RepairJob):
                 'norm_artist': _normalize(artist_name or ''),
                 'album': album_title or '',
                 'album_type': (album_type or '').lower(),
-                'total_tracks': total_track_count or 0,
+                # no stored count: what the library holds is the floor. an
+                # album with no count used to read as 0 tracks, so every
+                # track on it counted as a single (#1611)
+                'total_tracks': total_track_count or owned_count or 0,
                 'file_path': file_path,
                 'bitrate': bitrate,
                 'duration': duration,
@@ -202,6 +207,13 @@ class SingleAlbumDedupJob(RepairJob):
                     best_sim = combined
                     best_album_match = album_t
 
+            if best_album_match and same_file(single['file_path'], best_album_match['file_path']):
+                # two library rows for one file. "removing the single" would
+                # delete the only copy (#1611)
+                logger.info("Single/Album dedup: '%s' and its album match are the same file, skipped",
+                            single['title'])
+                best_album_match = None
+
             if best_album_match:
                 flagged_single_ids.add(single['id'])
 
@@ -290,6 +302,13 @@ def _extract_version_tag(text: str) -> str:
     """Return a lowercase version keyword if the title contains one, else empty string."""
     m = _VERSION_KEYWORDS.search(text)
     return m.group(1).lower().strip() if m else ''
+
+
+def same_file(a, b) -> bool:
+    """two library paths that name the same file, as far as text can tell."""
+    def _key(p):
+        return os.path.normcase(os.path.normpath(str(p or '').replace('\\', '/'))).casefold()
+    return bool(a) and bool(b) and _key(a) == _key(b)
 
 
 def _normalize(text: str) -> str:
