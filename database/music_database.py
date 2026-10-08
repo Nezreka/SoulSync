@@ -7142,6 +7142,7 @@ class MusicDatabase:
         exactly what would make a "vs last month" delta lie."""
         if not where:
             return dict(self._EMPTY_OVERVIEW)
+        from core.listening_scope import play_duration_sql
         conn = None
         try:
             conn = self._get_connection()
@@ -7149,7 +7150,7 @@ class MusicDatabase:
             cursor.execute(f"""
                 SELECT
                     COUNT(*) as total_plays,
-                    COALESCE(SUM(duration_ms), 0) as total_time_ms,
+                    COALESCE(SUM({play_duration_sql()}), 0) as total_time_ms,
                     COUNT(DISTINCT artist) as unique_artists,
                     COUNT(DISTINCT album) as unique_albums,
                     COUNT(DISTINCT title || '|||' || COALESCE(artist, '')) as unique_tracks
@@ -7719,7 +7720,7 @@ class MusicDatabase:
 
         conn = None
         try:
-            from core.listening_scope import owner_clause
+            from core.listening_scope import owner_clause, play_duration_sql
             scope = owner_clause(self._listening_owner(profile_id))
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -7728,7 +7729,7 @@ class MusicDatabase:
 
             cursor.execute(f"""
                 SELECT COUNT(*),
-                       COALESCE(SUM(duration_ms), 0),
+                       COALESCE(SUM({play_duration_sql()}), 0),
                        COUNT(DISTINCT LOWER(artist)),
                        COUNT(DISTINCT LOWER(album)),
                        COUNT(DISTINCT LOWER(title) || '|||' || LOWER(COALESCE(artist, ''))),
@@ -7754,7 +7755,7 @@ class MusicDatabase:
             # Per-month plays + minutes, folded onto the dense strip.
             cursor.execute(f"""
                 SELECT strftime('%Y-%m', played_at) AS ym,
-                       COUNT(*), COALESCE(SUM(duration_ms), 0)
+                       COUNT(*), COALESCE(SUM({play_duration_sql()}), 0)
                 FROM listening_history {window}
                 GROUP BY ym
             """, span)
