@@ -278,3 +278,55 @@ def test_the_ranker_drops_a_format_that_is_not_allowed():
     with _config({"audiobooks.quality.allowed_formats": ["m4b"]}):
         assert rank_releases([mp3], _book(), 0.0, "any") == []
         assert len(rank_releases([m4b], _book(), 0.0, "any")) == 1
+
+
+# ---------------------------------------------------------------------------
+# One file or several
+# ---------------------------------------------------------------------------
+
+def _soulseek_release(files):
+    return _release(soulseek={"file_count": files, "files": [{}] * files})
+
+
+def test_any_layout_is_the_default():
+    with _config({}):
+        assert profile()["file_layout"] == "any"
+    assert rejection(_soulseek_release(30), DEFAULTS) == ""
+    assert rejection(_soulseek_release(1), DEFAULTS) == ""
+
+
+@pytest.mark.parametrize("bad", ["both", "", None, 3])
+def test_a_nonsense_layout_reads_as_any(bad):
+    with _config({"audiobooks.quality.file_layout": bad}):
+        assert profile()["file_layout"] == "any"
+
+
+def test_the_layout_is_normalised():
+    with _config({"audiobooks.quality.file_layout": " Single "}):
+        assert profile()["file_layout"] == "single"
+
+
+def test_single_refuses_a_folder_of_chapters():
+    prof = {**DEFAULTS, "file_layout": "single"}
+    assert "30 files" in rejection(_soulseek_release(30), prof)
+    assert rejection(_soulseek_release(1), prof) == ""
+
+
+def test_multiple_refuses_a_lone_file():
+    prof = {**DEFAULTS, "file_layout": "multiple"}
+    assert "single file" in rejection(_soulseek_release(1), prof)
+    assert rejection(_soulseek_release(30), prof) == ""
+
+
+def test_a_release_with_no_known_file_count_is_not_refused():
+    # A torrent or NZB is a title and a size; hiding them all would hide most
+    # of what a search finds.
+    for layout in ("single", "multiple"):
+        assert rejection(_release(), {**DEFAULTS, "file_layout": layout}) == ""
+
+
+def test_the_file_count_falls_back_to_the_file_list():
+    from core.audiobook_quality import file_count
+
+    assert file_count(_release(soulseek={"files": [{}, {}, {}]})) == 3
+    assert file_count(_release()) is None

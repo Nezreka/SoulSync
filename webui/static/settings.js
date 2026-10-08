@@ -3333,6 +3333,7 @@ async function loadSettingsData() {
         document.getElementById('audiobook-allowed-formats')?.querySelectorAll('input').forEach(box => {
             box.checked = !abAllowed.length || abAllowed.includes(box.value);
         });
+        abVal(document.getElementById('audiobook-file-layout'), abq.file_layout || 'any');
         abVal(document.getElementById('audiobook-min-bitrate'), abq.min_bitrate_kbps ?? 0);
         abVal(document.getElementById('audiobook-max-bitrate'), abq.max_bitrate_kbps ?? 0);
         abChecked(document.getElementById('audiobook-allow-dramatized'),
@@ -6548,6 +6549,7 @@ async function saveSettings(quiet = false) {
                     const on = boxes.filter(box => box.checked).map(box => box.value);
                     return on.length === boxes.length ? [] : on;
                 })(),
+                file_layout: _cfgStr('audiobook-file-layout'),
                 min_bitrate_kbps: Math.max(0,
                     _cfgInt('audiobook-min-bitrate', 0)),
                 max_bitrate_kbps: Math.max(0,

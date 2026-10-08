@@ -7702,6 +7702,24 @@
                                                 </div>
 
                                                 <div class="form-group">
+                                                    <label>File Layout:</label>
+                                                    <select id="audiobook-file-layout" class="form-select">
+                                                        <option value="any">Either</option>
+                                                        <option value="single">Single file (whole book)</option>
+                                                        <option value="multiple">Multiple files (chapters or parts)</option>
+                                                    </select>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Whether a book
+                                                        should arrive as <strong>one file</strong> or as <strong>several
+                                                        smaller files</strong>, usually one per chapter. Releases laid out the
+                                                        other way are skipped. Only Soulseek says how many files a release has
+                                                        before it is downloaded; torrents and usenet do not, so they are always
+                                                        allowed.</small>
+                                                </div>
+
+                                                <div class="form-group">
                                                     <label>Reject Below:</label>
                                                     <input type="number" id="audiobook-min-bitrate" min="0" max="512"
                                                         step="1" placeholder="0">

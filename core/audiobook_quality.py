@@ -50,7 +50,13 @@ DEFAULTS: Dict[str, Any] = {
     # Formats a release may be in at all. Empty means every format: a list
     # that named all six would quietly refuse any format added later.
     "allowed_formats": [],
+    # "single" (the whole book in one file), "multiple" (a file per chapter or
+    # part), or "any". Only a release whose file count is known can be held to
+    # it, which today is Soulseek: a torrent or NZB is a title and a size.
+    "file_layout": "any",
 }
+
+FILE_LAYOUTS = ("any", "single", "multiple")
 
 
 def profile() -> Dict[str, Any]:
@@ -86,7 +92,23 @@ def profile() -> Dict[str, Any]:
         fmt for fmt in dict.fromkeys(str(f).strip().lower().lstrip(".") for f in allowed)
         if fmt in KNOWN_FORMATS
     ]
+    layout = str(values.get("file_layout") or "any").strip().lower()
+    values["file_layout"] = layout if layout in FILE_LAYOUTS else "any"
     return values
+
+
+def file_count(release: Any) -> Optional[int]:
+    """How many audio files a release holds, or None when it cannot be known."""
+    payload = getattr(release, "soulseek", None)
+    if not isinstance(payload, dict):
+        return None
+    count = payload.get("file_count")
+    if count is None:
+        count = len(payload.get("files") or [])
+    try:
+        return int(count) or None
+    except (TypeError, ValueError):
+        return None
 
 
 def format_scores(prof: Optional[Dict[str, Any]] = None) -> Dict[str, float]:
@@ -121,6 +143,16 @@ def rejection(release: Any, prof: Optional[Dict[str, Any]] = None) -> str:
     audio_format = str(getattr(release, "audio_format", "") or "").lower()
     if allowed and audio_format and audio_format not in allowed:
         return f"{audio_format.upper()} is not one of the formats you allow."
+
+    # Unknown file counts are let through, like unknown formats: a torrent or
+    # NZB does not say, and refusing them all would hide most of the results.
+    layout = prof["file_layout"]
+    count = file_count(release) if layout != "any" else None
+    if count is not None:
+        if layout == "single" and count > 1:
+            return f"{count} files; you asked for the whole book in a single file."
+        if layout == "multiple" and count == 1:
+            return "A single file; you asked for a book split into several files."
 
     implied = getattr(release, "implied_kbps", None)
     floor = prof["min_bitrate_kbps"]
