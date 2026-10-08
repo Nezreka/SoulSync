@@ -998,7 +998,9 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             hint = current_track_hint()
             if hint and (hint.get('deezer_id') or (hint.get('title') and hint.get('artist'))):
                 return []
-            from core.deezer_track_query import exact_title_queries, plain_has_exact_title
+            from core.deezer_track_query import (
+                exact_title_queries, plain_has_exact_title, query_is_an_artist,
+            )
             names = []
             pairs = []
             for it in plain_items:
@@ -1009,6 +1011,10 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             # The plain search already found the song (the usual case): one
             # request per query, not two. A playlist makes many of these.
             if plain_has_exact_title(query, pairs):
+                return []
+            # "taylor swift" is an artist search. track:"taylor swift" only finds
+            # songs that happen to be called that, so it's a wasted request
+            if query_is_an_artist(query, names):
                 return []
             extra: List[dict] = []
             for scoped in exact_title_queries(query, names):

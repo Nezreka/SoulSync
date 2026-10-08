@@ -118,9 +118,10 @@ def test_without_a_hint_the_plain_results_come_first(monkeypatch):
     assert calls[0][1]["q"] == "how far ill go"
 
 
-def test_no_artist_means_no_title_only_guess(monkeypatch):
-    """dozens of songs share a title: a hint without the artist runs no
-    title-scoped search of its own"""
+def test_a_hint_without_an_artist_runs_no_hinted_title_search(monkeypatch):
+    """dozens of songs share a title, so the hint's own title search needs the
+    artist. the typed-query title search still runs, see
+    test_deezer_exact_title_search.py"""
     c, calls = _client(monkeypatch)
     with track_hint_context({"title": "How Far I'll Go", "artist": "", "deezer_id": None}):
         c._search_sync("how far ill go")

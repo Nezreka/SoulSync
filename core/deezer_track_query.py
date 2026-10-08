@@ -134,6 +134,13 @@ def plain_has_exact_title(query: str, results: Iterable[Tuple[str, str]]) -> boo
     return any(fold(t) == title and fold(a) == artist for t, a in pairs)
 
 
+def query_is_an_artist(query: str, artist_names: Iterable[str]) -> bool:
+    """True when the whole query is one of the artists the plain search found,
+    i.e. someone searched an artist, not a song."""
+    q = fold(query)
+    return bool(q) and any(fold(name) == q for name in artist_names or [])
+
+
 def merge_by_id(*lists, limit: Optional[int] = None) -> list:
     """Concatenate result lists (dicts with ``id`` or objects with ``.id``),
     keeping the first of each id."""

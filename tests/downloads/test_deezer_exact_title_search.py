@@ -204,3 +204,12 @@ def test_hint_without_an_artist_does_not_skip_it():
     with track_hint_context({"title": "How Far I'll Go", "artist": "", "deezer_id": None}):
         client._exact_title_items("aulii cravalho how far ill go", PLAIN)
     assert len(client._calls) == 1
+
+
+# ── an artist search is not a song search ────────────────────────────────────
+
+def test_artist_only_query_runs_no_exact_title_search():
+    # track:"auli i cravalho" would only find songs that happen to be called that
+    client = _client(_responder)
+    client._search_sync("aulii cravalho")
+    assert client._calls == ["aulii cravalho"]
