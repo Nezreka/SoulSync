@@ -1035,24 +1035,30 @@ export function ReviewPage() {
                         Apply and organize folder
                       </button>
                     )}
-                    <details className={styles.readyChanges}>
-                      <summary>Review ready changes</summary>
-                      <div className={styles.readyChangeGroups}>
-                        {readyChangeGroups.map((group) => (
-                          <button
-                            key={group.key}
-                            type="button"
-                            onClick={() => selectFinding(group.findingIds[0] ?? null)}
-                          >
-                            <strong>{group.label}</strong>
-                            <span>
-                              {group.count} track{group.count === 1 ? '' : 's'}
-                              {group.valueSummary ? ` · ${group.valueSummary}` : ''}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    </details>
+                    {!(
+                      plan.status === 'ready' &&
+                      readyChangeGroups.length === 1 &&
+                      assignments.length > 0
+                    ) && (
+                      <details className={styles.readyChanges}>
+                        <summary>Review ready changes</summary>
+                        <div className={styles.readyChangeGroups}>
+                          {readyChangeGroups.map((group) => (
+                            <button
+                              key={group.key}
+                              type="button"
+                              onClick={() => selectFinding(group.findingIds[0] ?? null)}
+                            >
+                              <strong>{group.label}</strong>
+                              <span>
+                                {group.count} track{group.count === 1 ? '' : 's'}
+                                {group.valueSummary ? ` · ${group.valueSummary}` : ''}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </details>
+                    )}
                   </div>
                 )}
               </section>

@@ -151,6 +151,16 @@ describe('library reconciliation review queue', () => {
       ...finding,
       details: {
         ...finding.details,
+        expected_title: 'Laid to Rest',
+        artist_name: 'Lamb of God',
+        acoustid: {
+          status: 'ok',
+          best_score: 0.98,
+          recordings: [
+            { title: 'Laid to Rest', artist: 'Lamb of God', score: 0.98 },
+            { title: 'Hourglass', artist: 'Lamb of God', score: 0.98 },
+          ],
+        },
         ambiguity_reasons: [
           'AcoustID returned competing identities not resolved by the other evidence',
         ],
@@ -204,6 +214,8 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByText('US deluxe edition')).toBeTruthy();
     expect(screen.getByRole('heading', { name: /Why this needs review/ })).toBeTruthy();
     expect(screen.getByText(/competing recording identities at the same top score/)).toBeTruthy();
+    expect(screen.getByText('Equal-score alternatives')).toBeTruthy();
+    expect(screen.getAllByText('Hourglass · Lamb of God · 98%')).toHaveLength(2);
     expect(screen.getByText('1 confirmed match')).toBeTruthy();
     expect(screen.getByText(/Track comparisons were not saved/)).toBeTruthy();
     expect(screen.queryByText(/"release_id"/)).toBeNull();

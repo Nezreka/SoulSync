@@ -754,6 +754,31 @@ export function ReconciliationEvidence({
     : [];
   const primaryPairs = objects(objects(details.candidates)[0]?.pairs);
   const duplicateCopies = objects(details.duplicate_copies);
+  const audio = object(details.acoustid);
+  const expectedIdentity = `${label(details.expected_title)
+    .toLocaleLowerCase()
+    .trim()}::${label(details.artist_name).toLocaleLowerCase().trim()}`;
+  const bestAudioScore =
+    count(audio.best_score) ||
+    Math.max(0, ...objects(audio.recordings).map((recording) => count(recording.score)));
+  const competingAudioIdentities = [
+    ...new Map(
+      objects(audio.recordings)
+        .filter((recording) => Math.abs(count(recording.score) - bestAudioScore) < 0.000_001)
+        .filter((recording) => {
+          const identity = `${label(recording.title).toLocaleLowerCase().trim()}::${label(
+            recording.artist,
+          )
+            .toLocaleLowerCase()
+            .trim()}`;
+          return identity !== expectedIdentity;
+        })
+        .map((recording) => [
+          `${label(recording.title).toLocaleLowerCase()}::${label(recording.artist).toLocaleLowerCase()}`,
+          recording,
+        ]),
+    ).values(),
+  ];
 
   return (
     <div className={styles.reconciliationEvidence}>
@@ -803,6 +828,18 @@ export function ReconciliationEvidence({
             The release slot is the best overall fit, but AcoustID links this fingerprint to
             competing recording identities at the same top score.
           </p>
+          {competingAudioIdentities.length > 0 && (
+            <>
+              <strong>Equal-score alternatives</strong>
+              <ul>
+                {competingAudioIdentities.slice(0, 3).map((recording) => (
+                  <li key={`${label(recording.title)}-${label(recording.artist)}`}>
+                    {audioSummary(recording)}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </section>
       )}
       {missing.length > 0 && (
