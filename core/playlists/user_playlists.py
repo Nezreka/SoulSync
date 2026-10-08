@@ -19,7 +19,9 @@ reading the same list and one of them losing its track.
 from __future__ import annotations
 
 import json
+import re
 import threading
+import unicodedata
 import uuid
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -81,12 +83,35 @@ def clean_track(raw: Any) -> Optional[Dict[str, Any]]:
     }
 
 
+_BRACKETED = re.compile(r'\s*[\(\[][^\)\]]*[\)\]]')
+_DASH_SUFFIX = re.compile(r'\s+-\s+.*$')
+_FEAT = re.compile(r'\s+(feat\.?|ft\.?|featuring|with)\s+.*$', re.I)
+_ARTIST_SPLIT = re.compile(r'\s*(,|&|\bx\b|\band\b|;|/)\s*', re.I)
+_NON_WORD = re.compile(r'[^\w\s]')
+
+
+def _plain(text: str) -> str:
+    folded = unicodedata.normalize('NFKD', text)
+    folded = ''.join(c for c in folded if not unicodedata.combining(c))
+    return ' '.join(_NON_WORD.sub(' ', folded.lower()).split())
+
+
 def track_key(track: Dict[str, Any]) -> Tuple[str, str]:
-    """what counts as the same song for the already-in-this-playlist check."""
-    return (
-        str(track.get('artist_name') or '').strip().lower(),
-        str(track.get('track_name') or '').strip().lower(),
-    )
+    """what counts as LIKELY the same song for the already-in-this-playlist
+    check. loose on purpose: "Alright", "Alright (Remastered 2015)" and
+    "Alright - Radio Edit" by "Kendrick Lamar, Zacari" all land on one key.
+    the user is asked, never blocked, so a false match costs a click."""
+    title = str(track.get('track_name') or '')
+    stripped = _FEAT.sub('', _DASH_SUFFIX.sub('', _BRACKETED.sub('', title)))
+    # a title that is ALL brackets ("(Interlude)") keeps them rather than
+    # collapsing to nothing and matching every other such title
+    title_key = _plain(stripped) or _plain(title)
+    artist = str(track.get('artist_name') or '')
+    main = _ARTIST_SPLIT.split(_FEAT.sub('', artist))[0]
+    artist_key = _plain(main) or _plain(artist)
+    if artist_key.startswith('the '):
+        artist_key = artist_key[4:]
+    return (artist_key, title_key)
 
 
 def _stored_tracks(db: Any, playlist_id: int) -> List[Dict[str, Any]]:
@@ -165,21 +190,28 @@ def add_tracks(
         raise UserPlaylistError('No track to add')
     with _edit_lock:
         current = _stored_tracks(db, playlist['id'])
-        have = {track_key(t) for t in current}
+        # key -> the copy already there, so the prompt can name it
+        have = {track_key(t): t for t in current}
         added: List[Dict[str, Any]] = []
         duplicates: List[Dict[str, Any]] = []
         for track in incoming:
             key = track_key(track)
             if key in have and not allow_duplicates:
-                duplicates.append(track)
+                duplicates.append({'track': track, 'existing': have[key]})
                 continue
-            have.add(key)
+            have.setdefault(key, track)
             added.append(track)
         if added:
             _write(db, playlist, current + added)
     return {
         'added': len(added),
-        'duplicates': [{'track_name': t['track_name'], 'artist_name': t['artist_name']} for t in duplicates],
+        'duplicates': [{
+            'track_name': d['track']['track_name'],
+            'artist_name': d['track']['artist_name'],
+            # the copy it matched, which may be spelled differently
+            'existing_track_name': d['existing']['track_name'],
+            'existing_artist_name': d['existing']['artist_name'],
+        } for d in duplicates],
         'track_count': len(current) + len(added),
     }
 

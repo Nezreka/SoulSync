@@ -6,6 +6,7 @@ import {
   AddToPlaylistHost,
   cleanTracks,
   closeAddToPlaylist,
+  duplicateMessage,
   openAddToPlaylist,
 } from './add-to-playlist';
 
@@ -53,6 +54,32 @@ function renderWithHost(ui: React.ReactNode) {
     </>,
   );
 }
+
+describe('duplicateMessage', () => {
+  it('says plainly when it is the same title, and names the other spelling when not', () => {
+    expect(
+      duplicateMessage(
+        [{ track_name: 'Alright', artist_name: 'K', existing_track_name: 'alright' }],
+        'Gym',
+      ),
+    ).toBe('"Alright" is already in Gym.');
+    expect(
+      duplicateMessage(
+        [{ track_name: 'Alright (Remastered)', artist_name: 'K', existing_track_name: 'Alright' }],
+        'Gym',
+      ),
+    ).toBe('"Alright (Remastered)" looks like "Alright", which is already in Gym.');
+    expect(
+      duplicateMessage(
+        [
+          { track_name: 'A', artist_name: 'K' },
+          { track_name: 'B', artist_name: 'K' },
+        ],
+        'Gym',
+      ),
+    ).toBe("2 of these songs look like they're already in Gym.");
+  });
+});
 
 describe('cleanTracks', () => {
   it('keeps rows with both an artist and a title, trimmed', () => {

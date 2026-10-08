@@ -100,11 +100,41 @@ def test_duplicate_is_skipped_and_reported_unless_allowed(mdb):
     up.add_tracks(mdb, pl, [_song("One")])
     res = up.add_tracks(mdb, pl, [_song("one", "artist"), _song("Two")])
     assert res["added"] == 1
-    assert res["duplicates"] == [{"track_name": "one", "artist_name": "artist"}]
+    assert res["duplicates"] == [{
+        "track_name": "one", "artist_name": "artist",
+        "existing_track_name": "One", "existing_artist_name": "Artist",
+    }]
     assert _titles(mdb, pid) == ["One", "Two"]
     res = up.add_tracks(mdb, pl, [_song("One")], allow_duplicates=True)
     assert res["added"] == 1
     assert _titles(mdb, pid) == ["One", "Two", "One"]
+
+
+@pytest.mark.parametrize("have,adding", [
+    (("Alright", "Kendrick Lamar"), ("Alright (Remastered 2015)", "Kendrick Lamar")),
+    (("Alright", "Kendrick Lamar"), ("Alright - Radio Edit", "Kendrick Lamar")),
+    (("Love.", "Kendrick Lamar"), ("LOVE (feat. Zacari)", "Kendrick Lamar, Zacari")),
+    (("Beyoncé", "Señor"), ("Beyonce", "Senor")),
+    (("Yellow", "The Coldplay"), ("Yellow", "Coldplay")),
+    (("Dreams", "Fleetwood Mac"), ("Dreams [2004 Remaster]", "Fleetwood Mac & Friends")),
+])
+def test_likely_duplicates_are_caught_and_name_the_copy_already_there(mdb, have, adding):
+    pl = mdb.get_mirrored_playlist(up.create_playlist(mdb, 1, "Mix"))
+    up.add_tracks(mdb, pl, [_song(have[0], have[1])])
+    res = up.add_tracks(mdb, pl, [_song(adding[0], adding[1])])
+    assert res["added"] == 0
+    assert res["duplicates"][0]["existing_track_name"] == have[0]
+
+
+@pytest.mark.parametrize("a,b", [
+    (("Alright", "Kendrick Lamar"), ("Alright", "Pharrell")),
+    (("Alright", "Kendrick Lamar"), ("All Right", "Kendrick Lamar")),
+    (("(Interlude)", "Band"), ("(Outro)", "Band")),
+])
+def test_different_songs_are_not_flagged(mdb, a, b):
+    pl = mdb.get_mirrored_playlist(up.create_playlist(mdb, 1, "Mix"))
+    up.add_tracks(mdb, pl, [_song(a[0], a[1])])
+    assert up.add_tracks(mdb, pl, [_song(b[0], b[1])])["added"] == 1
 
 
 def test_edits_keep_each_tracks_identify_match(mdb):

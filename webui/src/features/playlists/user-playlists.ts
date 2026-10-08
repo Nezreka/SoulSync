@@ -29,7 +29,14 @@ export interface UserPlaylistSummary {
 
 export interface AddTracksResult {
   added: number;
-  duplicates: { track_name: string; artist_name: string }[];
+  /** each song that looked already there, and the copy it matched (which can
+   *  be spelled differently: "Alright" vs "Alright (Remastered)") */
+  duplicates: {
+    track_name: string;
+    artist_name: string;
+    existing_track_name?: string;
+    existing_artist_name?: string;
+  }[];
   track_count: number;
 }
 

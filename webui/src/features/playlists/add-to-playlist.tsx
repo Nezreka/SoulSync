@@ -16,7 +16,7 @@ import { createRoot } from 'react-dom/client';
 import { usePopoverDismiss } from '@/routes/sync/-ui/use-popover-dismiss';
 import { usePopoverPosition } from '@/routes/sync/-ui/use-popover-position';
 
-import type { UserPlaylistSummary, UserPlaylistTrack } from './user-playlists';
+import type { AddTracksResult, UserPlaylistSummary, UserPlaylistTrack } from './user-playlists';
 
 import styles from './add-to-playlist.module.css';
 import { addToUserPlaylist, createUserPlaylist, fetchUserPlaylists } from './user-playlists';
@@ -182,6 +182,22 @@ function describe(tracks: UserPlaylistTrack[]): string {
   return tracks.length === 1 ? `"${tracks[0].track_name}"` : `${tracks.length} songs`;
 }
 
+/** the duplicate prompt. names the copy that's there when it's spelled
+ *  differently, so "Alright" vs "Alright (Remastered)" makes sense. */
+export function duplicateMessage(
+  dupes: AddTracksResult['duplicates'],
+  playlistName: string,
+): string {
+  if (dupes.length > 1)
+    return `${dupes.length} of these songs look like they're already in ${playlistName}.`;
+  const [d] = dupes;
+  const there = d.existing_track_name ?? d.track_name;
+  if (there.trim().toLowerCase() === d.track_name.trim().toLowerCase()) {
+    return `"${d.track_name}" is already in ${playlistName}.`;
+  }
+  return `"${d.track_name}" looks like "${there}", which is already in ${playlistName}.`;
+}
+
 /** add, ask about duplicates, say what happened. exported for the tests. */
 export async function addAndReport(
   playlist: { id: number; name: string },
@@ -190,11 +206,9 @@ export async function addAndReport(
   const result = await addToUserPlaylist(playlist.id, tracks);
   const dupes = result.duplicates ?? [];
   if (dupes.length > 0) {
-    const which =
-      dupes.length === 1 ? `"${dupes[0].track_name}" is` : `${dupes.length} of these songs are`;
     const again = await window.showConfirmDialog?.({
       title: 'Already added',
-      message: `${which} already in ${playlist.name}.`,
+      message: duplicateMessage(dupes, playlist.name),
       confirmText: 'Add anyway',
       cancelText: result.added > 0 ? 'Skip' : "Don't add",
     });
