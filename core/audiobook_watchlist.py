@@ -28,6 +28,10 @@ logger = get_logger("audiobook_watchlist")
 # a shorter list still catches everything published since yesterday.
 DEFAULT_LOOKBACK = 20
 
+# A series is read in one go (the catalogue page is capped at 50 anyway), not
+# the newest-N window an author's bibliography needs.
+SERIES_LIMIT = 50
+
 # Authors checked per pass. Daily per author, so this only bounds a single run.
 DEFAULT_BATCH = 10
 
@@ -82,7 +86,7 @@ def scan_author(
     client: Any = None,
     marketplace: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Check one followed author and wishlist anything new.
+    """Check one followed author, narrator or series and wishlist anything new.
 
     ``marketplace`` is the Audible storefront code, passed through as a
     parameter because this module runs both inside a Flask request context
@@ -106,7 +110,7 @@ def scan_author(
     # every pass) and its new books were wishlisted to profile 1.
     profile_id = int(row.get("profile_id") or 1)
     role = str(row.get("role") or "author").strip().lower()
-    if role not in ("author", "narrator"):
+    if role not in ("author", "narrator", "series"):
         role = "author"
 
     try:
@@ -117,7 +121,21 @@ def scan_author(
         # Newest first, so a short lookback still sees everything published
         # since the last scan.
         marketplace_code = (marketplace or "").strip().lower() or "us"
-        if role == "narrator":
+        if role == "series":
+            # A series is not an author's bibliography: Audible has no
+            # "list a series" call, so get_series searches and keeps the
+            # products that carry it. The stored series ASIN makes the match
+            # exact; without one it falls back to the name. Editions collapse
+            # to one book per position so a dramatised adaptation does not
+            # queue a second copy of every instalment.
+            from core.audiobook_client import collapse_editions
+
+            books = collapse_editions(
+                client.get_series(
+                    name, series_asin=(row.get("series_asin") or None),
+                    limit=SERIES_LIMIT, marketplace=marketplace_code),
+                name)
+        elif role == "narrator":
             books = client.get_by_narrator(
                 name, limit=DEFAULT_LOOKBACK, sort="newest",
                 marketplace=marketplace_code)

@@ -1426,3 +1426,64 @@ def test_adopting_a_soulseek_folder_of_ebooks_is_refused(client, catalog, wishli
         "files": ["Books\\Stephen King\\Blaze.epub", "Books\\Stephen King\\Blaze.pdf"]})
     assert resp.status_code == 409
     assert wishlist_db.get_downloads() == []
+
+
+# ---------------------------------------------------------------------------
+# Watchlist roles: author, narrator, series
+# ---------------------------------------------------------------------------
+
+def test_following_without_a_role_is_an_author(client, wishlist_db):
+    resp = client.post("/api/audiobooks/watchlist", json={"name": "Andy Weir"})
+    assert resp.get_json()["followed"] is True
+    assert wishlist_db.is_following("Andy Weir", role="author")
+
+
+def test_a_narrator_and_a_series_can_be_followed_and_unfollowed(client, wishlist_db):
+    client.post("/api/audiobooks/watchlist", json={"name": "Ray Porter", "role": "narrator"})
+    client.post("/api/audiobooks/watchlist",
+                json={"name": "Mein Lotta-Leben", "role": "series", "series_asin": "SER1"})
+    rows = {r["role"]: r for r in client.get("/api/audiobooks/watchlist").get_json()["authors"]}
+    assert set(rows) == {"narrator", "series"}
+    assert rows["series"]["series_asin"] == "SER1"
+
+    gone = client.delete("/api/audiobooks/watchlist/Mein Lotta-Leben?role=series").get_json()
+    assert gone["removed"] is True
+    assert wishlist_db.is_following("Ray Porter", role="narrator")
+
+
+def test_delete_without_a_role_does_not_remove_a_series(client, wishlist_db):
+    client.post("/api/audiobooks/watchlist", json={"name": "Lotta", "role": "series"})
+    gone = client.delete("/api/audiobooks/watchlist/Lotta").get_json()
+    assert gone["removed"] is False
+    assert wishlist_db.is_following("Lotta", role="series")
+
+
+def test_an_unknown_role_is_refused(client, wishlist_db):
+    assert client.post("/api/audiobooks/watchlist",
+                       json={"name": "X", "role": "publisher"}).status_code == 400
+    assert client.delete("/api/audiobooks/watchlist/X?role=publisher").status_code == 400
+
+
+def test_a_series_followed_with_backfill_is_wishlisted_straight_away(client, wishlist_db):
+    volumes = [
+        _item("V1", "Band 1", release_date="2012-11-10",
+              series=[{"asin": "SER1", "title": "Mein Lotta-Leben", "sequence": "1"}]),
+        _item("V2", "Band 2", release_date="2013-03-21",
+              series=[{"asin": "SER1", "title": "Mein Lotta-Leben", "sequence": "2"}]),
+    ]
+    fake = MagicMock()
+    fake.get_series.return_value = volumes
+    with patch("core.audiobook_client.get_audiobook_client", return_value=fake):
+        body = client.post("/api/audiobooks/watchlist", json={
+            "name": "Mein Lotta-Leben", "role": "series", "series_asin": "SER1",
+            "backfill": True}).get_json()
+    assert body["wishlisted"] == 2
+    assert sorted(r["asin"] for r in wishlist_db.get_wishlist(1)) == ["V1", "V2"]
+    assert fake.get_series.call_args.kwargs["series_asin"] == "SER1"
+
+
+def test_a_series_followed_without_backfill_waits_for_the_scan(client, wishlist_db):
+    body = client.post("/api/audiobooks/watchlist",
+                       json={"name": "Mein Lotta-Leben", "role": "series"}).get_json()
+    assert "wishlisted" not in body
+    assert wishlist_db.get_wishlist(1) == []

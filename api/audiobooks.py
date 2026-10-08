@@ -133,6 +133,22 @@ def _sort(default: str = "relevance") -> str:
     return value if value in SORT_ORDERS else default
 
 
+# "Everything already published": an ISO date earlier than any audiobook.
+_BACKFILL_SINCE = "1900-01-01"
+_WATCH_ROLES = ("author", "narrator", "series")
+
+
+def _watch_role(raw: Any) -> Optional[str]:
+    """The follow role a request names, or None when it names something else.
+
+    Absent means ``author``, which is what every client sent before roles were
+    exposed here. An unknown value is refused rather than guessed, because the
+    role is part of the follow's key: guessing would unfollow the wrong row.
+    """
+    role = str(raw or "author").strip().lower()
+    return role if role in _WATCH_ROLES else None
+
+
 def _profile() -> int:
     """Whose audiobooks these are.
 
@@ -694,47 +710,81 @@ def create_audiobooks_blueprint() -> Blueprint:
 
     @bp.route("/watchlist", methods=["GET"])
     def watchlist():
-        """Authors being followed, newest release counts included."""
+        """Authors, narrators and series being followed, newest release counts included."""
         return jsonify({"success": True,
                         "authors": get_audiobook_db().get_watchlist(_profile())})
 
     @bp.route("/watchlist", methods=["POST"])
     def watchlist_follow():
-        """Follow an author so their new releases get wishlisted.
+        """Follow an author, narrator or series so new releases get wishlisted.
 
-        ``since`` is the cutoff and defaults to today: following an author means
-        "tell me about the next one", not "queue the 88 they already wrote".
-        Pass an earlier date deliberately to backfill.
+        ``role`` is ``author`` (default), ``narrator`` or ``series``. ``since``
+        is the cutoff and defaults to today: following an author means "tell me
+        about the next one", not "queue the 88 they already wrote". Pass an
+        earlier date deliberately to backfill, or ``backfill: true`` to take
+        everything already out. A series followed with ``backfill`` is scanned
+        right away, so the missing volumes are on the wishlist when this returns
+        rather than after the next daily pass.
         """
         body = request.get_json(silent=True) or {}
         name = str(body.get("name") or "").strip()
         if not name:
             return jsonify({"success": False, "error": "name is required"}), 400
+        role = _watch_role(body.get("role"))
+        if role is None:
+            return jsonify({"success": False, "error": "role must be author, narrator or series"}), 400
 
-        followed = get_audiobook_db().follow_author(
+        since = str(body.get("since") or "")
+        if body.get("backfill") and not since:
+            since = _BACKFILL_SINCE
+
+        db = get_audiobook_db()
+        profile = _profile()
+        followed = db.follow_author(
             name,
-            profile_id=_profile(),
+            profile_id=profile,
             cover_url=str(body.get("cover_url") or ""),
-            since_date=str(body.get("since") or ""),
+            since_date=since,
+            role=role,
+            series_asin=str(body.get("series_asin") or "") if role == "series" else "",
         )
-        return jsonify({"success": True, "followed": followed, "watching": True})
+        payload: Dict[str, Any] = {"success": True, "followed": followed, "watching": True}
+
+        if followed and role == "series" and body.get("backfill"):
+            from core.audiobook_watchlist import scan_author
+
+            row = next((r for r in db.get_watchlist(profile)
+                        if r["name"] == name and r["role"] == "series"), None)
+            if row:
+                result = scan_author(row, db=db, marketplace=_marketplace())
+                payload["wishlisted"] = result["wishlisted"]
+                payload["found"] = result["found"]
+                if result["error"]:
+                    payload["scan_error"] = result["error"]
+        return jsonify(payload)
 
     @bp.route("/watchlist/<path:name>", methods=["PATCH"])
     def watchlist_update(name: str):
-        """Change one followed author's settings from their card."""
+        """Change one follow's settings from its card."""
         body = request.get_json(silent=True) or {}
+        role = _watch_role(body.get("role") or request.args.get("role"))
+        if role is None:
+            return jsonify({"success": False, "error": "role must be author, narrator or series"}), 400
         fields = {k: v for k, v in body.items()
                   if k in ("auto_wishlist", "narrator_mode", "since_date")}
         if not fields:
             return jsonify({"success": False, "error": "nothing to change"}), 400
 
         changed = get_audiobook_db().update_watchlist_author(
-            name, profile_id=_profile(), **fields)
+            name, profile_id=_profile(), role=role, **fields)
         return jsonify({"success": True, "changed": changed})
 
     @bp.route("/watchlist/<path:name>", methods=["DELETE"])
     def watchlist_unfollow(name: str):
-        removed = get_audiobook_db().unfollow_author(name, _profile())
+        role = _watch_role(request.args.get("role"))
+        if role is None:
+            return jsonify({"success": False, "error": "role must be author, narrator or series"}), 400
+        removed = get_audiobook_db().unfollow_author(name, _profile(), role=role)
         return jsonify({"success": True, "removed": removed, "watching": False})
 
     @bp.route("/watchlist/scan", methods=["POST"])
