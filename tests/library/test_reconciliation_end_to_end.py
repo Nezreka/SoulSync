@@ -64,6 +64,16 @@ def test_album_title_keeps_clean_name_when_source_adds_catalog_qualifier():
         [{'tags': {'album': 'Rio'}}, {'tags': {'album': 'Rio'}}],
         'Rio (Columbia House)', 'Rio (Columbia House)',
     ) == 'Rio'
+    # A current provider title can carry real edition detail while the stored
+    # library title still carries an obsolete catalog label. Unanimous file
+    # tags remain the clean display title; the exact provider ID preserves the
+    # selected release identity separately.
+    assert not _album_titles_compatible(
+        'Rio (Columbia House)', 'Rio (Remastered)')
+    assert _display_album_title(
+        [{'tags': {'album': 'Rio'}}, {'tags': {'album': 'Rio'}}],
+        'Rio (Columbia House)', 'Rio (Remastered)',
+    ) == 'Rio'
 
 
 def test_candidate_evidence_displays_the_acoustid_recording_that_supports_the_slot():
@@ -1647,6 +1657,48 @@ def test_exact_release_title_repairs_rated_r_album_and_file_tags(tmp_path, monke
     with db._get_connection() as conn:
         title = conn.execute('SELECT title FROM albums WHERE id = 10').fetchone()[0]
     assert title == 'Rated R'
+
+
+def test_catalog_album_qualifier_is_cleaned_without_retagging_files(tmp_path, monkeypatch):
+    import core.repair_jobs.library_reconciliation as module
+
+    root = tmp_path / 'music'
+    root.mkdir()
+    path = root / '01 - Rio.flac'
+    _minimal_flac(path, {'title': 'Rio', 'artist': 'Duran Duran',
+                         'album': 'Rio', 'tracknumber': '1'})
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, path)
+    with db._get_connection() as conn:
+        conn.execute("UPDATE artists SET name = 'Duran Duran' WHERE id = 1")
+        conn.execute("UPDATE albums SET title = 'Rio (Columbia House)', "
+                     "canonical_album_id = 'rio-release' WHERE id = 10")
+        conn.execute("UPDATE tracks SET title = 'Rio' WHERE id = 1")
+        conn.commit()
+    worker = RepairWorker(database=db)
+    client = _Acoustid({path.name: {
+        'mbid': 'rio-id', 'title': 'Rio', 'artist': 'Duran Duran', 'score': 0.99,
+    }})
+    monkeypatch.setattr(RepairWorker, 'acoustid_client', property(lambda _self: client))
+    monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args: [
+        {'id': 'rio-id', 'name': 'Rio', 'artists': [{'name': 'Duran Duran'}],
+         'track_number': 1, 'disc_number': 1, 'duration_ms': 200000},
+    ])
+    monkeypatch.setattr(module, 'get_album_for_source', lambda *_args: {
+        'name': 'Rio (Remastered)', 'artists': [{'name': 'Duran Duran'}]})
+    context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
+                         acoustid_client=client, create_finding=worker._create_finding)
+
+    LibraryReconciliationJob().scan(context)
+
+    case_id = worker.get_review_cases()['items'][0]['case_id']
+    review_case = worker.get_review_case(case_id)
+    assert review_case['album'] == 'Rio'
+    assert review_case['decisions'][0]['label'] == 'Update library album title'
+    assert review_case['items'][0]['details']['changes'] == {
+        'library_album_title': {'old': 'Rio (Columbia House)', 'new': 'Rio'},
+    }
 
 
 def test_lone_compilation_track_does_not_spawn_original_album_plan(tmp_path, monkeypatch):

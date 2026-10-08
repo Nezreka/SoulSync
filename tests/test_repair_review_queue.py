@@ -187,6 +187,25 @@ def test_artist_typography_change_is_grouped_as_an_artist_update():
     assert plan['decisions'][0]['summary'] == '13 tracks: Tool → TOOL.'
 
 
+def test_library_album_title_change_is_described_as_one_album_change():
+    plan = classify_case([{
+        'id': 1,
+        'finding_type': 'reconciliation_metadata',
+        'details': {
+            'changes': {
+                'library_album_title': {
+                    'old': 'Rio (Columbia House)', 'new': 'Rio',
+                },
+            },
+            'confidence': 'clear',
+        },
+    }])
+
+    assert plan['decisions'][0]['label'] == 'Update library album title'
+    assert plan['decisions'][0]['summary'] == (
+        'Rename the library album: Rio (Columbia House) → Rio.')
+
+
 def test_album_intent_summary_states_the_album_level_question():
     plan = classify_case([{
         'id': 1, 'finding_type': 'reconciliation_intent', 'details': {},

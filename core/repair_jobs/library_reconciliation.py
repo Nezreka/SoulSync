@@ -600,23 +600,37 @@ def _album_titles_compatible(current: str, release: str) -> bool:
             return base.strip()
         return value
 
+    cleaned_current = without_repeated_qualifier(current or '')
     cleaned_release = without_repeated_qualifier(release or '')
-    current_normalized = normalize(current or '')
+    current_normalized = normalize(cleaned_current)
     release_normalized = normalize(cleaned_release)
     if not current_normalized or not release_normalized:
         return False
+    current_qualifier = trailing_qualifier(cleaned_current)
     release_qualifier = trailing_qualifier(cleaned_release)
-    if release_qualifier:
-        release_base, qualifier = release_qualifier
-        if (current_normalized == normalize(release_base) and
-                not _ALBUM_MATERIAL_QUALIFIER.search(qualifier)):
+    if current_qualifier or release_qualifier:
+        current_base, current_detail = current_qualifier or (cleaned_current, '')
+        release_base, release_detail = release_qualifier or (cleaned_release, '')
+        if normalize(current_base) != normalize(release_base):
+            return False
+        release_is_material = bool(_ALBUM_MATERIAL_QUALIFIER.search(release_detail))
+        current_is_material = bool(_ALBUM_MATERIAL_QUALIFIER.search(current_detail))
+        if release_detail and not release_is_material:
             # Retailer, pressing-plant and record-club labels identify the
             # catalog release. They are not useful display-title metadata.
             return True
+        if not release_detail:
+            # Preserve useful detail that is already present locally when the
+            # selected release uses only the base title.
+            return True
+        if not current_detail or not current_is_material:
+            return False
+        return normalize(current_detail) == normalize(release_detail)
     if current_normalized == release_normalized:
-        # Preserve detail already present locally, but still allow a selected
-        # release to add a meaningful edition suffix the local title does not carry.
-        return len(current.strip()) >= len(cleaned_release.strip())
+        # Some normalizers intentionally collapse known title flavor words
+        # (for example R and Rated R). The shorter local spelling must not
+        # suppress a fuller provider title when neither side has a qualifier.
+        return len(cleaned_current.strip()) >= len(cleaned_release.strip())
     if current_normalized.startswith(f'{release_normalized} '):
         local_detail = current_normalized[len(release_normalized):].strip()
         return bool(_ALBUM_EDITION_WORD.search(local_detail))
@@ -631,11 +645,22 @@ def _display_album_title(files: list[dict], library_title: str,
     tag_titles = [title for title in tag_titles if title]
     if tag_titles:
         normalized = {re.sub(r'\s+', ' ', title).casefold() for title in tag_titles}
-        if (len(normalized) == 1 and
-                _album_titles_compatible(tag_titles[0], release_title)):
+        library_qualifier = (
+            re.match(r'^(.*?)\s+\(([^()]*)\)\s*$', (library_title or '').strip()) or
+            re.match(r'^(.*?)\s+\[([^\[\]]*)\]\s*$', (library_title or '').strip())
+        )
+        clean_library_variant = bool(
+            library_qualifier and
+            normalize(tag_titles[0]) == normalize(library_qualifier.group(1)) and
+            not _ALBUM_MATERIAL_QUALIFIER.search(library_qualifier.group(2))
+        )
+        if len(normalized) == 1 and clean_library_variant:
             return tag_titles[0]
     if library_title and _album_titles_compatible(library_title, release_title):
         return library_title
+    if (tag_titles and len(normalized) == 1 and
+            _album_titles_compatible(tag_titles[0], release_title)):
+        return tag_titles[0]
     return release_title
 
 
@@ -1809,12 +1834,11 @@ class LibraryReconciliationJob(RepairJob):
                                                'new': os.path.basename(target_path)}
                     db_album_title = ''
                     if (album and file.get('db') and not album_title_proposed and
-                            album.get('album_title') != release_title and
-                            not _album_titles_compatible(
-                                album.get('album_title') or '', release_title)):
-                        db_album_title = release_title
+                            album.get('album_title') != display_release_title):
+                        db_album_title = display_release_title
                         changed['library_album_title'] = {
-                            'old': album.get('album_title') or '', 'new': release_title}
+                            'old': album.get('album_title') or '',
+                            'new': display_release_title}
                     if set(changed) == {'library_recording_disambiguation'}:
                         # This internal evidence improves later comparisons,
                         # but does not warrant a review decision by itself.

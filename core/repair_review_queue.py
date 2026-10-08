@@ -95,6 +95,9 @@ def _uniform_change_summary(rows: list[dict[str, Any]]) -> tuple[str, str] | Non
     count = len(rows)
     if values and all(value == values[0] for value in values) and any(values[0]):
         old, new = values[0]
+        if field == 'library_album_title':
+            return ('Update library album title',
+                    f'Rename the library album: {old or "empty"} → {new or "empty"}.')
         return (f'{label} update',
                 f'{count} track{"s" if count != 1 else ""}: '
                 f'{old or "empty"} → {new or "empty"}.')
