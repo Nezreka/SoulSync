@@ -243,7 +243,7 @@ def _identity_key(candidate):
     Returns None when the candidate carries no usable identity — such rows
     are never collapsed, whatever else they match.
     """
-    if _candidate_source_name(candidate) == 'usenet':
+    if _candidate_source_name(candidate) in ('torrent', 'usenet'):
         return candidate_release_key(candidate)
     artist = getattr(candidate, 'artist', None) or ''
     title = getattr(candidate, 'title', None) or ''
@@ -279,7 +279,7 @@ def dedupe_cross_source_pool(ranked):
     """
     seen, out = set(), []
     for row in dedupe_release_candidates(ranked):
-        if _candidate_source_name(row) == 'usenet':
+        if _candidate_source_name(row) in ('torrent', 'usenet'):
             out.append(row)
             continue
         key = _identity_key(row)
@@ -880,8 +880,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                             download_tasks[task_id]['download_id'] = download_id
                             download_tasks[task_id]['username'] = username
                             download_tasks[task_id]['filename'] = filename
-                            if username == 'usenet':
-                                download_tasks[task_id]['release_id'] = release_id
+                            download_tasks[task_id]['release_id'] = release_id
                             # what won, for the live status payload (#1156) —
                             # the peer's queue/slot stats explain a 'Queued,
                             # Remotely' better than any status word can

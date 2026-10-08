@@ -72,6 +72,14 @@ def test_credit_variants_select_the_same_recording(title, reverse):
     assert releases.select_requested_file([item], track) == item
 
 
+def test_symbol_only_title_selects_its_own_file():
+    track = {"name": "★", "artists": ["David Bowie"]}
+    item = releases.ReleaseFile("track.flac", "★", "David Bowie")
+    assert releases.select_requested_file([item], track) == item
+    other = releases.ReleaseFile("other.flac", "†", "David Bowie")
+    assert releases.select_requested_file([other], track) is None
+
+
 @pytest.mark.parametrize("version", ["Live", "Remix", "Acoustic", "Instrumental"])
 def test_stripping_credits_keeps_version_gate(version):
     item = releases.ReleaseFile("track.flac", f"Money Trees (feat. Jay Rock) ({version})", "Kendrick Lamar")

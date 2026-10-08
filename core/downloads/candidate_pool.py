@@ -68,16 +68,10 @@ def candidate_row(candidate, decision: Decision, *, source_name: str, query: str
 
 
 def _collapse_release_pairs(pairs):
-    pairs = list(pairs)
-    if not any(item[0].username == 'usenet' for item in pairs):
-        return pairs
     from core.download_plugins.release_identity import dedupe_release_candidates
-    by_endpoint = {(item[0].username, item[0].filename): item
-                   for item in pairs if item[0].username == 'usenet'}
-    unchanged = iter(item for item in pairs if item[0].username != 'usenet')
-    return [(candidate, *by_endpoint[(candidate.username, candidate.filename)][1:])
-            if candidate.username == 'usenet' else next(unchanged)
-            for candidate in dedupe_release_candidates([item[0] for item in pairs])]
+    by_endpoint = {(item[0].username, item[0].filename): item for item in pairs}
+    return [(c, *by_endpoint[(c.username, c.filename)][1:])
+            for c in dedupe_release_candidates([item[0] for item in pairs])]
 
 
 def build_source_rows(

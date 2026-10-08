@@ -25,7 +25,6 @@ from core.download_plugins.torrent import (
     _parse_release_title,
 )
 from core.download_plugins.usenet import UsenetDownloadPlugin
-from core.download_plugins.usenet_search import _parse_release_title as _parse_usenet_release_title
 from core.prowlarr_client import ProwlarrSearchResult
 from core.torrent_clients.base import TorrentStatus
 from core.usenet_clients.base import UsenetStatus
@@ -120,8 +119,8 @@ def test_parse_release_title_rejects_url_prefix() -> None:
     ('Artist-Song-Live-WEB-FLAC-2024-GROUP', 'Artist', 'Song-Live'),
 ])
 def test_scene_release_projection_preserves_music_identity(release, artist, title):
-    """Usenet search exposes music identity from scene packaging."""
-    for plugin, protocol in [(UsenetDownloadPlugin(), 'usenet')]:
+    """Both Prowlarr sources must expose music identity, not scene packaging."""
+    for plugin, protocol in [(TorrentDownloadPlugin(), 'torrent'), (UsenetDownloadPlugin(), 'usenet')]:
         tracks, albums = plugin._project_results([
             _make_torrent_result(title=release, protocol=protocol),
         ])
@@ -136,10 +135,10 @@ def test_scene_release_projection_preserves_music_identity(release, artist, titl
 @pytest.mark.parametrize('release', ['Self-Titled', 'Artist-Title', 'Artist - WEB of Lies', 'Artist - MP3 Player'])
 def test_release_parser_does_not_invent_scene_metadata(release):
     expected = ('Artist', release.split(' - ', 1)[1]) if ' - ' in release else ('', release)
-    assert _parse_usenet_release_title(release) == expected
+    assert _parse_release_title(release) == expected
 
 
-@pytest.mark.parametrize('protocol', ['usenet'])
+@pytest.mark.parametrize('protocol', ['torrent', 'usenet'])
 @pytest.mark.parametrize('release,artist,title', [
     ('Jay-Z-The Blueprint-WEB-FLAC-2001-GROUP', 'Jay-Z', 'The Blueprint'),
     ('G-Eazy-Lets Get Lost-16BIT-WEB-FLAC-2014-GROUP', 'G-Eazy', 'Lets Get Lost'),
@@ -162,10 +161,10 @@ def test_scene_candidate_validation_uses_expected_artist_as_boundary(monkeypatch
 
 def test_scene_artist_hint_requires_evidence_in_actual_release():
     release = 'Other Artist-Song-WEB-FLAC-2024-GROUP'
-    assert _parse_usenet_release_title(release, artist_hint='Wanted Artist') == ('Other Artist', 'Song')
+    assert _parse_release_title(release, artist_hint='Wanted Artist') == ('Other Artist', 'Song')
 
 
-@pytest.mark.parametrize('protocol', ['usenet'])
+@pytest.mark.parametrize('protocol', ['torrent', 'usenet'])
 @pytest.mark.parametrize('release_name,album', [('Shared Song', None), ('Shared Album', 'Shared Album')])
 def test_release_artist_containment_does_not_accept_another_band(monkeypatch, protocol, release_name, album):
     """An anonymized live cover release must fail even with an exact title."""
@@ -184,7 +183,7 @@ def test_release_artist_containment_does_not_accept_another_band(monkeypatch, pr
     assert reasons[id(tracks[0])][1].code == 'artist_mismatch'
 
 
-@pytest.mark.parametrize('protocol', ['usenet'])
+@pytest.mark.parametrize('protocol', ['torrent', 'usenet'])
 @pytest.mark.parametrize('artist', ['Signal Duo', 'The Signal Duo', 'Signal Duo feat. Guest Singer', 'Guest Singer & Signal Duo'])
 def test_release_artist_gate_keeps_real_artist_and_featured_credits(monkeypatch, protocol, artist):
     from types import SimpleNamespace
@@ -298,7 +297,7 @@ def test_usenet_cancel_during_file_collection_cannot_restore_success(monkeypatch
     assert plugin.active_downloads['dl']['state'] == 'Cancelled'
 
 
-@pytest.mark.parametrize('protocol', ['usenet'])
+@pytest.mark.parametrize('protocol', ['torrent', 'usenet'])
 def test_scene_artist_hint_does_not_override_explicit_artist_boundary(monkeypatch, protocol):
     from types import SimpleNamespace
     from core.downloads import validation
@@ -412,6 +411,7 @@ def test_torrent_project_results_encodes_token_and_title_in_filename() -> None:
     assert _decode_candidate(get_candidate_store().resolve(token))[0] == 'https://x/y.torrent'
     assert get_candidate_store().resolve_with_metadata(token)[1] == {
         'categories': [3040],
+        'release_title': 'Danny Brown - Atrocity Exhibition [FLAC]',
     }
     assert display == 'Danny Brown - Atrocity Exhibition [FLAC]'
 

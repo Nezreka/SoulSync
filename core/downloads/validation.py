@@ -486,10 +486,10 @@ def _score_streaming_candidates(results, spotify_track, why=None):
             continue
 
         # Score using matching engine's generic scorer (same weights as Soulseek).
-        if r.username == 'usenet':
+        if r.username in ('torrent', 'usenet'):
             release_title = (getattr(r, '_source_metadata', None) or {}).get('release_title')
             if release_title:
-                from core.download_plugins.usenet_search import _parse_release_title
+                from core.download_plugins.torrent import _parse_release_title
                 # Scene artist names can themselves contain bare hyphens.
                 # Resolve the boundary against real release-prefix evidence
                 # before the artist gate, without substituting a wanted name.
@@ -634,9 +634,8 @@ def _score_streaming_candidates(results, spotify_track, why=None):
                                   "no artist evidence and the title has words beyond the song",
                                   confidence)
                         continue
-            elif ((r.username == 'usenet' and not _release_artist_matches(
-                    expected_artists, _cand_artist_raw))
-                    or (r.username == 'torrent' and _best_artist < 0.5)):
+            elif r.username in ('torrent', 'usenet') and not _release_artist_matches(
+                    expected_artists, _cand_artist_raw):
                 logger.info(
                     "[%s] Rejecting candidate due to artist mismatch: "
                     "expected=%s candidate=%r title=%r",

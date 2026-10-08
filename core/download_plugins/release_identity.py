@@ -1,28 +1,64 @@
 """Conservative indexer release identity; never a recording/album identity.
 
 No URL, GUID, group alone, fuzzy title or size tolerance enters the key.
-Only Usenet rows participate. A complete original release name with markers
-and an exact positive size is a cautious heuristic for duplicate NZB listings.
+A validated BTIH identifies torrent bytes. Otherwise a complete original name
+with release markers and an exact positive size is only a cautious heuristic.
+Hash-bearing and hashless rows do not bridge; contradictory hashes fail open.
 """
 from __future__ import annotations
 
+import base64
 from copy import copy
 import hashlib
 import json
 import re
+from urllib.parse import parse_qs, urlsplit
 
 from core.quality.release_format import audio_quality_from_release
 
-_RELEASE_PROTOCOLS = frozenset({'usenet'})
+_RELEASE_PROTOCOLS = frozenset({'torrent', 'usenet'})
 _YEAR = re.compile(r'(?<!\d)(?:19|20)\d{2}(?!\d)')
 _SCENE_GROUP = re.compile(r'-(?!\d+$)[a-z][a-z0-9]{1,20}(?:[ ._-]+int)?$', re.I)
 _RELEASE_MARKER = re.compile(r'(?<![a-z0-9])(?:web|cd|\d+cd|vinyl|\d+lp|flac|alac|mp3|aac|opus|wav|ape)(?![a-z0-9])', re.I)
 
 
-def release_key(protocol, title, size):
+def normalize_infohash(value):
+    raw = str(value or '').strip()
+    if re.fullmatch(r'[a-fA-F0-9]{40}', raw):
+        return raw.lower()
+    if re.fullmatch(r'[a-zA-Z2-7]{32}', raw):
+        return base64.b32decode(raw.upper()).hex()
+    return None
+
+
+def torrent_hash_evidence(result):
+    """Return (normalized BTIH, inconsistent/unusable hash evidence).
+
+    Only Prowlarr's infoHash and magnet xt=urn:btih are BTIH evidence. A GUID
+    or releaseHash can be indexer-local and must never be interpreted as one.
+    """
+    if str(result.protocol).lower() != 'torrent':
+        return None, False
+    values = []
+    raw_hash = getattr(result, 'info_hash', None) or (result.raw or {}).get('infoHash')
+    if raw_hash:
+        values.append(normalize_infohash(raw_hash))
+    for uri in (result.magnet_uri, result.download_url):
+        if str(uri or '').lower().startswith('magnet:'):
+            for xt in parse_qs(urlsplit(uri).query).get('xt', []):
+                if xt.lower().startswith('urn:btih:'):
+                    values.append(normalize_infohash(xt[len('urn:btih:'):]))
+    invalid = bool(values) and (None in values or len(set(values)) != 1)
+    return (values[0] if values and not invalid else None), invalid
+
+
+def release_key(protocol, title, size, info_hash=None, hash_conflict=False):
     protocol = str(protocol or '').strip().lower()
-    if protocol not in _RELEASE_PROTOCOLS:
+    if protocol not in _RELEASE_PROTOCOLS or hash_conflict:
         return None
+    if protocol == 'torrent' and info_hash:
+        valid = normalize_infohash(info_hash)
+        return (protocol, 'btih', valid) if valid else None
     name = ' '.join(str(title or '').split()).casefold()
     # Bare artist/album labels do not distinguish editions or separate rips.
     # Keep ALL punctuation and every quality/edition/year/repack/group token.
@@ -36,7 +72,8 @@ def release_key(protocol, title, size):
 
 
 def prowlarr_release_key(row):
-    key = release_key(row.protocol, row.title, row.size)
+    info_hash, conflict = torrent_hash_evidence(row)
+    key = release_key(row.protocol, row.title, row.size, info_hash, conflict)
     return _with_quality_evidence(key, row)
 
 
@@ -47,7 +84,8 @@ def candidate_release_key(row):
     metadata = getattr(row, '_source_metadata', None) or {}
     if metadata.get('protocol', protocol) != protocol:
         return None
-    key = release_key(protocol, metadata.get('release_title'), getattr(row, 'size', 0))
+    key = release_key(protocol, metadata.get('release_title'), getattr(row, 'size', 0),
+                      metadata.get('info_hash'), metadata.get('hash_conflict', False))
     return _with_quality_evidence(key, row)
 
 
@@ -68,9 +106,7 @@ def candidate_endpoint_id(row):
 
 def release_sources(row):
     """Flatten source alternatives without cycles or duplicate endpoint tokens."""
-    if (isinstance(row, dict)
-            or getattr(row, 'protocol', getattr(row, 'username', None)) != 'usenet'
-            or not getattr(row, '_release_sources', None)):
+    if isinstance(row, dict) or not getattr(row, '_release_sources', None):
         return [row]
     out, seen = [], set()
     pending = [row]
@@ -91,8 +127,6 @@ def release_sources(row):
 
 def release_evidence(row):
     """Consistent ranking/grab facts, separate from immutable endpoint labels."""
-    if getattr(row, 'protocol', getattr(row, 'username', None)) != 'usenet':
-        return row
     return getattr(row, '_release_evidence', None) or row
 
 
@@ -117,7 +151,9 @@ def _release_title(row):
 
 
 def compatible_quality(left, right):
-    # Contradictory advertised editions must keep separate release slots.
+    # A hash is strong byte identity, but contradictory advertised editions
+    # must not erase separately ranked releases. Compare labels only when both
+    # names have release evidence; a generic display label is missing evidence.
     x, y = _release_title(left).casefold(), _release_title(right).casefold()
     years_x, years_y = set(_YEAR.findall(x)), set(_YEAR.findall(y))
     if years_x and years_y and years_x != years_y:
@@ -168,7 +204,12 @@ def merge_release_sources(winner, other):
 
 
 def _source_preference(row):
-    return (not bool(row.download_url), getattr(row, 'indexer_priority', 25))
+    usable = row.download_url or (row.magnet_uri if row.protocol == 'torrent' else None)
+    # Same release: an unseeded/unfetchable endpoint must not hide a live one
+    # before the album availability gate. Indexer priority still breaks ties.
+    availability = (2 if row.seeders == 0 else 1 if row.seeders is None else 0) if row.protocol == 'torrent' else 0
+    return (not bool(usable), availability, -(row.seeders or 0),
+            getattr(row, 'indexer_priority', 25))
 
 
 def dedupe_prowlarr_releases(rows):

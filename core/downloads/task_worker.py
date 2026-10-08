@@ -453,27 +453,6 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         artist_name = track.artists[0] if track.artists else None
         track_name = track.name
 
-        release_queries = []
-        try:
-            _download_mode = (getattr(deps.download_orchestrator, 'mode', '') or '').lower()
-            _track_album = (getattr(track, 'album', '') or '').strip()
-            _track_title = (getattr(track, 'name', '') or '').strip()
-            _track_artists = list(getattr(track, 'artists', []) or [])
-            _first_artist = _track_artists[0] if _track_artists else ''
-            _primary_artist = (
-                (_first_artist.get('name', '') if isinstance(_first_artist, dict) else str(_first_artist))
-                or ''
-            ).strip()
-            if (
-                _download_mode == 'torrent'
-                and _primary_artist
-                and _track_album
-                and _track_album.lower() not in ('unknown album', _track_title.lower())
-            ):
-                release_queries.append(f"{_primary_artist} {_track_album}".strip())
-        except Exception as _release_query_exc:
-            logger.debug("[Modal Worker] release query hint failed: %s", _release_query_exc)
-
         # Start with matching engine queries
         search_queries = deps.matching_engine.generate_download_queries(track)
 
@@ -512,8 +491,10 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         ):
             legacy_queries.append(cleaned_name.strip())
 
-        # Usenet adds its album hint locally; retain the original Torrent ladder.
-        all_queries = search_queries + legacy_queries + release_queries
+        # Release plugins add the known artist/album hint locally. Keeping
+        # album queries out of this list avoids sending them to Soulseek or
+        # streaming sources and preserves the hybrid source order.
+        all_queries = search_queries + legacy_queries
 
         # Remove duplicates while preserving order
         unique_queries = []
@@ -559,10 +540,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         # string (deezer by id / by title + the track's own artist, #1582).
         # one dict per task: a source caches what it found in it
         from core.downloads.track_hint import hint_from_track
-        _uses_usenet = (getattr(deps.download_orchestrator, 'mode', '') == 'usenet'
-                        or (getattr(deps.download_orchestrator, 'mode', '') == 'hybrid'
-                            and 'usenet' in (getattr(deps.download_orchestrator, 'hybrid_order', None) or [])))
-        _track_hint = hint_from_track(track_data, include_album=_uses_usenet) if isinstance(track_data, dict) else None
+        _track_hint = hint_from_track(track_data) if isinstance(track_data, dict) else None
 
         # 2. Sequential Query Search (matches GUI's start_search_worker_parallel logic)
         search_diagnostics = []  # Track what happened per query for detailed error messages
@@ -801,9 +779,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         #
         # Best-quality mode already searched EVERY source per query (the pool), so this
         # block would only re-search the same sources — skip it there.
-        _usenet_retry = (not _pooled_search and 'usenet' in (
-            getattr(deps.download_orchestrator, 'hybrid_order', None) or []))
-        if (not _best_quality or _usenet_retry) and getattr(deps.download_orchestrator, 'mode', '') == 'hybrid':
+        if not _pooled_search and getattr(deps.download_orchestrator, 'mode', '') == 'hybrid':
             try:
                 orch = deps.download_orchestrator
                 hybrid_order = getattr(orch, 'hybrid_order', None) or []
@@ -816,13 +792,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 # legacy per-source attrs were dropped in the registry
                 # refactor, so getattr(orch, 'soulseek', None) etc. all
                 # silently returned None and the fallback never fired.
-                source_clients = {
-                    name: orch.client(name)
-                    for name in ('soulseek', 'youtube', 'tidal', 'qobuz',
-                                 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon')
-                }
-                if 'usenet' in hybrid_order:
-                    source_clients['usenet'] = orch.client('usenet')
+                source_clients = {name: orch.client(name) for name in hybrid_order}
 
                 # The orchestrator tried sources in order but stopped at the first with results.
                 # We don't know which it stopped at, so try ALL sources except the first
@@ -834,8 +804,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                     s for s in hybrid_order[1:]
                     if s in source_clients and source_clients[s]
                     and s.lower() not in _exhausted_lower
-                    and (not _best_quality or s == 'usenet')
-                    and (s != 'usenet' or s.lower() not in (_exclude_for_hybrid_album or []))
+                    and s.lower() not in (_exclude_for_hybrid_album or [])
                 ]
                 if remaining_sources:
                     logger.warning(f"[Hybrid Fallback] Primary source had no valid matches. Trying fallback sources: {remaining_sources}")
@@ -845,8 +814,9 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                     if hasattr(fb_client, 'is_configured') and not fb_client.is_configured():
                         continue
 
-                    # Usenet uses the full query ladder; its album hint is cached once.
-                    fb_queries = search_queries if fallback_source == 'usenet' else search_queries[:2]
+                    # Release sources must see the whole bounded track-query
+                    # ladder; their album hint is cached once for this task.
+                    fb_queries = search_queries if fallback_source in ('torrent', 'usenet') else search_queries[:2]
                     for fb_query in fb_queries:
                         try:
                             logger.warning(f"[Hybrid Fallback] Trying {fallback_source}: '{fb_query}'")
@@ -856,9 +826,8 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                                 download_tasks[task_id]['current_source'] = fallback_source
                                 download_tasks[task_id]['current_query'] = fb_query
                                 download_tasks[task_id].pop('search_live', None)
-                            fb_results, _ = deps.run_async(
-                                _search_fallback_source(fb_client, fb_query, _track_hint, _profile_id)
-                                if fallback_source == 'usenet' else fb_client.search(fb_query, timeout=20))
+                            fb_results, _ = deps.run_async(_search_fallback_source(
+                                fb_client, fb_query, _track_hint, _profile_id))
                             with tasks_lock:
                                 if task_id not in download_tasks or download_tasks[task_id]['status'] == 'cancelled':
                                     return
@@ -876,13 +845,10 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                                     if task_id not in download_tasks or download_tasks[task_id]['status'] == 'cancelled':
                                         return
                                     download_tasks[task_id]['cached_candidates'] = fb_candidates
-                                if fallback_source == 'usenet':
-                                    success = deps.attempt_download_with_candidates(
-                                        task_id, fb_candidates, track, batch_id,
-                                        quality_first=_best_quality, quality_targets=_quality_targets)
-                                else:
-                                    success = deps.attempt_download_with_candidates(
-                                        task_id, fb_candidates, track, batch_id)
+                                success = deps.attempt_download_with_candidates(
+                                    task_id, fb_candidates, track, batch_id,
+                                    quality_first=_best_quality, quality_targets=_quality_targets,
+                                )
                                 if success:
                                     _record_decision(deps, task_id, decision_pool, 'chosen', track, _profile_id, cached_first, provenance=_provenance)
                                     return

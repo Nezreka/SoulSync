@@ -743,8 +743,41 @@ def test_retry_can_use_grouped_alternative_after_primary_transfer_error():
     assert download_tasks['release']['filename'] == alternative.filename
 
 
+def test_content_retry_skips_release_on_all_indexers_even_after_new_search(monkeypatch):
+    from core.downloads import monitor
+    from types import SimpleNamespace
+    first, alternative = _release_candidate(1), _release_candidate(2)
+    _seed_task('release')
+    assert dc.attempt_download_with_candidates('release', [first, alternative], _Track(), 'batch', _build_deps(), quality_first=True)
+    monkeypatch.setattr(monitor, 'missing_download_executor', SimpleNamespace(submit=lambda *args: None))
+    monkeypatch.setattr(monitor, '_download_track_worker', lambda *args: None)
+    monkeypatch.setattr(monitor.config_manager, 'get', lambda key, default=None: default)
+    assert monitor.requeue_quarantined_task_for_retry('release', 'batch', 'integrity')
+    # New tokens/GUIDs for the same release must not bypass content rejection.
+    fresh = [_release_candidate(3), _release_candidate(4)]
+    different = _release_candidate(5, title='Artist-Album-REPACK-WEB-FLAC-2023-GROUPA')
+    downloader = _FakeSoulseek()
+    assert dc.attempt_download_with_candidates('release', [*fresh, different], _Track(), 'batch',
+                                               _build_deps(soulseek=downloader), quality_first=True)
+    assert [c[1] for c in downloader.download_calls] == [different.filename]
 
 
+@pytest.mark.parametrize('failure_kind,blocked', [('content', True), ('transport', False)])
+def test_monitor_release_errors_distinguish_content_from_transport(monkeypatch, failure_kind, blocked):
+    import time
+    from core.downloads import monitor
+    first = _release_candidate(1)
+    _seed_task('release')
+    assert dc.attempt_download_with_candidates('release', [first], _Track(), 'batch', _build_deps(), quality_first=True)
+    monkeypatch.setattr(monitor, '_make_context_key', lambda u, f: f'{u}::{f}')
+    monkeypatch.setattr(monitor, '_orphaned_download_keys', set())
+    task = download_tasks['release']
+    task['status_change_time'] = 0
+    task['status'] = 'downloading'
+    lookup = {f'usenet::{first.filename}': {'state': 'Completed, Errored', 'failure_kind': failure_kind}}
+    monitor.WebUIDownloadMonitor()._should_retry_task('release', task, lookup, time.time(), [])
+    assert bool(task.get('failed_release_ids')) is blocked
+    assert task['status'] == 'searching'
 
 
 def test_fresh_signed_token_after_transfer_failure_uses_other_indexer():

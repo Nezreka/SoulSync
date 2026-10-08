@@ -414,7 +414,7 @@ def test_first_query_success_returns_after_storing_source():
     assert download_tasks['t1']['status'] == 'searching'
 
 
-def test_torrent_mode_uses_album_release_after_track_queries():
+def test_torrent_mode_carries_album_hint_without_global_album_queries():
     _seed_task(track_info={
         'id': 'sp-1', 'name': 'Money', 'artists': ['Pink Floyd'],
         'album': 'The Dark Side of the Moon', 'duration_ms': 383000,
@@ -430,7 +430,8 @@ def test_torrent_mode_uses_album_release_after_track_queries():
     tw.download_track_worker('t1', 'b1', deps)
 
     assert client.search_calls[0][0] == 'Pink Floyd Money'
-    assert client.search_calls[-1][0] == 'Pink Floyd The Dark Side of the Moon'
+    assert all(q != 'Pink Floyd The Dark Side of the Moon' for q, _ in client.search_calls)
+    assert all(h.get('album') == 'The Dark Side of the Moon' for h in client.hint_calls)
 
 
 def test_no_results_marks_not_found_and_calls_completion():
@@ -1019,7 +1020,7 @@ def test_the_search_carries_the_song_with_its_own_artist():
     deps, _ = _build_deps(soulseek=sk, matching=_FakeMatchEngine(queries=['q1', 'q2']))
     tw.download_track_worker('t1', 'b1', deps)
     assert sk.hint_calls and all(h == {"title": "How Far I'll Go", "artist": "Auli'i Cravalho",
-                                       "deezer_id": "136340808"} for h in sk.hint_calls)
+                                       "album": "Moana", "deezer_id": "136340808"} for h in sk.hint_calls)
     # one dict for the whole task, so a source can cache in it
     assert len({id(h) for h in sk.hint_calls}) == 1
 

@@ -98,6 +98,9 @@ def release_match_score(item: ReleaseFile, track: dict) -> float:
     if recording_version_markers(expected) != recording_version_markers(item.title):
         return 0.0
     wanted, actual = _title(expected), _title(item.title)
+    if not wanted and not actual:
+        # Symbol-only titles ("★") have no letters to normalize.
+        wanted, actual = expected.strip().casefold(), item.title.strip().casefold()
     if not wanted or not actual:
         return 0.0
     title_score = SequenceMatcher(None, wanted, actual).ratio()
