@@ -373,24 +373,6 @@ def pick_best_album_release(candidates, quality_guess,
     if not candidates:
         return None
 
-    # Availability is endpoint-specific. Evaluate all preserved indexers with
-    # the release's consistent quality evidence before selecting an endpoint;
-    # a low seeder count must not hide an unknown/live alternative.
-    from copy import copy
-    from core.download_plugins.release_identity import release_sources, release_evidence
-    expanded = []
-    for candidate in candidates:
-        sources = release_sources(candidate)
-        if len(sources) == 1:
-            expanded.append(candidate)
-            continue
-        for source in sources:
-            endpoint = copy(source)
-            endpoint._release_evidence = release_evidence(candidate)
-            endpoint._release_sources = [s for s in sources if s is not source]
-            expanded.append(endpoint)
-    candidates = expanded
-
     from core.downloads.size_limit import configured_limit, exceeds_size_limit, positive_number
     cap = configured_limit()
     duration = positive_number(expected_duration_seconds)
@@ -406,7 +388,7 @@ def pick_best_album_release(candidates, quality_guess,
     if album_name:
         relevant = [
             c for c in candidates
-            if album_title_relevance(release_evidence(c).title or "", album_name) >= _ALBUM_TITLE_RELEVANCE_FLOOR
+            if album_title_relevance(c.title or "", album_name) >= _ALBUM_TITLE_RELEVANCE_FLOOR
         ]
         if not relevant:
             logger.warning(
@@ -427,9 +409,9 @@ def pick_best_album_release(candidates, quality_guess,
         keeping = []
         for c in candidates:
             ok, why = evaluate_release(
-                allowed_formats, release_evidence(c).title or '',
+                allowed_formats, c.title or '',
                 file_names=getattr(c, 'file_names', None),
-                categories=getattr(release_evidence(c), 'categories', None),
+                categories=getattr(c, 'categories', None),
                 allow_mixed=allow_mixed,
             )
             if ok:
@@ -460,8 +442,8 @@ def pick_best_album_release(candidates, quality_guess,
         for c in candidates:
             reason = size_contradicts_quality(
                 audio_quality_from_release(
-                    release_evidence(c).title or '',
-                    getattr(release_evidence(c), 'categories', None),
+                    c.title or '',
+                    getattr(c, 'categories', None),
                     getattr(c, 'file_names', None),
                 ),
                 getattr(c, 'size', None),
@@ -524,8 +506,8 @@ def pick_best_album_release(candidates, quality_guess,
             # File list over title is decided inside audio_quality_from_release
             # so this stage and the legacy sort below cannot disagree.
             aq = audio_quality_from_release(
-                release_evidence(candidate).title or '',
-                getattr(release_evidence(candidate), 'categories', None),
+                candidate.title or '',
+                getattr(candidate, 'categories', None),
                 getattr(candidate, 'file_names', None),
             )
             quality_rows.append((rank_candidate(aq, quality_targets), aq, candidate))
@@ -599,7 +581,7 @@ def pick_best_album_release(candidates, quality_guess,
                 aq.tier_score(),
                 # Only ever a tiebreaker: a repack is the corrected copy of the
                 # SAME quality, never a reason to take a worse format.
-                release_revision(release_evidence(candidate).title or '').rank,
+                release_revision(candidate.title or '').rank,
                 availability,
                 _indexer_priority_rank(candidate),
                 _usenet_age_bucket(candidate),
@@ -613,11 +595,11 @@ def pick_best_album_release(candidates, quality_guess,
         return (
             seeders,
             release_quality_score(
-                release_evidence(c).title or '', quality_guess,
-                getattr(release_evidence(c), 'categories', None),
+                c.title or '', quality_guess,
+                getattr(c, 'categories', None),
                 getattr(c, 'file_names', None),
             ),
-            release_revision(release_evidence(c).title or '').rank,
+            release_revision(c.title or '').rank,
             c.size or 0,
         )
 

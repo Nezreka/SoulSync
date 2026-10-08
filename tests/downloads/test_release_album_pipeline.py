@@ -87,6 +87,9 @@ def album_environment(tmp_path, monkeypatch):
     monkeypatch.setattr(config_manager, "get", lambda key, default=None: settings.get(key, default))
     monkeypatch.setattr(config_manager, "get_active_media_server", lambda: "soulsync")
     monkeypatch.setattr(pipeline.time, "sleep", lambda seconds: None)
+    # These tests exercise import guards, tags and ownership. Background DSP
+    # would outlive the fixture and read the next test's temporary database.
+    monkeypatch.setattr("core.sample.worker.enqueue_analysis", lambda track_id: None)
     contexts, events = [], []
     outcomes = {title: acoustid.VerificationResult.PASS for title in TITLES}
 

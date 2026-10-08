@@ -35,15 +35,15 @@ from core.download_plugins.album_bundle import (
 )
 from core.download_plugins.base import DownloadSourcePlugin
 from core.download_plugins.candidate_store import get_candidate_store
-from core.download_plugins.release_identity import dedupe_prowlarr_releases, torrent_hash_evidence, release_sources, release_evidence as get_release_evidence
+from core.download_plugins.release_identity import dedupe_prowlarr_releases, release_sources, release_evidence as get_release_evidence
+from core.download_plugins.usenet_search import (
+    prowlarr_search_with_variants, prowlarr_track_search, _parse_release_title,
+)
 from core.download_plugins.torrent import (
-    prowlarr_search_with_variants,
-    prowlarr_track_search,
     _adapter_state_to_display,
     _decode_filename,
     _guess_quality_from_title,
     _parse_indexer_id_filter,
-    _parse_release_title,
     _row_to_status,
     _COMPLETE_STATES,
     _FILENAME_SEP,
@@ -173,13 +173,11 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                     'publish_date': result.publish_date,
                     'protocol': 'usenet',
                     'release_title': result.title,
-                    'info_hash': torrent_hash_evidence(result)[0],
-                    'hash_conflict': torrent_hash_evidence(result)[1],
                     'categories': list(result.categories or []),
                 },
             )
             tr._release_sources = [
-                source for raw in result._release_sources
+                source for raw in getattr(result, "_release_sources", ())
                 for source in self._project_results([raw], release_evidence=evidence)[0]
             ]
             tracks.append(tr)
@@ -619,8 +617,18 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         # lossless-only profile after the torrent path correctly refused.
         allowed_formats = profile_allowed_formats(quality_profile_id)
         quality_targets, fallback_enabled = profile_quality_targets(quality_profile_id)
+        # Carry merged release evidence only on this Usenet selection path.
+        from copy import copy
+        expanded = []
+        for candidate in candidates:
+            evidence = get_release_evidence(candidate)
+            for source in release_sources(candidate):
+                endpoint = copy(source)
+                endpoint.title, endpoint.categories = evidence.title, evidence.categories
+                endpoint._release_sources = [s for s in release_sources(candidate) if s is not source]
+                expanded.append(endpoint)
         picked = pick_best_album_release(
-            candidates, _guess_quality_from_title, album_name=album_name,
+            expanded, _guess_quality_from_title, album_name=album_name,
             allowed_formats=allowed_formats,
             quality_targets=quality_targets,
             fallback_enabled=fallback_enabled,

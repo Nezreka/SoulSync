@@ -2,10 +2,9 @@
 
 URLs/GUIDs/indexer names/artists/albums/groups are replacements. Sizes,
 release-name structure, dates and category IDs retain the observed evidence.
-Torrent/hash and adversarial cases are synthetic (no torrent indexers existed).
+Adversarial cases are synthetic.
 """
 import asyncio
-import base64
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -13,15 +12,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.download_plugins.torrent import TorrentDownloadPlugin, prowlarr_search_with_variants
+from core.download_plugins.torrent import TorrentDownloadPlugin
+from core.download_plugins.usenet_search import prowlarr_search_with_variants
 from core.download_plugins.usenet import UsenetDownloadPlugin
 from core.downloads.candidates import dedupe_cross_source_pool, order_candidates
 from core.prowlarr_client import ProwlarrClient
 from core.quality.model import QualityTarget
 
 FIXTURE = Path(__file__).parents[1] / 'fixtures/prowlarr/release_identity.json'
-HASH = '0123456789abcdef' * 2 + '01234567'
-OTHER_HASH = 'f' * 40
 
 
 def observed():
@@ -47,10 +45,10 @@ def project(rows):
 
 
 def test_variants_group_real_exact_name_size_hits_and_keep_other_sizes(monkeypatch):
-    import core.download_plugins.torrent as module
+    import core.download_plugins.usenet_search as module
     async def search(*args, **kwargs):
         return observed()
-    monkeypatch.setattr(module, '_prowlarr_search_query_with_variants', search)
+    monkeypatch.setattr(module, '_search_query', search)
     rows = asyncio.run(prowlarr_search_with_variants(None, 'artist album', 'usenet'))
     assert len(rows) == 3  # one rounded size remains separate; two duplicate groups
     scene = next(r for r in rows if r.size == 1706459787)
@@ -105,37 +103,12 @@ def test_protocols_stay_separate_even_when_recording_duration_is_known():
     assert len(dedupe_cross_source_pool(tracks)) == 2
 
 
-@pytest.mark.parametrize('hash_location', ['infoHash', 'magnetUrl', 'downloadUrl'])
-def test_torrent_infohash_merges_different_display_titles(hash_location):
-    value = HASH.upper() if hash_location == 'infoHash' else f'magnet:?xt=urn:btih:{HASH}'
-    rows = [result(protocol='torrent', **{hash_location: value}),
-            result(indexer=2, protocol='torrent', title='Different display label', **{hash_location: value})]
-    tracks = project(rows)
-    assert len(order_candidates(tracks, quality_first=True)) == 1
 
 
-def test_hex_and_base32_magnets_identify_the_same_torrent():
-    b32 = base64.b32encode(bytes.fromhex(HASH)).decode()
-    rows = [result(protocol='torrent', infoHash=HASH),
-            result(indexer=2, protocol='torrent', magnetUrl=f'magnet:?xt=urn:btih:{b32}')]
-    assert len(project(rows)) == 1
 
 
-@pytest.mark.parametrize('fields', [
-    {'infoHash': OTHER_HASH}, {'infoHash': 'invalid'},
-    {'infoHash': HASH, 'magnetUrl': f'magnet:?xt=urn:btih:{OTHER_HASH}'},
-    {},
-])
-def test_conflicting_invalid_or_missing_hash_does_not_bridge_hash_groups(fields):
-    rows = [result(protocol='torrent', infoHash=HASH), result(indexer=2, protocol='torrent', **fields)]
-    assert len(order_candidates(project(rows), quality_first=True)) == 2
 
 
-def test_hashless_row_cannot_bridge_two_different_hashes():
-    tracks = project([result(protocol='torrent', infoHash=HASH),
-                      result(indexer=2, protocol='torrent'),
-                      result(indexer=3, protocol='torrent', infoHash=OTHER_HASH)])
-    assert len(dedupe_cross_source_pool(tracks)) == 3
 
 
 def test_best_quality_profile_rank_and_distinct_same_group_before_limit():
@@ -166,19 +139,6 @@ def test_source_preference_selects_indexer_priority_and_preserves_fallbacks():
     assert [s._source_metadata['indexer_id'] for s in tracks[0]._release_sources] == [1]
 
 
-def test_content_rejection_during_torrent_inspection_reaches_status(monkeypatch):
-    from core.torrent_clients import base
-    import core.download_plugins.torrent as module
-    plugin = TorrentDownloadPlugin()
-    plugin.active_downloads['dl'] = {'id': 'dl', 'username': 'torrent', 'filename': 'ssc1-test||Release'}
-    monkeypatch.setattr(module, 'get_active_torrent_adapter', lambda: SimpleNamespace(is_configured=lambda: True))
-    monkeypatch.setattr(module, 'run_async', asyncio.run)
-    async def reject(*args, **kwargs):
-        raise base.ReleaseRejected('File list contains only MP3')
-    monkeypatch.setattr(base, 'add_torrent_smart', reject)
-    plugin._download_thread('dl', 'https://indexer.invalid/file', 'Release')
-    status = asyncio.run(plugin.get_download_status('dl'))
-    assert getattr(status, 'failure_kind', None) == 'content'
 
 
 def test_summary_dedupes_releases_before_alternative_limit():
@@ -193,23 +153,12 @@ def test_summary_dedupes_releases_before_alternative_limit():
     assert 'REPACK' in summary['alternatives'][0]['display_name']
 
 
-@pytest.mark.parametrize('suffix', ['REPACK', 'PROPER', 'Deluxe', 'Remastered', 'Drumless Edition', 'Japan Edition', 'Bonus Tracks', 'Collectors Edition', 'Tour Edition'])
-def test_conflicting_edition_labels_do_not_merge_even_with_same_hash(suffix):
-    rows = [result(protocol='torrent', infoHash=HASH),
-            result(indexer=2, protocol='torrent', infoHash=HASH,
-                   title=f'Example_Artist-Example_Album-{suffix}-24BIT-96KHZ-WEB-FLAC-2023-GROUPA')]
-    assert len(project(rows)) == 2
 
 
-def test_same_hash_but_contradictory_year_stays_separate():
-    rows = [result(protocol='torrent', infoHash=HASH),
-            result(indexer=2, protocol='torrent', infoHash=HASH,
-                   title='Example_Artist-Example_Album-24BIT-96KHZ-WEB-FLAC-2022-GROUPA')]
-    assert len(project(rows)) == 2
 
 
 def test_same_guid_or_releasehash_on_different_indexers_is_not_content_evidence():
-    rows = [result(indexer=i, title='Example Artist - Example Album', guid='same-local-guid', releaseHash=HASH)
+    rows = [result(indexer=i, title='Example Artist - Example Album', guid='same-local-guid', releaseHash="indexer-local-release-hash")
             for i in (1, 2)]
     assert len(project(rows)) == 2
 
@@ -231,16 +180,9 @@ def test_missing_original_title_never_uses_short_artist_album_fields():
     assert len(dedupe_cross_source_pool(tracks)) == 2
 
 
-def test_hash_group_does_not_lose_quality_evidence_to_preferred_generic_indexer():
-    rich = result(protocol='torrent', infoHash=HASH)
-    generic = result(indexer=2, protocol='torrent', infoHash=HASH, title='Different display label')
-    generic.indexer_priority = 1
-    tracks = project([generic, rich])
-    assert len(tracks) == 1
-    assert tracks[0].bit_depth == 24 and tracks[0].sample_rate == 96000
 
 
-@pytest.mark.parametrize('protocol', ['torrent', 'usenet'])
+@pytest.mark.parametrize('protocol', ['usenet'])
 def test_missing_download_url_does_not_hide_usable_duplicate(protocol):
     broken, usable = result(protocol=protocol), result(indexer=2, protocol=protocol)
     broken.download_url = None
@@ -250,17 +192,6 @@ def test_missing_download_url_does_not_hide_usable_duplicate(protocol):
     assert tracks[0]._source_metadata['indexer_id'] == 2
 
 
-def test_album_selection_does_not_hide_seeded_alternative():
-    from core.download_plugins.album_bundle import pick_best_album_release
-    from core.download_plugins.release_identity import dedupe_prowlarr_releases
-    from core.download_plugins.torrent import _guess_quality_from_title
-    dead = result(protocol='torrent', seeders=0)
-    seeded = result(indexer=2, protocol='torrent', seeders=20)
-    dead.indexer_priority = 1
-    picked = pick_best_album_release(dedupe_prowlarr_releases([dead, seeded]),
-                                     _guess_quality_from_title, min_seeders=1)
-    assert picked is not None
-    assert picked.indexer_id == 2
 
 
 def test_summary_resolves_selected_nested_indexer_before_capping():
@@ -277,7 +208,7 @@ def test_summary_resolves_selected_nested_indexer_before_capping():
     assert 'REPACK' in summary['alternatives'][0]['display_name']
 
 
-@pytest.mark.parametrize('protocol', ['torrent', 'usenet'])
+@pytest.mark.parametrize('protocol', ['usenet'])
 @pytest.mark.parametrize('failure', ['declined', 'fetch_error'])
 def test_album_grab_fetch_failure_tries_alternate_indexer(monkeypatch, tmp_path, protocol, failure):
     from core.torrent_clients import base
@@ -302,7 +233,7 @@ def test_album_grab_fetch_failure_tries_alternate_indexer(monkeypatch, tmp_path,
     adapter = SimpleNamespace(is_configured=lambda: True, add_nzb=add, get_status=status)
     monkeypatch.setattr(plugin, 'is_configured', lambda: True)
     monkeypatch.setattr(module, 'get_active_torrent_adapter' if protocol == 'torrent' else 'get_active_usenet_adapter', lambda: adapter)
-    monkeypatch.setattr(torrent, '_prowlarr_search_query_with_variants', search)
+    monkeypatch.setattr('core.download_plugins.usenet_search._search_query', search)
     monkeypatch.setattr(module, 'run_async', asyncio.run)
     monkeypatch.setattr(module, 'poll_album_download', lambda **kwargs: str(source))
     monkeypatch.setattr(module, 'profile_allowed_formats', lambda *args: None)
@@ -312,104 +243,3 @@ def test_album_grab_fetch_failure_tries_alternate_indexer(monkeypatch, tmp_path,
     assert outcome['success'] is True
     assert calls == [rows[0].download_url, rows[1].download_url]
     assert Path(outcome['files'][0]).read_bytes() == b'fLaC-test-payload'
-
-
-def test_album_torrent_content_rejection_does_not_fetch_same_release_elsewhere(monkeypatch, tmp_path):
-    from core.torrent_clients import base
-    import core.download_plugins.torrent as module
-    plugin = TorrentDownloadPlugin()
-    rows = [result(indexer=i, protocol='torrent', seeders=10) for i in (1, 2)]
-    calls = []
-    async def search(*args, **kwargs): return rows
-    async def add(adapter, url, **kwargs):
-        calls.append(url)
-        raise base.ReleaseRejected('File list contains MP3')
-    monkeypatch.setattr(plugin, 'is_configured', lambda: True)
-    monkeypatch.setattr(module, 'get_active_torrent_adapter', lambda: SimpleNamespace(is_configured=lambda: True))
-    monkeypatch.setattr(module, '_prowlarr_search_query_with_variants', search)
-    monkeypatch.setattr(module, 'run_async', asyncio.run)
-    monkeypatch.setattr(module, 'profile_allowed_formats', lambda *args: {'flac'})
-    monkeypatch.setattr(module, 'profile_quality_targets', lambda *args: ([], True))
-    monkeypatch.setattr(base, 'add_torrent_smart', add)
-    outcome = plugin.download_album_to_staging('Example Album', 'Example Artist', str(tmp_path))
-    assert outcome['success'] is False
-    assert calls == [rows[0].download_url]
-
-
-def test_hash_groups_compare_all_nested_source_evidence_on_both_sides():
-    from core.download_plugins.release_identity import dedupe_prowlarr_releases
-    raw_groups = []
-    for first_id, suffix in [(1, ''), (3, '-REPACK')]:
-        generic = result(indexer=first_id, protocol='torrent', infoHash=HASH,
-                         title='Display label', categories=[{'id': 3010}])
-        specific = result(indexer=first_id+1, protocol='torrent', infoHash=HASH,
-                          title=f'Example_Artist-Example_Album{suffix}-WEB-MP3-2023-GROUPA',
-                          categories=[{'id': 3010}])
-        generic.indexer_priority = 1
-        root = dedupe_prowlarr_releases([generic, specific])[0]
-        root.title = 'Display label'  # cached legacy/sparse representative
-        raw_groups.append(root)
-    assert len(dedupe_prowlarr_releases(raw_groups)) == 2
-    projected = [project([g])[0] for g in raw_groups]
-    assert len(dedupe_cross_source_pool(projected)) == 2
-
-
-def test_structured_hash_label_survives_equal_quality_evidence_counts():
-    generic = result(protocol='torrent', infoHash=HASH, title='Display label', categories=[{'id': 3010}])
-    specific = result(indexer=2, protocol='torrent', infoHash=HASH,
-                      title='Example_Artist-Example_Album-WEB-MP3-2023-GROUPA', categories=[{'id': 3010}])
-    generic.indexer_priority = 1
-    tracks = project([generic, specific])
-    assert len(tracks) == 1
-    assert tracks[0]._source_metadata['release_title'] == generic.title
-    assert tracks[0].quality == 'mp3'
-
-
-@pytest.mark.parametrize('reported_seeders,minimum', [(0, 1), (1, 5)])
-def test_album_selection_keeps_unknown_availability_alternative(reported_seeders, minimum):
-    from core.download_plugins.album_bundle import pick_best_album_release
-    from core.download_plugins.release_identity import dedupe_prowlarr_releases
-    from core.download_plugins.torrent import _guess_quality_from_title
-    known = result(protocol='torrent', seeders=reported_seeders)
-    unknown = result(indexer=2, protocol='torrent', seeders=None)
-    known.indexer_priority = 1
-    picked = pick_best_album_release(dedupe_prowlarr_releases([known, unknown]),
-                                     _guess_quality_from_title, min_seeders=minimum)
-    assert picked is not None and picked.indexer_id == 2
-
-
-def test_sparse_hash_alternative_grabs_with_server_side_release_quality_evidence(monkeypatch):
-    import core.download_plugins.torrent as module
-    rich = result(protocol='torrent', infoHash=HASH)
-    generic = result(indexer=2, protocol='torrent', infoHash=HASH,
-                     title='Display label', categories=[{'id': 3040}])
-    rich.indexer_priority = 1
-    plugin = TorrentDownloadPlugin()
-    tracks, _ = plugin._project_results([rich, generic])
-    alt = tracks[0]._release_sources[0]
-    monkeypatch.setattr(plugin, 'is_configured', lambda: True)
-    monkeypatch.setattr(module, 'profile_allowed_formats', lambda _: {'flac'})
-    monkeypatch.setattr(module.threading, 'Thread', lambda *args, **kwargs: SimpleNamespace(start=lambda: None))
-    download_id = asyncio.run(plugin.download(alt.username, alt.filename, alt.size, quality_profile_id=1))
-    assert download_id
-    assert alt.quality == 'flac'
-    assert alt._source_metadata['release_title'] == 'Display label'
-
-
-@pytest.mark.parametrize('order', [(0, 1, 2), (0, 2, 1), (1, 0, 2)])
-def test_richer_hash_label_does_not_erase_original_edition_evidence(order):
-    from core.download_plugins.release_identity import dedupe_prowlarr_releases, release_sources
-    original = result(protocol='torrent', infoHash=HASH,
-                      title='Example_Artist-Example_Album-2023-GROUPA', categories=[{'id': 3000}])
-    original.indexer_priority = 1
-    richer = result(indexer=2, protocol='torrent', infoHash=HASH,
-                    title='Example Artist - Example Album FLAC 24bit 96kHz')
-    repack = result(indexer=3, protocol='torrent', infoHash=HASH,
-                    title='Example_Artist-Example_Album-REPACK-2023-GROUPA', categories=[{'id': 3000}])
-    rows = [original, richer, repack]
-    groups = dedupe_prowlarr_releases([rows[i] for i in order])
-    assert len(groups) == 2
-    assert {s.title for g in groups for s in release_sources(g)} == {r.title for r in rows}
-    tracks = project(groups)
-    assert len(dedupe_cross_source_pool(tracks)) == 2
-    assert {s._source_metadata['release_title'] for t in tracks for s in release_sources(t)} == {r.title for r in rows}

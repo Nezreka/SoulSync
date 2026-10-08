@@ -119,7 +119,6 @@ class TrackResult(SearchResult):
     album: Optional[str] = None
     track_number: Optional[int] = None
     _source_metadata: Optional[Dict[str, Any]] = None
-    _release_sources: List['TrackResult'] = field(default_factory=list, repr=False)
 
     def __post_init__(self):
         self.result_type = "track"
@@ -267,5 +266,3 @@ class DownloadStatus:
     # why a failed download failed, in words a user can act on. the status
     # poll shows it instead of a bare "state: Errored" (#1349)
     error: Optional[str] = None
-    # Explicit verification failures differ from failed retrieval/transfer.
-    failure_kind: Optional[str] = None

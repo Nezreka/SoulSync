@@ -46,6 +46,21 @@ def _flac(path, bits=24):
 
 
 @pytest.mark.parametrize("title", [
+    "Money (2011 Remastered Version)", "Money - Mono Version", "Money (Deluxe Edition)",
+    "Money [Deluxe Edition]", "Money - Stereo Version", "Money (Album Version)",
+    "Money (Explicit)",
+])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_release_selection_accepts_catalogue_metadata_annotations(title, reverse):
+    wanted, actual = ("Money", title) if reverse else (title, "Money")
+    item = releases.ReleaseFile("track.flac", actual, "Pink Floyd", "Album", 1, 1, 180000, True)
+    track = {"name": wanted, "artists": ["Pink Floyd"], "duration_ms": 180000,
+             "track_number": 1, "disc_number": 1}
+    assert releases.select_requested_file([item], track) == item
+    assert releases.match_album_tracks([item], [track], "Album") == [(track, item)]
+
+
+@pytest.mark.parametrize("title", [
     "Money Trees (feat. Jay Rock)", "Money Trees [ft. Jay Rock]",
     "Money Trees featuring Jay Rock", "Money Trees feat. Jay Rock", "Money Trees (with Jay Rock)",
 ])
@@ -67,13 +82,13 @@ def test_stripping_credits_keeps_version_gate(version):
     (128, 0, True), (136, 0, False), (112, 0, False),
     (112, 10, True), (128, 10, True), (128, 5, False), (110, 10, True), (109, 10, False),
 ])
-def test_selection_agrees_with_real_integrity_duration_rules(tmp_path, monkeypatch, seconds, tolerance, accepted):
+def test_duration_is_checked_by_import_guard_after_selection(tmp_path, monkeypatch, seconds, tolerance, accepted):
     path = tmp_path / "Song.wav"
     _wav(path, seconds)
     monkeypatch.setattr(config_manager, "get", lambda key, default=None: tolerance if key == "post_processing.duration_tolerance_seconds" else default)
     item = releases.read_release_file(str(path))
     track = {"name": "Song", "duration_ms": 120000}
-    assert (releases.select_requested_file([item], track) is not None) is accepted
+    assert releases.select_requested_file([item], track) == item
     assert check_audio_integrity(str(path), 120000, length_tolerance_s=tolerance or None).ok is accepted
 
 
@@ -103,6 +118,9 @@ def album(tmp_path, monkeypatch):
     monkeypatch.setattr(config_manager, "get", lambda key, default=None: settings.get(key, default))
     monkeypatch.setattr(config_manager, "get_active_media_server", lambda: settings["active_media_server"])
     monkeypatch.setattr(pipeline.time, "sleep", lambda _: None)
+    # These tests exercise import guards, tags and ownership. Background DSP
+    # would outlive the fixture and read the next test's temporary database.
+    monkeypatch.setattr("core.sample.worker.enqueue_analysis", lambda track_id: None)
     monkeypatch.setattr(pipeline, "detect_broken_audio", lambda _: None)
     # Any actual retry or new wishlist entry is an error; ordinary success may
     # still settle a wishlist entry explicitly created before these spies.
@@ -161,7 +179,7 @@ def album(tmp_path, monkeypatch):
             is_owned=lambda *a: False)
 
     yield SimpleNamespace(db=db, profile=profile, qp=quality_profile, settings=settings, paths=paths,
-                          context=context, outcomes=outcomes, calls=calls, events=events, expand=expand, tmp=tmp_path)
+                          context=context, tracks=tracks, outcomes=outcomes, calls=calls, events=events, expand=expand, tmp=tmp_path)
     invalidate_library_scope_cache()
 
 
@@ -232,7 +250,7 @@ def test_success_settles_an_existing_wishlist_request_without_adding_one(album):
     assert album.db.get_wishlist_track("2", profile_id=album.profile) is None
 
 
-@pytest.mark.parametrize("failure", ["quality", "integrity", "acoustid", "silence", "exception"])
+@pytest.mark.parametrize("failure", ["quality", "integrity", "duration", "acoustid", "silence", "exception"])
 def test_failed_extra_is_one_pass_without_new_downloads_or_wishlist(album, monkeypatch, failure):
     if failure == "quality":
         _flac(album.paths[1], bits=16)
@@ -246,6 +264,8 @@ def test_failed_extra_is_one_pass_without_new_downloads_or_wishlist(album, monke
         real = releases.read_release_file
         monkeypatch.setattr(releases, "read_release_file", lambda path: releases.ReleaseFile(path, "Second", "Artist", "Album", 2, 1, 3000, True)
                             if Path(path) == album.paths[1] else real(path))
+    elif failure == "duration":
+        album.tracks[1]["duration_ms"] = 18000
     elif failure == "acoustid":
         album.outcomes["Second"] = acoustid.VerificationResult.FAIL
     elif failure == "silence":

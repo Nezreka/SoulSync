@@ -1,13 +1,17 @@
 """Real tagged audio regressions for release extraction and album track pairing."""
 
+import shutil
 import subprocess
 from pathlib import Path
 import pytest
 from core.downloads.release_import import read_release_file, select_requested_file, match_album_tracks
+from core.imports.file_integrity import check_audio_integrity
 
 
 @pytest.fixture
 def audio(tmp_path):
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg required to build test audio")
     def create(filename, title, artist="Artist", album="Album", track=1, disc=1, seconds=2):
         path = tmp_path / filename
         subprocess.run(
@@ -58,9 +62,11 @@ def test_unrequested_recording_version_is_rejected(audio):
     assert select_requested_file([item], track()) is None
 
 
-def test_duration_rejects_different_recording(audio):
-    item = audio("Artist - Song.flac", "Song", seconds=12)
-    assert select_requested_file([item], track()) is None
+@pytest.mark.parametrize("seconds,expected_ms", [(2, 12000), (18, 2000)])
+def test_duration_rejects_different_recording(audio, seconds, expected_ms):
+    item = audio("Artist - Song.flac", "Song", seconds=seconds)
+    assert select_requested_file([item], track(duration=expected_ms)) == item
+    assert not check_audio_integrity(item.path, expected_ms).ok
 
 
 def test_duplicate_recording_candidates_are_ambiguous(audio):

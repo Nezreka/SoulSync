@@ -10,7 +10,6 @@ wishlist download of that track.
 from __future__ import annotations
 
 import os
-import re
 import threading
 from collections import OrderedDict
 from copy import deepcopy
@@ -21,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from core.imports.filename import parse_filename_metadata
+from core.matching.audio_verification import normalize
 from core.quality.release_format import format_from_extension
 from core.tag_writer import read_file_tags
 from core.text.title_match import recording_version_markers
@@ -88,14 +88,9 @@ def _artist(track: dict) -> str:
 
 
 def _title(value: str) -> str:
-    # Credits vary between catalogue titles and file tags; they do not name
-    # another recording. The separate version gate still checks both originals.
-    value = value.replace("_", " ")
-    value = re.sub(r"\s*[\[(](?:feat\.?|ft\.?|featuring|with)\s+[^\])]+[\])]", "", value, flags=re.IGNORECASE)
-    value = re.sub(r"\s+(?:feat\.?|ft\.?|featuring)\s+.+$", "", value, flags=re.IGNORECASE)
-    edition = r"(?:\d{4}[ -]+)?(?:remaster(?:ed)?|mono|stereo)(?:[ -]+\d{4})?"
-    suffix = rf"\s*(?:[\[(]{edition}[\])]|[-–]\s*{edition})\s*$"
-    return _text(re.sub(suffix, "", value, flags=re.IGNORECASE))
+    # Use the shared catalogue annotation cleanup; check recording versions
+    # against the original titles before normalization.
+    return _text(normalize(value.replace("_", " ")))
 
 
 def release_match_score(item: ReleaseFile, track: dict) -> float:
@@ -118,15 +113,6 @@ def release_match_score(item: ReleaseFile, track: dict) -> float:
             similarity=lambda a, b: SequenceMatcher(None, _text(a), _text(b)).ratio(),
         )
         if not matched:
-            return 0.0
-    duration = float(track.get("duration_ms") or 0)
-    if duration and item.duration_ms:
-        from core.imports.file_integrity import duration_tolerances, resolve_duration_tolerance
-        from core.settings import config_manager
-
-        override = resolve_duration_tolerance(config_manager.get('post_processing.duration_tolerance_seconds', 0))
-        _, tolerance = duration_tolerances(item.duration_ms / 1000, duration / 1000, override)
-        if abs(duration - item.duration_ms) > tolerance * 1000:
             return 0.0
     return title_score
 
@@ -166,7 +152,8 @@ def match_album_tracks(files: list[ReleaseFile], tracks: list[dict], album_name:
     """Pair catalogue tracks with the release files that are unambiguously them.
 
     Only files tagged with this album count, at the track's own disc/number and
-    with a strict title/artist/duration score. Tracks the release lacks or
+    with a title/artist match. Duration and integrity are checked by the normal
+    import pipeline. Tracks the release lacks or
     cannot identify stay unpaired; they never block the others.
     """
     if not _text(album_name):

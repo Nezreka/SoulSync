@@ -521,7 +521,7 @@ def test_youtube_task_uses_get_download_status_to_resolve_path(monkeypatch):
     assert any(c[0] == 'mark_completed' for c in rec.calls)
 
 
-@pytest.mark.parametrize('source', ['torrent', 'usenet'])
+@pytest.mark.parametrize('source', ['usenet'])
 @pytest.mark.parametrize('include_original', [True, False])
 def test_release_never_imports_another_song_with_requested_title_in_qualifier(tmp_path, source, include_original):
     release_dir = tmp_path / 'release'
@@ -564,22 +564,8 @@ def test_release_never_imports_another_song_with_requested_title_in_qualifier(tm
         assert not list(transfer_dir.glob('*'))
 
 
-@pytest.mark.parametrize('filename,expected_title', [
-    ('Artist - Angel Eyes.flac', 'Angel'),
-    ('Artist - Thriller (Live).flac', 'Thriller'),
-    ('Artist - Thriller.flac', 'Thriller (Live)'),
-])
-def test_release_file_score_rejects_substrings_and_different_recordings(filename, expected_title):
-    assert pp._release_audio_match_score(filename, expected_title, 'Artist') < 0.80
 
 
-@pytest.mark.parametrize('filename,expected_title', [
-    ('Artist - Thriller (2008 Remastered).flac', 'Thriller'),
-    ('Artist - Thriller - Remastered 2008.flac', 'Thriller'),
-    ('Artist - Thriller.flac', 'Thriller - Remastered 2008'),
-])
-def test_release_file_score_still_accepts_remastered_original(filename, expected_title):
-    assert pp._release_audio_match_score(filename, expected_title, 'Artist') >= 0.80
 
 
 def test_torrent_release_copies_best_matching_audio_to_transfer(tmp_path):

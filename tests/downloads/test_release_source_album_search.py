@@ -186,7 +186,7 @@ def test_later_release_source_sees_track_queries_after_the_first_two(monkeypatch
     assert calls.count('Pink Floyd The Dark Side of the Moon') == 1
 
 
-@pytest.mark.parametrize('protocol', ['usenet', 'torrent'])
+@pytest.mark.parametrize('protocol', ['usenet'])
 def test_single_source_track_request_can_retrieve_its_album(monkeypatch, local_http, protocol):
     client, answers, calls, _ = local_http
     answers['Pink Floyd The Dark Side of the Moon'] = [_release(

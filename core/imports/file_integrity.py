@@ -141,17 +141,6 @@ def resolve_duration_tolerance(value: Any) -> Optional[float]:
     return parsed
 
 
-def duration_tolerances(actual_length_s: float, expected_length_s: float,
-                        length_tolerance_s: Optional[float] = None) -> Tuple[float, float]:
-    """The ordinary import's base and effective duration tolerances, in seconds."""
-    if length_tolerance_s is not None:
-        return length_tolerance_s, length_tolerance_s
-    base = (_LENGTH_TOLERANCE_LONG_TRACK_S if expected_length_s > _LONG_TRACK_THRESHOLD_S
-            else _DEFAULT_LENGTH_TOLERANCE_S)
-    effective = max(base, _LONGER_VERSION_TOLERANCE_S) if actual_length_s > expected_length_s else base
-    return base, effective
-
-
 def expected_duration_for_check(expected_ms: Any, is_local_import: bool) -> Optional[int]:
     """The expected duration (ms) to run the duration-agreement leg against,
     or None to skip that leg.
@@ -567,8 +556,15 @@ def _check_audio_integrity_tier1(
     expected_length_s = expected_duration_ms / 1000.0
     checks["expected_length_s"] = expected_length_s
 
-    length_tolerance_s, effective_tolerance_s = duration_tolerances(
-        actual_length_s, expected_length_s, length_tolerance_s)
+    if length_tolerance_s is None:
+        length_tolerance_s = (
+            _LENGTH_TOLERANCE_LONG_TRACK_S
+            if expected_length_s > _LONG_TRACK_THRESHOLD_S
+            else _DEFAULT_LENGTH_TOLERANCE_S
+        )
+        user_pinned_tolerance = False
+    else:
+        user_pinned_tolerance = True
     checks["length_tolerance_s"] = length_tolerance_s
 
     # Positive drift = the file runs LONGER than expected (not truncation). On the auto
@@ -577,6 +573,9 @@ def _check_audio_integrity_tier1(
     signed_drift_s = actual_length_s - expected_length_s
     drift_s = abs(signed_drift_s)
     checks["length_drift_s"] = drift_s
+    effective_tolerance_s = length_tolerance_s
+    if signed_drift_s > 0 and not user_pinned_tolerance:
+        effective_tolerance_s = max(length_tolerance_s, _LONGER_VERSION_TOLERANCE_S)
     checks["effective_tolerance_s"] = effective_tolerance_s
 
     if drift_s > effective_tolerance_s:

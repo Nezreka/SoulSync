@@ -155,10 +155,7 @@ class ProwlarrSearchResult:
     # search resource does not carry it. Neutral default for an indexer
     # Prowlarr did not list — an unknown indexer must not sort to the bottom.
     indexer_priority: int = DEFAULT_INDEXER_PRIORITY
-    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
-    info_hash: Optional[str] = None
-    _release_sources: List['ProwlarrSearchResult'] = field(default_factory=list, repr=False)
-    _release_evidence: Optional['ProwlarrSearchResult'] = field(default=None, repr=False)
+    raw: Dict[str, Any] = field(default_factory=dict)
 
 
 class ProwlarrSearchError(RuntimeError):
@@ -594,7 +591,6 @@ class ProwlarrClient:
             publish_date=entry.get('publishDate'),
             categories=category_ids,
             raw=entry,
-            info_hash=entry.get('infoHash') or None,
         )
 
     def _api_get(
@@ -646,19 +642,19 @@ class ProwlarrClient:
                 return None
             return resp.json()
         except http_requests.exceptions.Timeout as e:
-            logger.error("Prowlarr request to %s timed out (%s)", path, type(e).__name__)
+            logger.error("Prowlarr request to %s timed out: %s", path, e)
             if raise_on_error:
                 raise ProwlarrSearchError(
                     f"Prowlarr did not answer within {timeout or self.DEFAULT_TIMEOUT}s"
-                ) from None
+                ) from e
             return None
         except http_requests.exceptions.RequestException as e:
-            logger.error("Prowlarr request to %s failed (%s)", path, type(e).__name__)
+            logger.error("Prowlarr request to %s failed: %s", path, e)
             if raise_on_error:
-                raise ProwlarrSearchError(f"Prowlarr request failed ({type(e).__name__})") from None
+                raise ProwlarrSearchError(f"Prowlarr request failed: {e}") from e
             return None
         except ValueError as e:
-            logger.error("Prowlarr response to %s was not JSON (%s)", path, type(e).__name__)
+            logger.error("Prowlarr response to %s was not JSON: %s", path, e)
             if raise_on_error:
-                raise ProwlarrSearchError("Prowlarr returned a malformed response") from None
+                raise ProwlarrSearchError("Prowlarr returned a malformed response") from e
             return None
