@@ -23722,7 +23722,8 @@ def _emit_enrichment_status_loop():
                     w.paused = True
                     _download_auto_paused.add(name)
                     _auto_yield_cause[name] = reason
-                    logger.debug(f"Auto-paused {name} during active {reason}")
+                    # once per pause (guarded by `not w.paused`), so it can be info
+                    logger.info(f"Auto-paused {name} during active {reason}")
                 elif not reason and name in _download_auto_paused:
                     # Don't override an explicit user pause. If config says the worker
                     # was paused via the UI, leave it paused and just drop the auto-pause

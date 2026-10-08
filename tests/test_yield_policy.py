@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import pytest
+
 from core.enrichment.yield_policy import (
     ALL_YIELD_WORKERS,
     API_CONTENTION_WORKERS,
+    SERVICE_YIELD_NAMES,
     discovery_state_active,
     worker_yield_reason,
+    yield_name_for_service,
 )
 
 
@@ -50,7 +54,7 @@ def test_musicbrainz_yields_for_downloads_not_discovery():
 
 def test_discovery_state_active_phases():
     assert discovery_state_active({'phase': 'discovering'})
-    assert discovery_state_active({'phase': 'Matching tracks...'})
+    assert discovery_state_active({'phase': 'DISCOVERING'})
     assert not discovery_state_active({'phase': 'idle'})
     assert not discovery_state_active({'phase': ''})
     assert not discovery_state_active({'phase': 'discovered'})
@@ -58,3 +62,28 @@ def test_discovery_state_active_phases():
     assert not discovery_state_active({'phase': 'cancelled'})
     assert not discovery_state_active({})
     assert not discovery_state_active(None)
+
+
+@pytest.mark.parametrize('phase', [
+    'fresh', 'parsed', 'syncing', 'sync_complete', 'downloading', 'download_complete',
+    'complete', 'done', 'queued', 'Matching tracks...',
+])
+def test_phases_that_sit_in_memory_dont_pause_workers(phase):
+    """#1612 (cremonies): a playlist left in fresh (identifications cleared),
+    sync_complete (synced, never downloaded) or download_complete kept
+    "discovery" active forever and deezer, spotify, itunes, discogs and
+    hydrabase stayed paused with nothing running. only discovering is live
+    matching work; a real download yields through its own batch."""
+    assert not discovery_state_active({'phase': phase})
+
+
+def test_every_yield_worker_has_a_service_yield_name():
+    # a ui resume can only stick for a worker the override set can name
+    assert set(SERVICE_YIELD_NAMES.values()) == set(ALL_YIELD_WORKERS)
+
+
+def test_yield_name_for_service():
+    assert yield_name_for_service('deezer') == 'deezer'
+    assert yield_name_for_service('itunes') == 'itunes-enrichment'
+    assert yield_name_for_service('spotify', 'spotify-enrichment') == 'spotify-enrichment'
+    assert yield_name_for_service('listening-stats') is None
