@@ -208,6 +208,8 @@ _EXPOSED = {
     "quality.min_bitrate_kbps": "audiobook-min-bitrate",
     "quality.max_bitrate_kbps": "audiobook-max-bitrate",
     "quality.allow_dramatized": "audiobook-allow-dramatized",
+    "quality.allowed_formats": "audiobook-allowed-formats",
+    "quality.file_layout": "audiobook-file-layout",
     "recycle_deletes": "audiobook-recycle-deletes",
     "recycle_keep_days": "audiobook-recycle-keep-days",
     "torrent_category": "audiobook-torrent-category",
