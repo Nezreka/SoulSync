@@ -960,6 +960,7 @@ class DeezerClient:
 
     def _build_album_result(self, album_data: Dict[str, Any], album_id: str, include_tracks: bool = True) -> Dict[str, Any]:
         """Build Spotify-compatible album result from Deezer data"""
+        from core.metadata.deezer_genres import album_genre_names
         images = []
         for size_key, height in [('cover_xl', 1000), ('cover_big', 500), ('cover_medium', 250), ('cover_small', 56)]:
             if album_data.get(size_key):
@@ -987,6 +988,8 @@ class DeezerClient:
             'release_date': album_data.get('release_date', ''),
             'total_tracks': album_data.get('nb_tracks', 0),
             'album_type': album_type,
+            # deezer keeps genre on the album, never the track or artist (#1607)
+            'genres': album_genre_names(album_data),
             'external_urls': {'deezer': album_data.get('link', '')},
             'uri': f"deezer:album:{album_data.get('id', '')}",
             '_source': 'deezer',

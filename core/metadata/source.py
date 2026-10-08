@@ -1333,6 +1333,25 @@ def _album_artist_names(artists) -> list:
     return names if len(names) > 1 else []
 
 
+def _source_album_genres(album_ctx, source: str, source_ids: dict) -> list:
+    """the album's own genres: from the context when it has them, else from
+    deezer's /album/{id} (cached, the download already looked it up). only
+    deezer is asked, other sources keep genre on the artist. never raises."""
+    names = album_ctx.get("genres") if isinstance(album_ctx, dict) else None
+    if isinstance(names, list) and names:
+        return [str(g) for g in names if isinstance(g, str) and g.strip()]
+    album_id = str((source_ids or {}).get("album_id") or "")
+    if (source or "").strip().lower() != "deezer" or not album_id.isdigit():
+        return []
+    try:
+        from core.metadata.registry import get_deezer_client
+        album = get_deezer_client().get_album_metadata(album_id, include_tracks=False) or {}
+        return [g for g in (album.get("genres") or []) if isinstance(g, str) and g.strip()]
+    except Exception as e:
+        logger.debug("deezer album genres for %s: %s", album_id, e)
+        return []
+
+
 def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> dict:
     if album_info is None:
         album_info = {}
@@ -1567,7 +1586,9 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
         if release_date:
             metadata["date"] = release_date
 
-    genres = artist_dict.get("genres") or []
+    # deezer's artist has no genres, its album does. without this every deezer
+    # download got no genre unless musicbrainz or last.fm had one (#1607)
+    genres = artist_dict.get("genres") or _source_album_genres(album_ctx, source, source_ids)
     if genres:
         from core.genre_filter import filter_genres
 
