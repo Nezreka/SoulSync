@@ -88,9 +88,14 @@ def _artist(track: dict) -> str:
 
 
 def _title(value: str) -> str:
+    # Credits vary between catalogue titles and file tags; they do not name
+    # another recording. The separate version gate still checks both originals.
+    value = value.replace("_", " ")
+    value = re.sub(r"\s*[\[(](?:feat\.?|ft\.?|featuring|with)\s+[^\])]+[\])]", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"\s+(?:feat\.?|ft\.?|featuring)\s+.+$", "", value, flags=re.IGNORECASE)
     edition = r"(?:\d{4}[ -]+)?(?:remaster(?:ed)?|mono|stereo)(?:[ -]+\d{4})?"
     suffix = rf"\s*(?:[\[(]{edition}[\])]|[-–]\s*{edition})\s*$"
-    return _text(re.sub(suffix, "", value.replace("_", " "), flags=re.IGNORECASE))
+    return _text(re.sub(suffix, "", value, flags=re.IGNORECASE))
 
 
 def release_match_score(item: ReleaseFile, track: dict) -> float:
@@ -115,8 +120,14 @@ def release_match_score(item: ReleaseFile, track: dict) -> float:
         if not matched:
             return 0.0
     duration = float(track.get("duration_ms") or 0)
-    if duration and item.duration_ms and abs(duration - item.duration_ms) > max(4000, duration * 0.05):
-        return 0.0
+    if duration and item.duration_ms:
+        from core.imports.file_integrity import duration_tolerances, resolve_duration_tolerance
+        from core.settings import config_manager
+
+        override = resolve_duration_tolerance(config_manager.get('post_processing.duration_tolerance_seconds', 0))
+        _, tolerance = duration_tolerances(item.duration_ms / 1000, duration / 1000, override)
+        if abs(duration - item.duration_ms) > tolerance * 1000:
+            return 0.0
     return title_score
 
 
@@ -182,6 +193,8 @@ def _album_track_context(parent: dict, track: dict, album: dict, source: str) ->
 
     Never inherits the requested song's IDs, outcome flags or task. The context
     is what a quarantine entry stores, so an approval imports it like any track.
+    No task/batch IDs means one import pass, without download retries or a new
+    wishlist request when a guard rejects this already downloaded file.
     """
     from core.imports.context import get_import_context_artist
     from core.imports.paths import import_profile_id
@@ -191,7 +204,8 @@ def _album_track_context(parent: dict, track: dict, album: dict, source: str) ->
     if not isinstance(artist, dict):
         artist = {"name": str(artist)}
     info = deepcopy(track)
-    info["quality_profile_id"] = (parent.get("track_info") or {}).get("quality_profile_id")
+    info["quality_profile_id"] = ((parent.get("track_info") or {}).get("quality_profile_id")
+                                  or (parent.get("_quality_profile") or {}).get("id"))
     info["album"] = album.get("name") or ""
     ctx = {
         "artist": artist,
@@ -263,19 +277,23 @@ def _owned_in_library(track: dict, album_name: str, profile_id=None) -> bool:
 # One expansion per album at a time. A second download of the same album skips
 # its expansion instead of holding a post-processing worker while it waits.
 _active_albums: set[str] = set()
-# Tracks this process already imported. A media server's library table only
-# learns about them on its next scan.
-_recent_imports: OrderedDict[str, None] = OrderedDict()
+# Published paths in each library. A media server's library table only learns
+# about imports on its next scan; deleted files must stop counting immediately.
+_recent_imports: OrderedDict[str, str] = OrderedDict()
 _state_lock = threading.Lock()
 
 
-def _recently_imported(key: str, *, remember: bool = False) -> bool:
+def _recently_imported(key: str, *, published_path: str | None = None) -> bool:
     with _state_lock:
-        if remember:
-            _recent_imports[key] = None
+        if published_path and os.path.isfile(published_path):
+            _recent_imports[key] = published_path
             while len(_recent_imports) > 4096:
                 _recent_imports.popitem(last=False)
-        return key in _recent_imports
+        path = _recent_imports.get(key)
+        if path and os.path.isfile(path):
+            return True
+        _recent_imports.pop(key, None)
+        return False
 
 
 def import_album_tracks(context_key: str, context: dict, files: list[ReleaseFile], requested: ReleaseFile,
@@ -302,7 +320,8 @@ def import_album_tracks(context_key: str, context: dict, files: list[ReleaseFile
         logger.info("[Album Tracks] The request carries no album id; importing the requested track only")
         return 0
     artist_name = _artist(context.get("track_info") or {})
-    identity = f"{os.path.realpath(transfer_dir)}::{_text(artist_name)}::{_text(name)}"
+    library_root = os.path.normcase(os.path.realpath(transfer_dir))
+    identity = f"{library_root}::{_text(artist_name)}::{_text(name)}"
     with _state_lock:
         if identity in _active_albums:
             logger.info("[Album Tracks] %r is already being imported by another download", name)
@@ -344,7 +363,7 @@ def import_album_tracks(context_key: str, context: dict, files: list[ReleaseFile
 
             is_owned = partial(_owned_in_library, profile_id=import_profile_id(context))
         for index, (track, item) in enumerate(pairs):
-            key = f"{source}:{track.get('id') or ''}:{_text(name)}:{track.get('disc_number')}:{track.get('track_number')}"
+            key = f"{identity}::{source}:{track.get('id') or ''}:{track.get('disc_number')}:{track.get('track_number')}"
             if _recently_imported(key) or is_owned(track, name):
                 logger.info("[Album Tracks] %r is already in the library", track.get("name"))
                 continue
@@ -358,18 +377,22 @@ def import_album_tracks(context_key: str, context: dict, files: list[ReleaseFile
             except Exception as exc:
                 logger.warning("[Album Tracks] Import of %r failed: %s", track.get("name"), exc)
             finally:
-                # The pipeline keeps a failed context and its file for a retry
-                # that never comes for an extra track; drop both.
+                # An extra track has no retry. Remove failed contexts and unused
+                # copies, keeping quarantine and the published file intact.
                 with matched_context_lock:
                     matched_downloads_context.pop(track_key, None)
-                if os.path.exists(path):
+                published_path = ctx.get('_final_processed_path') or ctx.get('_final_path')
+                is_published_copy = (ctx.get('_pipeline_import_succeeded') and published_path
+                                     and os.path.normcase(os.path.realpath(path))
+                                     == os.path.normcase(os.path.realpath(published_path)))
+                if os.path.exists(path) and not is_published_copy:
                     try:
                         os.unlink(path)
                     except OSError as exc:
                         logger.warning("[Album Tracks] Could not remove unused copy %s: %s", path, exc)
             if ctx.get("_pipeline_import_succeeded"):
                 imported += 1
-                _recently_imported(key, remember=True)
+                _recently_imported(key, published_path=ctx.get('_final_processed_path') or ctx.get('_final_path'))
         logger.info("[Album Tracks] Imported %d of %d other tracks of %r", imported, len(pairs), name)
     except Exception as exc:
         logger.warning("[Album Tracks] Album expansion stopped: %s", exc, exc_info=True)
