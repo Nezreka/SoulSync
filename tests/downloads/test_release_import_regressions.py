@@ -72,6 +72,33 @@ def test_credit_variants_select_the_same_recording(title, reverse):
     assert releases.select_requested_file([item], track) == item
 
 
+def test_live_album_file_without_live_suffix_matches_a_live_request():
+    track = {"name": "Hotel California - Live", "artists": ["Eagles"], "album": "Hell Freezes Over",
+             "track_number": 5, "disc_number": 1}
+    live = releases.ReleaseFile("05.flac", "Hotel California", "Eagles", "Hell Freezes Over", 5, 1, 0, True)
+    assert releases.select_requested_file([live], track) == live
+    catalogue = {key: value for key, value in track.items() if key != "album"}
+    assert releases.match_album_tracks([live], [catalogue], "Hell Freezes Over") == [(catalogue, live)]
+    # The studio recording from another album stays a different recording.
+    studio = releases.ReleaseFile("01.flac", "Hotel California", "Eagles", "Hotel California", 1, 1, 0, True)
+    assert releases.select_requested_file([studio], track) is None
+
+
+def test_exact_title_settles_mono_and_stereo_copies():
+    track = {"name": "Wouldn't It Be Nice (Mono)", "artists": ["The Beach Boys"]}
+    mono = releases.ReleaseFile("01.flac", "Wouldn't It Be Nice (Mono)", "The Beach Boys")
+    stereo = releases.ReleaseFile("14.flac", "Wouldn't It Be Nice (Stereo)", "The Beach Boys")
+    assert releases.select_requested_file([stereo, mono], track) == mono
+
+
+@pytest.mark.parametrize("name,title", [("01 Run.flac", "Run"), ("99 Luftballons.flac", "99 Luftballons")])
+def test_untagged_file_name_with_track_prefix_matches(tmp_path, name, title):
+    path = tmp_path / name
+    path.write_bytes(b"")
+    item = releases.read_release_file(str(path))
+    assert releases.select_requested_file([item], {"name": title, "artists": ["Artist"]}) == item
+
+
 def test_symbol_only_title_selects_its_own_file():
     track = {"name": "★", "artists": ["David Bowie"]}
     item = releases.ReleaseFile("track.flac", "★", "David Bowie")

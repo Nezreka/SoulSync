@@ -93,10 +93,21 @@ def _title(value: str) -> str:
     return _text(normalize(value.replace("_", " ")))
 
 
-def release_match_score(item: ReleaseFile, track: dict) -> float:
+def _album_name(value: Any) -> str:
+    if isinstance(value, dict):
+        value = value.get("name") or value.get("title")
+    return str(value or "")
+
+
+def release_match_score(item: ReleaseFile, track: dict, *, album: str | None = None) -> float:
     expected = str(track.get("name") or track.get("title") or "")
-    if recording_version_markers(expected) != recording_version_markers(item.title):
-        return 0.0
+    file_versions = recording_version_markers(item.title)
+    if recording_version_markers(expected) != file_versions:
+        # A live album's files often leave out the "- Live" its catalogue
+        # titles carry. Trust that only for an unmarked file of that album.
+        wanted_album = _text(_album_name(album or track.get("album")))
+        if file_versions or not wanted_album or _text(item.album) != wanted_album:
+            return 0.0
     wanted, actual = _title(expected), _title(item.title)
     if not wanted and not actual:
         # Symbol-only titles ("★") have no letters to normalize.
@@ -104,6 +115,13 @@ def release_match_score(item: ReleaseFile, track: dict) -> float:
     if not wanted or not actual:
         return 0.0
     title_score = SequenceMatcher(None, wanted, actual).ratio()
+    if not item.tagged and title_score < 1.0:
+        # An untagged file only has its name; read it the way Soulseek file
+        # names are read ("01 Run.flac", "99 Luftballons.flac").
+        from core.downloads.soulseek_identity import match_track
+
+        if match_track(track, {"filename": item.path}).matches:
+            title_score = 1.0
     artist = _artist(track)
     if artist and item.artist:
         from core.matching.artist_aliases import artist_names_match
@@ -131,17 +149,23 @@ def _format_rank(item: ReleaseFile, preferred_formats) -> int:
     return preferred_formats.index(fmt) if fmt in preferred_formats else len(preferred_formats)
 
 
-def select_requested_file(files: list[ReleaseFile], track: dict, preferred_formats=()) -> ReleaseFile | None:
+def select_requested_file(files: list[ReleaseFile], track: dict, preferred_formats=(), *,
+                          album: str | None = None) -> ReleaseFile | None:
     """Refuse close alternatives rather than apply one song's tags to another.
 
-    The same song twice is settled by the track's own disc/number (one title on
-    two discs), then by the profile's format order (a FLAC+MP3 release).
+    The same song twice is settled by the exact title (a mono and a stereo
+    copy), then the track's own disc/number (one title on two discs), then by
+    the profile's format order (a FLAC+MP3 release).
     """
     unique = {str(Path(item.path).resolve()): item for item in files}
-    scored = sorted(((release_match_score(item, track), item) for item in unique.values()), key=lambda entry: entry[0], reverse=True)
+    scored = sorted(((release_match_score(item, track, album=album), item) for item in unique.values()),
+                    key=lambda entry: entry[0], reverse=True)
     if not scored or scored[0][0] < 0.80:
         return None
     tied = [item for score, item in scored if scored[0][0] - score < 0.03]
+    if len(tied) > 1:
+        expected = _text(track.get("name") or track.get("title"))
+        tied = [item for item in tied if _text(item.title) == expected] or tied
     number, disc = _number(track.get("track_number")), _number(track.get("disc_number"))
     if len(tied) > 1 and number:
         tied = [item for item in tied if item.track_number == number and (not disc or (item.disc_number or 1) == disc)] or tied
@@ -170,8 +194,8 @@ def match_album_tracks(files: list[ReleaseFile], tracks: list[dict], album_name:
         disc = _number(track.get("disc_number"), 1)
         number = _number(track.get("track_number"), index)
         candidates = [item for item in files if item.path not in used and item.track_number == number and (item.disc_number or 1) == disc]
-        item = select_requested_file(candidates, track, preferred_formats)
-        if item is None or release_match_score(item, track) < 0.95:
+        item = select_requested_file(candidates, track, preferred_formats, album=album_name)
+        if item is None or release_match_score(item, track, album=album_name) < 0.95:
             continue
         used.add(item.path)
         pairs.append((track, item))
