@@ -7703,20 +7703,20 @@
 
                                                 <div class="form-group">
                                                     <label>File Layout:</label>
-                                                    <select id="audiobook-file-layout" class="form-select">
-                                                        <option value="any">Either</option>
-                                                        <option value="single">Single file (whole book)</option>
-                                                        <option value="multiple">Multiple files (chapters or parts)</option>
-                                                    </select>
+                                                    <div id="audiobook-file-layout"
+                                                        style="display: grid; grid-template-columns: repeat(2, minmax(0, max-content)); gap: 0 24px;">
+                                                        <label class="checkbox-label"><input type="checkbox" value="single"><span>Single file (whole book)</span></label>
+                                                        <label class="checkbox-label"><input type="checkbox" value="multiple"><span>Multiple files (chapters or parts)</span></label>
+                                                    </div>
                                                     <span class="info-icon" role="button" tabindex="0"
                                                         title="What's this?" onclick="toggleSettingHelp(this)"
                                                         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                                     <small class="settings-hint setting-help-body" hidden>Whether a book
                                                         should arrive as <strong>one file</strong> or as <strong>several
-                                                        smaller files</strong>, usually one per chapter. Releases laid out the
-                                                        other way are skipped. Only Soulseek says how many files a release has
-                                                        before it is downloaded; torrents and usenet do not, so they are always
-                                                        allowed.</small>
+                                                        smaller files</strong>, usually one per chapter. Switch one off and
+                                                        releases laid out that way are skipped; leave both on (or both off) for
+                                                        either. Only Soulseek says how many files a release has before it is
+                                                        downloaded; torrents and usenet do not, so they are always allowed.</small>
                                                 </div>
 
                                                 <div class="form-group">

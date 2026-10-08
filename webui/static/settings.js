@@ -3333,7 +3333,11 @@ async function loadSettingsData() {
         document.getElementById('audiobook-allowed-formats')?.querySelectorAll('input').forEach(box => {
             box.checked = !abAllowed.length || abAllowed.includes(box.value);
         });
-        abVal(document.getElementById('audiobook-file-layout'), abq.file_layout || 'any');
+        // "any" shows both switches on; "single"/"multiple" shows just that one.
+        const abLayout = abq.file_layout || 'any';
+        document.getElementById('audiobook-file-layout')?.querySelectorAll('input').forEach(box => {
+            box.checked = abLayout === 'any' || abLayout === box.value;
+        });
         abVal(document.getElementById('audiobook-min-bitrate'), abq.min_bitrate_kbps ?? 0);
         abVal(document.getElementById('audiobook-max-bitrate'), abq.max_bitrate_kbps ?? 0);
         abChecked(document.getElementById('audiobook-allow-dramatized'),
@@ -6549,7 +6553,14 @@ async function saveSettings(quiet = false) {
                     const on = boxes.filter(box => box.checked).map(box => box.value);
                     return on.length === boxes.length ? [] : on;
                 })(),
-                file_layout: _cfgStr('audiobook-file-layout'),
+                // Exactly one switch on picks that layout; both on, or both off,
+                // means either. Undefined when the switches are not on the page.
+                file_layout: (function () {
+                    const group = document.getElementById('audiobook-file-layout');
+                    if (!group) return undefined;
+                    const on = [...group.querySelectorAll('input')].filter(box => box.checked);
+                    return on.length === 1 ? on[0].value : 'any';
+                })(),
                 min_bitrate_kbps: Math.max(0,
                     _cfgInt('audiobook-min-bitrate', 0)),
                 max_bitrate_kbps: Math.max(0,
