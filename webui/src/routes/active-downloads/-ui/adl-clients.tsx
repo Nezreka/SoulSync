@@ -11,6 +11,7 @@
  * eternal spinner and the user had no way to see what was wrong.
  */
 
+import { Menu } from '@base-ui/react/menu';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ClientAction, ClientFetch, ClientLinks } from '../-adl.api';
@@ -36,6 +37,7 @@ import {
   usenetClientBulk,
 } from '../-adl.api';
 import { formatBytes } from '../-adl.helpers';
+import { AdlMatchModal, type MatchTarget } from './adl-match-modal';
 
 const toast = (message: string, type: string) => window.showToast?.(message, type);
 
@@ -116,8 +118,18 @@ function pct(progress: number): number {
   return Math.max(0, Math.min(100, value));
 }
 
+/** qBittorrent answers 8640000 (100 days) when it has no estimate. Anything
+ * that long is "unknown", never a real time left. */
+const NO_ESTIMATE_SECONDS = 8_640_000;
+
+/** A client's eta, or null when it is the no-estimate sentinel. */
+function etaSeconds(seconds: number | null | undefined): number | null {
+  if (!seconds || seconds <= 0 || seconds >= NO_ESTIMATE_SECONDS) return null;
+  return seconds;
+}
+
 function etaText(seconds: number | null | undefined): string {
-  if (!seconds || seconds <= 0) return '';
+  if (!seconds || seconds <= 0 || seconds >= NO_ESTIMATE_SECONDS) return '';
   if (seconds < 60) return `${Math.round(seconds)}s left`;
   if (seconds < 3600) return `${Math.round(seconds / 60)}m left`;
   return `${Math.floor(seconds / 3600)}h ${Math.round((seconds % 3600) / 60)}m left`;
@@ -136,14 +148,81 @@ function stateBucket(state: string): string {
   return 'other';
 }
 
-function StateChip({ state, error }: { state: string; error?: string | null }) {
+const STATE_WORDS: Record<string, string> = {
+  downloading: 'Downloading',
+  queued: 'Queued',
+  seeding: 'Seeding',
+  completed: 'Complete',
+  paused: 'Paused',
+  stalled: 'Stalled',
+  error: 'Error',
+};
+
+/** The state in plain words. A download with nothing moving and nothing done
+ * is waiting on peers, which "downloading" would hide. */
+function stateWords(state: string, progress: number, speed: number): string {
+  const bucket = stateBucket(state);
+  if (bucket === 'downloading' && !speed && pct(progress) === 0) return 'Waiting for peers';
+  return STATE_WORDS[bucket] ?? state;
+}
+
+const KIND_LABELS: Record<string, string> = {
+  movie: 'Movie',
+  show: 'TV',
+  episode: 'Episode',
+  season: 'Season',
+  video: 'Video',
+  audiobook: 'Audiobook',
+  album: 'Album',
+  track: 'Track',
+};
+
+function KindIcon({ kind }: { kind?: string }) {
+  const common = {
+    width: 22,
+    height: 22,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.7,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  };
+  if (kind === 'movie')
+    return (
+      <svg {...common}>
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4" />
+      </svg>
+    );
+  if (kind === 'show' || kind === 'episode' || kind === 'season' || kind === 'video')
+    return (
+      <svg {...common}>
+        <rect x="3" y="5" width="18" height="12" rx="2" />
+        <path d="M8 21h8M12 17v4" />
+      </svg>
+    );
+  if (kind === 'audiobook')
+    return (
+      <svg {...common}>
+        <path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z" />
+        <path d="M4 21V5M9 7h6" />
+      </svg>
+    );
+  if (kind === 'album' || kind === 'track')
+    return (
+      <svg {...common}>
+        <path d="M9 18V5l12-2v13" />
+        <circle cx="6" cy="18" r="3" />
+        <circle cx="18" cy="16" r="3" />
+      </svg>
+    );
   return (
-    <span
-      className={`adl-client-state adl-client-state-${stateBucket(state)}`}
-      title={error || state}
-    >
-      {state}
-    </span>
+    <svg {...common}>
+      <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+      <path d="M14 3v6h6" />
+    </svg>
   );
 }
 
@@ -152,16 +231,16 @@ function SoulsyncChip({ item }: { item: { soulsync?: { kind?: string; title?: st
     return (
       <span
         className="adl-client-owner adl-client-owner-external"
-        title="Not dispatched by SoulSync"
+        title="SoulSync did not send this download"
       >
-        external
+        Not in SoulSync
       </span>
     );
   }
-  const label = item.soulsync.title || item.soulsync.kind || 'SoulSync';
+  const kind = item.soulsync.kind ? KIND_LABELS[item.soulsync.kind] : '';
   return (
-    <span className="adl-client-owner" title={`SoulSync dispatched this: ${label}`}>
-      {label}
+    <span className="adl-client-owner" title="SoulSync is following this download">
+      {kind ? `SoulSync · ${kind}` : 'SoulSync'}
     </span>
   );
 }
@@ -398,34 +477,54 @@ function durationText(seconds: number | null | undefined): string {
   return `${Math.floor(seconds / 3600)}h ${Math.round((seconds % 3600) / 60)}m`;
 }
 
+interface MenuAction {
+  label: string;
+  onSelect: () => void;
+  danger?: boolean;
+}
+
 function ClientRow({
   name,
+  title,
   sub,
+  kind,
   state,
+  label,
   error,
   progress,
   detail,
   details,
   owner,
-  actions,
+  primary,
+  menu,
   expanded,
   onToggle,
 }: {
+  /** the name the client shows */
   name: string;
+  /** a clean title, when SoulSync knows what this is */
+  title?: string;
   sub?: string;
+  kind?: string;
   state: string;
+  /** the state in plain words */
+  label: string;
   error?: string | null;
   progress: number;
   detail: string;
   /** everything the client knows, shown when the card is open. */
   details: DetailPairs;
   owner: React.ReactNode;
-  actions: React.ReactNode;
+  /** the one action the card leads with */
+  primary: React.ReactNode;
+  /** everything else, behind the ⋯ button */
+  menu: MenuAction[];
   expanded: boolean;
   onToggle: () => void;
 }) {
   const bucket = stateBucket(state);
   const shown = details.filter(([, value]) => value != null && String(value).trim() !== '');
+  const heading = title || name;
   return (
     <div
       className={`adl-client-card${expanded ? ' expanded' : ''}`}
@@ -434,46 +533,86 @@ function ClientRow({
       onClick={onToggle}
     >
       <div className="adl-client-card-main">
-        <div className="adl-row-info">
-          <div className="adl-client-row-top">
-            <span className="adl-row-title" title={name}>
-              {name}
+        <span className="adl-client-kind">
+          <KindIcon kind={kind} />
+        </span>
+        <div className="adl-client-text">
+          <div className="adl-client-title-line">
+            <span className="adl-row-title adl-client-title" title={heading}>
+              {heading}
             </span>
+            {sub ? <span className="adl-client-sub">{sub}</span> : null}
+          </div>
+          <div className="adl-client-meta">
             {owner}
-          </div>
-          {sub ? <div className="adl-row-meta">{sub}</div> : null}
-          <div className="adl-client-progress" data-state={bucket}>
-            <div className="adl-client-progress-fill" style={{ width: `${pct(progress)}%` }} />
-          </div>
-          <div className="adl-client-row-stats">
-            <span>{Math.round(pct(progress))}%</span>
-            {detail ? <span>{detail}</span> : null}
+            {heading !== name ? (
+              <span className="adl-client-raw" title={name}>
+                {name}
+              </span>
+            ) : null}
           </div>
         </div>
-        <div
-          className="verif-actions adl-client-actions"
-          onClick={(event) => event.stopPropagation()}
-        >
-          <StateChip state={state} error={error} />
-          {actions}
-          <span className={`adl-client-chevron${expanded ? ' open' : ''}`} aria-hidden>
-            ▾
+        <div className="adl-client-status">
+          <span className="adl-client-status-line">
+            <span className="adl-client-status-dot" data-state={bucket} aria-hidden="true" />
+            {label}
           </span>
+          <span className="adl-client-status-detail">
+            {Math.round(pct(progress))}%{detail ? ` · ${detail}` : ''}
+          </span>
+        </div>
+        <div className="adl-client-actions" onClick={(event) => event.stopPropagation()}>
+          {primary}
+          {menu.length > 0 ? (
+            <Menu.Root>
+              <Menu.Trigger className="adl-client-more" aria-label={`More actions for ${heading}`}>
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <circle cx="5" cy="12" r="1.8" />
+                  <circle cx="12" cy="12" r="1.8" />
+                  <circle cx="19" cy="12" r="1.8" />
+                </svg>
+              </Menu.Trigger>
+              <Menu.Portal>
+                <Menu.Positioner className="adl-client-menu-positioner" align="end" sideOffset={6}>
+                  <Menu.Popup className="adl-client-menu">
+                    {menu.map((action) => (
+                      <Menu.Item
+                        key={action.label}
+                        className={`adl-client-menu-item${action.danger ? ' danger' : ''}`}
+                        onClick={action.onSelect}
+                      >
+                        {action.label}
+                      </Menu.Item>
+                    ))}
+                  </Menu.Popup>
+                </Menu.Positioner>
+              </Menu.Portal>
+            </Menu.Root>
+          ) : null}
         </div>
       </div>
       {expanded ? (
         <div className="adl-client-details" onClick={(event) => event.stopPropagation()}>
           {error ? <div className="adl-client-details-error">{error}</div> : null}
           <dl>
-            {shown.map(([label, value]) => (
-              <div className="adl-client-detail" key={label}>
-                <dt>{label}</dt>
+            {shown.map(([detailLabel, value]) => (
+              <div className="adl-client-detail" key={detailLabel}>
+                <dt>{detailLabel}</dt>
                 <dd title={String(value)}>{String(value)}</dd>
               </div>
             ))}
           </dl>
         </div>
       ) : null}
+      <div className="adl-client-progress" data-state={bucket}>
+        <div className="adl-client-progress-fill" style={{ width: `${pct(progress)}%` }} />
+      </div>
     </div>
   );
 }
@@ -515,47 +654,36 @@ function EmptyState({
   return <div className="adl-client-empty">no {noun} right now — all quiet</div>;
 }
 
-function PauseResumeRemove({
-  item,
-  onAction,
-}: {
-  item: { id: string; name: string; state: string };
-  onAction: (id: string, action: ClientAction, deleteFiles: boolean) => void;
-}) {
+/** Pause or resume, then remove (which asks about the files). */
+function clientActions(
+  item: { id: string; name: string; state: string },
+  onAction: (id: string, action: ClientAction, deleteFiles: boolean) => void,
+): MenuAction[] {
   const paused = stateBucket(item.state) === 'paused';
-  return (
-    <>
-      <button
-        type="button"
-        className="verif-act"
-        title={paused ? 'Resume' : 'Pause'}
-        onClick={() => onAction(item.id, paused ? 'resume' : 'pause', false)}
-      >
-        {paused ? '▶' : '⏸'}
-      </button>
-      <button
-        type="button"
-        className="verif-act verif-act-del"
-        title="Remove from the client (asks about the files)"
-        onClick={() => {
-          void (async () => {
-            const withFiles = await window.showConfirmDialog?.({
-              title: 'Remove Download',
-              message: `Remove "${item.name}" from the client? Choose whether the downloaded files are deleted too.`,
-              confirmText: 'Remove + delete files',
-              cancelText: 'Remove only',
-              destructive: true,
-            });
-            // ESC closes the dialog and resolves undefined - do nothing then.
-            if (withFiles === undefined) return;
-            onAction(item.id, 'remove', Boolean(withFiles));
-          })();
-        }}
-      >
-        🗑
-      </button>
-    </>
-  );
+  return [
+    {
+      label: paused ? 'Resume' : 'Pause',
+      onSelect: () => onAction(item.id, paused ? 'resume' : 'pause', false),
+    },
+    {
+      label: 'Remove…',
+      danger: true,
+      onSelect: () => {
+        void (async () => {
+          const withFiles = await window.showConfirmDialog?.({
+            title: 'Remove Download',
+            message: `Remove "${item.name}" from the client? Choose whether the downloaded files are deleted too.`,
+            confirmText: 'Remove + delete files',
+            cancelText: 'Remove only',
+            destructive: true,
+          });
+          // ESC closes the dialog and resolves undefined - do nothing then.
+          if (withFiles === undefined) return;
+          onAction(item.id, 'remove', Boolean(withFiles));
+        })();
+      },
+    },
+  ];
 }
 
 /* ── the tab ─────────────────────────────────────────────────────────────── */
@@ -572,6 +700,8 @@ export function AdlClientsTab() {
   const [sort, setSort] = useState<ClientSort>('default');
   const [slskdView, setSlskdView] = useState<'downloads' | 'uploads'>('downloads');
   const [links, setLinks] = useState<ClientLinks | null>(null);
+  // the download being matched by hand, or null when the window is closed
+  const [matching, setMatching] = useState<MatchTarget | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -663,78 +793,140 @@ export function AdlClientsTab() {
     state: (t) => t.state,
   });
 
-  const slskdRow = (item: ClientSlskdItem, readOnly: boolean) => (
-    <ClientRow
-      key={`${readOnly ? 'up' : 'dl'}:${item.username}:${item.id}`}
-      name={item.filename.split(/[\\/]/).pop() || item.filename}
-      sub={readOnly ? `to ${item.username}` : `from ${item.username}`}
-      state={item.state}
-      progress={item.progress}
-      detail={[
-        item.size ? formatBytes(item.size) : '',
-        speedText(item.speed),
-        etaText(item.time_remaining),
-      ]
-        .filter(Boolean)
-        .join(' · ')}
-      details={[
-        ['Remote path', item.filename],
-        [readOnly ? 'Peer' : 'Uploader', item.username],
-        ['State', item.state],
-        ['Size', item.size ? formatBytes(item.size) : ''],
-        ['Transferred', item.transferred ? formatBytes(item.transferred) : ''],
-        ['Speed', speedText(item.speed)],
-        ['Time left', durationText(item.time_remaining)],
-        ['Local file', item.file_path],
-        ['Transfer id', item.id],
-        ['SoulSync', item.soulsync?.title],
-      ]}
-      expanded={openCards.has(`soulseek:${slskdView}:${item.username}:${item.id}`)}
-      onToggle={() => toggleCard(`soulseek:${slskdView}:${item.username}:${item.id}`)}
-      owner={<SoulsyncChip item={item} />}
-      actions={
-        readOnly ? null : (
-          <button
-            type="button"
-            className="verif-act verif-act-del"
-            title="Cancel this transfer in slskd"
-            onClick={() =>
-              void runAction(
-                'Cancel',
-                () => slskdClientCancel(item.id, item.username, true),
-                slskd.reload,
-              )
-            }
-          >
-            ✕
-          </button>
-        )
-      }
-    />
+  /** "Details" for a card SoulSync already follows; the card itself also opens. */
+  const detailsButton = (expanded: boolean, toggle: () => void) => (
+    <button type="button" className="adl-client-secondary" onClick={toggle}>
+      {expanded ? 'Hide' : 'Details'}
+    </button>
   );
 
-  const torrentRow = (item: ClientTorrentItem) => (
-    <ClientRow
-      key={item.id}
-      name={item.name}
-      state={item.state}
-      error={item.error}
-      progress={item.progress}
-      detail={[
+  /** A download SoulSync didn't send leads with matching it. */
+  const matchButton = (target: MatchTarget) => (
+    <button type="button" className="adl-client-primary" onClick={() => setMatching(target)}>
+      Match &amp; import
+    </button>
+  );
+
+  const slskdRow = (item: ClientSlskdItem, readOnly: boolean) => {
+    const key = `soulseek:${slskdView}:${item.username}:${item.id}`;
+    const expanded = openCards.has(key);
+    const toggle = () => toggleCard(key);
+    return (
+      <ClientRow
+        key={`${readOnly ? 'up' : 'dl'}:${item.username}:${item.id}`}
+        name={item.filename.split(/[\\/]/).pop() || item.filename}
+        sub={readOnly ? `to ${item.username}` : `from ${item.username}`}
+        kind={item.soulsync?.kind}
+        state={item.state}
+        label={stateWords(item.state, item.progress, item.speed)}
+        progress={item.progress}
+        detail={[
+          item.size ? formatBytes(item.size) : '',
+          speedText(item.speed),
+          etaText(item.time_remaining),
+        ]
+          .filter(Boolean)
+          .join(' · ')}
+        details={[
+          ['Remote path', item.filename],
+          [readOnly ? 'Peer' : 'Uploader', item.username],
+          ['State', item.state],
+          ['Size', item.size ? formatBytes(item.size) : ''],
+          ['Transferred', item.transferred ? formatBytes(item.transferred) : ''],
+          ['Speed', speedText(item.speed)],
+          ['Time left', durationText(item.time_remaining)],
+          ['Local file', item.file_path],
+          ['Transfer id', item.id],
+          ['SoulSync', item.soulsync?.title],
+        ]}
+        expanded={expanded}
+        onToggle={toggle}
+        owner={<SoulsyncChip item={item} />}
+        primary={detailsButton(expanded, toggle)}
+        menu={
+          readOnly
+            ? []
+            : [
+                {
+                  label: 'Cancel transfer',
+                  danger: true,
+                  onSelect: () =>
+                    void runAction(
+                      'Cancel',
+                      () => slskdClientCancel(item.id, item.username, true),
+                      slskd.reload,
+                    ),
+                },
+              ]
+        }
+      />
+    );
+  };
+
+  /** The torrent or usenet card: the same card, different numbers. */
+  const jobRow = (
+    client: 'torrent' | 'usenet',
+    item: ClientTorrentItem | ClientUsenetItem,
+    detail: string,
+    details: DetailPairs,
+    onAction: (id: string, action: ClientAction, deleteFiles: boolean) => void,
+  ) => {
+    const key = `${client}:${item.id}`;
+    const expanded = openCards.has(key);
+    const toggle = () => toggleCard(key);
+    const tracked = Boolean(item.soulsync);
+    const actions = clientActions(item, onAction);
+    return (
+      <ClientRow
+        key={item.id}
+        name={item.name}
+        title={item.soulsync?.title || undefined}
+        kind={item.soulsync?.kind}
+        state={item.state}
+        label={stateWords(item.state, item.progress, item.download_speed)}
+        error={item.error}
+        progress={item.progress}
+        detail={detail}
+        details={details}
+        expanded={expanded}
+        onToggle={toggle}
+        owner={<SoulsyncChip item={item} />}
+        primary={
+          tracked
+            ? detailsButton(expanded, toggle)
+            : matchButton({ client, id: item.id, name: item.name, size: item.size })
+        }
+        // an unmatched card leads with matching, so details move to the menu
+        menu={
+          tracked
+            ? actions
+            : [{ label: expanded ? 'Hide details' : 'Details', onSelect: toggle }, ...actions]
+        }
+      />
+    );
+  };
+
+  const torrentRow = (item: ClientTorrentItem) => {
+    const bucket = stateBucket(item.state);
+    return jobRow(
+      'torrent',
+      item,
+      [
         item.size ? formatBytes(item.size) : '',
+        bucket === 'seeding' && item.ratio != null ? `ratio ${item.ratio.toFixed(2)}` : '',
         speedText(item.download_speed),
-        etaText(item.eta),
+        bucket === 'downloading' ? etaText(item.eta) : '',
         item.seeders ? `${item.seeders} seeders` : '',
       ]
         .filter(Boolean)
-        .join(' · ')}
-      details={[
+        .join(' · '),
+      [
         ['State', item.state],
         ['Size', item.size ? formatBytes(item.size) : ''],
         ['Downloaded', item.downloaded ? formatBytes(item.downloaded) : ''],
         ['Down speed', speedText(item.download_speed)],
         ['Up speed', speedText(item.upload_speed)],
-        ['ETA', durationText(item.eta)],
+        ['ETA', bucket === 'downloading' ? durationText(etaSeconds(item.eta)) : ''],
         ['Seeders', item.seeders ? String(item.seeders) : ''],
         ['Peers', item.peers ? String(item.peers) : ''],
         ['Ratio', item.ratio != null ? item.ratio.toFixed(2) : ''],
@@ -743,68 +935,42 @@ export function AdlClientsTab() {
         ['Content path', item.content_path],
         ['Hash', item.id],
         ['SoulSync', item.soulsync?.title],
-      ]}
-      expanded={openCards.has(`torrent:${item.id}`)}
-      onToggle={() => toggleCard(`torrent:${item.id}`)}
-      owner={<SoulsyncChip item={item} />}
-      actions={
-        <PauseResumeRemove
-          item={item}
-          onAction={(id, action, deleteFiles) =>
-            void runAction(
-              action === 'remove' ? 'Remove' : action === 'pause' ? 'Pause' : 'Resume',
-              () => torrentClientAction(id, action, deleteFiles),
-              torrent.reload,
-            )
-          }
-        />
-      }
-    />
-  );
+      ],
+      (id, action, deleteFiles) =>
+        void runAction(
+          action === 'remove' ? 'Remove' : action === 'pause' ? 'Pause' : 'Resume',
+          () => torrentClientAction(id, action, deleteFiles),
+          torrent.reload,
+        ),
+    );
+  };
 
-  const usenetRow = (item: ClientUsenetItem) => (
-    <ClientRow
-      key={item.id}
-      name={item.name}
-      state={item.state}
-      error={item.error}
-      progress={item.progress}
-      detail={[
-        item.size ? formatBytes(item.size) : '',
-        speedText(item.download_speed),
-        etaText(item.eta),
-      ]
+  const usenetRow = (item: ClientUsenetItem) =>
+    jobRow(
+      'usenet',
+      item,
+      [item.size ? formatBytes(item.size) : '', speedText(item.download_speed), etaText(item.eta)]
         .filter(Boolean)
-        .join(' · ')}
-      details={[
+        .join(' · '),
+      [
         ['State', item.state],
         ['Size', item.size ? formatBytes(item.size) : ''],
         ['Downloaded', item.downloaded ? formatBytes(item.downloaded) : ''],
         ['Speed', speedText(item.download_speed)],
-        ['ETA', durationText(item.eta)],
+        ['ETA', durationText(etaSeconds(item.eta))],
         ['Category', item.category],
         ['Save path', item.save_path],
         ['Staging path', item.incomplete_path],
         ['Job id', item.id],
         ['SoulSync', item.soulsync?.title],
-      ]}
-      expanded={openCards.has(`usenet:${item.id}`)}
-      onToggle={() => toggleCard(`usenet:${item.id}`)}
-      owner={<SoulsyncChip item={item} />}
-      actions={
-        <PauseResumeRemove
-          item={item}
-          onAction={(id, action, deleteFiles) =>
-            void runAction(
-              action === 'remove' ? 'Remove' : action === 'pause' ? 'Pause' : 'Resume',
-              () => usenetClientAction(id, action, deleteFiles),
-              usenet.reload,
-            )
-          }
-        />
-      }
-    />
-  );
+      ],
+      (id, action, deleteFiles) =>
+        void runAction(
+          action === 'remove' ? 'Remove' : action === 'pause' ? 'Pause' : 'Resume',
+          () => usenetClientAction(id, action, deleteFiles),
+          usenet.reload,
+        ),
+    );
 
   const connectedWithItems = (state: ClientState<unknown>) => Boolean(state.overview?.connected);
 
@@ -1031,6 +1197,16 @@ export function AdlClientsTab() {
           />
         )}
       </div>
+
+      <AdlMatchModal
+        target={matching}
+        onClose={() => setMatching(null)}
+        onMatched={(message) => {
+          setMatching(null);
+          toast(message, 'success');
+          void (matching?.client === 'usenet' ? usenet.reload() : torrent.reload());
+        }}
+      />
     </div>
   );
 }

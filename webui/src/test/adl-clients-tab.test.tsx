@@ -4,8 +4,10 @@
  * sitting on "loading…" forever (the bug that shipped first).
  */
 
-import { render, waitFor, fireEvent } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AdlClientsTab } from '@/routes/active-downloads/-ui/adl-clients';
@@ -95,6 +97,11 @@ function mockAll({
 
 function pill(container: HTMLElement, key: string) {
   return container.querySelector(`[data-client-tab="${key}"]`) as HTMLElement;
+}
+/** pause, resume, remove and cancel live behind each card's ⋯ menu. */
+async function menuItem(title: string, item: string) {
+  fireEvent.click(screen.getByRole('button', { name: `More actions for ${title}` }));
+  return screen.findByRole('menuitem', { name: item });
 }
 
 beforeEach(() => {
@@ -196,10 +203,7 @@ describe('AdlClientsTab', () => {
     await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
     fireEvent.click(pill(container, 'torrent'));
     await waitFor(() => expect(container.textContent).toContain('Movie (2026)'));
-    const pauseBtn = [...container.querySelectorAll('.verif-act')].find(
-      (b) => b.getAttribute('title') === 'Pause',
-    );
-    fireEvent.click(pauseBtn as HTMLElement);
+    fireEvent.click(await menuItem('Movie (2026)', 'Pause'));
     await waitFor(() => expect(body).toBeTruthy());
     expect(body).toEqual({ id: 'HASH1', action: 'pause', delete_files: false });
     expect(toasts[0]).toBe('Pause ok');
@@ -211,10 +215,7 @@ describe('AdlClientsTab', () => {
     await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
     fireEvent.click(pill(container, 'torrent'));
     await waitFor(() => expect(container.textContent).toContain('someone.elses.iso'));
-    const titles = [...container.querySelectorAll('.verif-act')].map((b) =>
-      b.getAttribute('title'),
-    );
-    expect(titles).toContain('Resume');
+    expect(await menuItem('someone.elses.iso', 'Resume')).toBeTruthy();
   });
 
   it('remove asks about the files and carries the answer', async () => {
@@ -230,8 +231,7 @@ describe('AdlClientsTab', () => {
     await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
     fireEvent.click(pill(container, 'torrent'));
     await waitFor(() => expect(container.textContent).toContain('Movie (2026)'));
-    const removeBtn = [...container.querySelectorAll('.verif-act-del')][0];
-    fireEvent.click(removeBtn as HTMLElement);
+    fireEvent.click(await menuItem('Movie (2026)', 'Remove…'));
     await waitFor(() => expect(body).toBeTruthy());
     expect(body).toEqual({ id: 'HASH1', action: 'remove', delete_files: true });
   });
@@ -247,10 +247,7 @@ describe('AdlClientsTab', () => {
     );
     const { container } = render(<AdlClientsTab />);
     await waitFor(() => expect(container.textContent).toContain('song.flac'));
-    const cancelBtn = [...container.querySelectorAll('.verif-act-del')].find(
-      (b) => b.getAttribute('title') === 'Cancel this transfer in slskd',
-    );
-    fireEvent.click(cancelBtn as HTMLElement);
+    fireEvent.click(await menuItem('song.flac', 'Cancel transfer'));
     await waitFor(() => expect(body).toBeTruthy());
     expect(body).toEqual({ id: 'd9', username: 'peer1', action: 'cancel', remove: true });
   });
@@ -284,10 +281,7 @@ describe('AdlClientsTab', () => {
     await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
     fireEvent.click(pill(container, 'torrent'));
     await waitFor(() => expect(container.textContent).toContain('Movie (2026)'));
-    const pauseBtn = [...container.querySelectorAll('.verif-act')].find(
-      (b) => b.getAttribute('title') === 'Pause',
-    );
-    fireEvent.click(pauseBtn as HTMLElement);
+    fireEvent.click(await menuItem('Movie (2026)', 'Pause'));
     expect(container.querySelector('.adl-client-details')).toBeNull();
   });
 
@@ -311,8 +305,8 @@ describe('AdlClientsTab', () => {
     fireEvent.click(pill(container, 'torrent'));
     await waitFor(() => expect(container.textContent).toContain('Movie (2026)'));
     const owners = [...container.querySelectorAll('.adl-client-owner')].map((el) => el.textContent);
-    expect(owners).toContain('Movie (2026)');
-    expect(owners).toContain('external');
+    expect(owners).toContain('SoulSync · Movie');
+    expect(owners).toContain('Not in SoulSync');
   });
 });
 
@@ -430,12 +424,8 @@ describe('slskd extras', () => {
     fireEvent.click(upSwitch as HTMLElement);
     await waitFor(() => expect(container.textContent).toContain('give.flac'));
     expect(container.textContent).toContain('to leecher9');
-    // read-only: no cancel button on upload rows
-    expect(
-      [...container.querySelectorAll('.verif-act-del')].filter(
-        (b) => b.getAttribute('title') === 'Cancel this transfer in slskd',
-      ),
-    ).toHaveLength(0);
+    // read-only: an upload row has nothing to cancel, so no menu at all
+    expect(screen.queryByRole('button', { name: 'More actions for give.flac' })).toBeNull();
     // the 14k completed uploads the server trimmed are named, not hidden
     expect(container.textContent).toContain('14000 completed trimmed');
   });
@@ -457,5 +447,189 @@ describe('slskd extras', () => {
     fireEvent.click(clearBtn as HTMLElement);
     await waitFor(() => expect(hit).toHaveBeenCalled());
     expect(toasts[0]).toBe('Clear completed ok');
+  });
+});
+
+describe('match & import', () => {
+  const SEEDING_UNKNOWN = {
+    ...TORRENT_OK,
+    items: [
+      {
+        id: 'HASH3',
+        name: 'Andy.Weir.-.Project.Hail.Mary.2021.M4B-GRP',
+        state: 'seeding',
+        progress: 1,
+        size: 900_000_000,
+        downloaded: 900_000_000,
+        download_speed: 0,
+        upload_speed: 1000,
+        // qbittorrent's "no estimate" sentinel: 100 days
+        eta: 8_640_000,
+        ratio: 1.4,
+        content_path: '/data/Andy.Weir.-.Project.Hail.Mary.2021.M4B-GRP',
+      },
+      {
+        id: 'HASH4',
+        name: 'Nobody.Seeds.This.S01E01.1080p.WEB',
+        state: 'downloading',
+        progress: 0,
+        size: 1,
+        downloaded: 0,
+        download_speed: 0,
+        upload_speed: 0,
+        eta: 8_640_000,
+      },
+    ],
+  };
+
+  async function openTorrents() {
+    const view = render(<AdlClientsTab />);
+    await waitFor(() => expect(pill(view.container, 'torrent')).not.toBeNull());
+    fireEvent.click(pill(view.container, 'torrent'));
+    return view;
+  }
+
+  it('leads a download soulsync does not follow with match & import', async () => {
+    mockAll();
+    const { container } = await openTorrents();
+    await waitFor(() => expect(container.textContent).toContain('someone.elses.iso'));
+    expect(screen.getAllByRole('button', { name: 'Match & import' })).toHaveLength(1);
+    // the one soulsync already follows leads with its details instead
+    expect(screen.getByRole('button', { name: 'Details' })).toBeTruthy();
+  });
+
+  it("never prints the client's no-estimate sentinel as a time left", async () => {
+    mockAll({ torrent: SEEDING_UNKNOWN });
+    const { container } = await openTorrents();
+    await waitFor(() => expect(container.textContent).toContain('Project.Hail.Mary'));
+    expect(container.textContent).not.toContain('2400h');
+    expect(container.textContent).toContain('ratio 1.40');
+    // nothing moving and nothing done: say what is actually happening
+    expect(container.textContent).toContain('Waiting for peers');
+  });
+
+  it('matches an audiobook through its own adopt route', async () => {
+    mockAll({ torrent: SEEDING_UNKNOWN });
+    let adopted: unknown;
+    server.use(
+      http.get('/api/clients/match/suggest', () =>
+        HttpResponse.json({
+          success: true,
+          kind: 'audiobook',
+          query: 'Andy Weir Project Hail Mary',
+          year: 2021,
+          season: null,
+          episode: null,
+        }),
+      ),
+      http.get('/api/clients/match/files', () =>
+        HttpResponse.json({ success: true, visible: true, reported_path: '/data/x' }),
+      ),
+      http.get('/api/audiobooks/search', () =>
+        HttpResponse.json({
+          success: true,
+          source: 'audible',
+          results: [
+            {
+              asin: 'B08G9PRS1K',
+              title: 'Project Hail Mary',
+              subtitle: '',
+              authors: [],
+              narrators: [],
+              author_names: ['Andy Weir'],
+              narrator_names: ['Ray Porter'],
+              series: [],
+              publisher: '',
+              summary: '',
+              short_summary: '',
+              runtime_formatted: '16h 10m',
+              genres: [],
+              language: 'english',
+              format_type: 'unabridged',
+              is_adult: false,
+            },
+          ],
+        }),
+      ),
+      http.post('/api/audiobooks/adopt', async ({ request }) => {
+        adopted = await request.json();
+        return HttpResponse.json({ success: true, ref: 'hash3' });
+      }),
+    );
+    const { container } = await openTorrents();
+    await waitFor(() => expect(container.textContent).toContain('Project.Hail.Mary'));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Match & import' })[0] as HTMLElement);
+
+    // the guess picks the type and fills the search, and the results arrive
+    const pick = await screen.findByRole('radio', { name: /Project Hail Mary/ });
+    expect(screen.getByRole('radio', { name: 'Audiobook' }).getAttribute('aria-checked')).toBe(
+      'true',
+    );
+    expect(screen.getByText('SoulSync can see the files')).toBeTruthy();
+    const submit = screen.getByRole('button', { name: 'Pick a match' }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+
+    fireEvent.click(pick);
+    fireEvent.click(screen.getByRole('button', { name: 'Match & import' }));
+    await waitFor(() => expect(adopted).toBeTruthy());
+    expect(adopted).toEqual({
+      source: 'torrent',
+      client_ref: 'HASH3',
+      asin: 'B08G9PRS1K',
+      release_title: 'Andy.Weir.-.Project.Hail.Mary.2021.M4B-GRP',
+      size_bytes: 900_000_000,
+    });
+    await waitFor(() =>
+      expect(toasts.some((t) => t.startsWith('Matched to Project Hail Mary'))).toBe(true),
+    );
+  });
+
+  it("shows the server's reason when a match is refused", async () => {
+    mockAll({ torrent: SEEDING_UNKNOWN });
+    server.use(
+      http.get('/api/clients/match/suggest', () =>
+        HttpResponse.json({
+          success: true,
+          kind: 'movie',
+          query: 'Dune',
+          year: null,
+          season: null,
+          episode: null,
+        }),
+      ),
+      http.get('/api/clients/match/files', () => HttpResponse.json({ success: false })),
+      http.get('/api/video/search', () =>
+        HttpResponse.json({
+          results: [{ kind: 'movie', tmdb_id: 693134, title: 'Dune: Part Two', year: '2024' }],
+        }),
+      ),
+      http.post('/api/video/downloads/adopt', () =>
+        HttpResponse.json(
+          { ok: false, error: 'SoulSync is already following this download.' },
+          { status: 409 },
+        ),
+      ),
+    );
+    const { container } = await openTorrents();
+    await waitFor(() => expect(container.textContent).toContain('Project.Hail.Mary'));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Match & import' })[0] as HTMLElement);
+    fireEvent.click(await screen.findByRole('radio', { name: /Dune: Part Two/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Match & import' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'SoulSync is already following this download.',
+    );
+  });
+});
+
+describe('card layout guards', () => {
+  // jsdom can't measure layout; these were measured in chromium at 390px
+  const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
+
+  it('keeps the soulsync chip whole and lets the release name give way', () => {
+    expect(css).toMatch(/\.adl-client-meta \.adl-client-owner \{\s*flex-shrink: 0;/);
+  });
+
+  it('keeps the type tile beside the title on a phone', () => {
+    expect(css).toMatch(/@media \(max-width: 760px\) \{[^@]*?\.adl-client-text \{\s*flex: 1 1 0;/);
   });
 });

@@ -101,6 +101,8 @@ export function phaseDisplay(batch: AdlBatch): PhaseDisplay {
     batch.batch_id === 'audiobooks' ||
     batch.batch_type === 'audiobook';
   const isVideo = batch.batch_type === 'music_video';
+  // clients-tab matches are whole downloads (an album, a track), not tracks
+  const isMatch = batch.batch_type === 'client_match';
   const unit = isAudiobook
     ? total === 1
       ? 'book'
@@ -109,7 +111,11 @@ export function phaseDisplay(batch: AdlBatch): PhaseDisplay {
       ? total === 1
         ? 'video'
         : 'videos'
-      : 'tracks';
+      : isMatch
+        ? total === 1
+          ? 'download'
+          : 'downloads'
+        : 'tracks';
   switch (batch.phase) {
     case 'queued':
       return { text: 'Queued', icon: 'hourglass' };
