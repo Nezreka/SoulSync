@@ -7,6 +7,8 @@ World (Remastered 2022)") are also missing from Deezer's search index but are
 on the album.
 """
 import sqlite3
+
+import pytest
 from unittest.mock import MagicMock
 
 from core.deezer_client import DeezerClient
@@ -88,3 +90,67 @@ def test_worker_skips_when_album_unmatched():
 
 def test_worker_none_when_title_not_on_album():
     assert _worker('1', ALBUM)._track_from_matched_album(7, 'Something Else') is None
+
+
+# ── the album tracklist is fetched once, through the shared budget ──────────
+
+class _FakeCache:
+    def __init__(self):
+        self.store = {}
+
+    def get_entity(self, source, kind, entity_id):
+        return self.store.get((source, kind, entity_id))
+
+    def store_entity(self, source, kind, entity_id, data):
+        self.store[(source, kind, entity_id)] = data
+
+
+def _client(monkeypatch, cache, api):
+    c = DeezerClient.__new__(DeezerClient)
+    c._api_get = api
+    monkeypatch.setattr('core.deezer_client.get_metadata_cache', lambda: cache)
+    import core.deezer_throttle as throttle
+    monkeypatch.setattr(throttle, 'wait_for_slot', lambda *a, **k: True)
+    return c
+
+
+def test_tracklist_is_fetched_once_and_cached_under_the_playlist_key(monkeypatch):
+    cache, calls = _FakeCache(), []
+
+    def api(endpoint, params=None, **kw):
+        calls.append(endpoint)
+        return {'data': ALBUM}
+
+    c = _client(monkeypatch, cache, api)
+    assert c.get_album_tracks_raw(356502127) == ALBUM
+    assert c.get_album_tracks_raw('356502127') == ALBUM
+    assert calls == ['album/356502127/tracks']
+    # the same entry the playlist track-position pass reads
+    assert cache.store[('deezer', 'album_tracks', '356502127')] == {'data': ALBUM}
+
+
+def test_tracklist_cached_by_the_playlist_code_is_reused(monkeypatch):
+    cache = _FakeCache()
+    cache.store[('deezer', 'album_tracks', '9')] = {'data': ALBUM}
+    c = _client(monkeypatch, cache, lambda *a, **k: pytest.fail("should not request"))
+    assert c.get_album_tracks_raw(9) == ALBUM
+
+
+def test_failed_tracklist_fetch_is_empty_and_not_cached(monkeypatch):
+    cache = _FakeCache()
+
+    def api(*a, **k):
+        raise RuntimeError("boom")
+
+    c = _client(monkeypatch, cache, api)
+    assert c.get_album_tracks_raw(9) == []
+    assert cache.store == {}
+
+
+def test_tracklist_fetch_waits_for_a_shared_budget_slot(monkeypatch):
+    import core.deezer_throttle as throttle
+    slots = []
+    c = _client(monkeypatch, _FakeCache(), lambda *a, **k: {'data': ALBUM})
+    monkeypatch.setattr(throttle, 'wait_for_slot', lambda *a, **k: slots.append(1) or True)
+    c.get_album_tracks_raw(9)
+    assert slots == [1]

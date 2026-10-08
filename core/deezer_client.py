@@ -1513,6 +1513,7 @@ class DeezerClient:
                 return r
         return None
 
+    @rate_limited
     def _album_search_request(self, query: str, limit: Optional[int] = None):
         params = {'q': query}
         if limit:
@@ -1525,7 +1526,6 @@ class DeezerClient:
             return None
         return data.get('data', []) or []
 
-    @rate_limited
     def search_album(self, artist_name: str, album_title: str) -> Optional[Dict[str, Any]]:
         """
         Search for an album by artist name and album title (enrichment interface).
@@ -1624,13 +1624,35 @@ class DeezerClient:
         """Raw track dicts of one Deezer album (``/album/{id}/tracks``).
 
         The album's own tracklist holds songs that Deezer's search index leaves
-        out, and it needs no artist to find them. [] on any failure."""
+        out, and it needs no artist to find them. Reads and writes the same
+        ``album_tracks`` cache entry the playlist track-position pass uses, so
+        the worker fetches an album once, not once per track. [] on failure."""
+        aid = str(album_id)
+        cache = None
         try:
-            data = self._api_get(f'album/{album_id}/tracks', {'limit': 500}, use_token=False)
+            cache = get_metadata_cache()
+            cached = cache.get_entity('deezer', 'album_tracks', aid)
+            if cached and cached.get('data'):
+                return list(cached['data'])
+        except Exception as e:   # noqa: BLE001 - the cache is best-effort
+            logger.debug("album_tracks cache read failed for %s: %s", aid, e)
+
+        try:
+            items = self._fetch_album_tracks(aid)
         except Exception as e:
-            logger.debug("album tracklist %s failed: %s", album_id, e)
+            logger.debug("album tracklist %s failed: %s", aid, e)
             return []
-        items = (data or {}).get('data') if isinstance(data, dict) else None
+        if items and cache is not None:
+            try:
+                cache.store_entity('deezer', 'album_tracks', aid, {'data': items})
+            except Exception as e:   # noqa: BLE001
+                logger.debug("album_tracks cache store failed for %s: %s", aid, e)
+        return items
+
+    @rate_limited
+    def _fetch_album_tracks(self, album_id: str) -> List[Dict[str, Any]]:
+        data = self._api_get(f'album/{album_id}/tracks', {'limit': 500}, use_token=False)
+        items = data.get('data') if isinstance(data, dict) else None
         return list(items or [])
 
     @staticmethod
