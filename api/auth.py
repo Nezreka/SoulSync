@@ -81,9 +81,15 @@ def _match_api_key(config_mgr, api_key):
     """Return the stored key record matching ``api_key``, or None."""
     if not api_key:
         return None
-    key_hash = _hash_key(api_key)
+    key_hash = _hash_key(api_key).encode()
     for stored in config_mgr.get("api_keys", []) or []:
-        if hmac.compare_digest(stored.get("key_hash") or "", key_hash):
+        # compare_digest raises on a str that isn't ASCII, so one odd record
+        # (say, from an imported config) must be skipped, not allowed to break
+        # every key listed after it.
+        stored_hash = stored.get("key_hash") if isinstance(stored, dict) else None
+        if not isinstance(stored_hash, str):
+            continue
+        if hmac.compare_digest(stored_hash.encode("utf-8"), key_hash):
             return stored
     return None
 

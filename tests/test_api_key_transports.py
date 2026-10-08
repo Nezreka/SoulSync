@@ -136,6 +136,20 @@ def test_record_without_hash_never_matches(cfg):
     assert auth._match_api_key(cfg, "") is None
 
 
+@pytest.mark.parametrize("bad", [
+    {"id": "non_ascii", "key_hash": "\u00e9" * 64},
+    {"id": "not_a_str", "key_hash": 12345},
+    {"id": "bytes", "key_hash": b"abc"},
+    "not-a-dict",
+])
+def test_bad_record_ahead_of_a_good_one_does_not_block_it(cfg, bad):
+    # compare_digest raises TypeError on a non-ASCII str; a bad record first
+    # in the list used to stop every key after it from matching.
+    good = {"id": "k1", "key_hash": KEY_HASH, "label": "bot"}
+    cfg.data["api_keys"] = [bad, good]
+    assert auth._match_api_key(cfg, RAW_KEY) is good
+
+
 def test_usage_write_does_not_restore_a_key_revoked_mid_request(app, cfg):
     """The last_used_at write must persist the current list, not the one read
     before the lookup. Revoking during the request used to be undone."""
