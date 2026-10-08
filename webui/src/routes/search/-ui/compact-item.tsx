@@ -1,5 +1,8 @@
 import { useState } from 'react';
 
+import type { UserPlaylistTrack } from '@/features/playlists/user-playlists';
+
+import { AddToPlaylistButton } from '@/features/playlists/add-to-playlist';
 import { acquireVerb } from '@/platform/shell/download-rights';
 
 import { splitTitleExtra } from '../-search.helpers';
@@ -193,6 +196,7 @@ export function TrackRow({
   playTitle,
   onOpen,
   onPlay,
+  playlistTrack,
 }: {
   index: number;
   name: string;
@@ -205,6 +209,8 @@ export function TrackRow({
   /** opens the download for this track */
   onOpen: () => void;
   onPlay: () => void;
+  /** what the + adds to a playlist; null hides it */
+  playlistTrack?: UserPlaylistTrack | null;
 }) {
   const img = useImage(image);
   const title = splitTitleExtra(name);
@@ -260,6 +266,12 @@ export function TrackRow({
         ) : null}
       </span>
       <span className={styles.duration}>{duration}</span>
+      {/* an empty cell when there's nothing to add, so download keeps its column */}
+      {playlistTrack ? (
+        <AddToPlaylistButton track={playlistTrack} className={styles.rowDownload} />
+      ) : (
+        <span aria-hidden="true" />
+      )}
       <button
         type="button"
         className={styles.rowDownload}

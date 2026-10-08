@@ -49,6 +49,17 @@ html[data-sidebar="collapsed"] {
     margin-right: 4px;
 }
 
+/* the download modal's add-to-playlist, beside play: quieter, it's not the main action */
+.modal-track-add-btn {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.65);
+}
+.modal-track-add-btn:hover {
+    background: rgba(255, 255, 255, 0.14);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: #fff;
+}
+
 /* Reset and Base Styles */
 * {
     margin: 0;
@@ -15799,6 +15810,108 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     background-image: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ffffff"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 17h2V7H7v10zm4 0h2V7h-2v10zm4 0h2V7h-2v10z"/></svg>');
 }
 
+/* My Playlists: the playlists made in soulsync */
+.my-playlists-icon {
+    background-image: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23a78bfa"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z"/></svg>');
+}
+
+.sync-tab-button[data-tab="my-playlists"].active {
+    background: linear-gradient(135deg,
+        rgba(var(--accent-rgb), 0.95),
+        rgba(var(--accent-rgb), 0.75));
+    color: #000;
+    box-shadow: 0 4px 15px rgba(var(--accent-rgb), 0.3);
+}
+
+.sync-tab-button.active .my-playlists-icon {
+    background-image: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ffffff"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z"/></svg>');
+}
+
+.user-playlist-new-btn { margin-right: 10px; }
+
+.user-playlist-create {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 6px 14px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(var(--accent-rgb), 0.08);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+}
+
+.user-playlist-create-input {
+    flex: 1;
+    min-width: 0;
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.25);
+    color: #fff;
+    font-size: 14px;
+    font-family: inherit;
+}
+
+.user-playlist-create-input:focus {
+    outline: none;
+    border-color: rgba(var(--accent-rgb), 0.6);
+}
+
+.user-playlist-create-btn {
+    height: 36px;
+    padding: 0 18px;
+    border: none;
+    border-radius: 18px;
+    background: rgb(var(--accent-rgb));
+    color: #000;
+    font-size: 12px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.user-playlist-create-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* a user playlist's detail: an extra column for remove, rows drag to reorder */
+.mm-list--editable .mm-list-head,
+.mm-list--editable .mm-row {
+    grid-template-columns: 34px 40px minmax(0, 1.6fr) minmax(0, 1.1fr) 56px 28px 28px;
+}
+
+.mm-list--editable .mm-row { cursor: grab; }
+.mm-list--editable .mm-row:active { cursor: grabbing; }
+.mm-row--dragging { opacity: 0.4; }
+.mm-row--over { box-shadow: inset 0 2px 0 rgb(var(--accent-rgb)); }
+
+.mm-row-add,
+.mm-row-remove {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.mm-row:hover .mm-row-add,
+.mm-row-add:focus-visible,
+.mm-row:hover .mm-row-remove,
+.mm-row-remove:focus-visible { opacity: 1; }
+.mm-row-add { display: grid; place-items: center; padding: 0; }
+.mm-row-add:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.mm-row-remove:hover { background: rgba(239, 83, 80, 0.14); color: #ff6b66; }
+.mm-row-remove:disabled { cursor: default; opacity: 0.3; }
+
+@media (hover: none) {
+    .mm-row-add,
+    .mm-row-remove { opacity: 1; }
+}
+
 /* Mirrored playlist cards */
 .mirrored-playlist-card {
     background: rgba(18, 18, 22, 0.9);
@@ -17112,7 +17225,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .mm-list-head,
 .mm-row {
     display: grid;
-    grid-template-columns: 34px 40px minmax(0, 1.6fr) minmax(0, 1.1fr) 56px;
+    grid-template-columns: 34px 40px minmax(0, 1.6fr) minmax(0, 1.1fr) 56px 28px;
     align-items: center;
     gap: 14px;
     padding: 0 26px;
@@ -31748,7 +31861,8 @@ div.artist-hero-badge {
 
 /* Per-row wishlist button — only shown on metadata-source rows
    (Spotify / Deezer). Last.fm rows show the playcount instead. */
-.hero-top-track-download {
+.hero-top-track-download,
+.hero-top-track-add {
     width: 22px;
     height: 22px;
     border-radius: 50%;
@@ -31764,10 +31878,13 @@ div.artist-hero-badge {
     opacity: 0;
     transition: all 0.2s;
 }
-.hero-top-track:hover .hero-top-track-download {
+.hero-top-track:hover .hero-top-track-download,
+.hero-top-track:hover .hero-top-track-add,
+.hero-top-track-add:focus-visible {
     opacity: 1;
 }
-.hero-top-track-download:hover {
+.hero-top-track-download:hover,
+.hero-top-track-add:hover {
     background: rgba(var(--accent-rgb), 0.25);
     color: rgb(var(--accent-rgb));
     transform: scale(1.1);
@@ -40511,7 +40628,7 @@ div.artist-hero-badge {
 
 .discover-playlist-track-compact {
     display: grid;
-    grid-template-columns: 30px 40px 1fr 1.5fr 60px;
+    grid-template-columns: 30px 40px 1fr 1.5fr 60px 32px;
     gap: 12px;
     align-items: center;
     padding: 8px 12px;
@@ -40522,6 +40639,18 @@ div.artist-hero-badge {
 
 .discover-playlist-track-compact:hover {
     background-color: #2a2a2a;
+}
+
+/* the row's add-to-playlist, shown on hover like the play button */
+.track-compact-add {
+    opacity: 0;
+}
+.discover-playlist-track-compact:hover .track-compact-add,
+.track-compact-add:focus-visible {
+    opacity: 1;
+}
+@media (hover: none) {
+    .track-compact-add { opacity: 1; }
 }
 
 .track-compact-number {
@@ -40583,7 +40712,7 @@ div.artist-hero-badge {
    Scoped to .has-select so the plain compact list (Build Playlist results,
    ListenBrainz inline view) keeps its original 5-column layout untouched. */
 .discover-playlist-track-compact.has-select {
-    grid-template-columns: 24px 30px 40px 1fr 1.5fr 60px;
+    grid-template-columns: 24px 30px 40px 1fr 1.5fr 60px 32px;
 }
 
 .track-compact-select {
@@ -53440,7 +53569,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .enhanced-track-table .col-bpm { width: 52px; text-align: right; }
 .enhanced-track-table .col-path { width: 22%; }
 .enhanced-track-table .col-match { width: 96px; }
-.enhanced-track-table .col-queue { width: 62px; text-align: right; }
+.enhanced-track-table .col-queue { width: 92px; text-align: right; } /* play next, queue, add to playlist */
 .enhanced-track-table .col-delete,
 .enhanced-track-table .col-report,
 .enhanced-track-table .col-track-actions { width: 76px; text-align: right; }

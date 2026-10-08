@@ -127,13 +127,18 @@ describe('the page root', () => {
 });
 
 describe('the tab strip', () => {
-  it('renders THREE permanent chips, not fifteen', () => {
+  it('renders FOUR permanent chips, not sixteen', () => {
     // Six of the fifteen were duplicates of one another and the four
     // paste-a-URL tabs differed at the input step not at all. They are reached
     // through Add playlist now, which detects the service from the link.
     const { container } = renderShell();
     const btns = Array.from(container.querySelectorAll('.sync-tab-button'));
-    expect(btns.map((b) => b.getAttribute('data-tab'))).toEqual(['mirrored', 'server', 'beatport']);
+    expect(btns.map((b) => b.getAttribute('data-tab'))).toEqual([
+      'mirrored',
+      'my-playlists',
+      'server',
+      'beatport',
+    ]);
   });
 
   it('opens YouTube Music as a routed tab, same as the other sources', () => {
@@ -152,7 +157,7 @@ describe('the tab strip', () => {
     const withRouted = Array.from(container.querySelectorAll('.sync-tab-button')).map((b) =>
       b.getAttribute('data-tab'),
     );
-    expect(withRouted).toEqual(['mirrored', 'server', 'beatport', 'ytmusic']);
+    expect(withRouted).toEqual(['mirrored', 'my-playlists', 'server', 'beatport', 'ytmusic']);
     expect(container.querySelector('[data-tab="ytmusic"]')?.className).toContain('active');
   });
 
@@ -179,14 +184,20 @@ describe('the tab strip', () => {
     const withRouted = Array.from(container.querySelectorAll('.sync-tab-button')).map((b) =>
       b.getAttribute('data-tab'),
     );
-    expect(withRouted).toEqual(['mirrored', 'server', 'beatport', 'spotify-public']);
+    expect(withRouted).toEqual([
+      'mirrored',
+      'my-playlists',
+      'server',
+      'beatport',
+      'spotify-public',
+    ]);
     expect(container.querySelector('[data-tab="spotify-public"]')?.className).toContain('active');
 
     act(() => {
       open('server');
     });
     // the chip stays; only the highlight moves
-    expect(container.querySelectorAll('.sync-tab-button')).toHaveLength(4);
+    expect(container.querySelectorAll('.sync-tab-button')).toHaveLength(5);
     expect(container.querySelector('[data-tab="spotify-public"]')?.className).not.toContain(
       'active',
     );
@@ -194,7 +205,7 @@ describe('the tab strip', () => {
 
   it('hides a routed chip with its ×, for good, and Add playlist brings it back (#1402)', () => {
     // cremonies #1402: sources you never use pile up in the strip with no
-    // way to clear them. the three permanent chips have no ×.
+    // way to clear them. the four permanent chips have no ×.
     let open!: (tab: string) => void;
     const view = renderShell({
       panels: { deezer: <div id="probe" /> },
@@ -212,11 +223,18 @@ describe('the tab strip', () => {
       Array.from(view.container.querySelectorAll('.sync-tab-button')).map((b) =>
         b.getAttribute('data-tab'),
       );
-    expect(chips()).toEqual(['mirrored', 'server', 'beatport', 'spotify', 'deezer']);
+    expect(chips()).toEqual([
+      'mirrored',
+      'my-playlists',
+      'server',
+      'beatport',
+      'spotify',
+      'deezer',
+    ]);
     expect(view.container.querySelectorAll('.sync-tab-close')).toHaveLength(2);
 
     fireEvent.click(view.getByLabelText('Hide Deezer tab'));
-    expect(chips()).toEqual(['mirrored', 'server', 'beatport', 'spotify']);
+    expect(chips()).toEqual(['mirrored', 'my-playlists', 'server', 'beatport', 'spotify']);
     // it was the active one, so we land back on the library
     expect(view.container.querySelector('[data-tab="mirrored"]')?.className).toContain('active');
     // chip gone, panel kept
@@ -233,7 +251,7 @@ describe('the tab strip', () => {
       Array.from(again.container.querySelectorAll('.sync-tab-button')).map((b) =>
         b.getAttribute('data-tab'),
       );
-    expect(chipsAgain()).toEqual(['mirrored', 'server', 'beatport', 'spotify']);
+    expect(chipsAgain()).toEqual(['mirrored', 'my-playlists', 'server', 'beatport', 'spotify']);
 
     // opening the source again brings it back
     act(() => {

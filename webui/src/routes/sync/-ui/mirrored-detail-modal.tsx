@@ -23,6 +23,8 @@
  * styling here. The actions are props because the call sites differ.
  */
 
+import { useEffect, useState } from 'react';
+
 import type { MirroredPlaylistDetail } from '../-sync.api';
 import type { MirroredTrack } from '../-sync.mirrored';
 
@@ -34,6 +36,8 @@ import {
   mirroredTotalRuntime,
   timeAgo,
 } from '../-sync.mirrored';
+import { AddToPlaylistButton } from '../../../features/playlists/add-to-playlist';
+import { isUserPlaylist, movedOrder } from '../../../features/playlists/user-playlists';
 
 export interface MirroredDetailModalProps {
   playlistId: number;
@@ -53,11 +57,59 @@ export interface MirroredDetailModalProps {
   onDiscover: () => void;
   /** "View discovery" once one exists, the card no longer jumps there (#1403). */
   discoverLabel?: string;
+  /** a user playlist's edits. set only for one (source 'soulsync'); a synced
+   *  mirror's tracks belong to its source and stay read-only. */
+  onRemoveTrack?: (position: number) => void;
+  /** the full 1-based position list in its new order. */
+  onReorder?: (order: number[]) => void;
 }
 
-function TrackRow({ track }: { track: MirroredTrack }) {
+interface EditProps {
+  index: number;
+  busy: boolean;
+  dragging: boolean;
+  over: boolean;
+  onRemove: () => void;
+  onDragStart: () => void;
+  onDragOver: () => void;
+  onDrop: () => void;
+  onDragEnd: () => void;
+}
+
+function TrackRow({ track, edit }: { track: MirroredTrack; edit?: EditProps }) {
+  const cls = `mm-row${edit?.dragging ? ' mm-row--dragging' : ''}${edit?.over ? ' mm-row--over' : ''}`;
   return (
-    <div className="mm-row">
+    <div
+      className={cls}
+      draggable={edit && !edit.busy ? true : undefined}
+      onDragStart={
+        edit
+          ? (e) => {
+              e.dataTransfer.effectAllowed = 'move';
+              // firefox won't start a drag without data
+              e.dataTransfer.setData('text/plain', String(edit.index));
+              edit.onDragStart();
+            }
+          : undefined
+      }
+      onDragOver={
+        edit
+          ? (e) => {
+              e.preventDefault();
+              edit.onDragOver();
+            }
+          : undefined
+      }
+      onDrop={
+        edit
+          ? (e) => {
+              e.preventDefault();
+              edit.onDrop();
+            }
+          : undefined
+      }
+      onDragEnd={edit?.onDragEnd}
+    >
       <span className="mm-row-pos">{track.position}</span>
       {track.image_url ? (
         <img
@@ -83,6 +135,29 @@ function TrackRow({ track }: { track: MirroredTrack }) {
       </div>
       <span className="mm-row-album">{track.album_name || ''}</span>
       <span className="mm-row-dur">{mirroredRowDuration(track.duration_ms)}</span>
+      {/* copy it onto one of your playlists, from any mirror or your own */}
+      <AddToPlaylistButton
+        track={{
+          track_name: track.track_name ?? '',
+          artist_name: track.artist_name ?? '',
+          album_name: track.album_name ?? '',
+          duration_ms: track.duration_ms ?? 0,
+        }}
+        className="mm-row-add"
+        size={15}
+      />
+      {edit ? (
+        <button
+          type="button"
+          className="mm-row-remove"
+          disabled={edit.busy}
+          title="Remove from this playlist"
+          aria-label={`Remove ${track.track_name ?? 'track'} from this playlist`}
+          onClick={edit.onRemove}
+        >
+          &times;
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -97,8 +172,23 @@ export function MirroredDetailModal({
   onRefreshFromSource,
   onDiscover,
   discoverLabel = 'Identify',
+  onRemoveTrack,
+  onReorder,
 }: MirroredDetailModalProps) {
   const tracks = (data.tracks ?? []) as MirroredTrack[];
+  const own = isUserPlaylist(data);
+  const editable = own && Boolean(onRemoveTrack && onReorder);
+  // one edit at a time: positions are only true until the refetch lands, so a
+  // second click on a stale row could hit the wrong track. a new payload
+  // (the refetch) is what frees it.
+  const [busy, setBusy] = useState(false);
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState<number | null>(null);
+  useEffect(() => {
+    setBusy(false);
+    setDragFrom(null);
+    setDragOver(null);
+  }, [data]);
   const source = data.source || 'unknown';
   const sourceIcon = mirroredDetailSourceIcon(source);
   const srcLabel = mirroredDetailSourceLabel(source);
@@ -126,10 +216,10 @@ export function MirroredDetailModal({
               <div className={`mm-cover mm-cover-empty ${source}`}>{sourceIcon}</div>
             )}
             <div className="mm-hero-info">
-              <span className="mm-eyebrow">Mirrored Playlist</span>
+              <span className="mm-eyebrow">{own ? 'Your Playlist' : 'Mirrored Playlist'}</span>
               <h2 className="mm-title">{data.name}</h2>
               <div className="mm-meta">
-                <span className={`mm-source-pill ${source}`}>{srcLabel}</span>
+                {own ? null : <span className={`mm-source-pill ${source}`}>{srcLabel}</span>}
                 {data.owner ? (
                   <>
                     <span className="mm-meta-item">{data.owner}</span>
@@ -145,7 +235,7 @@ export function MirroredDetailModal({
                 ) : null}
                 <span className="mm-dot">&middot;</span>
                 <span className="mm-meta-item">
-                  Mirrored {timeAgo(data.updated_at || data.mirrored_at, now)}
+                  {own ? 'Edited' : 'Mirrored'} {timeAgo(data.updated_at || data.mirrored_at, now)}
                 </span>
               </div>
             </div>
@@ -154,23 +244,57 @@ export function MirroredDetailModal({
             &times;
           </button>
         </div>
-        <div className="mm-list">
+        <div className={`mm-list${editable ? ' mm-list--editable' : ''}`}>
           <div className="mm-list-head">
             <span>#</span>
             <span />
             <span>Title</span>
             <span>Album</span>
             <span className="mm-col-dur">Time</span>
+            <span />
+            {editable ? <span /> : null}
           </div>
           {tracks.length > 0 ? (
             tracks.map((track, index) => (
               <TrackRow
                 key={`${track.position ?? index}-${track.track_name ?? ''}`}
                 track={track}
+                edit={
+                  editable
+                    ? {
+                        index,
+                        busy,
+                        dragging: dragFrom === index,
+                        over: dragOver === index && dragFrom !== null && dragFrom !== index,
+                        onRemove: () => {
+                          setBusy(true);
+                          onRemoveTrack?.(track.position ?? index + 1);
+                        },
+                        onDragStart: () => setDragFrom(index),
+                        onDragOver: () => setDragOver(index),
+                        onDrop: () => {
+                          const from = dragFrom;
+                          setDragFrom(null);
+                          setDragOver(null);
+                          if (from === null || from === index) return;
+                          setBusy(true);
+                          onReorder?.(movedOrder(tracks.length, from, index));
+                        },
+                        onDragEnd: () => {
+                          setDragFrom(null);
+                          setDragOver(null);
+                        },
+                      }
+                    : undefined
+                }
               />
             ))
           ) : (
-            <div className="mm-empty">No tracks in this mirror yet.</div>
+            <div className="mm-empty">
+              {own
+                ? 'Nothing in here yet. Add songs with the + on any track.'
+                : 'No tracks in this mirror yet.'}
+            </div>
           )}
         </div>
         <div className="mm-actions">
@@ -184,13 +308,16 @@ export function MirroredDetailModal({
               onDelete();
             }}
           >
-            Delete Mirror
+            {own ? 'Delete playlist' : 'Delete Mirror'}
           </button>
           <div className="mm-actions-right">
-            <button type="button" className="mm-btn mm-btn-ghost" onClick={onEditSource}>
-              Edit Source
-            </button>
-            {onRefreshFromSource ? (
+            {/* no source behind a user playlist, so nothing to point or pull */}
+            {own ? null : (
+              <button type="button" className="mm-btn mm-btn-ghost" onClick={onEditSource}>
+                Edit Source
+              </button>
+            )}
+            {onRefreshFromSource && !own ? (
               <div className="mm-btn-wrap">
                 <button
                   type="button"
@@ -208,7 +335,11 @@ export function MirroredDetailModal({
               <button
                 type="button"
                 className="mm-btn mm-btn-secondary"
-                title="Refresh from the source, match, push to your server and download what's missing"
+                title={
+                  own
+                    ? "Match, push to your server and download what's missing"
+                    : "Refresh from the source, match, push to your server and download what's missing"
+                }
                 onClick={onRunPipeline}
               >
                 Sync & download

@@ -27,6 +27,7 @@ from core.automation.deps import AutomationDeps
 from core.profile_context import get_background_profile
 from core.playlists.source_refs import require_refresh_url
 from core.playlists.sources import PlaylistDetail, to_mirror_track_dict
+from core.playlists.user_playlists import NO_UPSTREAM_SOURCES
 from core.playlists.sources.base import (
     SOURCE_SPOTIFY,
     SOURCE_SPOTIFY_PUBLIC,
@@ -75,7 +76,7 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
         return {'status': 'error', 'reason': 'No playlist specified'}
 
     # Filter out sources that can't be refreshed (no external API).
-    playlists = [pl for pl in playlists if pl.get('source', '') not in ('file', 'beatport')]
+    playlists = [pl for pl in playlists if pl.get('source', '') not in NO_UPSTREAM_SOURCES]
 
     refreshed = 0
     errors: List[str] = []

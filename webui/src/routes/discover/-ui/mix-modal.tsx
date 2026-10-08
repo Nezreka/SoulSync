@@ -1,6 +1,8 @@
 import { useId } from 'react';
 
 import { useAccessibleModal } from '@/components/dialog';
+import { AddToPlaylistButton, openAddToPlaylist } from '@/features/playlists/add-to-playlist';
+import addStyles from '@/features/playlists/add-to-playlist.module.css';
 
 import type { CompactRow, DiscoverMix, MixAction } from '../-discover.mixes';
 
@@ -136,6 +138,11 @@ function CompactTrackRow({
       <div className="track-compact-album">{row.album}</div>
       {/* EMPTY for an unknown length — "0:00" claims a fact we do not have. */}
       <div className="track-compact-duration">{row.duration}</div>
+      <AddToPlaylistButton
+        track={{ track_name: row.name, artist_name: row.artist, album_name: row.album }}
+        className={`track-compact-add ${addStyles.button}`}
+        size={15}
+      />
     </div>
   );
 }
@@ -148,6 +155,8 @@ export interface MixSelectionBarProps {
   onSelectAll: (indices: number[]) => void;
   onClearSelection: () => void;
   onDownloadSelected: () => void;
+  /** the ticked rows onto a playlist; anchor is the button */
+  onAddSelectedToPlaylist?: (anchor: HTMLElement) => void;
 }
 
 /**
@@ -164,6 +173,7 @@ export function MixSelectionBarView({
   onSelectAll,
   onClearSelection,
   onDownloadSelected,
+  onAddSelectedToPlaylist,
 }: MixSelectionBarProps) {
   const bar = mixSelectionBar(selected.length, total);
   return (
@@ -186,6 +196,16 @@ export function MixSelectionBarView({
       <button type="button" className="btn btn--sm btn--secondary" onClick={onClearSelection}>
         Clear
       </button>
+      {onAddSelectedToPlaylist ? (
+        <button
+          type="button"
+          className="btn btn--sm btn--secondary"
+          disabled={selected.length === 0}
+          onClick={(e) => onAddSelectedToPlaylist(e.currentTarget)}
+        >
+          Add to playlist
+        </button>
+      ) : null}
       <button
         type="button"
         className="btn btn--sm btn--primary"
@@ -316,6 +336,19 @@ export function MixModal({
             onSelectAll={onSelectAll}
             onClearSelection={onClearSelection}
             onDownloadSelected={onDownloadSelected}
+            onAddSelectedToPlaylist={(anchor) => {
+              const picked = new Set(selected);
+              openAddToPlaylist(
+                compactRows(tracks as unknown[])
+                  .filter((row) => picked.has(row.index))
+                  .map((row) => ({
+                    track_name: row.name,
+                    artist_name: row.artist,
+                    album_name: row.album,
+                  })),
+                anchor,
+              );
+            }}
           />
         )}
 

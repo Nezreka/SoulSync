@@ -2080,10 +2080,26 @@ function updateNpTrackInfo() {
             }
         }
 
-        // Action buttons visibility
+        // Action buttons visibility. the row shows for a track with a library
+        // artist OR one that can go on a playlist (a stream has no artist_id)
+        const npPlaylistTrack = npAddToPlaylistTrack(currentTrack);
         if (actionBtns) {
             const hasArtist = currentTrack.artist_id;
-            actionBtns.classList.toggle('hidden', !hasArtist);
+            actionBtns.classList.toggle('hidden', !hasArtist && !npPlaylistTrack);
+            const gotoArtist = document.getElementById('np-goto-artist');
+            if (gotoArtist) gotoArtist.classList.toggle('hidden', !hasArtist);
+        }
+        const addBtn = document.getElementById('np-add-to-playlist');
+        if (addBtn) {
+            addBtn.classList.toggle('hidden', !npPlaylistTrack);
+            if (!addBtn._npAddAttached) {
+                addBtn.addEventListener('click', () => {
+                    const t = npAddToPlaylistTrack(currentTrack);
+                    if (!t || typeof window.openAddToPlaylist !== 'function') return;
+                    window.openAddToPlaylist(t, addBtn);
+                });
+                addBtn._npAddAttached = true;
+            }
         }
         // reporting needs a library row to point at
         const reportBtn = document.getElementById('np-report-issue');
@@ -3140,7 +3156,22 @@ function updateNpPrevNextButtons() {
     if (miniNextBtn) miniNextBtn.disabled = !canNext;
 }
 
+// what the now playing "Add to playlist" hands the picker: artist + title,
+// or null when the track has no artist to identify it by
+function npAddToPlaylistTrack(track) {
+    if (!track) return null;
+    let title = String(track.title || '');
+    const cut = title.indexOf('||');   // some titles are stored "<id>||<title>"
+    if (cut >= 0) title = title.slice(cut + 2);
+    title = title.trim();
+    const artist = String(track.artist || '').trim();
+    if (!title || !artist || artist === 'Unknown Artist') return null;
+    return { track_name: title, artist_name: artist, album_name: String(track.album || '').trim() };
+}
+
 function handlePlayerKeyboardShortcuts(event) {
+    // a popover over the player (add to playlist) owns its own keys
+    if (document.activeElement?.closest?.('[data-popover-layer]')) return;
     // Don't intercept when typing in inputs or when non-player modals are open
     const tag = document.activeElement.tagName.toLowerCase();
     if (tag === 'input' || tag === 'textarea' || tag === 'select' || document.activeElement.isContentEditable) return;

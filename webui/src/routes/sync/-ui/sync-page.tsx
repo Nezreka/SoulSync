@@ -286,6 +286,17 @@ export function SyncPage() {
         registerOpenDetail={registerOpenDetail}
       />
     ),
+    // the same tab over the playlists made here: one vertical, one pipeline
+    'my-playlists': (
+      <MirroredTab
+        scope="user"
+        vertical={page.verticals.mirrored}
+        onOpen={(sourceId) => openSourceModal('mirrored', sourceId)}
+        sourceName={sourceName}
+        pipeline={page.pipeline}
+        registerReload={page.registerMirroredReload}
+      />
+    ),
   };
 
   return (

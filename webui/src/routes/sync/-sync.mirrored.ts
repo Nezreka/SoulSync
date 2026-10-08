@@ -107,9 +107,10 @@ export const MIRRORED_DETAIL_SOURCE_ICONS: Readonly<Record<string, string>> = {
   beatport: '🎛',
   deezer: '🎧',
   qobuz: '♫',
+  soulsync: '♥',
 };
 
-/** Same seven keys; an unlisted source falls back to its RAW name (1089). */
+/** Same keys; an unlisted source falls back to its RAW name (1089). */
 export const MIRRORED_DETAIL_SOURCE_LABELS: Readonly<Record<string, string>> = {
   spotify: 'Spotify',
   spotify_public: 'Spotify',
@@ -118,6 +119,7 @@ export const MIRRORED_DETAIL_SOURCE_LABELS: Readonly<Record<string, string>> = {
   beatport: 'Beatport',
   deezer: 'Deezer',
   qobuz: 'Qobuz',
+  soulsync: 'SoulSync',
 };
 
 export function mirroredDetailSourceIcon(source: string): string {

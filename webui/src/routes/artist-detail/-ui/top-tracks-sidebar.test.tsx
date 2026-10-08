@@ -69,6 +69,15 @@ describe('TopTracksSidebar', () => {
     );
   });
 
+  it('every row can go on a playlist, credited to its own artist or the page artist', async () => {
+    stubRoutes({ '/top-tracks': () => json(SOURCE_TRACKS) });
+    render(<TopTracksSidebar artistId={42} artistName="Aphex Twin" />);
+    await screen.findByText('Xtal');
+    // Xtal has its own credit; Ageispolis has none and falls back to the page
+    expect(screen.getByLabelText('Add Xtal to a playlist')).toHaveClass('hero-top-track-add');
+    expect(screen.getByLabelText('Add Ageispolis to a playlist')).toBeInTheDocument();
+  });
+
   it('offers a download per row plus Download All for the source pass', async () => {
     stubRoutes({ '/top-tracks': () => json(SOURCE_TRACKS) });
     render(<TopTracksSidebar artistId={42} artistName="Aphex Twin" />);

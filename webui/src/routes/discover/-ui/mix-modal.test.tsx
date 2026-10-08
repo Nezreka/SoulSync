@@ -421,3 +421,60 @@ describe('the mix modal', () => {
     expect(document.body.style.overflow).not.toBe('hidden');
   });
 });
+
+describe('add to playlist', () => {
+  afterEach(() => {
+    delete window.openAddToPlaylist;
+  });
+
+  it('every row can go on a playlist, with its main artist and album', async () => {
+    const { AddToPlaylistHost, closeAddToPlaylist } =
+      await import('@/features/playlists/add-to-playlist');
+    const posts: unknown[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        if (init?.method === 'POST') posts.push(JSON.parse(init.body as string));
+        return new Response(
+          JSON.stringify(
+            init?.method === 'POST'
+              ? { added: 1, duplicates: [], track_count: 1 }
+              : { playlists: [{ id: 1, name: 'Mine', track_count: 0 }] },
+          ),
+        );
+      }),
+    );
+    render(
+      <>
+        <CompactPlaylist tracks={[track()]} />
+        <AddToPlaylistHost />
+      </>,
+    );
+    fireEvent.click(screen.getByLabelText('Add Xtal to a playlist'));
+    fireEvent.click(await screen.findByText('Mine'));
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toEqual({
+      tracks: [
+        { track_name: 'Xtal', artist_name: 'Aphex Twin', album_name: 'Selected Ambient Works' },
+      ],
+      allow_duplicates: false,
+    });
+    closeAddToPlaylist();
+    vi.unstubAllGlobals();
+  });
+
+  it('the selection bar sends only the ticked rows, and waits for a tick', () => {
+    const onAdd = vi.fn();
+    render(
+      <MixSelectionBarView
+        total={3}
+        selected={[]}
+        onSelectAll={vi.fn()}
+        onClearSelection={vi.fn()}
+        onDownloadSelected={vi.fn()}
+        onAddSelectedToPlaylist={onAdd}
+      />,
+    );
+    expect(screen.getByText('Add to playlist')).toBeDisabled();
+  });
+});

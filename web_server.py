@@ -23340,6 +23340,11 @@ _cfg_mpl(
 )
 app.register_blueprint(_bp_mpl())
 
+# user playlists (made inside soulsync, stored as mirrored playlists)
+from api.user_playlists import configure as _cfg_upl, create_blueprint as _bp_upl
+_cfg_upl(get_database=get_database)
+app.register_blueprint(_bp_upl())
+
 # beatport chart discovery/sync (rides the source_playlists spine)
 from api.beatport_charts import configure as _cfg_bpc, create_blueprint as _bp_bpc
 _cfg_bpc(
