@@ -168,21 +168,33 @@ def _display(value) -> str:
 
 
 def _artist_credit_includes(credit: str, artist: str) -> bool:
-    """Accept a fuller local credit when the source exposes one performer."""
+    """Accept equivalent or fuller local credits despite join-phrase style."""
     def folded(value: str) -> str:
         return ' '.join(re.sub(r'[^\w]+', ' ', value.casefold()).split())
 
+    def includes_name(haystack: str, name: str) -> bool:
+        return bool(name and re.search(
+            rf'(?<!\w){re.escape(name)}(?!\w)', haystack))
+
     current = folded(credit)
-    expected = folded(artist)
-    if not current or not expected:
+    expected_names = []
+    for name in str(artist or '').split(';'):
+        normalized = folded(name)
+        if normalized:
+            expected_names.append(normalized)
+    if not current or not expected_names:
         return False
-    if current == expected:
+    if len(expected_names) == 1 and current == expected_names[0]:
         return True
     # Require visible collaboration punctuation before treating a longer
-    # credit as a superset; ordinary substrings are not artist agreement.
-    return bool(re.search(r'(?:\s(?:&|and|feat\.?|featuring|with)\s|[,;]\s*)',
-                          credit, flags=re.IGNORECASE) and
-                re.search(rf'(?<!\w){re.escape(expected)}(?!\w)', current))
+    # credit as equivalent/a superset; ordinary substrings are not agreement.
+    # Source adapters join structured artist names with semicolons. Local tags
+    # commonly express those same names using feat., featuring, commas or and.
+    return bool(
+        re.search(r'(?:\s(?:&|and|feat\.?|featuring|ft\.?|vs\.?|with|x|/)\s|[,;]\s*)',
+                  credit, flags=re.IGNORECASE)
+        and all(includes_name(current, expected) for expected in expected_names)
+    )
 
 
 def _is_empty(value) -> bool:

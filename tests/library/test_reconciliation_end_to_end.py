@@ -508,6 +508,59 @@ def test_audio_evidence_cache_survives_rename_but_retries_errors(tmp_path):
         cache.close()
 
 
+def test_malformed_cached_fingerprint_is_regenerated(tmp_path):
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    path = tmp_path / 'Sweet Hitch-Hiker.flac'
+    path.write_bytes(b'fixture')
+    client = _Acoustid({path.name: {
+        'mbid': 'sweet-id', 'title': 'Sweet Hitch-Hiker',
+        'artist': 'Creedence Clearwater Revival', 'score': 0.99,
+    }})
+    stat = path.stat()
+    with db._get_connection() as conn:
+        conn.execute('''CREATE TABLE reconcile_file_fingerprints (
+            file_path TEXT PRIMARY KEY, size_bytes INTEGER NOT NULL,
+            mtime_ns INTEGER NOT NULL, duration_s REAL NOT NULL,
+            fingerprint TEXT NOT NULL)''')
+        conn.execute('''INSERT INTO reconcile_file_fingerprints
+            VALUES (?, ?, ?, ?, ?)''',
+                     (str(path), stat.st_size, stat.st_mtime_ns, 177.4, 'AQAAAA'))
+        conn.commit()
+
+    cache = ReconciliationEvidence(db, client)
+    try:
+        result = cache.identify(str(path))
+        assert result['status'] == 'ok'
+        assert client.fingerprints == 1
+        assert cache.metrics['fingerprint_hits'] == 0
+        stored = cache.conn.execute(
+            'SELECT fingerprint FROM reconcile_file_fingerprints WHERE file_path = ?',
+            (str(path),)).fetchone()[0]
+        assert stored != 'AQAAAA'
+    finally:
+        cache.close()
+
+
+def test_new_malformed_fingerprint_is_a_retryable_file_error(tmp_path):
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    path = tmp_path / 'Sweet Hitch-Hiker.flac'
+    path.write_bytes(b'fixture')
+    client = _Acoustid({})
+    client.fingerprint_audio_file = lambda _path: {
+        'status': 'ok', 'duration_s': 177.4, 'fingerprint': 'AQAAAA'}
+    cache = ReconciliationEvidence(db, client)
+    try:
+        result = cache.identify(str(path))
+        assert result['status'] == 'error'
+        assert 'invalid fingerprint' in result['error']
+        assert 'fingerprint_key' not in result
+        assert cache.conn.execute(
+            'SELECT 1 FROM reconcile_file_fingerprints WHERE file_path = ?',
+            (str(path),)).fetchone() is None
+    finally:
+        cache.close()
+
+
 def test_tag_cache_reuses_unchanged_file_and_invalidates_on_write(tmp_path):
     db = MusicDatabase(str(tmp_path / 'music.db'))
     path = tmp_path / 'Lucky.flac'
@@ -602,10 +655,10 @@ def test_exhausted_audio_lookup_opens_circuit_but_cached_evidence_remains_availa
             return {'status': 'error', 'recordings': [], 'error': 'AcoustID unavailable'}
 
         client.lookup_fingerprint_with_status = unavailable
-        for path in failed:
+        for index, path in enumerate(failed):
             result = cache.identify(str(path))
             assert result['status'] == 'error'
-            assert 'deferred' not in result
+            assert bool(result.get('deferred')) is (index == 2)
         deferred_result = cache.identify(str(deferred))
         assert deferred_result['status'] == 'error'
         assert deferred_result['deferred'] is True
@@ -616,7 +669,7 @@ def test_exhausted_audio_lookup_opens_circuit_but_cached_evidence_remains_availa
         cache.close()
 
 
-def test_api_error_skips_affected_folder_without_repeating_failed_requests(tmp_path, monkeypatch):
+def test_isolated_api_errors_are_scoped_to_files_until_circuit_opens(tmp_path, monkeypatch):
     import core.repair_jobs.library_reconciliation as module
     monkeypatch.setattr('core.library.reconciliation_evidence.time.sleep', lambda _delay: None)
 
@@ -626,8 +679,14 @@ def test_api_error_skips_affected_folder_without_repeating_failed_requests(tmp_p
         (root / name).write_bytes(b'fixture')
     db = MusicDatabase(str(tmp_path / 'music.db'))
     client = _Acoustid({})
-    client.lookup_fingerprint_with_status = lambda *_args: {
-        'status': 'error', 'recordings': [], 'error': 'AcoustID rate limited'}
+    lookup_attempts = 0
+
+    def unavailable(*_args):
+        nonlocal lookup_attempts
+        lookup_attempts += 1
+        return {'status': 'error', 'recordings': [], 'error': 'AcoustID rate limited'}
+
+    client.lookup_fingerprint_with_status = unavailable
     monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
     findings = []
     context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
@@ -636,7 +695,11 @@ def test_api_error_skips_affected_folder_without_repeating_failed_requests(tmp_p
     result = LibraryReconciliationJob().scan(context)
     assert result.errors == 1
     assert not result.stopped_early
-    assert client.fingerprints == 1
+    assert result.scanned == 2
+    assert client.fingerprints == 3
+    assert lookup_attempts == 15
+    # The third exhausted lookup opens the service circuit and preserves the
+    # folder. The first two failures did not abort sibling collection.
     assert findings == []
 
 

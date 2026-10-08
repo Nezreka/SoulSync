@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import time
 from typing import Any
@@ -22,6 +23,29 @@ from utils.logging_config import get_logger
 logger = get_logger('library.reconciliation_evidence')
 _LOOKUP_RETRY_DELAYS = (1, 2, 4, 8)
 _LOOKUP_CIRCUIT_THRESHOLD = 3
+_MIN_FINGERPRINT_LENGTH = 7
+
+
+def _usable_fingerprint(fingerprint: object, duration: object) -> bool:
+    """Reject empty Chromaprint payloads before they reach AcoustID.
+
+    ``fpcalc`` can occasionally report success with its six-character empty
+    payload (``AQAAAA``).  It cannot identify audio, and AcoustID responds with
+    a generic API error which previously made reconciliation skip the album.
+    Real encoded fingerprints comfortably exceed this small structural floor,
+    including short interludes.
+    """
+    try:
+        duration_value = float(duration)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(duration_value) or duration_value <= 0:
+        return False
+    if isinstance(fingerprint, memoryview):
+        fingerprint = fingerprint.tobytes()
+    if not isinstance(fingerprint, (str, bytes)):
+        return False
+    return len(fingerprint.strip()) >= _MIN_FINGERPRINT_LENGTH
 
 
 def folder_audio_path_digest(folder: str) -> str:
@@ -120,18 +144,30 @@ class ReconciliationEvidence:
             SELECT duration_s, fingerprint FROM reconcile_file_fingerprints
             WHERE file_path = ? AND size_bytes = ? AND mtime_ns = ?
         ''', (file_path, stat.st_size, stat.st_mtime_ns)).fetchone()
-        if row:
+        if row and _usable_fingerprint(row[1], row[0]):
             duration, fingerprint = row
             self.metrics['fingerprint_hits'] += 1
         else:
+            if row:
+                # Old versions cached fpcalc's empty AQAAAA payload.  Remove
+                # it before retrying so a repaired decoder/file can recover.
+                self.conn.execute(
+                    'DELETE FROM reconcile_file_fingerprints WHERE file_path = ?',
+                    (file_path,))
             started = time.perf_counter()
             generated = self.client.fingerprint_audio_file(file_path)
             self.metrics['fingerprint_seconds'] += time.perf_counter() - started
             self.metrics['fingerprints'] += 1
             if generated.get('status') != 'ok':
                 return {**generated, 'recordings': []}
-            duration = generated['duration_s']
-            fingerprint = generated['fingerprint']
+            duration = generated.get('duration_s')
+            fingerprint = generated.get('fingerprint')
+            if not _usable_fingerprint(fingerprint, duration):
+                return {
+                    'status': 'error',
+                    'recordings': [],
+                    'error': 'Chromaprint returned an empty or invalid fingerprint',
+                }
             self.conn.execute('''
                 INSERT OR REPLACE INTO reconcile_file_fingerprints
                     (file_path, size_bytes, mtime_ns, duration_s, fingerprint)
@@ -184,4 +220,8 @@ class ReconciliationEvidence:
             if (result.get('invalid_key') or
                     self.consecutive_lookup_errors >= _LOOKUP_CIRCUIT_THRESHOLD):
                 self.lookup_error = dict(result)
+                # Tell the scanner this is no longer evidence about one file.
+                # It can preserve affected folders while the circuit prevents
+                # any further requests during a service outage.
+                result = {**result, 'deferred': True}
         return {**result, 'fingerprint_key': key}

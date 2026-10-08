@@ -134,6 +134,71 @@ def test_source_does_not_shorten_a_comma_separated_local_artist_credit():
     assert 'track_artist' not in plan['changes']
 
 
+def test_equivalent_feature_credit_punctuation_does_not_create_noise():
+    album = {'name': 'Album', 'artists': [{'name': 'Eminem'}]}
+    source = {
+        'name': 'Bitch Please II',
+        'artists': [
+            {'name': 'Eminem'}, {'name': 'Dr. Dre'}, {'name': 'Snoop Dogg'},
+            {'name': 'Xzibit'}, {'name': 'Nate Dogg'},
+        ],
+        'track_number': 1, 'disc_number': 1,
+    }
+    current = {
+        'title': 'Bitch Please II', 'album': 'Album', 'album_artist': 'Eminem',
+        'track_artist': 'Eminem featuring Dr. Dre, Snoop Dogg, Xzibit and Nate Dogg',
+        'track_number': 1, 'disc_number': 1,
+    }
+
+    plan = rp.plan_track(current, source, album)
+
+    assert 'track_artist' not in plan['changes']
+    assert 'track_artist' not in plan['db_data']
+
+
+def test_slash_separated_fuller_credit_is_preserved():
+    album = {'name': 'Alive 2007', 'artists': [{'name': 'Daft Punk'}]}
+    source = {'name': 'Touch It / Technologic',
+              'artists': [{'name': 'Daft Punk'}],
+              'track_number': 1, 'disc_number': 1}
+    current = {'title': 'Touch It / Technologic', 'album': 'Alive 2007',
+               'album_artist': 'Daft Punk',
+               'track_artist': 'Daft Punk / Busta Rhymes',
+               'track_number': 1, 'disc_number': 1}
+
+    plan = rp.plan_track(current, source, album)
+
+    assert 'track_artist' not in plan['changes']
+
+
+def test_new_performer_in_source_credit_remains_actionable():
+    album = {'name': 'Album', 'artists': [{'name': 'Sungazer'}]}
+    source = {'name': 'Whalefall',
+              'artists': [{'name': 'Sungazer'}, {'name': 'Plini'}],
+              'track_number': 1, 'disc_number': 1}
+    current = {'title': 'Whalefall', 'album': 'Album',
+               'album_artist': 'Sungazer', 'track_artist': 'Sungazer',
+               'track_number': 1, 'disc_number': 1}
+
+    plan = rp.plan_track(current, source, album)
+
+    assert plan['changes']['track_artist']['new'] == 'Sungazer; Plini'
+
+
+def test_artist_name_substring_is_not_treated_as_same_credit():
+    album = {'name': 'Album', 'artists': [{'name': 'Various Artists'}]}
+    source = {'name': 'Track', 'artists': [{'name': 'Drake'}],
+              'track_number': 1, 'disc_number': 1}
+    current = {'title': 'Track', 'album': 'Album',
+               'album_artist': 'Various Artists',
+               'track_artist': 'Drakeo the Ruler feat. Guest',
+               'track_number': 1, 'disc_number': 1}
+
+    plan = rp.plan_track(current, source, album)
+
+    assert plan['changes']['track_artist']['new'] == 'Drake'
+
+
 def test_source_blank_field_never_written():
     album = {'name': 'Real Album', 'artists': [{'name': 'Real Artist'}]}  # no year/genres
     current = {'title': 'Real Title', 'album_artist': 'Real Artist', 'album': 'Real Album',

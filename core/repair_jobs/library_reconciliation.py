@@ -843,16 +843,16 @@ class LibraryReconciliationJob(RepairJob):
                         if not lookup_error_reported:
                             result.errors += 1
                             lookup_error_reported = True
-                        if audio.get('fingerprint_key'):
-                            # A service lookup failure is transient and can
-                            # affect every remaining file. Preserve this
-                            # logical album instead of replacing good findings
-                            # with unavailable-evidence noise.
+                        if audio.get('deferred') or audio.get('invalid_key'):
+                            # The evidence cache only marks errors deferred
+                            # after its circuit breaker establishes a service
+                            # problem. Preserve this logical album rather than
+                            # replacing good findings with outage noise.
                             evidence_error = audio.get('error') or 'AcoustID lookup failed'
                             break
-                        # A decoder/fingerprint failure belongs to this file.
-                        # Keep auditing the rest of the album and surface this
-                        # track as uncertain rather than hiding every sibling.
+                        # A decoder, malformed fingerprint, or isolated lookup
+                        # failure belongs to this file. Keep auditing siblings
+                        # and surface only this track as uncertain.
                     playlists = (list(playlist_membership.get(str(db_row['id']), []))
                                  if db_row else [])
                     files.append({'path': path, 'tags': cache.read_tags(path, _read_file_tags),
