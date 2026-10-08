@@ -16,7 +16,12 @@ import types
 import pytest
 
 import core.deezer_download_client as ddc
-from core.deezer_track_query import exact_title_queries, fold, split_query_by_artist
+from core.deezer_track_query import (
+    exact_title_queries,
+    fold,
+    plain_has_exact_title,
+    split_query_by_artist,
+)
 
 ORIGINAL_ID = 136340808
 
@@ -181,3 +186,42 @@ def test_not_authenticated_makes_no_request():
     client._authenticated = False
     assert client._search_sync("aulii cravalho how far ill go") == ([], [])
     assert client._calls == []
+
+
+# ── skipping the extra request when the plain search already has the song ────
+
+def test_plain_has_exact_title_true_when_the_artists_own_exact_title_is_there():
+    pairs = [("How Far I'll Go (Reprise)", "Auli'i Cravalho"), ("How Far I'll Go", "Auli'i Cravalho")]
+    assert plain_has_exact_title("aulii cravalho how far ill go", pairs)
+
+
+def test_plain_has_exact_title_false_for_reprises_and_karaoke_only():
+    pairs = [(i["title"], i["artist"]["name"]) for i in PLAIN]
+    assert not plain_has_exact_title("aulii cravalho how far ill go", pairs)
+
+
+def test_plain_has_exact_title_false_when_the_exact_title_is_another_artists():
+    pairs = [("How Far I'll Go", "Alessia Cara"), ("How Far I'll Go (Reprise)", "Auli'i Cravalho")]
+    assert not plain_has_exact_title("aulii cravalho how far ill go", pairs)
+
+
+def test_plain_has_exact_title_false_without_an_artist_in_the_query():
+    # a bare title is shared by many songs, so the exact-title search still runs
+    pairs = [("He Was You", "Mark Mancina")]
+    assert not plain_has_exact_title("he was you", pairs)
+    assert not plain_has_exact_title("", [])
+
+
+def test_no_second_request_when_the_plain_search_already_has_the_song():
+    plain_with_song = [_item(ORIGINAL_ID, "How Far I'll Go", "Auli'i Cravalho")] + PLAIN
+    client = _client(lambda q: {"data": plain_with_song})
+    results, _ = client._search_sync("aulii cravalho how far ill go")
+
+    assert client._calls == ["aulii cravalho how far ill go"]
+    assert str(ORIGINAL_ID) in {r._source_metadata["track_id"] for r in results}
+
+
+def test_second_request_still_runs_when_the_song_is_missing_from_the_plain_search():
+    client = _client(_responder)
+    client._search_sync("aulii cravalho how far ill go")
+    assert len(client._calls) == 2

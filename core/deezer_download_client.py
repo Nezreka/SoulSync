@@ -913,15 +913,23 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         exact-title filter does return it. The artist in the query is found from
         the plain results' own artist names (see ``core.deezer_track_query``).
 
-        Best-effort: any failure returns [] and the plain results stand.
+        Skipped (no request) when the plain results already hold the exact
+        title by the artist the query names. Best-effort: any failure returns []
+        and the plain results stand.
         """
         try:
-            from core.deezer_track_query import exact_title_queries
+            from core.deezer_track_query import exact_title_queries, plain_has_exact_title
             names = []
+            pairs = []
             for it in plain_items:
                 artist = it.get('artist') if isinstance(it, dict) else None
                 if isinstance(artist, dict) and artist.get('name'):
                     names.append(artist['name'])
+                    pairs.append((it.get('title') or '', artist['name']))
+            # The plain search already found the song (the usual case): one
+            # request per query, not two. A playlist makes many of these.
+            if plain_has_exact_title(query, pairs):
+                return []
             extra: List[dict] = []
             for scoped in exact_title_queries(query, names):
                 resp = self._api_get(
