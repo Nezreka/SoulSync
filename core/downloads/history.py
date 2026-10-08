@@ -38,6 +38,30 @@ _SOURCE_PREFIX_MAP = [
 ]
 
 
+# downloads that ride the playlist pipeline but aren't playlists. the client
+# only flags some of them is_album_download, so a single track from search
+# was recorded as a playlist and showed up on the dashboard's playlist card
+# (#1591). the id prefix is the one thing every caller sets.
+SINGLE_TRACK_PREFIXES = ('enhanced_search_track_', 'gsearch_track_')
+ALBUM_PREFIXES = (
+    'artist_album_', 'discover_album_', 'enhanced_search_album_',
+    'seasonal_album_', 'spotify_library_', 'beatport_release_',
+    'discover_cache_', 'issue_download_', 'library_redownload_',
+)
+
+
+def detect_sync_type(playlist_id: str, is_album_download: bool) -> str:
+    """wishlist, album, track or playlist, for the sync_history row."""
+    playlist_id = str(playlist_id or '')
+    if playlist_id == 'wishlist':
+        return 'wishlist'
+    if is_album_download or playlist_id.startswith(ALBUM_PREFIXES):
+        return 'album'
+    if playlist_id.startswith(SINGLE_TRACK_PREFIXES):
+        return 'track'
+    return 'playlist'
+
+
 def detect_sync_source(playlist_id: str) -> str:
     """Derive the sync source from the playlist_id prefix."""
     for prefix, source in _SOURCE_PREFIX_MAP:
@@ -98,12 +122,7 @@ def record_sync_history_start(
         if quality_profile_id is None:
             quality_profile_id = quality_profile_id_for_tracks(tracks)
         source = detect_sync_source(playlist_id)
-        if playlist_id == 'wishlist':
-            sync_type = 'wishlist'
-        elif is_album_download:
-            sync_type = 'album'
-        else:
-            sync_type = 'playlist'
+        sync_type = detect_sync_type(playlist_id, is_album_download)
 
         # Extract thumb URL from album context or first track
         thumb_url = None

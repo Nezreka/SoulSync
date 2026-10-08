@@ -1677,6 +1677,23 @@ class MusicDatabase:
                     except Exception as e:
                         logger.debug("Failed to add %s column: %s", _sh_col, e)
 
+            # Repair: single tracks and some albums were recorded as playlists
+            # and showed on the dashboard's playlist card (#1591). cheap and
+            # idempotent, so it just runs every start.
+            try:
+                from core.downloads.history import ALBUM_PREFIXES, SINGLE_TRACK_PREFIXES
+                for _sh_type, _sh_prefixes in (('track', SINGLE_TRACK_PREFIXES),
+                                               ('album', ALBUM_PREFIXES)):
+                    _sh_like = " OR ".join("playlist_id LIKE ?" for _ in _sh_prefixes)
+                    cursor.execute(
+                        f"UPDATE sync_history SET sync_type = ? "
+                        f"WHERE (sync_type = 'playlist' OR sync_type IS NULL OR sync_type = '') "
+                        f"AND ({_sh_like})",
+                        (_sh_type, *(p + '%' for p in _sh_prefixes)),
+                    )
+            except Exception as e:
+                logger.debug("Failed to repair sync_history types: %s", e)
+
             # Migration: add track_artist column for per-track artist on compilations/DJ mixes
             try:
                 cursor.execute("SELECT track_artist FROM tracks LIMIT 1")
