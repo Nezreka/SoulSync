@@ -164,6 +164,20 @@ def _recording_supports_slot(recording: dict, slot: dict) -> bool:
     return not slot_artist or not recording_artist or _title_score(recording_artist, slot_artist) >= 0.75
 
 
+def _same_base_recording_title(left: object, right: object) -> bool:
+    """Whether two recording labels differ only by a bracketed qualifier.
+
+    AcoustID can legitimately attach the same audio to a bare MusicBrainz
+    recording and a qualified release track. Pelagial's two copies of
+    ``Epipelagic`` are the concrete example: both are instrumental audio even
+    though only the second disc labels the track ``(Instrumental)``. The local
+    title and release slot still have to agree on their version markers; this
+    helper only prevents the bare AcoustID label from vetoing that agreement.
+    """
+    a, b = fold_title(str(left or '')), fold_title(str(right or ''))
+    return bool(a and b and a == b)
+
+
 def _duration_delta_ms(file: dict, slot: dict) -> int | None:
     tags = file.get('tags') or {}
     file_duration = int(tags.get('duration_ms') or file.get('duration_ms') or 0)
@@ -217,6 +231,7 @@ def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None) -> tup
     if strong_recordings and all(
         recording.get('mbid') != _recording_id(slot)
         and _title_score(str(recording.get('title') or ''), slot_title) < 0.83
+        and not _same_base_recording_title(recording.get('title'), slot_title)
         for recording in strong_recordings
     ):
         # A convincing fingerprint for another song must not become a match
@@ -250,6 +265,13 @@ def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None) -> tup
             elif _recording_supports_slot(recording, slot):
                 fingerprint_weight = max(fingerprint_weight, int(5_000 * score))
                 reasons = ['AcoustID recording title matches release slot']
+            elif _same_base_recording_title(recording.get('title'), slot_title):
+                # The local title and slot already passed the symmetric
+                # version check above. A bare AcoustID recording label is
+                # therefore positive audio evidence, rather than merely an
+                # exception to the wrong-audio veto.
+                fingerprint_weight = max(fingerprint_weight, int(5_000 * score))
+                reasons = ['AcoustID base recording title matches release slot']
 
     tag_title = _title_score(str(tags.get('title') or ''), slot_title)
     filename_title = _title_score(_filename_title(str(file.get('path') or '')), slot_title)
@@ -304,11 +326,24 @@ def reconcile_folder(files: list[dict], slots: list[dict]) -> dict[str, Any]:
         # A top-scored fingerprint spanning different songs cannot authorize a
         # confident repair even when one candidate names the release slot.
         recordings = evidence.get('recordings') or []
-        ambiguous_fingerprint = fingerprint_is_ambiguous(recordings)
         slot = slots[slot_index]
         tags = files[file_index].get('tags') or {}
         top_score = max((float(recording.get('score') or 0)
                          for recording in recordings), default=0)
+        top_recordings = [
+            recording for recording in recordings
+            if float(recording.get('score') or 0) >= top_score
+        ]
+        # Multiple MusicBrainz rows can describe the same named recording.
+        # If every top-scored row supports this exact album slot, differences
+        # such as "Angeleyes" / "Angel Eyes" are catalogue aliases rather
+        # than competing audio identities.
+        one_slot_identity = bool(top_recordings) and all(
+            _recording_supports_slot(recording, slot)
+            for recording in top_recordings
+        )
+        ambiguous_fingerprint = (
+            fingerprint_is_ambiguous(recordings) and not one_slot_identity)
         top_supports_slot = any(
             float(recording.get('score') or 0) >= top_score
             and _recording_supports_slot(recording, slot)
@@ -322,10 +357,6 @@ def reconcile_folder(files: list[dict], slots: list[dict]) -> dict[str, Any]:
                  and tags['mbid'] == _recording_id(slot)),
         ))
         assigned_duration_delta = _duration_delta_ms(files[file_index], slot)
-        top_recordings = [
-            recording for recording in recordings
-            if float(recording.get('score') or 0) >= top_score
-        ]
         def unresolved_alternative(
             other_index: int, other: dict, *, assigned_slot_index=slot_index,
             candidate_file_index=file_index, candidate_recordings=top_recordings,

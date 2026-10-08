@@ -235,6 +235,28 @@ def test_unrelated_acoustid_link_does_not_override_complete_album_evidence():
     assert pair['ambiguity_reasons'] == []
 
 
+def test_top_acoustid_aliases_for_one_release_slot_are_not_ambiguous():
+    files = [_file(
+        'Angeleyes', '/album/21 - Angeleyes.flac', 260000,
+        {'mbid': 'joined-title', 'title': 'Angeleyes',
+         'artist': 'ABBA', 'score': 0.94},
+    )]
+    files[0]['acoustid']['recordings'].append({
+        'mbid': 'spaced-title', 'title': 'Angel Eyes',
+        'artist': 'ABBA', 'score': 0.94,
+    })
+    slots = [{
+        'title': 'Angeleyes', 'artist': 'ABBA',
+        'recording_mbid': 'joined-title', 'duration_ms': 264400,
+    }]
+
+    pair = reconcile_folder(files, slots)['pairs'][0]
+
+    assert pair['confidence'] == 'clear'
+    assert pair['duration_delta_ms'] == 4400
+    assert pair['ambiguity_reasons'] == []
+
+
 def test_acoustid_link_that_fits_another_release_slot_remains_ambiguous():
     files = [_file(
         'First Song', '/album/01 - First Song.flac', 200000,
@@ -314,6 +336,32 @@ def test_recording_disambiguation_corroborates_same_titled_version():
     pair = reconcile_folder([file], [slot])['pairs'][0]
 
     assert 'recording disambiguation agrees' in pair['reasons']
+
+
+def test_bare_acoustid_title_does_not_veto_agreed_instrumental_slot():
+    shared = {'mbid': 'shared', 'title': 'Epipelagic',
+              'artist': 'The Ocean', 'score': 1.0}
+    files = [
+        _file('Epipelagic', '/album/01 - Epipelagic.flac', 72440, shared),
+        _file('Epipelagic (instrumental)',
+              '/album/12 - Epipelagic (instrumental).flac', 72440, shared),
+    ]
+    slots = [
+        {'title': 'Epipelagic', 'artist': 'The Ocean', 'duration_ms': 72440,
+         'track_number': 1, 'disc_number': 1},
+        {'title': 'Epipelagic (Instrumental)', 'artist': 'The Ocean',
+         'duration_ms': 72440, 'track_number': 1, 'disc_number': 2},
+    ]
+
+    result = reconcile_folder(files, slots)
+
+    assert {(pair['file_index'], pair['slot_index']) for pair in result['pairs']} == {
+        (0, 0), (1, 1)}
+    assert all(pair['confidence'] == 'clear' for pair in result['pairs'])
+    assert any('base recording title' in reason
+               for reason in result['pairs'][1]['reasons'])
+    assert result['extra_files'] == []
+    assert result['missing_slots'] == []
 
 
 def test_wrong_audio_is_extra_and_intended_slot_is_missing():

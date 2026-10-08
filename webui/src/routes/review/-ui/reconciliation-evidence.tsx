@@ -29,6 +29,20 @@ function percent(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value * 100)}%` : '';
 }
 
+function MusicBrainzId({ value, kind }: { value: unknown; kind: 'release' | 'recording' }) {
+  const id = label(value);
+  if (!id) return null;
+  return (
+    <a
+      href={`https://musicbrainz.org/${kind}/${encodeURIComponent(id)}`}
+      target="_blank"
+      rel="noreferrer"
+    >
+      {id}
+    </a>
+  );
+}
+
 function EvidenceIcon({ name, ...props }: SVGProps<SVGSVGElement> & { name: IconName }) {
   const path: Record<IconName, ReactNode> = {
     check: <path d="m4 12 5 5L20 6" />,
@@ -390,7 +404,11 @@ function AudioEvidence({ details }: { details: Data }) {
               {count(recording.recording_count) > 1 && (
                 <small>{count(recording.recording_count)} linked recording IDs</small>
               )}
-              {Boolean(recording.mbid) && <small>Recording ID: {label(recording.mbid)}</small>}
+              {Boolean(recording.mbid) && (
+                <small>
+                  Recording ID: <MusicBrainzId value={recording.mbid} kind="recording" />
+                </small>
+              )}
             </li>
           ))}
         </ol>
@@ -401,12 +419,15 @@ function AudioEvidence({ details }: { details: Data }) {
 }
 
 function candidateAssignments(candidate: Data): string {
-  return objects(candidate.pairs)
+  const pairs = objects(candidate.pairs)
     .map(
       (pair) =>
         `${label(pair.file)}:${label(pair.disc_number)}:${label(pair.slot_number)}:${label(pair.slot_title)}`,
     )
     .join('|');
+  const missing = Array.isArray(candidate.missing) ? candidate.missing.map(label).join('|') : '';
+  const extra = Array.isArray(candidate.extra) ? candidate.extra.map(label).join('|') : '';
+  return `${label(candidate.total_slots)}::${pairs}::missing=${missing}::extra=${extra}`;
 }
 
 function ReleaseCandidates({
@@ -465,7 +486,13 @@ function ReleaseCandidates({
                   <strong>
                     Candidate {index + 1} · {label(candidate.source) || 'Unknown source'}
                   </strong>
-                  <small>{label(candidate.release_id)}</small>
+                  <small>
+                    {label(candidate.source) === 'musicbrainz' ? (
+                      <MusicBrainzId value={candidate.release_id} kind="release" />
+                    ) : (
+                      label(candidate.release_id)
+                    )}
+                  </small>
                 </div>
               </header>
               {candidate.matched !== undefined && (
@@ -681,7 +708,13 @@ function Facts({ finding, details }: { finding: ReviewFinding; details: Data }) 
           {Boolean(details.release_id) && (
             <div>
               <dt>Release ID</dt>
-              <dd>{label(details.release_id)}</dd>
+              <dd>
+                {label(details.source) === 'musicbrainz' ? (
+                  <MusicBrainzId value={details.release_id} kind="release" />
+                ) : (
+                  label(details.release_id)
+                )}
+              </dd>
             </div>
           )}
           {details.local_file_count !== undefined && details.release_track_count !== undefined && (
@@ -714,6 +747,9 @@ export function ReconciliationEvidence({
   const changes = object(details.changes);
   const missing = objects(details.missing_tracks);
   const reasons = Array.isArray(details.match_reasons) ? details.match_reasons.map(label) : [];
+  const ambiguityReasons = Array.isArray(details.ambiguity_reasons)
+    ? details.ambiguity_reasons.map(label).filter(Boolean)
+    : [];
   const primaryPairs = objects(objects(details.candidates)[0]?.pairs);
   const duplicateCopies = objects(details.duplicate_copies);
 
@@ -751,6 +787,22 @@ export function ReconciliationEvidence({
       )}
       <ReleaseCandidates details={details} onPin={onPin} busy={busy} />
       <DuplicateCopies details={details} onKeepCopy={onKeepCopy} busy={busy} />
+      {ambiguityReasons.length > 0 && (
+        <section className={styles.problemCard} data-tone="warning">
+          <h4>
+            <EvidenceIcon name="warning" /> Why this needs review
+          </h4>
+          <ul>
+            {ambiguityReasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+          <p>
+            The release slot is the best overall fit, but AcoustID links this fingerprint to
+            competing recording identities at the same top score.
+          </p>
+        </section>
+      )}
       {missing.length > 0 && (
         <section className={styles.problemCard} data-tone="danger">
           <h4>

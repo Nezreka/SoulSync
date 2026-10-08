@@ -18,7 +18,7 @@ from core.repair_jobs.library_reconciliation import (
     LibraryReconciliationJob, _album_titles_compatible, _candidate_evidence,
     _candidate_rank, _candidate_shape, _candidate_shapes_equivalent,
     _group_disc_folders, _group_logical_albums,
-    _has_unexplained_identified_extras, _normalize_slot,
+    _has_unexplained_identified_extras, _normalize_slot, _numbered_slot,
     _promote_album_context_candidate,
     _release_group_candidates, _same_recording_copies, _search_release_candidates,
     _single_file_album_context_conflict, _suggest_filename,
@@ -133,6 +133,21 @@ def test_release_shapes_keep_two_explicit_recording_versions_distinct():
     }], plan)
 
     assert not _candidate_shapes_equivalent(live_1977, live_1978)
+
+
+def test_release_shapes_ignore_minor_provider_spelling_differences():
+    plan = {'pairs': [{'file_index': 0, 'slot_index': 0, 'confidence': 'clear'}],
+            'missing_slots': [], 'extra_files': []}
+    itunes = (1, 1, 0, 'itunes', 'a', [{
+        'title': 'Bathyalpelagic III: Disequilibrated (Instrumental)',
+        'track_number': 3, 'disc_number': 2,
+    }], plan)
+    deezer = (1, 1, 0, 'deezer', 'b', [{
+        'title': 'Bathyalpelagic III: Disequillibrated (Instrumental Version)',
+        'track_number': 3, 'disc_number': 2,
+    }], plan)
+
+    assert _candidate_shapes_equivalent(itunes, deezer)
 
 
 def test_musicbrainz_slot_keeps_recording_disambiguation():
@@ -1012,6 +1027,36 @@ def test_digital_numbering_rank_prefers_continuous_track_numbers():
         _candidate_rank(files, compact_disc, 'digital')
     assert _candidate_rank(files, continuous, 'release') == \
         _candidate_rank(files, compact_disc, 'release')
+
+
+def test_complete_tracklist_breaks_tie_with_deluxe_release():
+    files = [{'tags': {'track_number': number, 'disc_number': 1}}
+             for number in range(1, 12)]
+    pairs = [{'file_index': index, 'slot_index': index, 'confidence': 'clear'}
+             for index in range(11)]
+    complete_plan = {'pairs': pairs, 'extra_files': [], 'missing_slots': []}
+    deluxe_plan = {'pairs': pairs, 'extra_files': [], 'missing_slots': [11, 12, 13]}
+    complete = (11, 11, 0, 'musicbrainz', 'standard',
+                [{'track_number': number, 'disc_number': 1}
+                 for number in range(1, 12)], complete_plan)
+    deluxe = (11, 11, 0, 'itunes', 'deluxe',
+              [{'track_number': number, 'disc_number': 1}
+               for number in range(1, 15)], deluxe_plan)
+
+    assert _candidate_rank(files, complete, 'digital') > \
+        _candidate_rank(files, deluxe, 'digital')
+
+
+def test_digital_numbering_flattens_physical_release_without_changing_identity():
+    slot = {'title': 'Ab Ovo', 'disc_number': 2, 'track_number': 12,
+            'recording_mbid': 'recording-id'}
+
+    slots = [{'disc_number': 1}, slot]
+    numbered = _numbered_slot(slot, 12, 'digital', slots)
+
+    assert numbered == {**slot, 'disc_number': 1, 'track_number': 13}
+    assert _numbered_slot(slot, 12, 'release', slots) is slot
+    assert _numbered_slot(slot, 12, 'digital', [slot]) is slot
 
 
 def test_title_searched_compilation_beats_equally_fitting_original_album():

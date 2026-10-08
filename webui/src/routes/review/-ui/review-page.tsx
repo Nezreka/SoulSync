@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { FindingTypeInfo } from '../../tools/-tools.groups';
 
@@ -61,6 +61,36 @@ const categoryOptions = [
 
 const categoryLabels = Object.fromEntries(categoryOptions.filter(([value]) => value));
 
+function findingHeading(finding: ReviewFinding): string {
+  const details = finding.details && typeof finding.details === 'object' ? finding.details : {};
+  const changes =
+    details.changes && typeof details.changes === 'object' && !Array.isArray(details.changes)
+      ? Object.keys(details.changes as Record<string, unknown>)
+      : [];
+  const expected = String(details.expected_title || finding.title.replace(/^Retag\s+/i, ''));
+  if (changes.length === 1 && changes[0] === 'filename') return `Rename file: ${expected}`;
+  if (finding.finding_type === 'reconciliation_unresolved' && changes.length === 0) {
+    return `Confirm assignment: ${expected.replace(/^Confirm:\s*/i, '')}`;
+  }
+  if (/^Retag\s+/i.test(finding.title)) return `Update metadata: ${expected}`;
+  return finding.title;
+}
+
+function ReleaseId({ source, releaseId }: { source?: string; releaseId?: string }) {
+  if (!releaseId) return <code>unknown</code>;
+  return source === 'musicbrainz' ? (
+    <a
+      href={`https://musicbrainz.org/release/${encodeURIComponent(releaseId)}`}
+      target="_blank"
+      rel="noreferrer"
+    >
+      <code>{releaseId}</code>
+    </a>
+  ) : (
+    <code>{releaseId}</code>
+  );
+}
+
 function statusLabel(status: string) {
   return (
     {
@@ -71,6 +101,7 @@ function statusLabel(status: string) {
       not_owned: 'Not collected',
       extra: 'Extra',
       duplicate: 'Duplicate',
+      settled: 'No action',
     }[status] || status
   );
 }
@@ -78,9 +109,11 @@ function statusLabel(status: string) {
 function AssignmentRow({
   row,
   onSelect,
+  selected,
 }: {
   row: AlbumAssignment;
   onSelect: (findingId: number) => void;
+  selected: boolean;
 }) {
   return (
     <button
@@ -88,6 +121,7 @@ function AssignmentRow({
       role="row"
       className={styles.matrixRow}
       data-status={row.status}
+      data-selected={selected || undefined}
       onClick={() => row.finding_id && onSelect(row.finding_id)}
       disabled={!row.finding_id}
     >
@@ -115,17 +149,223 @@ function AssignmentRow({
         {row.playlists?.length ? <small>Playlist: {row.playlists.join(', ')}</small> : null}
       </span>
       <span>
-        {row.changes && Object.keys(row.changes).length
-          ? Object.keys(row.changes)
-              .map((key) => key.replaceAll('_', ' '))
-              .join(', ')
-          : row.title_difference === 'flavor'
-            ? 'Display wording only'
-            : row.title_difference === 'version_detail'
-              ? 'Version detail preserved'
-              : 'None'}
+        {row.relationship === 'version_conflict'
+          ? row.status === 'extra'
+            ? `Possible version of missing ${row.counterpart_disc_number || 1}.${row.counterpart_track_number ?? '—'} ${row.counterpart_title || ''}`
+            : `Possible local version: ${row.counterpart_file || row.counterpart_title || ''}`
+          : row.action_state === 'preview'
+            ? `Preview; ${row.preview_reason || 'resolve the album question first'}`
+            : row.status === 'settled'
+              ? 'No pending action'
+              : row.changes && Object.keys(row.changes).length
+                ? Object.keys(row.changes)
+                    .map((key) => key.replaceAll('_', ' '))
+                    .join(', ')
+                : row.status === 'uncertain'
+                  ? 'Confirm assignment; no metadata edit'
+                  : row.title_difference === 'flavor'
+                    ? 'Display wording only'
+                    : row.title_difference === 'version_detail'
+                      ? 'Version detail preserved'
+                      : 'None'}
       </span>
     </button>
+  );
+}
+
+function changeFieldLabel(field: string): string {
+  return (
+    {
+      artist: 'Artist',
+      album_artist: 'Album artist',
+      album: 'Album title',
+      title: 'Track title',
+      filename: 'Filename',
+      musicbrainz_recording_id: 'Recording ID',
+      library_recording_mbid: 'Library recording ID',
+    }[field] || field.replaceAll('_', ' ')
+  );
+}
+
+interface ReadyChangeGroup {
+  key: string;
+  label: string;
+  count: number;
+  findingIds: number[];
+  valueSummary?: string;
+}
+
+function groupReadyChanges(items: ReviewFinding[]): ReadyChangeGroup[] {
+  const groups = new Map<
+    string,
+    ReadyChangeGroup & { values: Array<{ old?: unknown; new?: unknown }> }
+  >();
+  for (const item of items.filter((finding) => finding.review_tier === 'ready')) {
+    const details = item.details && typeof item.details === 'object' ? item.details : {};
+    const changes =
+      details.changes && typeof details.changes === 'object' && !Array.isArray(details.changes)
+        ? (details.changes as Record<string, { old?: unknown; new?: unknown }>)
+        : {};
+    const fields = Object.keys(changes).sort();
+    const key = fields.join('|') || 'other';
+    const group = groups.get(key) || {
+      key,
+      label: fields.length ? fields.map(changeFieldLabel).join(' + ') : 'Other repair',
+      count: 0,
+      findingIds: [],
+      values: [],
+    };
+    group.count += 1;
+    group.findingIds.push(item.id);
+    if (fields.length === 1) group.values.push(changes[fields[0]] || {});
+    groups.set(key, group);
+  }
+  return [...groups.values()].map(({ values, ...group }) => {
+    if (!values.length) return group;
+    const first = values[0];
+    const same = values.every(
+      (value) =>
+        String(value.old ?? '') === String(first.old ?? '') &&
+        String(value.new ?? '') === String(first.new ?? ''),
+    );
+    return {
+      ...group,
+      valueSummary: same
+        ? `${String(first.old ?? 'empty')} → ${String(first.new ?? 'empty')}`
+        : undefined,
+    };
+  });
+}
+
+function SelectedActionDetail({
+  finding,
+  itemIndex,
+  itemCount,
+  typeInfo,
+  busy,
+  onAct,
+  onPin,
+  onSelect,
+  previousId,
+  nextId,
+}: {
+  finding: ReviewFinding;
+  itemIndex: number;
+  itemCount: number;
+  typeInfo?: FindingTypeInfo;
+  busy: boolean;
+  onAct: (action: 'fix' | 'dismiss', choice?: string) => void;
+  onPin?: (index: number) => void;
+  onSelect: (findingId: number | null) => void;
+  previousId?: number;
+  nextId?: number;
+}) {
+  const canApply = Boolean(typeInfo?.fixable) && finding.finding_type !== 'suspect_album_tag';
+  const duplicateChoice = finding.finding_type === 'reconciliation_duplicate';
+  const suggested = finding.review_tier === 'ready';
+  return (
+    <section
+      className={styles.findingDetail}
+      id="selected-review-action"
+      aria-label="Selected action detail"
+    >
+      <div className={styles.decisionHeader}>
+        <span>
+          Selected action · {suggested ? 'Ready change' : 'Needs review'} ·{' '}
+          {findingTypeLabel(finding.finding_type)} · Item {itemIndex + 1} of {itemCount}
+        </span>
+        <span className={styles.severity}>{finding.severity}</span>
+      </div>
+      <h3>{findingHeading(finding)}</h3>
+      <p className={styles.description}>{finding.description || 'Review the evidence below.'}</p>
+      <section
+        className={styles.suggestion}
+        data-tone={suggested ? 'good' : 'warning'}
+        aria-label="Suggested resolution"
+      >
+        <span className={styles.suggestionIcon} aria-hidden="true">
+          {suggested ? '✓' : '!'}
+        </span>
+        <div>
+          <div className={styles.eyebrow}>Suggested resolution</div>
+          <strong>
+            {duplicateChoice
+              ? 'Choose the copy to keep'
+              : suggested
+                ? typeInfo?.verb || 'Apply repair'
+                : canApply
+                  ? 'Choose the correct action after reviewing the evidence'
+                  : 'Review manually'}
+          </strong>
+          <p>
+            {duplicateChoice
+              ? 'Both files identify as the same release track. Playlist membership is shown with each copy.'
+              : suggested
+                ? 'Evidence supports a direct repair.'
+                : finding.review_reason || 'The evidence still requires a decision.'}
+          </p>
+        </div>
+      </section>
+      <ReconciliationEvidence
+        finding={finding}
+        busy={busy}
+        onPin={onPin}
+        onKeepCopy={duplicateChoice ? (trackId) => onAct('fix', trackId) : undefined}
+      />
+      <div className={styles.actions}>
+        {finding.finding_type === 'reconciliation_intent' ? (
+          <>
+            <button
+              type="button"
+              disabled={busy}
+              className={styles.primary}
+              onClick={() => onAct('fix', 'complete')}
+            >
+              I want the complete album
+            </button>
+            <button type="button" disabled={busy} onClick={() => onAct('fix', 'partial')}>
+              Playlist tracks or partial album
+            </button>
+          </>
+        ) : (
+          canApply &&
+          finding.finding_type !== 'reconciliation_release' &&
+          finding.finding_type !== 'reconciliation_duplicate' && (
+            <button
+              type="button"
+              disabled={busy}
+              className={styles.primary}
+              onClick={() => onAct('fix')}
+            >
+              {busy
+                ? 'Applying…'
+                : suggested
+                  ? typeInfo?.verb || 'Apply repair'
+                  : finding.finding_type === 'reconciliation_extra'
+                    ? 'Quarantine file'
+                    : 'Choose resolution'}
+            </button>
+          )
+        )}
+        <button type="button" disabled={busy} onClick={() => onAct('dismiss')}>
+          Accept as-is
+        </button>
+        <button
+          type="button"
+          disabled={busy || previousId == null}
+          onClick={() => onSelect(previousId ?? null)}
+        >
+          ← Previous decision
+        </button>
+        <button
+          type="button"
+          disabled={busy || nextId == null}
+          onClick={() => onSelect(nextId ?? null)}
+        >
+          Next decision →
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -245,9 +485,14 @@ export function ReviewPage() {
       .then((result) => {
         if (!live) return;
         setReviewCase(result);
-        setActiveId((current) =>
-          result.items.some((f) => f.id === current) ? current : (result.items[0]?.id ?? null),
-        );
+        setActiveId((current) => {
+          if (result.items.some((f) => f.id === current)) return current;
+          return (
+            result.items.find((finding) => finding.finding_type === 'reconciliation_release')?.id ??
+            result.items[0]?.id ??
+            null
+          );
+        });
       })
       .catch((cause: unknown) => {
         if (live) setError((cause as Error).message);
@@ -267,28 +512,59 @@ export function ReviewPage() {
   const pageCount = queue ? Math.max(1, Math.ceil(queue.total / queue.limit)) : 1;
   const albumNumber = queue && caseIndex >= 0 ? page * queue.limit + caseIndex + 1 : null;
   const typeInfo = active ? catalog[active.finding_type] : undefined;
-  const canApply = Boolean(typeInfo?.fixable) && active?.finding_type !== 'suspect_album_tag';
-  const duplicateChoice = active?.finding_type === 'reconciliation_duplicate';
-  const suggested = active?.review_tier === 'ready';
   const plan = reviewCase?.plan || emptyPlan;
   const decisions = reviewCase?.decisions || plan.decisions || [];
   const assignments = reviewCase?.album_plan?.assignments || [];
-  const attentionAssignments = assignments
-    .filter((row) => !['confirmed', 'not_owned'].includes(row.status))
-    .sort((left, right) => {
-      const order: Record<string, number> = {
-        uncertain: 0,
-        extra: 1,
-        duplicate: 1,
-        missing: 2,
-        change: 3,
-        not_owned: 4,
-      };
-      return (order[left.status] ?? 9) - (order[right.status] ?? 9);
-    });
-  const settledAssignments = assignments.filter((row) =>
-    ['confirmed', 'not_owned'].includes(row.status),
+  const pendingAssignments = assignments.filter(
+    (row) => !['confirmed', 'not_owned', 'settled'].includes(row.status),
   );
+  const versionConflictAssignments = pendingAssignments
+    .filter((row) => row.relationship === 'version_conflict')
+    .sort((left, right) => {
+      const relationship = (left.relationship_key || '').localeCompare(
+        right.relationship_key || '',
+      );
+      if (relationship) return relationship;
+      return left.status === 'extra' ? -1 : right.status === 'extra' ? 1 : 0;
+    });
+  const attentionAssignments = [
+    ...versionConflictAssignments,
+    ...pendingAssignments
+      .filter((row) => row.relationship !== 'version_conflict')
+      .sort((left, right) => {
+        const order: Record<string, number> = {
+          uncertain: 0,
+          extra: 1,
+          duplicate: 1,
+          missing: 2,
+          change: 3,
+          not_owned: 4,
+        };
+        return (order[left.status] ?? 9) - (order[right.status] ?? 9);
+      }),
+  ];
+  const settledAssignments = assignments.filter((row) =>
+    ['confirmed', 'not_owned', 'settled'].includes(row.status),
+  );
+  const readyChangeGroups = useMemo(
+    () => groupReadyChanges(reviewCase?.items || []),
+    [reviewCase?.items],
+  );
+  const activeDecision = active
+    ? decisions.find((decision) => decision.finding_ids.includes(active.id))
+    : undefined;
+  const activeAssignment = active
+    ? assignments.find((row) => row.finding_id === active.id)
+    : undefined;
+  const primaryDecision = decisions.length === 1 ? decisions[0] : undefined;
+
+  const selectFinding = (findingId: number | null) => {
+    setActiveId(findingId);
+    window.setTimeout(
+      () => document.getElementById('selected-review-action')?.scrollIntoView({ block: 'nearest' }),
+      0,
+    );
+  };
 
   const selectCase = (next: string) => {
     setNotice('');
@@ -450,6 +726,26 @@ export function ReviewPage() {
     }
   };
 
+  const selectedActionDetail =
+    active && reviewCase ? (
+      <SelectedActionDetail
+        finding={active}
+        itemIndex={itemIndex}
+        itemCount={reviewCase.count}
+        typeInfo={typeInfo}
+        busy={busy}
+        onAct={(action, choice) => void act(active, action, choice)}
+        onPin={
+          active.finding_type === 'reconciliation_release'
+            ? (index) => void act(active, 'fix', String(index))
+            : undefined
+        }
+        onSelect={selectFinding}
+        previousId={reviewCase.items[itemIndex - 1]?.id}
+        nextId={reviewCase.items[itemIndex + 1]?.id}
+      />
+    ) : null;
+
   return (
     <main className={`page-shell ${styles.page}`}>
       <header className={styles.header}>
@@ -549,7 +845,7 @@ export function ReviewPage() {
                 }}
               >
                 <option value="">All risk levels</option>
-                <option value="ready">Ready to apply</option>
+                <option value="ready">Fully ready albums</option>
                 <option value="manual">Needs a decision</option>
                 <option value="destructive">File actions</option>
               </select>
@@ -661,10 +957,13 @@ export function ReviewPage() {
                     <strong>
                       {plan.status === 'ready'
                         ? 'Ready to reconcile'
-                        : `${plan.decision_count ?? plan.manual + plan.destructive + plan.blocked} decision${(plan.decision_count ?? plan.manual + plan.destructive + plan.blocked) === 1 ? '' : 's'} need review`}
+                        : primaryDecision
+                          ? `${primaryDecision.label} needs a decision`
+                          : `${plan.decision_count ?? plan.manual + plan.destructive + plan.blocked} decisions need review`}
                     </strong>
                     <p>
-                      {plan.blocker_reasons[0] ||
+                      {primaryDecision?.summary ||
+                        plan.blocker_reasons[0] ||
                         'All proposed changes are supported by the album and audio evidence.'}
                     </p>
                   </div>
@@ -696,15 +995,23 @@ export function ReviewPage() {
                         Apply and organize folder
                       </button>
                     )}
-                    <details>
+                    <details className={styles.readyChanges}>
                       <summary>Review ready changes</summary>
-                      <ul>
-                        {reviewCase.items
-                          .filter((item) => item.review_tier === 'ready')
-                          .map((item) => (
-                            <li key={item.id}>{item.title}</li>
-                          ))}
-                      </ul>
+                      <div className={styles.readyChangeGroups}>
+                        {readyChangeGroups.map((group) => (
+                          <button
+                            key={group.key}
+                            type="button"
+                            onClick={() => selectFinding(group.findingIds[0] ?? null)}
+                          >
+                            <strong>{group.label}</strong>
+                            <span>
+                              {group.count} track{group.count === 1 ? '' : 's'}
+                              {group.valueSummary ? ` · ${group.valueSummary}` : ''}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
                     </details>
                   </div>
                 )}
@@ -725,54 +1032,92 @@ export function ReviewPage() {
                     </span>
                   </div>
                   <div className={styles.decisionGrid}>
-                    {decisions.map((decision) => (
-                      <article key={decision.id} data-risk={decision.risk}>
-                        <button
-                          type="button"
-                          className={styles.decisionSelect}
-                          onClick={() => setActiveId(decision.finding_ids[0] ?? null)}
-                        >
-                          <span className={styles.decisionIcon} aria-hidden="true">
-                            {decision.risk === 'ready'
-                              ? '✓'
-                              : decision.risk === 'destructive'
-                                ? '×'
-                                : '!'}
-                          </span>
-                          <span>
-                            <strong>{decision.label}</strong>
-                            <small>{decision.summary}</small>
-                          </span>
-                          <b>{decision.action_count}</b>
-                        </button>
-                        {['numbering', 'title_conventions', 'metadata'].includes(
-                          decision.category,
-                        ) && (
-                          <div className={styles.decisionActions}>
+                    {decisions.map((decision) => {
+                      const selected = decision.finding_ids.includes(active.id);
+                      return (
+                        <Fragment key={decision.id}>
+                          <article data-risk={decision.risk} data-selected={selected || undefined}>
                             <button
                               type="button"
-                              disabled={busy}
-                              onClick={() => void actGroup(decision, 'fix')}
+                              className={styles.decisionSelect}
+                              onClick={() => selectFinding(decision.finding_ids[0] ?? null)}
                             >
-                              {decision.category === 'numbering'
-                                ? 'Use selected release numbering'
-                                : decision.category === 'title_conventions'
-                                  ? 'Apply title conventions'
-                                  : 'Apply safe metadata'}
+                              <span className={styles.decisionIcon} aria-hidden="true">
+                                {decision.risk === 'ready'
+                                  ? '✓'
+                                  : decision.risk === 'destructive'
+                                    ? '×'
+                                    : '!'}
+                              </span>
+                              <span>
+                                <strong>{decision.label}</strong>
+                                <small>{decision.summary}</small>
+                              </span>
+                              <b>{decision.action_count}</b>
                             </button>
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => void actGroup(decision, 'dismiss')}
+                            {['numbering', 'title_conventions', 'metadata'].includes(
+                              decision.category,
+                            ) && (
+                              <div className={styles.decisionActions}>
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => void actGroup(decision, 'fix')}
+                                >
+                                  {decision.category === 'numbering'
+                                    ? reviewCase.album_plan?.numbering_mode === 'digital'
+                                      ? 'Use continuous numbering'
+                                      : 'Use release numbering'
+                                    : decision.category === 'title_conventions'
+                                      ? 'Apply title conventions'
+                                      : `Apply ${decision.label.toLowerCase()}`}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => void actGroup(decision, 'dismiss')}
+                                >
+                                  {decision.category === 'numbering'
+                                    ? 'Keep current numbering'
+                                    : 'Keep current values'}
+                                </button>
+                              </div>
+                            )}
+                          </article>
+                          {selected &&
+                            !activeAssignment &&
+                            active.finding_type !== 'reconciliation_release' &&
+                            selectedActionDetail}
+                          {selected && active.finding_type === 'reconciliation_release' && (
+                            <section
+                              className={styles.releaseDecision}
+                              id="selected-review-action"
+                              aria-label="Release decision"
                             >
-                              {decision.category === 'numbering'
-                                ? 'Keep current numbering'
-                                : 'Keep current values'}
-                            </button>
-                          </div>
-                        )}
-                      </article>
-                    ))}
+                              <div>
+                                <div className={styles.eyebrow}>Choose this first</div>
+                                <h4>{findingHeading(active)}</h4>
+                                <p>{active.description}</p>
+                              </div>
+                              <ReconciliationEvidence
+                                finding={active}
+                                busy={busy}
+                                onPin={(index) => void act(active, 'fix', String(index))}
+                              />
+                              <div className={styles.actions}>
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => void act(active, 'dismiss')}
+                                >
+                                  Keep current release
+                                </button>
+                              </div>
+                            </section>
+                          )}
+                        </Fragment>
+                      );
+                    })}
                   </div>
                 </section>
               )}
@@ -805,6 +1150,11 @@ export function ReviewPage() {
                           ○ {reviewCase.album_plan?.counts.not_owned} outside collection
                         </span>
                       )}
+                      {(reviewCase.album_plan?.counts.settled || 0) > 0 && (
+                        <span data-status="settled">
+                          ✓ {reviewCase.album_plan?.counts.settled} already reviewed
+                        </span>
+                      )}
                       <span data-status="extra">
                         + {reviewCase.album_plan?.counts.extra || 0} extra
                       </span>
@@ -813,14 +1163,17 @@ export function ReviewPage() {
                   <div className={styles.releaseContext}>
                     <span>
                       Selected {reviewCase.album_plan?.source || 'catalog'} release
-                      <code>{reviewCase.album_plan?.release_id || 'unknown'}</code>
+                      <ReleaseId
+                        source={reviewCase.album_plan?.source}
+                        releaseId={reviewCase.album_plan?.release_id}
+                      />
                     </span>
                     {reviewCase.album_plan?.intent_scope && (
                       <span>Intent: {reviewCase.album_plan.intent_scope} album</span>
                     )}
                     {reviewCase.album_plan?.candidates?.[0] && (
                       <span>
-                        {reviewCase.album_plan.candidates[0].continuous_numbering
+                        {reviewCase.album_plan.numbering_mode === 'digital'
                           ? 'Continuous digital numbering'
                           : 'Multi-disc release numbering'}
                       </span>
@@ -833,145 +1186,37 @@ export function ReviewPage() {
                       <span>Local file</span>
                       <span>Release slot</span>
                       <span>Evidence</span>
-                      <span>Change</span>
+                      <span>Pending action</span>
                     </div>
                     {attentionAssignments.map((row, index) => (
-                      <AssignmentRow
-                        key={`${row.file_path || row.slot_title}-${index}`}
-                        row={row}
-                        onSelect={setActiveId}
-                      />
+                      <Fragment key={`${row.file_path || row.slot_title}-${index}`}>
+                        <AssignmentRow
+                          row={row}
+                          onSelect={selectFinding}
+                          selected={row.finding_id === active.id}
+                        />
+                        {row.finding_id === active.id && selectedActionDetail}
+                      </Fragment>
                     ))}
                     {settledAssignments.length > 0 && (
                       <details className={styles.confirmedAssignments}>
                         <summary>✓ {settledAssignments.length} settled release slots</summary>
                         {settledAssignments.map((row, index) => (
-                          <AssignmentRow
-                            key={`${row.file_path || row.slot_title}-${index}`}
-                            row={row}
-                            onSelect={setActiveId}
-                          />
+                          <Fragment key={`${row.file_path || row.slot_title}-${index}`}>
+                            <AssignmentRow
+                              row={row}
+                              onSelect={selectFinding}
+                              selected={row.finding_id === active.id}
+                            />
+                            {row.finding_id === active.id && selectedActionDetail}
+                          </Fragment>
                         ))}
                       </details>
                     )}
                   </div>
                 </section>
               )}
-
-              <section className={styles.findingDetail} aria-label="Selected action detail">
-                <div className={styles.decisionHeader}>
-                  <span>
-                    {active.review_tier === 'ready' ? 'Ready change' : 'Needs review'} ·{' '}
-                    {findingTypeLabel(active.finding_type)} · Item {itemIndex + 1} of{' '}
-                    {reviewCase.count}
-                  </span>
-                  <span className={styles.severity}>{active.severity}</span>
-                </div>
-                <h3>{active.title}</h3>
-                <p className={styles.description}>
-                  {active.description || 'Review the evidence below.'}
-                </p>
-
-                <section
-                  className={styles.suggestion}
-                  data-tone={suggested ? 'good' : 'warning'}
-                  aria-label="Suggested resolution"
-                >
-                  <span className={styles.suggestionIcon} aria-hidden="true">
-                    {suggested ? '✓' : '!'}
-                  </span>
-                  <div>
-                    <div className={styles.eyebrow}>Suggested resolution</div>
-                    <strong>
-                      {duplicateChoice
-                        ? 'Choose the copy to keep'
-                        : suggested
-                          ? typeInfo?.verb || 'Apply repair'
-                          : canApply
-                            ? 'Choose the correct action after reviewing the evidence'
-                            : 'Review manually'}
-                    </strong>
-                    <p>
-                      {duplicateChoice
-                        ? 'Both files identify as the same release track. Playlist membership is shown with each copy.'
-                        : suggested
-                          ? 'Evidence supports a direct repair.'
-                          : active.review_reason || 'The evidence still requires a decision.'}
-                    </p>
-                  </div>
-                </section>
-
-                <ReconciliationEvidence
-                  finding={active}
-                  busy={busy}
-                  onPin={
-                    active.finding_type === 'reconciliation_release'
-                      ? (index) => void act(active, 'fix', String(index))
-                      : undefined
-                  }
-                  onKeepCopy={
-                    duplicateChoice ? (trackId) => void act(active, 'fix', trackId) : undefined
-                  }
-                />
-
-                <div className={styles.actions}>
-                  {active.finding_type === 'reconciliation_intent' ? (
-                    <>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        className={styles.primary}
-                        onClick={() => void act(active, 'fix', 'complete')}
-                      >
-                        I want the complete album
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => void act(active, 'fix', 'partial')}
-                      >
-                        Playlist tracks or partial album
-                      </button>
-                    </>
-                  ) : (
-                    canApply &&
-                    active.finding_type !== 'reconciliation_release' &&
-                    active.finding_type !== 'reconciliation_duplicate' && (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        className={styles.primary}
-                        onClick={() => void act(active, 'fix')}
-                      >
-                        {busy
-                          ? 'Applying…'
-                          : suggested
-                            ? typeInfo?.verb || 'Apply repair'
-                            : active.finding_type === 'reconciliation_extra'
-                              ? 'Quarantine file'
-                              : 'Choose resolution'}
-                      </button>
-                    )
-                  )}
-                  <button type="button" disabled={busy} onClick={() => void act(active, 'dismiss')}>
-                    Accept as-is
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy || itemIndex <= 0}
-                    onClick={() => setActiveId(reviewCase.items[itemIndex - 1].id)}
-                  >
-                    ← Previous decision
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy || itemIndex >= reviewCase.items.length - 1}
-                    onClick={() => setActiveId(reviewCase.items[itemIndex + 1].id)}
-                  >
-                    Next decision →
-                  </button>
-                </div>
-              </section>
+              {!activeAssignment && !activeDecision && selectedActionDetail}
             </>
           ) : queue && queue.total === 0 ? (
             <div className={styles.empty}>

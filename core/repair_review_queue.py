@@ -13,6 +13,7 @@ import os
 from typing import Any
 
 from core.library.reconciliation_store import load_album_plan
+from core.text.fold import fold_title
 
 
 _SEVERITY = "CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END"
@@ -25,6 +26,45 @@ _GLOBAL_BLOCKER_TYPES = frozenset({'reconciliation_release'})
 _POSITION_CHANGE_KEYS = frozenset({
     'track_number', 'disc_number', 'library_track_number', 'library_disc_number',
 })
+_TITLE_CHANGE_KEYS = frozenset({'title', 'library_title', 'filename'})
+
+
+def _change_value(change: Any, key: str) -> str:
+    value = change.get(key) if isinstance(change, dict) else None
+    return str(value or '').strip()
+
+
+def _uniform_change_summary(rows: list[dict[str, Any]]) -> tuple[str, str] | None:
+    """Describe one identical metadata field change across an album."""
+    changes = [
+        row.get('details', {}).get('changes', {})
+        if isinstance(row.get('details'), dict) else {}
+        for row in rows
+    ]
+    if not changes or any(not isinstance(change, dict) or len(change) != 1
+                          for change in changes):
+        return None
+    field = next(iter(changes[0]))
+    if any(next(iter(change)) != field for change in changes[1:]):
+        return None
+    labels = {
+        'artist': 'Artist', 'album_artist': 'Album artist', 'album': 'Album title',
+        'library_track_artist': 'Library artist',
+        'library_album_title': 'Library album title',
+        'musicbrainz_recording_id': 'Recording ID',
+        'library_recording_mbid': 'Library recording ID', 'filename': 'Filename',
+    }
+    label = labels.get(field, field.replace('_', ' ').title())
+    values = [(_change_value(change[field], 'old'),
+               _change_value(change[field], 'new')) for change in changes]
+    count = len(rows)
+    if values and all(value == values[0] for value in values) and any(values[0]):
+        old, new = values[0]
+        return (f'{label} update',
+                f'{count} track{"s" if count != 1 else ""}: '
+                f'{old or "empty"} → {new or "empty"}.')
+    return (f'{label} update',
+            f'{count} track{"s" if count != 1 else ""} update {label.lower()}.')
 
 
 def finding_category(item: dict[str, Any]) -> str:
@@ -45,11 +85,13 @@ def finding_category(item: dict[str, Any]) -> str:
     # A possibly different recording version is the controlling decision even
     # when its atomic repair also carries track-number or filename changes.
     # The grouped numbering button must never conceal a material title edit.
-    if details.get('title_difference_kind') in ('material', 'version'):
+    if (details.get('title_difference_kind') in ('material', 'version') and
+            _TITLE_CHANGE_KEYS.intersection(changes)):
         return 'title_issues'
     if _POSITION_CHANGE_KEYS.intersection(changes):
         return 'numbering'
-    if details.get('title_difference_kind') in ('typography', 'flavor'):
+    if (details.get('title_difference_kind') in ('typography', 'flavor') and
+            _TITLE_CHANGE_KEYS.intersection(changes)):
         return 'title_conventions'
     return 'metadata'
 
@@ -70,17 +112,17 @@ def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for item in items:
         category = finding_category(item)
         item['category'] = category
-        # Numbering and convention changes are one album question. Safe
-        # metadata is one inspectable bulk action. Other findings retain their
-        # individual decisions because their supported actions can differ.
-        if category in ('numbering', 'title_conventions', 'metadata'):
-            key = category
-        else:
-            key = f'{category}:{item.get("id")}'
+        # A decision card describes one album-level question. The track matrix
+        # below it remains the place to inspect and act on individual files.
+        # Repeating an identical "audio assignment" card for every uncertain
+        # track makes the album look more complicated without adding choices.
+        key = category
         grouped.setdefault(key, []).append(item)
     decisions = []
     for key, rows in grouped.items():
         category = finding_category(rows[0])
+        decision_label = _CATEGORY_LABELS.get(
+            category, category.replace('_', ' ').title())
         tiers = [str(row.get('review_tier') or 'manual') for row in rows]
         risk = ('destructive' if 'destructive' in tiers else
                 'manual' if 'manual' in tiers else
@@ -90,18 +132,42 @@ def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         elif category == 'title_conventions':
             summary = f'{len(rows)} title wording changes preserve the identified recordings.'
         elif category == 'metadata':
-            summary = f'{len(rows)} evidence-supported metadata actions are ready.'
+            uniform = _uniform_change_summary(rows)
+            if uniform:
+                decision_label, summary = uniform
+            else:
+                summary = f'{len(rows)} evidence-supported metadata actions are ready.'
+        elif category == 'audio_conflicts':
+            summary = (f'{len(rows)} track assignment'
+                       f'{"s need" if len(rows) != 1 else " needs"} confirmation.')
+        elif category == 'missing_tracks':
+            summary = (f'{len(rows)} expected track'
+                       f'{"s are" if len(rows) != 1 else " is"} absent.')
+        elif category == 'extra_files':
+            summary = (f'{len(rows)} local file'
+                       f'{"s do" if len(rows) != 1 else " does"} not fit the release.')
+        elif category == 'duplicates':
+            summary = (f'{len(rows)} duplicate-copy decision'
+                       f'{"s" if len(rows) != 1 else ""} remain.')
+        elif category == 'partial_albums':
+            summary = 'Choose whether this album should be complete.'
         else:
             summary = rows[0].get('description') or 'Review the supporting evidence.'
         decisions.append({
             'id': key, 'category': category,
-            'label': _CATEGORY_LABELS.get(category, category.replace('_', ' ').title()),
+            'label': decision_label,
             'risk': risk, 'summary': summary,
             'finding_ids': [row.get('id') for row in rows],
             'action_count': len(rows),
         })
+    category_rank = {
+        'release_conflicts': 0, 'partial_albums': 1, 'numbering': 2,
+        'title_issues': 3, 'audio_conflicts': 4, 'missing_tracks': 5,
+        'extra_files': 6, 'duplicates': 7, 'title_conventions': 8, 'metadata': 9,
+    }
     risk_rank = {'manual': 0, 'destructive': 1, 'blocked': 2, 'ready': 3}
-    return sorted(decisions, key=lambda row: (risk_rank.get(row['risk'], 9), row['label']))
+    return sorted(decisions, key=lambda row: (
+        category_rank.get(row['category'], 99), risk_rank.get(row['risk'], 9), row['label']))
 
 
 def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tuple[str, str]:
@@ -123,7 +189,8 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
         }.get(finding_type, 'This finding requires a decision')
     if global_blocked:
         return 'blocked', 'The selected release must be resolved first'
-    if details.get('title_difference_kind') in ('material', 'version'):
+    if (details.get('title_difference_kind') in ('material', 'version') and
+            _TITLE_CHANGE_KEYS.intersection(changes)):
         return 'manual', 'The title may identify a different song or recording version'
     if _POSITION_CHANGE_KEYS.intersection(changes):
         return 'manual', 'The release uses a different disc or track numbering scheme'
@@ -195,8 +262,23 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
                 json_type(%s, '$.changes.library_track_number') IS NOT NULL OR
                 json_type(%s, '$.changes.library_disc_number') IS NOT NULL)""" %
                 (_DETAILS, _DETAILS, _DETAILS, _DETAILS, _DETAILS)),
-            'title_conventions': "json_extract(%s, '$.title_difference_kind') IN ('typography','flavor')" % _DETAILS,
-            'title_issues': "json_extract(%s, '$.title_difference_kind') IN ('material','version')" % _DETAILS,
+            'title_conventions': ("finding_type = 'reconciliation_metadata' AND "
+                "json_extract(%s, '$.title_difference_kind') IN ('typography','flavor') "
+                "AND (json_type(%s, '$.changes.title') IS NOT NULL OR "
+                "json_type(%s, '$.changes.library_title') IS NOT NULL OR "
+                "json_type(%s, '$.changes.filename') IS NOT NULL) "
+                "AND json_type(%s, '$.changes.track_number') IS NULL "
+                "AND json_type(%s, '$.changes.disc_number') IS NULL "
+                "AND json_type(%s, '$.changes.library_track_number') IS NULL "
+                "AND json_type(%s, '$.changes.library_disc_number') IS NULL" %
+                (_DETAILS, _DETAILS, _DETAILS, _DETAILS, _DETAILS,
+                 _DETAILS, _DETAILS, _DETAILS)),
+            'title_issues': ("json_extract(%s, '$.title_difference_kind') "
+                "IN ('material','version') AND ("
+                "json_type(%s, '$.changes.title') IS NOT NULL OR "
+                "json_type(%s, '$.changes.library_title') IS NOT NULL OR "
+                "json_type(%s, '$.changes.filename') IS NOT NULL)" %
+                (_DETAILS, _DETAILS, _DETAILS, _DETAILS)),
             'release_conflicts': "finding_type = 'reconciliation_release'",
             'audio_conflicts': "finding_type = 'reconciliation_unresolved'",
             'missing_tracks': "finding_type = 'reconciliation_missing'",
@@ -204,13 +286,17 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
             'duplicates': "finding_type = 'reconciliation_duplicate'",
             'extra_files': "finding_type = 'reconciliation_extra'",
             'metadata': ("finding_type = 'reconciliation_metadata' AND "
-                         "COALESCE(json_extract(%s, '$.title_difference_kind'), '') "
-                         "NOT IN ('typography','flavor','material','version') AND "
+                         "NOT (COALESCE(json_extract(%s, '$.title_difference_kind'), '') "
+                         "IN ('typography','flavor','material','version') AND ("
+                         "json_type(%s, '$.changes.title') IS NOT NULL OR "
+                         "json_type(%s, '$.changes.library_title') IS NOT NULL OR "
+                         "json_type(%s, '$.changes.filename') IS NOT NULL)) AND "
                          "json_type(%s, '$.changes.track_number') IS NULL AND "
                          "json_type(%s, '$.changes.disc_number') IS NULL AND "
                          "json_type(%s, '$.changes.library_track_number') IS NULL AND "
                          "json_type(%s, '$.changes.library_disc_number') IS NULL" %
-                         (_DETAILS, _DETAILS, _DETAILS, _DETAILS, _DETAILS)),
+                         (_DETAILS, _DETAILS, _DETAILS, _DETAILS,
+                          _DETAILS, _DETAILS, _DETAILS, _DETAILS)),
         }
         if category in category_conditions:
             search += f' AND ({category_conditions[category]})'
@@ -226,7 +312,27 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
                        " AND COALESCE(json_extract(" + _DETAILS +
                        ", '$.confidence'), 'clear') IN ('','clear')" +
                        " AND COALESCE(json_extract(" + _DETAILS +
-                       ", '$.title_difference_kind'), '') NOT IN ('material','version')")
+                       ", '$.title_difference_kind'), '') NOT IN ('material','version')" +
+                       " AND COALESCE(last_error, '') = ''" +
+                       " AND NOT EXISTS (SELECT 1 FROM repair_findings blocker "
+                       "WHERE blocker.status = repair_findings.status "
+                       "AND blocker.job_id = repair_findings.job_id "
+                       "AND blocker.review_case_key = repair_findings.review_case_key "
+                       "AND (blocker.finding_type != 'reconciliation_metadata' "
+                       "OR COALESCE(blocker.last_error, '') != '' "
+                       "OR json_type(CASE WHEN json_valid(blocker.details_json) "
+                       "THEN blocker.details_json ELSE '{}' END, '$.changes.track_number') IS NOT NULL "
+                       "OR json_type(CASE WHEN json_valid(blocker.details_json) "
+                       "THEN blocker.details_json ELSE '{}' END, '$.changes.disc_number') IS NOT NULL "
+                       "OR json_type(CASE WHEN json_valid(blocker.details_json) "
+                       "THEN blocker.details_json ELSE '{}' END, '$.changes.library_track_number') IS NOT NULL "
+                       "OR json_type(CASE WHEN json_valid(blocker.details_json) "
+                       "THEN blocker.details_json ELSE '{}' END, '$.changes.library_disc_number') IS NOT NULL "
+                       "OR COALESCE(json_extract(CASE WHEN json_valid(blocker.details_json) "
+                       "THEN blocker.details_json ELSE '{}' END, '$.confidence'), 'clear') NOT IN ('','clear') "
+                       "OR COALESCE(json_extract(CASE WHEN json_valid(blocker.details_json) "
+                       "THEN blocker.details_json ELSE '{}' END, '$.title_difference_kind'), '') "
+                       "IN ('material','version'))) ")
         elif risk == 'destructive':
             search += " AND finding_type IN ('reconciliation_extra','reconciliation_duplicate')"
         elif risk == 'manual':
@@ -309,31 +415,19 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
             case_ids = [item['case_id'] for item in items]
             placeholders = ','.join('?' for _ in case_ids)
             detail_rows = conn.execute(f"""
-                SELECT review_case_key, finding_type, last_error,
-                       json_extract({_DETAILS}, '$.confidence'),
-                       json_type({_DETAILS}, '$.changes.track_number'),
-                       json_type({_DETAILS}, '$.changes.disc_number'),
-                       json_type({_DETAILS}, '$.changes.library_track_number'),
-                       json_type({_DETAILS}, '$.changes.library_disc_number'),
-                       json_extract({_DETAILS}, '$.title_difference_kind')
+                SELECT review_case_key, finding_type, last_error, details_json
                 FROM repair_findings
                 WHERE status = ? AND review_case_key IN ({placeholders})
                   AND (? = '' OR job_id = ?)
             """, [status, *case_ids, job_id, job_id]).fetchall()
             grouped: dict[str, list[dict[str, Any]]] = {}
-            for (case_key, finding_type, last_error, confidence,
-                 track_number, disc_number, library_track_number,
-                 library_disc_number, title_kind) in detail_rows:
-                position_values = (
-                    ('track_number', track_number), ('disc_number', disc_number),
-                    ('library_track_number', library_track_number),
-                    ('library_disc_number', library_disc_number),
-                )
-                details = {
-                    'confidence': confidence,
-                    'title_difference_kind': title_kind,
-                    'changes': {key: True for key, value in position_values if value is not None},
-                }
+            for case_key, finding_type, last_error, raw_details in detail_rows:
+                try:
+                    details = json.loads(raw_details) if raw_details else {}
+                    if not isinstance(details, dict):
+                        details = {}
+                except (TypeError, ValueError):
+                    details = {}
                 grouped.setdefault(case_key, []).append({
                     'finding_type': finding_type, 'details': details,
                     'last_error': last_error,
@@ -403,7 +497,37 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                            str(slot.get('track_number') or 0),
                            str(slot.get('name') or ''))
                     missing_findings[key] = item
-            for assignment in album_plan.get('assignments') or []:
+            has_release_decision = any(
+                item.get('finding_type') == 'reconciliation_release' for item in items)
+            intent_finding = next((
+                item for item in items
+                if item.get('finding_type') == 'reconciliation_intent'
+            ), None)
+            has_album_unresolved = any(
+                item.get('finding_type') == 'reconciliation_unresolved'
+                and not item.get('file_path')
+                for item in items
+            )
+            assignments = album_plan.get('assignments') or []
+            missing_rows = [row for row in assignments if row.get('status') == 'missing']
+            used_missing: set[int] = set()
+            for extra in (row for row in assignments if row.get('status') == 'extra'):
+                key = fold_title(str(extra.get('current_title') or ''))
+                match = next((row for row in missing_rows
+                              if id(row) not in used_missing and key and
+                              fold_title(str(row.get('slot_title') or '')) == key), None)
+                if not match:
+                    continue
+                used_missing.add(id(match))
+                extra['counterpart_title'] = match.get('slot_title')
+                extra['counterpart_disc_number'] = match.get('slot_disc_number')
+                extra['counterpart_track_number'] = match.get('slot_track_number')
+                extra['relationship'] = match['relationship'] = 'version_conflict'
+                extra['relationship_key'] = match['relationship_key'] = key
+                match['counterpart_title'] = extra.get('current_title')
+                match['counterpart_file'] = extra.get('file')
+                match['counterpart_file_path'] = extra.get('file_path')
+            for assignment in assignments:
                 finding = finding_by_path.get(assignment.get('file_path'))
                 if not finding and assignment.get('status') == 'missing':
                     key = (str(assignment.get('source_track_id') or ''),
@@ -411,9 +535,55 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                            str(assignment.get('slot_track_number') or 0),
                            str(assignment.get('slot_title') or ''))
                     finding = missing_findings.get(key)
+                if (not finding and assignment.get('status') == 'missing' and
+                        assignment.get('relationship') == 'version_conflict'):
+                    # The actionable finding belongs to the local file, while
+                    # the paired absent slot has no file path of its own.
+                    # Link both rows to the same decision so the queue cannot
+                    # hide half of a version conflict as already reviewed.
+                    finding = finding_by_path.get(assignment.get('counterpart_file_path'))
+                if (not finding and intent_finding and
+                        assignment.get('status') == 'missing'):
+                    # A partial-album question owns the absent rows as one
+                    # album-level choice. Keep those rows visibly actionable
+                    # even though there is no finding per missing slot.
+                    finding = intent_finding
                 if finding:
                     assignment['finding_id'] = finding['id']
                     assignment['review_tier'] = finding.get('review_tier')
+                    assignment['action_state'] = finding.get('review_tier')
+                elif has_release_decision or has_album_unresolved:
+                    # These rows preview the selected candidate. They are not
+                    # independent actions until the album-level question has
+                    # been answered.
+                    assignment['action_state'] = 'preview'
+                    assignment['preview_reason'] = (
+                        'Choose the release first' if has_release_decision
+                        else 'Resolve the album question first')
+                elif assignment.get('status') in {
+                        'change', 'uncertain', 'missing', 'extra', 'duplicate'}:
+                    # The persisted plan is complete evidence and can outlive
+                    # a dismissed/applied finding. Do not present a resolved
+                    # hypothesis as a pending action.
+                    assignment['evidence_status'] = assignment.get('status')
+                    assignment['status'] = 'settled'
+                    assignment['changes'] = {}
+                    assignment['action_state'] = 'resolved'
+            counts = {
+                'confirmed': 0, 'changed': 0, 'uncertain': 0, 'missing': 0,
+                'not_owned': 0, 'extra': 0, 'settled': 0,
+            }
+            count_keys = {
+                'confirmed': 'confirmed', 'change': 'changed',
+                'uncertain': 'uncertain', 'missing': 'missing',
+                'not_owned': 'not_owned', 'extra': 'extra',
+                'duplicate': 'extra', 'settled': 'settled',
+            }
+            for assignment in album_plan.get('assignments') or []:
+                key = count_keys.get(str(assignment.get('status') or ''))
+                if key:
+                    counts[key] += 1
+            album_plan['counts'] = counts
         return {
             'case_id': case_id,
             'album': label.get('album_title') or label.get('album') or label.get('album_name'),

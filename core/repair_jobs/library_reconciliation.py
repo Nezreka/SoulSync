@@ -399,10 +399,40 @@ def _continuous_numbering(scored: tuple) -> int:
     return int(bool(slots) and discs == {1} and positions == list(range(1, len(slots) + 1)))
 
 
+def _complete_collection_fit(files: list[dict], scored: tuple) -> int:
+    """Prefer an exact tracklist only when the folder looks like a collection.
+
+    This resolves a full 11-track album against an 11-track release instead of
+    calling a 14-track deluxe edition an equal fit. A lone playlist track is
+    deliberately excluded: its absent album siblings are acquisition intent,
+    not evidence for the shortest release that happens to contain the song.
+    """
+    if len(files) <= 1 or (len(files) < 5 and any(file.get('playlists') for file in files)):
+        return 0
+    slots, plan = scored[5], scored[6]
+    return int(not plan['extra_files'] and not plan['missing_slots'] and
+               len(slots) == len(files))
+
+
 def _candidate_rank(files: list[dict], scored: tuple, numbering_mode: str) -> tuple:
-    rank = scored[:3]
+    rank = (*scored[:3], _complete_collection_fit(files, scored))
     return ((*rank, _continuous_numbering(scored), _numbering_fit(files, scored))
             if numbering_mode == 'digital' else rank)
+
+
+def _numbered_slot(slot: dict, slot_index: int, numbering_mode: str,
+                   slots: list[dict] | None = None) -> dict:
+    """Return the metadata position selected for a release slot.
+
+    SoulSync stores disc and track numbers on each track. In digital mode the
+    release identity remains exact while its ordered slots are flattened to a
+    single 1..N sequence. This gives physical-only releases the same useful
+    convention as a digital edition without inventing a different tracklist.
+    """
+    discs = {row.get('disc_number') or 1 for row in (slots or [])}
+    if numbering_mode != 'digital' or len(discs) <= 1:
+        return slot
+    return {**slot, 'disc_number': 1, 'track_number': slot_index + 1}
 
 
 def _promote_album_context_candidate(
@@ -738,7 +768,8 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict) ->
 def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
                            *, candidates: list[tuple] | None = None,
                            state: str = '', intent_scope: str = '',
-                           action_changes: dict[str, dict] | None = None) -> str:
+                           action_changes: dict[str, dict] | None = None,
+                           numbering_mode: str = '') -> str:
     clear, matched, _extras, source, release_id, slots, plan = scored
     assignments, categories = _album_plan_assignments(files, slots, plan)
     if intent_scope == 'partial':
@@ -784,6 +815,7 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
         return persist_album_plan(db, common, {
             'source': source, 'release_id': release_id, 'state': state,
             'intent_scope': intent_scope,
+            'numbering_mode': numbering_mode,
             'release_track_count': len(slots), 'local_file_count': len(files),
             'matched': matched, 'clear': clear, 'assignments': assignments,
             'categories': sorted(set(categories)),
@@ -839,7 +871,11 @@ def _candidate_shapes_equivalent(left: tuple, right: tuple) -> bool:
         if a[:prefix_length] != b[:prefix_length]:
             return False
         left_title, right_title = a[prefix_length], b[prefix_length]
-        if left_title[0] != right_title[0]:
+        # Provider spelling and capitalization differences do not define a
+        # different edition when the positions, assignments, and version
+        # markers agree. Numeric/version changes remain hard boundaries in
+        # _title_score and the marker comparison below.
+        if _title_score(left_title[0], right_title[0]) < 0.94:
             return False
         left_markers, right_markers = left_title[1], right_title[1]
         if left_markers and right_markers and left_markers != right_markers:
@@ -1507,6 +1543,7 @@ class LibraryReconciliationJob(RepairJob):
                     case_id = _persist_selected_plan(
                         context.db, choice_common, files, scored[0],
                         candidates=scored, state='release_conflict',
+                        numbering_mode=numbering_mode,
                     )
                     if case_id:
                         observed_plans.add(case_id)
@@ -1594,6 +1631,8 @@ class LibraryReconciliationJob(RepairJob):
                 for pair in plan['pairs']:
                     file = files[pair['file_index']]
                     slot = slots[pair['slot_index']]
+                    metadata_slot = _numbered_slot(
+                        slot, pair['slot_index'], numbering_mode, slots)
                     tags = file['tags']
                     if pair['confidence'] != 'clear':
                         if (pair['file_index'] in duplicate_indexes and
@@ -1621,8 +1660,9 @@ class LibraryReconciliationJob(RepairJob):
                                      'playlists': list(file.get('playlists') or [])}):
                             result.findings_created += 1
                         continue
-                    target = {'name': slot['title'], 'track_number': slot['track_number'],
-                              'disc_number': slot['disc_number'],
+                    target = {'name': slot['title'],
+                              'track_number': metadata_slot['track_number'],
+                              'disc_number': metadata_slot['disc_number'],
                               'artists': [{'name': name}
                                           for name in slot.get('artist_names') or
                                           ([slot['artist']] if slot['artist'] else [])]}
@@ -1674,10 +1714,12 @@ class LibraryReconciliationJob(RepairJob):
                         changed['library_title'] = {
                             'old': row.get('title') or '', 'new': slot['title']}
                     for field in ('track_number', 'disc_number'):
-                        if row and slot.get(field) is not None and row.get(field) != slot[field]:
-                            db_updates[field] = slot[field]
+                        if (row and metadata_slot.get(field) is not None and
+                                row.get(field) != metadata_slot[field]):
+                            db_updates[field] = metadata_slot[field]
                             changed[f'library_{field}'] = {
-                                'old': str(row.get(field) or ''), 'new': str(slot[field])}
+                                'old': str(row.get(field) or ''),
+                                'new': str(metadata_slot[field])}
                     target_track_artist = tag_plan['db_data'].get('track_artist')
                     if (row and target_track_artist and
                             row.get('track_artist') != target_track_artist):
@@ -1711,7 +1753,8 @@ class LibraryReconciliationJob(RepairJob):
                                 'old': current_disambiguation,
                                 'new': confirmed_disambiguation,
                             }
-                    target_path = _suggest_filename(file['path'], slot) if file.get('db') else ''
+                    target_path = (_suggest_filename(file['path'], metadata_slot)
+                                   if file.get('db') else '')
                     if target_path:
                         changed['filename'] = {'old': os.path.basename(file['path']),
                                                'new': os.path.basename(target_path)}
@@ -1777,7 +1820,9 @@ class LibraryReconciliationJob(RepairJob):
                         job_id=self.job_id, finding_type='reconciliation_metadata',
                         severity='warning', entity_type='track',
                         entity_id=str(file['db']['id']), file_path=file['path'],
-                        title=f'Retag {slot["title"]}',
+                        title=(f'Rename file: {slot["title"]}'
+                               if set(changed) == {'filename'}
+                               else f'Update metadata: {slot["title"]}'),
                         description='Audio and release slot support these metadata corrections.',
                         details=details):
                         result.findings_created += 1
@@ -1880,6 +1925,7 @@ class LibraryReconciliationJob(RepairJob):
                 case_id = _persist_selected_plan(
                     context.db, common, files, scored[0], candidates=scored,
                     intent_scope=intent_scope, action_changes=plan_action_changes,
+                    numbering_mode=numbering_mode,
                 )
                 if case_id:
                     observed_plans.add(case_id)

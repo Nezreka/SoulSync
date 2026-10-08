@@ -26,7 +26,25 @@ export interface ReviewDecision {
 }
 
 export interface AlbumAssignment {
-  status: 'confirmed' | 'change' | 'uncertain' | 'missing' | 'not_owned' | 'extra' | 'duplicate';
+  status:
+    | 'confirmed'
+    | 'change'
+    | 'uncertain'
+    | 'missing'
+    | 'not_owned'
+    | 'extra'
+    | 'duplicate'
+    | 'settled';
+  evidence_status?: string;
+  action_state?: 'ready' | 'manual' | 'destructive' | 'blocked' | 'preview' | 'resolved';
+  preview_reason?: string;
+  relationship?: 'version_conflict';
+  relationship_key?: string;
+  counterpart_title?: string;
+  counterpart_file?: string;
+  counterpart_file_path?: string;
+  counterpart_track_number?: number | string | null;
+  counterpart_disc_number?: number | string | null;
   file_path?: string;
   file?: string;
   finding_id?: number;
@@ -59,7 +77,9 @@ export interface AlbumReconciliationPlan {
     missing: number;
     not_owned?: number;
     extra: number;
+    settled?: number;
   };
+  numbering_mode?: string;
   categories: string[];
   assignments: AlbumAssignment[];
   candidates?: Array<{

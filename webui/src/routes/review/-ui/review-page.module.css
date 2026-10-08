@@ -218,7 +218,7 @@
 }
 .decisionGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
   gap: 10px;
 }
 .decisionGrid article {
@@ -238,6 +238,10 @@
 .decisionGrid article[data-risk='ready'] {
   border-color: #38775e;
   background: #17271f;
+}
+.decisionGrid article[data-selected='true'] {
+  outline: 2px solid #9b86ff;
+  outline-offset: 2px;
 }
 .decisionSelect {
   width: 100%;
@@ -281,6 +285,9 @@
   flex-wrap: wrap;
 }
 .decisionActions button {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
   padding: 7px 10px;
   border-radius: 8px;
   border: 1px solid #51566d;
@@ -292,6 +299,21 @@
   border-color: #467d68;
   background: #1c3a2f;
   color: #c6f5dc;
+}
+.releaseDecision {
+  grid-column: 1 / -1;
+  padding: 18px;
+  border: 1px solid #585078;
+  border-radius: 12px;
+  background: #191a2b;
+}
+.releaseDecision > div:first-child h4 {
+  margin: 4px 0;
+  font-size: 20px;
+}
+.releaseDecision > div:first-child p {
+  margin: 0;
+  color: #aeb5c8;
 }
 .matrixCounts {
   display: flex;
@@ -308,6 +330,10 @@
 .matrixCounts span[data-status='confirmed'] {
   color: #bdf0d2;
   border-color: #38775e;
+}
+.matrixCounts span[data-status='settled'] {
+  color: #c8cddd;
+  border-color: #646b82;
 }
 .matrixCounts span[data-status='uncertain'],
 .matrixCounts span[data-status='change'] {
@@ -343,6 +369,11 @@
 .releaseContext code {
   color: #d6d0ff;
   font-size: 11px;
+}
+.releaseContext a {
+  color: #cfc6ff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .trackTable {
   border: 1px solid #363b4d;
@@ -398,6 +429,16 @@
   box-shadow: inset 3px 0 #43a77c;
   background: #17251f;
 }
+.matrixRow[data-status='settled'] {
+  box-shadow: inset 3px 0 #697187;
+  background: #1d202b;
+}
+.matrixRow[data-selected='true'] {
+  outline: 2px solid #9b86ff;
+  outline-offset: -2px;
+  position: relative;
+  z-index: 1;
+}
 .matrixRow span {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -434,6 +475,19 @@
   font-size: 12px;
   font-weight: 650;
 }
+.trackTable > .findingDetail,
+.confirmedAssignments > .findingDetail {
+  min-width: 840px;
+  margin: 0;
+  border-width: 2px 0 1px;
+  border-color: #9b86ff #3b4053 #3b4053;
+  border-radius: 0;
+}
+.decisionGrid > .findingDetail {
+  grid-column: 1 / -1;
+  margin: 0;
+  border-color: #6f61ad;
+}
 .findingDetail > .decisionHeader:first-child {
   margin-top: 0;
 }
@@ -462,7 +516,9 @@
 }
 .planSummary p {
   margin: 0;
-  color: #a9b0c3;
+  color: #c7ccda;
+  font-size: 15px;
+  line-height: 1.45;
 }
 .planBadges,
 .planActions {
@@ -517,9 +573,31 @@
 .planActions summary {
   cursor: pointer;
 }
-.planActions ul {
-  margin: 8px 0 0;
-  padding-left: 20px;
+.readyChanges[open] {
+  flex-basis: 100%;
+  padding: 12px;
+  border: 1px solid #3a4053;
+  border-radius: 10px;
+  background: #191c28;
+}
+.readyChangeGroups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.readyChangeGroups button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  background: #1d2d26;
+  border-color: #3b765f;
+}
+.readyChangeGroups span {
+  color: #aeb8c9;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 .albumHeader h2 {
   font-size: clamp(24px, 2vw, 32px);
@@ -901,6 +979,12 @@
 .muted {
   color: #9ea7bb;
 }
+.technicalCard a,
+.releaseCard a {
+  color: #cfc6ff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .factList dd {
   margin: 0;
   overflow-wrap: anywhere;
@@ -911,8 +995,20 @@
 }
 .releaseGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(285px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
   gap: 12px;
+}
+.releaseCard .trackRow {
+  grid-template-columns: 28px 38px minmax(0, 1fr);
+}
+.releaseCard .trackEvidence {
+  grid-column: 3;
+}
+.releaseCard .trackIdentity {
+  grid-template-columns: 1fr;
+}
+.releaseCard .trackIdentity > .evidenceIcon {
+  transform: rotate(90deg);
 }
 .releaseCard {
   display: grid;
@@ -1069,6 +1165,9 @@
 .problemCard ol,
 .problemCard ul {
   margin: 12px 0 0;
+  padding-left: 24px;
+  display: grid;
+  gap: 5px;
 }
 .technicalEvidence > summary {
   display: grid;

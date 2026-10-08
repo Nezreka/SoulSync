@@ -166,6 +166,37 @@ def test_title_flavor_is_safe_but_recording_version_change_is_manual():
     assert plan['categories'] == ['title_conventions', 'title_issues']
 
 
+def test_artist_typography_change_is_grouped_as_an_artist_update():
+    items = [{
+        'id': finding_id,
+        'finding_type': 'reconciliation_metadata',
+        'details': {
+            'changes': {'artist': {'old': 'Tool', 'new': 'TOOL'}},
+            'confidence': 'clear',
+            # The matcher may still describe the compared track titles. That
+            # must not relabel an artist-only repair as a title convention.
+            'title_difference_kind': 'typography',
+        },
+    } for finding_id in range(1, 14)]
+
+    plan = classify_case(items)
+
+    assert plan['categories'] == ['metadata']
+    assert plan['ready'] == 13
+    assert plan['decisions'][0]['label'] == 'Artist update'
+    assert plan['decisions'][0]['summary'] == '13 tracks: Tool → TOOL.'
+
+
+def test_album_intent_summary_states_the_album_level_question():
+    plan = classify_case([{
+        'id': 1, 'finding_type': 'reconciliation_intent', 'details': {},
+    }])
+
+    assert plan['decisions'][0]['label'] == 'Album intent'
+    assert plan['decisions'][0]['summary'] == (
+        'Choose whether this album should be complete.')
+
+
 def test_material_title_conflict_is_not_hidden_inside_numbering_group():
     items = [{
         'id': 1, 'finding_type': 'reconciliation_metadata',
@@ -224,11 +255,159 @@ def test_case_includes_persisted_successful_assignments_around_the_open_action()
     assert len(case['album_plan']['assignments']) == 2
     assert case['album_plan']['counts'] == {
         'confirmed': 1, 'changed': 1, 'uncertain': 0,
-        'missing': 0, 'not_owned': 0, 'extra': 0,
+        'missing': 0, 'not_owned': 0, 'extra': 0, 'settled': 0,
     }
     changed = case['album_plan']['assignments'][1]
     assert changed['finding_id'] == 1
     assert changed['review_tier'] == 'manual'
+
+
+def test_persisted_plan_marks_previous_actions_settled_without_hiding_current_action():
+    db = _Database()
+    details = {'album_id': 10, 'profile_id': 1, 'album_title': 'Album'}
+    db.add(1, '/music/Album/02.flac', {
+        **details, 'changes': {'title': {'new': 'Current'}}, 'confidence': 'clear',
+    }, job_id='library_reconciliation', kind='reconciliation_metadata')
+    case_id = persist_album_plan(db, {**details, 'evidence_signature': 'evidence'}, {
+        'source': 'musicbrainz', 'release_id': 'release-id',
+        'assignments': [
+            {'status': 'change', 'file_path': '/music/Album/01.flac',
+             'current_title': 'Already handled', 'slot_title': 'Already handled',
+             'changes': {'album': {'old': 'Old', 'new': 'Album'}}},
+            {'status': 'change', 'file_path': '/music/Album/02.flac',
+             'current_title': 'Current', 'slot_title': 'Current',
+             'changes': {'title': {'old': 'Curent', 'new': 'Current'}}},
+        ],
+    })
+
+    case = get_case(db, case_id, job_id='library_reconciliation')
+
+    previous, current = case['album_plan']['assignments']
+    assert previous['status'] == 'settled'
+    assert previous['evidence_status'] == 'change'
+    assert previous['changes'] == {}
+    assert previous['action_state'] == 'resolved'
+    assert current['status'] == 'change'
+    assert current['finding_id'] == 1
+    assert case['album_plan']['counts']['settled'] == 1
+    assert case['album_plan']['counts']['changed'] == 1
+
+
+def test_album_intent_decision_owns_missing_plan_rows():
+    db = _Database()
+    details = {'album_id': 10, 'profile_id': 1, 'album_title': 'Partial Album'}
+    db.add(1, None, details, job_id='library_reconciliation',
+           kind='reconciliation_intent')
+    case_id = persist_album_plan(db, {**details, 'evidence_signature': 'evidence'}, {
+        'source': 'musicbrainz', 'release_id': 'release-id',
+        'assignments': [
+            {'status': 'confirmed', 'file_path': '/music/Album/01.flac',
+             'current_title': 'One', 'slot_title': 'One'},
+            {'status': 'missing', 'source_track_id': 'track-2',
+             'slot_disc_number': 1, 'slot_track_number': 2, 'slot_title': 'Two'},
+        ],
+    })
+
+    case = get_case(db, case_id, job_id='library_reconciliation')
+
+    missing = case['album_plan']['assignments'][1]
+    assert missing['status'] == 'missing'
+    assert missing['finding_id'] == 1
+    assert missing['review_tier'] == 'manual'
+    assert case['album_plan']['counts']['missing'] == 1
+
+
+def test_pending_version_extra_keeps_its_paired_missing_slot_visible():
+    db = _Database()
+    details = {'album_id': 10, 'profile_id': 1, 'album_title': 'Deluxe Album'}
+    extra_path = '/music/Album/16 - Song (Abbey Road Sessions).flac'
+    db.add(1, extra_path, details, job_id='library_reconciliation',
+           kind='reconciliation_extra')
+    case_id = persist_album_plan(db, {**details, 'evidence_signature': 'evidence'}, {
+        'source': 'musicbrainz', 'release_id': 'release-id',
+        'assignments': [
+            {'status': 'missing', 'slot_title': 'Song',
+             'slot_disc_number': 2, 'slot_track_number': 3},
+            {'status': 'extra', 'file_path': extra_path,
+             'file': '16 - Song (Abbey Road Sessions).flac',
+             'current_title': 'Song (Abbey Road Sessions)'},
+        ],
+    })
+
+    case = get_case(db, case_id, job_id='library_reconciliation')
+
+    missing, extra = case['album_plan']['assignments']
+    assert missing['status'] == 'missing'
+    assert extra['status'] == 'extra'
+    assert missing['relationship'] == extra['relationship'] == 'version_conflict'
+    assert missing['finding_id'] == extra['finding_id'] == 1
+    assert missing['action_state'] == extra['action_state'] == 'destructive'
+    assert case['album_plan']['counts']['missing'] == 1
+    assert case['album_plan']['counts']['extra'] == 1
+
+
+def test_repeated_audio_conflicts_are_one_album_question():
+    items = [
+        {'id': 1, 'finding_type': 'reconciliation_unresolved', 'details': {}},
+        {'id': 2, 'finding_type': 'reconciliation_unresolved', 'details': {}},
+    ]
+
+    plan = classify_case(items)
+
+    assert plan['decision_count'] == 1
+    assert plan['decisions'][0]['category'] == 'audio_conflicts'
+    assert plan['decisions'][0]['finding_ids'] == [1, 2]
+
+
+def test_fully_ready_filter_excludes_an_album_with_manual_work():
+    db = _Database()
+    ready = {'album_id': 10, 'album_title': 'Mixed', 'confidence': 'clear',
+             'changes': {'album': {'new': 'Mixed'}}}
+    db.add(1, '/music/Mixed/01.flac', ready,
+           job_id='library_reconciliation', kind='reconciliation_metadata')
+    db.add(2, '/music/Mixed/02.flac', {'album_id': 10, 'album_title': 'Mixed'},
+           job_id='library_reconciliation', kind='reconciliation_unresolved')
+    db.add(3, '/music/Ready/01.flac', {
+        'album_id': 11, 'album_title': 'Ready', 'confidence': 'clear',
+        'changes': {'album': {'new': 'Ready'}},
+    }, job_id='library_reconciliation', kind='reconciliation_metadata')
+
+    result = list_cases(db, job_id='library_reconciliation', risk='ready')
+
+    assert result['total'] == 1
+    assert result['items'][0]['album'] == 'Ready'
+
+
+def test_title_convention_filter_excludes_numbering_changes_with_title_flavor():
+    db = _Database()
+    db.add(1, '/music/Numbered/01.flac', {
+        'album_id': 10, 'album_title': 'Numbered', 'confidence': 'clear',
+        'title_difference_kind': 'flavor',
+        'changes': {'track_number': {'new': 2}, 'title': {'new': 'Song'}},
+    }, job_id='library_reconciliation', kind='reconciliation_metadata')
+
+    result = list_cases(
+        db, job_id='library_reconciliation', category='title_conventions')
+
+    assert result['total'] == 0
+
+
+def test_title_convention_filter_excludes_artist_only_typography_change():
+    db = _Database()
+    db.add(1, '/music/Lateralus/01.flac', {
+        'album_id': 10, 'album_title': 'Lateralus', 'confidence': 'clear',
+        'title_difference_kind': 'typography',
+        'changes': {'artist': {'old': 'Tool', 'new': 'TOOL'}},
+    }, job_id='library_reconciliation', kind='reconciliation_metadata')
+
+    title_result = list_cases(
+        db, job_id='library_reconciliation', category='title_conventions')
+    metadata_result = list_cases(
+        db, job_id='library_reconciliation', category='metadata')
+
+    assert title_result['total'] == 0
+    assert metadata_result['total'] == 1
+    assert metadata_result['items'][0]['plan']['categories'] == ['metadata']
 
 
 def test_stale_plan_retirement_handles_more_than_sqlite_parameter_limit():

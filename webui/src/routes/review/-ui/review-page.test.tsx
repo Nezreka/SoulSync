@@ -140,6 +140,15 @@ describe('library reconciliation review queue', () => {
   });
 
   it('explains release comparisons without dumping JSON', async () => {
+    const ambiguousFinding = {
+      ...finding,
+      details: {
+        ...finding.details,
+        ambiguity_reasons: [
+          'AcoustID returned competing identities not resolved by the other evidence',
+        ],
+      },
+    };
     fetchMock.mockImplementation((url: string) => {
       const common = auxiliary(url);
       if (common) return Promise.resolve(common);
@@ -171,7 +180,7 @@ describe('library reconciliation review queue', () => {
             folder: '/music/Lamb of God/Ashes of the Wake',
             count: 1,
             status: 'pending',
-            items: [finding],
+            items: [ambiguousFinding],
           }),
         );
       throw new Error(`Unexpected request: ${url}`);
@@ -186,6 +195,8 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByText(/AcoustID alternate ruled out: Hourglass/)).toBeTruthy();
     expect(screen.getAllByText('Recording: acoustic')).toHaveLength(2);
     expect(screen.getByText('US deluxe edition')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /Why this needs review/ })).toBeTruthy();
+    expect(screen.getByText(/competing recording identities at the same top score/)).toBeTruthy();
     expect(screen.getByText('1 confirmed match')).toBeTruthy();
     expect(screen.getByText(/Track comparisons were not saved/)).toBeTruthy();
     expect(screen.queryByText(/"release_id"/)).toBeNull();
@@ -269,6 +280,7 @@ describe('library reconciliation review queue', () => {
               state: 'review',
               source: 'musicbrainz',
               release_id: 'digital-release',
+              numbering_mode: 'digital',
               intent_scope: 'partial',
               counts: {
                 confirmed: 1,
@@ -277,6 +289,7 @@ describe('library reconciliation review queue', () => {
                 missing: 0,
                 not_owned: 1,
                 extra: 0,
+                settled: 1,
               },
               categories: ['numbering', 'partial_albums'],
               candidates: [
@@ -309,6 +322,13 @@ describe('library reconciliation review queue', () => {
                   changes: { track_number: { old: 1, new: 2 } },
                 },
                 { status: 'not_owned', slot_title: 'Bonus Track' },
+                {
+                  status: 'settled',
+                  file_path: '/music/Album/03.flac',
+                  file: '03.flac',
+                  current_title: 'Already reviewed',
+                  slot_title: 'Already reviewed',
+                },
               ],
             },
           }),
@@ -320,11 +340,15 @@ describe('library reconciliation review queue', () => {
 
     expect(await screen.findByRole('heading', { name: 'Track assignment' })).toBeTruthy();
     expect(screen.getByText('Numbering convention')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Use selected release numbering' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Use continuous numbering' })).toBeTruthy();
     expect(screen.getByText('digital-release')).toBeTruthy();
     expect(screen.getByText('Continuous digital numbering')).toBeTruthy();
     expect(screen.getByText('○ 1 outside collection')).toBeTruthy();
-    expect(screen.getByText('✓ 2 settled release slots')).toBeTruthy();
+    expect(screen.getByText('✓ 3 settled release slots')).toBeTruthy();
+    expect(screen.getAllByText('No action')).toHaveLength(1);
+    const selectedRow = screen.getByRole('row', { name: /Hourglass/ });
+    const selectedDetail = screen.getByLabelText('Selected action detail');
+    expect(selectedRow.nextElementSibling).toBe(selectedDetail);
   });
 
   it('shows why the last scan stopped and can queue a rerun', async () => {
@@ -452,6 +476,9 @@ describe('library reconciliation review queue', () => {
 
     expect(await screen.findByText('Ready to reconcile')).toBeTruthy();
     expect(screen.getAllByText('✓ 1 ready').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByText('Review ready changes'));
+    expect(screen.getByText('Album artist')).toBeTruthy();
+    expect(screen.getByText('1 track · Various Artists → Lamb of God')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Apply 1 ready change' }));
     await waitFor(() => expect(screen.getByText('1 ready change applied.')).toBeTruthy());
   });
