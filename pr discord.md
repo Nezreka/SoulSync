@@ -1,15 +1,17 @@
-**SoulSync 3.5.2 is out** :musical_note:
+**SoulSync 3.5.3 is out** :musical_note:
 
-Sign in with Plex: everyone you share your server with can log in with their own Plex account, and their playlists land in their own Plex. Profiles can also connect Plex from My Account (thanks SeadogsBooty).
+My Playlists: make your own playlists and add any track from anywhere in the app, search, library, discover, the now playing view. They identify, sync to your server and download missing like mirrored playlists, and adding a song that's already there asks first, even when it's a remaster or radio edit.
 
-Listening history is per person now. Plex plays go to whoever played them, so the kids' plays stay out of your stats, mixes and Last.fm, and plays stop counting twice when your scrobbles come back from Last.fm or ListenBrainz (existing history gets cleaned up once, with a backup first). Kids profiles can play library music again.
+The Clients tab can match & import downloads SoulSync didn't start, for music, audiobooks and video, including Soulseek folders. Cards got a redesign with one clear action each.
 
-Download Discography has a Wishlist + Watchlist button, and a new edition preference stops the watchlist grabbing both standard and deluxe. Non-admin profiles can request music videos and single episodes. The dashboard got a refresh, and the sidebar shows live weather with holiday decorations.
+Audiobooks: choose allowed formats and one file vs several, a failed download tries the next release right away, and Soulseek books survive slskd clearing finished chapters (thanks @curiousmoose24). You can also type your own release search, and the series strip shows what you own.
 
-The duplicate detector shows which copy is in a playlist and Keep Best keeps it, so cleanups never break playlists. Deezer downloads find the original song instead of the reprise or karaoke version (thanks @cremonies), and explicit tracks stop failing AcoustID (thanks @mateusguilherme).
+BPM Backfill now fills BPM across the whole library, from Deezer or local analysis, and downloads get Deezer's BPM and ISRC tags. Sample Studio analyzes MP3 and M4A files without ffmpeg on PATH and lists your tracks before you search (thanks Specialmed).
 
-Video: the wishlist stops grabbing the same release every hour, usenet grabs import instead of sitting at 100%, and mixed Jellyfin libraries can be picked.
+Tidal playlists load every track: SoulSync asked for the US catalogue, so non-US accounts lost tracks. Duplicates and videos are counted too (#1613).
 
-Also: mirrored tracks identified by their own Deezer or Spotify ID, Navidrome libraries under a different mount stop breaking playlist writes, MP3s get their MusicBrainz recording ID, audiobooks import from single-file torrents (thanks SeadogsBooty), Soulseek cleanup only touches its own transfers (thanks @splitsec2), plus repair fixes from @mandos21 and @nick2000713.
+Deezer matching picks the right album for soundtracks and compilations and reaches the original song from more searches (thanks @cremonies). Deezer downloads keep their album artist and genre.
+
+Also: enrichment workers stop staying paused, a dead HiFi pool stops slowing every track, re-tag and release year repairs stop picking the wrong track or album, video episodes import like Sonarr judges them, API key fixes (thanks @splitsec2), and accent colours that never showed now do (thanks @Thundernerd).
 
 Full notes on GitHub.
