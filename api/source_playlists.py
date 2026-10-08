@@ -190,7 +190,15 @@ def search_spotify_tracks():
         else:
             if _hydrabase_worker() and _dev_mode_enabled():
                 _hydrabase_worker().enqueue(query, 'tracks')
-            tracks = _spotify_client().search_tracks(query, limit=limit)
+            client = _spotify_client()
+            # with a title to aim at, spotify answers first and the fallback
+            # source gets search_song, not the plain free-text search the
+            # client falls back to. deezer's free text leaves originals out
+            # and the rerank can't surface what never came back (#1601).
+            tracks = client.search_tracks(query, limit=limit, allow_fallback=not track_q)
+            if not tracks and track_q:
+                from core.metadata.song_search import search_song
+                tracks = search_song(client._fallback, track_q, artist_q, limit=limit)
 
         # Local rerank — same helper Deezer + iTunes use. Spotify's
         # ranking is usually clean but karaoke / cover variants do
@@ -5268,6 +5276,7 @@ def _run_sync_task(
     playlist_image_url='',
     sync_mode=None,
     skip_wishlist_add=False,
+    user_initiated=False,
 ):
     # When a caller doesn't specify a mode — the mirrored auto-sync + Playlist
     # Pipeline (auto_sync_playlist), iTunes-link sync, Wing It — honor the user's
@@ -5291,6 +5300,7 @@ def _run_sync_task(
         _build_sync_deps(),
         sync_mode=sync_mode,
         skip_wishlist_add=skip_wishlist_add,
+        user_initiated=user_initiated,
     )
 
 
