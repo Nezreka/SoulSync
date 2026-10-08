@@ -405,6 +405,25 @@ def _candidate_rank(files: list[dict], scored: tuple, numbering_mode: str) -> tu
             if numbering_mode == 'digital' else rank)
 
 
+def _promote_linked_candidate(scored: list[tuple],
+                              linked_candidates: list[tuple[str, str]]) -> None:
+    """Prefer the album-linked release when its audio fit is equally good.
+
+    Numbering remains a useful edition preference, but it cannot turn one
+    recording from a known compilation into the original album merely because
+    that album has a shorter, continuous tracklist.  A candidate that matches
+    more files, or leaves fewer identified extras, still wins.
+    """
+    if not scored or not linked_candidates:
+        return
+    best_audio_fit = scored[0][:3]
+    linked = next((row for candidate in linked_candidates for row in scored
+                   if row[:3] == best_audio_fit and (row[3], row[4]) == candidate), None)
+    if linked is not None and linked is not scored[0]:
+        scored.remove(linked)
+        scored.insert(0, linked)
+
+
 def _has_unexplained_identified_extras(files: list[dict], scored: tuple) -> bool:
     """Whether a plausible album file fits no slot or competing local copy."""
     plan = scored[6]
@@ -1272,6 +1291,7 @@ class LibraryReconciliationJob(RepairJob):
                 candidates = self._release_candidates(
                     files, album, context,
                     exact_musicbrainz_releases=exact_musicbrainz_releases)
+                linked_candidates = list(candidates)
                 scored = _score_release_candidates(
                     files, candidates, release_cache, exact_musicbrainz_releases)
                 best_initial = (max(scored, key=lambda c: _candidate_rank(
@@ -1357,16 +1377,10 @@ class LibraryReconciliationJob(RepairJob):
                 scored.sort(
                     key=lambda c: _candidate_rank(files, c, numbering_mode), reverse=True)
                 # Album/source IDs are direct evidence of intended edition.
-                # Prefer the first stored candidate when it fits as well as
-                # the best audio-discovered candidate; sorting by opaque UUID
-                # must never manufacture a human decision.
-                top_score = _candidate_rank(files, scored[0], numbering_mode)
-                linked_row = next((row for candidate in candidates for row in scored
-                                   if _candidate_rank(files, row, numbering_mode) == top_score and
-                                   (row[3], row[4]) == candidate), None)
-                if linked_row:
-                    scored.remove(linked_row)
-                    scored.insert(0, linked_row)
+                # Prefer it whenever the audio assignment is equally good;
+                # digital numbering is an edition preference, not evidence
+                # that a compilation track belongs to its original album.
+                _promote_linked_candidate(scored, linked_candidates)
                 pinned_row = None
                 if album and album.get('canonical_locked'):
                     pinned_row = next((row for row in scored

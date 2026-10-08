@@ -19,6 +19,7 @@ from core.repair_jobs.library_reconciliation import (
     _candidate_rank, _candidate_shape, _candidate_shapes_equivalent,
     _group_disc_folders, _group_logical_albums,
     _has_unexplained_identified_extras, _normalize_slot,
+    _promote_linked_candidate,
     _release_group_candidates, _same_recording_copies, _search_release_candidates,
     _suggest_filename,
 )
@@ -1011,6 +1012,31 @@ def test_digital_numbering_rank_prefers_continuous_track_numbers():
         _candidate_rank(files, compact_disc, 'digital')
     assert _candidate_rank(files, continuous, 'release') == \
         _candidate_rank(files, compact_disc, 'release')
+
+
+def test_album_linked_compilation_beats_equally_fitting_original_album():
+    plan = {'pairs': [{'file_index': 0, 'slot_index': 0, 'confidence': 'clear'}],
+            'extra_files': [], 'missing_slots': []}
+    compilation = (1, 1, 0, 'musicbrainz', 'soundtracks-box',
+                   [{'track_number': 1, 'disc_number': 2}], plan)
+    original_album = (1, 1, 0, 'musicbrainz', 'truman-show',
+                      [{'track_number': 17, 'disc_number': 1}], plan)
+    scored = [original_album, compilation]
+
+    _promote_linked_candidate(scored, [('musicbrainz', 'soundtracks-box')])
+
+    assert scored == [compilation, original_album]
+
+
+def test_linked_release_does_not_override_better_audio_assignment():
+    plan = {'pairs': [], 'extra_files': [], 'missing_slots': []}
+    linked = (1, 1, 0, 'musicbrainz', 'linked', [], plan)
+    better = (2, 2, 0, 'musicbrainz', 'better', [], plan)
+    scored = [better, linked]
+
+    _promote_linked_candidate(scored, [('musicbrainz', 'linked')])
+
+    assert scored == [better, linked]
 
 
 def test_identified_bonus_audio_requires_edition_confirmation_but_duplicate_does_not():
