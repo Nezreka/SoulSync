@@ -514,6 +514,58 @@ def test_playlist_track_falls_back_to_its_artist_when_the_source_has_no_credit(m
     assert album["artists"] == [{"name": "Solo Artist"}]
 
 
+def test_deezer_search_track_gets_its_albums_artist_and_count(monkeypatch):
+    """#1605 (cremonies): 'How Far I'll Go' downloaded alone from deezer search
+    on a spotify-primary install came out as Auli'i Cravalho, 4/1. the search
+    now sends the track's own album id and the backfill asks deezer for it."""
+    from core.metadata import album_tracks, registry
+    calls = []
+    monkeypatch.setattr(registry, "get_primary_source", lambda: "spotify")
+    monkeypatch.setattr(album_tracks, "get_album_for_source", lambda s, a, **_k: calls.append((s, a)) or {
+        "id": "14582002", "release_date": "2016-11-18", "total_tracks": 59, "album_type": "album",
+        "artists": [{"name": "Lin-Manuel Miranda", "id": "1545788"}],
+    })
+    deps = _build_deps()
+    _seed_task("t22", track_info={
+        "id": "136340808", "source": "deezer", "track_number": 4,
+        "album": {"id": "14582002", "name": "Moana (Deluxe)", "images": [], "release_date": None},
+    })
+    track = _Track(album="Moana (Deluxe)", artists=["Auli'i Cravalho"])
+
+    dc.attempt_download_with_candidates("t22", [_Candidate()], track, batch_id=None, deps=deps)
+
+    assert calls == [("deezer", "14582002")]
+    album = matched_downloads_context["user1::song.flac"]["spotify_album"]
+    assert album["artists"] == [{"name": "Lin-Manuel Miranda", "id": "1545788"}]
+    assert album["total_tracks"] == 59
+
+
+def test_deezer_search_single_keeps_its_real_single_type(monkeypatch):
+    """#1605: the search no longer calls every track a single, so a real
+    single has to get its type from the lookup, not the 'album' default."""
+    from core.metadata import album_tracks, registry
+    monkeypatch.setattr(registry, "get_primary_source", lambda: "spotify")
+    monkeypatch.setattr(album_tracks, "get_album_for_source", lambda *_a, **_k: {
+        "id": "9", "release_date": "2024-01-01", "total_tracks": 1, "album_type": "single",
+        "artists": [{"name": "Solo"}],
+    })
+    deps = _build_deps()
+    _seed_task("t23", track_info={"source": "deezer", "track_number": 1,
+                                  "album": {"id": "9", "name": "Hit"}})
+    dc.attempt_download_with_candidates("t23", [_Candidate()], _Track(album="Hit", artists=["Solo"]),
+                                        batch_id=None, deps=deps)
+    assert matched_downloads_context["user1::song.flac"]["spotify_album"]["album_type"] == "single"
+
+
+def test_album_type_still_defaults_to_album_when_nothing_names_one(monkeypatch):
+    _patch_primary_source(monkeypatch, "itunes", None)
+    deps = _build_deps()
+    _seed_task("t24", track_info={"track_number": 1, "album": {"id": "it-y", "name": "Some Album"}})
+    dc.attempt_download_with_candidates("t24", [_Candidate()], _Track(album="Some Album"),
+                                        batch_id=None, deps=deps)
+    assert matched_downloads_context["user1::song.flac"]["spotify_album"]["album_type"] == "album"
+
+
 def test_the_artist_page_section_lock_reaches_the_album_context():
     """an artist-page download locks the release type to its section; the
     context the path builder reads has to keep that lock"""

@@ -84,6 +84,13 @@ def _decrypt_chunk(chunk: bytes, key: bytes) -> bytes:
 from core.download_plugins.base import DownloadSourcePlugin
 
 
+def _keep_album_artist(album_artists: dict, album_id: str, album_data) -> None:
+    """remember an /album/{id} response's own artist as {'name', 'id'}."""
+    artist = album_data.get('artist') if isinstance(album_data, dict) else None
+    if isinstance(artist, dict) and artist.get('name'):
+        album_artists[album_id] = {'name': artist['name'], 'id': str(artist.get('id') or '')}
+
+
 class DeezerDownloadClient(DownloadSourcePlugin):
     """Deezer download client using ARL token authentication."""
 
@@ -561,6 +568,10 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             # (It used to get the PLAYLIST's track count — a 12-track album
             # imported from a 1582-track playlist claimed 1582 tracks.)
             album_track_counts = {}
+            # the album's own artist, from the same /album/{id} response. without
+            # it a playlist track's album artist fell back to the track's singer
+            # and one soundtrack split across artist folders (#1605)
+            album_artists = {}
             # Deezer PLAYLIST tracks do NOT carry `track_position` (only `/track/<id>`
             # and `/album/<id>/tracks` do), so numbering them by their playlist index
             # poisons the real album track number — which then rides into the wishlist
@@ -600,6 +611,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                             album_release_dates[aid] = cached['release_date']
                             if cached.get('nb_tracks'):
                                 album_track_counts[aid] = cached['nb_tracks']
+                            _keep_album_artist(album_artists, aid, cached)
                     except Exception as e:
                         logger.debug("cache get_entity album release_date: %s", e)
                 # Cache miss — fetch from API
@@ -614,6 +626,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                             album_release_dates[aid] = a_data.get('release_date', '')
                             if a_data.get('nb_tracks'):
                                 album_track_counts[aid] = a_data['nb_tracks']
+                            _keep_album_artist(album_artists, aid, a_data)
                             # Store in metadata cache for future use
                             if cache:
                                 try:
@@ -653,6 +666,9 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                         # lookup failed entirely.
                         'total_tracks': album_track_counts.get(album_id) or total_tracks,
                         'id': album_id,
+                        # only when the lookup named one, the download's album
+                        # backfill still fills it otherwise
+                        **({'artists': [album_artists[album_id]]} if album_id in album_artists else {}),
                     },
                     'duration_ms': t.get('duration', 0) * 1000,
                     # REAL album position (resolved above); the playlist index is a last

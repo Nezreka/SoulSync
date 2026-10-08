@@ -156,6 +156,8 @@ def test_search_kind_tracks_returns_full_shape():
         'artists': ['Pink Floyd'],
         'source': '',
         'album': 'DSOTM',
+        # a source that doesn't know the album id gives None
+        'album_id': None,
         'duration_ms': 383000,
         'image_url': 'm.jpg',
         'release_date': '1973-03-01',
@@ -316,3 +318,18 @@ def test_search_source_healthy_marks_available():
     client = _Client(artists=[_Artist('a', 'A')])
     result = sources.search_source('q', client, 'spotify')
     assert result['available'] is True
+
+
+def test_deezer_track_carries_its_album_id_through_search():
+    """#1605: a single-track download needs the track's own album id to look up
+    the album artist and track count. deezer search gives it, keep it."""
+    from core.deezer_client import Track as DeezerTrack
+    track = DeezerTrack.from_deezer_track({
+        'id': 136340808, 'title': "How Far I'll Go", 'duration': 163,
+        'artist': {'name': "Auli'i Cravalho"},
+        'album': {'id': 14582002, 'title': 'Moana (Deluxe)', 'cover_xl': 'c.jpg'},
+    })
+    assert track.album_id == '14582002'
+    out = sources.search_kind(_Client(tracks=[track]), 'q', 'tracks', source_name='deezer')
+    assert out[0]['album_id'] == '14582002'
+    assert out[0]['source'] == 'deezer'

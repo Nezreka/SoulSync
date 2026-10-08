@@ -184,6 +184,8 @@ export interface SearchTrack {
    * it as an object silently loses the album from every track's meta line.
    */
   album?: string;
+  /** The album's id in `source`, when the source search gives it (Deezer). */
+  album_id?: string | null;
   duration_ms?: number;
   image_url?: string;
   release_date?: string;

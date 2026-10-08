@@ -201,6 +201,9 @@ class Track:
     album_type: Optional[str] = None
     total_tracks: Optional[int] = None
     explicit: Optional[bool] = None
+    # the track's own album. search only gives {id, title, cover}, the album
+    # artist and track count need /album/{id} (#1605)
+    album_id: Optional[str] = None
 
     @classmethod
     def from_deezer_track(cls, track_data: Dict[str, Any]) -> 'Track':
@@ -266,6 +269,8 @@ class Track:
             total_tracks=nb_tracks,
             explicit=(bool(track_data['explicit_lyrics'])
                       if track_data.get('explicit_lyrics') is not None else None),
+            album_id=(str(album_data['id'])
+                      if isinstance(album_data, dict) and album_data.get('id') else None),
         )
 
 

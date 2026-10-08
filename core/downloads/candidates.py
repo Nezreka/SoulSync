@@ -602,7 +602,9 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                     'name': fallback_album.get('name', '') or track.album,
                     'release_date': fallback_album.get('release_date', ''),
                     'image_url': fallback_image_url,
-                    'album_type': fallback_album.get('album_type', 'album'),
+                    # 'album' only after the backfill below, so a search track
+                    # that sent no type gets its album's real one (#1605)
+                    'album_type': fallback_album.get('album_type') or None,
                     'album_type_locked': bool(fallback_album.get('album_type_locked')),
                     'total_tracks': fallback_album.get('total_tracks', 0),
                     'total_discs': fallback_album.get('total_discs', 1),
@@ -620,9 +622,12 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                 from core.metadata.album_tracks import get_album_for_source as _get_album_for_source
                 backfill_album_context_from_source(
                     spotify_album_context, _meta_registry.get_primary_source(), _get_album_for_source,
+                    album_source=(track_info or {}).get('source') or (track_info or {}).get('_source'),
                 )
             except Exception as _bf_err:  # noqa: BLE001 — never let backfill break a download
                 logger.debug("[Context] primary-source album backfill skipped: %s", _bf_err)
+            if not spotify_album_context.get('album_type'):
+                spotify_album_context['album_type'] = 'album'
             if not spotify_album_context.get('artists') and track.artists:
                 spotify_album_context['artists'] = [{'name': track.artists[0]}]
 
