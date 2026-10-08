@@ -148,6 +148,8 @@ def test_ffmpeg_timeout_surfaces_as_error(monkeypatch):
     def _hang(*a, **k):
         raise subprocess.TimeoutExpired("ffmpeg", 180)
 
+    # ci has no ffmpeg; this test is about the timeout, not the lookup
+    monkeypatch.setattr(analyze_mod, "ffmpeg_bin", lambda: "ffmpeg")
     monkeypatch.setattr(analyze_mod.subprocess, "run", _hang)
     with pytest.raises(RuntimeError, match="timed out"):
         analyze_mod._decode_via_ffmpeg("/music/x.flac")
