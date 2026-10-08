@@ -237,6 +237,48 @@ _pushed_new_defaults = False
 from core.download_plugins.base import DownloadSourcePlugin
 
 
+class AllInstancesDownBreaker:
+    """fail fast while every hifi instance is down.
+
+    with every server dead each call walked the whole pool, a timeout per
+    instance, and post-processing made three calls per track, about a minute a
+    track (#1606). once a full pass fails the gate shuts for 30s, doubling up to
+    5 min while it keeps failing. any answer, or reloading the instance list,
+    opens it again.
+    """
+
+    FIRST_WAIT = 30.0
+    MAX_WAIT = 300.0
+
+    def __init__(self, clock=time.monotonic):
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._wait = 0.0
+        self._until = 0.0
+
+    def is_open(self) -> bool:
+        """True while calls should skip the pool entirely."""
+        with self._lock:
+            return self._clock() < self._until
+
+    def remaining(self) -> float:
+        with self._lock:
+            return max(0.0, self._until - self._clock())
+
+    def record_all_down(self) -> float:
+        with self._lock:
+            self._wait = min(self.MAX_WAIT, self._wait * 2 if self._wait else self.FIRST_WAIT)
+            self._until = self._clock() + self._wait
+            return self._wait
+
+    def record_answer(self) -> None:
+        with self._lock:
+            self._wait = 0.0
+            self._until = 0.0
+
+    reset = record_answer
+
+
 class HiFiClient(DownloadSourcePlugin):
     """
     HiFi API client for searching and downloading lossless music.
@@ -334,6 +376,8 @@ class HiFiClient(DownloadSourcePlugin):
                 logger.info(f"HiFi instances reloaded, active: {self._current_instance}")
             else:
                 logger.info("HiFi instances reloaded")
+        # new instance list, worth asking again right away
+        self._breaker().reset()
 
     def _get_instance(self) -> Optional[str]:
         with self._instance_lock:
@@ -350,6 +394,13 @@ class HiFiClient(DownloadSourcePlugin):
             else:
                 self._current_instance = None
 
+    def _breaker(self) -> AllInstancesDownBreaker:
+        # lazy so a client built without __init__ still has one
+        breaker = self.__dict__.get('_down_breaker')
+        if breaker is None:
+            breaker = self.__dict__.setdefault('_down_breaker', AllInstancesDownBreaker())
+        return breaker
+
     def _rate_limit(self):
         with self._api_lock:
             now = time.time()
@@ -365,12 +416,20 @@ class HiFiClient(DownloadSourcePlugin):
         # fetches) are unaffected.
         if timeout is None:
             timeout = config_manager.get_source_search_timeout() or 15
+        if self._breaker().is_open():
+            logger.debug("HiFi: every instance was down, skipping for another %.0fs",
+                         self._breaker().remaining())
+            return None
         tried = set()
 
         while True:
             instance = self._get_instance()
             if not instance or instance in tried:
-                logger.error("All HiFi API instances exhausted")
+                if tried:
+                    wait = self._breaker().record_all_down()
+                    logger.error("All HiFi API instances exhausted, skipping hifi for %.0fs", wait)
+                else:
+                    logger.error("All HiFi API instances exhausted")
                 return None
 
             tried.add(instance)
@@ -382,6 +441,8 @@ class HiFiClient(DownloadSourcePlugin):
                 response.raise_for_status()
                 data = response.json()
 
+                # an instance answered, the pool is alive
+                self._breaker().record_answer()
                 if isinstance(data, dict) and data.get('error'):
                     logger.warning(f"HiFi API error from {instance}: {data['error']}")
                     return None
@@ -407,6 +468,8 @@ class HiFiClient(DownloadSourcePlugin):
                     logger.warning(f"HiFi API error ({status}) — rotating: {instance}")
                     self._rotate_instance(instance)
                 else:
+                    # a 4xx about the request is still an answer
+                    self._breaker().record_answer()
                     logger.error(f"HiFi API HTTP error ({status}): {e}")
                     return None
             except Exception as e:
