@@ -210,6 +210,49 @@ def _deezer_direct_lookup(entity_type, deezer_id, query=''):
     return []
 
 
+
+def _deezer_exact_title_first(query, plain, req_lib, limit=8):
+    """Deezer's plain track search for a typed query, plus ``track:"title" artist``.
+
+    The plain results can leave the real song out entirely (for "Auli'i Cravalho
+    How Far I'll Go" they are the Reprise and karaoke copies). When the query
+    names an artist, the exact-title results go first. The artist is read from
+    the plain results' artist names. Scoped results are used only if one is
+    credited to that artist. Returns ``plain`` unchanged otherwise.
+    """
+    from core.deezer_throttle import wait_for_slot
+    from core.deezer_track_query import (
+        artist_scoped_query,
+        credits_artist,
+        merge_by_id,
+        split_query_by_artist,
+    )
+
+    def get(kind, q, n):
+        wait_for_slot()
+        return req_lib.get(f'https://api.deezer.com/search/{kind}', params={'q': q, 'limit': n}, timeout=10).json().get('data', [])
+
+    def scoped_for(names):
+        scoped_query = artist_scoped_query(query, names)
+        split = split_query_by_artist(query, names) if scoped_query else None
+        if not split:
+            return None
+        scoped = get('track', scoped_query, limit)
+        # Deezer only RANKS by the artist words (its artist filter is broken), so
+        # covers by other artists can still lead: the artist's own tracks go first.
+        by_artist = [i for i in scoped if credits_artist([(i.get('artist') or {}).get('name')], split[0])]
+        if by_artist:
+            rest = [i for i in scoped if i not in by_artist]
+            return merge_by_id(by_artist, rest, plain, limit=limit)
+        return None
+
+    names = [(i.get('artist') or {}).get('name') for i in plain if isinstance(i.get('artist'), dict)]
+    found = scoped_for([n for n in names if n])
+    if found:
+        return found
+    return plain
+
+
 def _search_service(service, entity_type, query):
     """Search a service and return normalized results."""
     import requests as req_lib
@@ -324,6 +367,13 @@ def _search_service(service, entity_type, query):
             data = resp.json().get('data', [])
         except Exception:
             data = []
+        if entity_type == 'track' and data:
+            # the plain search can leave the real song out of its 8 results; for
+            # a query that names an artist, put the exact-title results first
+            try:
+                data = _deezer_exact_title_first(query, data, req_lib)
+            except Exception as e:
+                logger.debug("deezer exact-title search skipped for %r: %s", query, e)
         results = []
         for item in data:
             if entity_type == 'artist':
