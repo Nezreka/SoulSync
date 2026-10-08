@@ -60,7 +60,7 @@ make your own playlists, match & import for downloads soulsync didn't start, aud
 - sync & download brings back tracks you removed from the wishlist, and a cached identify shows the push and download buttons again (#1603).
 - single tracks and albums stay off the dashboard's playlist sync card (#1591).
 - video episodes are judged the way sonarr does. episodes failed import against wrong tv runtimes (a placeholder 159 min, a slot length of 85 min for a 43 min show). the runtime now only picks sonarr's sample threshold, movies fail only under half the runtime, and episodes the old rule failed get one more go.
-- auto-import stops filing every release under an artist called "Album" when a singular release-type folder comes back in (thanks SeadogsBooty on discord).
+- auto-import stops filing every release under an artist called "Album" when a singular release-type folder comes back in, and a track you match by hand from the import page keeps its year, so it lands in "[2013] Rise" instead of "Rise". the itunes and discogs albums lost their date on the way to the matcher (thanks SeadogsBooty on discord).
 - the download and mix modals fit a phone.
 
 ## api keys (@splitsec2)
