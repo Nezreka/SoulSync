@@ -932,8 +932,16 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             resp.raise_for_status()
             data = resp.json()
 
+            items = list(data.get('data', []))
+            items.extend(self._exact_title_items(query, items))
+
             results = []
-            for item in data.get('data', []):
+            seen_ids = set()
+            for item in items:
+                item_id = str((item or {}).get('id') or '')
+                if item_id in seen_ids:
+                    continue
+                seen_ids.add(item_id)
                 tr = self._item_to_track_result(item)
                 if tr:
                     results.append(tr)
@@ -951,6 +959,56 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         except Exception as e:
             logger.error(f"Deezer search failed: {e}")
             return [], []
+
+    def _exact_title_items(self, query: str, plain_items: List[dict]) -> List[dict]:
+        """Extra results from Deezer's ``track:"title"`` filter.
+
+        Plain ``/search`` ranks reprises, karaoke and key-shifted copies first and
+        can leave the original out of the page entirely (e.g. "How Far I'll Go"
+        by Auli'i Cravalho), so no matching step downstream can pick it. The
+        exact-title filter does return it. The artist in the query is found from
+        the plain results' own artist names (see ``core.deezer_track_query``).
+
+        Skipped (no request) when a download hint is active (the hint search
+        covers it), or when the plain results already hold the exact
+        title by the artist the query names. Best-effort: any failure returns []
+        and the plain results stand.
+        """
+        try:
+            # A queued download carries the song itself (see _hinted_tracks),
+            # which already runs a title-scoped search. Only a typed query
+            # (no hint) needs this one, so a playlist doesn't pay for both.
+            from core.downloads.track_hint import current_track_hint
+            hint = current_track_hint()
+            if hint and (hint.get('deezer_id') or (hint.get('title') and hint.get('artist'))):
+                return []
+            from core.deezer_track_query import exact_title_queries, plain_has_exact_title
+            names = []
+            pairs = []
+            for it in plain_items:
+                artist = it.get('artist') if isinstance(it, dict) else None
+                if isinstance(artist, dict) and artist.get('name'):
+                    names.append(artist['name'])
+                    pairs.append((it.get('title') or '', artist['name']))
+            # The plain search already found the song (the usual case): one
+            # request per query, not two. A playlist makes many of these.
+            if plain_has_exact_title(query, pairs):
+                return []
+            extra: List[dict] = []
+            for scoped in exact_title_queries(query, names):
+                resp = self._api_get(
+                    'https://api.deezer.com/search',
+                    params={'q': scoped, 'limit': 30},
+                    timeout=getattr(self._config, 'get_source_search_timeout', lambda: None)() or 10,
+                )
+                if resp is None:
+                    continue
+                resp.raise_for_status()
+                extra.extend(resp.json().get('data', []))
+            return extra
+        except Exception as e:   # noqa: BLE001 - the plain search already has its answer
+            logger.debug("Deezer exact-title search skipped for '%s': %s", query, e)
+            return []
 
     # ─── Download ────────────────────────────────────────────────
 

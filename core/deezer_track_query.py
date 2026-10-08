@@ -112,6 +112,28 @@ def artist_scoped_query(query: str, artist_names: Iterable[str]) -> Optional[str
     return queries[0] if queries else None
 
 
+def plain_has_exact_title(query: str, results: Iterable[Tuple[str, str]]) -> bool:
+    """True when the plain results already hold the song the query asks for.
+
+    ``results`` are ``(title, artist_name)`` pairs from the plain search. The
+    song is there when the query names an artist (read from those same pairs)
+    and one result has exactly the remaining words as its title and that artist
+    as its credit. "How Far I'll Go (Reprise)" is not an exact title for "how
+    far ill go", so a page of reprises and karaoke copies is not a hit.
+
+    Used to skip the extra ``track:"title"`` request for the common case where
+    the plain search already found the song. A query that names no artist is
+    never a hit: with just a title, many unrelated songs share it, and the
+    exact-title search is what puts the right one in reach.
+    """
+    pairs = [(t, a) for t, a in (results or []) if t and a]
+    split = split_query_by_artist(query, [a for _, a in pairs])
+    if not split:
+        return False
+    artist, title = split
+    return any(fold(t) == title and fold(a) == artist for t, a in pairs)
+
+
 def merge_by_id(*lists, limit: Optional[int] = None) -> list:
     """Concatenate result lists (dicts with ``id`` or objects with ``.id``),
     keeping the first of each id."""
