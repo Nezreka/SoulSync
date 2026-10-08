@@ -3,6 +3,7 @@ API key authentication for the SoulSync public API.
 """
 
 import hashlib
+import hmac
 import secrets
 import threading
 import uuid
@@ -58,34 +59,64 @@ def _hash_key(raw_key):
     return hashlib.sha256(raw_key.encode()).hexdigest()
 
 
+def _request_api_key() -> str:
+    """The raw API key the request carries, or ``""``.
+
+    Accepted transports, first match wins: ``Authorization: Bearer <key>``,
+    ``X-API-Key: <key>`` (the header the *arr apps and most dashboards use),
+    then the ``?api_key=`` query param (``<img>`` tags can't send headers).
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        api_key = auth_header[len("Bearer "):].strip()
+        if api_key:
+            return api_key
+    api_key = request.headers.get("X-API-Key", "").strip()
+    if api_key:
+        return api_key
+    return (request.args.get("api_key") or "").strip()
+
+
+def _match_api_key(config_mgr, api_key):
+    """Return the stored key record matching ``api_key``, or None."""
+    if not api_key:
+        return None
+    key_hash = _hash_key(api_key).encode()
+    for stored in config_mgr.get("api_keys", []) or []:
+        # compare_digest raises on a str that isn't ASCII, so one odd record
+        # (say, from an imported config) must be skipped, not allowed to break
+        # every key listed after it.
+        stored_hash = stored.get("key_hash") if isinstance(stored, dict) else None
+        if not isinstance(stored_hash, str):
+            continue
+        if hmac.compare_digest(stored_hash.encode("utf-8"), key_hash):
+            return stored
+    return None
+
+
+def _stamp_admin_context(profile_name="API"):
+    """Key-authed requests act with admin rights (an admin minted the key)."""
+    g.is_admin = True
+    g.can_download = True
+    g.allowed_sides = 'both'
+    if getattr(g, 'profile_id', None) is None:
+        g.profile_id = 1
+        g.profile_name = profile_name
+
+
 def require_api_key(f):
     """Decorator that enforces API key authentication."""
 
     @wraps(f)
     def decorated(*args, **kwargs):
-        # Extract key from header or query param
-        api_key = None
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            api_key = auth_header[7:]
-        if not api_key:
-            api_key = request.args.get("api_key")
-
+        api_key = _request_api_key()
         if not api_key:
             return api_error("AUTH_REQUIRED", "API key is required. "
-                             "Pass via Authorization: Bearer <key> header "
-                             "or ?api_key= query parameter.", 401)
+                             "Pass via Authorization: Bearer <key> header, "
+                             "X-API-Key header, or ?api_key= query parameter.", 401)
 
         config_mgr = current_app.soulsync["config_manager"]
-        stored_keys = config_mgr.get("api_keys", []) or []
-        key_hash = _hash_key(api_key)
-
-        matched = None
-        for stored in stored_keys:
-            if isinstance(stored, dict) and stored.get("key_hash") == key_hash:
-                matched = stored
-                break
-
+        matched = _match_api_key(config_mgr, api_key)
         if not matched:
             return api_error("INVALID_KEY", "Invalid API key.", 403)
 
@@ -93,6 +124,7 @@ def require_api_key(f):
         # the full app config on every authenticated request).
         now = datetime.now(timezone.utc)
         matched["last_used_at"] = now.isoformat()
+        key_hash = matched["key_hash"]
         if _should_persist_usage(key_hash, now):
             # through key_store, not set(stored_keys): that list was read before
             # this request and writing it back would undo a revoke since then
@@ -104,13 +136,7 @@ def require_api_key(f):
         # multi-profile install with nothing picked), which made v1 admin
         # routes like request approve answer "Admin only" to a valid key.
         try:
-            from flask import g
-            g.is_admin = True
-            g.can_download = True
-            g.allowed_sides = 'both'
-            if getattr(g, 'profile_id', None) is None:
-                g.profile_id = 1
-                g.profile_name = matched.get("label") or "API"
+            _stamp_admin_context(matched.get("label") or "API")
         except RuntimeError:
             pass
 
@@ -122,8 +148,8 @@ def require_api_key(f):
 def request_has_valid_api_key() -> bool:
     """True when the current request carries a valid API key.
 
-    Accepts the same two transports as :func:`require_api_key`
-    (``Authorization: Bearer <key>`` header or ``?api_key=`` query param).
+    Accepts the same transports as :func:`require_api_key` (see
+    :func:`_request_api_key`).
 
     The session gates (login / launch PIN) use this so key-authed callers that
     cannot do cookie sessions — e.g. the Companion extension's ``<img>`` tags
@@ -131,19 +157,14 @@ def request_has_valid_api_key() -> bool:
     ``/api/v1/*`` public API. A valid key is admin-minted, so this grants no
     more than the v1 path-prefix exemption already does.
     """
-    api_key = request.args.get("api_key") or ""
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        api_key = auth_header[len("Bearer "):].strip()
+    api_key = _request_api_key()
     if not api_key:
         return False
     try:
         config_mgr = current_app.soulsync["config_manager"]
     except Exception:
         return False
-    stored_keys = config_mgr.get("api_keys", []) or []
-    key_hash = _hash_key(api_key)
-    return any(isinstance(s, dict) and s.get("key_hash") == key_hash for s in stored_keys)
+    return _match_api_key(config_mgr, api_key) is not None
 
 
 def apply_api_key_request_context() -> bool:
@@ -163,10 +184,5 @@ def apply_api_key_request_context() -> bool:
     """
     if not request_has_valid_api_key():
         return False
-    g.is_admin = True
-    g.can_download = True
-    g.allowed_sides = 'both'
-    if getattr(g, 'profile_id', None) is None:
-        g.profile_id = 1
-        g.profile_name = "API"
+    _stamp_admin_context()
     return True
