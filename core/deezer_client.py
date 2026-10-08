@@ -1620,6 +1620,42 @@ class DeezerClient:
             logger.error(f"Error searching for track '{artist_name} - {track_title}': {e}")
             return None
 
+    def get_album_tracks_raw(self, album_id) -> List[Dict[str, Any]]:
+        """Raw track dicts of one Deezer album (``/album/{id}/tracks``).
+
+        The album's own tracklist holds songs that Deezer's search index leaves
+        out, and it needs no artist to find them. [] on any failure."""
+        try:
+            data = self._api_get(f'album/{album_id}/tracks', {'limit': 500}, use_token=False)
+        except Exception as e:
+            logger.debug("album tracklist %s failed: %s", album_id, e)
+            return []
+        items = (data or {}).get('data') if isinstance(data, dict) else None
+        return list(items or [])
+
+    @staticmethod
+    def pick_track_from_list(tracks: List[Dict[str, Any]], track_title: str,
+                             track_number: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """The song called ``track_title`` among one album's tracks.
+
+        Exact title first, then the same song with harmless extras
+        ("Remastered 2022"). A live/remix/other-song title never counts. When
+        several tie (a disc 2 repeat), the one at ``track_number`` wins."""
+        if not tracks or not track_title:
+            return None
+        ranked = [(_title_rank(track_title, t.get('title') or ''), i, t)
+                  for i, t in enumerate(tracks)]
+        ranked = [r for r in ranked if r[0] in (_EXACT_TITLE, _SAME_SONG)]
+        if not ranked:
+            return None
+        best_rank = min(r[0] for r in ranked)
+        best = [r for r in ranked if r[0] == best_rank]
+        if track_number and len(best) > 1:
+            for _, _, t in best:
+                if t.get('track_position') == track_number:
+                    return t
+        return best[0][2]
+
     @rate_limited
     def _search_track_raw(self, query: str) -> List[Dict[str, Any]]:
         """one /search call, raw result dicts. its own rate slot so the
