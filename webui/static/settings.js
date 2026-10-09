@@ -91,7 +91,7 @@ const _QP_BUNDLE_CONTROL_IDS = new Set([
 const _QP_PROFILE_CONTROL_IDS = new Set([
     ..._QP_BUNDLE_CONTROL_IDS,
     'quality-fallback-enabled', 'quality-search-mode', 'quality-rank-candidates',
-    'quality-upgrade-policy', 'quality-upgrade-cutoff',
+    'quality-upgrade-policy', 'quality-upgrade-cutoff', 'quality-release-import-mode',
 ]);
 
 // Route a Quality-page change to the profile editor's lightweight autosave.
@@ -4182,6 +4182,9 @@ function populateQualityProfileUI(profile) {
     const rankCandidatesCheckbox = document.getElementById('quality-rank-candidates');
     if (rankCandidatesCheckbox) rankCandidatesCheckbox.checked = profile.rank_candidates_by_quality === true;
 
+    const releaseImportSelect = document.getElementById('quality-release-import-mode');
+    if (releaseImportSelect) releaseImportSelect.value = profile.release_import_mode === 'album_tracks' ? 'album_tracks' : 'requested_tracks';
+
     const upgradePolicySelect = document.getElementById('quality-upgrade-policy');
     if (upgradePolicySelect) {
         upgradePolicySelect.value = ['until_cutoff', 'until_top'].includes(profile.upgrade_policy)
@@ -4418,6 +4421,7 @@ async function applyQualityPreset(presetName) {
                 ...preset,
                 search_mode: uiState.search_mode,
                 rank_candidates_by_quality: uiState.rank_candidates_by_quality,
+                release_import_mode: uiState.release_import_mode,
             };
             currentQualityProfile = merged;
             window._suppressSettingsAutoSave = true;
@@ -4520,6 +4524,7 @@ function collectQualityProfileFromUI() {
         fallback_enabled: document.getElementById('quality-fallback-enabled')?.checked ?? true,
         search_mode: document.getElementById('quality-search-mode')?.value === 'best_quality' ? 'best_quality' : 'priority',
         rank_candidates_by_quality: document.getElementById('quality-rank-candidates')?.checked ?? false,
+        release_import_mode: document.getElementById('quality-release-import-mode')?.value === 'album_tracks' ? 'album_tracks' : 'requested_tracks',
         upgrade_policy: document.getElementById('quality-upgrade-policy')?.value === 'until_cutoff' ? 'until_cutoff' : 'acceptable',
         upgrade_cutoff_index: parseInt(document.getElementById('quality-upgrade-cutoff')?.value || '0', 10) || 0,
         ranked_targets,

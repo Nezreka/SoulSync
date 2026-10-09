@@ -254,9 +254,11 @@ def audio_quality_from_release(
     quality = audio_quality_from_release_title(title)
     file_formats = formats_in_files(file_names or ())
     if file_formats:
-        quality.format = (
-            next(iter(file_formats)) if len(file_formats) == 1 else 'unknown'
-        )
+        file_format = next(iter(file_formats)) if len(file_formats) == 1 else 'unknown'
+        if file_format != quality.format or file_format == 'unknown':
+            # An extension can identify a codec, never the resolution or
+            # bitrate advertised for a different codec in the release title.
+            return AudioQuality(format=file_format)
         return quality
     title_formats = formats_in_title(title)
     has_mp3_category = False
@@ -272,15 +274,14 @@ def audio_quality_from_release(
             has_lossless_category = True
 
     if has_mp3_category and has_lossless_category:
-        quality.format = 'unknown'
-        return quality
+        return AudioQuality(format='unknown')
 
     if has_mp3_category and not title_formats:
         # Fills a silent title only; a title that names a codec outranks a
         # category mapping (see evaluate_release for the same rule).
         quality.format = 'mp3'
     elif has_lossless_category and quality.format in _LOSSY_FORMATS:
-        quality.format = 'unknown'
+        return AudioQuality(format='unknown')
     return quality
 
 

@@ -6322,6 +6322,48 @@
                                                 </div>
                                             </div><!-- end Quality on Import body -->
 
+                                            <!-- ═══ ALBUM RELEASES (profile: what to import from a downloaded album release) ═══ -->
+                                            <div class="settings-section-header collapsed" data-stg="quality"
+                                                onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
+                                                role="button" tabindex="0" aria-expanded="false">
+                                                <span class="settings-section-arrow">&#9660;</span>
+                                                <h3>Album Releases</h3>
+                                                <span class="qp-governed-badge"
+                                                    title="Saved under the active profile in the panel on the right">Profile</span>
+                                                <span class="settings-section-hint">What to import when a Usenet or
+                                                    torrent download is a whole album</span>
+                                            </div>
+                                            <div class="settings-section-body collapsed" data-stg="quality">
+                                                <div class="settings-group" data-stg="quality">
+                                                    <div class="form-group">
+                                                        <div class="setting-row" style="margin-bottom:4px;">
+                                                            <label for="quality-release-import-mode"
+                                                                style="font-weight:600;">Import from album releases</label>
+                                                            <span class="info-icon" role="button" tabindex="0"
+                                                                title="What's this?"
+                                                                onclick="toggleSettingHelp(this)"
+                                                                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                        </div>
+                                                        <select id="quality-release-import-mode"
+                                                            style="width:100%;max-width:420px;"
+                                                            onchange="debouncedSaveQualityProfile()">
+                                                            <option value="requested_tracks">Requested tracks only (default)</option>
+                                                            <option value="album_tracks">Also the album's other tracks that pass</option>
+                                                        </select>
+                                                        <div class="help-text setting-help-body" hidden>
+                                                            A requested track often arrives inside a whole album release.
+                                                            <strong>Requested tracks only</strong> imports just the track you asked for.
+                                                            <br><br>
+                                                            <strong>Also the album's other tracks</strong> then imports every other
+                                                            track of that album found in the release and not yet in your library.
+                                                            Each one goes through the normal import pipeline with this quality
+                                                            profile, like a wishlist download: a track that fails a check is
+                                                            quarantined on its own, and the tracks that pass are imported.
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div><!-- end Album Releases body -->
+
                                             <!-- ═══ POST-DOWNLOAD CONVERSION (quality — moved from Library) ═══ -->
                                             <div class="settings-section-header collapsed" data-stg="quality"
                                                 onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"

@@ -14,6 +14,7 @@ from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 from pathlib import Path
 from utils.logging_config import get_logger
+from core.quality.schema import normalize_release_import_mode
 
 logger = get_logger("music_database")
 
@@ -13689,6 +13690,7 @@ class MusicDatabase:
             "search_mode": row["search_mode"] or "priority",
             "rank_candidates_by_quality": bool(row["rank_candidates_by_quality"]),
             "ranked_targets": ranked_targets,
+            "release_import_mode": normalize_release_import_mode(_row_value(row, "release_import_mode")),
             "acoustid_required": bool(row["acoustid_required"]),
             "downsample_enabled": bool(row["downsample_enabled"]),
             "deep_audio_verify": bool(row["deep_audio_verify"]),
@@ -13731,6 +13733,7 @@ class MusicDatabase:
             "lossy_copy_codec": str(profile.get("lossy_copy_codec") or "mp3"),
             "lossy_copy_bitrate": str(profile.get("lossy_copy_bitrate") or "320"),
             "lossy_copy_delete_original": 1 if profile.get("lossy_copy_delete_original") else 0,
+            "release_import_mode": normalize_release_import_mode(profile.get("release_import_mode")),
         }
 
     # SQLite has no native boolean type — these columns are stored as 0/1.
@@ -13756,6 +13759,7 @@ class MusicDatabase:
             profiles = []
             for row in rows:
                 profile = dict(row)
+                profile["release_import_mode"] = normalize_release_import_mode(profile.get("release_import_mode"))
                 for col in self._QUALITY_PROFILE_BOOL_COLUMNS:
                     if col in profile:
                         profile[col] = bool(profile[col])
@@ -13782,12 +13786,12 @@ class MusicDatabase:
                         search_mode, rank_candidates_by_quality, upgrade_policy,
                         upgrade_cutoff_index, acoustid_required, downsample_enabled, deep_audio_verify,
                         replace_lower_quality, lossy_copy_enabled, lossy_copy_codec,
-                        lossy_copy_bitrate, lossy_copy_delete_original, is_default)
+                        lossy_copy_bitrate, lossy_copy_delete_original, release_import_mode, is_default)
                    VALUES (:name, :description, :ranked_targets, :fallback_enabled,
                            :search_mode, :rank_candidates_by_quality, :upgrade_policy,
                            :upgrade_cutoff_index, :acoustid_required, :downsample_enabled, :deep_audio_verify,
                            :replace_lower_quality, :lossy_copy_enabled, :lossy_copy_codec,
-                           :lossy_copy_bitrate, :lossy_copy_delete_original, 0)""",
+                           :lossy_copy_bitrate, :lossy_copy_delete_original, :release_import_mode, 0)""",
                 {"name": name, "description": "Custom profile", **params},
             )
             conn.commit()
@@ -13815,6 +13819,7 @@ class MusicDatabase:
                           replace_lower_quality=:replace_lower_quality, lossy_copy_enabled=:lossy_copy_enabled,
                           lossy_copy_codec=:lossy_copy_codec, lossy_copy_bitrate=:lossy_copy_bitrate,
                           lossy_copy_delete_original=:lossy_copy_delete_original,
+                          release_import_mode=:release_import_mode,
                           updated_at=CURRENT_TIMESTAMP
                     WHERE id=:profile_id""",
                 {"profile_id": profile_id, **params},
@@ -14259,7 +14264,7 @@ class MusicDatabase:
     _QUALITY_BUNDLE_COLUMNS = (
         "acoustid_required", "downsample_enabled", "deep_audio_verify",
         "replace_lower_quality", "lossy_copy_enabled", "lossy_copy_codec",
-        "lossy_copy_bitrate", "lossy_copy_delete_original",
+        "lossy_copy_bitrate", "lossy_copy_delete_original", "release_import_mode",
     )
 
     def _write_default_quality_profile_row(self, profile: dict) -> None:

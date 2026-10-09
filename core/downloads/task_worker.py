@@ -6,7 +6,7 @@ Runs as a background thread (one per task) that:
 3. Generates smart search queries via the matching engine + legacy fallbacks
 4. Iterates queries sequentially against the soulseek client
 5. For each query: validates results, attempts download with fallback candidates
-6. If hybrid mode: falls back to remaining sources (youtube/tidal/qobuz/hifi/deezer_dl)
+6. If hybrid mode: falls back to remaining configured sources
 7. On total failure: marks task not_found + records search diagnostics
 8. On any uncaught exception: marks failed + emergency worker-slot recovery
 
@@ -92,6 +92,15 @@ def _youtube_ytsearch_fallback(deps, query, track, tracks_result, profile_id=Non
     return deps.get_valid_candidates(extra, track, query, profile_id) or None
 
 
+async def _search_fallback_source(client, query, track_hint, profile_id):
+    """Direct hybrid retries carry the same identity/profile as the main search."""
+    from core.downloads.track_hint import track_hint_context
+    from core.quality.source_map import quality_profile_context
+
+    with track_hint_context(track_hint), quality_profile_context(profile_id):
+        return await client.search(query, timeout=20)
+
+
 def _candidate_ordering(track_info: Optional[dict] = None):
     """Return ``(quality_first, targets)`` for the active search mode + toggle.
 
@@ -146,7 +155,9 @@ def _try_cached_candidates(task_id, batch_id, track, deps):
         exhausted = {str(s).lower() for s in (task.get('exhausted_download_sources') or ())}
         slow_fallback_key = task.get('_slow_fallback_source_key')
         task_track_info = task.get('track_info')
+        used_release_sources = set(task.get('used_release_sources') or ())
 
+    from core.download_plugins.release_identity import release_sources, candidate_endpoint_id
     remaining = []
     slow_fallback = None
     for c in cached:
@@ -154,7 +165,10 @@ def _try_cached_candidates(task_id, batch_id, track, deps):
         if not uname or not fname:
             continue
         source_key = f"{uname}_{fname}"
-        if source_key in used:
+        if not any(
+                f'{_cand_user_file(s)[0]}_{_cand_user_file(s)[1]}' not in used
+                and candidate_endpoint_id(s) not in used_release_sources
+                for s in release_sources(c)):
             if source_key == slow_fallback_key:
                 slow_fallback = c
             continue
@@ -439,27 +453,6 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         artist_name = track.artists[0] if track.artists else None
         track_name = track.name
 
-        release_queries = []
-        try:
-            _download_mode = (getattr(deps.download_orchestrator, 'mode', '') or '').lower()
-            _track_album = (getattr(track, 'album', '') or '').strip()
-            _track_title = (getattr(track, 'name', '') or '').strip()
-            _track_artists = list(getattr(track, 'artists', []) or [])
-            _first_artist = _track_artists[0] if _track_artists else ''
-            _primary_artist = (
-                (_first_artist.get('name', '') if isinstance(_first_artist, dict) else str(_first_artist))
-                or ''
-            ).strip()
-            if (
-                _download_mode in ('torrent', 'usenet')
-                and _primary_artist
-                and _track_album
-                and _track_album.lower() not in ('unknown album', _track_title.lower())
-            ):
-                release_queries.append(f"{_primary_artist} {_track_album}".strip())
-        except Exception as _release_query_exc:
-            logger.debug("[Modal Worker] release query hint failed: %s", _release_query_exc)
-
         # Start with matching engine queries
         search_queries = deps.matching_engine.generate_download_queries(track)
 
@@ -498,14 +491,10 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         ):
             legacy_queries.append(cleaned_name.strip())
 
-        # Combine enhanced queries with legacy fallbacks.
-        #
-        # Torrent / usenet can use full album releases as a fallback for
-        # single-track requests, but trying the album release first makes
-        # playlist batches download whole albums before checking whether a
-        # track-shaped release exists. Keep release queries last so singles
-        # stay light when the indexer has a direct result.
-        all_queries = search_queries + legacy_queries + release_queries
+        # Release plugins add the known artist/album hint locally. Keeping
+        # album queries out of this list avoids sending them to Soulseek or
+        # streaming sources and preserves the hybrid source order.
+        all_queries = search_queries + legacy_queries
 
         # Remove duplicates while preserving order
         unique_queries = []
@@ -545,6 +534,8 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         # so per-item profiles changed what survived import but not what was
         # considered in the first place (#1150). None = app-wide default.
         _profile_id = track_data.get('quality_profile_id') if isinstance(track_data, dict) else None
+        from core.quality.selection import load_search_mode
+        _pooled_search = load_search_mode(_profile_id) == 'best_quality'
         # the song itself, for sources that can search better than a query
         # string (deezer by id / by title + the track's own artist, #1582).
         # one dict per task: a source caches what it found in it
@@ -578,6 +569,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
             _searched_queries = (
                 set(_t.get('searched_queries') or ()) if cached_first else set()
             )
+        _exclude_for_hybrid_album = None
         for query_index, query in enumerate(search_queries):
             # Cancellation check before each query
             with tasks_lock:
@@ -787,7 +779,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         #
         # Best-quality mode already searched EVERY source per query (the pool), so this
         # block would only re-search the same sources — skip it there.
-        if not _best_quality and getattr(deps.download_orchestrator, 'mode', '') == 'hybrid':
+        if not _pooled_search and getattr(deps.download_orchestrator, 'mode', '') == 'hybrid':
             try:
                 orch = deps.download_orchestrator
                 hybrid_order = getattr(orch, 'hybrid_order', None) or []
@@ -800,11 +792,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 # legacy per-source attrs were dropped in the registry
                 # refactor, so getattr(orch, 'soulseek', None) etc. all
                 # silently returned None and the fallback never fired.
-                source_clients = {
-                    name: orch.client(name)
-                    for name in ('soulseek', 'youtube', 'tidal', 'qobuz',
-                                 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon')
-                }
+                source_clients = {name: orch.client(name) for name in hybrid_order}
 
                 # The orchestrator tried sources in order but stopped at the first with results.
                 # We don't know which it stopped at, so try ALL sources except the first
@@ -816,6 +804,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                     s for s in hybrid_order[1:]
                     if s in source_clients and source_clients[s]
                     and s.lower() not in _exhausted_lower
+                    and s.lower() not in (_exclude_for_hybrid_album or [])
                 ]
                 if remaining_sources:
                     logger.warning(f"[Hybrid Fallback] Primary source had no valid matches. Trying fallback sources: {remaining_sources}")
@@ -825,16 +814,23 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                     if hasattr(fb_client, 'is_configured') and not fb_client.is_configured():
                         continue
 
-                    # Use first 2 queries only for speed
-                    for fb_query in search_queries[:2]:
+                    # Release sources must see the whole bounded track-query
+                    # ladder; their album hint is cached once for this task.
+                    fb_queries = search_queries if fallback_source in ('torrent', 'usenet') else search_queries[:2]
+                    for fb_query in fb_queries:
                         try:
                             logger.warning(f"[Hybrid Fallback] Trying {fallback_source}: '{fb_query}'")
                             with tasks_lock:
-                                if task_id in download_tasks:
-                                    download_tasks[task_id]['current_source'] = fallback_source
-                                    download_tasks[task_id]['current_query'] = fb_query
-                                    download_tasks[task_id].pop('search_live', None)
-                            fb_results, _ = deps.run_async(fb_client.search(fb_query, timeout=20))
+                                if task_id not in download_tasks or download_tasks[task_id]['status'] == 'cancelled':
+                                    return
+                                download_tasks[task_id]['current_source'] = fallback_source
+                                download_tasks[task_id]['current_query'] = fb_query
+                                download_tasks[task_id].pop('search_live', None)
+                            fb_results, _ = deps.run_async(_search_fallback_source(
+                                fb_client, fb_query, _track_hint, _profile_id))
+                            with tasks_lock:
+                                if task_id not in download_tasks or download_tasks[task_id]['status'] == 'cancelled':
+                                    return
                             if not fb_results:
                                 continue
                             fb_candidates = _judge(deps, fb_results, track, fb_query, _profile_id, decision_pool)
@@ -846,9 +842,13 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                             if fb_candidates:
                                 logger.warning(f"[Hybrid Fallback] {fallback_source} found {len(fb_candidates)} valid candidates!")
                                 with tasks_lock:
-                                    if task_id in download_tasks:
-                                        download_tasks[task_id]['cached_candidates'] = fb_candidates
-                                success = deps.attempt_download_with_candidates(task_id, fb_candidates, track, batch_id)
+                                    if task_id not in download_tasks or download_tasks[task_id]['status'] == 'cancelled':
+                                        return
+                                    download_tasks[task_id]['cached_candidates'] = fb_candidates
+                                success = deps.attempt_download_with_candidates(
+                                    task_id, fb_candidates, track, batch_id,
+                                    quality_first=_best_quality, quality_targets=_quality_targets,
+                                )
                                 if success:
                                     _record_decision(deps, task_id, decision_pool, 'chosen', track, _profile_id, cached_first, provenance=_provenance)
                                     return

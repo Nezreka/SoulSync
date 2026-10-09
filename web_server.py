@@ -16242,6 +16242,7 @@ def _build_post_processing_deps():
         enhance_file_metadata=_enhance_file_metadata,
         wipe_source_tags=_wipe_source_tags,
         post_process_with_verification=_post_process_matched_download_with_verification,
+        process_release_file=_post_process_matched_download,
         mark_task_completed=_mark_task_completed,
         on_download_completed=_on_download_completed,
     )
