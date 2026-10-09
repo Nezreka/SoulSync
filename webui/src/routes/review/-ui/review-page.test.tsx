@@ -363,6 +363,8 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByText(/Renumber 1 track as one sequence/)).toBeTruthy();
     expect(screen.queryByText('1 affected action')).toBeNull();
     expect(screen.getByRole('button', { name: 'Use continuous numbering' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Evidence' }));
+    expect(screen.getByLabelText('Selected action detail')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Tracks/ }));
     expect(screen.getByRole('heading', { name: 'Track assignments' })).toBeTruthy();
     expect(screen.getByText('digital-release')).toBeTruthy();
@@ -370,10 +372,7 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByText('○ 1 outside collection')).toBeTruthy();
     expect(screen.getByText('✓ 3 settled release slots')).toBeTruthy();
     expect(screen.getAllByText('No action')).toHaveLength(1);
-    fireEvent.click(screen.getByText('↻ 1 proposed track change'));
     const selectedRow = screen.getByRole('row', { name: /Hourglass/ });
-    expect(screen.queryByLabelText('Selected action detail')).toBeNull();
-    fireEvent.click(selectedRow);
     const selectedDetail = screen.getByLabelText('Selected action detail');
     expect(selectedRow.nextElementSibling).toBe(selectedDetail);
   });

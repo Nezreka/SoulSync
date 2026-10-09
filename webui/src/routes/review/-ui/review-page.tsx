@@ -1182,7 +1182,10 @@ export function ReviewPage() {
                 <button
                   type="button"
                   aria-current={albumView === 'evidence' ? 'page' : undefined}
-                  onClick={() => setAlbumView('evidence')}
+                  onClick={() => {
+                    setAlbumView('evidence');
+                    setActiveId((current) => current ?? reviewCase.items[0]?.id ?? null);
+                  }}
                 >
                   Evidence
                 </button>
