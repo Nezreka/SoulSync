@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { LibraryV2ArtistPlaybackFile } from './-library-v2.api';
 import type { LibraryV2AlbumDetail, LibraryV2Track } from './-library-v2.types';
 
-import { albumQueueRows, artistQueueRows } from './-library-v2.play';
+import { albumQueueRows, artistQueueRows, playlistTrack } from './-library-v2.play';
 
 /**
  * Why Library v2 does NOT need the ownership round-trip upstream added.
@@ -269,5 +269,35 @@ describe('artistQueueRows', () => {
   it('carries the release artwork into the queue', () => {
     const [row] = artistQueueRows([file()], 'Aphex Twin');
     expect(row.image_url).toBe('/art/saw.jpg');
+  });
+});
+
+describe('playlistTrack (upstream 651f6e7e2: add any track to a playlist)', () => {
+  it('adds the title, the credited artist, the album and the length', () => {
+    expect(
+      playlistTrack(
+        track({
+          artists: [
+            { id: 2, name: 'Guest', role: 'featured' },
+            { id: 1, name: 'Aphex Twin', role: 'primary' },
+          ],
+        }),
+        'Selected Ambient Works 85-92',
+      ),
+    ).toEqual({
+      track_name: 'Xtal',
+      artist_name: 'Aphex Twin',
+      album_name: 'Selected Ambient Works 85-92',
+      duration_ms: 292000,
+    });
+  });
+
+  it('a missing row still has a song to add', () => {
+    expect(playlistTrack(track({ id: null, file: null }), 'Album')?.track_name).toBe('Xtal');
+  });
+
+  it('nothing to add without a title or an artist', () => {
+    expect(playlistTrack(track({ title: null }), 'Album')).toBeNull();
+    expect(playlistTrack(track({ artists: [] }), 'Album')).toBeNull();
   });
 });

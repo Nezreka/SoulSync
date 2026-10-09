@@ -22,6 +22,8 @@
  * truth that can disagree with the one on screen.
  */
 
+import type { UserPlaylistTrack } from '@/features/playlists/user-playlists';
+
 import type { LibraryV2ArtistPlaybackFile } from './-library-v2.api';
 import type { LibraryV2AlbumDetail, LibraryV2Track } from './-library-v2.types';
 
@@ -153,4 +155,22 @@ export function artistQueueRows(
         disc_number: file.disc_number ?? null,
       };
     });
+}
+
+/** Upstream 651f6e7e2 ("add any track to a playlist"), on a Library v2 row:
+ *  a user playlist holds artist + title (album and length when known) and
+ *  identifies the rest itself, so the catalogue id never leaves the page.
+ *  The artist is the track's own primary credit. Null when there is no song
+ *  to name, so the row shows no button. */
+export function playlistTrack(track: LibraryV2Track, albumTitle: string): UserPlaylistTrack | null {
+  const credit = track.artists?.find((a) => a.role === 'primary') ?? track.artists?.[0];
+  const title = track.title?.trim();
+  const artist = credit?.name?.trim();
+  if (!title || !artist) return null;
+  return {
+    track_name: title,
+    artist_name: artist,
+    album_name: albumTitle || undefined,
+    duration_ms: track.duration ?? undefined,
+  };
 }

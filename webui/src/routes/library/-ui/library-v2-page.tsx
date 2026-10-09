@@ -15,6 +15,7 @@ import {
 } from 'react';
 
 import { DialogFrame, DialogHeader } from '@/components/dialog';
+import { AddToPlaylistButton } from '@/features/playlists/add-to-playlist';
 import { thumb } from '@/platform/artwork-thumb';
 import { getShellBridge } from '@/platform/shell/bridge';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
@@ -108,7 +109,7 @@ import {
   type LibraryV2MatchSearchResult,
 } from '../-library-v2.api';
 import { useLibraryChanged, useMaintenanceChanged } from '../-library-v2.live';
-import { albumQueueRows, artistQueueRows } from '../-library-v2.play';
+import { albumQueueRows, artistQueueRows, playlistTrack } from '../-library-v2.play';
 import { getServiceUrl } from '../-library-v2.service-links';
 import {
   LIBRARY_V2_WANTED_KINDS,
@@ -10226,6 +10227,10 @@ function TrackRow({
           requiresWish
           disabled={!track.id}
           onClick={() => onAction(`Interactive Search: ${label} (${albumTitle})`, entity)}
+        />
+        <AddToPlaylistButton
+          track={playlistTrack(track, albumTitle)}
+          className={styles.iconAction}
         />
         {track.id ? (
           <TrackDetailButton

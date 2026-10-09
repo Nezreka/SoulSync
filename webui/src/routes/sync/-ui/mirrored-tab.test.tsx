@@ -11,7 +11,7 @@ import { mirroredPipelineStateWriter } from '../-sync.mirrored';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { useMirroredPipeline } from '../-sync.use-pipeline';
 import { useSourceVertical } from '../-sync.use-vertical';
-import { MirroredTab } from './mirrored-tab';
+import { MirroredTab, rowsForScope } from './mirrored-tab';
 
 interface Call {
   url: string;
@@ -1591,5 +1591,18 @@ describe('MirroredTab — My Playlists scope', () => {
     await waitFor(() => expect(screen.queryByText('One')).toBeNull());
     expect(screen.getByText('Two')).toBeInTheDocument();
     expect(removed).toBe(true);
+  });
+});
+
+describe('rowsForScope (upstream 651f6e7e2: My Playlists tab)', () => {
+  const rows = [
+    { id: 1, source: 'spotify' },
+    { id: 2, source: 'soulsync' },
+    { id: 3, source: null },
+  ];
+
+  it('the user tab holds only playlists made here, the mirrored tab the rest', () => {
+    expect(rowsForScope(rows, 'user').map((r) => r.id)).toEqual([2]);
+    expect(rowsForScope(rows, 'all').map((r) => r.id)).toEqual([1, 3]);
   });
 });
