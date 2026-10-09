@@ -836,7 +836,9 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict) ->
         recordings = (file.get('acoustid') or {}).get('recordings') or []
         audio = max(recordings, key=lambda item: float(item.get('score') or 0), default={})
         duplicate = bool((plan.get('competing_files') or {}).get(index))
-        categories.add('duplicates' if duplicate else 'extra_files')
+        different_recording = audio_contradicts_local_title(file)
+        categories.add('duplicates' if duplicate else
+                       'audio_conflicts' if different_recording else 'extra_files')
         assignments.append({
             'status': 'duplicate' if duplicate else 'extra',
             'file_path': file['path'], 'file': os.path.basename(file['path']),
@@ -848,8 +850,7 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict) ->
             'audio_title': audio.get('title') or '',
             'audio_artist': audio.get('artist') or '',
             'audio_score': audio.get('score'),
-            'audio_conflict': ('different_recording'
-                               if audio_contradicts_local_title(file) else ''),
+            'audio_conflict': ('different_recording' if different_recording else ''),
             'playlists': list(file.get('playlists') or []),
         })
     return assignments, sorted(categories)
@@ -1926,6 +1927,7 @@ class LibraryReconciliationJob(RepairJob):
                         details=details):
                         result.findings_created += 1
 
+                missing = [slots[i] for i in plan['missing_slots']]
                 for file_index in plan['extra_files']:
                     if file_index in duplicate_indexes and file_index not in duplicate_groups:
                         continue
@@ -1948,6 +1950,26 @@ class LibraryReconciliationJob(RepairJob):
                                   float(best.get('score') or 0) >= 0.80 and
                                   not fingerprint_is_ambiguous(recordings) and
                                   not competing_paths)
+                    replacement_track = None
+                    if different_recording and album_id is not None and file.get('db'):
+                        local_key = semantic_title_key({
+                            'title': file['tags'].get('title') or file['db'].get('title') or '',
+                        })
+                        matching_slots = [
+                            slot for slot in missing
+                            if local_key[0] and semantic_title_key(slot) == local_key
+                            and slot.get('source_track_id')
+                        ]
+                        if len(matching_slots) == 1:
+                            slot = matching_slots[0]
+                            replacement_track = {
+                                'name': slot['title'],
+                                'artist': slot.get('artist') or common['artist_name'],
+                                'track_number': slot.get('track_number'),
+                                'disc_number': slot.get('disc_number') or 1,
+                                'duration_ms': slot.get('duration_ms') or 0,
+                                'source_track_id': slot['source_track_id'],
+                            }
                     details = {**common, 'current_title': file['tags'].get('title'),
                                'current_tags': file['tags'], 'acoustid': audio,
                                'fingerprint_key': audio.get('fingerprint_key'),
@@ -1963,13 +1985,17 @@ class LibraryReconciliationJob(RepairJob):
                                'acoustid_artist': best.get('artist'),
                                'acoustid_score': best.get('score'),
                                'audio_conflict': ('different_recording'
-                                                  if different_recording else '')}
+                                                  if different_recording else ''),
+                               'replacement_track': replacement_track}
                     if emit(
                         job_id=self.job_id,
                         finding_type=('reconciliation_duplicate' if duplicate_copies else
-                                      'reconciliation_extra' if identified else
+                                      'reconciliation_extra'
+                                      if identified or different_recording else
                                       'reconciliation_unresolved'),
-                        severity='warning' if identified or duplicate_copies else 'info',
+                        severity=('warning'
+                                  if identified or different_recording or duplicate_copies
+                                  else 'info'),
                         entity_type='track' if file.get('db') else 'file',
                         entity_id=str(file['db']['id']) if file.get('db') else file['path'],
                         file_path=file['path'],
@@ -1989,7 +2015,6 @@ class LibraryReconciliationJob(RepairJob):
                         details=details):
                         result.findings_created += 1
 
-                missing = [slots[i] for i in plan['missing_slots']]
                 saved_intent = intents.get(str(album_id)) if album_id is not None else None
                 intent_scope = (saved_intent[0] if saved_intent and
                                 saved_intent[1:] == (source, release_id) else '')

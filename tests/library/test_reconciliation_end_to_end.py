@@ -44,7 +44,8 @@ class _Acoustid:
 
     def lookup_fingerprint_with_status(self, fingerprint, duration):
         self.lookups += 1
-        return {'status': 'ok', 'recordings': [self.matches[fingerprint]]}
+        match = self.matches[fingerprint]
+        return {'status': 'ok', 'recordings': match if isinstance(match, list) else [match]}
 
 
 def test_album_title_keeps_clean_local_name_when_source_repeats_its_qualifier():
@@ -1375,6 +1376,66 @@ def test_wrong_audio_defers_completion_intent_until_assignment_is_settled(tmp_pa
     assert (root / '.deleted' / path.name).exists()
     with db._get_connection() as conn:
         assert conn.execute('SELECT id FROM tracks WHERE id = 1').fetchone() is None
+
+
+def test_wrong_audio_can_request_exact_replacement_before_quarantine(tmp_path, monkeypatch):
+    import core.repair_jobs.library_reconciliation as module
+
+    root = tmp_path / 'music'
+    root.mkdir()
+    path = root / '01 - Laid to Rest.flac'
+    path.write_bytes(b'wrong audio')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, path)
+    monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
+    monkeypatch.setattr(module, '_read_file_tags', lambda _path: {
+        'title': 'Laid to Rest', 'artist': 'Lamb of God', 'album': 'Ashes of the Wake',
+        'track_number': 1, 'disc_number': 1, 'duration_ms': 200000,
+    })
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args: [
+        {'id': 'wanted-id', 'name': 'Laid to Rest', 'track_number': 1,
+         'disc_number': 1, 'duration_ms': 200000},
+    ])
+    monkeypatch.setattr(module, 'get_album_for_source',
+                        lambda *_args: {'name': 'Ashes of the Wake'})
+    client = _Acoustid({path.name: [
+        {'mbid': 'wrong-one', 'title': 'Southbound',
+         'artist': 'Thin Lizzy', 'score': 0.99},
+        {'mbid': 'wrong-two', 'title': 'Jailbreak',
+         'artist': 'Thin Lizzy', 'score': 0.99},
+    ]})
+    worker = RepairWorker(database=db, transfer_folder=str(root))
+    monkeypatch.setattr(RepairWorker, 'acoustid_client', property(lambda _self: client))
+    monkeypatch.setattr('core.repair_worker._server_playlist_membership', lambda: {})
+    context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
+                         acoustid_client=client, create_finding=worker._create_finding)
+
+    LibraryReconciliationJob().scan(context)
+
+    case_id = worker.get_review_cases()['items'][0]['case_id']
+    extra = worker.get_review_case(case_id)['items'][0]
+    assert extra['finding_type'] == 'reconciliation_extra'
+    assert extra['details']['audio_conflict'] == 'different_recording'
+    assert extra['details']['replacement_track']['source_track_id'] == 'wanted-id'
+    assert extra['category'] == 'audio_conflicts'
+    assert extra['review_reason'] == (
+        'The fingerprint identifies different audio than the expected release track')
+
+    result = worker.apply_review_decision(
+        case_id, extra['id'], evidence_token=extra['evidence_token'],
+        action='fix', fix_action='replace')
+
+    assert result['success'], result
+    assert not path.exists()
+    assert (root / '.deleted' / path.name).exists()
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT id FROM tracks WHERE id = 1').fetchone() is None
+        row = conn.execute(
+            'SELECT spotify_track_id, source_info FROM wishlist_tracks').fetchone()
+    assert row['spotify_track_id'] == 'wanted-id'
+    source_info = json.loads(row['source_info'])
+    assert source_info['source_album_id'] == 'ashes-release'
+    assert source_info['reason'] == 'library_reconciliation_wrong_audio'
 
 
 def test_locked_release_with_better_fitting_edition_requires_release_review(tmp_path, monkeypatch):

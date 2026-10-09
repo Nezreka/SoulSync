@@ -4148,8 +4148,10 @@ class RepairWorker:
                 f'Wishlist did not accept this track ({outcome.get("status")})'}
 
     def _fix_reconciliation_extra(self, entity_type, entity_id, file_path, details):
-        if details.get('_fix_action') != 'quarantine':
-            return {'success': False, 'error': 'Choose Quarantine File explicitly'}
+        action = details.get('_fix_action')
+        if action not in ('quarantine', 'replace'):
+            return {'success': False,
+                    'error': 'Choose Replace with Correct Track or Quarantine File explicitly'}
         error = (self._reconciliation_release_guard(details) or
                  self._reconciliation_file_guard(file_path, details))
         if error:
@@ -4174,10 +4176,58 @@ class RepairWorker:
             if playlists.get(str(track_id)) or playlists.get(track_id):
                 return {'success': False,
                         'error': 'This copy is in a playlist; review that reference first'}
+        replacement_name = ''
+        if action == 'replace':
+            if details.get('audio_conflict') != 'different_recording':
+                return {'success': False, 'error': 'This file is not verified as wrong audio'}
+            slot = details.get('replacement_track')
+            if not isinstance(slot, dict) or not slot.get('source_track_id'):
+                return {'success': False,
+                        'error': 'No exact replacement track is available from this release'}
+            source = details.get('source')
+            exact_release_id = details.get('exact_release_id') or details.get('release_id')
+            if not source or not exact_release_id:
+                return {'success': False, 'error': 'The selected release is incomplete'}
+            replacement_name = str(slot.get('name') or '').strip()
+            if not replacement_name:
+                return {'success': False, 'error': 'The replacement track has no title'}
+            profile_id = int(details.get('profile_id') or 1)
+            payload = {
+                'id': slot['source_track_id'], 'name': replacement_name,
+                'provider': source,
+                'artists': [{'name': slot.get('artist') or
+                             details.get('artist_name') or 'Unknown Artist'}],
+                'album': {'name': details.get('album_title') or 'Unknown Album',
+                          'id': exact_release_id, 'images': [], 'album_type': 'album',
+                          'total_tracks': details.get('release_track_count') or 0},
+                'track_number': slot.get('track_number'),
+                'disc_number': slot.get('disc_number') or 1,
+                'duration_ms': slot.get('duration_ms') or 0,
+            }
+            outcome = self.db.add_to_wishlist_detailed(
+                payload, failure_reason='Replacing wrong audio from selected release',
+                source_type='album', profile_id=profile_id,
+                source_info={
+                    'source': source, 'source_track_id': slot['source_track_id'],
+                    'source_album_id': exact_release_id, 'is_album': True,
+                    'album_title': payload['album']['name'],
+                    'track_number': slot.get('track_number'),
+                    'disc_number': slot.get('disc_number') or 1,
+                    'reason': 'library_reconciliation_wrong_audio',
+                },
+                user_initiated=True,
+            )
+            if not outcome.get('applied'):
+                return {'success': False, 'error': outcome.get('reason') or
+                        f'Replacement request was not accepted ({outcome.get("status")})'}
         moved, note, dest = _quarantine_file_if_present(
             file_path, self.transfer_folder, 'library_reconciliation',
             config_manager=self._config_manager)
         if not moved:
+            if action == 'replace':
+                return {'success': False,
+                        'error': (f'{replacement_name} was requested, but the wrong file '
+                                  f'could not be quarantined: {note or "unknown error"}')}
             return {'success': False, 'error': note or 'Could not quarantine file'}
         if track_id:
             conn = self.db._get_connection()
@@ -4188,10 +4238,17 @@ class RepairWorker:
                     raise RuntimeError('Track row changed while file was being quarantined')
                 conn.commit()
             except Exception as exc:
+                prefix = (f'{replacement_name} was requested and the file was quarantined '
+                          if action == 'replace' else 'File quarantined ')
                 return {'success': False, 'error':
-                        f'File quarantined at {dest}, but track row could not be removed: {exc}'}
+                        f'{prefix}at {dest}, but track row could not be removed: {exc}'}
             finally:
                 conn.close()
+        if action == 'replace':
+            return {'success': True, 'action': 'replacement_requested',
+                    'message': (f'{replacement_name} requested from the selected release; '
+                                'wrong audio moved to recoverable quarantine'),
+                    'quarantine_path': dest}
         return {'success': True, 'action': 'quarantined',
                 'message': 'File moved to recoverable quarantine', 'quarantine_path': dest}
 

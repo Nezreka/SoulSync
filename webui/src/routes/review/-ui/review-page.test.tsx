@@ -363,6 +363,7 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByText(/Renumber 1 track as one sequence/)).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'What this decision affects' })).toBeTruthy();
     expect(screen.getByText('2 of 3 release slots assigned')).toBeTruthy();
+    expect(screen.getByText('2 tracks need no decision')).toBeTruthy();
     expect(screen.queryByText('1 affected action')).toBeNull();
     expect(screen.getByRole('button', { name: 'Use continuous numbering' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Evidence' }));
@@ -379,6 +380,120 @@ describe('library reconciliation review queue', () => {
     expect(selectedRow.nextElementSibling).toBe(selectedDetail);
     expect(screen.getByRole('heading', { name: 'Proposed changes' })).toBeTruthy();
     expect(screen.queryByText('Evidence and exact changes')).toBeNull();
+  });
+
+  it('offers an exact replacement and recoverable quarantine for verified wrong audio', async () => {
+    const wrongAudioFinding = {
+      ...finding,
+      finding_type: 'reconciliation_extra',
+      title: 'Wrong audio: Who Wants to Live Forever',
+      description: 'The fingerprint identifies different recordings than the file title.',
+      file_path: '/music/Queen/26 - Who Wants to Live Forever.flac',
+      review_tier: 'destructive',
+      review_reason: 'The fingerprint identifies different audio than the expected release track',
+      details: {
+        album_id: 10,
+        album_title: 'The Platinum Collection',
+        artist_name: 'Queen',
+        audio_conflict: 'different_recording',
+        replacement_track: {
+          name: 'Who Wants to Live Forever',
+          source_track_id: 'expected-track-id',
+        },
+      },
+    };
+    const plan = {
+      ready: 0,
+      manual: 0,
+      destructive: 1,
+      blocked: 0,
+      total: 1,
+      status: 'needs_review',
+      blocker_reasons: [wrongAudioFinding.review_reason],
+      can_apply_ready: false,
+      can_organize: false,
+      decision_count: 1,
+      categories: ['audio_conflicts'],
+      decisions: [
+        {
+          id: 'audio_conflicts',
+          category: 'audio_conflicts',
+          label: 'Wrong audio',
+          risk: 'destructive',
+          summary: '1 local file contains different audio than the expected release track.',
+          finding_ids: [7],
+          action_count: 1,
+        },
+      ],
+    };
+    fetchMock.mockImplementation((url: string) => {
+      if (url === '/api/repair/finding-types')
+        return Promise.resolve(
+          reply({
+            types: [
+              {
+                type: 'reconciliation_extra',
+                label: 'Unassigned Audio',
+                verb: 'Quarantine File',
+                fixable: true,
+                destructive: true,
+              },
+            ],
+          }),
+        );
+      const common = auxiliary(url);
+      if (common) return Promise.resolve(common);
+      if (url.startsWith('/api/repair/review-queue?'))
+        return Promise.resolve(
+          reply({
+            items: [
+              {
+                case_id: 'album:10:queen',
+                album: 'The Platinum Collection',
+                artist: 'Queen',
+                pending: 1,
+                priority: 1,
+                finding_types: ['reconciliation_extra'],
+                error_count: 0,
+                plan,
+              },
+            ],
+            total: 1,
+            page: 0,
+            limit: 30,
+          }),
+        );
+      if (url.startsWith('/api/repair/review-queue/album%3A10%3Aqueen?'))
+        return Promise.resolve(
+          reply({
+            case_id: 'album:10:queen',
+            album: 'The Platinum Collection',
+            artist: 'Queen',
+            album_id: 10,
+            folder: '/music/Queen/The Platinum Collection',
+            count: 1,
+            status: 'pending',
+            plan,
+            decisions: plan.decisions,
+            items: [wrongAudioFinding],
+          }),
+        );
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(<ReviewPage />);
+    await screen.findByText(
+      '1 local file contains different audio than the expected release track.',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Evidence' }));
+
+    expect(screen.getByRole('button', { name: 'Replace with correct track' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Quarantine wrong file' })).toBeTruthy();
+    expect(
+      screen.getByText(
+        'Requests the exact track from the selected release, then moves this file to recoverable quarantine.',
+      ),
+    ).toBeTruthy();
   });
 
   it('shows why the last scan stopped and can queue a rerun', async () => {

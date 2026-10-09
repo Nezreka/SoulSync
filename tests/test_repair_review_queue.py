@@ -425,6 +425,28 @@ def test_wrong_audio_is_not_reconnected_to_missing_slot_by_title():
     assert extra['finding_id'] == 1
 
 
+def test_actionable_wrong_audio_remains_an_audio_conflict():
+    item = {
+        'id': 1,
+        'finding_type': 'reconciliation_extra',
+        'details': {'audio_conflict': 'different_recording'},
+    }
+
+    plan = classify_case([item])
+
+    assert item['category'] == 'audio_conflicts'
+    assert item['review_tier'] == 'destructive'
+    assert plan['decisions'] == [{
+        'id': 'audio_conflicts',
+        'category': 'audio_conflicts',
+        'label': 'Wrong audio',
+        'risk': 'destructive',
+        'summary': '1 local file contains different audio than the expected release track.',
+        'finding_ids': [1],
+        'action_count': 1,
+    }]
+
+
 def test_repeated_audio_conflicts_are_one_album_question():
     items = [
         {'id': 1, 'finding_type': 'reconciliation_unresolved', 'details': {}},

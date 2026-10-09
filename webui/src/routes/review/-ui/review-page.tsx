@@ -432,6 +432,9 @@ function SelectedActionDetail({
 }) {
   const canApply = Boolean(typeInfo?.fixable) && finding.finding_type !== 'suspect_album_tag';
   const duplicateChoice = finding.finding_type === 'reconciliation_duplicate';
+  const wrongAudio = finding.details?.audio_conflict === 'different_recording';
+  const replacement = record(finding.details?.replacement_track);
+  const canReplaceWrongAudio = Boolean(wrongAudio && replacement?.source_track_id);
   const suggested = finding.review_tier === 'ready';
   const compactReason = finding.review_reason || finding.description;
   return (
@@ -468,20 +471,28 @@ function SelectedActionDetail({
           <div>
             <div className={styles.eyebrow}>Suggested resolution</div>
             <strong>
-              {duplicateChoice
-                ? 'Choose the copy to keep'
-                : suggested
-                  ? typeInfo?.verb || 'Apply repair'
-                  : canApply
-                    ? 'Choose the correct action after reviewing the evidence'
-                    : 'Review manually'}
+              {wrongAudio
+                ? canReplaceWrongAudio
+                  ? 'Replace with the expected release track'
+                  : 'Move the wrong file to quarantine'
+                : duplicateChoice
+                  ? 'Choose the copy to keep'
+                  : suggested
+                    ? typeInfo?.verb || 'Apply repair'
+                    : canApply
+                      ? 'Choose the correct action after reviewing the evidence'
+                      : 'Review manually'}
             </strong>
             <p>
-              {duplicateChoice
-                ? 'Both files identify as the same release track. Playlist membership is shown with each copy.'
-                : suggested
-                  ? 'Evidence supports a direct repair.'
-                  : finding.review_reason || 'The evidence still requires a decision.'}
+              {wrongAudio
+                ? canReplaceWrongAudio
+                  ? 'Requests the exact track from the selected release, then moves this file to recoverable quarantine.'
+                  : 'The audio is wrong for this release slot, but no exact replacement source is available.'
+                : duplicateChoice
+                  ? 'Both files identify as the same release track. Playlist membership is shown with each copy.'
+                  : suggested
+                    ? 'Evidence supports a direct repair.'
+                    : finding.review_reason || 'The evidence still requires a decision.'}
             </p>
           </div>
         </section>
@@ -505,6 +516,22 @@ function SelectedActionDetail({
             </button>
             <button type="button" disabled={busy} onClick={() => onAct('fix', 'partial')}>
               Playlist tracks or partial album
+            </button>
+          </>
+        ) : wrongAudio && canApply ? (
+          <>
+            {canReplaceWrongAudio && (
+              <button
+                type="button"
+                disabled={busy}
+                className={styles.primary}
+                onClick={() => onAct('fix', 'replace')}
+              >
+                {busy ? 'Applying…' : 'Replace with correct track'}
+              </button>
+            )}
+            <button type="button" disabled={busy} onClick={() => onAct('fix', 'quarantine')}>
+              Quarantine wrong file
             </button>
           </>
         ) : (
@@ -875,7 +902,7 @@ export function ReviewPage() {
 
   const act = async (finding: ReviewFinding, action: 'fix' | 'dismiss', override?: string) => {
     let fixAction: string | null = override || null;
-    if (action === 'fix' && finding.finding_type === 'reconciliation_extra') {
+    if (action === 'fix' && finding.finding_type === 'reconciliation_extra' && !fixAction) {
       fixAction = 'quarantine';
     }
     if (action === 'fix' && requireChoice.has(finding.finding_type) && !fixAction) return;
@@ -885,12 +912,19 @@ export function ReviewPage() {
     ) {
       const confirmed = window.showConfirmDialog
         ? await window.showConfirmDialog({
-            title: 'Apply repair',
-            message: `Apply this action to ${finding.title}? Review the evidence and file path first.`,
-            confirmText: 'Apply',
+            title: fixAction === 'replace' ? 'Replace wrong audio' : 'Apply repair',
+            message:
+              fixAction === 'replace'
+                ? 'Request the exact track from the selected release and move this file to recoverable quarantine?'
+                : `Apply this action to ${finding.title}? Review the evidence and file path first.`,
+            confirmText: fixAction === 'replace' ? 'Replace audio' : 'Apply',
             destructive: true,
           })
-        : window.confirm(`Apply this action to ${finding.title}?`);
+        : window.confirm(
+            fixAction === 'replace'
+              ? 'Request the exact track and move the wrong file to recoverable quarantine?'
+              : `Apply this action to ${finding.title}?`,
+          );
       if (!confirmed) return;
     }
     setBusy(true);
@@ -1501,7 +1535,11 @@ export function ReviewPage() {
                       <div>
                         <dt>Already settled</dt>
                         <dd>
-                          {settledSlots} track{settledSlots === 1 ? '' : 's'} need no decision
+                          {settledSlots === 0
+                            ? 'None yet'
+                            : `${settledSlots} track${settledSlots === 1 ? '' : 's'} need${
+                                settledSlots === 1 ? 's' : ''
+                              } no decision`}
                         </dd>
                       </div>
                       <div>

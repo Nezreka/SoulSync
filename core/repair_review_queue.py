@@ -154,6 +154,8 @@ def finding_category(item: dict[str, Any]) -> str:
         return 'release_conflicts'
     if finding_type in ('reconciliation_intent', 'reconciliation_missing'):
         return 'album_completeness'
+    if details.get('audio_conflict') == 'different_recording':
+        return 'audio_conflicts'
     if finding_type in _DESTRUCTIVE_TYPES:
         return 'duplicates' if finding_type == 'reconciliation_duplicate' else 'extra_files'
     if finding_type == 'reconciliation_unresolved':
@@ -214,8 +216,19 @@ def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             else:
                 summary = f'{len(rows)} evidence-supported metadata actions are ready.'
         elif category == 'audio_conflicts':
-            summary = (f'{len(rows)} track assignment'
-                       f'{"s need" if len(rows) != 1 else " needs"} confirmation.')
+            wrong_audio = [
+                row for row in rows
+                if isinstance(row.get('details'), dict) and
+                row['details'].get('audio_conflict') == 'different_recording'
+            ]
+            if wrong_audio and len(wrong_audio) == len(rows):
+                decision_label = 'Wrong audio'
+                summary = (f'{len(rows)} local file'
+                           f'{"s contain" if len(rows) != 1 else " contains"} '
+                           'different audio than the expected release track.')
+            else:
+                summary = (f'{len(rows)} track assignment'
+                           f'{"s need" if len(rows) != 1 else " needs"} confirmation.')
         elif category == 'album_completeness':
             if any(row.get('finding_type') == 'reconciliation_intent' for row in rows):
                 summary = 'Choose whether this album should be complete.'
@@ -256,6 +269,9 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
     if item.get('last_error'):
         return 'manual', 'The previous apply attempt failed'
     if finding_type in _DESTRUCTIVE_TYPES:
+        if details.get('audio_conflict') == 'different_recording':
+            return ('destructive',
+                    'The fingerprint identifies different audio than the expected release track')
         return 'destructive', 'This action moves or removes a file and requires review'
     if finding_type != 'reconciliation_metadata':
         return 'manual', {

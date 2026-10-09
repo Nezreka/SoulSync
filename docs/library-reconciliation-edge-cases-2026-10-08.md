@@ -92,7 +92,7 @@ Examples encountered: Snow Patrol’s *Up to Now* should remain partial; the sin
 - Mistagged wrong audio can create a false duplicate after retagging. AcoustID identity must be checked before metadata is rewritten.
 - Exact duplicates must show every local copy, quality/path evidence, and playlist membership before a keeper is selected.
 - An extra file paired with a missing release slot may be a different version, not disposable junk. Show the pair as one version conflict.
-- Queen — *The Platinum Collection*, “Who Wants to Live Forever” exposed the opposite case: every strong fingerprint identity named a different song. Mark the file as wrong audio and keep the genuinely absent release slot separate; matching text tags cannot reconnect them as alternate versions.
+- Queen — *The Platinum Collection*, “Who Wants to Live Forever” exposed the opposite case: every strong fingerprint identity named a different song. Mark the file as wrong audio and keep the genuinely absent release slot separate; matching text tags cannot reconnect them as alternate versions. When exactly one absent slot matches the local title on the already selected album release, offer one guarded action that requests that exact source track and moves the wrong file to recoverable quarantine.
 - Deletion/quarantine remains recoverable and manual. Safe metadata bulk actions never include destructive work.
 - Previously encountered wrong-audio examples, composer/performance attribution errors, and the Southbound mismatch motivated keeping file identity above tags and folder names in the evidence hierarchy.
 
