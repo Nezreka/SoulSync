@@ -34,7 +34,13 @@ def strip_provenance_tail(title: Any) -> str:
 
 
 def _normalized_title(value: Any) -> str:
-    text = unicodedata.normalize("NFKC", strip_provenance_tail(value)).casefold()
+    # A feat credit names who is on it, not which version (#1568): the same
+    # rule the importer's single/album link uses. (Remix) etc. still count.
+    from core.library2.importer import _FEAT_IN_TITLE_RE, _FEAT_TITLE_TAIL_RE
+
+    text = strip_provenance_tail(value)
+    text = _FEAT_TITLE_TAIL_RE.sub("", _FEAT_IN_TITLE_RE.sub("", text))
+    text = unicodedata.normalize("NFKC", text).casefold()
     return " ".join(part for part in re.split(r"\W+", text) if part)
 
 

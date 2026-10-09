@@ -45,3 +45,25 @@ def test_a_parenthesized_from_stays_a_different_title(conn):
 
     with pytest.raises(DuplicateRelationshipError, match="titles do not match"):
         validate_duplicate_pair(conn, vault, plain)
+
+
+def test_a_feat_credit_in_the_title_is_the_same_recording(conn):
+    """#1568 on Library v2: one source tags the guests into the title, the
+    other does not. The credit names who is on it, not which version."""
+    plain = track(conn, "Eminem", "Relapse", "Crack A Bottle", duration=297_000)
+    credited = track(conn, "Eminem", "Relapse (Deluxe)",
+                     "Crack a Bottle (feat. Dr. Dre & 50 Cent)", duration=298_000)
+    conn.commit()
+
+    pair = validate_duplicate_pair(conn, credited, plain)
+
+    assert pair["source"]["id"] == credited
+
+
+def test_a_remix_stays_a_different_title(conn):
+    plain = track(conn, "Eminem", "Relapse", "Crack A Bottle", duration=297_000)
+    remix = track(conn, "Eminem", "Remixes", "Crack A Bottle (Remix)", duration=297_000)
+    conn.commit()
+
+    with pytest.raises(DuplicateRelationshipError, match="titles do not match"):
+        validate_duplicate_pair(conn, remix, plain)
