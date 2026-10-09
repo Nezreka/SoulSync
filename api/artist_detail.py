@@ -749,8 +749,8 @@ def write_artist_image_to_disk(artist_id):
     """
     try:
         from core.library.artist_image import (
-            derive_artist_folder,
             download_image_bytes,
+            find_artist_folder,
             write_artist_jpg,
         )
         from core.metadata_service import get_artist_image_url as _get_artist_image_url
@@ -770,36 +770,22 @@ def write_artist_image_to_disk(artist_id):
         if artist_row is None:
             return jsonify({"success": False, "error": "Artist not found"}), 404
 
-        # Find a track file on disk so we can derive the artist folder.
-        # Walk albums in DB order; first one with a resolvable track wins.
         albums = db.get_albums_by_artist(artist_id)
         if not albums:
             return jsonify({"success": False,
                             "error": "No albums for this artist; cannot derive folder."}), 400
 
-        resolved_track_path = None
-        for album in albums:
-            tracks = db.get_tracks_by_album(album.id)
-            for tr in tracks:
-                if not getattr(tr, 'file_path', None):
-                    continue
-                candidate = _resolve_library_file_path(tr.file_path) or tr.file_path
-                if candidate and os.path.exists(candidate):
-                    resolved_track_path = candidate
-                    break
-            if resolved_track_path:
-                break
-
-        if not resolved_track_path:
+        track_paths = list(_artist_track_paths_on_disk(db, albums, limit=1))
+        if not track_paths:
             return jsonify({"success": False,
                             "error": "Could not locate any track file on disk to derive the artist folder. "
                                      "Configure Settings → Library → Music Paths to point at the library mount."}), 400
 
-        album_folder = os.path.dirname(resolved_track_path)
-        artist_folder = derive_artist_folder(album_folder)
+        artist_folder = find_artist_folder(
+            _artist_track_paths_on_disk(db, albums), getattr(artist_row, 'name', '') or '')
         if not artist_folder or not os.path.isdir(artist_folder):
             return jsonify({"success": False,
-                            "error": f"Resolved artist folder is invalid: {artist_folder!r}"}), 400
+                            "error": _NO_ARTIST_FOLDER}), 400
 
         # Pick the image URL. Explicit override (from request body)
         # wins so users can paste a specific photo URL. Otherwise
@@ -1684,6 +1670,30 @@ def get_artist_art_options(artist_id):
         return jsonify({"error": str(e)}), 500
 
 
+_NO_ARTIST_FOLDER = ("artist.jpg not written: no folder named after this artist "
+                     "holds their tracks")
+
+
+def _artist_track_paths_on_disk(db, albums, limit=None):
+    """the artist's track files that exist on this machine, lazily.
+
+    lazy so a caller that finds the folder on the first track never stats
+    the other few hundred over nfs.
+    """
+    found = 0
+    for album in albums or []:
+        for tr in (db.get_tracks_by_album(album.id) or []):
+            raw = getattr(tr, 'file_path', None)
+            if not raw:
+                continue
+            resolved = _resolve_library_file_path(raw) or raw
+            if resolved and os.path.exists(resolved):
+                yield resolved
+                found += 1
+                if limit is not None and found >= limit:
+                    return
+
+
 @bp.route('/api/artist/<artist_id>/art', methods=['POST'])
 def set_artist_art(artist_id):
     """Apply a photo chosen in the artist image picker — everywhere:
@@ -1753,21 +1763,17 @@ def set_artist_art(artist_id):
 
         # 3. artist.jpg on disk (Navidrome's mechanism) + scan nudge.
         disk_written = False
+        disk_skipped = None
         try:
-            from core.library.artist_image import derive_artist_folder, write_artist_jpg
+            from core.library.artist_image import find_artist_folder, write_artist_jpg
             albums = db.get_albums_by_artist(artist_id) or []
-            artist_folder = None
-            for album in albums:
-                for tr in (db.get_tracks_by_album(album.id) or []):
-                    raw = getattr(tr, 'file_path', None)
-                    if not raw:
-                        continue
-                    resolved = _resolve_library_file_path(raw) or raw
-                    if resolved and os.path.exists(resolved):
-                        artist_folder = derive_artist_folder(os.path.dirname(resolved))
-                        break
-                if artist_folder:
-                    break
+            artist_folder = find_artist_folder(
+                _artist_track_paths_on_disk(db, albums), artist_name) if image_bytes else ''
+            # tracks on disk but no folder named after the artist: say so
+            # rather than plant artist.jpg somewhere every artist reads it
+            if image_bytes and not artist_folder and next(
+                    iter(_artist_track_paths_on_disk(db, albums, limit=1)), None):
+                disk_skipped = _NO_ARTIST_FOLDER
             if artist_folder and image_bytes:
                 ok, detail = write_artist_jpg(artist_folder, image_bytes, overwrite=True)
                 disk_written = bool(ok)
@@ -1790,7 +1796,8 @@ def set_artist_art(artist_id):
             _ART_OPTIONS_CACHE.pop(('artist', artist_id), None)
 
         return jsonify({"success": True, "artist_id": artist_id, "thumb_url": url,
-                        "server_updated": server_updated, "disk_written": disk_written})
+                        "server_updated": server_updated, "disk_written": disk_written,
+                        "disk_skipped": disk_skipped})
     except Exception as e:
         logger.error("[set-artist-art] failed for %s: %s", artist_id, e, exc_info=True)
         return jsonify({"error": str(e)}), 500
