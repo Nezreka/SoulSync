@@ -7,7 +7,7 @@ import type { RenderFx, StashEntry } from '../-sample-studio.types';
 import { DEFAULT_FX } from '../-sample-studio.types';
 import { SaveDialog } from './save-dialog';
 
-const track = { id: 7, title: 'Midnight Groove', artist_name: 'Test Artist' };
+const track = { id: '7', title: 'Midnight Groove', artist_name: 'Test Artist' };
 
 type FetchStub = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -63,7 +63,7 @@ function stubApi(handlers: {
         id: 3,
         name: 'Midnight Groove · 0:00 chop',
         tags: [],
-        track_id: 7,
+        track_id: '7',
         start_s: 0,
         end_s: 2,
         pitch_st: 0,
@@ -182,7 +182,7 @@ describe('SaveDialog', () => {
     expect(props.onClose).toHaveBeenCalledTimes(1);
     const chopCall = calls.find((c) => c.url.includes('/api/sample/chop'));
     expect(chopCall?.body).toMatchObject({
-      track_id: 7,
+      track_id: '7',
       start_s: 0,
       end_s: 2,
       name: 'killer break',

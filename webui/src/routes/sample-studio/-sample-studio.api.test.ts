@@ -75,7 +75,9 @@ describe('URL builders', () => {
     expect(previewAudioUrl('p7/a b.wav')).toBe('/api/sample/preview/p7%2Fa%20b.wav');
     expect(stashAudioUrl(11)).toBe('/api/sample/stash/11/audio');
     expect(stashExportUrl()).toBe('/api/sample/stash/export');
-    expect(stemAudioUrl(7, 'drums')).toBe('/api/sample/stems/7/drums/audio');
+    expect(stemAudioUrl('7', 'drums')).toBe('/api/sample/stems/7/drums/audio');
+    // jellyfin ids are guids; still one clean path segment
+    expect(stemAudioUrl('5f1c0a3e9b7d', 'bass')).toBe('/api/sample/stems/5f1c0a3e9b7d/bass/audio');
   });
 });
 
@@ -86,7 +88,7 @@ describe('requestPreview', () => {
       data: { preview_id: 'p7_x.wav', engine: 'librosa', duration_s: 2.5 },
       error: null,
     });
-    const result = await requestPreview(7, {
+    const result = await requestPreview('7', {
       start: 0,
       end: 2.5,
       pitchSt: 2,
@@ -96,7 +98,7 @@ describe('requestPreview', () => {
     expect(result).toEqual({ preview_id: 'p7_x.wav', engine: 'librosa', duration_s: 2.5 });
     expect(calls).toHaveLength(1);
     expect(calls[0].body).toMatchObject({
-      track_id: 7,
+      track_id: '7',
       start_s: 0,
       end_s: 2.5,
       pitch_st: 2,
@@ -111,7 +113,7 @@ describe('requestPreview', () => {
       data: { preview_id: 'p7_x.wav', engine: 'librosa', duration_s: 1 },
       error: null,
     });
-    await requestPreview(7, { start: 0, end: 1, pitchSt: 0, targetBpm: null });
+    await requestPreview('7', { start: 0, end: 1, pitchSt: 0, targetBpm: null });
     expect(calls[0].body).toMatchObject({ stem: null, target_bpm: null });
   });
 
@@ -121,7 +123,7 @@ describe('requestPreview', () => {
       data: { preview_id: 'p7_x.wav', engine: 'librosa', duration_s: 2.5 },
       error: null,
     });
-    await requestPreview(7, {
+    await requestPreview('7', {
       start: 0,
       end: 2.5,
       pitchSt: 0,
@@ -150,7 +152,7 @@ describe('requestPreview', () => {
       data: { preview_id: 'p7_x.wav', engine: 'librosa', duration_s: 1 },
       error: null,
     });
-    await requestPreview(7, { start: 0, end: 1, pitchSt: 0, targetBpm: null, fx: DEFAULT_FX });
+    await requestPreview('7', { start: 0, end: 1, pitchSt: 0, targetBpm: null, fx: DEFAULT_FX });
     expect(calls[0].body).not.toHaveProperty('normalize');
     expect(calls[0].body).toMatchObject({ fade_ms: 5, reverse: false, space: null, delay: null });
   });
@@ -158,7 +160,7 @@ describe('requestPreview', () => {
   it('throws the server message on failure', async () => {
     routes['/api/sample/preview'] = ok({ success: false, error: 'slice too long' }, 400);
     await expect(
-      requestPreview(7, { start: 0, end: 70, pitchSt: 0, targetBpm: null }),
+      requestPreview('7', { start: 0, end: 70, pitchSt: 0, targetBpm: null }),
     ).rejects.toThrow('slice too long');
   });
 });
@@ -167,7 +169,7 @@ describe('saveChop', () => {
   it('posts the full chop body and returns the entry', async () => {
     const entry = { id: 3, name: 'break', tags: ['a'] };
     routes['/api/sample/chop'] = ok({ success: true, data: entry, error: null }, 201);
-    const result = await saveChop(7, {
+    const result = await saveChop('7', {
       start: 1,
       end: 3,
       pitchSt: -2,
@@ -180,7 +182,7 @@ describe('saveChop', () => {
     });
     expect(result).toMatchObject({ id: 3, name: 'break' });
     expect(calls[0].body).toMatchObject({
-      track_id: 7,
+      track_id: '7',
       start_s: 1,
       end_s: 3,
       pitch_st: -2,
@@ -197,28 +199,28 @@ describe('saveChop', () => {
 describe('stems + stash requests', () => {
   it('requestStems posts the track id', async () => {
     routes['/api/sample/stems'] = ok(
-      { success: true, data: { track_id: 7, status: 'queued', stems: [] }, error: null },
+      { success: true, data: { track_id: '7', status: 'queued', stems: [] }, error: null },
       202,
     );
-    const info = await requestStems(7);
+    const info = await requestStems('7');
     expect(info.status).toBe('queued');
-    expect(calls[0].body).toEqual({ track_id: 7 });
+    expect(calls[0].body).toEqual({ track_id: '7' });
   });
 
   it('trimSilence posts the region and returns the adjusted bounds', async () => {
     routes['/api/sample/trim'] = ok({
       success: true,
-      data: { track_id: 7, start_s: 0.12, end_s: 3.4 },
+      data: { track_id: '7', start_s: 0.12, end_s: 3.4 },
       error: null,
     });
-    const bounds = await trimSilence(7, 0, 3.5);
-    expect(bounds).toEqual({ track_id: 7, start_s: 0.12, end_s: 3.4 });
-    expect(calls[0].body).toMatchObject({ track_id: 7, start_s: 0, end_s: 3.5, stem: null });
+    const bounds = await trimSilence('7', 0, 3.5);
+    expect(bounds).toEqual({ track_id: '7', start_s: 0.12, end_s: 3.4 });
+    expect(calls[0].body).toMatchObject({ track_id: '7', start_s: 0, end_s: 3.5, stem: null });
   });
 
   it('trimSilence trims against the stem being chopped', async () => {
     routes['/api/sample/trim'] = ok({ success: true, data: { start_s: 1, end_s: 2 }, error: null });
-    await trimSilence(7, 0, 3.5, 'drums');
+    await trimSilence('7', 0, 3.5, 'drums');
     expect(calls[0].body).toMatchObject({ stem: 'drums' });
   });
 
@@ -227,15 +229,15 @@ describe('stems + stash requests', () => {
       success: true,
       data: {
         tracks: [
-          { id: 7, title: 'Midnight Groove', artist_name: 'Test Artist' },
-          { id: 9, title: 'Other Song', artist_name: 'Test Artist' },
+          { id: '7', title: 'Midnight Groove', artist_name: 'Test Artist' },
+          { id: '9', title: 'Other Song', artist_name: 'Test Artist' },
         ],
       },
       error: null,
     });
-    const track = await lookupStudioTrack(7, 'Midnight Groove', 'Test Artist');
-    expect(track?.id).toBe(7);
-    const missing = await lookupStudioTrack(42, 'Midnight Groove', 'Test Artist');
+    const track = await lookupStudioTrack('7', 'Midnight Groove', 'Test Artist');
+    expect(track?.id).toBe('7');
+    const missing = await lookupStudioTrack('42', 'Midnight Groove', 'Test Artist');
     expect(missing).toBeNull();
   });
 
@@ -255,22 +257,22 @@ describe('studioTrackSearchQueryOptions', () => {
     routes['recently-added'] = ok({ success: true, albums: [] });
     routes['library/tracks/recent'] = ok({
       success: true,
-      data: { tracks: [{ id: 1 }] },
+      data: { tracks: [{ id: '1' }] },
       error: null,
     });
     const opts = studioTrackSearchQueryOptions('   ');
     expect(typeof opts.queryFn).toBe('function');
     const tracks = await opts.queryFn!({} as never);
-    expect(tracks).toEqual([{ id: 1 }]);
+    expect(tracks).toEqual([{ id: '1' }]);
     expect(calls[0].url).toContain('library/tracks/recent');
   });
 
   it('a query hits the track search', async () => {
-    routes['library/tracks'] = ok({ success: true, data: { tracks: [{ id: 2 }] }, error: null });
+    routes['library/tracks'] = ok({ success: true, data: { tracks: [{ id: '2' }] }, error: null });
     const opts = studioTrackSearchQueryOptions('rock');
     expect(typeof opts.queryFn).toBe('function');
     const tracks = await opts.queryFn!({} as never);
-    expect(tracks).toEqual([{ id: 2 }]);
+    expect(tracks).toEqual([{ id: '2' }]);
     expect(calls[0].url).toContain('library/tracks');
     expect(calls[0].url).toContain('q=rock');
   });
@@ -283,8 +285,8 @@ describe('studioTrackSearchQueryOptions', () => {
       success: true,
       data: {
         tracks: [
-          { id: 2, duration: 206000 },
-          { id: 3, duration: null },
+          { id: '2', duration: 206000 },
+          { id: '3', duration: null },
         ],
       },
       error: null,
@@ -292,34 +294,34 @@ describe('studioTrackSearchQueryOptions', () => {
     const opts = studioTrackSearchQueryOptions('rock');
     const tracks = await opts.queryFn!({} as never);
     expect(tracks).toEqual([
-      { id: 2, duration: 206 },
-      { id: 3, duration: null },
+      { id: '2', duration: 206 },
+      { id: '3', duration: null },
     ]);
   });
 
   it('converts recent-track durations from milliseconds to seconds', async () => {
     routes['library/tracks/recent'] = ok({
       success: true,
-      data: { tracks: [{ id: 1, duration: 120000 }] },
+      data: { tracks: [{ id: '1', duration: 120000 }] },
       error: null,
     });
     const opts = studioTrackSearchQueryOptions('   ');
     const tracks = await opts.queryFn!({} as never);
-    expect(tracks).toEqual([{ id: 1, duration: 120 }]);
+    expect(tracks).toEqual([{ id: '1', duration: 120 }]);
   });
 
   it('analysis retry nonce adds ?retry=1 to clear a sticky worker error', async () => {
     routes['/api/sample/analysis'] = ok({
       success: true,
-      data: { track_id: 7, status: 'pending' },
+      data: { track_id: '7', status: 'pending' },
       error: null,
     });
-    const plain = studioAnalysisQueryOptions(7);
+    const plain = studioAnalysisQueryOptions('7');
     await plain.queryFn!({} as never);
     expect(calls[0].url).not.toContain('retry=');
     expect(plain.queryKey).toContain(0);
 
-    const retry = studioAnalysisQueryOptions(7, 1);
+    const retry = studioAnalysisQueryOptions('7', 1);
     await retry.queryFn!({} as never);
     expect(calls[1].url).toContain('retry=1');
     expect(retry.queryKey).toContain(1);
@@ -328,14 +330,14 @@ describe('studioTrackSearchQueryOptions', () => {
   it('normalizes a missing analysis payload', async () => {
     routes['/api/sample/analysis'] = ok({
       success: true,
-      data: { track_id: 7, status: 'done', bpm: null, onsets: null, duration_s: null },
+      data: { track_id: '7', status: 'done', bpm: null, onsets: null, duration_s: null },
       error: null,
     });
-    const opts = studioAnalysisQueryOptions(7);
+    const opts = studioAnalysisQueryOptions('7');
     expect(typeof opts.queryFn).toBe('function');
     const analysis = await opts.queryFn!({} as never);
     expect(analysis).toEqual({
-      track_id: 7,
+      track_id: '7',
       status: 'done',
       bpm: null,
       key: null,
@@ -345,11 +347,11 @@ describe('studioTrackSearchQueryOptions', () => {
   });
 
   it('normalizes the key from analysis — confident, uncertain, and missing', async () => {
-    const opts = studioAnalysisQueryOptions(7);
+    const opts = studioAnalysisQueryOptions('7');
     const fetchAnalysis = async (key: unknown) => {
       routes['/api/sample/analysis'] = ok({
         success: true,
-        data: { track_id: 7, status: 'done', bpm: 99.4, key, onsets: [], duration_s: 206 },
+        data: { track_id: '7', status: 'done', bpm: 99.4, key, onsets: [], duration_s: 206 },
         error: null,
       });
       return opts.queryFn!({} as never);
@@ -380,7 +382,7 @@ describe('refetch intervals', () => {
   }
 
   it('analysis polls while pending, stops when done or errored', () => {
-    const interval = intervalOf(studioAnalysisQueryOptions(7));
+    const interval = intervalOf(studioAnalysisQueryOptions('7'));
     expect(interval(fakeQuery({ status: 'queued' }))).toBe(2500);
     expect(interval(fakeQuery({ status: 'analyzing' }))).toBe(2500);
     expect(interval(fakeQuery({ status: 'done' }))).toBe(false);
@@ -393,14 +395,14 @@ describe('refetch intervals', () => {
   });
 
   it('stems status polls while active and unfinished', () => {
-    const interval = intervalOf(studioStemsStatusQueryOptions(7, true));
+    const interval = intervalOf(studioStemsStatusQueryOptions('7', true));
     expect(interval(fakeQuery(undefined))).toBe(1500);
     expect(interval(fakeQuery({ status: 'queued' }))).toBe(1500);
     expect(interval(fakeQuery({ status: 'running' }))).toBe(1500);
     expect(interval(fakeQuery({ status: 'done' }))).toBe(false);
     expect(interval(fakeQuery({ status: 'error: boom' }))).toBe(false);
 
-    const idle = intervalOf(studioStemsStatusQueryOptions(7, false));
+    const idle = intervalOf(studioStemsStatusQueryOptions('7', false));
     expect(idle(fakeQuery({ status: 'queued' }))).toBe(false);
   });
 });

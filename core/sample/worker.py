@@ -24,11 +24,13 @@ from typing import Dict, Optional
 
 from utils.logging_config import get_logger
 
+from .ids import track_key
+
 logger = get_logger("sample.worker")
 
-_task_queue: "queue.Queue[int]" = queue.Queue()
+_task_queue: "queue.Queue[str]" = queue.Queue()
 _pending: set = set()  # track_ids queued or running (dedupe)
-_status: Dict[int, str] = {}  # track_id -> pending|running|done|error: ...
+_status: Dict[str, str] = {}  # track_id -> pending|running|done|error: ...
 _lock = threading.Lock()
 _thread: Optional[threading.Thread] = None
 
@@ -142,7 +144,7 @@ def unreachable_message(stored_path: str) -> str:
     )
 
 
-def track_source(track_id: int) -> tuple:
+def track_source(track_id: str) -> tuple:
     """(resolved_path, signature) for a library track, (None, None) when unreachable."""
     from . import store
 
@@ -151,7 +153,7 @@ def track_source(track_id: int) -> tuple:
     return path, (store.source_signature(path) if path else None)
 
 
-def _process_one(track_id: int) -> None:
+def _process_one(track_id: str) -> None:
     from . import store
     from .analyze import ANALYZER_VERSION, analyze_track
 
@@ -177,7 +179,7 @@ def _run() -> None:
         try:
             with _lock:
                 _status[track_id] = "running"
-            _process_one(int(track_id))
+            _process_one(track_key(track_id))
             with _lock:
                 _status[track_id] = "done"
         except Exception as exc:  # noqa: BLE001 — a bad file must not kill the worker
@@ -187,7 +189,7 @@ def _run() -> None:
                 _status[track_id] = f"error: {exc}"
         finally:
             with _lock:
-                _pending.discard(int(track_id))
+                _pending.discard(track_key(track_id))
             _task_queue.task_done()
 
 
@@ -200,7 +202,7 @@ def _ensure_started() -> None:
             logger.info("Sample analysis worker started")
 
 
-def enqueue_analysis(track_id: int, retry: bool = False) -> str:
+def enqueue_analysis(track_id: str, retry: bool = False) -> str:
     """Queue a track for background analysis. Idempotent; returns the status.
 
     Never raises — analysis must never break imports or HTTP handlers.
@@ -214,7 +216,7 @@ def enqueue_analysis(track_id: int, retry: bool = False) -> str:
     queue the track again (the Studio "Try again" button).
     """
     try:
-        track_id = int(track_id)
+        track_id = track_key(track_id)
     except (TypeError, ValueError):
         return "error: invalid track_id"
     try:
@@ -243,14 +245,14 @@ def enqueue_analysis(track_id: int, retry: bool = False) -> str:
         return f"error: {exc}"
 
 
-def get_status(track_id: int) -> str:
+def get_status(track_id: str) -> str:
     """pending|running|done|error: … — 'done' also when already analyzed."""
     try:
         from . import store
 
-        if store.is_current(int(track_id)):
+        if store.is_current(track_key(track_id)):
             return "done"
     except Exception as exc:
         logger.debug("status check fell back to queue state: %s", exc)
     with _lock:
-        return _status.get(int(track_id), "idle")
+        return _status.get(track_key(track_id), "idle")

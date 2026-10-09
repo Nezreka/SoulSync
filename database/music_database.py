@@ -607,7 +607,7 @@ class MusicDatabase:
             # re-computed when core.sample.analyze.ANALYZER_VERSION increases.
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS sample_analysis (
-                    track_id INTEGER PRIMARY KEY,
+                    track_id TEXT PRIMARY KEY,
                     bpm REAL,
                     onsets_json TEXT,  -- JSON array of onset times in seconds
                     duration_s REAL,
@@ -689,6 +689,8 @@ class MusicDatabase:
                     cursor.execute(f"ALTER TABLE {_table} ADD COLUMN {_col} {_type}")
                 except sqlite3.OperationalError:
                     pass  # already there
+
+            self._migrate_sample_analysis_text_ids(cursor)
 
             # Metadata table for storing system information like last refresh dates
             cursor.execute("""
@@ -2992,6 +2994,52 @@ class MusicDatabase:
             logger.error(f"Error adding server_source columns: {e}")
             # Don't raise - this is a migration, database can still function without it
     
+    def _migrate_sample_analysis_text_ids(self, cursor):
+        """sample_analysis.track_id was an INTEGER PRIMARY KEY, which sqlite
+        refuses text in. tracks.id is TEXT (jellyfin guids, navidrome ids), so
+        no track from those libraries could ever be analyzed. rebuild it keyed
+        by TEXT; plex ids carry over as their digits."""
+        try:
+            cursor.execute("PRAGMA table_info(sample_analysis)")
+            cols = {row[1]: row for row in cursor.fetchall()}
+            track_col = cols.get("track_id")
+            if not track_col or str(track_col[2]).upper() == "TEXT":
+                return
+            keep = ["bpm", "onsets_json", "duration_s", "analyzed_at", "analyzer_version",
+                    "key_name", "key_confidence", "source_sig"]
+            keep = [c for c in keep if c in cols]
+            cursor.execute("SAVEPOINT sample_analysis_text_ids")
+            cursor.execute("DROP TABLE IF EXISTS sample_analysis_text")
+            cursor.execute("""
+                CREATE TABLE sample_analysis_text (
+                    track_id TEXT PRIMARY KEY,
+                    bpm REAL,
+                    onsets_json TEXT,
+                    duration_s REAL,
+                    analyzed_at REAL,
+                    analyzer_version INTEGER DEFAULT 1,
+                    key_name TEXT,
+                    key_confidence REAL,
+                    source_sig TEXT
+                )
+            """)
+            col_list = ", ".join(keep)
+            cursor.execute(
+                f"INSERT INTO sample_analysis_text (track_id, {col_list}) "
+                f"SELECT CAST(track_id AS TEXT), {col_list} FROM sample_analysis")
+            cursor.execute("DROP TABLE sample_analysis")
+            cursor.execute("ALTER TABLE sample_analysis_text RENAME TO sample_analysis")
+            cursor.execute("RELEASE sample_analysis_text_ids")
+            logger.info("sample_analysis now keyed by text track ids")
+        except Exception as e:
+            # put the old table back. numeric ids keep working on it
+            try:
+                cursor.execute("ROLLBACK TO sample_analysis_text_ids")
+                cursor.execute("RELEASE sample_analysis_text_ids")
+            except Exception as rollback_err:
+                logger.debug(f"sample_analysis rollback: {rollback_err}")
+            logger.error(f"sample_analysis text-id migration failed: {e}")
+
     def _migrate_id_columns_to_text(self, cursor):
         """Migrate ID columns from INTEGER to TEXT to support both Plex (int) and Jellyfin (GUID) IDs"""
         try:
@@ -23490,6 +23538,19 @@ class MusicDatabase:
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
+            if table == "tracks":
+                # a bare track row has artist_id and album_id but no names, so
+                # every track came back as "Unknown artist" in sample studio
+                scope_sql, scope_params = self._current_scope_sql('t.owner_profile_id')
+                cursor.execute(f"""
+                    SELECT t.*, ar.name AS artist_name, al.title AS album_title
+                    FROM tracks t
+                    LEFT JOIN artists ar ON ar.id = t.artist_id
+                    LEFT JOIN albums al ON al.id = t.album_id
+                    WHERE {scope_sql}
+                    ORDER BY COALESCE(t.created_at, t.updated_at) DESC LIMIT ?
+                """, (*scope_params, limit))
+                return [dict(row) for row in cursor.fetchall()]
             scope_sql, scope_params = self._current_scope_sql('owner_profile_id')
             # COALESCE handles rows where created_at was never backfilled —
             # updated_at is always set on write.

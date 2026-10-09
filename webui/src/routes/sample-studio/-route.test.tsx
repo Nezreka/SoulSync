@@ -7,7 +7,7 @@ import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
 
 const track = {
-  id: 7,
+  id: '7',
   title: 'Test Track',
   artist_name: 'Test Artist',
   album_title: 'Test Album',
@@ -25,7 +25,7 @@ const peaks = {
 };
 
 const analysis = {
-  track_id: 7,
+  track_id: '7',
   status: 'done',
   bpm: 120,
   onsets: [0.5, 1.0, 1.5],
@@ -93,7 +93,7 @@ describe('sample-studio route', () => {
   });
 
   it('shows the staged analysis-pending state when the backend returns 202', async () => {
-    stubFetch({ track_id: 7, status: 'queued' }, 202);
+    stubFetch({ track_id: '7', status: 'queued' }, 202);
     renderRoute();
 
     await waitFor(() => expect(screen.getByText('Test Track')).toBeInTheDocument());
@@ -112,7 +112,7 @@ describe('sample-studio route', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.includes('/api/sample/analysis')) analysisCalls.push(url);
-      return stubbedResponse(url, { track_id: 7, status: 'error: disk full' }, 200);
+      return stubbedResponse(url, { track_id: '7', status: 'error: disk full' }, 200);
     });
     vi.stubGlobal('fetch', fetchMock);
     renderRoute();
@@ -130,6 +130,33 @@ describe('sample-studio route', () => {
     await waitFor(() => {
       expect(analysisCalls.length).toBeGreaterThan(before);
     });
+  });
+
+  it('a failed analysis request shows what the server said, not "check your connection"', async () => {
+    // Specialmed's jellyfin library: every request was a 400 and the page
+    // blamed the connection, so nobody could tell what was wrong
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.includes('/api/sample/analysis')) {
+          return new Response(
+            JSON.stringify({ success: false, data: null, error: 'unknown track_id 5f1c0a3e' }),
+            { status: 404, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        return stubbedResponse(url, analysis, 200);
+      }),
+    );
+    renderRoute();
+
+    await waitFor(() => expect(screen.getByText('Test Track')).toBeInTheDocument());
+    screen.getByText('Test Track').click();
+
+    await waitFor(() => {
+      expect(screen.getByText(/unknown track_id 5f1c0a3e/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Check your connection/)).not.toBeInTheDocument();
   });
 
   it('opens the keyboard shortcut overlay with ?', async () => {
@@ -179,7 +206,7 @@ describe('sample-studio route', () => {
       id: 11,
       name: 'killer break',
       tags: [],
-      track_id: 7,
+      track_id: '7',
       track_title: 'Test Track',
       artist_name: 'Test Artist',
       start_s: 1,

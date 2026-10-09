@@ -8,7 +8,7 @@ import { LibraryPanel } from './library-panel';
 
 const tracks: StudioTrack[] = [
   {
-    id: 1,
+    id: '1',
     title: 'Hi-Res Song',
     artist_name: 'A',
     duration: 90,
@@ -17,7 +17,7 @@ const tracks: StudioTrack[] = [
     bpm: 128,
   },
   {
-    id: 2,
+    id: '2',
     title: 'MP3 Song',
     artist_name: 'B',
     duration: 200,
@@ -26,7 +26,7 @@ const tracks: StudioTrack[] = [
     bpm: 95,
   },
   {
-    id: 3,
+    id: '3',
     title: 'Long Lossless',
     artist_name: 'C',
     duration: 400,
@@ -126,9 +126,9 @@ describe('LibraryPanel', () => {
     // Guard against the old millisecond pass-through: 119000ms/120000ms were
     // both "long". Durations here are seconds (toStudioTrack normalizes).
     const boundary: StudioTrack[] = [
-      { id: 1, title: 'Just under two', duration: 119 },
-      { id: 2, title: 'Two minutes', duration: 120 },
-      { id: 3, title: 'Five minutes', duration: 300 },
+      { id: '1', title: 'Just under two', duration: 119 },
+      { id: '2', title: 'Two minutes', duration: 120 },
+      { id: '3', title: 'Five minutes', duration: 300 },
     ];
     const short: StudioFilters = { ...DEFAULT_FILTERS, length: 'short' };
     const medium: StudioFilters = { ...DEFAULT_FILTERS, length: 'medium' };
@@ -159,7 +159,7 @@ describe('LibraryPanel', () => {
 
     unmount();
     const { container } = render(
-      <LibraryPanel {...props} selectedId={2} onFiltersChange={vi.fn()} />,
+      <LibraryPanel {...props} selectedId="2" onFiltersChange={vi.fn()} />,
     );
     const selected = container.querySelector('[data-selected="true"]');
     expect(selected?.textContent).toContain('MP3 Song');

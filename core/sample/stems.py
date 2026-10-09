@@ -30,6 +30,8 @@ from typing import Callable, Dict, Optional, Protocol
 
 from utils.logging_config import get_logger
 
+from .ids import track_key
+
 logger = get_logger("sample.stems")
 
 STEMS = ("drums", "vocals", "bass", "other")
@@ -311,7 +313,7 @@ def get_separator(method: str, backend: Optional[str] = None) -> SeparatorBacken
 
 
 def separate_track(
-    track_id: int,
+    track_id: str,
     backend: Optional[SeparatorBackend] = None,
     method: str = "demucs",
     progress: Optional[Callable[[float], None]] = None,
@@ -330,7 +332,7 @@ def separate_track(
     if not path:
         raise RuntimeError(unreachable_message(stored))
     backend = backend or get_separator(method)
-    out_dir = os.path.join(store.stems_dir(), str(int(track_id)))
+    out_dir = os.path.join(store.stems_dir(), track_key(track_id))
     os.makedirs(out_dir, exist_ok=True)
     try:
         paths = backend.separate(path, out_dir, progress=progress)
