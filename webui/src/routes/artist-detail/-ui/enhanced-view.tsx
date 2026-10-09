@@ -78,7 +78,7 @@ export function EnhancedView({ data, status, isAdmin, onReload, focusAlbumId }: 
   if (status.error) {
     return (
       <div className="lib-state error">
-        <div className="enhanced-loading" style={{ color: '#ff6b6b' }}>
+        <div className="enhanced-loading" style={{ color: 'var(--danger-light)' }}>
           Failed to load: {status.error}
         </div>
         <button type="button" className="lib-btn" onClick={onReload}>

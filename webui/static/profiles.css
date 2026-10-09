@@ -2,9 +2,9 @@
    init.js builds the markup, this file is all of its look. */
 
 :root {
-    --pf-accent: rgb(29, 185, 84);
-    --pf-accent-soft: rgba(29, 185, 84, 0.14);
-    --pf-accent-line: rgba(29, 185, 84, 0.45);
+    --pf-accent: var(--accent);
+    --pf-accent-soft: rgba(var(--accent-rgb), 0.14);
+    --pf-accent-line: rgba(var(--accent-rgb), 0.45);
     --pf-bg: #0b0d10;
     --pf-surface: #15181d;
     --pf-surface-2: #1c2027;
@@ -35,7 +35,7 @@ body.pf-modal-open .toast-container { z-index: 150000; }
     overflow-y: auto;
     padding: 48px 16px;
     background:
-        radial-gradient(1200px 600px at 50% -10%, rgba(29, 185, 84, 0.10), transparent 60%),
+        radial-gradient(1200px 600px at 50% -10%, rgba(var(--accent-rgb), 0.10), transparent 60%),
         var(--pf-bg);
     animation: pfFade 0.35s var(--pf-ease);
 }

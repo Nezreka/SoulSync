@@ -36,14 +36,14 @@
 }
 
 .tabActive {
-  background: linear-gradient(135deg, #1db954, #12833b);
+  background: linear-gradient(135deg, var(--accent), #12833b);
   color: #fff;
   border-color: transparent;
 }
 
 .tabActive:hover {
   color: #fff;
-  background: linear-gradient(135deg, #1db954, #12833b);
+  background: linear-gradient(135deg, var(--accent), #12833b);
 }
 
 .labelsGrid {
@@ -66,7 +66,7 @@
 
 .labelCard:hover {
   background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(29, 185, 84, 0.4);
+  border-color: rgba(var(--accent-rgb), 0.4);
 }
 
 .labelIcon {
@@ -159,7 +159,7 @@
 
 .podcastCard:hover {
   background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(29, 185, 84, 0.45);
+  border-color: rgba(var(--accent-rgb), 0.45);
   transform: translateY(-2px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
@@ -191,7 +191,7 @@
   align-items: center;
   justify-content: center;
   font-size: 48px;
-  background: linear-gradient(135deg, rgba(29, 185, 84, 0.1), rgba(255, 255, 255, 0.03));
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.1), rgba(255, 255, 255, 0.03));
 }
 
 .podcastActions {
@@ -327,9 +327,9 @@
   font-weight: 600;
   padding: 2px 7px;
   border-radius: 6px;
-  background: rgba(29, 185, 84, 0.15);
+  background: rgba(var(--success-rgb), 0.15);
   color: #26d462;
-  border: 1px solid rgba(29, 185, 84, 0.3);
+  border: 1px solid rgba(var(--success-rgb), 0.3);
 }
 
 .podcastBadgeMuted {
@@ -436,8 +436,8 @@
 }
 
 .retentionPresetBtnActive {
-  background: rgba(29, 185, 84, 0.2);
-  border-color: #1db954;
+  background: rgba(var(--accent-rgb), 0.2);
+  border-color: var(--accent);
   color: #26d462;
 }
 
@@ -472,7 +472,7 @@
 
 .retentionInput:focus {
   outline: none;
-  border-color: #1db954;
+  border-color: var(--accent);
 }
 
 .retentionInputSuffix {
