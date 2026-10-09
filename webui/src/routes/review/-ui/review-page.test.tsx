@@ -357,23 +357,20 @@ describe('library reconciliation review queue', () => {
 
     render(<ReviewPage />);
 
-    expect(await screen.findByRole('heading', { name: 'Track assignment' })).toBeTruthy();
-    const decisionHeading = screen.getByRole('heading', {
-      name: 'Use continuous track numbering',
-    });
-    const trackHeading = screen.getByRole('heading', { name: 'Track assignment' });
-    expect(
-      decisionHeading.compareDocumentPosition(trackHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(await screen.findByText('Switch this album to continuous track numbering')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Track assignments' })).toBeNull();
     expect(screen.queryByLabelText('Album reconciliation plan')).toBeNull();
     expect(screen.getByText(/Renumber 1 track as one sequence/)).toBeTruthy();
-    expect(screen.queryByText('1 affected action')).toBeNull();
+    expect(screen.getByText('1 affected action')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Use continuous numbering' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Tracks/ }));
+    expect(screen.getByRole('heading', { name: 'Track assignments' })).toBeTruthy();
     expect(screen.getByText('digital-release')).toBeTruthy();
     expect(screen.getByText('Continuous digital numbering')).toBeTruthy();
     expect(screen.getByText('○ 1 outside collection')).toBeTruthy();
     expect(screen.getByText('✓ 3 settled release slots')).toBeTruthy();
     expect(screen.getAllByText('No action')).toHaveLength(1);
+    fireEvent.click(screen.getByText('↻ 1 proposed track change'));
     const selectedRow = screen.getByRole('row', { name: /Hourglass/ });
     expect(screen.queryByLabelText('Selected action detail')).toBeNull();
     fireEvent.click(selectedRow);
@@ -519,7 +516,7 @@ describe('library reconciliation review queue', () => {
 
     render(<ReviewPage />);
 
-    expect(await screen.findByText('Album artist update')).toBeTruthy();
+    expect(await screen.findByText('Various Artists → Lamb of God')).toBeTruthy();
     expect(screen.getAllByText('✓ 1 ready').length).toBeGreaterThan(0);
     expect(screen.queryByRole('heading', { name: '1 question for this album' })).toBeNull();
     fireEvent.click(screen.getByText('Review ready changes'));
@@ -626,12 +623,15 @@ describe('library reconciliation review queue', () => {
 
     render(<ReviewPage />);
 
-    const choices = await screen.findByRole('heading', { name: 'Album completeness' });
+    const choices = (
+      await screen.findByText('Choose whether this folder represents the complete album')
+    ).closest('section');
     const safeChanges = screen.getByLabelText('Independent safe changes');
+    expect(choices).not.toBeNull();
     expect(
-      choices.compareDocumentPosition(safeChanges) & Node.DOCUMENT_POSITION_FOLLOWING,
+      choices!.compareDocumentPosition(safeChanges) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    expect(screen.queryByText('1 affected action')).toBeNull();
+    expect(screen.getByText('1 affected action')).toBeTruthy();
     expect(screen.getAllByText('Album completeness').length).toBeGreaterThan(0);
     expect(screen.queryByText('2 questions for this album')).toBeNull();
   });

@@ -9,6 +9,7 @@ import {
   fetchReviewCase,
   fetchReviewApplyStatus,
   fetchReviewQueue,
+  fetchReviewQueueModeTotals,
   fetchReconciliationScanStatus,
   runReconciliationScan,
   startReadyChanges,
@@ -21,6 +22,7 @@ import {
   type ReviewFinding,
   type ReviewPlan,
   type ReviewQueuePage,
+  type ReviewQueueModeTotals,
 } from '../-review.api';
 import { fetchFindingTypes } from '../../tools/-tools.api';
 import { findingTypeLabel } from '../../tools/-tools.core';
@@ -60,22 +62,39 @@ const categoryOptions = [
   ['extra_files', 'Extra files'],
 ] as const;
 
-const categoryLabels = Object.fromEntries(categoryOptions.filter(([value]) => value));
+type QueueMode = 'review' | 'ready' | 'files' | 'all';
+type AlbumView = 'plan' | 'tracks' | 'evidence';
+
+const queueModes: Array<{ value: QueueMode; label: string; risk: string }> = [
+  { value: 'review', label: 'Needs input', risk: 'manual' },
+  { value: 'ready', label: 'Ready to apply', risk: 'ready' },
+  { value: 'files', label: 'File actions', risk: 'destructive' },
+  { value: 'all', label: 'All', risk: '' },
+];
+
+const decisionOrder: Record<string, number> = {
+  release_conflicts: 0,
+  album_completeness: 1,
+  numbering: 2,
+  audio_conflicts: 3,
+  title_issues: 4,
+  duplicates: 5,
+  extra_files: 6,
+  title_conventions: 7,
+  metadata: 8,
+};
 
 function caseStatusSummary(item: ReviewCaseSummary): string {
   if (!item.plan) {
     return `${item.pending} pending action${item.pending === 1 ? '' : 's'}`;
   }
-  if (item.plan.status === 'ready') {
-    return `Ready · ${item.pending} action${item.pending === 1 ? '' : 's'}`;
-  }
-  const reviewCount = (item.plan.decisions || []).filter(
-    (decision) => decision.risk !== 'ready',
-  ).length;
-  const reviewLabel = reviewCount
-    ? `${reviewCount} decision${reviewCount === 1 ? '' : 's'}`
-    : 'Needs review';
-  return `${reviewLabel} · ${item.pending} action${item.pending === 1 ? '' : 's'}`;
+  const ordered = [...(item.plan.decisions || [])].sort(
+    (left, right) => (decisionOrder[left.category] ?? 99) - (decisionOrder[right.category] ?? 99),
+  );
+  const primary = ordered.find((decision) => decision.risk !== 'ready') || ordered[0];
+  const status = item.plan.status === 'ready' ? 'Ready' : 'Needs input';
+  const more = ordered.length > 1 ? ` · +${ordered.length - 1} more` : '';
+  return `${status}${primary ? ` · ${primary.label}` : ''} · ${item.pending} action${item.pending === 1 ? '' : 's'}${more}`;
 }
 
 function findingHeading(finding: ReviewFinding): string {
@@ -108,23 +127,26 @@ function statusLabel(status: string) {
   );
 }
 
-function decisionReviewLabel(decision: ReviewDecision): string {
-  const count = decision.action_count;
+function decisionInstruction(decision: ReviewDecision, numberingMode?: string): string {
   switch (decision.category) {
     case 'release_conflicts':
-      return 'Compare release options';
+      return 'Choose the release this album should follow';
     case 'album_completeness':
-      return 'Review missing tracks';
+      return 'Choose whether this folder represents the complete album';
+    case 'numbering':
+      return numberingMode === 'digital'
+        ? 'Switch this album to continuous track numbering'
+        : "Use the selected release's disc and track numbering";
     case 'audio_conflicts':
-      return `Review ${count} track assignment${count === 1 ? '' : 's'}`;
+      return `Confirm ${decision.action_count} uncertain track assignment${decision.action_count === 1 ? '' : 's'}`;
     case 'title_issues':
-      return `Review ${count} title difference${count === 1 ? '' : 's'}`;
+      return `Resolve ${decision.action_count} recording title difference${decision.action_count === 1 ? '' : 's'}`;
     case 'duplicates':
-      return `Choose between ${count} duplicate ${count === 1 ? 'set' : 'sets'}`;
+      return `Choose which ${decision.action_count === 1 ? 'duplicate file' : 'duplicate files'} to keep`;
     case 'extra_files':
-      return `Review ${count} unmatched file${count === 1 ? '' : 's'}`;
+      return `Decide what to do with ${decision.action_count} unmatched file${decision.action_count === 1 ? '' : 's'}`;
     default:
-      return 'Review affected changes';
+      return decision.label;
   }
 }
 
@@ -137,6 +159,32 @@ function AssignmentRow({
   onSelect: (findingId: number) => void;
   selected: boolean;
 }) {
+  const position = `${row.current_disc_number || row.slot_disc_number || 1}.${
+    row.current_track_number ?? row.slot_track_number ?? '—'
+  }`;
+  const evidence = row.audio_title
+    ? `${row.audio_title}${row.audio_score ? ` · ${Math.round(row.audio_score * 100)}%` : ''}`
+    : row.confidence || '';
+  const action =
+    row.relationship === 'version_conflict'
+      ? row.status === 'extra'
+        ? `Possible version of ${row.counterpart_title || 'a missing track'}`
+        : `Possible local version: ${row.counterpart_file || row.counterpart_title || ''}`
+      : row.action_state === 'preview'
+        ? row.preview_reason || 'Resolve the album question first'
+        : row.status === 'settled'
+          ? 'No pending action'
+          : row.changes && Object.keys(row.changes).length
+            ? Object.keys(row.changes)
+                .map((key) => key.replaceAll('_', ' '))
+                .join(', ')
+            : row.status === 'uncertain'
+              ? 'Confirm assignment'
+              : row.title_difference === 'flavor'
+                ? 'Display wording only'
+                : row.title_difference === 'version_detail'
+                  ? 'Version detail preserved'
+                  : 'No metadata edit';
   return (
     <button
       type="button"
@@ -147,49 +195,27 @@ function AssignmentRow({
       onClick={() => row.finding_id && onSelect(row.finding_id)}
       disabled={!row.finding_id}
     >
-      <span>
+      <span className={styles.rowStatus}>
         <i>{statusLabel(row.status)}</i>
       </span>
-      <span>
-        {row.current_disc_number || row.slot_disc_number || 1}.
-        {row.current_track_number ?? row.slot_track_number ?? '—'}
+      <span className={styles.rowPosition}>{position}</span>
+      <span className={styles.trackComparison}>
+        <span>
+          <strong>{row.current_title || 'No local file'}</strong>
+          <small>{row.file || 'Missing from this folder'}</small>
+        </span>
+        <b aria-hidden="true">→</b>
+        <span>
+          <strong>{row.slot_title || 'No release slot'}</strong>
+          <small>
+            Release {row.slot_disc_number || 1}.{row.slot_track_number ?? '—'}
+          </small>
+        </span>
       </span>
-      <span>
-        <strong>{row.current_title || 'No local file'}</strong>
-        <small>{row.file}</small>
-      </span>
-      <span>
-        <strong>{row.slot_title || 'No release slot'}</strong>
-        <small>
-          {row.slot_disc_number || 1}.{row.slot_track_number ?? '—'}
-        </small>
-      </span>
-      <span>
-        {row.audio_title
-          ? `${row.audio_title}${row.audio_score ? ` · ${Math.round(row.audio_score * 100)}%` : ''}`
-          : row.confidence || '—'}
+      <span className={styles.rowResult}>
+        <strong>{action}</strong>
+        {evidence ? <small>{evidence}</small> : null}
         {row.playlists?.length ? <small>Playlist: {row.playlists.join(', ')}</small> : null}
-      </span>
-      <span>
-        {row.relationship === 'version_conflict'
-          ? row.status === 'extra'
-            ? `Possible version of missing ${row.counterpart_disc_number || 1}.${row.counterpart_track_number ?? '—'} ${row.counterpart_title || ''}`
-            : `Possible local version: ${row.counterpart_file || row.counterpart_title || ''}`
-          : row.action_state === 'preview'
-            ? `Preview; ${row.preview_reason || 'resolve the album question first'}`
-            : row.status === 'settled'
-              ? 'No pending action'
-              : row.changes && Object.keys(row.changes).length
-                ? Object.keys(row.changes)
-                    .map((key) => key.replaceAll('_', ' '))
-                    .join(', ')
-                : row.status === 'uncertain'
-                  ? 'Confirm assignment; no metadata edit'
-                  : row.title_difference === 'flavor'
-                    ? 'Display wording only'
-                    : row.title_difference === 'version_detail'
-                      ? 'Version detail preserved'
-                      : 'None'}
       </span>
     </button>
   );
@@ -254,6 +280,18 @@ function groupReadyChanges(items: ReviewFinding[]): ReadyChangeGroup[] {
         valueSummary: 'Adding missing featured artists to metadata',
       };
     }
+    if (
+      fields.length > 0 &&
+      fields.every((field) =>
+        ['library_recording_mbid', 'musicbrainz_recording_id'].includes(field),
+      )
+    ) {
+      return {
+        ...group,
+        label: 'Recording IDs',
+        valueSummary: `Add MusicBrainz recording IDs to ${group.count} track${group.count === 1 ? '' : 's'}`,
+      };
+    }
     if (!values.length) return group;
     const first = values[0];
     const same = values.every(
@@ -298,6 +336,7 @@ function SelectedActionDetail({
   const canApply = Boolean(typeInfo?.fixable) && finding.finding_type !== 'suspect_album_tag';
   const duplicateChoice = finding.finding_type === 'reconciliation_duplicate';
   const suggested = finding.review_tier === 'ready';
+  const compactReason = finding.review_reason || finding.description;
   return (
     <section
       className={styles.findingDetail}
@@ -305,22 +344,21 @@ function SelectedActionDetail({
       id="selected-review-action"
       aria-label="Selected action detail"
     >
-      <div className={styles.decisionHeader}>
-        <span>
-          {compact ? 'Selected row' : 'Selected action'} ·{' '}
-          {suggested ? 'Ready change' : 'Needs review'} · {findingTypeLabel(finding.finding_type)}
-          {!compact && ` · Item ${itemIndex + 1} of ${itemCount}`}
-        </span>
-        <span className={styles.severity}>{finding.severity}</span>
-      </div>
-      <h3>
+      {!compact && (
+        <div className={styles.decisionHeader}>
+          <span>
+            {suggested ? 'Ready change' : 'Needs review'} · {findingTypeLabel(finding.finding_type)}{' '}
+            · Item {itemIndex + 1} of {itemCount}
+          </span>
+          <span className={styles.severity}>{finding.severity}</span>
+        </div>
+      )}
+      <h3>{findingHeading(finding)}</h3>
+      <p className={styles.description}>
         {compact
-          ? suggested
-            ? 'Proposed metadata change'
-            : 'Why this assignment needs review'
-          : findingHeading(finding)}
-      </h3>
-      <p className={styles.description}>{finding.description || 'Review the evidence below.'}</p>
+          ? compactReason || 'Review the supporting evidence.'
+          : finding.description || 'Review the evidence below.'}
+      </p>
       {!compact && (
         <section
           className={styles.suggestion}
@@ -351,12 +389,24 @@ function SelectedActionDetail({
           </div>
         </section>
       )}
-      <ReconciliationEvidence
-        finding={finding}
-        busy={busy}
-        onPin={onPin}
-        onKeepCopy={duplicateChoice ? (trackId) => onAct('fix', trackId) : undefined}
-      />
+      {compact ? (
+        <details className={styles.rowEvidence}>
+          <summary>Evidence and exact changes</summary>
+          <ReconciliationEvidence
+            finding={finding}
+            busy={busy}
+            onPin={onPin}
+            onKeepCopy={duplicateChoice ? (trackId) => onAct('fix', trackId) : undefined}
+          />
+        </details>
+      ) : (
+        <ReconciliationEvidence
+          finding={finding}
+          busy={busy}
+          onPin={onPin}
+          onKeepCopy={duplicateChoice ? (trackId) => onAct('fix', trackId) : undefined}
+        />
+      )}
       <div className={styles.actions}>
         {finding.finding_type === 'reconciliation_intent' ? (
           <>
@@ -415,16 +465,22 @@ function SelectedActionDetail({
 }
 
 export function ReviewPage() {
+  const initialParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const initialMode = initialParams.get('mode');
   const [queue, setQueue] = useState<ReviewQueuePage | null>(null);
-  const [caseId, setCaseId] = useState(
-    () => new URLSearchParams(window.location.search).get('case') || '',
-  );
+  const [queueTotals, setQueueTotals] = useState<ReviewQueueModeTotals | null>(null);
+  const [caseId, setCaseId] = useState(() => initialParams.get('case') || '');
   const [reviewCase, setReviewCase] = useState<ReviewCase | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
+  const [albumView, setAlbumView] = useState<AlbumView>('plan');
   const [page, setPage] = useState(0);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('');
-  const [risk, setRisk] = useState('');
+  const [queueMode, setQueueMode] = useState<QueueMode>(
+    initialMode && queueModes.some((mode) => mode.value === initialMode)
+      ? (initialMode as QueueMode)
+      : 'review',
+  );
   const [searchInput, setSearchInput] = useState('');
   const [catalog, setCatalog] = useState<Record<string, FindingTypeInfo>>({});
   const [busy, setBusy] = useState(false);
@@ -436,6 +492,7 @@ export function ReviewPage() {
   const [scanStatus, setScanStatus] = useState<ReconciliationScanStatus | null>(null);
   const [lastRun, setLastRun] = useState<ReconciliationRun | null>(null);
   const wasScanning = useRef(false);
+  const risk = queueModes.find((mode) => mode.value === queueMode)?.risk || '';
 
   useEffect(() => {
     let live = true;
@@ -485,15 +542,22 @@ export function ReviewPage() {
   const refreshQueue = useCallback(async () => {
     const result = await fetchReviewQueue(page, query, category, risk);
     setQueue(result);
+    void fetchReviewQueueModeTotals(query, category)
+      .then(setQueueTotals)
+      .catch(() => undefined);
     return result;
   }, [page, query, category, risk]);
 
   useEffect(() => {
     let live = true;
-    void fetchReviewQueue(page, query, category, risk)
-      .then((result) => {
+    void Promise.all([
+      fetchReviewQueue(page, query, category, risk),
+      fetchReviewQueueModeTotals(query, category),
+    ])
+      .then(([result, totals]) => {
         if (!live) return;
         setQueue(result);
+        setQueueTotals(totals);
         if (!caseId && result.items[0]) setCaseId(result.items[0].case_id);
       })
       .catch((cause: unknown) => {
@@ -518,6 +582,7 @@ export function ReviewPage() {
     const url = new URL(window.location.href);
     if (caseId) url.searchParams.set('case', caseId);
     else url.searchParams.delete('case');
+    url.searchParams.set('mode', queueMode);
     window.history.replaceState(null, '', url);
     if (!caseId) {
       setReviewCase(null);
@@ -550,7 +615,7 @@ export function ReviewPage() {
     return () => {
       live = false;
     };
-  }, [caseId]);
+  }, [caseId, queueMode]);
 
   const active = useMemo(
     () => reviewCase?.items.find((finding) => finding.id === activeId),
@@ -563,7 +628,9 @@ export function ReviewPage() {
   const albumNumber = queue && caseIndex >= 0 ? page * queue.limit + caseIndex + 1 : null;
   const typeInfo = active ? catalog[active.finding_type] : undefined;
   const plan = reviewCase?.plan || emptyPlan;
-  const decisions = reviewCase?.decisions || plan.decisions || [];
+  const decisions = [...(reviewCase?.decisions || plan.decisions || [])].sort(
+    (left, right) => (decisionOrder[left.category] ?? 99) - (decisionOrder[right.category] ?? 99),
+  );
   const assignments = reviewCase?.album_plan?.assignments || [];
   const pendingAssignments = assignments.filter(
     (row) => !['confirmed', 'not_owned', 'settled'].includes(row.status),
@@ -606,7 +673,6 @@ export function ReviewPage() {
     : undefined;
   const reviewDecisions = decisions.filter((decision) => decision.risk !== 'ready');
   const readyDecisions = decisions.filter((decision) => decision.risk === 'ready');
-  const singleReviewDecision = reviewDecisions.length === 1 ? reviewDecisions[0] : undefined;
   const reviewActionCount = reviewDecisions.reduce(
     (total, decision) => total + decision.action_count,
     0,
@@ -627,6 +693,7 @@ export function ReviewPage() {
 
   const selectCase = (next: string) => {
     setNotice('');
+    setAlbumView('plan');
     setCaseId(next);
   };
 
@@ -877,9 +944,23 @@ export function ReviewPage() {
             ← Library Maintenance
           </a>
           <h1>Review Queue</h1>
-          <p>Showing library reconciliation findings, one album at a time.</p>
+          <p>Review album plans, apply supported changes, and resolve exceptions.</p>
         </div>
         <div className={styles.headerTools}>
+          <div className={styles.headerCount}>
+            <strong>{queueTotals?.all ?? queue?.total ?? 0} albums</strong>
+            <span>{queue?.ready_total || 0} ready changes</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setQueueMode('ready');
+              setPage(0);
+              setCaseId('');
+            }}
+          >
+            Review ready batch
+          </button>
           <button
             type="button"
             className={styles.safeAction}
@@ -888,27 +969,27 @@ export function ReviewPage() {
           >
             {applyBusy
               ? applyProgress || 'Applying…'
-              : `Apply all ready changes (${queue?.ready_total || 0})`}
+              : `Apply ready changes (${queue?.ready_total || 0})`}
           </button>
-          <button
-            type="button"
-            disabled={scanBusy || scanStatus?.current_job?.job_id === 'library_reconciliation'}
-            onClick={() => void runScan()}
-          >
-            {scanBusy
-              ? 'Queuing…'
-              : scanStatus?.current_job?.job_id === 'library_reconciliation'
-                ? 'Scanning…'
-                : 'Scan library'}
-          </button>
-          <button type="button" onClick={() => void refresh()}>
-            Refresh queue
-          </button>
-          <div className={styles.headerCount}>
-            {queue
-              ? `${queue.total} album${queue.total === 1 ? '' : 's'} in queue`
-              : 'Loading albums…'}
-          </div>
+          <details className={styles.moreMenu}>
+            <summary aria-label="More queue actions">More</summary>
+            <div>
+              <button
+                type="button"
+                disabled={scanBusy || scanStatus?.current_job?.job_id === 'library_reconciliation'}
+                onClick={() => void runScan()}
+              >
+                {scanBusy
+                  ? 'Queuing…'
+                  : scanStatus?.current_job?.job_id === 'library_reconciliation'
+                    ? 'Scanning…'
+                    : 'Scan library'}
+              </button>
+              <button type="button" onClick={() => void refresh()}>
+                Refresh queue
+              </button>
+            </div>
+          </details>
         </div>
       </header>
 
@@ -934,6 +1015,23 @@ export function ReviewPage() {
 
       <div className={styles.workspace}>
         <aside className={styles.sidebar} aria-label="Reconciliation albums">
+          <nav className={styles.queueModes} aria-label="Queue view">
+            {queueModes.map((mode) => (
+              <button
+                key={mode.value}
+                type="button"
+                aria-current={queueMode === mode.value ? 'page' : undefined}
+                onClick={() => {
+                  setQueueMode(mode.value);
+                  setPage(0);
+                  setCaseId('');
+                }}
+              >
+                <span>{mode.label}</span>
+                <b>{queueTotals?.[mode.value] ?? '—'}</b>
+              </button>
+            ))}
+          </nav>
           <label htmlFor="review-search">Find album or track</label>
           <input
             id="review-search"
@@ -941,41 +1039,23 @@ export function ReviewPage() {
             onChange={(event) => setSearchInput(event.target.value)}
             placeholder="Search findings"
           />
-          <div className={styles.queueFilters}>
-            <label>
-              Category
-              <select
-                value={category}
-                onChange={(event) => {
-                  setCategory(event.target.value);
-                  setPage(0);
-                  setCaseId('');
-                }}
-              >
-                {categoryOptions.map(([value, label]) => (
-                  <option key={value || 'all'} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Risk
-              <select
-                value={risk}
-                onChange={(event) => {
-                  setRisk(event.target.value);
-                  setPage(0);
-                  setCaseId('');
-                }}
-              >
-                <option value="">All risk levels</option>
-                <option value="ready">Fully ready albums</option>
-                <option value="manual">Needs a decision</option>
-                <option value="destructive">File actions</option>
-              </select>
-            </label>
-          </div>
+          <label className={styles.categoryFilter}>
+            Filter by type
+            <select
+              value={category}
+              onChange={(event) => {
+                setCategory(event.target.value);
+                setPage(0);
+                setCaseId('');
+              }}
+            >
+              {categoryOptions.map(([value, label]) => (
+                <option key={value || 'all'} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
           <div className={styles.caseList}>
             {queue?.items.map((item) => (
               <button
@@ -990,14 +1070,6 @@ export function ReviewPage() {
                   {caseStatusSummary(item)}
                   {item.error_count ? ` · ${item.error_count} failed` : ''}
                 </small>
-                {item.plan?.categories?.length ? (
-                  <span className={styles.caseCategories}>
-                    {item.plan.categories.slice(0, 2).map((value) => (
-                      <i key={value}>{categoryLabels[value] || value.replaceAll('_', ' ')}</i>
-                    ))}
-                    {item.plan.categories.length > 2 && <i>+{item.plan.categories.length - 2}</i>}
-                  </span>
-                ) : null}
               </button>
             ))}
           </div>
@@ -1074,7 +1146,33 @@ export function ReviewPage() {
                 </div>
               </div>
 
-              {plan.status === 'ready' && (
+              <nav className={styles.albumViews} aria-label="Album review views">
+                <button
+                  type="button"
+                  aria-current={albumView === 'plan' ? 'page' : undefined}
+                  onClick={() => setAlbumView('plan')}
+                >
+                  Plan
+                  <span>{reviewDecisions.length || plan.ready}</span>
+                </button>
+                <button
+                  type="button"
+                  aria-current={albumView === 'tracks' ? 'page' : undefined}
+                  onClick={() => setAlbumView('tracks')}
+                >
+                  Tracks
+                  <span>{assignments.length}</span>
+                </button>
+                <button
+                  type="button"
+                  aria-current={albumView === 'evidence' ? 'page' : undefined}
+                  onClick={() => setAlbumView('evidence')}
+                >
+                  Evidence
+                </button>
+              </nav>
+
+              {albumView === 'plan' && plan.status === 'ready' && (
                 <section
                   className={styles.albumPlan}
                   data-state="ready"
@@ -1084,11 +1182,17 @@ export function ReviewPage() {
                     <div>
                       <div className={styles.eyebrow}>Ready to apply</div>
                       <strong>
-                        {primaryReadyDecision?.label || `${plan.ready} supported changes are ready`}
+                        {readyChangeGroups.length === 1
+                          ? readyChangeGroups[0].valueSummary ||
+                            `${readyChangeGroups[0].label} on ${readyChangeGroups[0].count} tracks`
+                          : primaryReadyDecision?.label ||
+                            `${plan.ready} supported changes are ready`}
                       </strong>
                       <p>
-                        {primaryReadyDecision?.summary ||
-                          'All proposed changes are supported by the album and audio evidence.'}
+                        {readyChangeGroups.length > 1
+                          ? `${readyChangeGroups.length} groups of changes passed the album and audio checks.`
+                          : primaryReadyDecision?.summary ||
+                            'All proposed changes are supported by the album and audio evidence.'}
                       </p>
                     </div>
                     <div className={styles.planBadges}>
@@ -1103,61 +1207,55 @@ export function ReviewPage() {
                 </section>
               )}
 
-              {decisions.length > 0 && showDecisionBoard && (
+              {albumView === 'plan' && decisions.length > 0 && showDecisionBoard && (
                 <section className={styles.decisionBoard} aria-label="Album decisions">
                   <div className={styles.sectionHeading}>
                     <div>
-                      <div className={styles.eyebrow}>Decision required</div>
+                      <div className={styles.eyebrow}>Resolve first</div>
                       <h3>
-                        {singleReviewDecision?.label ||
-                          `${reviewDecisions.length} decisions need your input`}
+                        {reviewDecisions.length === 1
+                          ? 'One choice needs your input'
+                          : `${reviewDecisions.length} choices need your input`}
                       </h3>
-                      <p>
-                        {singleReviewDecision?.summary ||
-                          'Resolve these choices before applying their dependent track actions.'}
-                      </p>
+                      {reviewDecisions.length > 1 && (
+                        <p>
+                          Work from top to bottom. Earlier choices can update later track actions.
+                        </p>
+                      )}
                     </div>
-                    {!singleReviewDecision && (
-                      <span>
-                        {reviewActionCount} affected action{reviewActionCount === 1 ? '' : 's'}
-                      </span>
-                    )}
+                    <span>
+                      {reviewActionCount} affected action{reviewActionCount === 1 ? '' : 's'}
+                    </span>
                   </div>
-                  <div
-                    className={styles.decisionGrid}
-                    data-single={singleReviewDecision ? 'true' : undefined}
-                  >
-                    {reviewDecisions.map((decision) => {
+                  <div className={styles.decisionGrid}>
+                    {reviewDecisions.map((decision, decisionIndex) => {
                       const selected = active ? decision.finding_ids.includes(active.id) : false;
-                      const isDirectSingleNumbering =
-                        Boolean(singleReviewDecision) && decision.category === 'numbering';
                       return (
                         <Fragment key={decision.id}>
                           <article data-risk={decision.risk} data-selected={selected || undefined}>
-                            {!isDirectSingleNumbering && (
-                              <button
-                                type="button"
-                                className={styles.decisionSelect}
-                                onClick={() => selectFinding(decision.finding_ids[0] ?? null)}
-                              >
-                                <span className={styles.decisionIcon} aria-hidden="true">
-                                  {decision.risk === 'ready'
-                                    ? '✓'
-                                    : decision.risk === 'destructive'
-                                      ? '×'
-                                      : '!'}
-                                </span>
-                                <span>
-                                  <strong>
-                                    {singleReviewDecision
-                                      ? decisionReviewLabel(decision)
-                                      : decision.label}
-                                  </strong>
-                                  {!singleReviewDecision && <small>{decision.summary}</small>}
-                                </span>
-                                {!singleReviewDecision && <b>{decision.action_count}</b>}
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              className={styles.decisionSelect}
+                              onClick={() => selectFinding(decision.finding_ids[0] ?? null)}
+                            >
+                              <span className={styles.decisionStep} aria-hidden="true">
+                                {reviewDecisions.length > 1 ? decisionIndex + 1 : '!'}
+                              </span>
+                              <span>
+                                <small>{decision.label}</small>
+                                <strong>
+                                  {decisionInstruction(
+                                    decision,
+                                    reviewCase.album_plan?.numbering_mode,
+                                  )}
+                                </strong>
+                                {decision.summary && <small>{decision.summary}</small>}
+                              </span>
+                              <b>
+                                {decision.action_count} action
+                                {decision.action_count === 1 ? '' : 's'}
+                              </b>
+                            </button>
                             {['numbering', 'title_conventions', 'metadata'].includes(
                               decision.category,
                             ) && (
@@ -1225,7 +1323,7 @@ export function ReviewPage() {
                 </section>
               )}
 
-              {plan.status !== 'ready' && plan.ready > 0 && (
+              {albumView === 'plan' && plan.status !== 'ready' && plan.ready > 0 && (
                 <section
                   className={`${styles.albumPlan} ${styles.safeChangesPanel}`}
                   data-state="supporting"
@@ -1251,15 +1349,22 @@ export function ReviewPage() {
                 </section>
               )}
 
-              {assignments.length > 0 && (
+              {albumView === 'plan' && !showDecisionBoard && plan.ready === 0 && (
+                <div className={styles.empty}>No album-level action is pending.</div>
+              )}
+
+              {albumView === 'tracks' && assignments.length > 0 && (
                 <section
                   className={styles.trackMatrix}
                   aria-label="Complete album track assignment"
                 >
                   <div className={styles.sectionHeading}>
                     <div>
-                      <div className={styles.eyebrow}>Complete album evidence</div>
-                      <h3>Track assignment</h3>
+                      <div className={styles.eyebrow}>Album track list</div>
+                      <h3>Track assignments</h3>
+                      <p>
+                        Compare each local file with the selected release slot and proposed result.
+                      </p>
                     </div>
                     <div className={styles.matrixCounts}>
                       {(reviewCase.album_plan?.counts.confirmed || 0) > 0 && (
@@ -1322,10 +1427,8 @@ export function ReviewPage() {
                     <div className={styles.trackTableHead} role="row">
                       <span>Status</span>
                       <span>Position</span>
-                      <span>Local file</span>
-                      <span>Release slot</span>
-                      <span>Evidence</span>
-                      <span>Pending action</span>
+                      <span>Local file → release slot</span>
+                      <span>Result</span>
                     </div>
                     {attentionAssignments.map((row, index) => (
                       <Fragment key={`${row.file_path || row.slot_title}-${index}`}>
@@ -1337,12 +1440,15 @@ export function ReviewPage() {
                         {row.finding_id === active?.id && compactSelectedActionDetail}
                       </Fragment>
                     ))}
-                    {changeAssignments.length > 6 ? (
+                    {changeAssignments.length > 0 && (
                       <details
                         className={styles.proposedAssignments}
                         open={activeAssignment?.status === 'change' || undefined}
                       >
-                        <summary>↻ {changeAssignments.length} proposed track changes</summary>
+                        <summary>
+                          ↻ {changeAssignments.length} proposed track change
+                          {changeAssignments.length === 1 ? '' : 's'}
+                        </summary>
                         {changeAssignments.map((row, index) => (
                           <Fragment key={`${row.file_path || row.slot_title}-${index}`}>
                             <AssignmentRow
@@ -1354,17 +1460,6 @@ export function ReviewPage() {
                           </Fragment>
                         ))}
                       </details>
-                    ) : (
-                      changeAssignments.map((row, index) => (
-                        <Fragment key={`${row.file_path || row.slot_title}-${index}`}>
-                          <AssignmentRow
-                            row={row}
-                            onSelect={selectFinding}
-                            selected={row.finding_id === active?.id}
-                          />
-                          {row.finding_id === active?.id && compactSelectedActionDetail}
-                        </Fragment>
-                      ))
                     )}
                     {settledAssignments.length > 0 && (
                       <details className={styles.confirmedAssignments}>
@@ -1384,7 +1479,104 @@ export function ReviewPage() {
                   </div>
                 </section>
               )}
-              {active && !activeAssignment && !activeDecision && selectedActionDetail}
+
+              {albumView === 'tracks' && assignments.length === 0 && (
+                <div className={styles.empty}>
+                  No track assignment data is available for this album.
+                </div>
+              )}
+
+              {albumView === 'evidence' && (
+                <section className={styles.evidenceView} aria-label="Album evidence">
+                  <div className={styles.sectionHeading}>
+                    <div>
+                      <div className={styles.eyebrow}>Supporting information</div>
+                      <h3>Why this plan was chosen</h3>
+                      <p>
+                        Catalog source, album scope, numbering, and the evidence behind each action.
+                      </p>
+                    </div>
+                  </div>
+                  <dl className={styles.albumFacts}>
+                    <div>
+                      <dt>Selected release</dt>
+                      <dd>
+                        {reviewCase.album_plan?.source || 'Catalog'}{' '}
+                        <ProviderReleaseId
+                          source={reviewCase.album_plan?.source}
+                          releaseId={reviewCase.album_plan?.release_id}
+                        />
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Album scope</dt>
+                      <dd>{reviewCase.album_plan?.intent_scope || 'Complete'} album</dd>
+                    </div>
+                    <div>
+                      <dt>Numbering</dt>
+                      <dd>
+                        {reviewCase.album_plan?.numbering_mode === 'digital'
+                          ? 'Continuous digital numbering'
+                          : 'Release disc and track numbering'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Track coverage</dt>
+                      <dd>
+                        {assignments.length} local and release slot record
+                        {assignments.length === 1 ? '' : 's'} compared
+                      </dd>
+                    </div>
+                  </dl>
+                  {(reviewCase.album_plan?.candidates?.length || 0) > 1 && (
+                    <details className={styles.albumCandidates}>
+                      <summary>
+                        Compare {reviewCase.album_plan?.candidates?.length} release candidates
+                      </summary>
+                      <div>
+                        {reviewCase.album_plan?.candidates?.map((candidate, index) => (
+                          <article key={`${candidate.source}-${candidate.release_id}`}>
+                            <b>#{index + 1}</b>
+                            <span>
+                              <strong>{candidate.source}</strong>
+                              <ProviderReleaseId
+                                source={candidate.source}
+                                releaseId={candidate.release_id}
+                              />
+                            </span>
+                            <small>
+                              {candidate.matched}/{candidate.total_slots} assigned ·{' '}
+                              {candidate.missing} missing · {candidate.extra} extra
+                            </small>
+                          </article>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                  {reviewCase.items.length > 0 && (
+                    <label className={styles.evidencePicker}>
+                      Evidence for action
+                      <select
+                        value={activeId ?? ''}
+                        onChange={(event) => selectFinding(Number(event.target.value))}
+                      >
+                        {reviewCase.items.map((finding) => (
+                          <option key={finding.id} value={finding.id}>
+                            {findingHeading(finding)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  {active ? selectedActionDetail : null}
+                </section>
+              )}
+
+              {albumView === 'plan' &&
+                active &&
+                !activeAssignment &&
+                !activeDecision &&
+                selectedActionDetail}
             </>
           ) : queue && queue.total === 0 ? (
             <div className={styles.empty}>

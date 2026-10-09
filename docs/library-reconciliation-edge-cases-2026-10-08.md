@@ -106,3 +106,5 @@ Examples encountered: Snow Patrol’s *Up to Now* should remain partial; the sin
 9. A scan interrupted before completion preserves previous plans and findings; a successful scan retires stale ones.
 10. The review queue must distinguish algorithmic uncertainty from presentation state. A selected row should reveal its detail without changing the underlying confidence or risk classification.
 11. Headings describe the proposed outcome (“Use continuous numbering,” “Link MusicBrainz recording IDs”), not the planner's internal category or finding count.
+12. The default album view is the actionable plan. The complete track audit and technical evidence remain available as separate views so dense albums do not bury the controlling decision.
+13. Queue modes separate albums that need input, supported changes ready to apply, and recoverable file actions. Type filtering refines the selected mode instead of duplicating it.

@@ -113,6 +113,13 @@ export interface ReviewQueuePage {
   limit: number;
 }
 
+export interface ReviewQueueModeTotals {
+  all: number;
+  review: number;
+  ready: number;
+  files: number;
+}
+
 export interface ReviewFinding extends RepairFinding {
   evidence_token: string;
   updated_at?: string | null;
@@ -160,15 +167,30 @@ export async function fetchReviewQueue(
   q = '',
   category = '',
   risk = '',
+  limit = 30,
 ): Promise<ReviewQueuePage> {
   const params = new URLSearchParams({
     page: String(page),
     q,
     job_id: 'library_reconciliation',
+    limit: String(limit),
   });
   if (category) params.set('category', category);
   if (risk) params.set('risk', risk);
   return readJson<ReviewQueuePage>(await fetch(`/api/repair/review-queue?${params}`));
+}
+
+export async function fetchReviewQueueModeTotals(
+  q = '',
+  category = '',
+): Promise<ReviewQueueModeTotals> {
+  const [all, review, ready, files] = await Promise.all([
+    fetchReviewQueue(0, q, category, '', 1),
+    fetchReviewQueue(0, q, category, 'manual', 1),
+    fetchReviewQueue(0, q, category, 'ready', 1),
+    fetchReviewQueue(0, q, category, 'destructive', 1),
+  ]);
+  return { all: all.total, review: review.total, ready: ready.total, files: files.total };
 }
 
 export async function applyReviewDecisionGroup(

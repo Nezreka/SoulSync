@@ -15,7 +15,7 @@ departures, remaining gaps, and the visual hierarchy used by the review queue.
 | Distinguish missing tracks from acquisition intent                                                | Complete, partial, playlist-only, and unknown intent are separated; unknown intent creates one Album completeness decision                                               | Strong                                                                                          |
 | Keep duplicate and destructive work explicit and recoverable                                      | Duplicate-copy decisions include playlist evidence and use quarantine-backed repair paths                                                                                | Strong                                                                                          |
 | Review and apply album by album                                                                   | Stable folder/release cases, grouped decisions, full track assignment, guarded apply, stale-evidence checks, and album-scoped safe apply are present                     | Strong                                                                                          |
-| Show one clear recommendation with supporting evidence                                            | Album decisions and selected-row evidence do this, but dense albums still require careful progressive disclosure                                                         | Improving                                                                                       |
+| Show one clear recommendation with supporting evidence                                            | The default Plan view states each outcome directly; Tracks and Evidence are separate disclosure layers, and selected-row detail stays beside its row                     | Strong                                                                                          |
 | Refresh only affected folders after apply                                                         | The apply path refreshes the case, but the scanner still primarily operates as a full-library job                                                                        | Partial                                                                                         |
 | Provide complete action history, preview, recovery, and undo in the queue                         | Finding state and quarantine recovery exist; a unified album-plan preview/history/undo surface does not                                                                  | Partial                                                                                         |
 | Handle mixed folders and relocate unique recordings into the correct release automatically        | The scanner detects conflicts and avoids unsafe retagging, but it usually leaves cross-release relocation for review or another tool                                     | Partial by design                                                                               |
@@ -27,9 +27,10 @@ departures, remaining gaps, and the visual hierarchy used by the review queue.
 
 The original sketch centered one decision at a time. Real albums showed that a
 release choice can change numbering, missing slots, titles, and every per-track
-action. The UI therefore opens with the album's unresolved decisions and a
-complete track-assignment table. Selecting a decision or row reveals its detail
-in place.
+action. The UI therefore opens on a Plan view with the album's ordered decisions
+and supported bulk actions. The complete assignment matrix and technical
+evidence are available through separate Tracks and Evidence views. Selecting a
+track still reveals compact detail directly beneath that row.
 
 This deviation is useful. It preserves the original queue and action model while
 preventing users from accepting several apparently independent findings before
@@ -66,17 +67,20 @@ differ.
 
 The page should answer these questions in order:
 
-1. **Which album am I reviewing?** Album and artist, queue position, and album navigation.
-2. **What requires my judgment?** Only release, completeness, numbering, audio, duplicate, or blocked decisions. These appear first and use restrained warning or danger accents.
-3. **What can SoulSync safely do now?** Independent safe actions appear after blocking decisions with a clear bulk button. On a fully ready album this becomes the primary panel.
-4. **What supports those decisions?** The complete track assignment follows, with uncertain, missing, extra, and changed rows before settled rows.
-5. **Why is one row classified this way?** Selecting the row inserts compact evidence immediately beneath it.
-6. **What are the raw technical details?** IDs, tags, paths, scores, and provenance remain in the final disclosure layer.
+1. **What kind of work am I doing?** Queue modes separate Needs input, Ready to apply, File actions, and All, with album counts.
+2. **Which album am I reviewing?** Album and artist, queue position, and album navigation.
+3. **What requires my judgment?** The Plan view orders release, completeness, numbering, audio, title, duplicate, and file decisions. Each card states the requested outcome in plain language.
+4. **What can SoulSync safely do now?** Independent safe actions follow blocking decisions with a clear album-level apply button. On a fully ready album this is the primary panel.
+5. **How does the album map track by track?** The Tracks view compares local file and release slot in one row, groups routine changes, and places exceptions first.
+6. **Why is one row classified this way?** Selecting the row inserts compact detail immediately beneath it; exact changes and deeper evidence are disclosed on demand.
+7. **What are the raw technical details?** The Evidence view holds source release, scope, numbering, candidate comparison, IDs, tags, paths, scores, and provenance.
 
 Color communicates state rather than selection: green means supported and safe,
 amber means judgment is required, red means a file or destructive consequence,
 and purple is reserved for navigation and focus. Large tinted surfaces are kept
 subtle so a busy album does not become a wall of competing status colors.
+On narrow screens, track rows become stacked comparisons instead of preserving a
+desktop-width table with horizontal scrolling.
 
 ## Remaining priorities
 
