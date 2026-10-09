@@ -123,3 +123,46 @@ def test_relocate_handler_moves_the_file_out_of_the_wrong_album(tmp_path):
     assert res['library_v2_file_deleted'] is True
     assert not wrong.exists()                           # gone from the wrong album folder
     assert (staging / '03 - wrong.mp3').exists()        # now staged for re-import
+
+
+def test_relocate_handler_leaves_the_files_library_for_auto_import(tmp_path):
+    """Upstream #1504 on Library v2: a file from someone's own library carries
+    that owner into staging, so auto-import files the corrected copy back into
+    the same library instead of the shared one."""
+    import json
+
+    from database.music_database import MusicDatabase
+    from core.library2.library_roots import apply_roots, ensure_library_roots_schema
+    from core.library2.schema import ensure_library_v2_schema
+    from core.repair_worker import RepairWorker
+
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    own = tmp_path / 'kim'
+    album = own / 'Wrong Artist' / 'Wrong Album'
+    album.mkdir(parents=True)
+    wrong = album / '03 - wrong.mp3'
+    wrong.write_bytes(b'\x00' * 64)
+    staging = tmp_path / 'Staging'; staging.mkdir()
+
+    with db._get_connection() as conn:
+        ensure_library_v2_schema(conn)
+        ensure_library_roots_schema(conn.cursor())
+        apply_roots(conn.cursor(), {str(own) + '/': 2})
+        conn.execute("INSERT INTO lib2_artists(id, name, sort_name) VALUES(1,'Wrong Artist','Wrong Artist')")
+        conn.execute("INSERT INTO lib2_albums(id, primary_artist_id, title) VALUES(10,1,'Wrong Album')")
+        conn.execute("INSERT INTO lib2_tracks(id, album_id, title, track_number) VALUES(1,10,'Wrong Title',3)")
+        conn.execute("INSERT INTO lib2_track_files(track_id, path, format, is_primary) VALUES(1,?, 'mp3', 1)",
+                     (str(wrong),))
+        conn.commit()
+
+    worker = RepairWorker(db)
+    worker._config_manager = type('C', (), {
+        'get': staticmethod(lambda k, d=None: str(staging) if k == 'import.staging_path' else d)})()
+
+    res = worker._fix_acoustid_mismatch(
+        'track', 'lib2:1', str(wrong),
+        {'_fix_action': 'relocate', 'acoustid_title': 'Real Song', 'acoustid_artist': 'Real Artist'})
+
+    assert res['success'] is True
+    crumb = staging / '03 - wrong.mp3.soulsync-owner.json'
+    assert json.loads(crumb.read_text()) == {'owner_profile_id': 2}

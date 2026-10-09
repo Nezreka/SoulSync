@@ -5007,6 +5007,19 @@ class RepairWorker:
                 updates['track_artist'] = details['acoustid_artist']
                 updates['artists_list'] = _split_acoustid_credit(
                     details['acoustid_artist'])
+            # Upstream #1504: the staged file carries its library's owner, so
+            # auto-import files the corrected copy back into that library and
+            # not into the shared one.
+            owner = None
+            try:
+                from core.library2.library_roots import load_roots, owner_for_path
+                conn = self.db._get_connection()
+                try:
+                    _known, owner = owner_for_path(load_roots(conn), file_path)
+                finally:
+                    conn.close()
+            except Exception as exc:  # noqa: BLE001 - shared is the safe default
+                logger.debug("relocate owner lookup failed: %s", exc)
             try:
                 destination = relocate_mismatch_to_staging(
                     resolved, staging, updates,
@@ -5014,6 +5027,7 @@ class RepairWorker:
                     move_file=safe_move_file,
                     drop_db_row=lambda: None,
                     exists=os.path.exists,
+                    owner_profile_id=owner,
                 )
             except Exception as exc:
                 return {'success': False, 'error': f'Relocate failed: {exc}'}
