@@ -36,6 +36,22 @@ export function seriesOwnership(books: readonly AudiobookItem[]): Map<string, Se
 }
 
 /**
+ * The Audible ASIN of the series this strip is about.
+ *
+ * Not `books[0].series[0]`: a book can sit in several series (a saga and the
+ * sub-series inside it), and the first entry may be the parent. The entry whose
+ * title is the strip's own is the one that identifies it. Empty when no book
+ * carries an ASIN for it, and the scan then matches by name.
+ */
+export function seriesAsinFor(books: readonly AudiobookItem[], seriesTitle: string): string {
+  for (const book of books) {
+    const entry = book.series.find((s) => s.title === seriesTitle && s.asin);
+    if (entry?.asin) return entry.asin;
+  }
+  return '';
+}
+
+/**
  * The series in reading order, with the book you are looking at marked.
  *
  * Order comes from the sequence Audible prints, so half-numbered novellas land
@@ -48,7 +64,7 @@ export function AudiobookSeriesStrip({
   books,
   currentAsin,
 }: AudiobookSeriesStripProps) {
-  const seriesAsin = books[0]?.series[0]?.asin ?? '';
+  const seriesAsin = seriesAsinFor(books, seriesTitle);
   const [watching, setWatching] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');

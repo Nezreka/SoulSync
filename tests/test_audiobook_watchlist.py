@@ -455,7 +455,8 @@ def _volume(asin, number, release_date, title=None, series="Mein Lotta-Leben", r
         "narrators": [{"name": "Katinka Kultscher"}],
         "release_date": release_date,
         "series": [{"asin": "SER1", "title": series, "sequence": str(number)}],
-        "rating": {"num_reviews": ratings},
+        # what the parser reads: rating.overall_distribution.num_ratings
+        "rating": {"overall_distribution": {"num_ratings": ratings}},
     })
 
 
@@ -515,10 +516,61 @@ def test_an_owned_volume_is_not_wishlisted_for_a_series(db):
     assert out["wishlisted"] == 1
 
 
-def test_two_editions_of_one_volume_queue_once(db):
+def _two_editions(standard_first):
+    """Volume 3 in two editions. The better-rated one is the standard narration."""
+    standard = _volume("STD", 3, "2013-05-11", ratings=500)
+    drama = _volume("DRAMA", 3, "2013-05-11", title="Band 3 (Hörspiel)", ratings=5)
+    return [standard, drama] if standard_first else [drama, standard]
+
+
+def test_the_better_rated_edition_wins_whatever_the_list_order(db):
+    # the less-rated edition comes first, so only the ratings can pick the winner
     db.follow_author("Mein Lotta-Leben", role="series", since_date="1900-01-01")
-    books = [_volume("STD", 3, "2013-05-11", ratings=500),
-             _volume("DRAMA", 3, "2013-05-11", title="Band 3 (Hörspiel)", ratings=5)]
-    out = scan_author(_follow_row(db, 1), db=db, client=_SeriesCatalogue(books))
+    out = scan_author(_follow_row(db, 1), db=db, client=_SeriesCatalogue(_two_editions(False)))
     assert out["wishlisted"] == 1
     assert [r["asin"] for r in db.get_wishlist(1)] == ["STD"]
+
+
+def test_two_editions_of_one_volume_queue_once(db):
+    db.follow_author("Mein Lotta-Leben", role="series", since_date="1900-01-01")
+    out = scan_author(_follow_row(db, 1), db=db, client=_SeriesCatalogue(_two_editions(True)))
+    assert out["wishlisted"] == 1
+    assert [r["asin"] for r in db.get_wishlist(1)] == ["STD"]
+
+
+def test_a_volume_whose_other_edition_is_owned_is_not_queued(db):
+    db.follow_author("Mein Lotta-Leben", role="series", since_date="1900-01-01")
+    with patch.object(AudiobookDatabase, "is_owned", lambda self, asin: asin == "DRAMA"):
+        out = scan_author(_follow_row(db, 1), db=db, client=_SeriesCatalogue(_two_editions(True)))
+    assert out["found"] == 0 and out["wishlisted"] == 0
+    assert db.get_wishlist(1) == []
+
+
+def test_a_volume_whose_other_edition_is_wished_is_not_queued(db):
+    db.follow_author("Mein Lotta-Leben", role="series", since_date="1900-01-01")
+    db.add_to_wishlist(_volume("DRAMA", 3, "2013-05-11", ratings=5).to_dict())
+    out = scan_author(_follow_row(db, 1), db=db, client=_SeriesCatalogue(_two_editions(True)))
+    assert out["wishlisted"] == 0
+    assert [r["asin"] for r in db.get_wishlist(1)] == ["DRAMA"]
+
+
+def test_ratings_shifting_between_scans_do_not_queue_the_volume_again(db):
+    db.follow_author("Mein Lotta-Leben", role="series", since_date="1900-01-01")
+    row = _follow_row(db, 1)
+    first = scan_author(row, db=db, client=_SeriesCatalogue([
+        _volume("A", 3, "2013-05-11", ratings=500), _volume("B", 3, "2013-05-11", ratings=5)]))
+    assert first["wishlisted"] == 1
+    # the other edition overtakes it on ratings: it must not look new
+    second = scan_author(row, db=db, client=_SeriesCatalogue([
+        _volume("A", 3, "2013-05-11", ratings=5), _volume("B", 3, "2013-05-11", ratings=900)]))
+    assert second["wishlisted"] == 0
+    assert [r["asin"] for r in db.get_wishlist(1)] == ["A"]
+
+
+def test_an_unnumbered_book_is_judged_on_its_own_edition_check(db):
+    db.follow_author("Mein Lotta-Leben", role="series", since_date="1900-01-01")
+    books = [_volume("N1", 1, "2012-11-10"), _volume("X", "", "2022-08-17", title="Sonderband")]
+    with patch.object(AudiobookDatabase, "is_owned", lambda self, asin: asin == "N1"):
+        out = scan_author(_follow_row(db, 1), db=db, client=_SeriesCatalogue(books))
+    assert [r["asin"] for r in db.get_wishlist(1)] == ["X"]
+    assert out["wishlisted"] == 1

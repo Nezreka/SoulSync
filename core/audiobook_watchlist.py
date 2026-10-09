@@ -80,6 +80,52 @@ def new_books_for(
     return found
 
 
+def _series_slot(book: Any, series_title: str) -> Optional[float]:
+    """The position a book holds in the series, or None when it has no number."""
+    entry = next((e for e in getattr(book, "series", []) or []
+                  if e.title == series_title), None)
+    return entry.sequence_value if entry else None
+
+
+def _one_edition_per_new_volume(
+    books: List[Any],
+    series_title: str,
+    is_known: Any,
+) -> List[Any]:
+    """Collapse a series to one book per volume, skipping volumes already covered.
+
+    Audible sells some volumes more than once (the standard narration and a
+    dramatised adaptation, say), and ``collapse_editions`` keeps only the
+    best-rated one. Asking "is the winner known?" afterwards is the wrong
+    question: if the OTHER edition is the one that is owned or wished, the
+    winner looks new and the volume is queued a second time. The same happens
+    when the ratings shift between two scans and a different edition wins.
+
+    So ownership is decided per POSITION, before collapsing: a volume with any
+    edition already wanted or owned is left alone. Books with no number have no
+    position to share and are judged one by one, as before. A lookup that fails
+    counts as known, because queuing on a guess is worse than waiting a day.
+    """
+    from core.audiobook_client import collapse_editions
+
+    covered = set()
+    for book in books:
+        slot = _series_slot(book, series_title)
+        if slot is None:
+            continue
+        try:
+            if is_known(book.asin):
+                covered.add(slot)
+        except Exception as exc:                            # noqa: BLE001
+            logger.debug("Could not check whether %s is known: %s", book.asin, exc)
+            covered.add(slot)
+
+    open_books = [b for b in books
+                  if (_series_slot(b, series_title) is None
+                      or _series_slot(b, series_title) not in covered)]
+    return collapse_editions(open_books, series_title)
+
+
 def scan_author(
     row: Dict[str, Any],
     db: Any = None,
@@ -125,16 +171,12 @@ def scan_author(
             # A series is not an author's bibliography: Audible has no
             # "list a series" call, so get_series searches and keeps the
             # products that carry it. The stored series ASIN makes the match
-            # exact; without one it falls back to the name. Editions collapse
-            # to one book per position so a dramatised adaptation does not
-            # queue a second copy of every instalment.
-            from core.audiobook_client import collapse_editions
-
-            books = collapse_editions(
-                client.get_series(
-                    name, series_asin=(row.get("series_asin") or None),
-                    limit=SERIES_LIMIT, marketplace=marketplace_code),
-                name)
+            # exact; without one it falls back to the name. Editions are
+            # collapsed further down, once we know which volumes are already
+            # wanted or owned.
+            books = client.get_series(
+                name, series_asin=(row.get("series_asin") or None),
+                limit=SERIES_LIMIT, marketplace=marketplace_code)
         elif role == "narrator":
             books = client.get_by_narrator(
                 name, limit=DEFAULT_LOOKBACK, sort="newest",
@@ -151,6 +193,9 @@ def scan_author(
 
     def is_known(asin: str) -> bool:
         return bool(database.is_wishlisted(asin, profile_id) or database.is_owned(asin))
+
+    if role == "series":
+        books = _one_edition_per_new_volume(books, name, is_known)
 
     fresh = new_books_for(books, row.get("since_date"), is_known)
     outcome["found"] = len(fresh)
