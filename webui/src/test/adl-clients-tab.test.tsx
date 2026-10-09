@@ -360,6 +360,84 @@ describe('the toolbar', () => {
   });
 });
 
+describe('the category filter', () => {
+  const CATEGORIZED = {
+    ...TORRENT_OK,
+    items: [
+      { ...TORRENT_OK.items[0], category: 'SoulSync Movies' },
+      { ...TORRENT_OK.items[1], category: 'ebooks' },
+      { ...TORRENT_OK.items[1], id: 'HASH3', name: 'Blaze.m4b', category: 'SoulSync Audiobooks' },
+      { ...TORRENT_OK.items[1], id: 'HASH4', name: 'loose.iso' },
+    ],
+  };
+
+  async function openTorrents() {
+    const view = render(<AdlClientsTab />);
+    await waitFor(() => expect(pill(view.container, 'torrent')).not.toBeNull());
+    fireEvent.click(pill(view.container, 'torrent'));
+    await waitFor(() => expect(view.container.textContent).toContain('Movie.2026.1080p.mkv'));
+    return view.container;
+  }
+
+  it("lists the client's own categories, including torrents with none", async () => {
+    mockAll({ torrent: CATEGORIZED });
+    const container = await openTorrents();
+    const picker = screen.getByRole('combobox', { name: 'Category' });
+    const options = [...picker.querySelectorAll('option')].map((o) => o.textContent);
+    expect(options).toEqual([
+      'all categories',
+      'ebooks (1)',
+      'SoulSync Audiobooks (1)',
+      'SoulSync Movies (1)',
+      'no category (1)',
+    ]);
+    expect(container.textContent).toContain('4 shown');
+  });
+
+  it('a category narrows the list and the owner counts', async () => {
+    mockAll({ torrent: CATEGORIZED });
+    const container = await openTorrents();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Category' }), {
+      target: { value: 'SoulSync Audiobooks' },
+    });
+    expect(container.textContent).toContain('Blaze.m4b');
+    expect(container.textContent).not.toContain('Movie.2026.1080p.mkv');
+    expect(container.textContent).toContain('1 shown');
+    // "Not in SoulSync" counts only the chosen category
+    const owners = [...container.querySelectorAll('.adl-client-owner-choice')].map(
+      (b) => b.textContent,
+    );
+    expect(owners).toContain('Not in SoulSync1');
+  });
+
+  it('pause all respects the category', async () => {
+    mockAll({ torrent: CATEGORIZED });
+    let body: unknown;
+    server.use(
+      http.post('/api/clients/torrent/action', async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({ success: true, done: 1, failed: [] });
+      }),
+    );
+    const container = await openTorrents();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Category' }), {
+      target: { value: 'ebooks' },
+    });
+    const pauseAll = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === '⏸ Pause all',
+    );
+    fireEvent.click(pauseAll as HTMLElement);
+    await waitFor(() => expect(body).toBeTruthy());
+    expect(body).toEqual({ ids: ['HASH2'], action: 'pause', delete_files: false });
+  });
+
+  it('no picker when the client reports no categories', async () => {
+    mockAll();
+    await openTorrents();
+    expect(screen.queryByRole('combobox', { name: 'Category' })).toBeNull();
+  });
+});
+
 describe('bulk actions', () => {
   it('pause all sends every visible id in one request', async () => {
     mockAll();

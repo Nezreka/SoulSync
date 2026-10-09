@@ -257,6 +257,29 @@ export function byOwner<T extends { soulsync?: unknown }>(items: T[], owner: Own
   return items.filter((item) => Boolean(item.soulsync) === (owner === 'soulsync'));
 }
 
+/** the client's own category. '' is the torrents that have none. */
+export const ALL_CATEGORIES = '*';
+
+export function byCategory<T extends { category?: string | null }>(
+  items: T[],
+  category: string,
+): T[] {
+  if (category === ALL_CATEGORIES) return items;
+  return items.filter((item) => (item.category || '') === category);
+}
+
+/** every category the client reported, with counts, most used first, the uncategorized last. */
+export function categoryCounts<T extends { category?: string | null }>(
+  items: T[],
+): [string, number][] {
+  const counts = new Map<string, number>();
+  for (const item of items)
+    counts.set(item.category || '', (counts.get(item.category || '') ?? 0) + 1);
+  return [...counts.entries()].sort(
+    (a, b) => Number(!a[0]) - Number(!b[0]) || b[1] - a[1] || a[0].localeCompare(b[0]),
+  );
+}
+
 const OWNER_CHOICES: { key: OwnerFilter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'soulsync', label: 'SoulSync' },
@@ -326,6 +349,9 @@ function ClientToolbar({
   sort,
   onSort,
   stateOf,
+  categories,
+  category,
+  onCategory,
   link,
   onRefresh,
 }: {
@@ -342,9 +368,14 @@ function ClientToolbar({
   sort: ClientSort;
   onSort: (value: ClientSort) => void;
   stateOf: Map<string, number>;
+  /** the client's categories; the picker shows only when a torrent has one. */
+  categories?: [string, number][];
+  category?: string;
+  onCategory?: (value: string) => void;
   link: string;
   onRefresh: () => void;
 }) {
+  const showCategories = Boolean(categories?.some(([name]) => name) && onCategory);
   return (
     <div className="adl-client-toolbar">
       <div className="adl-client-owner-switch" role="radiogroup" aria-label="Whose downloads">
@@ -388,6 +419,22 @@ function ClientToolbar({
           </button>
         ))}
       </div>
+      {showCategories ? (
+        <select
+          className="adl-deleted-retention adl-client-category"
+          title="The download client's category"
+          aria-label="Category"
+          value={category}
+          onChange={(event) => onCategory?.(event.target.value)}
+        >
+          <option value={ALL_CATEGORIES}>all categories</option>
+          {categories?.map(([name, count]) => (
+            <option key={name || '(none)'} value={name}>
+              {name || 'no category'} ({count})
+            </option>
+          ))}
+        </select>
+      ) : null}
       <select
         className="adl-deleted-retention adl-client-sort"
         title="Sort"
@@ -736,6 +783,7 @@ export function AdlClientsTab() {
   // kept across client tabs: "show me what SoulSync isn't following" is a
   // question about every client at once
   const [owner, setOwner] = useState<OwnerFilter>('all');
+  const [category, setCategory] = useState(ALL_CATEGORIES);
   const [slskdView, setSlskdView] = useState<'downloads' | 'uploads'>('downloads');
   const [links, setLinks] = useState<ClientLinks | null>(null);
   // the download being matched by hand, or null when the window is closed
@@ -816,8 +864,15 @@ export function AdlClientsTab() {
     state: (t) => t.state,
     haystack: (t) => t.username,
   });
+  const torrentCategories = categoryCounts(torrent.overview?.items ?? []);
+  // a category the client no longer reports (last one removed, client
+  // switched) would otherwise leave the list empty with nothing to undo it
+  const activeCategory =
+    category === ALL_CATEGORIES || torrentCategories.some(([name]) => name === category)
+      ? category
+      : ALL_CATEGORIES;
   const torrentVisible = applyView(
-    byOwner(torrent.overview?.items ?? [], owner),
+    byOwner(byCategory(torrent.overview?.items ?? [], activeCategory), owner),
     search,
     stateFilter,
     sort,
@@ -1053,7 +1108,7 @@ export function AdlClientsTab() {
     tab === 'soulseek'
       ? slskdSource
       : tab === 'torrent'
-        ? (torrent.overview?.items ?? [])
+        ? byCategory(torrent.overview?.items ?? [], activeCategory)
         : (usenet.overview?.items ?? []);
   const stateCounts = bucketCounts(activeAll as { state: string }[], (item) => item.state);
   const owned = (activeAll as { soulsync?: unknown }[]).filter((item) => item.soulsync).length;
@@ -1197,6 +1252,9 @@ export function AdlClientsTab() {
           sort={sort}
           onSort={setSort}
           stateOf={stateCounts}
+          categories={tab === 'torrent' ? torrentCategories : undefined}
+          category={activeCategory}
+          onCategory={setCategory}
           link={activeLink}
           onRefresh={() => void activeState.reload()}
         />

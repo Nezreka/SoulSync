@@ -418,6 +418,7 @@ class QBittorrentAdapter:
             content_path=item.get('content_path'),   # exact path to this torrent's file/folder
             ratio=float(item['ratio']) if item.get('ratio') is not None else None,
             seeding_time=int(item['seeding_time']) if isinstance(item.get('seeding_time'), (int, float)) else None,
+            category=str(item.get('category') or '') or None,
         )
 
     async def remove(self, torrent_id: str, delete_files: bool = False) -> bool:

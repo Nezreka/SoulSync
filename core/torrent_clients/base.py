@@ -83,6 +83,11 @@ class TorrentStatus:
     # the v1 info-hash, for clients whose ``id`` is not the hash (aria2's gid).
     # None means ``id`` already is the hash.
     info_hash: Optional[str] = None
+    # the client's own category for the torrent (qbittorrent category,
+    # transmission's first label, deluge's label plugin). set on every torrent
+    # in the client, soulsync's or not, so the clients tab can filter by it.
+    # None when the client has none (aria2) or the torrent has none.
+    category: Optional[str] = None
 
 
 class AdoptedRef(str):

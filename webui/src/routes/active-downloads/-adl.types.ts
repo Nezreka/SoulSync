@@ -265,6 +265,8 @@ export interface ClientTorrentItem {
   seeding_time?: number | null;
   save_path?: string | null;
   content_path?: string | null;
+  /** the client's own category (qbittorrent category, transmission/deluge label). */
+  category?: string | null;
   error?: string | null;
   /** present when SoulSync itself dispatched this item. */
   soulsync?: { kind?: string; title?: string };
