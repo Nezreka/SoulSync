@@ -3770,6 +3770,34 @@ class RepairWorker:
             msg += ' + refreshed cover.jpg'
         return {'success': True, 'action': 'library_retag', 'message': msg, **res}
 
+    def _write_bpm_tag(self, file_path, bpm):
+        """put an applied bpm into the file too. it only ever reached the
+        database, so players and media servers never saw it. the deezer
+        "BPM" tag setting turns this off. returns a note for the message."""
+        if self._config_manager and self._config_manager.get('deezer.tags.bpm', True) is False:
+            return ' (BPM tags are off in settings, file not changed)'
+        try:
+            bpm = float(bpm)
+        except (TypeError, ValueError):
+            return ''
+        if bpm <= 0 or not file_path:
+            return ''
+        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else ''
+        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder,
+                                      config_manager=self._config_manager)
+        if not resolved or not os.path.exists(resolved):
+            return ' (file not reachable, saved in SoulSync only)'
+        try:
+            from core.tag_writer import write_tags_to_file
+            result = write_tags_to_file(resolved, {'bpm': int(round(bpm))}, embed_cover=False)
+        except Exception as e:  # noqa: BLE001 - the db value already landed
+            logger.warning("Could not write BPM to %s: %s", resolved, e)
+            return ' (could not write the file tag)'
+        if not result.get('success') or 'bpm' not in (result.get('written_fields') or []):
+            logger.warning("BPM tag not written to %s: %s", resolved, result.get('error'))
+            return ' (could not write the file tag)'
+        return ', written to the file'
+
     def _fix_metadata_gap(self, entity_type, entity_id, file_path, details):
         """Apply found metadata fields to the track."""
         found_fields = details.get('found_fields')
@@ -3822,8 +3850,10 @@ class RepairWorker:
 
             applied = list(updates.keys()) + list(direct_fields.keys())
             if applied:
-                return {'success': True, 'action': 'applied_metadata',
-                        'message': f'Applied metadata: {", ".join(applied)}'}
+                message = f'Applied metadata: {", ".join(applied)}'
+                if 'bpm' in updates:
+                    message += self._write_bpm_tag(file_path, updates['bpm'])
+                return {'success': True, 'action': 'applied_metadata', 'message': message}
             return {'success': False, 'error': 'No applicable metadata fields to update'}
         finally:
             if conn:
