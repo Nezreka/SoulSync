@@ -161,14 +161,16 @@ def resolve_tracks(tracks, songs, db):
             with db._get_connection() as conn:
                 row = conn.execute(_TRACK_BY_SERVER_ID, (sid, sid)).fetchone()
                 old = dict(row) if row else {}
-                # Upstream #1571/#1573, on the mapping table: another Navidrome
-                # id already filed for the same catalogue track is the song
-                # the server re-keyed to.
+                # Upstream #1573, on the mapping table: a Navidrome id the scan
+                # already filed for another catalogue row of the same local
+                # file is the song the server re-keyed to.
                 same_file = [str(r[0]) for r in conn.execute(
-                    "SELECT server_id FROM lib2_media_server_mappings "
-                    "WHERE entity_type='track' AND server_source='navidrome' "
-                    "AND entity_id=? AND server_id<>?",
-                    (old['track_id'], sid))] if old.get('track_id') is not None else []
+                    "SELECT m.server_id FROM lib2_media_server_mappings m "
+                    "JOIN lib2_track_files f ON f.track_id = m.entity_id "
+                    "WHERE m.entity_type='track' AND m.server_source='navidrome' "
+                    "AND f.path=? AND COALESCE(f.file_state, 'active')='active' "
+                    "AND m.server_id<>?",
+                    (old['file_path'], sid))] if old.get('file_path') else []
             candidates = _rekey_candidates(same_file, old, paths, songs) if old else []
             if len(candidates) != 1 or not _same_recording(old, songs[candidates[0]]):
                 raise IdentityError(f'Cannot safely resolve Navidrome song {sid}; playlist left unchanged. Run a library scan.')
@@ -211,16 +213,17 @@ def repair_rekeyed_tracks(db, songs):
              WHERE m.entity_type='track' AND m.server_source='navidrome'
         """).fetchall()
         live_ids = {str(r['server_id']) for r in rows if str(r['server_id']) in songs}
-        # one pass, not a query per stale row (upstream): the other Navidrome
-        # ids filed for the same catalogue track
-        by_track = defaultdict(list)
+        # one pass, not a query per stale row (upstream): the Navidrome ids
+        # filed for each local file
+        by_file = defaultdict(list)
         for r in rows:
-            by_track[r['track_id']].append(str(r['server_id']))
+            if r['file_path']:
+                by_file[r['file_path']].append(str(r['server_id']))
         for row in rows:
             old_id = str(row['server_id'])
             if old_id in songs:
                 continue
-            same_file = [i for i in by_track.get(row['track_id'], []) if i != old_id]
+            same_file = [i for i in by_file.get(row['file_path'], []) if i != old_id]
             candidates = _rekey_candidates(same_file, dict(row), paths, songs)
             if len(candidates) != 1:
                 continue

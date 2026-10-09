@@ -299,15 +299,45 @@ def test_tail_match_still_needs_the_same_recording():
         resolve_tracks([SimpleNamespace(ratingKey='old')], songs, db)
 
 
-def test_repair_merges_a_row_stored_in_the_local_mount(tmp_path):
+def test_repair_repoints_a_mapping_whose_file_sits_in_the_local_mount(tmp_path):
+    """#1571 on Library v2: the catalogue file is in SoulSync's mount, Navidrome
+    reports its own; the artist/album/file tail still finds the reissued id."""
     from database.music_database import MusicDatabase
+    from tests.support.catalogue_seed import seed_library_track
+
     db = MusicDatabase(tmp_path / 'test.db')
     with db._get_connection() as c:
-        c.execute("INSERT INTO artists(id,name,server_source) VALUES('artist','Artist','navidrome')")
-        c.execute("INSERT INTO albums(id,artist_id,title,server_source) VALUES('album','artist','Album','navidrome')")
-        c.execute("INSERT INTO tracks(id,album_id,artist_id,title,file_path,server_source) VALUES('old','album','artist','Song',?,'navidrome')", (_LOCAL,))
-        c.execute("INSERT INTO tracks(id,album_id,artist_id,title,file_path,server_source) VALUES('live','album','artist','Song',?,'navidrome')", (_SERVER,))
+        track_id = seed_library_track(
+            c, artist='Artist', album='Album', title='Song',
+            track_server_id='old', file_path=_LOCAL, server_source='navidrome')
+        c.execute("INSERT INTO lib2_media_server_mappings"
+                  "(entity_type,entity_id,server_source,server_id)"
+                  " VALUES('track',?,'navidrome','old')", (track_id,))
         c.commit()
     assert repair_rekeyed_tracks(db, {'live': {'id': 'live', 'title': 'Song', 'path': _SERVER}}) == 1
     with db._get_connection() as c:
-        assert [r[0] for r in c.execute("SELECT id FROM tracks")] == ['live']
+        assert c.execute(
+            "SELECT server_id FROM lib2_media_server_mappings"
+            " WHERE entity_type='track' AND server_source='navidrome'").fetchone()[0] == 'live'
+
+
+def test_resolve_follows_a_live_id_filed_for_the_same_local_file(tmp_path):
+    """#1573 on Library v2: the scan already filed the reissued id on another
+    catalogue row of the same local file -- that is the song, whatever path
+    the server reports for it."""
+    from database.music_database import MusicDatabase
+    from tests.support.catalogue_seed import seed_library_track
+
+    db = MusicDatabase(tmp_path / 'test.db')
+    with db._get_connection() as c:
+        for server_id in ('old', 'live'):
+            track_id = seed_library_track(
+                c, artist='Artist', album='Album', title='Song', artist_server_id='ar1',
+                album_server_id='al1', track_server_id=server_id,
+                file_path='/Media/Music/song.flac', server_source='navidrome')
+            c.execute("INSERT INTO lib2_media_server_mappings"
+                      "(entity_type,entity_id,server_source,server_id)"
+                      " VALUES('track',?,'navidrome',?)", (track_id, server_id))
+        c.commit()
+    songs = {'live': {'id': 'live', 'title': 'Song', 'path': '/srv/x/y/z.flac'}}
+    assert resolve_tracks([SimpleNamespace(ratingKey='old')], songs, db)[0].ratingKey == 'live'

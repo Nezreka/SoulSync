@@ -7,14 +7,11 @@ server_path holds what the server reported and file_path where SoulSync opens
 the file. These run the real save, the real resolver and real files.
 """
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 import core.settings as settings_module
 from core.library import server_paths
-from core.library.navidrome_identity import repair_rekeyed_tracks, resolve_tracks
-from database.music_database import MusicDatabase
 
 _REL = 'The Killers/The Killers - Hot Fuss/11 - Everything Will Be Alright.flac'
 
@@ -55,21 +52,6 @@ def library(tmp_path, monkeypatch):
     song.write_bytes(b'audio')
     monkeypatch.setattr(settings_module, 'config_manager', _Config([str(root)]))
     return root
-
-
-def _db(tmp_path):
-    db = MusicDatabase(database_path=str(tmp_path / 'music.db'))
-    with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, server_source) VALUES ('ar', 'The Killers', 'navidrome')")
-        conn.execute("INSERT INTO albums (id, artist_id, title, server_source) VALUES ('al', 'ar', 'Hot Fuss', 'navidrome')")
-        conn.commit()
-    return db
-
-
-def _paths(db, track_id):
-    with db._get_connection() as conn:
-        row = conn.execute("SELECT file_path, server_path FROM tracks WHERE id = ?", (track_id,)).fetchone()
-    return row[0], row[1]
 
 
 # -- the translator ---------------------------------------------------------
@@ -123,68 +105,8 @@ def test_a_hit_resets_the_miss_count(library, monkeypatch):
 
 # -- the scan save ----------------------------------------------------------
 
-def test_scan_stores_both_paths(tmp_path, library):
-    db = _db(tmp_path)
-    db.insert_or_update_media_track(_Track('nd-1', '/music/' + _REL), 'al', 'ar', server_source='navidrome')
-    assert _paths(db, 'nd-1') == (str(library / _REL), '/music/' + _REL)
-
-
-def test_unreachable_file_keeps_todays_behaviour(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings_module, 'config_manager', _Config([]))
-    db = _db(tmp_path)
-    db.insert_or_update_media_track(_Track('nd-1', '/music/' + _REL), 'al', 'ar', server_source='navidrome')
-    assert _paths(db, 'nd-1') == ('/music/' + _REL, '/music/' + _REL)
-
-
-def test_rescan_never_swaps_a_working_local_path_for_the_servers(tmp_path, library, monkeypatch):
-    db = _db(tmp_path)
-    db.insert_or_update_media_track(_Track('nd-1', '/music/' + _REL), 'al', 'ar', server_source='navidrome')
-    # this time nothing resolves (say the library path setting was cleared)
-    monkeypatch.setattr(settings_module, 'config_manager', _Config([]))
-    server_paths.reset()
-    db.insert_or_update_media_track(_Track('nd-1', '/music/' + _REL), 'al', 'ar', server_source='navidrome')
-    assert _paths(db, 'nd-1') == (str(library / _REL), '/music/' + _REL)
-
-
-def test_missing_server_path_keeps_both(tmp_path, library):
-    db = _db(tmp_path)
-    db.insert_or_update_media_track(_Track('nd-1', '/music/' + _REL), 'al', 'ar', server_source='navidrome')
-    db.insert_or_update_media_track(_Track('nd-1', None), 'al', 'ar', server_source='navidrome')
-    assert _paths(db, 'nd-1') == (str(library / _REL), '/music/' + _REL)
-
-
-def test_export_hands_the_server_its_own_path(tmp_path, library):
-    db = _db(tmp_path)
-    db.insert_or_update_media_track(_Track('nd-1', '/music/' + _REL), 'al', 'ar', server_source='navidrome')
-    assert [e['path'] for e in db.get_all_library_tracks_for_export()] == ['/music/' + _REL]
-
-
-# -- navidrome re-keys ------------------------------------------------------
-
-def _stale_and_live(tmp_path, library):
-    """reorganize moved the file: navidrome gave it a new id and a new path,
-    the scan brought the new row in. the old row still carries the old id."""
-    db = _db(tmp_path)
-    db.insert_or_update_media_track(_Track('dead', '/music/old/place.flac'), 'al', 'ar', server_source='navidrome')
-    with db._get_connection() as conn:
-        conn.execute("UPDATE tracks SET file_path = ? WHERE id = 'dead'", (str(library / _REL),))
-        conn.commit()
-    db.insert_or_update_media_track(_Track('live', '/music/' + _REL), 'al', 'ar', server_source='navidrome')
-    songs = {'live': {'id': 'live', 'title': 'Everything Will Be Alright', 'duration': 345,
-                      'path': '/music/' + _REL}}
-    return db, songs
-
-
-def test_playlist_guard_follows_a_rekey_through_the_local_file(tmp_path, library):
-    db, songs = _stale_and_live(tmp_path, library)
-    # the tail fallback would also find it; take it away to prove the new route
-    songs['live']['path'] = '/music/elsewhere/x.flac'
-    assert resolve_tracks([SimpleNamespace(ratingKey='dead')], songs, db)[0].ratingKey == 'live'
-
-
-def test_repair_merges_a_rekeyed_row_through_the_local_file(tmp_path, library):
-    db, songs = _stale_and_live(tmp_path, library)
-    songs['live']['path'] = '/music/elsewhere/x.flac'
-    assert repair_rekeyed_tracks(db, songs) == 1
-    with db._get_connection() as conn:
-        assert [r[0] for r in conn.execute("SELECT id FROM tracks")] == ['live']
+# The rest of upstream's #1573 tests pin the legacy tracks table: the scan
+# storing server_path beside file_path, the M3U export and the Navidrome
+# re-key through the local file. Library v2's media-server scan only maps
+# server ids onto catalogue tracks (no server path is stored), and the re-key
+# candidates run on lib2_media_server_mappings (tests/test_navidrome_identity.py).
