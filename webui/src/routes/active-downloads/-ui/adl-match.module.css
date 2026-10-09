@@ -293,3 +293,93 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
+
+/* the bulk review list: one row per download, its guess, change, untick */
+
+.bulkPopup {
+  width: min(760px, 100%);
+}
+
+.bulkList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bulkRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  transition:
+    border-color 0.15s,
+    opacity 0.15s;
+}
+
+.bulkRow[data-status='none'] {
+  border-style: dashed;
+}
+
+.bulkRow[data-status='guessing'] {
+  opacity: 0.6;
+}
+
+.bulkRow[data-status='done'] {
+  border-color: rgba(var(--accent-rgb), 0.35);
+}
+
+.bulkRow[data-status='failed'] {
+  border-color: rgba(255, 99, 99, 0.45);
+}
+
+.bulkCheck {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  accent-color: rgb(var(--accent-rgb));
+  cursor: pointer;
+}
+
+.bulkCheck:disabled {
+  cursor: default;
+}
+
+.bulkRaw {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bulkError {
+  font-size: 12px;
+  color: #ff8a8a;
+}
+
+.bulkDone,
+.bulkWorking {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.bulkDone {
+  color: rgb(var(--accent-rgb));
+}
+
+.bulkWorking {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.bulkSummary {
+  margin-right: auto;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+}

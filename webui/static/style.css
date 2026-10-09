@@ -89226,3 +89226,44 @@ body.src-modal-open { overflow: hidden; }
     opacity: 0.6;
     cursor: wait;
 }
+
+/* bulk match & import: a checkbox on each download soulsync doesn't follow,
+   and one bar to send the checked ones to the review list */
+.adl-client-select {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.adl-client-select input {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: rgb(var(--accent-rgb));
+    cursor: pointer;
+}
+
+.adl-client-selectbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 0 0 10px;
+    padding: 10px 12px 10px 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(var(--accent-rgb), 0.22);
+    background: rgba(var(--accent-rgb), 0.06);
+}
+
+.adl-client-selectbar-count {
+    margin-right: auto;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.adl-client-selectbar .adl-client-primary:disabled {
+    opacity: 0.45;
+    cursor: default;
+    filter: none;
+}

@@ -37,6 +37,7 @@ import {
   usenetClientBulk,
 } from '../-adl.api';
 import { formatBytes } from '../-adl.helpers';
+import { AdlBulkMatchModal } from './adl-bulk-match';
 import { AdlMatchModal, type MatchTarget } from './adl-match-modal';
 
 const toast = (message: string, type: string) => window.showToast?.(message, type);
@@ -581,6 +582,7 @@ function ClientRow({
   menu,
   expanded,
   onToggle,
+  select,
 }: {
   /** the name the client shows */
   name: string;
@@ -603,6 +605,8 @@ function ClientRow({
   menu: MenuAction[];
   expanded: boolean;
   onToggle: () => void;
+  /** the bulk-match checkbox, on a download SoulSync doesn't follow */
+  select?: React.ReactNode;
 }) {
   const bucket = stateBucket(state);
   const shown = details.filter(([, value]) => value != null && String(value).trim() !== '');
@@ -615,6 +619,11 @@ function ClientRow({
       onClick={onToggle}
     >
       <div className="adl-client-card-main">
+        {select ? (
+          <span className="adl-client-select" onClick={(event) => event.stopPropagation()}>
+            {select}
+          </span>
+        ) : null}
         <span className="adl-client-kind">
           <KindIcon kind={kind} />
         </span>
@@ -788,6 +797,9 @@ export function AdlClientsTab() {
   const [links, setLinks] = useState<ClientLinks | null>(null);
   // the download being matched by hand, or null when the window is closed
   const [matching, setMatching] = useState<MatchTarget | null>(null);
+  // bulk match & import: the checked downloads, by `${client}:${id}`
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [bulkTargets, setBulkTargets] = useState<MatchTarget[] | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -807,6 +819,20 @@ export function AdlClientsTab() {
       return next;
     });
   }, []);
+
+  const toggleSelected = useCallback((key: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  // a selection belongs to the client it was made in
+  useEffect(() => {
+    setSelected(new Set());
+  }, [tab]);
 
   const switchTab = useCallback((next: ClientSubTab) => {
     setTab(next);
@@ -897,6 +923,18 @@ export function AdlClientsTab() {
       state: (t) => t.state,
     },
   );
+
+  /* bulk match & import: only what is on screen and not followed yet, so a
+     filter change quietly drops anything it hides */
+  const selectable: MatchTarget[] =
+    tab === 'soulseek'
+      ? []
+      : (tab === 'torrent' ? torrentVisible : usenetVisible)
+          .filter((item) => !item.soulsync)
+          .map((item) => ({ client: tab, id: item.id, name: item.name, size: item.size }));
+  const selectedTargets = selectable.filter((t) => selected.has(`${t.client}:${t.id}`));
+  const showSelectionBar =
+    selectable.length > 0 && (owner === 'external' || selectedTargets.length > 0);
 
   /** "Details" for a card SoulSync already follows; the card itself also opens. */
   const detailsButton = (expanded: boolean, toggle: () => void) => (
@@ -1023,6 +1061,16 @@ export function AdlClientsTab() {
           tracked
             ? detailsButton(expanded, toggle)
             : matchButton({ client, id: item.id, name: item.name, size: item.size })
+        }
+        select={
+          tracked ? undefined : (
+            <input
+              type="checkbox"
+              aria-label={`Select ${item.name}`}
+              checked={selected.has(key)}
+              onChange={() => toggleSelected(key)}
+            />
+          )
         }
         // an unmatched card leads with matching, so details move to the menu
         menu={
@@ -1303,6 +1351,39 @@ export function AdlClientsTab() {
 
       {trimmedNote ? <div className="adl-client-trimnote">{trimmedNote}</div> : null}
 
+      {showSelectionBar ? (
+        <div className="adl-client-selectbar" role="toolbar" aria-label="Selection">
+          <span className="adl-client-selectbar-count">
+            {selectedTargets.length
+              ? `${selectedTargets.length} selected`
+              : 'Select downloads to match'}
+          </span>
+          <button
+            type="button"
+            className="adl-filter-banner-clear"
+            onClick={() =>
+              setSelected(
+                selectedTargets.length === selectable.length
+                  ? new Set()
+                  : new Set(selectable.map((t) => `${t.client}:${t.id}`)),
+              )
+            }
+          >
+            {selectedTargets.length === selectable.length
+              ? 'Clear'
+              : `Select all shown (${selectable.length})`}
+          </button>
+          <button
+            type="button"
+            className="adl-client-primary"
+            disabled={selectedTargets.length === 0}
+            onClick={() => setBulkTargets(selectedTargets)}
+          >
+            Match &amp; import{selectedTargets.length ? ` ${selectedTargets.length}` : ''}
+          </button>
+        </div>
+      ) : null}
+
       <div className="adl-list adl-clients-list">
         {tab === 'soulseek' ? (
           connectedWithItems(slskd) && slskdVisible.length > 0 ? (
@@ -1338,6 +1419,16 @@ export function AdlClientsTab() {
         )}
       </div>
 
+      <AdlBulkMatchModal
+        targets={bulkTargets}
+        onClose={() => setBulkTargets(null)}
+        onFinished={(imported) => {
+          if (imported) {
+            setSelected(new Set());
+            void (tab === 'usenet' ? usenet.reload() : torrent.reload());
+          }
+        }}
+      />
       <AdlMatchModal
         target={matching}
         onClose={() => setMatching(null)}

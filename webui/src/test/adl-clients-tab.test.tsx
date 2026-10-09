@@ -827,3 +827,191 @@ describe('soulseek and the owner filter', () => {
     expect(decodeURIComponent(filesQuery)).toContain('username=peer');
   });
 });
+
+describe('bulk match & import', () => {
+  const LOOSE = {
+    ...TORRENT_OK,
+    items: [
+      ...TORRENT_OK.items.slice(0, 1),
+      {
+        id: 'HASH5',
+        name: 'Stephen.King.-.Blaze.M4B',
+        state: 'seeding',
+        progress: 1,
+        size: 300_000_000,
+        downloaded: 300_000_000,
+        download_speed: 0,
+        upload_speed: 0,
+      },
+      {
+        id: 'HASH6',
+        name: 'Stephen.King.-.Just.After.Sunset.M4B',
+        state: 'seeding',
+        progress: 1,
+        size: 400_000_000,
+        downloaded: 400_000_000,
+        download_speed: 0,
+        upload_speed: 0,
+      },
+      {
+        id: 'HASH7',
+        name: 'zzz.unknown.blob',
+        state: 'seeding',
+        progress: 1,
+        size: 1,
+        downloaded: 1,
+        download_speed: 0,
+        upload_speed: 0,
+      },
+    ],
+  };
+
+  function book(asin: string, title: string) {
+    return {
+      asin,
+      title,
+      subtitle: '',
+      authors: [],
+      narrators: [],
+      author_names: ['Stephen King'],
+      narrator_names: [],
+      series: [],
+      publisher: '',
+      summary: '',
+      short_summary: '',
+      runtime_formatted: '10h',
+      genres: [],
+      language: 'english',
+      format_type: 'unabridged',
+      is_adult: false,
+    };
+  }
+
+  function mockCatalog(adopted: { client_ref: string; asin: string }[], refuse = '') {
+    server.use(
+      http.get('/api/clients/match/suggest', ({ request }) => {
+        const name = new URL(request.url).searchParams.get('name') || '';
+        if (name.startsWith('zzz')) {
+          return HttpResponse.json({ success: true, kind: null, query: name });
+        }
+        return HttpResponse.json({
+          success: true,
+          kind: 'audiobook',
+          query: name.includes('Blaze') ? 'Blaze' : 'Just After Sunset',
+        });
+      }),
+      http.get('/api/audiobooks/search', ({ request }) => {
+        const q = new URL(request.url).searchParams.get('q') || '';
+        return HttpResponse.json({
+          success: true,
+          source: 'audible',
+          results: q.includes('Blaze')
+            ? [book('B-BLAZE', 'Blaze')]
+            : [book('B-SUNSET', 'Just After Sunset'), book('B-OTHER', 'Full Dark, No Stars')],
+        });
+      }),
+      http.post('/api/audiobooks/adopt', async ({ request }) => {
+        const body = (await request.json()) as { client_ref: string; asin: string };
+        adopted.push({ client_ref: body.client_ref, asin: body.asin });
+        if (refuse && body.asin === refuse) {
+          return HttpResponse.json(
+            { success: false, error: "There's no audio in this download" },
+            { status: 409 },
+          );
+        }
+        return HttpResponse.json({ success: true, ref: body.client_ref });
+      }),
+    );
+  }
+
+  async function openNotInSoulSync() {
+    const view = render(<AdlClientsTab />);
+    await waitFor(() => expect(pill(view.container, 'torrent')).not.toBeNull());
+    fireEvent.click(pill(view.container, 'torrent'));
+    await waitFor(() => expect(view.container.textContent).toContain('Blaze'));
+    fireEvent.click(screen.getByRole('radio', { name: /Not in SoulSync/ }));
+    return view.container;
+  }
+
+  it('select all shown, review the guesses, import them in one go', async () => {
+    mockAll({ torrent: LOOSE });
+    const adopted: { client_ref: string; asin: string }[] = [];
+    mockCatalog(adopted);
+    await openNotInSoulSync();
+    // the movie soulsync already follows has no checkbox
+    expect(screen.queryByRole('checkbox', { name: /Movie\.2026/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Select all shown (3)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Match & import 3' }));
+
+    // each row gets its guess; the one nothing matched is left out
+    await waitFor(() => expect(screen.getByText('No match found')).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Import 2' })).toBeTruthy());
+    expect(
+      (screen.getByRole('checkbox', { name: 'Import zzz.unknown.blob' }) as HTMLInputElement)
+        .checked,
+    ).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import 2' }));
+    await waitFor(() => expect(screen.getAllByText('Matched')).toHaveLength(2));
+    expect(adopted).toEqual([
+      { client_ref: 'HASH5', asin: 'B-BLAZE' },
+      { client_ref: 'HASH6', asin: 'B-SUNSET' },
+    ]);
+    expect(screen.getByText(/2 matched/)).toBeTruthy();
+  });
+
+  it('an unticked row is not sent', async () => {
+    mockAll({ torrent: LOOSE });
+    const adopted: { client_ref: string; asin: string }[] = [];
+    mockCatalog(adopted);
+    await openNotInSoulSync();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Stephen.King.-.Blaze.M4B' }));
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'Select Stephen.King.-.Just.After.Sunset.M4B' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Match & import 2' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Import 2' })).toBeTruthy());
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Import Stephen.King.-.Blaze.M4B' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Import 1' }));
+    await waitFor(() => expect(screen.getAllByText('Matched')).toHaveLength(1));
+    expect(adopted).toEqual([{ client_ref: 'HASH6', asin: 'B-SUNSET' }]);
+  });
+
+  it('a refused row shows why, and the rest still go', async () => {
+    mockAll({ torrent: LOOSE });
+    const adopted: { client_ref: string; asin: string }[] = [];
+    mockCatalog(adopted, 'B-BLAZE');
+    await openNotInSoulSync();
+    fireEvent.click(screen.getByRole('button', { name: 'Select all shown (3)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Match & import 3' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Import 2' })).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: 'Import 2' }));
+    await waitFor(() => expect(screen.getByText(/1 matched, 1 refused/)).toBeTruthy());
+    expect(screen.getByRole('alert').textContent).toContain("There's no audio in this download");
+    expect(adopted).toHaveLength(2);
+  });
+
+  it('change swaps a guess for a hand-picked match', async () => {
+    mockAll({ torrent: LOOSE });
+    const adopted: { client_ref: string; asin: string }[] = [];
+    mockCatalog(adopted);
+    server.use(
+      http.get('/api/clients/match/files', () =>
+        HttpResponse.json({ success: true, visible: true, reported_path: '/data/x' }),
+      ),
+    );
+    await openNotInSoulSync();
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'Select Stephen.King.-.Just.After.Sunset.M4B' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Match & import 1' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Change' }));
+    // the normal match window, in pick-only mode
+    fireEvent.click(await screen.findByRole('radio', { name: /Full Dark, No Stars/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use this match' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Import 1' })).toBeTruthy());
+    expect(screen.getByText('Full Dark, No Stars')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Import 1' }));
+    await waitFor(() => expect(adopted).toEqual([{ client_ref: 'HASH6', asin: 'B-OTHER' }]));
+  });
+});
