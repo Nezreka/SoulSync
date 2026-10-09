@@ -360,6 +360,9 @@ class DescriptiveMetadataProviderResult:
     lyrics: Optional[str] = None
     copyright: Optional[str] = None
     banner_url: Optional[str] = None
+    title: Optional[str] = None
+    album_type: Optional[str] = None
+    isrc: Optional[str] = None
 
 
 def _normalized_source_ids(
@@ -548,9 +551,9 @@ def _optional_float(value: Any) -> Optional[float]:
 
 def _descriptive_getter(client: Any, entity_type: str) -> Optional[Any]:
     names = {
-        "artist": ("get_artist", "get_artist_details", "get_artist_metadata"),
-        "album": ("get_album_metadata", "get_album", "get_album_details"),
-        "track": ("get_track_details", "get_track", "get_track_metadata"),
+        "artist": ("get_artist", "get_artist_details", "get_artist_metadata", "lookup_artist_by_id"),
+        "album": ("get_album_metadata", "get_album", "get_album_details", "lookup_album_by_id"),
+        "track": ("get_track_details", "get_track", "get_track_metadata", "lookup_track_by_id", "get_song"),
     }[entity_type]
     return next(
         (getter for name in names if callable(getter := getattr(client, name, None))),
@@ -618,6 +621,8 @@ def fetch_descriptive_metadata(
             result = DescriptiveMetadataProviderResult(
                 provider=provider,
                 provider_entity_id=provider_id,
+                title=_optional_text(_first(payload, 'name', 'title', 'trackName', 'collectionName')) if canonical in {'album', 'track'} else None,
+                album_type=_optional_text(_first(payload, 'album_type', 'record_type', 'primary-type')) if canonical == 'album' else None,
                 image_url=_image_url(payload),
                 genres=_string_values(_first(
                     payload, "genres", "genre", "primaryGenreName", "strGenre", "tags",
@@ -638,6 +643,7 @@ def fetch_descriptive_metadata(
                     payload, "explicit", "explicit_lyrics", "trackExplicitness",
                 )),
                 duration_ms=duration,
+                isrc=_optional_text(_first(payload, "isrc", "ISRC")),
                 bpm=_optional_float(_first(payload, "bpm", "tempo")),
                 lyrics=_optional_text(_first(
                     payload, "genius_lyrics", "lyrics", "strTrackLyrics",

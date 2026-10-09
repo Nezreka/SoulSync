@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS lib2_albums (
     primary_artist_id INTEGER NOT NULL,
     title TEXT NOT NULL,
     album_type TEXT NOT NULL DEFAULT 'album',         -- 'album'|'single'|'ep'|'compilation'|'live'|...
+    album_type_known INTEGER NOT NULL DEFAULT 0,
     secondary_types TEXT NOT NULL DEFAULT '[]',       -- JSON array of extra tags
     filed_release TEXT NOT NULL DEFAULT '{}',         -- how the last download filed it ($albumtype inputs); reorganize reuses it
     release_date TEXT,
@@ -1005,6 +1006,17 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         cursor.execute(ddl)
     for index_sql in _INDEXES:
         cursor.execute(index_sql)
+    # Legacy defaults and deliberate album classifications cannot be distinguished.
+    # Preserve them; only new, explicitly unknown rows may be classified later.
+    if 'album_type_known' not in {r[1] for r in cursor.execute('PRAGMA table_info(lib2_albums)')}:
+        cursor.execute('ALTER TABLE lib2_albums ADD COLUMN album_type_known INTEGER NOT NULL DEFAULT 0')
+        cursor.execute('UPDATE lib2_albums SET album_type_known=1')
+    cursor.execute("""CREATE TRIGGER IF NOT EXISTS trg_lib2_album_kind_insert
+        AFTER INSERT ON lib2_albums WHEN NEW.album_type <> 'album'
+        BEGIN UPDATE lib2_albums SET album_type_known=1 WHERE id=NEW.id; END""")
+    cursor.execute("""CREATE TRIGGER IF NOT EXISTS trg_lib2_album_kind_update
+        AFTER UPDATE OF album_type ON lib2_albums WHEN OLD.album_type <> NEW.album_type
+        BEGIN UPDATE lib2_albums SET album_type_known=1 WHERE id=NEW.id; END""")
     # Additive column migrations for installs created before a column existed.
     # PRAGMA table_info is read ONCE per distinct table and cached — the
     # previous per-column query re-read the same table's schema ~30 times a

@@ -476,3 +476,16 @@ def test_name_guard_is_inert_without_a_requested_name(monkeypatch):
     result = metadata_album_tracks.get_artist_album_tracks("a1")
     assert result["success"] is True
     assert len(result["tracks"]) == 1
+
+
+def test_embedded_first_page_does_not_hide_the_complete_album(monkeypatch):
+    album = _album()
+    album.update(total_tracks=3, tracks={'items': [_track()]})
+    monkeypatch.setattr(metadata_registry, 'get_primary_source', lambda **kw: 'spotify')
+    monkeypatch.setattr(metadata_registry, 'get_source_priority', lambda primary: [primary])
+    monkeypatch.setattr(metadata_registry, 'get_client_for_source', lambda *a, **kw: object())
+    monkeypatch.setattr(metadata_album_tracks, 'get_album_for_source', lambda *a, **kw: album)
+    monkeypatch.setattr(metadata_album_tracks, 'get_album_tracks_for_source', lambda *a: {'items': [_track(f't{i}', f'Track {i}') for i in range(1, 4)]})
+    payload = metadata_album_tracks.get_artist_album_tracks('album-1', album_name='Album One', artist_name='Artist One')
+    assert len(payload['tracks']) == 3
+    assert payload['is_complete'] is True

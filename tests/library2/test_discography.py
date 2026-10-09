@@ -1624,3 +1624,53 @@ def test_another_provider_never_writes_the_musicbrainz_column(
         "FROM lib2_albums WHERE title='Certified Lover Boy'").fetchone()
     assert row["rg"] is None
     assert json.loads(row["external_ids"])["jiosaavn"] == "js-clb"
+
+
+@pytest.mark.parametrize('preference,expected', [('all', {'Edition Test', 'Edition Test (Deluxe)', 'Edition Test (Super Deluxe)'}), ('one_standard', {'Edition Test'}), ('one_complete', {'Edition Test (Deluxe)'})])
+def test_native_automatic_selection_keeps_the_entire_edition_catalogue(legacy_db, imported_conn, monkeypatch, preference, expected):
+    from core.settings import config_manager
+    original_get = config_manager.get
+    monkeypatch.setattr(config_manager, 'get', lambda key, default=None: preference if key == 'watchlist.edition_preference' else original_get(key, default))
+    aid = _artist_id(imported_conn)
+    imported_conn.execute("UPDATE lib2_artists SET monitored=1, monitor_new_items='all', discography_synced_at='2020-01-01' WHERE id=?", (aid,))
+    imported_conn.commit()
+    payload = _cards(*[('albums', {'id': f'edition-{i}', 'title': title, 'album_type': 'album', 'track_count': count, 'release_date': '2024-01-01'}) for i, (title, count) in enumerate([('Edition Test', 10), ('Edition Test (Deluxe)', 20), ('Edition Test (Super Deluxe)', 80)])])
+    monkeypatch.setattr('core.metadata.discography.get_artist_detail_discography', lambda *a, **k: payload)
+    stats = D.expand_artist_discography(legacy_db, aid)
+    selected = set(stats['auto_monitor_album_ids'])
+    rows = imported_conn.execute("SELECT id,title,monitored FROM lib2_albums WHERE title LIKE 'Edition Test%'").fetchall()
+    assert len(rows) == 3
+    assert {r['title'] for r in rows if r['id'] in selected} == expected
+    assert {r['title'] for r in rows if r['monitored']} == expected
+
+
+def test_automatic_editions_preserve_explicit_monitor_provenance(legacy_db, imported_conn, monkeypatch):
+    from core.library2.monitor_rules import record_rule, PROVENANCE_USER
+    from core.library2.edition_selection import select_automatic_album_ids
+    from types import SimpleNamespace
+    aid = _artist_id(imported_conn)
+    ids = [imported_conn.execute('INSERT INTO lib2_albums(primary_artist_id,title,track_count) VALUES(?,?,?)', (aid, title, n)).lastrowid for title, n in [('Choice', 10), ('Choice (Deluxe)', 20)]]
+    record_rule(imported_conn, 'album', ids[1], True, PROVENANCE_USER)
+    imported_conn.commit()
+    cfg = SimpleNamespace(get=lambda key, default=None: 'one_standard' if key == 'watchlist.edition_preference' else default)
+    assert select_automatic_album_ids(imported_conn, ids, cfg) == [ids[1]]
+    def materialize(config, conn, album_id):
+        conn.execute("INSERT INTO lib2_tracks(album_id,title) VALUES(?,'Chosen')", (album_id,))
+        return [{'title': 'Chosen', 'track_number': 1}]
+    monkeypatch.setattr('core.library2.completeness.resolve_tracklist', materialize)
+    monkeypatch.setattr('core.library2.wishlist_mirror.mirror_projected_tracks_wishlist', lambda db, conn, tracks, **kw: len(tracks))
+    assert D.auto_monitor_releases(legacy_db, cfg, ids) == 1
+    assert imported_conn.execute("SELECT monitored,provenance FROM lib2_monitor_rules WHERE entity_type='album' AND entity_id=?", (ids[1],)).fetchone()[:] == (1, 'user_explicit')
+
+
+def test_automatic_editions_keep_pins_and_respect_manual_veto(imported_conn):
+    from core.library2.monitor_rules import record_rule, PROVENANCE_USER
+    from core.library2.edition_selection import select_automatic_album_ids
+    from types import SimpleNamespace
+    aid = _artist_id(imported_conn)
+    ids = [imported_conn.execute('INSERT INTO lib2_albums(primary_artist_id,title,track_count) VALUES(?,?,?)', (aid, title, n)).lastrowid for title, n in [('Choice', 10), ('Choice (Deluxe)', 20)]]
+    imported_conn.execute('UPDATE lib2_albums SET canonical_locked=1 WHERE id=?', (ids[1],))
+    cfg = SimpleNamespace(get=lambda key, default=None: 'one_standard' if key == 'watchlist.edition_preference' else default)
+    assert select_automatic_album_ids(imported_conn, ids, cfg) == [ids[1]]
+    record_rule(imported_conn, 'album', ids[1], False, PROVENANCE_USER)
+    assert select_automatic_album_ids(imported_conn, ids, cfg) == [ids[0]]

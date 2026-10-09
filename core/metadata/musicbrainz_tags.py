@@ -168,7 +168,19 @@ def write_tag(audio, tag, value, symbols):
     values = [str(v) for v in (value if isinstance(value, (list, tuple)) else [value]) if v is not None]
     if not values:
         return
-    native = {"DATE": "TDRC", "ARTISTSORT": "TSOP", "ALBUMARTISTSORT": "TSO2", "LABEL": "TPUB", "ISRC": "TSRC"}
+    native = {"COPYRIGHT": "TCOP", "DATE": "TDRC", "ARTISTSORT": "TSOP", "ALBUMARTISTSORT": "TSO2", "LABEL": "TPUB", "ISRC": "TSRC"}
+    if tag == 'LYRICS':
+        if isinstance(audio.tags, symbols.ID3):
+            from mutagen.id3 import USLT
+            audio.tags.add(USLT(encoding=3, lang='eng', desc='', text=values[0]))
+        elif isinstance(audio, symbols.MP4):
+            audio['\xa9lyr'] = values
+        elif is_vorbis_like(audio, symbols):
+            audio['LYRICS'] = values
+        return
+    if tag == 'COPYRIGHT' and isinstance(audio, symbols.MP4):
+        audio['cprt'] = values
+        return
     if isinstance(audio.tags, symbols.ID3):
         frame, desc = ID3_TAG_MAP.get(tag, ("TXXX", tag))
         frame = native.get(tag, frame)
@@ -192,3 +204,26 @@ def write_tag(audio, tag, value, symbols):
         if key != tag and tag in audio:
             del audio[tag]  # Remove SoulSync's legacy alias before writing Picard's key.
         audio[key] = values
+
+
+def read_tag(audio, tag, symbols):
+    """Read the same native frame/atom used by write_tag."""
+    from core.metadata.common import is_vorbis_like
+    from core.metadata.source import ID3_TAG_MAP, MP4_TAG_MAP, VORBIS_TAG_MAP
+    if isinstance(audio.tags, symbols.ID3):
+        frame, desc = ID3_TAG_MAP.get(tag, ('TXXX', tag))
+        frame = {'COPYRIGHT': 'TCOP', 'LABEL': 'TPUB', 'ISRC': 'TSRC'}.get(tag, frame)
+        frames = audio.tags.getall(frame)
+        if frame == 'TXXX':
+            frames = [f for f in frames if f.desc == desc]
+        elif frame == 'UFID':
+            frames = [f for f in frames if f.owner == desc]
+        value = getattr(frames[0], 'data' if frame == 'UFID' else 'text', None) if frames else None
+    elif isinstance(audio, symbols.MP4):
+        value = audio.get('cprt' if tag == 'COPYRIGHT' else '----:com.apple.iTunes:' + MP4_TAG_MAP.get(tag, tag))
+    elif is_vorbis_like(audio, symbols):
+        value = audio.get(VORBIS_TAG_MAP.get(tag, tag))
+    else:
+        value = None
+    first = value[0] if isinstance(value, (list, tuple)) and value else value
+    return first.decode('utf-8') if isinstance(first, bytes) else str(first) if first is not None else None

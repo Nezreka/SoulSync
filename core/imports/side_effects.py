@@ -811,7 +811,6 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                             "year": year, "track_count": total_tracks,
                             "duration": album_total_duration_ms})
             else:
-                newest_album = cursor.execute("SELECT MAX(id) FROM lib2_albums").fetchone()[0] or 0
                 catalogue_album = upsert_album(
                     cursor, server_source="soulsync", server_id=album_server_id,
                     artist_id=catalogue_artist, title=album_name, year=year,
@@ -823,13 +822,9 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                     # aware. The writer's own title fallback would fold a
                     # second release of the same name straight back in.
                     title_fallback=not mb_release_id)
-                if _import_record_type and catalogue_album and catalogue_album > newest_album:
-                    # Upstream #1562: a release this import creates carries the
-                    # kind the download already knows. Only a NEW row: the
-                    # catalogue's default 'album' is indistinguishable from a
-                    # kind a provider wrote, so an existing row is left alone.
-                    cursor.execute("UPDATE lib2_albums SET album_type=? WHERE id=?",
-                                   (_import_record_type, catalogue_album))
+            from core.library2.release_kind import confirm_release_kind
+            confirm_release_kind(cursor, catalogue_album, _import_record_type,
+                                 known=album_ctx.get('_album_type_known') is not False)
             _fill_external_id(cursor, "lib2_albums", catalogue_album, source, album_source_id)
             from core.library2.reorganize_plan import record_filed_release
             record_filed_release(cursor, catalogue_album, context)

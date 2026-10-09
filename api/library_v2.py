@@ -1298,6 +1298,23 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 return _fail("Request not found", 404)
             if acquisition_request.status != "searching":
                 return _fail(f"Request cannot be searched while {acquisition_request.status}", 409)
+            # Reuse the album-page loader for track and release requests.
+            # Server-owned relations supply the album; browser fields cannot
+            # redirect this catalogue operation to a different release.
+            from core.acquisition.catalog import resolve_public_request_search_options
+            scope = acquisition_request.scope
+            if scope == 'upgrade':
+                scope = acquisition_request.search_options.get('entity_type')
+            if scope in ('release_group', 'release_edition', 'recording'):
+                options = resolve_public_request_search_options(
+                    read_conn, scope, acquisition_request.entity_id)
+                album_id = options.get('release_group_id')
+                if album_id:
+                    from core.library2.completeness import load_album_catalogue
+                    load_album_catalogue(get_database(), config_manager, read_conn,
+                                         album_id, inherit_monitoring=False,
+                                         services=(configured_match_services_getter()
+                                                   if configured_match_services_getter else None))
             criteria = build_search_criteria(
                 acquisition_request,
                 resolve_catalog_context(read_conn, acquisition_request),
@@ -2005,32 +2022,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             try:
                 database = get_database()
                 worker_conn = database._get_connection()
-                from core.library2.completeness import resolve_tracklist
-                resolved = resolve_tracklist(config_manager, worker_conn, album_id)
-                if resolved:
-                    # `_persist_tracklist_tracks` writes each track exactly as
-                    # the ONE provider that answered returned it, and
-                    # `fetch_album_tracklist` stops at the first provider with
-                    # a hit — so a release whose album id is confirmed at four
-                    # providers still got single-provider tracks. Two steps fix
-                    # that, in order: give the ALBUM every provider id it can
-                    # have, then merge the track ids from each of those exact
-                    # provider tracklists. The second is the reconcile guide
-                    # §2.5 describes; it was only ever triggered from the
-                    # import pipeline, so a tracklist materialized any other
-                    # way never got it.
-                    from core.library2.native_enrich import (
-                        enrich_native_entity_all_services,
-                    )
-                    from core.library2.track_reconcile_trigger import (
-                        schedule_album_track_reconcile,
-                    )
-                    enrich_native_entity_all_services(
-                        worker_conn, "album", album_id, commit=True,
-                        services=(configured_match_services_getter()
-                                  if configured_match_services_getter else None))
-                    schedule_album_track_reconcile(database, album_id, config_manager)
-                else:
+                from core.library2.completeness import load_album_catalogue
+                resolved = load_album_catalogue(
+                    database, config_manager, worker_conn, album_id,
+                    services=(configured_match_services_getter()
+                              if configured_match_services_getter else None))
+                if not resolved:
                     # Nothing came back. Leaving the row 'pending' would make
                     # the client poll forever for a tracklist no provider has.
                     worker_conn.execute(
@@ -4791,11 +4788,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             track_ids = (retag.album_track_ids(conn, eid) if entity == "albums"
                          else retag.artist_track_ids(conn, eid))
             truncated = len(track_ids) > retag.MAX_TRACKS
+        refresh_result = None
+        depth = request.args.get('depth', 'light')
+        if depth not in ('light', 'full'):
+            return _fail('depth must be light or full')
+        if depth == 'full':
+            refresh_result = retag.refresh_metadata(db, track_ids[:retag.MAX_TRACKS], config_manager=config_manager)
+        with closing(db._get_connection()) as conn:
             contexts = retag.track_contexts(conn, track_ids[:retag.MAX_TRACKS])
         preview = retag.tag_preview(contexts)
         return jsonify({
             "success": True,
             "tracks": preview,
+            "refresh": refresh_result,
             "changed_count": sum(1 for p in preview if p.get("has_changes")),
             "truncated": truncated,
         })

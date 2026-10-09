@@ -614,3 +614,32 @@ def test_the_release_group_beats_a_title_search(monkeypatch):
         release_group_id=MB_GROUP,
     )
     assert result.provider_entity_id == MB_GROUP
+
+
+def test_descriptive_refresh_reuses_a_configured_worker_client(monkeypatch):
+    from types import SimpleNamespace
+    from core.enrichment.services import get_service
+    calls = []
+    client = SimpleNamespace(lookup_track_by_id=lambda identifier: calls.append(identifier) or {'idTrack': identifier, 'strMood': 'Relaxed', 'strStyle': 'Electronic'})
+    monkeypatch.setattr('core.enrichment.services.get_service', lambda name: SimpleNamespace(get_worker=lambda: SimpleNamespace(client=client)) if name == 'audiodb' else get_service(name))
+    result = fetch_descriptive_metadata('track', {'audiodb': 'ad-exact'})
+    assert result is not None
+    assert calls == ['ad-exact']
+    assert (result.mood, result.style) == ('Relaxed', 'Electronic')
+
+
+def test_descriptive_track_refresh_retains_isrc():
+    from types import SimpleNamespace
+    result = fetch_descriptive_metadata('track', {'deezer': 'dz-exact'}, clients={'deezer': SimpleNamespace(get_track_details=lambda identifier: {'id': identifier, 'isrc': 'USABC2400001'})})
+    assert result.isrc == 'USABC2400001'
+
+
+def test_genius_descriptive_refresh_uses_existing_lyrics_scraper(monkeypatch):
+    from core.genius_client import GeniusClient
+    client = GeniusClient()
+    monkeypatch.setattr(client, 'get_song', lambda song_id: {'id': song_id, 'title': 'Song', 'url': 'https://genius.com/test-song'})
+    calls = []
+    monkeypatch.setattr(client, 'get_lyrics', lambda url: (calls.append(url) or 'Complete lyrics'))
+    result = fetch_descriptive_metadata('track', {'genius': '123'}, clients={'genius': client})
+    assert result.lyrics == 'Complete lyrics'
+    assert calls == ['https://genius.com/test-song']

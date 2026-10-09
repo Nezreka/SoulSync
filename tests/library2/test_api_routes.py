@@ -3719,6 +3719,7 @@ def test_album_resolve_answers_immediately_and_reports_pending(api, monkeypatch)
     started = threading.Event()
     release = threading.Event()
     from core.library2 import completeness
+    _record_tracklist_resolves(monkeypatch)  # stub Enrich/reconcile as well
 
     def _slow(_cfg, _conn, _album_id):
         started.set()
@@ -4315,3 +4316,18 @@ def test_the_artist_detail_match_writes_the_library_v2_row(api):
         "SELECT external_ids FROM lib2_albums WHERE id=?", (ids["views"],)).fetchone()[0])
     conn.close()
     assert stored["deezer"] == "dz-album" and "deezer" not in cleared
+
+
+@pytest.mark.parametrize('scope', ['release_group', 'recording'])
+def test_acquisition_search_loads_the_same_album_catalogue_before_search(api, monkeypatch, scope):
+    client, db, ids = api
+    from core.library2.editions import backfill_editions
+    with db._get_connection() as conn:
+        backfill_editions(conn.cursor())
+        rid = conn.execute('SELECT recording_id FROM lib2_release_tracks WHERE track_id=?', (ids['album_track'],)).fetchone()[0]
+        conn.commit()
+    calls = []
+    monkeypatch.setattr('core.library2.completeness.load_album_catalogue', lambda database, config, conn, album_id, **kw: calls.append(album_id) or [])
+    created = client.post('/api/library/v2/acquisition/requests', json={'scope': scope, 'entity_id': ids['views'] if scope == 'release_group' else rid, 'idempotency_key': 'catalogue-before-search-' + scope}).get_json()
+    client.post(f"/api/library/v2/acquisition/requests/{created['request']['id']}/search")
+    assert calls == [ids['views']]

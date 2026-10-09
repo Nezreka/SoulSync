@@ -67,3 +67,12 @@ def test_musicbrainz_gated_off(monkeypatch):
     src.embed_known_source_ids(object(), {'spotify_track_id': 'sp', 'musicbrainz_recording_id': 'mb'})
     assert 'SPOTIFY_TRACK_ID' in captured
     assert 'MUSICBRAINZ_RECORDING_ID' not in captured   # gated off
+
+
+def test_known_catalogue_ids_use_the_common_frames_and_embed_switches(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(src, 'get_mutagen_symbols', lambda: SimpleNamespace())
+    monkeypatch.setattr(src, 'get_config_manager', lambda: SimpleNamespace(get=lambda k, d=None: False if k == 'itunes.embed_tags' else d))
+    monkeypatch.setattr(src, '_write_embedded_metadata', lambda audio, m, pp, cfg, sym: captured.update(pp['id_tags']))
+    src.embed_known_source_ids(object(), {'known_source_ids': {'deezer': {'track': 'dz-t', 'artist': 'dz-ar'}, 'spotify': {'track': 'sp-t', 'album': 'sp-al'}, 'itunes': {'track': 'it-t'}}})
+    assert captured == {'DEEZER_TRACK_ID': 'dz-t', 'DEEZER_ARTIST_ID': 'dz-ar', 'SPOTIFY_TRACK_ID': 'sp-t', 'SPOTIFY_ALBUM_ID': 'sp-al'}

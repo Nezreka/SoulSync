@@ -276,6 +276,17 @@ def _collect_source_ids(metadata: dict, cfg) -> dict:
             if metadata.get("itunes_album_id"):
                 source_ids["ITUNES_ALBUM_ID"] = metadata["itunes_album_id"]
 
+    # Native catalogue callers carry every already confirmed identity. Use
+    # the existing namespace/frame map and each provider's embed switch.
+    for provider, ids in (metadata.get('known_source_ids') or {}).items():
+        if not isinstance(ids, dict) or cfg.get(f'{provider}.embed_tags', True) is False:
+            continue
+        names = get_source_tag_names(provider)
+        for kind in ('track', 'artist', 'album'):
+            tag = names.get(kind) or f'{provider.upper()}_{kind.upper()}_ID'
+            if (ids.get(kind) and (names.get(kind) or tag in SOURCE_TAG_CONFIG)
+                    and cfg.get(SOURCE_TAG_CONFIG.get(tag, f'{provider}.tags.{kind}_id'), True) is not False):
+                source_ids[tag] = ids[kind]
     return source_ids
 
 
@@ -1634,6 +1645,19 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     return metadata
 
 
+def known_source_id_tags(metadata: dict, cfg=None) -> dict:
+    """The exact, configured identity tags shared by preview and writing."""
+    cfg = cfg or get_config_manager()
+    tags = _collect_source_ids(metadata, cfg)
+    if cfg.get('musicbrainz.embed_tags', True) is not False:
+        for key, tag in [('musicbrainz_recording_id', 'MUSICBRAINZ_RECORDING_ID'),
+                         ('musicbrainz_release_id', 'MUSICBRAINZ_RELEASE_ID')]:
+            if metadata.get(key):
+                tags[tag] = metadata[key]
+    return {tag: value for tag, value in tags.items()
+            if _tag_enabled(cfg, SOURCE_TAG_CONFIG.get(tag, ''))}
+
+
 def embed_known_source_ids(audio_file, metadata: dict) -> list:
     """Embed ALREADY-KNOWN source IDs into a file's tags, no API re-fetch.
 
@@ -1653,15 +1677,7 @@ def embed_known_source_ids(audio_file, metadata: dict) -> list:
     if not symbols or audio_file is None:
         return []
     try:
-        id_tags = _collect_source_ids(metadata, cfg)
-        # MusicBrainz ids aren't in _collect_source_ids (they come from the MB
-        # processor at import time); add them from the DB when present, using
-        # the canonical names the frame map already knows.
-        if cfg.get("musicbrainz.embed_tags", True) is not False:
-            if metadata.get("musicbrainz_recording_id"):
-                id_tags["MUSICBRAINZ_RECORDING_ID"] = metadata["musicbrainz_recording_id"]
-            if metadata.get("musicbrainz_release_id"):
-                id_tags["MUSICBRAINZ_RELEASE_ID"] = metadata["musicbrainz_release_id"]
+        id_tags = known_source_id_tags(metadata, cfg)
         if not id_tags:
             return []
         pp = _blank_post_process_state()

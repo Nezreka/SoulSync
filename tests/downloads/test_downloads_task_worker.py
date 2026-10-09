@@ -1120,8 +1120,11 @@ def test_the_search_carries_the_song_with_its_own_artist():
     sk = _FakeClient(results=[])
     deps, _ = _build_deps(soulseek=sk, matching=_FakeMatchEngine(queries=['q1', 'q2']))
     tw.download_track_worker('t1', 'b1', deps)
-    assert sk.hint_calls and all(h == {"title": "How Far I'll Go", "artist": "Auli'i Cravalho",
-                                       "album": "Moana", "deezer_id": "136340808"} for h in sk.hint_calls)
+    assert sk.hint_calls
+    for hint in sk.hint_calls:
+        assert {k: v for k, v in hint.items() if k != 'catalogue_context'} == {
+            "title": "How Far I'll Go", "artist": "Auli'i Cravalho", "album": "Moana", "deezer_id": "136340808"}
+        assert hint['catalogue_context']['track_info']['artists'] == [{'name': "Auli'i Cravalho"}]
+        assert hint['catalogue_context']['album']['artists'] == [{'name': 'Various Artists'}]
     # one dict for the whole task, so a source can cache in it
     assert len({id(h) for h in sk.hint_calls}) == 1
-

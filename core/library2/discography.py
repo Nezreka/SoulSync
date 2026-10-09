@@ -662,6 +662,8 @@ def _expand_artist_discography(
                     release.artist_credits,
                     source,
                 )
+                from core.library2.release_kind import confirm_release_kind
+                confirm_release_kind(cursor, existing['id'], album_type)
                 stats["enriched"] += 1
                 continue
 
@@ -678,6 +680,8 @@ def _expand_artist_discography(
                  release_group_id),
             )
             new_id = cursor.lastrowid
+            from core.library2.release_kind import confirm_release_kind
+            confirm_release_kind(cursor, new_id, album_type)
             seen_ids.add(new_id)
             if auto_monitor_release:
                 if not defer_auto_monitor:
@@ -713,6 +717,16 @@ def _expand_artist_discography(
             })
             stats["added"] += 1
             new_album_ids.append(new_id)
+
+        from core.library2.edition_selection import select_automatic_album_ids
+        selected_ids = select_automatic_album_ids(conn, stats['auto_monitor_album_ids'])
+        rejected_new = set(stats['auto_monitor_album_ids']) - set(selected_ids)
+        for rejected in rejected_new & set(new_album_ids):
+            # Undo only the automatic intent minted in this transaction.
+            # Neither an existing user's choice nor a file is discarded.
+            conn.execute("UPDATE lib2_albums SET monitored=0 WHERE id=?", (rejected,))
+            conn.execute("DELETE FROM lib2_monitor_rules WHERE entity_type='album' AND entity_id=? AND provenance='new_release'", (rejected,))
+        stats['auto_monitor_album_ids'] = selected_ids
 
         # Prune provider-only rows that vanished from the provider — but never
         # rows the user monitored or that grew tracks/files since.
@@ -801,6 +815,10 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
     """
     from core.library2.completeness import resolve_tracklist
 
+    from core.library2.edition_selection import select_automatic_album_ids
+    with closing(db._get_connection()) as selection_conn:
+        album_ids = select_automatic_album_ids(selection_conn, album_ids, config_manager,
+                                              profile_id=wishlist_profile_id)
     mirrored = 0
     filters_cache: Dict[int, Dict[str, bool]] = {}
     with closing(db._get_connection()) as conn:
@@ -911,8 +929,10 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
                     f"UPDATE lib2_tracks SET monitored=1 WHERE id IN ({marks})",
                     auto_monitor_ids,
                 )
-            record_rule(conn, "album", album_id, True, PROVENANCE_NEW_RELEASE,
-                        profile_id=wishlist_profile_id)
+            explicit = conn.execute("SELECT 1 FROM lib2_monitor_rules WHERE entity_type='album' AND entity_id=? AND profile_id=? AND provenance='user_explicit'", (album_id, wishlist_profile_id)).fetchone()
+            if not explicit:
+                record_rule(conn, "album", album_id, True, PROVENANCE_NEW_RELEASE,
+                            profile_id=wishlist_profile_id)
             # The freshly materialized tracks inherit the album's new_release
             # rule through the projection's album tier (audit §11.2).
             from core.library2.wanted import recompute_wanted_for_entity

@@ -382,3 +382,22 @@ def test_migrates_default_one_columns_without_losing_graph_data():
             fk[2] == "quality_profiles" and fk[3] == "quality_profile_id"
             for fk in conn.execute(f"PRAGMA foreign_key_list({table})")
         )
+
+
+def test_release_kind_migration_preserves_ambiguous_existing_albums():
+    from core.library2.release_kind import confirm_release_kind
+    conn = row_conn(':memory:')
+    ensure_library_v2_schema(conn)
+    aid = conn.execute("INSERT INTO lib2_artists(name) VALUES('Artist')").lastrowid
+    old = conn.execute("INSERT INTO lib2_albums(primary_artist_id,title) VALUES(?,'Old album')", (aid,)).lastrowid
+    conn.execute('DROP TRIGGER trg_lib2_album_kind_insert')
+    conn.execute('DROP TRIGGER trg_lib2_album_kind_update')
+    conn.execute('ALTER TABLE lib2_albums DROP COLUMN album_type_known')
+    ensure_library_v2_schema(conn)
+    assert not confirm_release_kind(conn, old, 'single')
+    assert conn.execute('SELECT album_type,album_type_known FROM lib2_albums WHERE id=?', (old,)).fetchone()[:] == ('album', 1)
+    new = conn.execute("INSERT INTO lib2_albums(primary_artist_id,title) VALUES(?,'Unknown new release')", (aid,)).lastrowid
+    assert confirm_release_kind(conn, new, 'single')
+    assert not confirm_release_kind(conn, new, 'ep')
+    ensure_library_v2_schema(conn)
+    assert conn.execute('SELECT album_type,album_type_known FROM lib2_albums WHERE id=?', (new,)).fetchone()[:] == ('single', 1)

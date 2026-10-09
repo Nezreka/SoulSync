@@ -85,6 +85,15 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
             return result
 
         result['format'] = ext.lstrip('.').upper()
+        from core.metadata.musicbrainz_tags import read_tag
+        from core.metadata.common import get_mutagen_symbols
+        symbols = get_mutagen_symbols()
+        if symbols:
+            for key, tag in [('style', 'STYLE'), ('mood', 'MOOD'), ('copyright', 'COPYRIGHT'), ('isrc', 'ISRC')]:
+                result[key] = read_tag(audio, tag, symbols)
+            from core.metadata.source import SOURCE_TAG_CONFIG
+            result['source_ids'] = {tag: value for tag in SOURCE_TAG_CONFIG if tag.endswith('ID')
+                                    and (value := read_tag(audio, tag, symbols))}
         length = getattr(getattr(audio, 'info', None), 'length', None)
         if length:
             result['duration_ms'] = int(length * 1000)
@@ -112,7 +121,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
                     break
             uslt_frames = audio.tags.getall('USLT')
             if uslt_frames and uslt_frames[0].text:
-                result['lyrics'] = str(uslt_frames[0].text[0])
+                result['lyrics'] = str(uslt_frames[0].text)
 
         elif isinstance(audio, (FLAC, OggVorbis)) or type(audio).__name__ == 'OggOpus':
             # FLAC / OGG
@@ -151,6 +160,12 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
             result['album'] = _mp4_first(audio, '\xa9alb')
             result['year'] = _mp4_first(audio, '\xa9day')
             result['genre'] = _mp4_first(audio, '\xa9gen')
+            bpm = _mp4_first(audio, 'tmpo')
+            if bpm is not None:
+                try:
+                    result['bpm'] = float(bpm)
+                except (ValueError, TypeError):
+                    pass
             trkn = audio.tags.get('trkn', []) if audio.tags else []
             if trkn:
                 result['track_number'] = trkn[0][0] if isinstance(trkn[0], tuple) else None
@@ -313,6 +328,9 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
         ('track_number', 'track_number', 'Track #'),
         ('disc_number', 'disc_number', 'Disc #'),
         ('bpm', 'bpm', 'BPM'),
+        *[(key, key, label) for key, label in [('style', 'Style'), ('mood', 'Mood'),
+            ('copyright', 'Copyright'), ('isrc', 'ISRC'), ('lyrics', 'Lyrics')]
+          if db_data.get(key) not in (None, '')],
     ]
 
     diffs = []
@@ -387,6 +405,14 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
         actual, expected = file_tags.get(key), db_data.get(db_key)
         diffs.append({'field': label, 'file_key': key, 'file_value': str(actual or ''), 'db_value': str(expected or ''),
                       'changed': bool(actual and expected and actual != expected)})
+
+    if db_data.get('known_source_ids'):
+        from core.metadata.source import known_source_id_tags
+        for tag, expected in known_source_id_tags(db_data).items():
+            actual = (file_tags.get('source_ids') or {}).get(tag)
+            diffs.append({'field': tag.replace('_', ' '), 'file_key': tag,
+                          'file_value': str(actual or ''), 'db_value': str(expected),
+                          'changed': str(actual or '') != str(expected)})
 
     # Cover art — special row
     diffs.append({
@@ -563,7 +589,7 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
             'source', 'source_track_id', 'source_album_id', 'source_artist_id',
             'spotify_track_id', 'spotify_album_id', 'spotify_artist_id',
             'itunes_track_id', 'itunes_album_id', 'itunes_artist_id',
-            'musicbrainz_recording_id', 'musicbrainz_release_id',
+            'musicbrainz_recording_id', 'musicbrainz_release_id', 'known_source_ids',
         ) if db_data.get(k)}
         if _src_meta:
             try:
@@ -572,6 +598,16 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
                     written.append('source_ids')
             except Exception as e:
                 logger.debug("source-id embed skipped for %s: %s", file_path, e)
+
+        from core.metadata.musicbrainz_tags import write_tag
+        from core.metadata.common import get_mutagen_symbols
+        symbols = get_mutagen_symbols()
+        if symbols:
+            for key, tag in [('style', 'STYLE'), ('mood', 'MOOD'), ('copyright', 'COPYRIGHT'), ('isrc', 'ISRC'), ('lyrics', 'LYRICS')]:
+                value = db_data.get(key)
+                if value not in (None, ''):
+                    write_tag(audio, tag, value, symbols)
+                    written.append(key)
 
         # Embed cover art if requested
         if embed_cover:

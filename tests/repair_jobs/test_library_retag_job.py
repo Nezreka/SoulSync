@@ -160,3 +160,18 @@ def test_the_scan_writes_nothing(subjects, monkeypatch):
     ctx, _findings = _context()
 
     LibraryRetagJob().scan(ctx)
+
+
+def test_full_depth_refreshes_only_scoped_subjects_before_preview(subjects, monkeypatch):
+    from core.library2 import retag
+    order = []
+    monkeypatch.setattr(retag, 'refresh_metadata', lambda db, ids, **kw: order.append(('refresh', ids)) or {'refreshed': 1, 'errors': []}, raising=False)
+    _preview(monkeypatch, {2: _entry(2, diff=[_row()])})
+    original = retag.tag_preview
+    monkeypatch.setattr(retag, 'tag_preview', lambda *a, **k: order.append(('preview', None)) or original(*a, **k))
+    ctx, findings = _context(scope={'file_paths': [subjects[1]['path']]})
+    ctx.config_manager.get.side_effect = lambda key, default=None: {'enrichment_depth': 'full'} if key == 'repair.jobs.library_retag.settings' else default
+    LibraryRetagJob().scan(ctx)
+    assert order[0] == ('refresh', [2])
+    assert order[1][0] == 'preview'
+    assert findings[0]['details']['enrichment_depth'] == 'full'

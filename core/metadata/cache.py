@@ -9,10 +9,29 @@ import json
 import logging
 import threading
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
+
+_refresh_entities = ContextVar('metadata_refresh_entities', default=frozenset())
+
+
+@contextmanager
+def refresh_cached_entity(source, entity_type, entity_id):
+    """Bypass one entity's cache for this provider call, retaining offline data.
+
+    The existing client still stores a successful response normally. Failed
+    requests never erase the old cache, and concurrent readers keep using it.
+    """
+    key = (str(source), str(entity_type), str(entity_id))
+    token = _refresh_entities.set(_refresh_entities.get() | {key})
+    try:
+        yield
+    finally:
+        _refresh_entities.reset(token)
 
 
 def _name_key(name) -> str:
@@ -115,6 +134,8 @@ class MetadataCache:
 
     def get_entity(self, source: str, entity_type: str, entity_id: str) -> Optional[dict]:
         """Look up a cached entity. Returns parsed raw_json dict on hit, None on miss."""
+        if (str(source), str(entity_type), str(entity_id)) in _refresh_entities.get():
+            return None
         try:
             db = self._get_db()
             conn = db._get_connection()
@@ -391,7 +412,8 @@ class MetadataCache:
                         WHERE source = ? AND entity_type = ? AND entity_id IN ({placeholders})
                     """, [source, entity_type] + chunk)
                     for row in cursor.fetchall():
-                        found[row['entity_id']] = json.loads(row['raw_json'])
+                        if (str(source), str(entity_type), str(row['entity_id'])) not in _refresh_entities.get():
+                            found[row['entity_id']] = json.loads(row['raw_json'])
                     # Touch all found entries
                     if found:
                         found_in_chunk = [eid for eid in chunk if eid in found]

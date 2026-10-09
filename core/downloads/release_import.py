@@ -235,6 +235,7 @@ def _album_track_context(parent: dict, track: dict, album: dict, source: str) ->
         "is_album_download": True,
         "has_clean_metadata": True,
         "has_full_metadata": True,
+        "_monitor_album_extra": True,
         "original_search_result": {
             "id": info.get("id") or "",
             "source": source,
@@ -349,12 +350,9 @@ def import_album_tracks(context_key: str, context: dict, files: list[ReleaseFile
         _active_albums.add(identity)
     imported = 0
     try:
-        if lookup_album is None:
-            from core.metadata.album_tracks import get_artist_album_tracks
-
-            lookup_album = get_artist_album_tracks
-        payload = lookup_album(album["id"], artist_name=artist_name, album_name=name,
-                               source_override=get_import_source(context) or None)
+        from core.library2.download_catalogue import hydrate_download_album
+        catalogue_context = deepcopy(context)
+        payload = hydrate_download_album(catalogue_context, lookup_album=lookup_album)
         if not isinstance(payload, dict) or not payload.get("success"):
             logger.info("[Album Tracks] Track list for %r is unavailable", name)
             return 0
@@ -391,6 +389,8 @@ def import_album_tracks(context_key: str, context: dict, files: list[ReleaseFile
             if not path:
                 continue
             ctx = _album_track_context(context, track, album, source)
+            if catalogue_context.get('_album_catalogue_id'):
+                ctx['lib2_entity'] = {'album_id': catalogue_context['_album_catalogue_id']}
             track_key = f"{context_key}::album-track:{index}"
             try:
                 process_file(track_key, ctx, path)

@@ -750,6 +750,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
             except Exception as _bf_err:  # noqa: BLE001 — never let backfill break a download
                 logger.debug("[Context] primary-source album backfill skipped: %s", _bf_err)
             if not spotify_album_context.get('album_type'):
+                spotify_album_context['_album_type_known'] = False
                 spotify_album_context['album_type'] = 'album'
             if not spotify_album_context.get('artists'):
                 # a wishlist album with no credit falls back to ONE singer for

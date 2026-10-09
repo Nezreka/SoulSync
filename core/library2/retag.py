@@ -50,7 +50,7 @@ def _track_rows(conn, track_ids: List[int]) -> List[Any]:
     marks = ",".join("?" for _ in batch)
     return conn.execute(
         f"""SELECT t.id, t.title, t.track_number, t.disc_number,
-                   t.spotify_id, t.musicbrainz_id, t.album_id,
+                   t.spotify_id, t.musicbrainz_id, t.album_id, t.bpm, t.isrc, t.style, t.mood, t.copyright, t.genius_lyrics, t.external_ids,
                    al.title AS album_title, al.album_type, al.year, al.release_date, al.genres,
                    al.expected_track_count, al.track_count,
                    al.image_url AS album_image_url,
@@ -144,6 +144,9 @@ _OVERRIDE_FIELDS = {
     "title": ("track", "title"),
     "track_number": ("track", "track_number"),
     "disc_number": ("track", "disc_number"),
+    "bpm": ("track", "bpm"),
+    "style": ("track", "style"),
+    "mood": ("track", "mood"),
     "album_title": ("release_group", "title"),
     "year": ("release_group", "year"),
     "release_date": ("release_group", "release_date"),
@@ -209,12 +212,27 @@ def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
         "genres": _genres_list(row["genres"]),
         "track_number": row["track_number"],
         "disc_number": row["disc_number"],
+        "bpm": row["bpm"],
+        "style": row["style"],
+        "mood": row["mood"],
+        "copyright": row["copyright"],
+        "lyrics": row["genius_lyrics"],
+        "isrc": row["isrc"],
         "track_count": row["expected_track_count"] or row["track_count"],
     }
     from core.library2.validation import edition_reference
     edition_reference(conn, row['id'], data)
     # Explicit user overrides still win over the edition's catalogue values.
-    data["_manual_fields"] = _apply_overrides(conn, row, data)
+    manual = {}
+    if data.get('edition_id'):
+        from core.library2.metadata_overrides import get_field_overrides
+        overrides = get_field_overrides(conn, entity_type='release_edition', entity_id=data['edition_id'])
+        for key, field in [('album_title', 'title'), ('release_date', 'release_date')]:
+            if field in overrides and overrides[field].value != data.get(key):
+                manual[key] = data.get(key)
+                data[key] = overrides[field].value
+    manual.update(_apply_overrides(conn, row, data))
+    data["_manual_fields"] = manual
     # ``build_tag_diff`` renders its Cover Art row from ``thumb_url``. Without
     # it the preview claimed "Cover Art: None → None, unchanged" for every lib2
     # track, so a file with no embedded art still reported "Tags match" while
@@ -230,6 +248,19 @@ def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
         data["spotify_track_id"] = row["spotify_id"]
     if row["musicbrainz_id"]:
         data["musicbrainz_recording_id"] = row["musicbrainz_id"]
+    from core.library2.native_enrich import _stored_source_ids
+    known = {}
+    album_row = conn.execute('SELECT * FROM lib2_albums WHERE id=?', (row['album_id'],)).fetchone()
+    if data.get('edition_id'):
+        album_row = conn.execute('SELECT * FROM lib2_release_editions WHERE id=?', (data['edition_id'],)).fetchone()
+    artist_row = conn.execute('SELECT * FROM lib2_artists WHERE id=?', (row['album_artist_id'],)).fetchone()
+    for kind, entity in [('track', row), ('album', album_row), ('artist', artist_row)]:
+        if entity is not None:
+            for source, value in _stored_source_ids(entity).items():
+                known.setdefault(source, {})[kind] = value
+    data['known_source_ids'] = known
+    if (known.get('musicbrainz') or {}).get('album'):
+        data['musicbrainz_release_id'] = known['musicbrainz']['album']
     return data
 
 
@@ -263,6 +294,9 @@ _MANUAL_DIFF_KEYS = {
     "genres": "genre",
     "track_number": "track_number",
     "disc_number": "disc_number",
+    "bpm": "bpm",
+    "style": "style",
+    "mood": "mood",
 }
 
 
@@ -499,7 +533,7 @@ def _release_manual_fields(db_data: Dict[str, Any], track_id: Any,
 
 def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
                force_cover: bool = False, overwrite_manual: Any = None,
-               progress=None, file_ids=None) -> Dict[str, Any]:
+               progress=None, file_ids=None, protect_hand_tagged: bool = False) -> Dict[str, Any]:
     """Write lib2 DB metadata into the files' tags.
 
     ``overwrite_manual`` releases fields a person set by hand back to the
@@ -539,6 +573,20 @@ def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
                     row.update(file_id=files[0]['id'], file_path=files[0]['path'], sibling_files=files[1:])
                     scoped.append(row)
             rows = scoped
+    if protect_hand_tagged:
+        from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
+        keys = hand_tagged_path_keys(database)
+        protected_rows = []
+        for row in rows:
+            files = [{'id': row['file_id'], 'path': row['file_path']}, *row['sibling_files']]
+            files = [f for f in files if not is_hand_tagged_path(f['path'], keys)
+                     and not is_hand_tagged_path(resolve_lib2_path(f['path']), keys)]
+            if files:
+                row.update(file_id=files[0]['id'], file_path=files[0]['path'], sibling_files=files[1:])
+                protected_rows.append(row)
+            else:
+                stats['skipped'] += 1
+        rows = protected_rows
     for i, row in enumerate(rows):
         if progress:
             progress("retag", i, len(rows))
@@ -622,3 +670,8 @@ __all__ = [
     "artist_track_ids",
     "MAX_TRACKS",
 ]
+
+
+def refresh_metadata(database, track_ids, **kwargs):
+    from core.library2.native_enrich import refresh_native_metadata as refresh
+    return refresh(database, track_ids, **kwargs)

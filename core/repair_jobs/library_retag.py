@@ -63,6 +63,8 @@ class LibraryRetagJob(RepairJob):
         "The scan never writes. Applying a finding writes the library's values "
         "into the file — the same engine the Re-tag dialog uses, so the preview "
         "and the finding agree.\n\n"
+        "Full depth refreshes the provider metadata in the catalogue first. "
+        "Hand-tagged files are excluded. "
         "A field you edited by hand wins by default. Where the catalogue wanted "
         "something else, the finding shows both values, and you can release that "
         "field deliberately."
@@ -70,7 +72,8 @@ class LibraryRetagJob(RepairJob):
     icon = "repair-icon-retag"
     default_enabled = False
     default_interval_hours = 168
-    default_settings = {}
+    default_settings = {'depth': 'light'}
+    setting_options = {'depth': ['light', 'full']}
     auto_fix = False
     supports_file_scope = True
     # Moves/rewrites real library files, so a LIVE run is refused when the
@@ -106,6 +109,15 @@ class LibraryRetagJob(RepairJob):
         by_track = {int(s["track_id"]): s for s in subjects if s.get("track_id")}
         track_ids = list(by_track)
         total = len(track_ids)
+        settings = context.config_manager.get('repair.jobs.library_retag.settings', {}) or {}
+        depth = settings.get('depth', settings.get('enrichment_depth', 'light'))
+        if depth == 'full':
+            if context.report_progress:
+                context.report_progress(phase='Refreshing provider metadata before preview...', total=total)
+            refreshed = retag.refresh_metadata(context.db, track_ids,
+                                               config_manager=context.config_manager,
+                                               check_stop=context.check_stop)
+            result.errors += len(refreshed['errors'])
         if context.update_progress:
             context.update_progress(0, total)
         if context.report_progress:
@@ -159,6 +171,7 @@ class LibraryRetagJob(RepairJob):
                         description=_describe(entry, manual_fields),
                         details={
                             "track_id": entry["track_id"],
+                            "enrichment_depth": depth,
                             "title": title,
                             "artist": artist,
                             "album": entry.get("album_title"),

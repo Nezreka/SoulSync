@@ -412,7 +412,7 @@ def _from_a_known_release_id(
 
 
 def _persist_tracklist_tracks(
-    conn, album_id: int, tracks: List[dict], *, complete: bool = False,
+    conn, album_id: int, tracks: List[dict], *, complete: bool = False, inherit_monitoring: bool = True,
 ) -> int:
     """Persist provider tracklist entries as fileless lib2 track rows.
 
@@ -563,7 +563,7 @@ def _persist_tracklist_tracks(
                           duration, spotify_id, monitored, quality_profile_id)
                    VALUES(?,?,?,?,?,?,?,?)""",
                 (album_id, title, number, disc, duration, spotify_id,
-                 1 if al["monitored"] else 0,
+                 1 if inherit_monitoring and al["monitored"] else 0,
                  al["quality_profile_id"] or default_quality_profile_id(conn)),
             )
             track_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -633,7 +633,8 @@ def _persist_tracklist_tracks(
     return changed
 
 
-def resolve_tracklist(config_manager, conn, album_id: int) -> Optional[List[dict]]:
+def resolve_tracklist(config_manager, conn, album_id: int, *,
+                      inherit_monitoring: bool = True, provider_result=None) -> Optional[List[dict]]:
     """Return + cache the album's canonical tracklist. None when unavailable.
 
     **Commits ``conn``.** iss29-D05: this function calls ``conn.commit()``
@@ -712,6 +713,7 @@ def resolve_tracklist(config_manager, conn, album_id: int) -> Optional[List[dict
         )
         _persist_tracklist_tracks(
             conn, album_id, reusable, complete=reusable_complete,
+            inherit_monitoring=inherit_monitoring,
         )
         conn.execute(
             """UPDATE lib2_albums
@@ -734,7 +736,7 @@ def resolve_tracklist(config_manager, conn, album_id: int) -> Optional[List[dict
     # stalled every other request until the 30s busy timeout fired.
     conn.commit()
     from core.library2.provider_adapters import fetch_album_tracklist
-    provider_result = fetch_album_tracklist(
+    provider_result = provider_result or fetch_album_tracklist(
         al["title"],
         artist_name,
         source_album_ids=source_ids,
@@ -744,6 +746,15 @@ def resolve_tracklist(config_manager, conn, album_id: int) -> Optional[List[dict
     if provider_result:
         tracks = provider_result.track_payloads()
         try:
+            _persist_tracklist_tracks(
+                conn, album_id, tracks,
+                complete=bool(provider_result.is_complete) and _from_a_known_release_id(
+                    source_ids, provider_result.provider, provider_result.provider_entity_id),
+                inherit_monitoring=inherit_monitoring,
+            )
+            # Bind after count corrections, so the next caller can reuse this
+            # very snapshot instead of fetching the album a second time.
+            _, reference, _ = _album_tracklist_context(conn, album_id)
             record_provider_snapshot(
                 conn,
                 provider=provider_result.provider,
@@ -757,17 +768,11 @@ def resolve_tracklist(config_manager, conn, album_id: int) -> Optional[List[dict
             )
             conn.execute(
                 """UPDATE lib2_albums
-                      SET tracklist_json=?, tracklist_status='ready',
+                      SET tracklist_json=?, tracklist_status=?,
                           tracklist_attempts=0, tracklist_error=NULL,
                           tracklist_retry_at=NULL
                     WHERE id=?""",
-                (json.dumps(tracks), album_id),
-            )
-            _persist_tracklist_tracks(
-                conn, album_id, tracks,
-                complete=bool(provider_result.is_complete) and _from_a_known_release_id(
-                    source_ids, provider_result.provider,
-                    provider_result.provider_entity_id),
+                (json.dumps(tracks), 'ready' if provider_result.is_complete else 'idle', album_id),
             )
             conn.commit()
         except Exception as e:  # noqa: BLE001
@@ -775,6 +780,37 @@ def resolve_tracklist(config_manager, conn, album_id: int) -> Optional[List[dict
         return tracks
     return None
 
+
+
+def load_album_catalogue(database, config_manager, conn, album_id, *, services=None,
+                         inherit_monitoring=True, provider_result=None, enrich=True):
+    """The shared album-page/download loader: enrich, resolve and reconcile.
+
+    Existing complete, edition-bound snapshots skip the provider walk. A
+    prefetched result enters the same persistence boundary; it is never saved
+    by a parallel download-specific catalogue writer.
+    """
+    from core.library2.provider_snapshots import get_latest_provider_snapshot
+    context = _album_tracklist_context(conn, album_id)
+    snapshot = get_latest_provider_snapshot(conn, entity_type='album', entity_id=album_id, scope='tracklist')
+    reusable = context and _snapshot_tracks(snapshot, context[1])
+    if context and enrich and not reusable:
+        from core.library2.native_enrich import enrich_native_entity_all_services
+        if services is None:
+            from core.library2.match_status import configured_services
+            services = configured_services()
+        # Date/ID enrichment changes the edition-bound cache reference. Finish
+        # it before resolving, so this caller and the next reuse one snapshot.
+        enrich_native_entity_all_services(conn, 'album', album_id, commit=True, services=services)
+    if inherit_monitoring and provider_result is None:
+        tracks = resolve_tracklist(config_manager, conn, album_id)
+    else:
+        tracks = resolve_tracklist(config_manager, conn, album_id,
+                                   inherit_monitoring=inherit_monitoring, provider_result=provider_result)
+    if tracks and enrich and not reusable:
+        from core.library2.track_reconcile_trigger import schedule_album_track_reconcile
+        schedule_album_track_reconcile(database, album_id, config_manager)
+    return tracks
 
 def _partial_album_rows(conn, *, cached: Optional[bool] = None) -> List[Any]:
     """Albums whose expected provider track count is larger than known track rows,

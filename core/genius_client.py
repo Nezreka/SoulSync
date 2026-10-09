@@ -228,6 +228,19 @@ class GeniusClient:
 
         return None
 
+    def get_track_metadata(self, song_id: str) -> Optional[Dict[str, Any]]:
+        """Exact-ID metadata via the existing song and lyrics implementations."""
+        song = self.get_song(int(song_id))
+        if not song:
+            return None
+        payload = dict(song)
+        if song.get('url'):
+            try:
+                payload['lyrics'] = self.get_lyrics(song['url'])
+            except Exception as exc:
+                logger.debug('Genius lyrics lookup failed (%s): %s', song_id, exc)
+        return payload
+
     # ── Artist Methods ──
 
     @rate_limited

@@ -295,6 +295,9 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                 actual_download_id = task.get('download_id') or task_id
                 status = deps.run_async(deps.download_orchestrator.get_download_status(actual_download_id))
                 if status and task.get('username') in ('torrent', 'usenet'):
+                    if context:
+                        from core.library2.download_catalogue import hydrate_download_album
+                        hydrate_download_album(context)
                     audio_files = list(getattr(status, 'audio_files', None) or [])
                     if not audio_files and getattr(status, 'file_path', None):
                         audio_files = [status.file_path]

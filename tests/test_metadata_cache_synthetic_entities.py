@@ -37,8 +37,12 @@ from core.metadata.cache import MetadataCache
 def cache(tmp_path, monkeypatch):
     monkeypatch.setenv('DATABASE_PATH', str(tmp_path / 'cache.db'))
     from core.metadata import cache as cache_module
+    from database.music_database import MusicDatabase
     monkeypatch.setattr(cache_module, '_cache_instance', None, raising=False)
-    return MetadataCache()
+    db = MusicDatabase(str(tmp_path / 'cache.db'))
+    result = MetadataCache()
+    monkeypatch.setattr(result, '_get_db', lambda: db)
+    return result
 
 
 # ── the synthetic types must persist ──────────────────────────────────────
@@ -99,3 +103,51 @@ def test_synthetic_detection(cache):
     assert not cache._is_synthetic_entity('track', '12345')
     # 'track' must not be swept in by a naive '_tracks' substring test
     assert not cache._is_synthetic_entity('track', 'sometrack')
+
+
+def test_full_retag_refreshes_the_same_provider_client_despite_cached_metadata(cache, monkeypatch):
+    from core.deezer_client import DeezerClient
+    from core.library2.native_enrich import refresh_native_metadata
+    db = cache._get_db()
+    monkeypatch.setattr('core.deezer_client.get_metadata_cache', lambda: cache)
+    client = DeezerClient()
+    old = {'id': 999, 'title': 'Old provider title', 'artist': {'name': 'Artist'},
+           'album': {'id': 888, 'title': 'Album'}, 'isrc': 'USABC2400001', 'bpm': 100,
+           'track_position': 1, 'contributors': []}
+    cache.store_entity('deezer', 'track', '999', old)
+    assert cache.get_entity('deezer', 'track', '999')['title'] == 'Old provider title'
+    calls = []
+    def fetch(path):
+        calls.append(path)
+        return {**old, 'title': 'Fresh provider title', 'bpm': 125}
+    monkeypatch.setattr(client, '_api_get', fetch)
+    monkeypatch.setattr('core.metadata.registry.get_client_for_source', lambda *a, **kw: client)
+    monkeypatch.setattr('core.library2.match_status.configured_services', lambda: {'deezer'})
+    with db._get_connection() as conn:
+        aid = conn.execute("INSERT INTO lib2_artists(name) VALUES('Artist')").lastrowid
+        album_id = conn.execute("INSERT INTO lib2_albums(primary_artist_id,title) VALUES(?,'Album')", (aid,)).lastrowid
+        tid = conn.execute("INSERT INTO lib2_tracks(album_id,title,external_ids) VALUES(?,'Old provider title',?)", (album_id, '{"deezer":"999"}')).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id,path) VALUES(?,'/missing/test.flac')", (tid,))
+        conn.commit()
+    result = refresh_native_metadata(db, [tid])
+    assert result['refreshed'] == 1 and not result['errors']
+    assert calls == ['track/999']
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT title,bpm FROM lib2_tracks WHERE id=?', (tid,)).fetchone()[:] == ('Fresh provider title', 125)
+    assert cache.get_entity('deezer', 'track', '999')['title'] == 'Fresh provider title'
+
+
+def test_provider_refresh_cache_bypass_is_scoped_and_keeps_offline_data(cache):
+    from concurrent.futures import ThreadPoolExecutor
+    from core.metadata.cache import refresh_cached_entity
+    cache.store_entity('deezer', 'album', '222', {'title': 'Cached album'})
+    cache.store_entity('deezer', 'album', '333', {'title': 'Other album'})
+    with pytest.raises(RuntimeError), refresh_cached_entity('deezer', 'album', '222'):
+        assert cache.get_entity('deezer', 'album', '222') is None
+        assert cache.get_entity('deezer', 'album', '333')['title'] == 'Other album'
+        found, missing = cache.get_entities_batch('deezer', 'album', ['222', '333'])
+        assert set(found) == {'333'} and missing == ['222']
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            assert pool.submit(cache.get_entity, 'deezer', 'album', '222').result()['title'] == 'Cached album'
+        raise RuntimeError('provider unavailable')
+    assert cache.get_entity('deezer', 'album', '222')['title'] == 'Cached album'

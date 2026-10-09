@@ -4,9 +4,18 @@ from __future__ import annotations
 
 import json
 import sqlite3
+
+import pytest
 from typing import Any, Dict, List
 
 from core.library2 import retag
+
+
+@pytest.fixture(autouse=True)
+def configured_refresh_services(monkeypatch):
+    # Explicit provider availability, independent of host/API registration
+    # left by another test module. Provider responses are injected per test.
+    monkeypatch.setattr('core.library2.match_status.configured_services', lambda: {'spotify', 'deezer'})
 
 
 def _seed_album_with_files(conn, *, path: str | None = "/nope/track.flac"):
@@ -688,3 +697,147 @@ def test_wrong_file_number_does_not_select_another_catalogue_track(imported_conn
     saved = FLAC(path)
     assert saved['title'] == ['Beta']
     assert saved['tracknumber'] == ['2']
+
+
+def test_full_refresh_updates_catalogue_before_manual_projection(imported_conn, legacy_db, monkeypatch):
+    from core.library2.metadata_overrides import set_field_override
+    from core.library2.provider_adapters import DescriptiveMetadataProviderResult
+    _, album_id, track_id = _seed_album_with_files(imported_conn)
+    imported_conn.execute('UPDATE lib2_albums SET spotify_id=? WHERE id=?', ('pinned-release', album_id))
+    set_field_override(imported_conn, entity_type='track', entity_id=track_id, field_name='title', value='My title')
+    imported_conn.commit()
+    calls = []
+    def fetch(entity, source_ids, **kwargs):
+        calls.append((entity, dict(source_ids)))
+        if entity == 'album':
+            return DescriptiveMetadataProviderResult('spotify', 'pinned-release', release_date='2024-06-17', genres=('new genre',))
+        if entity == 'track':
+            return DescriptiveMetadataProviderResult('spotify', 'sp1', bpm=125)
+        return None
+    monkeypatch.setattr('core.library2.provider_adapters.fetch_descriptive_metadata', fetch)
+    out = retag.refresh_metadata(legacy_db, [track_id])
+    assert out['refreshed'] >= 2 and not out['errors']
+    row = retag.track_contexts(imported_conn, [track_id])[0]
+    assert row['db_data']['title'] == 'My title'
+    assert row['db_data']['release_date'] == '2024-06-17'
+    assert row['db_data']['genres'] == ['new genre']
+    assert row['db_data']['bpm'] == 125
+    assert ('album', {'spotify': 'pinned-release'}) in calls
+    assert imported_conn.execute('SELECT spotify_id FROM lib2_albums WHERE id=?', (album_id,)).fetchone()[0] == 'pinned-release'
+
+
+def test_full_refresh_never_shortens_a_complete_date(imported_conn, legacy_db, monkeypatch):
+    from core.library2.provider_adapters import DescriptiveMetadataProviderResult
+    _, album_id, track_id = _seed_album_with_files(imported_conn)
+    imported_conn.execute('UPDATE lib2_albums SET spotify_id=? WHERE id=?', ('release', album_id))
+    imported_conn.commit()
+    monkeypatch.setattr('core.library2.provider_adapters.fetch_descriptive_metadata', lambda kind, ids, **kw: DescriptiveMetadataProviderResult('spotify', 'release', release_date='2016') if kind == 'album' else None)
+    retag.refresh_metadata(legacy_db, [track_id])
+    assert imported_conn.execute('SELECT release_date FROM lib2_albums WHERE id=?', (album_id,)).fetchone()[0] == '2016-04-29'
+
+
+def test_provider_refresh_keeps_a_manual_bpm(imported_conn, legacy_db, monkeypatch):
+    from core.library2.metadata_overrides import set_field_override
+    from core.library2.provider_adapters import DescriptiveMetadataProviderResult
+    _, _, tid = _seed_album_with_files(imported_conn)
+    set_field_override(imported_conn, entity_type='track', entity_id=tid, field_name='bpm', value=90)
+    imported_conn.commit()
+    monkeypatch.setattr('core.library2.provider_adapters.fetch_descriptive_metadata', lambda kind, ids, **kw: DescriptiveMetadataProviderResult('spotify', 'sp1', bpm=125) if kind == 'track' else None)
+    retag.refresh_metadata(legacy_db, [tid])
+    data = retag.track_contexts(imported_conn, [tid])[0]['db_data']
+    assert data['bpm'] == 90
+    assert data['_manual_fields']['bpm'] == 125
+
+
+def test_full_refresh_cannot_touch_a_hand_tagged_file(imported_conn, legacy_db, monkeypatch):
+    from database.music_database import MusicDatabase
+    _, _, tid = _seed_album_with_files(imported_conn)
+    monkeypatch.setattr(legacy_db, 'manual_path_keys', lambda: {MusicDatabase.manual_path_key('/nope/track.flac')}, raising=False)
+    monkeypatch.setattr('core.library2.provider_adapters.fetch_descriptive_metadata', lambda *a, **kw: pytest.fail('hand tagged subjects must not be provider-refreshed'))
+    assert retag.refresh_metadata(legacy_db, [tid])['refreshed'] == 0
+
+
+@pytest.mark.parametrize('extension,codec', [('flac', 'flac'), ('mp3', 'libmp3lame'), ('m4a', 'aac'), ('ogg', 'libvorbis'), ('opus', 'libopus')])
+def test_full_retag_uses_existing_writer_for_rich_tags_and_keeps_manual_values(imported_conn, legacy_db, tmp_path, monkeypatch, extension, codec):
+    import hashlib
+    import shutil
+    import subprocess
+    from mutagen import File
+    from core.tag_writer import read_file_tags
+    from core.metadata.common import get_mutagen_symbols
+    from core.metadata.musicbrainz_tags import read_tag
+    from core.library2.metadata_overrides import set_field_override
+    from core.library2.provider_adapters import DescriptiveMetadataProviderResult
+    if not shutil.which('ffmpeg'):
+        pytest.skip('real FLAC test requires ffmpeg')
+    path = tmp_path / f'full.{extension}'
+    subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'sine=duration=1', '-c:a', codec, '-y', str(path)], check=True, capture_output=True)
+    _, aid, tid = _seed_album_with_files(imported_conn, path=str(path))
+    set_field_override(imported_conn, entity_type='track', entity_id=tid, field_name='title', value='My title')
+    set_field_override(imported_conn, entity_type='track', entity_id=tid, field_name='mood', value='My mood')
+    imported_conn.commit()
+    imported_conn.execute('UPDATE lib2_tracks SET external_ids=? WHERE id=?', (json.dumps({'deezer': 'dz-track'}), tid))
+    imported_conn.commit()
+    before = hashlib.sha256(path.read_bytes()).hexdigest()
+    monkeypatch.setattr('core.library2.provider_adapters.fetch_descriptive_metadata', lambda kind, ids, **kw: DescriptiveMetadataProviderResult('spotify', 'sp1', bpm=125, lyrics='Complete provider lyrics', isrc='USABC2400001', mood='Provider mood', style='Provider style', copyright='Copyright 2024') if kind == 'track' else None)
+    result = retag.refresh_metadata(legacy_db, [tid])
+    assert not result['errors']
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == before  # refresh is catalogue-only
+    preview = retag.tag_preview(retag.track_contexts(imported_conn, [tid]))[0]
+    assert any(d['file_key'] == 'mood' and d['manual'] and d['provider_value'] == 'Provider mood' for d in preview['diff'])
+    stats = retag.write_tags(legacy_db, [tid], embed_cover=False)
+    assert stats['written'] == 1
+    tags = read_file_tags(str(path))
+    assert not tags['error']
+    assert tags['title'] == 'My title'
+    assert tags['mood'] == 'My mood'
+    assert tags['style'] == 'Provider style'
+    assert tags['copyright'] == 'Copyright 2024'
+    assert tags['isrc'] == 'USABC2400001'
+    assert tags['bpm'] == 125
+    assert tags['lyrics'] == 'Complete provider lyrics'
+    audio = File(path)
+    assert read_tag(audio, 'SPOTIFY_TRACK_ID', get_mutagen_symbols()) == 'sp1'
+    assert read_tag(audio, 'DEEZER_TRACK_ID', get_mutagen_symbols()) == 'dz-track'
+    preview = retag.tag_preview(retag.track_contexts(imported_conn, [tid]))[0]
+    assert not any(d['file_key'] in {'bpm', 'lyrics', 'mood', 'style', 'copyright', 'isrc'} for d in preview['diff'])
+
+
+def test_full_refresh_respects_hand_tagged_mapped_paths(imported_conn, legacy_db, monkeypatch, tmp_path):
+    from database.music_database import MusicDatabase
+    _, _, tid = _seed_album_with_files(imported_conn, path='/server/track.flac')
+    local = str(tmp_path / 'track.flac')
+    monkeypatch.setattr('core.library2.paths.resolve_lib2_path', lambda *a, **kw: local)
+    monkeypatch.setattr(legacy_db, 'manual_path_keys', lambda: {MusicDatabase.manual_path_key(local)}, raising=False)
+    monkeypatch.setattr('core.library2.provider_adapters.fetch_descriptive_metadata', lambda *a, **kw: pytest.fail('mapped hand tagged files must remain protected'))
+    assert retag.refresh_metadata(legacy_db, [tid])['refreshed'] == 0
+
+
+def test_provider_ids_are_written_even_when_core_tags_already_match(imported_conn, legacy_db, tmp_path, monkeypatch):
+    import shutil
+    import subprocess
+    from core.tag_writer import write_tags_to_file
+    if not shutil.which('ffmpeg'):
+        pytest.skip('real audio test requires ffmpeg')
+    path = tmp_path / 'ids.flac'
+    subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'sine=duration=1', '-c:a', 'flac', '-y', str(path)], check=True, capture_output=True)
+    _, _, tid = _seed_album_with_files(imported_conn, path=str(path))
+    data = retag.track_contexts(imported_conn, [tid])[0]['db_data']
+    core_data = {k: v for k, v in data.items() if k != 'known_source_ids' and not k.endswith('_id')}
+    assert write_tags_to_file(str(path), core_data, embed_cover=False)['success']
+    preview = retag.tag_preview(retag.track_contexts(imported_conn, [tid]))[0]
+    assert any(d['file_key'] == 'SPOTIFY_TRACK_ID' and d['changed'] for d in preview['diff'])
+    assert retag.write_tags(legacy_db, [tid], embed_cover=False)['written'] == 1
+    assert retag.write_tags(legacy_db, [tid], embed_cover=False)['skipped'] == 1
+
+
+def test_retag_preserves_manual_concrete_edition_title(imported_conn):
+    from core.library2.metadata_overrides import set_field_override
+    _, aid, tid = _seed_album_with_files(imported_conn)
+    eid = imported_conn.execute("INSERT INTO lib2_release_editions(release_group_id,title) VALUES(?,'Provider edition')", (aid,)).lastrowid
+    rid = imported_conn.execute("INSERT INTO lib2_recordings(title) VALUES('One Dance')").lastrowid
+    imported_conn.execute('INSERT INTO lib2_release_tracks(release_edition_id,recording_id,track_id,track_number,disc_number) VALUES(?,?,?,1,1)', (eid,rid,tid))
+    set_field_override(imported_conn, entity_type='release_edition', entity_id=eid, field_name='title', value='My edition')
+    data = retag.track_contexts(imported_conn, [tid])[0]['db_data']
+    assert data['album_title'] == 'My edition'
+    assert data['_manual_fields']['album_title'] == 'Provider edition'

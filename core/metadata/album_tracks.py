@@ -200,6 +200,10 @@ def _normalize_track_artists(track_item: Any) -> List[str]:
 
 
 def _extract_album_track_items(album_data: Any, tracks_data: Any = None) -> List[Dict[str, Any]]:
+    # An explicitly fetched complete list wins over the album's embedded page.
+    supplied = _extract_track_items(tracks_data)
+    if supplied:
+        return supplied
     embedded_tracks = _extract_lookup_value(album_data, 'tracks', default=None)
     if isinstance(embedded_tracks, dict):
         items = embedded_tracks.get('items') or []
@@ -547,6 +551,7 @@ def _build_album_tracks_payload(
 
     return {
         'success': bool(tracks),
+        'is_complete': bool(tracks) and len(tracks) >= int(album_info.get('total_tracks') or len(tracks)),
         'album': album_info,
         'tracks': tracks,
         'source': source,
@@ -946,6 +951,15 @@ def _served_album_name_acceptable(requested_name: str, album_data: Any) -> bool:
     return SequenceMatcher(None, a, b).ratio() >= 0.6
 
 
+def _needs_full_tracklist(album_data):
+    embedded = _extract_album_track_items(album_data)
+    total = _extract_lookup_value(album_data, 'total_tracks', 'track_count', default=0)
+    try:
+        return not embedded or len(embedded) < int(total or 0)
+    except (TypeError, ValueError):
+        return not embedded
+
+
 def get_artist_album_tracks(
     album_id: str,
     artist_name: str = '',
@@ -968,7 +982,7 @@ def get_artist_album_tracks(
             continue
 
         tracks_data = None
-        if not _extract_album_track_items(album_data):
+        if _needs_full_tracklist(album_data):
             tracks_data = get_album_tracks_for_source(source, album_id)
         payload = _build_album_tracks_payload(
             album_data,
@@ -1014,7 +1028,7 @@ def get_artist_album_tracks(
                 continue
 
             tracks_data = None
-            if not _extract_album_track_items(album_data):
+            if _needs_full_tracklist(album_data):
                 tracks_data = get_album_tracks_for_source(source, resolved_album_id)
             payload = _build_album_tracks_payload(
                 album_data,

@@ -4,12 +4,8 @@ Before, the import wrote no kind at all and freshly imported releases were
 kind-blind until an enrichment sweep ran. The pipeline already carries the
 kind (post_processing stamps ``album_info['record_type']``).
 
-Open #1562 port conflict: Library v2's ``lib2_albums.album_type`` is NOT NULL
-with the default 'album', so an existing unknown kind cannot be told apart
-from a confirmed album. Inserts and protection of existing types are covered
-here; upstream's later fill of an unknown type is NOT yet fulfilled. The
-ambiguous-default test documents the current limitation pending a user
-decision on representing unknown classification. See the local sync report.
+Known kinds are protected; an explicitly unknown default may be filled later.
+Legacy ambiguous defaults are protected during the additive migration.
 """
 
 from __future__ import annotations
@@ -96,13 +92,12 @@ def test_import_falls_back_to_album_type(soulsync_db):
     assert _album_kind(soulsync_db) == "ep"
 
 
-def test_import_without_a_kind_keeps_the_schema_default(soulsync_db):
-    """No kind from the pipeline: the row keeps 'album', which the kind gates
-    read as unknown, and a later import does not re-judge the existing row."""
+def test_import_without_a_kind_can_be_confirmed_later(soulsync_db):
+    """A placeholder remains unknown until an import provides a real kind."""
     _import(1, {"album_name": "Some Album"})
     assert _album_kind(soulsync_db) == "album"
     _import(2, {"album_name": "Some Album", "record_type": "single"})
-    assert _album_kind(soulsync_db) == "album"
+    assert _album_kind(soulsync_db) == "single"
 
 
 def test_import_never_overwrites_existing_record_type(soulsync_db):
@@ -111,3 +106,10 @@ def test_import_never_overwrites_existing_record_type(soulsync_db):
     soulsync_db.execute("UPDATE lib2_albums SET album_type = 'ep'")
     _import(2, {"album_name": "Some Album", "record_type": "single"})
     assert _album_kind(soulsync_db) == "ep"
+
+
+def test_confirmed_album_cannot_be_reclassified_by_later_import(soulsync_db):
+    _import(1, {"album_name": "Some Album", "record_type": "album"})
+    _import(2, {"album_name": "Some Album", "record_type": "single"})
+    assert _album_kind(soulsync_db) == "album"
+    assert soulsync_db.execute("SELECT album_type_known FROM lib2_albums").fetchone()[0] == 1

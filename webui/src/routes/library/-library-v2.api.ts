@@ -1240,17 +1240,32 @@ export interface LibraryV2TagPreviewTrack {
 export async function fetchLibraryV2TagPreview(
   entity: 'artists' | 'albums',
   id: number,
-): Promise<{ tracks: LibraryV2TagPreviewTrack[]; changed_count: number; truncated: boolean }> {
+  depth: 'light' | 'full' = 'light',
+): Promise<{
+  tracks: LibraryV2TagPreviewTrack[];
+  changed_count: number;
+  truncated: boolean;
+  refresh?: { refreshed: number; unavailable?: number; errors: unknown[] } | null;
+}> {
   const payload = await lib2Json<
-    Ok & { tracks?: LibraryV2TagPreviewTrack[]; changed_count?: number; truncated?: boolean }
+    Ok & {
+      tracks?: LibraryV2TagPreviewTrack[];
+      changed_count?: number;
+      truncated?: boolean;
+      refresh?: { refreshed: number; unavailable?: number; errors: unknown[] } | null;
+    }
   >(
-    apiClient.get(`library/v2/${entity}/${id}/tag-preview`, { timeout: 120_000 }),
+    apiClient.get(
+      `library/v2/${entity}/${id}/tag-preview${depth === 'full' ? '?depth=full' : ''}`,
+      { timeout: 120_000 },
+    ),
     'Tag preview failed',
   );
   return {
     tracks: payload.tracks ?? [],
     changed_count: payload.changed_count ?? 0,
     truncated: payload.truncated ?? false,
+    refresh: payload.refresh,
   };
 }
 

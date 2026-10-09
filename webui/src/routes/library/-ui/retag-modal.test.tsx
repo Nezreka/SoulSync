@@ -195,3 +195,52 @@ describe('Library v2 retag preview', () => {
     },
   );
 });
+
+it('refreshes provider metadata explicitly before showing a new full preview', async () => {
+  const depths: string[] = [];
+  server.use(
+    http.get('/api/library/v2/albums/5/tag-preview', ({ request }) => {
+      depths.push(new URL(request.url).searchParams.get('depth') ?? 'light');
+      return HttpResponse.json({
+        success: true,
+        tracks: [],
+        changed_count: 0,
+        truncated: false,
+        refresh:
+          new URL(request.url).searchParams.get('depth') === 'full'
+            ? { refreshed: 2, errors: [] }
+            : null,
+      });
+    }),
+  );
+  render(
+    <QueryClientProvider client={createTestQueryClient()}>
+      <RetagModal entity="albums" id={5} title="Album" onClose={vi.fn()} />
+    </QueryClientProvider>,
+  );
+  await screen.findByText('No tracks with files.');
+  fireEvent.click(await screen.findByRole('button', { name: /Refresh providers.*Full Retag/i }));
+  await screen.findByText(/Provider metadata refreshed/);
+  expect(depths).toContain('full');
+});
+
+it('reports an unavailable full refresh without claiming provider success', async () => {
+  server.use(
+    http.get('/api/library/v2/albums/5/tag-preview', () =>
+      HttpResponse.json({
+        success: true,
+        tracks: [],
+        refresh: { refreshed: 0, unavailable: 2, errors: [] },
+      }),
+    ),
+  );
+  render(
+    <QueryClientProvider client={createTestQueryClient()}>
+      <RetagModal entity="albums" id={5} title="Album" onClose={vi.fn()} />
+    </QueryClientProvider>,
+  );
+  await screen.findByText('No tracks with files.');
+  fireEvent.click(screen.getByRole('button', { name: /Refresh providers.*Full Retag/i }));
+  await screen.findByText(/No fresh provider metadata available/);
+  expect(screen.queryByText(/Provider metadata refreshed/)).not.toBeInTheDocument();
+});

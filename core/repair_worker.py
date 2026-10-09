@@ -3632,6 +3632,7 @@ class RepairWorker:
             stats = retag.write_tags(
                 self.db, [native_track_id],
                 embed_cover=bool(validation), overwrite_manual=release,
+                protect_hand_tagged=True,
                 file_ids=[validation['file_id']] if validation.get('file_id') else None,
             )
             if validation.get('checks', {}).get('artwork_sidecar') == 'missing':

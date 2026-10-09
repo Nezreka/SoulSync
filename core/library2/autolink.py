@@ -306,6 +306,9 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
                 return row["id"]
     for row in rows:
         if release_title_key(row["title"]) == key:
+            stored_id = row['spotify_id'] if namespace == 'spotify' else _row_external_ids(row['external_ids']).get(namespace)
+            if provider_id and stored_id and str(stored_id) != provider_id:
+                continue  # Same title does not make two provider editions identical.
             if namespace is not None and namespace != "spotify" and provider_id:
                 _adopt_external_id(conn, "lib2_albums", row["id"], namespace,
                                    provider_id)
@@ -1024,6 +1027,9 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                                   (file_id,)).fetchone()
             if _owner and _owner[0]:
                 recompute_wanted(conn, profile_id=int(_owner[0]), track_ids=[track_id])
+            if context.get('_monitor_album_extra') is True:
+                from core.library2.import_monitor import monitor_imported_extra
+                monitor_imported_extra(conn, track_id, context)
             conn.commit()
             # perf25-04: an artist/album born from a finished download is not
             # covered by the last precache run, so warm its artwork now instead

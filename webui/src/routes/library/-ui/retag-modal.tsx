@@ -133,10 +133,12 @@ export function RetagModal({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const [depth, setDepth] = useState<'light' | 'full'>('light');
   const previewQuery = useQuery({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'tag-preview', entity, id],
-    queryFn: () => fetchLibraryV2TagPreview(entity, id),
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'tag-preview', entity, id, depth],
+    queryFn: () => fetchLibraryV2TagPreview(entity, id, depth),
     staleTime: 0,
+    refetchOnWindowFocus: false,
   });
   const tracks = useMemo(() => {
     const raw = previewQuery.data?.tracks ?? [];
@@ -276,6 +278,30 @@ export function RetagModal({
       }
     >
       <div className={styles.previewToolbar}>
+        <button
+          type="button"
+          className={styles.btnGhost}
+          disabled={previewQuery.isFetching || phase === 'writing' || phase === 'done'}
+          onClick={() => {
+            setReleased(new Set());
+            if (depth === 'full') void previewQuery.refetch();
+            else setDepth('full');
+          }}
+        >
+          {previewQuery.isFetching && depth === 'full'
+            ? 'Refreshing providers…'
+            : 'Refresh providers · Full Retag'}
+        </button>
+        {depth === 'full' && !previewQuery.isFetching && !previewQuery.error ? (
+          <span className={styles.previewQuiet}>
+            {previewQuery.data?.refresh?.refreshed
+              ? `Provider metadata refreshed (${previewQuery.data.refresh.refreshed}) · manual edits kept`
+              : 'No fresh provider metadata available · manual edits kept'}
+            {previewQuery.data?.refresh?.errors.length
+              ? ` · ${previewQuery.data.refresh.errors.length} refresh errors`
+              : ''}
+          </span>
+        ) : null}
         <span>
           <strong>{changed.length}</strong> files with changes{' '}
           <span className={styles.previewQuiet}>of {tracks.length} files</span>

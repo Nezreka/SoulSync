@@ -588,11 +588,13 @@ def _apply_descriptive_metadata(
             "banner_url": "banner_url",
         },
         "album": {
+            "title": "title",
             "image_url": "image_url", "genres": "genres", "year": "year",
             "release_date": "release_date", "label": "label", "upc": "upc",
             "style": "style", "mood": "mood", "explicit": "explicit",
         },
         "track": {
+            "title": "title",
             "duration_ms": "duration", "bpm": "bpm", "explicit": "explicit",
             "lyrics": "genius_lyrics", "copyright": "copyright",
             "style": "style", "mood": "mood",
@@ -845,16 +847,9 @@ def enrich_native_entity_for_service(
     # on its own uncommitted match write.
     conn.commit()
 
-    from core.library2.provider_adapters import fetch_descriptive_metadata
-    metadata = fetch_descriptive_metadata(
-        canonical,
-        {actual_source: provider_id},
-        source_order=(actual_source,),
-    )
-    metadata_image = (
-        _apply_descriptive_metadata(conn, canonical, int(entity_id), metadata)
-        if metadata is not None else None
-    )
+    metadata = refresh_native_entity_metadata(conn, canonical, int(entity_id),
+                                              {actual_source: provider_id})
+    metadata_image = getattr(metadata, 'image_url', None)
     image_url = metadata_image or str(hit.get("image") or "").strip() or None
     if canonical == "artist":
         if not image_url:
@@ -1724,3 +1719,84 @@ __all__ = [
     "default_artist_resolver",
     "default_artwork_fetcher",
 ]
+
+
+def refresh_native_entity_metadata(conn, entity_type, entity_id, source_ids):
+    """The common exact-ID provider refresh used by Enrich and Full Retag.
+
+    Identity resolution stays with the existing match engine. Refreshing facts
+    never searches for or substitutes a different edition.
+    """
+    from dataclasses import asdict, replace
+    from core.library2.provider_adapters import fetch_descriptive_metadata
+    from core.library2.provider_writes import write_provider_enrichment
+    conn.commit()  # provider caches may write through their own connection
+    metadata = fetch_descriptive_metadata(entity_type, source_ids,
+                                          source_order=tuple(source_ids))
+    if metadata is None or str(metadata.provider_entity_id) != str(source_ids.get(metadata.provider)):
+        return None
+    if entity_type == 'album' and metadata.release_date:
+        old = conn.execute('SELECT release_date FROM lib2_albums WHERE id=?', (entity_id,)).fetchone()[0]
+        from core.metadata.source import _more_precise_date
+        metadata = replace(metadata, release_date=_more_precise_date(old, metadata.release_date))
+    _apply_descriptive_metadata(conn, entity_type, entity_id, metadata)
+    if entity_type == 'track' and metadata.isrc:
+        conn.execute("UPDATE lib2_tracks SET isrc=COALESCE(NULLIF(isrc,''), ?) WHERE id=?", (metadata.isrc, entity_id))
+    if entity_type == 'album':
+        from core.library2.release_kind import confirm_release_kind
+        confirm_release_kind(conn, entity_id, metadata.album_type)
+    write_provider_enrichment(conn, entity_type=entity_type, entity_id=entity_id,
+                              service=metadata.provider, payload=asdict(metadata))
+    return metadata
+
+
+def refresh_native_metadata(database, track_ids, *, config_manager=None, check_stop=None):
+    from contextlib import closing
+    from core.library2 import retag
+    from core.library2.completeness import _album_tracklist_context
+    from core.library2.provider_adapters import _configured_source_order
+    from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
+    from core.library2.paths import resolve_lib2_path
+    keys = hand_tagged_path_keys(database)
+    targets = {}
+    with closing(database._get_connection()) as conn:
+        rows = [r for r in retag.track_contexts(conn, track_ids) if r.get('file_path')
+                and not is_hand_tagged_path(r['file_path'], keys)
+                and not is_hand_tagged_path(resolve_lib2_path(r['file_path'], config_manager), keys)]
+        for row in rows:
+            for kind, entity_id in [('track', row['id']), ('album', row['album_id']), ('artist', row['album_artist_id'])]:
+                if entity_id is None or (kind, entity_id) in targets:
+                    continue
+                entity = conn.execute(f'SELECT * FROM lib2_{kind}s WHERE id=?', (entity_id,)).fetchone()
+                ids = _stored_source_ids(entity)
+                if kind == 'album':
+                    _, _, ids = _album_tracklist_context(conn, entity_id)
+                    if entity['canonical_locked'] and entity['canonical_source'] and entity['canonical_album_id']:
+                        ids[entity['canonical_source']] = str(entity['canonical_album_id'])
+                targets[(kind, entity_id)] = ids
+    result = {'refreshed': 0, 'unavailable': 0, 'errors': []}
+    order = tuple(_configured_source_order())
+    from core.library2.match_status import configured_services
+    available = configured_services()
+    for (kind, entity_id), ids in targets.items():
+        # Apply fallbacks first; the preferred provider's nonempty fields win.
+        sources = list(dict.fromkeys([*order, *ids]))
+        for source in reversed(sources):
+            if source not in ids or (available is not None and source not in available):
+                continue
+            if check_stop and check_stop():
+                return result
+            try:
+                from core.metadata.cache import refresh_cached_entity
+                with closing(database._get_connection()) as conn:
+                    with refresh_cached_entity(source, kind, ids[source]):
+                        metadata = refresh_native_entity_metadata(conn, kind, entity_id,
+                                                                  {source: ids[source]})
+                    conn.commit()
+                if metadata is None:
+                    result['unavailable'] += 1
+                    continue
+                result['refreshed'] += 1
+            except Exception as exc:
+                result['errors'].append({'entity_type': kind, 'entity_id': entity_id, 'source': source, 'error': str(exc)})
+    return result
