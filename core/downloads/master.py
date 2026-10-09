@@ -1410,6 +1410,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
             wishlist_album_disc_counts = {}
             wishlist_album_artist_map = {}  # album_id -> resolved artist context (consistent per album)
             wishlist_album_context_map = {}  # album_id -> richest shared album context
+            wishlist_album_fallback_artist = {}  # album_id -> singer, when the album has no credit (#1616)
             if playlist_id == 'wishlist':
                 import json as _json
                 # First pass: collect disc_number and resolve ONE artist per album
@@ -1456,10 +1457,17 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                                 _fa = _wl_album_artists[0]
                                 wishlist_album_artist_map[album_id] = _fa if isinstance(_fa, dict) else {'name': str(_fa)}
                             else:
+                                # #1616: no album credit stored. the singer is
+                                # NOT the album artist (a VA soundtrack filed
+                                # under whoever sang the first track). the album
+                                # lookup at download time fills the real credit;
+                                # the singer is only its fallback, one per album
+                                # so a failed lookup still keeps one folder
+                                wishlist_album_artist_map[album_id] = {}
                                 _wl_track_artists = sp_data.get('artists', [])
                                 if _wl_track_artists:
                                     _fa = _wl_track_artists[0]
-                                    wishlist_album_artist_map[album_id] = _fa if isinstance(_fa, dict) else {'name': str(_fa)}
+                                    _fallback_name = _fa.get('name', '') if isinstance(_fa, dict) else str(_fa)
                                 else:
                                     # Try top-level 'artists' (wishlist format uses plural)
                                     _tl_artists = t.get('artists', [])
@@ -1468,8 +1476,9 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                                         _fallback_name = _tla.get('name', str(_tla)) if isinstance(_tla, dict) else str(_tla)
                                     else:
                                         _fallback_name = t.get('artist', '')
-                                    wishlist_album_artist_map[album_id] = {'name': _fallback_name or 'Unknown Artist'}
-                            logger.info(f"[Wishlist Album Grouping] Album '{_wl_album.get('name', album_id)}' → artist: '{wishlist_album_artist_map[album_id].get('name', '?')}'")
+                                wishlist_album_fallback_artist[album_id] = _fallback_name or 'Unknown Artist'
+                            logger.info(f"[Wishlist Album Grouping] Album '{_wl_album.get('name', album_id)}' → artist: "
+                                        f"'{wishlist_album_artist_map[album_id].get('name') or '(from the album lookup)'}'")
 
 
 
@@ -1543,15 +1552,9 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                                 _map_artist_name, track_info.get('name'), _own_album_artist_name,
                             )
                             artist_ctx = {'name': _own_album_artist_name}
-                        if not artist_ctx or not artist_ctx.get('name'):
-                            # Fallback: per-track resolution from artists array
-                            _fb_artists = track_info.get('artists', [])
-                            if _fb_artists:
-                                _fb_a = _fb_artists[0]
-                                _fb_name = _fb_a.get('name', str(_fb_a)) if isinstance(_fb_a, dict) else str(_fb_a)
-                            else:
-                                _fb_name = track_info.get('artist', '')
-                            artist_ctx = {'name': _fb_name or 'Unknown Artist'}
+                        if (not (artist_ctx or {}).get('name') and _own_album_artist_name
+                                and _own_album_artist_name.casefold() != 'unknown artist'):
+                            artist_ctx = {'name': _own_album_artist_name}
 
                         # Construct a shared album context from the richest track in
                         # this album group so release_date/year and artwork do not
@@ -1562,7 +1565,9 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                             'id': album_id,
                             'name': shared_album.get('name') or s_album.get('name'),
                             'release_date': shared_album.get('release_date', ''),
-                            'total_tracks': shared_album.get('total_tracks') or s_album.get('total_tracks', 1),
+                            # 0 = unknown, so the album lookup fills it. 1 read as
+                            # real and every track tagged 4/1 (#1616)
+                            'total_tracks': shared_album.get('total_tracks') or s_album.get('total_tracks') or 0,
                             'total_discs': wishlist_album_disc_counts.get(album_id_for_lookup, 1),
                             'album_type': shared_album.get('album_type') or s_album.get('album_type', 'album'),
                             'album_type_locked': bool(shared_album.get('album_type_locked') or s_album.get('album_type_locked')),
@@ -1571,7 +1576,13 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                         }
 
                         track_info['_explicit_album_context'] = album_ctx
-                        track_info['_explicit_artist_context'] = artist_ctx
+                        if (artist_ctx or {}).get('name'):
+                            track_info['_explicit_artist_context'] = artist_ctx
+                        else:
+                            # no album credit: leave the folder to the album
+                            # lookup, like download missing does (#1616)
+                            track_info['_fallback_album_artist'] = wishlist_album_fallback_artist.get(
+                                album_id_for_lookup) or ''
                         track_info['_is_explicit_album_download'] = True
                         logger.info(f"[Wishlist] Added album context for: '{track_info.get('name')}' -> '{album_ctx['name']}'")
 
