@@ -110,24 +110,30 @@ def test_owner_scoping(db):
 # ---------------------------------------------------------------------------
 
 def _seed_track(db, track_id, duration):
+    """Ours: a Library v2 catalogue track; plays link to it by lib2_track_id."""
     conn = db._get_connection()
     try:
-        conn.execute("INSERT INTO artists (id, name) VALUES ('a1', 'A') ON CONFLICT DO NOTHING")
-        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES ('al1', 'a1', 'B') ON CONFLICT DO NOTHING")
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, duration) VALUES (?, 'al1', 'a1', 'T', ?)",
-                     (str(track_id), duration))
+        artist = conn.execute("SELECT id FROM lib2_artists WHERE name='A'").fetchone()
+        artist_id = artist[0] if artist else conn.execute(
+            "INSERT INTO lib2_artists (name) VALUES ('A')").lastrowid
+        album = conn.execute("SELECT id FROM lib2_albums WHERE title='B'").fetchone()
+        album_id = album[0] if album else conn.execute(
+            "INSERT INTO lib2_albums (primary_artist_id, title) VALUES (?, 'B')",
+            (artist_id,)).lastrowid
+        conn.execute("INSERT INTO lib2_tracks (id, album_id, title, duration) VALUES (?, ?, 'T', ?)",
+                     (int(track_id), album_id, duration))
         conn.commit()
     finally:
         conn.close()
 
 
-def _seed_linked_play(db, played_at, db_track_id, duration_ms=0, source='plex'):
+def _seed_linked_play(db, played_at, lib2_track_id, duration_ms=0, source='plex'):
     conn = db._get_connection()
     try:
         conn.execute(
-            "INSERT INTO listening_history (title, artist, played_at, duration_ms, server_source, db_track_id, profile_id) "
+            "INSERT INTO listening_history (title, artist, played_at, duration_ms, server_source, lib2_track_id, profile_id) "
             "VALUES ('Firework', 'Katy Perry', ?, ?, ?, ?, 1)",
-            (played_at, duration_ms, source, db_track_id))
+            (played_at, duration_ms, source, lib2_track_id))
         conn.commit()
     finally:
         conn.close()

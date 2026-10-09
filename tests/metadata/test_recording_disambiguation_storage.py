@@ -25,27 +25,23 @@ def test_match_recording_returns_disambiguation_from_live_and_cached_results():
     assert cached["recording_disambiguation"] == "acoustic"
 
 
-def test_track_mbid_update_preserves_comment_only_for_same_recording(tmp_path):
-    path = tmp_path / "tracks.db"
-    with sqlite3.connect(path) as conn:
-        conn.execute("CREATE TABLE tracks (id TEXT PRIMARY KEY, musicbrainz_recording_id TEXT, "
-                     "recording_disambiguation TEXT, musicbrainz_last_attempted TEXT, "
-                     "musicbrainz_match_status TEXT)")
-        conn.execute("INSERT INTO tracks (id) VALUES ('track')")
+def test_track_mbid_update_takes_the_comment_and_stores_the_recording(tmp_path):
+    """Ours: upstream's call shape (``recording_disambiguation``) works on the
+    Library v2 row. lib2 keeps no comment column -- nothing reads one; the
+    comment reaches the file as MUSICBRAINZ_TRACKCOMMENT -- so only the id
+    lands, on lib2_tracks.musicbrainz_id."""
+    from database.music_database import MusicDatabase
+    from tests.lib2_seed import track
+
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    with db._get_connection() as conn:
+        track_id = track(conn, "Artist", "Album", "Song")
+        conn.commit()
 
     service = MusicBrainzService.__new__(MusicBrainzService)
-    service.db = SimpleNamespace(_get_connection=lambda: sqlite3.connect(path))
+    service.db = db
+    service.update_track_mbid(track_id, "rec-a", "matched", "acoustic")
 
-    service.update_track_mbid("track", "rec-a", "matched", "acoustic")
-    service.update_track_mbid("track", "rec-a", "matched")
-    with sqlite3.connect(path) as conn:
-        assert conn.execute("SELECT recording_disambiguation FROM tracks").fetchone()[0] == "acoustic"
-
-    service.update_track_mbid("track", "rec-b", "matched")
-    with sqlite3.connect(path) as conn:
-        assert conn.execute("SELECT musicbrainz_recording_id, recording_disambiguation "
-                            "FROM tracks").fetchone() == ("rec-b", None)
-
-    service.update_track_mbid("track", "rec-b", "matched", "  live  ")
-    with sqlite3.connect(path) as conn:
-        assert conn.execute("SELECT recording_disambiguation FROM tracks").fetchone()[0] == "live"
+    with db._get_connection() as conn:
+        assert conn.execute("SELECT musicbrainz_id FROM lib2_tracks WHERE id=?",
+                            (track_id,)).fetchone()[0] == "rec-a"

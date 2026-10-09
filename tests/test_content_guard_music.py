@@ -291,13 +291,21 @@ def test_kid_still_hears_the_library_track_it_was_allowed(kid, tmp_path):
         s['stream_sid'] = f'kidtest{uuid4().hex[:8]}'
         sid = s['stream_sid']
     sess = web_server.stream_state_store.get(sid)
+    from api.content_guard import VOUCHED_KEY
+    # upstream 2a4811360: /api/library/play vouches for the exact file it
+    # checked; the stream serves a kid only while the session still plays it
     with sess.lock:
         sess.update({'status': 'ready', 'file_path': str(audio), 'stream_url': None,
-                     'is_library': True, 'error_message': None})
+                     'is_library': True, 'error_message': None,
+                     VOUCHED_KEY: str(audio)})
     assert c.get('/stream/audio').status_code in (200, 206)
+    # a session moved on to another file loses the vouch
+    with sess.lock:
+        sess.update({'file_path': str(tmp_path / 'other.flac')})
+    assert c.get('/stream/audio').status_code == 403
     # a stream that isn't a library track stays unvouched
     with sess.lock:
-        sess.update({'is_library': False})
+        sess.update({'file_path': str(audio), 'is_library': False})
     assert c.get('/stream/audio').status_code == 403
 
 

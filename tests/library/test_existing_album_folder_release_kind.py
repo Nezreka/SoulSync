@@ -114,55 +114,9 @@ def test_compile_normalizes_to_compilation(tmp_path):
     assert _resolve(tmp_path, db, incoming_album_type="single") is None
 
 
-class _ProductionDb(_Db):
-    """Mirrors a real production DB: the albums table carries record_type
-    (populated by the enrichment workers) and has NO album_type column at
-    all. The kind gate must read the live column."""
-
-    def _get_connection(self):
-        conn = sqlite3.connect(":memory:")
-        conn.execute("CREATE TABLE albums (id TEXT, musicbrainz_release_id TEXT, record_type TEXT)")
-        conn.execute("INSERT INTO albums VALUES ('1', NULL, 'album')")
-        return conn
-
-
-def test_kind_gate_reads_record_type_in_production(tmp_path):
-    # The album_type column is never written by current code; without the
-    # record_type fallback the gate below would be lenient and reuse the
-    # album folder for the single.
-    _folder, tracks = _existing_album_folder(tmp_path)
-    db = _ProductionDb(tracks)
-    assert _resolve(tmp_path, db, incoming_album_type="single") is None
-
-
-class _BothColumnsDb(_Db):
-    """An older enriched DB carrying BOTH columns: a NULL/blank record_type
-    must fall through to album_type; a populated record_type wins."""
-
-    def __init__(self, tracks, record_type, album_type):
-        super().__init__(tracks, album_type)
-        self._record_type = record_type
-
-    def _get_connection(self):
-        conn = sqlite3.connect(":memory:")
-        conn.execute(
-            "CREATE TABLE albums (id TEXT, musicbrainz_release_id TEXT, "
-            "record_type TEXT, album_type TEXT)")
-        conn.execute(
-            "INSERT INTO albums VALUES ('1', NULL, ?, ?)",
-            (self._record_type, self._album_type))
-        return conn
-
-
-def test_blank_record_type_falls_through_to_album_type(tmp_path):
-    folder, tracks = _existing_album_folder(tmp_path)
-    # record_type NULL/empty/whitespace -> the legacy album_type decides.
-    for blank in (None, "", "   "):
-        db = _BothColumnsDb(tracks, record_type=blank, album_type="album")
-        assert _resolve(tmp_path, db, incoming_album_type="single") is None
-    # A populated record_type wins over a conflicting album_type.
-    db = _BothColumnsDb(tracks, record_type="single", album_type="album")
-    assert _resolve(tmp_path, db, incoming_album_type="single") == os.path.normpath(folder)
+# Upstream's _ProductionDb / _BothColumnsDb tests (#1562) pin the legacy
+# albums table's record_type-then-album_type fallback. Library v2 has one kind
+# column, lib2_albums.album_type, which the tests above already exercise.
 
 
 def test_single_and_ep_share_a_folder(tmp_path):

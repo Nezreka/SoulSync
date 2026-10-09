@@ -714,8 +714,11 @@ def test_user_initiated_reaches_the_sync_service(patched_db):
                      user_initiated=True)
     assert svc.user_initiated is True
 
+    # Ours: a sync without an automation is a click too (Sync buttons on the
+    # source pages); only a run an automation started keeps the ignore-list.
     svc = _FakeSyncService(media_client=_FakeMediaClient())
-    ds.run_sync_task('sched_pl', 'Scheduled', [_track()], deps=_build_deps(sync_service=svc))
+    ds.run_sync_task('sched_pl', 'Scheduled', [_track()], automation_id='auto-1',
+                     deps=_build_deps(sync_service=svc))
     assert svc.user_initiated is False
 
 

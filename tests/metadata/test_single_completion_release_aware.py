@@ -47,30 +47,38 @@ def _build_library(tmp_path, albums):
 
     Each spec: dict(title, year, track_count, record_type, deezer_id,
     tracks=[titles]). Returns (db, candidate_albums, candidate_tracks).
+
+    Ours: Library v2 rows. lib2_albums.album_type is NOT NULL with the default
+    'album', so a known kind is the type plus the download's filing record
+    (filed_release); ``record_type=None`` leaves the schema default, which the
+    gate reads as unknown, like upstream's NULL record_type.
     """
+    import json
+
+    from tests.lib2_seed import artist, file_track
+
     db = MusicDatabase(str(tmp_path / "m.db"))
     with db._get_connection() as conn:
-        conn.execute(
-            "INSERT INTO artists (id, name, server_source) VALUES ('AR1', ?, 'test')",
-            (ARTIST,))
+        artist_id = artist(conn, ARTIST, server_source="test")
+        next_track = 1
         for i, spec in enumerate(albums):
-            aid = f"AL{i}"
-            cols = ["id", "artist_id", "title", "year", "track_count", "server_source"]
-            vals = [aid, "AR1", spec["title"], spec["year"], spec["track_count"], "test"]
+            cols = {"year": spec["year"], "track_count": spec["track_count"],
+                    "server_source": "test", "server_id": f"AL{i}"}
             if spec.get("record_type") is not None:
-                cols.append("record_type")
-                vals.append(spec["record_type"])
+                cols["album_type"] = spec["record_type"]
+                cols["filed_release"] = json.dumps({"type": spec["record_type"]})
             if spec.get("deezer_id") is not None:
-                cols.append("deezer_id")
-                vals.append(spec["deezer_id"])
-            conn.execute(
-                f"INSERT INTO albums ({', '.join(cols)}) VALUES ({', '.join('?' * len(vals))})",
-                vals)
+                cols["external_ids"] = json.dumps({"deezer": spec["deezer_id"]})
+            # never album(): it folds a second release of the same title into
+            # the first, and a same-titled album + single is the point here
+            keys = ["primary_artist_id", "title", "origin", *cols]
+            album_id = conn.execute(
+                f"INSERT INTO lib2_albums ({', '.join(keys)}) VALUES ({', '.join('?' * len(keys))})",
+                [artist_id, spec["title"], "library", *cols.values()]).lastrowid
             for j, title in enumerate(spec["tracks"]):
-                conn.execute(
-                    "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, server_source) "
-                    "VALUES (?, ?, 'AR1', ?, ?, ?, 'test')",
-                    (f"T{i}_{j}", aid, title, j + 1, f"/m/{aid}/t{j}.mp3"))
+                track_id = file_track(conn, next_track, album_id, title, f"/m/AL{i}/t{j}.mp3")
+                conn.execute("UPDATE lib2_tracks SET track_number=? WHERE id=?", (j + 1, track_id))
+                next_track += 1
         conn.commit()
     candidates = db.get_candidate_albums_for_artist(ARTIST, server_source="test")
     tracks = db.get_candidate_tracks_for_albums([a.id for a in candidates]) if candidates else []

@@ -28,21 +28,20 @@ class _FakeDB:
 
 
 def _make_db_with_album(owner_profile_id=None):
+    """Ours: Library v2 keeps the owner per file (lib2_track_files)."""
     db = _FakeDB()
     conn = db._get_connection()
+    conn.execute("CREATE TABLE lib2_albums (id INTEGER PRIMARY KEY, title TEXT)")
+    conn.execute("CREATE TABLE lib2_tracks (id INTEGER PRIMARY KEY, album_id INTEGER)")
     conn.execute(
-        "CREATE TABLE albums (id TEXT PRIMARY KEY, title TEXT, owner_profile_id INTEGER)"
+        "CREATE TABLE lib2_track_files (id INTEGER PRIMARY KEY, track_id INTEGER, path TEXT,"
+        " file_state TEXT DEFAULT 'active', is_primary INTEGER DEFAULT 1, owner_profile_id INTEGER)"
     )
+    conn.execute("INSERT INTO lib2_albums (id, title) VALUES (1, 'Test Album')")
+    conn.execute("INSERT INTO lib2_tracks (id, album_id) VALUES (1, 1)")
     conn.execute(
-        "CREATE TABLE tracks (id TEXT PRIMARY KEY, album_id TEXT, file_path TEXT)"
-    )
-    conn.execute(
-        "INSERT INTO albums (id, title, owner_profile_id) VALUES (?, ?, ?)",
-        ("alb-1", "Test Album", owner_profile_id),
-    )
-    conn.execute(
-        "INSERT INTO tracks (id, album_id, file_path) VALUES (?, ?, ?)",
-        ("t1", "alb-1", "/app/libraries/user1/Artist/Album/01.flac"),
+        "INSERT INTO lib2_track_files (track_id, path, owner_profile_id) VALUES (1, ?, ?)",
+        ("/app/libraries/user1/Artist/Album/01.flac", owner_profile_id),
     )
     conn.commit()
     return db
@@ -56,7 +55,7 @@ def test_resolve_album_profile_id_file_location_wins():
     ):
         # ...but the file is in profile 2's library, so 2 wins
         pid = reorg.resolve_album_profile_id(
-            db, "alb-1", tracks=tracks, resolve_file_path_fn=lambda p: p
+            db, 1, tracks=tracks, resolve_file_path_fn=lambda p: p
         )
     assert pid == 2
 
@@ -69,7 +68,7 @@ def test_resolve_album_profile_id_falls_back_to_db():
     ):
         # file not in any own library -> DB owner wins
         pid = reorg.resolve_album_profile_id(
-            db, "alb-1", tracks=tracks, resolve_file_path_fn=lambda p: p
+            db, 1, tracks=tracks, resolve_file_path_fn=lambda p: p
         )
     assert pid == 3
 
@@ -81,7 +80,7 @@ def test_resolve_album_profile_id_shared_default():
         "core.imports.paths.profile_id_for_path", return_value=None
     ):
         pid = reorg.resolve_album_profile_id(
-            db, "alb-1", tracks=tracks, resolve_file_path_fn=lambda p: p
+            db, 1, tracks=tracks, resolve_file_path_fn=lambda p: p
         )
     assert pid is None
 
