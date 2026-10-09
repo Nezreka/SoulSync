@@ -168,7 +168,13 @@ def process_download(
         verdict = check_complete(str(resolved), row)
         patch["completeness"] = verdict.get("reason", "")
         if not verdict.get("complete"):
-            if verdict.get("expired"):
+            if verdict.get("no_audio"):
+                # files but no audio, an ebook claimed as an audiobook. staging
+                # held these as "importing" for the whole window, and no amount
+                # of waiting turns an epub into a book you can listen to
+                patch["status"] = "failed"
+                patch["error"] = "No audio in this download, only other files (an ebook?)"
+            elif verdict.get("expired"):
                 patch["status"] = "failed"
                 patch["error"] = (
                     f"Never completed: {verdict.get('reason') or 'still incomplete'}"
@@ -309,6 +315,9 @@ def _check_complete(source_path: str, row: Dict[str, Any]) -> Dict[str, Any]:
 
     verdict = assess(source_path, expected, tolerance_from_settings(),
                      abridged=abridged)
+    if not verdict.get("complete") and not verdict.get("files"):
+        from core.audiobook_completeness import has_files_but_no_audio
+        verdict["no_audio"] = has_files_but_no_audio(source_path)
     if not verdict.get("complete"):
         verdict["expired"] = staging_expired(
             row.get("created_at") or 0, staging_days_from_settings(),

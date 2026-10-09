@@ -1373,3 +1373,56 @@ def test_adopting_a_soulseek_folder_packs_it_like_a_grab(client, catalog, wishli
     again = client.post("/api/audiobooks/adopt", json={
         "source": "soulseek", "username": "peer", "files": files, "asin": "B1"})
     assert again.status_code == 409
+
+
+
+# an ebook claimed as an audiobook used to match, show as claimed, and then sit
+# "importing" forever. the claim now looks inside a finished download first
+
+def _client_reports(path, state="completed"):
+    from types import SimpleNamespace
+    status = SimpleNamespace(state=state, progress=1.0 if state == "completed" else 0.4,
+                             content_path=str(path), save_path=str(path))
+    return patch("core.audiobook_download_monitor._get_status", return_value=status)
+
+
+def _identity_resolve():
+    return patch("core.audiobook_download_monitor._resolve_path", side_effect=lambda p: p)
+
+
+def test_adopting_a_finished_ebook_is_refused(client, catalog, wishlist_db, tmp_path):
+    catalog.get_book.return_value = _item(asin="B1")
+    epub = tmp_path / "Blaze.epub"
+    epub.write_bytes(b"x")
+    with _client_reports(epub), _identity_resolve():
+        resp = _adopt(client)
+    assert resp.status_code == 409
+    assert resp.get_json()["no_audio"] is True
+    assert wishlist_db.get_downloads() == []
+
+
+def test_adopting_a_finished_audiobook_folder_still_works(client, catalog, wishlist_db, tmp_path):
+    catalog.get_book.return_value = _item(asin="B1")
+    folder = tmp_path / "book"
+    folder.mkdir()
+    (folder / "cover.jpg").write_bytes(b"x")
+    (folder / "01.mp3").write_bytes(b"x")
+    with _client_reports(folder), _identity_resolve():
+        assert _adopt(client).status_code == 200
+
+
+def test_adopting_an_unfinished_download_is_judged_later(client, catalog, wishlist_db, tmp_path):
+    catalog.get_book.return_value = _item(asin="B1")
+    epub = tmp_path / "Blaze.epub"
+    epub.write_bytes(b"x")
+    with _client_reports(epub, state="downloading"), _identity_resolve():
+        assert _adopt(client).status_code == 200
+
+
+def test_adopting_a_soulseek_folder_of_ebooks_is_refused(client, catalog, wishlist_db):
+    catalog.get_book.return_value = _item(asin="B1")
+    resp = client.post("/api/audiobooks/adopt", json={
+        "source": "soulseek", "username": "peer", "asin": "B1",
+        "files": ["Books\\Stephen King\\Blaze.epub", "Books\\Stephen King\\Blaze.pdf"]})
+    assert resp.status_code == 409
+    assert wishlist_db.get_downloads() == []
