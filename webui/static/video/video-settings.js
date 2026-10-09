@@ -186,7 +186,7 @@
     }
 
     function status(text) {
-        var n = document.querySelector('[data-video-lib-status]');
+        var n = document.querySelector('[data-video-lib-save-status]');
         if (n) n.textContent = text || '';
     }
 
@@ -215,7 +215,13 @@
                 var sel = d.selected || {};
                 fill(document.querySelector('[data-video-lib-select="movies"]'), d.movies || [], sel.movies);
                 fill(document.querySelector('[data-video-lib-select="tv"]'), d.tv || [], sel.tv);
-                status('');
+                if (!(d.movies || []).length && !(d.tv || []).length) {
+                    status('No movie or TV libraries found. Check the server connection and that the user above can see them.');
+                } else if (!sel.movies && !sel.tv) {
+                    status('Pick a library or the scan has nothing to read.');
+                } else {
+                    status('');
+                }
             })
             .catch(function () { status('Could not load libraries'); });
     }
@@ -1543,7 +1549,7 @@
         // 'Music Library' selector above (which saves on change, no button).
         // NB: wrap each handler so the DOM Event isn't passed as the function's
         // first arg (which is our `silent` flag — it would suppress the toast).
-        var selects = document.querySelectorAll('[data-video-lib-select]');
+        var selects = document.querySelectorAll('select[data-video-lib-select]');
         for (var i = 0; i < selects.length; i++) {
             selects[i].addEventListener('change', function () { save(); });
         }
