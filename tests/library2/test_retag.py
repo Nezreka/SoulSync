@@ -657,3 +657,34 @@ def test_a_hand_set_artist_name_is_what_gets_written(imported_conn):
     assert data['artist_name'] == 'Corrected Artist'
     assert data['track_artist'] == 'Corrected Artist; Wizkid'
     assert data['artists_list'] == ['Corrected Artist', 'Wizkid']
+
+
+def test_wrong_file_number_does_not_select_another_catalogue_track(imported_conn, legacy_db, tmp_path):
+    """#1610: tags naming Beta but numbered 1 must never receive Alpha's tags."""
+    import subprocess
+    from mutagen.flac import FLAC
+    from tests.lib2_seed import track
+    from core.library2.editions import backfill_editions
+    path = tmp_path / 'Beta.flac'
+    subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i',
+                    'anullsrc=r=44100:cl=stereo', '-t', '0.1', str(path)], check=True)
+    audio = FLAC(path)
+    audio['title'] = 'Beta'
+    audio['tracknumber'] = '1'
+    audio.save()
+    conn = imported_conn
+    track(conn, 'Numbering Artist', 'Numbering Album', 'Alpha', track_number=1,
+          album_cols={'track_count': 2})
+    beta = track(conn, 'Numbering Artist', 'Numbering Album', 'Beta', track_number=2, path=str(path))
+    backfill_editions(conn.cursor())
+    conn.commit()
+    preview = retag.tag_preview(retag.track_contexts(conn, [beta]))
+    assert preview[0]['track_id'] == beta
+    assert preview[0]['title'] == 'Beta'
+    changes = {d['file_key']: d for d in preview[0]['diff']}
+    assert changes['track_number']['db_value'] == '2'
+    stats = retag.write_tags(legacy_db, [beta], embed_cover=False)
+    assert stats['written'] == 1
+    saved = FLAC(path)
+    assert saved['title'] == ['Beta']
+    assert saved['tracknumber'] == ['2']

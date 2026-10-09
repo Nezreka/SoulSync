@@ -4120,7 +4120,12 @@ export function UnifiedFileRemovalDialog({
   });
   const physical = preview.data;
   const trackCount = new Set((physical?.files ?? []).flatMap((file) => file.track_ids ?? [])).size;
-  const physicalReady = Boolean(physical && physical.file_count > 0 && physical.unsafe_count === 0);
+  const physicalReady = Boolean(
+    physical &&
+    physical.file_count > 0 &&
+    physical.unsafe_count === 0 &&
+    !physical.shared_reference_count,
+  );
   const canExecute = Boolean(
     physical && !busy && (mode === 'database_only' || (physicalReady && confirmed)),
   );
@@ -4239,7 +4244,9 @@ export function UnifiedFileRemovalDialog({
                       <small>
                         {file.album_title ? `${file.album_title} · ` : ''}
                         {formatFileSize(file.size ?? 0)}
-                        {!file.deletable ? ` · permanent delete blocked: ${file.reason}` : ''}
+                        {!file.deletable
+                          ? ` · permanent delete blocked: ${file.reason === 'shared_file_references' ? 'also used by unselected tracks' : file.reason}`
+                          : ''}
                       </small>
                     </li>
                   );
@@ -4305,6 +4312,12 @@ export function UnifiedFileRemovalDialog({
           </span>
         </label>
       </div>
+      {physical?.shared_reference_count ? (
+        <p role="alert" className={styles.mutationError}>
+          These files are also used by tracks you have not selected. Select all references to delete
+          the files, or remove only the selected database references.
+        </p>
+      ) : null}
       {physical && physical.unsafe_count > 0 ? (
         <div className={styles.mutationError} role="alert">
           Deleting is blocked for {physical.unsafe_count} file

@@ -85,9 +85,9 @@ def test_orphan_detector_walks_own_root():
         import sqlite3
         db_path = os.path.join(tmp, 't.db')
         conn = sqlite3.connect(db_path)
-        conn.execute("CREATE TABLE tracks (id INTEGER PRIMARY KEY, file_path TEXT, title TEXT, artist_id TEXT, album_id TEXT)")
-        conn.execute("CREATE TABLE artists (id TEXT PRIMARY KEY, name TEXT)")
-        conn.execute("CREATE TABLE albums (id TEXT PRIMARY KEY, artist_id TEXT)")
+        # ours: an empty Library v2 catalogue
+        from core.library2.schema import ensure_library_v2_schema
+        ensure_library_v2_schema(conn)
         conn.commit()
         conn.close()
 

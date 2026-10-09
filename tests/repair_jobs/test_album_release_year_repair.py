@@ -262,7 +262,7 @@ def test_resolve_canonical_album_year_waterfall():
     assert res_search[0] == "1978"
 
 
-def test_scan_dry_run_generates_findings(tmp_path):
+def test_scan_dry_run_generates_findings(tmp_path, monkeypatch):
     db = MusicDatabase(str(tmp_path / "test.db"))
     album_dir = tmp_path / "Queen" / "Jazz (2011)"
     f1 = album_dir / "01.flac"
@@ -294,8 +294,17 @@ def test_scan_dry_run_generates_findings(tmp_path):
         create_finding=create_finding,
     )
 
+    import core.repair_jobs.album_release_year_repair as repair
+    original_resolve = repair.resolve_canonical_album_year
+    requested_titles = []
+    def resolve_with_titles(**kwargs):
+        requested_titles.extend(kwargs.get('track_titles') or [])
+        return original_resolve(**kwargs)
+    monkeypatch.setattr(repair, 'resolve_canonical_album_year', resolve_with_titles)
     job = AlbumReleaseYearRepairJob()
     result = job.scan(ctx)
+    assert requested_titles == ['Mustapha']
+
 
     assert result.scanned == 1
     assert result.findings_created == 1

@@ -174,6 +174,7 @@ class OrphanFileDetectorJob(RepairJob):
         # H:\Music\Artist\Album\track.mp3).  We compare using suffix fragments
         # of depth 2-4 (album/filename, artist/album/filename) which covers
         # mount-prefix mismatches without conflating common filenames.
+        known_suffixes = set()     # lowercase path suffixes, depth 1-4
         known_titles = set()       # (title_lower, artist_lower) for exact match
         known_titles_clean = set()  # (clean_title, clean_artist) for normalized match
         def _strip_extras(s):

@@ -9528,6 +9528,15 @@ class MusicDatabase:
                     if isinstance(_wrapper_size, int) and _wrapper_size > 0:
                         file_size = _wrapper_size
 
+                # #1573: keep the server mount as an observation on its mapping.
+                # Local resolution helps recognition/technical facts; it never
+                # replaces the imported catalogue's file or its owner.
+                server_path = file_path
+                if file_path:
+                    from core.library.server_paths import local_path_for
+                    from core.settings import config_manager
+                    file_path = local_path_for(file_path, config_manager) or file_path
+
                 catalogue_album = resolve_album(cursor, server_source, album_id)
                 catalogue_artist = resolve_artist(cursor, server_source, artist_id)
                 if catalogue_album is None or catalogue_artist is None:
@@ -9597,6 +9606,7 @@ class MusicDatabase:
                     track_artist=track_artist,
                     musicbrainz_id=getattr(track_obj, 'musicBrainzId', None) or None,
                     file_path=file_path,
+                    server_path=server_path,
                     file_size=file_size,
                     bitrate=bitrate,
                 )
@@ -9785,18 +9795,30 @@ class MusicDatabase:
             logger.error(f"Error getting tracks for album {album_id}: {e}")
             return []
 
-    def get_all_library_tracks_for_export(self) -> List[Dict[str, Any]]:
+    def get_all_library_tracks_for_export(self, server_source: Optional[str] = None) -> List[Dict[str, Any]]:
         """All library tracks that have a file, for playlist/M3U export.
 
         Returns ``[{path, title, artist, duration}]`` ordered by artist / album / track number.
         ``duration`` is converted to SECONDS here (the schema stores milliseconds)."""
         from core.library2.track_files import primary_order
+        from core.library2.sql_util import owner_clause
+        if server_source is None:
+            from core.settings import config_manager
+            server_source = (config_manager.get_active_media_server()
+                             if hasattr(config_manager, 'get_active_media_server') else None)
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(f"""
-                SELECT f.path AS path, t.title AS title, ar.name AS artist,
+                SELECT COALESCE((SELECT NULLIF(m.server_path, '')
+                           FROM lib2_media_server_mappings m
+                          WHERE m.entity_type='track' AND m.entity_id=t.id
+                            AND m.server_source=? AND m.match_status='recognized'
+                            AND m.server_library_id=CASE WHEN f.owner_profile_id IS NULL
+                                THEN '' ELSE 'own:' || f.owner_profile_id END
+                          ORDER BY m.last_seen_at DESC, m.id DESC LIMIT 1), f.path) AS path,
+                       t.title AS title, ar.name AS artist,
                        t.duration AS duration_ms, t.track_number AS track_number
                 FROM lib2_tracks t
                 JOIN lib2_albums al ON al.id = t.album_id
@@ -9806,9 +9828,10 @@ class MusicDatabase:
                       WHERE inner_f.track_id = t.id
                         AND COALESCE(inner_f.file_state, 'active') = 'active'
                         AND COALESCE(inner_f.path, '') <> ''
+                        {owner_clause(column='inner_f.owner_profile_id')}
                       ORDER BY {primary_order('inner_f')} LIMIT 1)
                 ORDER BY ar.name COLLATE NOCASE, al.title COLLATE NOCASE, t.track_number
-            """)
+            """, (server_source or "",))
             out: List[Dict[str, Any]] = []
             for row in cursor.fetchall():
                 dur_ms = row['duration_ms']
@@ -10064,18 +10087,23 @@ class MusicDatabase:
         rows that actually have a file_path are returned (the rest can't go in an
         M3U anyway)."""
         try:
+            from core.library2.sql_util import scoped_primary_file_join
             conn = self._get_connection()
             cursor = conn.cursor()
             sql = ("SELECT tracks.title AS title, artists.name AS artist_name, "
-                   "       files.path AS file_path "
+                   "       COALESCE((SELECT NULLIF(m.server_path, '') "
+                   "FROM lib2_media_server_mappings m "
+                   "WHERE m.entity_type='track' AND m.entity_id=tracks.id "
+                   "AND m.server_source=? AND m.match_status='recognized' "
+                   "AND m.server_library_id=CASE WHEN files.owner_profile_id IS NULL "
+                   "THEN '' ELSE 'own:' || files.owner_profile_id END "
+                   "ORDER BY m.last_seen_at DESC, m.id DESC LIMIT 1), files.path) AS file_path "
                    "FROM lib2_tracks tracks "
                    "JOIN lib2_albums albums ON albums.id = tracks.album_id "
                    "JOIN lib2_artists artists ON artists.id = albums.primary_artist_id "
-                   "JOIN lib2_track_files files ON files.track_id = tracks.id "
-                   "     AND files.is_primary = 1 "
-                   "     AND COALESCE(files.file_state, 'active') <> 'deleted' "
+                   f"JOIN lib2_track_files files ON {scoped_primary_file_join('tracks', 'files')} "
                    "WHERE files.path IS NOT NULL AND files.path != ''")
-            params: list = []
+            params: list = [server_source or ""]
             if server_source:
                 sql += (" AND (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
                         "WHERE m.entity_type='track' AND m.entity_id=tracks.id "
@@ -19695,8 +19723,19 @@ class MusicDatabase:
                 f"UPDATE lib2_tracks SET {', '.join(set_clauses)} WHERE id = ?",
                 params,
             )
+            updated = cursor.rowcount or 0
+            # Upstream 5170059ed: the provenance comment fills in only for the
+            # recording it was recorded with.
+            disambiguation = str(prov.get('recording_disambiguation') or '').strip()
+            prov_mbid = prov.get('musicbrainz_recording_id')
+            if disambiguation and prov_mbid:
+                cursor.execute(
+                    "UPDATE lib2_tracks SET recording_disambiguation ="
+                    " COALESCE(NULLIF(recording_disambiguation, ''), ?)"
+                    " WHERE id = ? AND LOWER(COALESCE(musicbrainz_id, '')) = LOWER(?)",
+                    (disambiguation, track_id, str(prov_mbid)))
             conn.commit()
-            return cursor.rowcount or 0
+            return updated
         except Exception as exc:
             logger.debug(f"backfill_track_external_ids_from_provenance failed: {exc}")
             return 0

@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS lib2_media_server_mappings (
     server_source TEXT NOT NULL,
     server_library_id TEXT NOT NULL DEFAULT '',
     server_id TEXT NOT NULL,
+    server_path TEXT,                         -- observed mount, never catalogue ownership
     match_status TEXT NOT NULL DEFAULT 'recognized',
     first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -91,6 +92,10 @@ def _migrate_server_library_id(cursor: Any) -> None:
 def ensure_media_mapping_schema(cursor: Any) -> None:
     cursor.execute(DDL)
     _migrate_server_library_id(cursor)
+    columns = {r[1] for r in cursor.execute(
+        "PRAGMA table_info(lib2_media_server_mappings)").fetchall()}
+    if "server_path" not in columns:
+        cursor.execute("ALTER TABLE lib2_media_server_mappings ADD COLUMN server_path TEXT")
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_lib2_media_mappings_entity "
         "ON lib2_media_server_mappings(entity_type, entity_id)"
@@ -132,7 +137,8 @@ def resolve_mapping(cursor: Any, entity_type: str, server_source: Any,
 
 def upsert_mapping(cursor: Any, entity_type: str, entity_id: int,
                    server_source: Any, server_id: Any,
-                   server_library_id: Any = "", *, compat: bool = True) -> None:
+                   server_library_id: Any = "", *, compat: bool = True,
+                   server_path: Optional[str] = None) -> None:
     """Record one positive recognition, safely handling a server re-key.
 
     Everything here is scoped to ONE server library. Without that, mapping an
@@ -157,14 +163,15 @@ def upsert_mapping(cursor: Any, entity_type: str, entity_id: int,
     )
     cursor.execute(
         """INSERT INTO lib2_media_server_mappings(
-               entity_type,entity_id,server_source,server_library_id,server_id,match_status)
-           VALUES(?,?,?,?,?,'recognized')
+               entity_type,entity_id,server_source,server_library_id,server_id,server_path,match_status)
+           VALUES(?,?,?,?,?,?,'recognized')
            ON CONFLICT(entity_type,entity_id,server_source,server_library_id)
            DO UPDATE SET
                server_id=excluded.server_id,
+               server_path=COALESCE(NULLIF(excluded.server_path, ''), server_path),
                match_status='recognized',
                last_seen_at=CURRENT_TIMESTAMP""",
-        (entity_type, int(entity_id), source, library, sid),
+        (entity_type, int(entity_id), source, library, sid, server_path),
     )
     # Compatibility only.  New code reads the mapping table, so replacing this
     # snapshot cannot erase another server's durable mapping.

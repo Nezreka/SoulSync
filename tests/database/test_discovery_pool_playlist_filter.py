@@ -144,7 +144,7 @@ def test_wing_it_stats_filtered_by_playlist(pool_db, monkeypatch):
     assert db.get_wing_it_pool_stats(playlist_id=pid_b) == {"wing_it": 0, "matched": 1}
 
 
-def test_filter_keys_match_write_path_keys(pool_db):
+def test_filter_keys_match_write_path_keys(pool_db, monkeypatch):
     """The per-playlist filter must re-key tracks exactly the way the cache
     write path does (#1452 review follow-up).
 
@@ -159,6 +159,8 @@ def test_filter_keys_match_write_path_keys(pool_db):
         "api.source_playlists", reason="write path needs the full app stack"
     )
     db, pid_a, _pid_b = pool_db
+    # Route dependencies are normally injected by web_server at registration.
+    monkeypatch.setattr(source_playlists, "_matching_engine", lambda: mdb._matching_engine)
     write_keys = {
         source_playlists._get_discovery_cache_key(title, artist)
         for title, artist in (("Alpha", "Artist One"), ("Beta", "Artist Two"))

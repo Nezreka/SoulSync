@@ -215,4 +215,22 @@ describe('unified Library v2 file-removal dialog', () => {
 
     expect(await screen.findByText(/Music Library Paths/i)).toBeInTheDocument();
   });
+  it('protects a file also used by an unselected album track', async () => {
+    const original = preview();
+    const payload = {
+      ...original,
+      shared_reference_count: 1,
+      deletable_count: 0,
+      files: [{ ...original.files[0], deletable: false, reason: 'shared_file_references' }],
+    };
+    server.use(
+      http.get('/api/library/v2/albums/42/file-delete-preview', () => HttpResponse.json(payload)),
+    );
+    renderDialog();
+    expect(
+      await screen.findByText(/also used by tracks you have not selected/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /Delete files/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Remove from library database' })).toBeEnabled();
+  });
 });

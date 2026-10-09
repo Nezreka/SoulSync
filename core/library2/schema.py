@@ -586,6 +586,12 @@ _ADDED_COLUMNS = (
     # the release column on its next run.
     ("lib2_albums", "musicbrainz_release_group_id",
      "ALTER TABLE lib2_albums ADD COLUMN musicbrainz_release_group_id TEXT"),
+    # The MusicBrainz recording comment ("acoustic", "live") that tells two
+    # versions of a song apart (upstream 5170059ed / #1536). It belongs to one
+    # recording: trg_lib2_tracks_recording_comment clears it whenever
+    # musicbrainz_id changes, whoever writes the id.
+    ("lib2_tracks", "recording_disambiguation",
+     "ALTER TABLE lib2_tracks ADD COLUMN recording_disambiguation TEXT"),
     # Whose library the file belongs to. Nullable and unread for now: NULL on
     # every existing row is the shared library, which is what an install
     # without own-library profiles is.
@@ -1018,6 +1024,22 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
                 columns.add(column)
             except Exception as e:  # noqa: BLE001
                 logger.debug("column migration %s.%s: %s", table, column, e)
+    # A recording comment never outlives its recording id (see the column).
+    try:
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_lib2_tracks_recording_comment
+            AFTER UPDATE OF musicbrainz_id ON lib2_tracks
+            FOR EACH ROW
+            WHEN LOWER(COALESCE(OLD.musicbrainz_id, '')) <> LOWER(COALESCE(NEW.musicbrainz_id, ''))
+             AND NEW.recording_disambiguation IS NOT NULL
+             -- a statement writing id and comment together meant that pair
+             AND NEW.recording_disambiguation IS OLD.recording_disambiguation
+            BEGIN
+                UPDATE lib2_tracks SET recording_disambiguation = NULL WHERE id = NEW.id;
+            END
+        """)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("recording comment trigger skipped: %s", e)
     _migrate_lib2_profiles_to_app_wide(cursor)
     _migrate_quality_profile_constraints(cursor)
     _backfill_quality_profile_provenance(cursor)

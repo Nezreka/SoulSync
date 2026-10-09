@@ -25,11 +25,10 @@ def test_match_recording_returns_disambiguation_from_live_and_cached_results():
     assert cached["recording_disambiguation"] == "acoustic"
 
 
-def test_track_mbid_update_takes_the_comment_and_stores_the_recording(tmp_path):
-    """Ours: upstream's call shape (``recording_disambiguation``) works on the
-    Library v2 row. lib2 keeps no comment column -- nothing reads one; the
-    comment reaches the file as MUSICBRAINZ_TRACKCOMMENT -- so only the id
-    lands, on lib2_tracks.musicbrainz_id."""
+def test_track_mbid_update_stores_recording_and_comment(tmp_path):
+    """Ours: on the Library v2 row (lib2_tracks.musicbrainz_id and
+    recording_disambiguation); the full same-recording rules are pinned in
+    tests/library2/test_recording_disambiguation.py."""
     from database.music_database import MusicDatabase
     from tests.lib2_seed import track
 
@@ -43,5 +42,6 @@ def test_track_mbid_update_takes_the_comment_and_stores_the_recording(tmp_path):
     service.update_track_mbid(track_id, "rec-a", "matched", "acoustic")
 
     with db._get_connection() as conn:
-        assert conn.execute("SELECT musicbrainz_id FROM lib2_tracks WHERE id=?",
-                            (track_id,)).fetchone()[0] == "rec-a"
+        assert tuple(conn.execute(
+            "SELECT musicbrainz_id, recording_disambiguation FROM lib2_tracks WHERE id=?",
+            (track_id,)).fetchone()) == ("rec-a", "acoustic")

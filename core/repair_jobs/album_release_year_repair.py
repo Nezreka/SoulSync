@@ -771,7 +771,8 @@ class AlbumReleaseYearRepairJob(RepairJob):
                 # Hand-tagged files were dropped above; an album left without
                 # files was dropped with them.
                 eligible_tracks = [
-                    {'id': f['track_id'], 'file_id': f['file_id'], 'file_path': f['path']}
+                    {'id': f['track_id'], 'file_id': f['file_id'], 'file_path': f['path'],
+                     'title': f['title']}
                     for f in files_by_album[album_id]
                 ]
                 tracks = eligible_tracks

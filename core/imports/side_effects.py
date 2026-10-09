@@ -745,7 +745,7 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         # comes off the provider response or a Picard-tagged file.
         # Upstream 5170059ed: the embedded tag or a MusicBrainz source id
         # counts too, not only the provider response.
-        track_mbid, _recording_disambiguation = _recording_identity(context)
+        track_mbid, recording_disambiguation = _recording_identity(context)
         track_isrc = (track_info.get("isrc") or "").strip().upper() or None
         # Whatever the pipeline resolved for this item (a wishlist row's or
         # Auto-Import's own override, or None for "follow the app-wide
@@ -849,6 +849,12 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                 allow_create=True, file_source="import")
             cursor.execute("UPDATE lib2_tracks SET isrc=COALESCE(?, isrc) WHERE id=?",
                            (track_isrc, catalogue_track))
+            if recording_disambiguation and track_mbid:
+                # Upstream 5170059ed: the comment lands with its recording only.
+                cursor.execute(
+                    "UPDATE lib2_tracks SET recording_disambiguation=? WHERE id=?"
+                    " AND LOWER(COALESCE(musicbrainz_id, ''))=?",
+                    (recording_disambiguation, catalogue_track, track_mbid))
             if track_quality_profile_id:
                 # v2 says "which profile" and "was it chosen" separately, so an
                 # item imported under an explicit override keeps that on record

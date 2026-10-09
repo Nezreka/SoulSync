@@ -352,6 +352,28 @@ def preview_entity_files(
                     item["reason"] = "stat_failed"
 
     files = list(grouped.values())
+    # #1611: a second catalogue reference is not a second physical copy.
+    # A subset delete must not unlink the file an unselected track still uses.
+    selected_ids = {fid for item in files for fid in item["file_ids"]}
+    paths = {p for item in files for p in [item["path"], *item["stored_paths"]] if p}
+    refs_by_path: Dict[str, set] = {}
+    with closing(database._get_connection()) as conn:
+        path_list = sorted(paths)
+        for start in range(0, len(path_list), 800):
+            batch = path_list[start:start + 800]
+            marks = ','.join('?' for _ in batch)
+            for ref in conn.execute(
+                    f"SELECT id, path FROM lib2_track_files WHERE path IN ({marks}) "
+                    "AND COALESCE(file_state, 'active') NOT IN ('deleted','missing_confirmed')",
+                    batch):
+                refs_by_path.setdefault(ref['path'], set()).add(int(ref['id']))
+    for item in files:
+        unselected = set()
+        for path in [item["path"], *item["stored_paths"]]:
+            unselected.update(refs_by_path.get(path, set()) - selected_ids)
+        if item["deletable"] and unselected:
+            item.update(deletable=False, reason="shared_file_references",
+                        unselected_file_ids=sorted(unselected))
     token_payload = {
         "entity": entity,
         "entity_id": int(entity_id),
@@ -376,6 +398,7 @@ def preview_entity_files(
         "files": files,
         "file_count": len(files),
         "deletable_count": sum(1 for item in files if item["deletable"]),
+        "shared_reference_count": sum(item["reason"] == "shared_file_references" for item in files),
         # "Unsafe" means: this path is real and lies outside your library, so
         # deleting it could destroy something that is not the library's to
         # delete. A file that is simply GONE is not unsafe — there is nothing
@@ -890,6 +913,13 @@ def delete_entity_files(
     if preview["unsafe_count"]:
         raise FileDeleteError(
             "Physical delete blocked: one or more files are outside a safe library root",
+            409,
+        )
+
+    if preview["shared_reference_count"]:
+        raise FileDeleteError(
+            "Physical delete blocked: this file is also used by unselected tracks. "
+            "Select all references to delete the file, or remove only the selected database references.",
             409,
         )
 

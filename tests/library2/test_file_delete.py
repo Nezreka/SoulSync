@@ -458,3 +458,30 @@ def test_two_rows_on_one_path_are_one_file_to_delete(imported_conn, legacy_db, t
     assert len(paths) == 1, (
         f"one file on disk must be one row to act on, got {paths}")
     assert preview["file_count"] == 1
+
+
+def test_selected_single_cannot_delete_an_unselected_albums_only_physical_copy(
+        imported_conn, legacy_db, tmp_path):
+    """#1611: another row referencing this file is never a second copy."""
+    root = tmp_path / 'music'
+    root.mkdir()
+    shared = root / 'Faint.flac'
+    shared.write_bytes(b'only-copy')
+    rows = imported_conn.execute('SELECT id, album_id FROM lib2_tracks ORDER BY id LIMIT 2').fetchall()
+    album_track, single_track = rows
+    album_file = _set_track_path(imported_conn, album_track['id'], shared)
+    single_file = _set_track_path(imported_conn, single_track['id'], shared)
+    config = _Config([str(root)])
+    preview = preview_entity_files(legacy_db, entity='albums', entity_id=single_track['album_id'],
+                                   file_ids=[single_file], config_manager=config)
+    item = preview['files'][0]
+    assert item['deletable'] is False
+    assert item['reason'] == 'shared_file_references'
+    assert item['unselected_file_ids'] == [album_file]
+    with pytest.raises(FileDeleteError):
+        delete_entity_files(legacy_db, entity='albums', entity_id=single_track['album_id'],
+                            file_ids=[single_file], preview_token=preview['preview_token'],
+                            config_manager=config)
+    assert shared.read_bytes() == b'only-copy'
+    assert imported_conn.execute('SELECT file_state FROM lib2_track_files WHERE id=?',
+                                 (album_file,)).fetchone()[0] == 'active'

@@ -263,10 +263,9 @@ class TestBackfillTrackExternalIdsFromProvenance:
 
         assert self._ids_of(db, track_id) == ('sp1', 'dz1', 'USRC17607839')
 
-    # Upstream 5170059ed also keeps the comment on the legacy tracks row
-    # (provenance backfill, media-server scan). Library v2 stores no comment:
-    # nothing reads one, and it reaches the file as MUSICBRAINZ_TRACKCOMMENT.
-    # The provenance row above keeps it.
+    # Upstream 5170059ed's comment rules on the catalogue row (provenance
+    # backfill, a changed recording id clearing it) are pinned on Library v2 in
+    # tests/library2/test_recording_disambiguation.py.
 
     def test_preserves_existing_ids(self, db):
         """Fill-empty only — if the enrichment worker already wrote a Spotify

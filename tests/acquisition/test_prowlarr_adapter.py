@@ -205,3 +205,18 @@ def test_adapter_uses_structured_catalog_query_and_indexer_allowlist():
     assert asyncio.run(adapter.search(_criteria())) == []
     assert client.call[0] == "Björk Debut Deluxe Edition"
     assert client.call[1]["indexer_ids"] == (4, 8)
+
+
+@pytest.mark.parametrize('source', ['torrent', 'usenet'])
+@pytest.mark.parametrize('release,artist,album', [
+    ('Linkin_Park-Meteora-WEB-FLAC-2003-GROUP', 'Linkin Park', 'Meteora'),
+    ('Jay-Z-The_Blueprint-WEB-FLAC-2001-GROUP', 'Jay-Z', 'The Blueprint'),
+    ('Nine_Inch_Nails-Pretty_Hate_Machine-WEB-FLAC-1989-GROUP', 'Nine Inch Nails', 'Pretty Hate Machine'),
+])
+def test_native_acquisition_parses_scene_evidence_like_release_downloads(source, release, artist, album):
+    parser = ProwlarrCandidateParser(source, candidate_store=CandidateStore())
+    candidate = parser.parse(_result(title=release, protocol=source), criteria=_criteria(
+        artist=artist, release_title=album, edition=None))
+    assert candidate.facts['artist'] == artist
+    assert candidate.facts['release_title'] == album
+    assert candidate.content_scope == 'release_bundle'

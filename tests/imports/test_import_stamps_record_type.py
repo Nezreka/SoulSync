@@ -1,12 +1,15 @@
-"""#1562 / Major C (round 3): the import stamps record_type at import time.
+"""#1562 / Major C (round 3): the import stamps the release kind at import time.
 
-Before this, ``record_soulsync_library_entry`` wrote no release kind at
-all — ``record_type`` was only backfilled later by the enrichment sweep,
-so freshly imported releases were kind-blind (and the single/album gates
-lenient-always) until the workers ran. The pipeline already carries the
-kind (post_processing stamps ``album_info['record_type']``); the import
-now persists it on both the insert and the re-import fill-empty path,
-without ever overwriting a kind the enrichment workers already wrote.
+Before, the import wrote no kind at all and freshly imported releases were
+kind-blind until an enrichment sweep ran. The pipeline already carries the
+kind (post_processing stamps ``album_info['record_type']``).
+
+Open #1562 port conflict: Library v2's ``lib2_albums.album_type`` is NOT NULL
+with the default 'album', so an existing unknown kind cannot be told apart
+from a confirmed album. Inserts and protection of existing types are covered
+here; upstream's later fill of an unknown type is NOT yet fulfilled. The
+ambiguous-default test documents the current limitation pending a user
+decision on representing unknown classification. See the local sync report.
 """
 
 from __future__ import annotations
@@ -16,7 +19,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.imports import side_effects
+import core.imports.side_effects as side_effects
+from core.library2.schema import ensure_library_v2_schema
 
 
 class _FakeDB:
@@ -25,45 +29,6 @@ class _FakeDB:
 
     def _get_connection(self):
         return self._conn
-
-
-def _make_soulsync_db(with_record_type=True):
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        """
-        CREATE TABLE artists (
-            id TEXT PRIMARY KEY, name TEXT, genres TEXT, thumb_url TEXT,
-            server_source TEXT, created_at TEXT, updated_at TEXT,
-            spotify_artist_id TEXT
-        )
-        """
-    )
-    record_col = ", record_type TEXT" if with_record_type else ""
-    conn.execute(
-        f"""
-        CREATE TABLE albums (
-            id TEXT PRIMARY KEY, artist_id TEXT, title TEXT, year INTEGER,
-            thumb_url TEXT, genres TEXT, track_count INTEGER, duration INTEGER,
-            server_source TEXT, created_at TEXT, updated_at TEXT,
-            spotify_album_id TEXT{record_col}
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE tracks (
-            id TEXT PRIMARY KEY, album_id TEXT, artist_id TEXT, title TEXT,
-            track_number INTEGER, duration INTEGER, file_path TEXT,
-            bitrate INTEGER, file_size INTEGER, track_artist TEXT,
-            musicbrainz_recording_id TEXT, isrc TEXT,
-            quality_profile_id INTEGER, server_source TEXT,
-            created_at TEXT, updated_at TEXT, spotify_track_id TEXT,
-            deezer_id TEXT
-        )
-        """
-    )
-    return conn
 
 
 def _track_context(final_path, track_id, track_name, track_number):
@@ -90,7 +55,10 @@ def _track_context(final_path, track_id, track_name, track_number):
 
 @pytest.fixture()
 def soulsync_db(monkeypatch):
-    conn = _make_soulsync_db()
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    ensure_library_v2_schema(conn)
+    conn.commit()
     monkeypatch.setattr(side_effects, "get_database", lambda: _FakeDB(conn))
     monkeypatch.setattr(
         side_effects,
@@ -104,84 +72,42 @@ def soulsync_db(monkeypatch):
 
 
 def _album_kind(conn):
-    row = conn.execute("SELECT record_type FROM albums").fetchone()
-    return row["record_type"] if row else None
+    row = conn.execute("SELECT album_type FROM lib2_albums").fetchone()
+    return row["album_type"] if row else None
+
+
+def _import(n, album_info):
+    side_effects.record_soulsync_library_entry(
+        _track_context(f"/music/Test Artist/Some Album/0{n} - T{n}.flac", f"sp-{n}", f"T{n}", n),
+        {"name": "Test Artist", "genres": []},
+        album_info,
+    )
 
 
 def test_import_stamps_record_type_on_insert(soulsync_db):
     """New album row carries the pipeline's record_type immediately."""
-    side_effects.record_soulsync_library_entry(
-        _track_context("/music/Test Artist/Some Album/01 - A.flac", "sp-a", "A", 1),
-        {"name": "Test Artist", "genres": []},
-        {"album_name": "Some Album", "record_type": "single", "album_type": "single"},
-    )
+    _import(1, {"album_name": "Some Album", "record_type": "single", "album_type": "single"})
     assert _album_kind(soulsync_db) == "single"
 
 
 def test_import_falls_back_to_album_type(soulsync_db):
     """When the pipeline only carries album_type, that is what lands."""
-    side_effects.record_soulsync_library_entry(
-        _track_context("/music/Test Artist/Some Album/01 - A.flac", "sp-a", "A", 1),
-        {"name": "Test Artist", "genres": []},
-        {"album_name": "Some Album", "album_type": "EP"},
-    )
+    _import(1, {"album_name": "Some Album", "album_type": "EP"})
     assert _album_kind(soulsync_db) == "ep"
 
 
-def test_import_fills_empty_record_type_on_reimport(soulsync_db):
-    """First import without a kind leaves it empty; a re-import carrying
-    the kind fills it (fill-empty, never overwrite)."""
-    ctx = lambda n: _track_context(
-        f"/music/Test Artist/Some Album/0{n} - T{n}.flac", f"sp-{n}", f"T{n}", n
-    )
-    side_effects.record_soulsync_library_entry(
-        ctx(1), {"name": "Test Artist", "genres": []}, {"album_name": "Some Album"}
-    )
-    assert _album_kind(soulsync_db) is None
-    side_effects.record_soulsync_library_entry(
-        ctx(2),
-        {"name": "Test Artist", "genres": []},
-        {"album_name": "Some Album", "record_type": "single"},
-    )
-    assert _album_kind(soulsync_db) == "single"
+def test_import_without_a_kind_keeps_the_schema_default(soulsync_db):
+    """No kind from the pipeline: the row keeps 'album', which the kind gates
+    read as unknown, and a later import does not re-judge the existing row."""
+    _import(1, {"album_name": "Some Album"})
+    assert _album_kind(soulsync_db) == "album"
+    _import(2, {"album_name": "Some Album", "record_type": "single"})
+    assert _album_kind(soulsync_db) == "album"
 
 
 def test_import_never_overwrites_existing_record_type(soulsync_db):
     """A kind the enrichment workers already wrote survives a re-import."""
-    ctx = lambda n: _track_context(
-        f"/music/Test Artist/Some Album/0{n} - T{n}.flac", f"sp-{n}", f"T{n}", n
-    )
-    side_effects.record_soulsync_library_entry(
-        ctx(1),
-        {"name": "Test Artist", "genres": []},
-        {"album_name": "Some Album", "record_type": "single"},
-    )
-    soulsync_db.execute("UPDATE albums SET record_type = 'ep'")
-    side_effects.record_soulsync_library_entry(
-        ctx(2),
-        {"name": "Test Artist", "genres": []},
-        {"album_name": "Some Album", "record_type": "single"},
-    )
+    _import(1, {"album_name": "Some Album", "record_type": "single"})
+    soulsync_db.execute("UPDATE lib2_albums SET album_type = 'ep'")
+    _import(2, {"album_name": "Some Album", "record_type": "single"})
     assert _album_kind(soulsync_db) == "ep"
-
-
-def test_import_without_record_type_column_does_not_crash(monkeypatch, tmp_path):
-    """Minimal/legacy schemas lacking the column keep importing — the
-    PRAGMA guard skips the column instead of failing the insert."""
-    conn = _make_soulsync_db(with_record_type=False)
-    monkeypatch.setattr(side_effects, "get_database", lambda: _FakeDB(conn))
-    monkeypatch.setattr(
-        side_effects,
-        "_get_config_manager",
-        lambda: SimpleNamespace(get_active_media_server=lambda: "soulsync"),
-    )
-    import core.genre_filter as genre_filter
-
-    monkeypatch.setattr(genre_filter, "filter_genres", lambda genres, _cfg: genres)
-    side_effects.record_soulsync_library_entry(
-        _track_context("/music/Test Artist/Some Album/01 - A.flac", "sp-a", "A", 1),
-        {"name": "Test Artist", "genres": []},
-        {"album_name": "Some Album", "record_type": "single"},
-    )
-    row = conn.execute("SELECT title FROM albums").fetchone()
-    assert row["title"] == "Some Album"

@@ -1436,13 +1436,29 @@ class MusicBrainzService:
 
     def update_track_mbid(self, track_id: int, mbid: Optional[str], status: str,
                           recording_disambiguation: Optional[str] = None):
-        """Update track with MusicBrainz recording ID.
+        """Update track identity and any disambiguation supplied by MusicBrainz.
 
-        ``recording_disambiguation`` is accepted for upstream's call shape
-        (5170059ed). Library v2 keeps no column for it: nothing reads the
-        stored value, the comment reaches the file as MUSICBRAINZ_TRACKCOMMENT.
+        The comment belongs to the recording (upstream 5170059ed): a lookup
+        without one keeps the stored comment of the SAME recording, and a new
+        recording id drops the old comment (the schema trigger). A miss leaves
+        both alone, like the id.
         """
         self._record_mbid('track', track_id, mbid, status)
+        if not mbid or recording_disambiguation is None:
+            return
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            conn.execute(
+                "UPDATE lib2_tracks SET recording_disambiguation = ?"
+                " WHERE id = ? AND LOWER(COALESCE(musicbrainz_id, '')) = LOWER(?)",
+                (recording_disambiguation.strip() or None, track_id, mbid))
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error storing the recording comment of track {track_id}: {e}")
+        finally:
+            if conn:
+                conn.close()
 
 
 

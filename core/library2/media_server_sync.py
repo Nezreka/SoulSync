@@ -55,9 +55,9 @@ def resolve_mapping(cursor: Any, entity_type: str, server_source: Any, server_id
 
 
 def upsert_mapping(cursor: Any, entity_type: str, entity_id: int,
-                   server_source: Any, server_id: Any) -> None:
+                   server_source: Any, server_id: Any, *, server_path: Optional[str] = None) -> None:
     _upsert_mapping(cursor, entity_type, entity_id, server_source, server_id,
-                    scan_library_id())
+                    scan_library_id(), server_path=server_path)
 
 
 def _name_key(name: Any) -> str:
@@ -268,7 +268,8 @@ def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
                  musicbrainz_id: Optional[str] = None,
                  file_path: Optional[str] = None, file_size=None,
                  bitrate=None, allow_create: bool = False,
-                 file_source: Optional[str] = None) -> Optional[int]:
+                 file_source: Optional[str] = None,
+                 server_path: Optional[str] = None) -> Optional[int]:
     """The catalogue id for a track the server reported, plus its file row."""
     mapped_id = resolve_mapping(cursor, "track", server_source, server_id)
     row = ((mapped_id,) if mapped_id is not None else cursor.execute(
@@ -318,7 +319,8 @@ def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
                 "updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (track_number, disc_number, duration, track_artist,
                  track_id))
-            upsert_mapping(cursor, "track", track_id, server_source, server_id)
+            upsert_mapping(cursor, "track", track_id, server_source, server_id,
+                           server_path=server_path)
             if file_path:
                 cursor.execute(
                     "UPDATE lib2_track_files SET size=COALESCE(?,size),"
@@ -344,7 +346,8 @@ def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
              musicbrainz_id, server_source, str(server_id), track_id),
         )
     if is_media_server_source(server_source):
-        upsert_mapping(cursor, "track", track_id, server_source, server_id)
+        upsert_mapping(cursor, "track", track_id, server_source, server_id,
+                       server_path=server_path)
     cursor.execute(
         "DELETE FROM lib2_track_artists WHERE track_id=? AND role='primary' "
         "AND artist_id<>?", (track_id, artist_id))

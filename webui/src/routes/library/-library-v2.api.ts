@@ -930,6 +930,7 @@ export interface LibraryV2FileDeletePreview {
   files: LibraryV2FileDeletePreviewItem[];
   file_count: number;
   deletable_count: number;
+  shared_reference_count?: number;
   /** Paths that exist but lie outside the library — these block the delete. */
   unsafe_count: number;
   /** Rows whose file is already gone: nothing to unlink, only a row to retire.

@@ -121,7 +121,8 @@ def test_record_soulsync_library_entry_writes_artist_album_and_track(tmp_path, m
     assert track_row["track_number"] == 7
     assert track_row["duration"] == 210000
     assert track_row["track_artist"] == "Guest Artist"
-    assert track_row["musicbrainz_recording_id"] == "rec-acoustic"
+    # ours: the recording id is lib2_tracks.musicbrainz_id
+    assert track_row["musicbrainz_id"] == "rec-acoustic"
     assert track_row["recording_disambiguation"] == "Connect Sets acoustic"
     assert track_row["album_id"] == album_row["id"]
     assert track_row["file_path"] == str(final_path)

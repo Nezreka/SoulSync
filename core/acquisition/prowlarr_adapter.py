@@ -68,18 +68,18 @@ def _normalized_words(value: Any) -> Tuple[str, ...]:
     return tuple(re.findall(r"[a-z0-9]+", folded.casefold()))
 
 
-def parse_release_title(value: str) -> Tuple[str, str]:
-    """Return an indexer release's explicit artist/title components."""
+def parse_release_title(value: str, *, artist_hint: Optional[str] = None,
+                        release_hint: Optional[str] = None) -> Tuple[str, str]:
+    """Use the same evidence-based scene split as both release plugins (#1604)."""
+    from core.download_plugins.torrent import _parse_release_title
+
     title = str(value or "").strip()
-    if not title:
-        return "", ""
-    parts = re.split(r"\s+-\s+", title, maxsplit=1)
-    if len(parts) != 2:
+    artist, release = _parse_release_title(
+        title, artist_hint=artist_hint,
+        title_hints=(release_hint,) if release_hint else ())
+    if re.match(r"^(?:https?|magnet):", artist, re.IGNORECASE):
         return "", title
-    artist, release = (part.strip() for part in parts)
-    if not artist or re.match(r"^(?:https?|magnet):", artist, re.IGNORECASE):
-        return "", title
-    return artist, release or title
+    return artist, release
 
 
 def _strip_trailing_metadata(value: str) -> str:
@@ -207,7 +207,8 @@ class ProwlarrCandidateParser:
         store = self.candidate_store or get_candidate_store()
         with candidate_binding(criteria.profile_id):
             server_ref = store.put(download_url)
-        parsed_artist, parsed_release = parse_release_title(title)
+        parsed_artist, parsed_release = parse_release_title(
+            title, artist_hint=criteria.artist, release_hint=criteria.release_title)
         artist = _mapped_fact(parsed_artist, criteria.artist) if parsed_artist else None
         release_title = _mapped_fact(parsed_release, criteria.release_title)
         facts = {

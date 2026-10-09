@@ -81,3 +81,18 @@ def test_never_synced_monitored_artist_is_included():
     ids = Lib2DiscographyRefreshJob()._artist_ids(conn)
 
     assert ids == [never_synced]
+
+
+def test_playlist_files_do_not_make_an_artist_a_discography_backfill_target(tmp_path):
+    """#1572: owning incidental playlist songs must not request their albums."""
+    from tests.lib2_seed import track
+    conn = _conn()
+    path = tmp_path / 'playlist-song.flac'
+    path.write_bytes(b'owned playlist file')
+    track(conn, 'Playlist Guest', 'Loose Release', 'One Song', path=str(path))
+    guest = conn.execute("SELECT id FROM lib2_artists WHERE name='Playlist Guest'").fetchone()[0]
+    monitored = _artist(conn, 'Chosen Artist', monitored=1)
+    conn.commit()
+    assert Lib2DiscographyRefreshJob()._artist_ids(conn) == [monitored]
+    assert conn.execute('SELECT monitored FROM lib2_artists WHERE id=?', (guest,)).fetchone()[0] == 0
+    conn.close()
