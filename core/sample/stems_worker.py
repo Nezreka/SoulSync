@@ -22,6 +22,8 @@ from typing import Dict, Optional, Tuple
 
 from utils.logging_config import get_logger
 
+from .ids import track_key
+
 logger = get_logger("sample.stems_worker")
 
 _LANES = ("demucs",)
@@ -43,17 +45,17 @@ def _lane(method: str) -> str:
     return method if method in _LANES else "demucs"
 
 
-def _track_key(track_id: int) -> tuple:
+def _track_key(track_id: str) -> tuple:
     from core.library_scope import current_library_scope
 
-    return current_library_scope(), int(track_id)
+    return current_library_scope(), track_key(track_id)
 
 
-def _job_key(track_id: int, method: str) -> tuple:
+def _job_key(track_id: str, method: str) -> tuple:
     return (*_track_key(track_id), method)
 
 
-def _process_one(track_id: int, backend_name: Optional[str] = None, method: str = "demucs") -> None:
+def _process_one(track_id: str, backend_name: Optional[str] = None, method: str = "demucs") -> None:
     from . import stems as stems_mod
     from . import store
 
@@ -94,7 +96,7 @@ def _run(lane: str) -> None:
             key = _job_key(track_id, method)
             with _lock:
                 _status[key] = "running"
-            _process_one(int(track_id), backend_name, method)
+            _process_one(track_key(track_id), backend_name, method)
             with _lock:
                 _status[key] = "done"
         except Exception as exc:  # noqa: BLE001 — a bad file must not kill the worker
@@ -124,14 +126,14 @@ def _ensure_started(lane: str) -> None:
             logger.info("Sample stems worker (%s) started", lane)
 
 
-def enqueue_separation(track_id: int, backend: Optional[str] = None,
+def enqueue_separation(track_id: str, backend: Optional[str] = None,
                        method: str = "demucs") -> str:
     """Queue a track for separation with `method`. Idempotent; returns the status.
 
     Never raises — separation must never break HTTP handlers.
     """
     try:
-        track_id = int(track_id)
+        track_id = track_key(track_id)
     except (TypeError, ValueError):
         return "error: invalid track_id"
     try:
@@ -159,7 +161,7 @@ def enqueue_separation(track_id: int, backend: Optional[str] = None,
         return f"error: {exc}"
 
 
-def current_method(track_id: int) -> str:
+def current_method(track_id: str) -> str:
     """the method the page is looking at: the last one asked for, else the
     first that already has results, else demucs."""
     with _lock:
@@ -171,20 +173,20 @@ def current_method(track_id: int) -> str:
         from .stems import SEPARATION_METHODS
 
         for method in SEPARATION_METHODS:
-            if store.stems_complete(int(track_id), method):
+            if store.stems_complete(track_key(track_id), method):
                 return method
     except Exception as exc:
         logger.debug("stems method lookup failed: %s", exc)
     return "demucs"
 
 
-def get_status(track_id: int, method: Optional[str] = None) -> str:
+def get_status(track_id: str, method: Optional[str] = None) -> str:
     """queued|running|done|error: … — 'done' also when outputs already exist."""
     method = method or current_method(track_id)
     try:
         from . import store
 
-        if store.stems_complete(int(track_id), method):
+        if store.stems_complete(track_key(track_id), method):
             return "done"
     except Exception as exc:
         logger.debug("stems status check fell back to queue state: %s", exc)
@@ -192,7 +194,7 @@ def get_status(track_id: int, method: Optional[str] = None) -> str:
         return _status.get(_job_key(track_id, method), "idle")
 
 
-def get_progress(track_id: int, method: Optional[str] = None) -> Optional[float]:
+def get_progress(track_id: str, method: Optional[str] = None) -> Optional[float]:
     """0..1 while that job runs, None otherwise."""
     method = method or current_method(track_id)
     with _lock:

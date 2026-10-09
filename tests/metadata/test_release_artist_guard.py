@@ -163,3 +163,41 @@ def test_enrichment_skips_a_slot_holding_another_song(hermetic):
     assert tags["MUSICBRAINZ_RELEASE_ID"] == "wvh-ed"
     assert "MUSICBRAINZ_RELEASETRACKID" not in tags
     assert tags["MUSICBRAINZ_RECORDING_ID"] == "right-recording"
+
+
+# ── a same-named band (#1426 follow-up) ──
+
+OTHER_MAMMOTH = "0f1a3b2c-other-mammoth"
+NAMESAKE = _release("namesake", _credit("Mammoth", OTHER_MAMMOTH), ["Mr. Ed", "B-Side"])
+
+
+def test_same_name_with_another_id_is_another_band():
+    """the finnish "Nirvana" single: name matches, id doesn't. the id decides."""
+    assert not release_by_artist(NAMESAKE, "Mammoth", artist_mbid=WVH, mbid_name="Mammoth")
+    assert release_by_artist(NAMESAKE, "Mammoth")                      # no id -> names only
+    assert release_by_artist(WVH_ALBUM, "Mammoth", artist_mbid=WVH, mbid_name="Mammoth")
+
+
+def test_a_feature_id_does_not_veto_the_album_artist():
+    """the id belongs to the track's guest; the release is the main artist's
+    and matches by album-artist name, as before."""
+    rel = _release("main", _credit("Main", "main-id"), ["Mr. Ed"])
+    assert release_by_artist(rel, ["Guest", "Main"], artist_mbid="guest-id", mbid_name="Guest")
+
+
+def test_find_best_release_rejects_a_same_named_band():
+    assert ac._find_best_release("Mammoth", "Mammoth", 2, _mb([NAMESAKE], artist_mbid=WVH)) is None
+    assert ac._find_best_release("Mammoth", "Mammoth", 2, _mb([NAMESAKE, WVH_ALBUM], artist_mbid=WVH))["id"] == "wvh"
+
+
+def test_pinned_release_by_a_same_named_band_is_not_reused(monkeypatch):
+    monkeypatch.setattr("core.metadata.album_mbid_cache.lookup", lambda a, ar: "namesake")
+    monkeypatch.setattr("core.metadata.album_mbid_cache.record", lambda *a: True)
+    assert ac._resolve_album_release("Mammoth", "Mammoth", 2, _mb([NAMESAKE], artist_mbid=WVH)) is None
+
+
+def test_enrichment_drops_a_same_named_bands_release(hermetic):
+    tags = _enrich(NAMESAKE, _credit("Mammoth WVH", WVH))
+    assert "MUSICBRAINZ_RELEASE_ID" not in tags
+    assert "DATE" not in tags
+    assert tags["MUSICBRAINZ_ARTIST_ID"] == WVH

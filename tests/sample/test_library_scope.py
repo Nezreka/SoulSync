@@ -164,3 +164,24 @@ def test_worker_error_stays_in_queued_scope_and_restores_explicit_none(scoped_db
         assert module.get_status(777).startswith("error:")
     with library_scope(3):
         assert module.get_status(777) == "idle"
+
+
+def test_recent_tracks_include_names_and_only_the_selected_librarys_file(scoped_db, tmp_path):
+    db, tid, shared = scoped_db
+    profile = db.create_profile(name="Independent library")
+    own = tmp_path / "own.wav"
+    own.write_bytes(b"owner audio")
+    with db._get_connection() as conn:
+        conn.execute("INSERT INTO lib2_track_files (track_id,path,owner_profile_id) VALUES (?,?,?)",
+                     (tid, str(own), profile))
+        conn.commit()
+    with library_scope(profile):
+        rows = db.api_get_recently_added("tracks")
+        assert len(rows) == 1
+        assert rows[0]["artist_name"] == "Artist"
+        assert rows[0]["album_title"] == "Album"
+        assert rows[0]["file_path"] == str(own)
+    with library_scope("shared"):
+        assert db.api_get_recently_added("tracks")[0]["file_path"] == str(shared)
+    with library_scope(profile + 1):
+        assert db.api_get_recently_added("tracks") == []

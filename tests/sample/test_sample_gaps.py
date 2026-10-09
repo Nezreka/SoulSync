@@ -285,7 +285,9 @@ def test_enqueue_analysis_already_done_returns_done(db_only):
 
 
 def test_enqueue_analysis_invalid_id_never_raises():
-    assert worker.enqueue_analysis("not-a-track").startswith("error:")
+    # ids are text (jellyfin guids, navidrome ids); only one that could
+    # escape a path is invalid
+    assert worker.enqueue_analysis("../not-a-track").startswith("error:")
     assert worker.enqueue_analysis(None).startswith("error:")
 
 
@@ -364,7 +366,7 @@ def test_stems_enqueue_dedupes_while_pending():
 
 
 def test_stems_enqueue_invalid_id_never_raises():
-    assert stems_worker.enqueue_separation("nope").startswith("error:")
+    assert stems_worker.enqueue_separation("no/pe").startswith("error:")
 
 
 def test_stems_process_one_unknown_track_raises():
@@ -463,6 +465,7 @@ def test_migration_adds_stem_column_to_legacy_stash(tmp_path, monkeypatch):
         conn.close()
 
 
-def test_peaks_path_rejects_non_integer_ids():
+def test_peaks_path_rejects_ids_that_could_escape_the_folder():
     with pytest.raises((TypeError, ValueError)):
-        store.peaks_path("abc")
+        store.peaks_path("../abc")
+    assert store.peaks_path("5f1c0a3e9b7d").endswith(".json")   # a jellyfin id is fine

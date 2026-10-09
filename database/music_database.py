@@ -782,7 +782,7 @@ class MusicDatabase:
             # re-computed when core.sample.analyze.ANALYZER_VERSION increases.
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS sample_analysis (
-                    track_id INTEGER PRIMARY KEY,
+                    track_id TEXT PRIMARY KEY,
                     bpm REAL,
                     onsets_json TEXT,  -- JSON array of onset times in seconds
                     duration_s REAL,
@@ -865,6 +865,8 @@ class MusicDatabase:
                     cursor.execute(f"ALTER TABLE {_table} ADD COLUMN {_col} {_type}")
                 except sqlite3.OperationalError:
                     pass  # already there
+
+            self._migrate_sample_analysis_text_ids(cursor)
 
             # Metadata table for storing system information like last refresh dates
             from core.library2.user_references import ensure_reference_id_kinds
@@ -2850,6 +2852,52 @@ class MusicDatabase:
                 logger.info("Migrated existing notify data to then_actions")
         except Exception as e:
             logger.error(f"Error adding automation then_actions column: {e}")
+
+    def _migrate_sample_analysis_text_ids(self, cursor):
+        """sample_analysis.track_id was an INTEGER PRIMARY KEY, which sqlite
+        refuses text in. Sample Studio normalizes keys to strings, independently
+        of native catalogue or media-server identity. Rebuild it keyed by TEXT;
+        every existing analysis row keeps its data and digit identity."""
+        try:
+            cursor.execute("PRAGMA table_info(sample_analysis)")
+            cols = {row[1]: row for row in cursor.fetchall()}
+            track_col = cols.get("track_id")
+            if not track_col or str(track_col[2]).upper() == "TEXT":
+                return
+            keep = ["bpm", "onsets_json", "duration_s", "analyzed_at", "analyzer_version",
+                    "key_name", "key_confidence", "source_sig"]
+            keep = [c for c in keep if c in cols]
+            cursor.execute("SAVEPOINT sample_analysis_text_ids")
+            cursor.execute("DROP TABLE IF EXISTS sample_analysis_text")
+            cursor.execute("""
+                CREATE TABLE sample_analysis_text (
+                    track_id TEXT PRIMARY KEY,
+                    bpm REAL,
+                    onsets_json TEXT,
+                    duration_s REAL,
+                    analyzed_at REAL,
+                    analyzer_version INTEGER DEFAULT 1,
+                    key_name TEXT,
+                    key_confidence REAL,
+                    source_sig TEXT
+                )
+            """)
+            col_list = ", ".join(keep)
+            cursor.execute(
+                f"INSERT INTO sample_analysis_text (track_id, {col_list}) "
+                f"SELECT CAST(track_id AS TEXT), {col_list} FROM sample_analysis")
+            cursor.execute("DROP TABLE sample_analysis")
+            cursor.execute("ALTER TABLE sample_analysis_text RENAME TO sample_analysis")
+            cursor.execute("RELEASE sample_analysis_text_ids")
+            logger.info("sample_analysis now keyed by text track ids")
+        except Exception as e:
+            # put the old table back. numeric ids keep working on it
+            try:
+                cursor.execute("ROLLBACK TO sample_analysis_text_ids")
+                cursor.execute("RELEASE sample_analysis_text_ids")
+            except Exception as rollback_err:
+                logger.debug(f"sample_analysis rollback: {rollback_err}")
+            logger.error(f"sample_analysis text-id migration failed: {e}")
 
     def _add_discovery_tables(self, cursor):
         """Add tables for discovery feature: similar artists, discovery pool, and recent releases"""
@@ -22116,6 +22164,24 @@ class MusicDatabase:
             # whose library the caller reads (#1199)
             from core.library2.sql_util import scope_visibility_sql
             visible = scope_visibility_sql(entity_type, "e")
+            if entity_type == "tracks":
+                from core.library2.sql_util import owned_sql, owner_clause
+                from core.library2.track_files import primary_order
+                cursor.execute(f"""
+                    SELECT e.*, COALESCE(NULLIF(e.track_artist, ''), ar.name) AS artist_name,
+                           al.title AS album_title, f.path AS file_path, f.bitrate
+                    FROM lib2_tracks e
+                    LEFT JOIN lib2_albums al ON al.id=e.album_id
+                    LEFT JOIN lib2_artists ar ON ar.id=al.primary_artist_id
+                    LEFT JOIN lib2_track_files f ON f.id=(
+                        SELECT own.id FROM lib2_track_files own
+                        WHERE own.track_id=e.id AND COALESCE(own.file_state,'active')='active'
+                          AND COALESCE(own.path,'')!='' {owner_clause(column='own.owner_profile_id')}
+                        ORDER BY {primary_order('own')} LIMIT 1)
+                    WHERE {owned_sql('track', 'e')}
+                    ORDER BY COALESCE(e.added_at, e.updated_at) DESC LIMIT ?
+                """, (limit,))
+                return self._api_project_lib2(conn, 'track', cursor.fetchall())
             cursor.execute(
                 f"SELECT e.* FROM {table} e{f' WHERE {visible}' if visible else ''}"
                 " ORDER BY e.added_at DESC LIMIT ?", (limit,))

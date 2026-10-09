@@ -532,11 +532,14 @@ def test_libraries_endpoint_lists_and_saves(tmp_path, monkeypatch):
         data = client.get("/api/video/libraries").get_json()
         assert data["server"] == "plex"
         assert [m["title"] for m in data["movies"]] == ["Movies"]
-        assert data["selected"]["movies"] is None
+        # one library of each kind and nothing ever picked: they're picked
+        # for you, so a fresh install's first scan reads something
+        assert data["selected"] == {"movies": "Movies", "tv": "TV"}
 
-        assert client.post("/api/video/libraries", json={"movies": "Movies", "tv": "TV"}).status_code == 200
+        # "— None —" for tv is a choice and stays one on the next load
+        assert client.post("/api/video/libraries", json={"movies": "Movies", "tv": ""}).status_code == 200
         data2 = client.get("/api/video/libraries").get_json()
-        assert data2["selected"] == {"movies": "Movies", "tv": "TV"}
+        assert data2["selected"] == {"movies": "Movies", "tv": ""}
     finally:
         videoapi._video_db = None
 

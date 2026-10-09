@@ -135,7 +135,7 @@ def test_full_chop_lifecycle(client):
     entry = r.get_json()["data"]
     assert entry["name"] == "e2e chop"
     assert entry["tags"] == ["test", "e2e"]
-    assert entry["track_id"] == 1
+    assert entry["track_id"] == "1"
     assert entry["start_s"] == 0 and entry["end_s"] == 2
     import os
 

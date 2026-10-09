@@ -1940,12 +1940,19 @@ def library_recent_tracks_web():
         return jsonify({"success": False, "data": None, "error": str(e)}), 500
 
 
+def _sample_track_key(raw):
+    """a sample studio track id as text. jellyfin and navidrome ids aren't
+    numbers, and int() turned every request from those libraries into a 400."""
+    from core.sample.ids import track_key
+    return track_key(raw)
+
+
 @app.route('/api/sample/analysis', methods=['GET'])
 def sample_analysis_web():
     try:
         from api.sample import fetch_analysis, SampleHttpError
         try:
-            track_id = int(request.args.get('track_id') or 0)
+            track_id = _sample_track_key(request.args.get('track_id'))
         except (TypeError, ValueError):
             return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
         try:
@@ -1965,7 +1972,7 @@ def sample_analyze_web():
         from api.sample import enqueue_track_analysis, SampleHttpError
         data = request.get_json(silent=True) or {}
         try:
-            track_id = int(data.get('track_id') or 0)
+            track_id = _sample_track_key(data.get('track_id'))
         except (TypeError, ValueError):
             return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
         try:
@@ -1987,10 +1994,10 @@ def sample_peaks_web():
     try:
         from api.sample import fetch_peaks, SampleHttpError
         try:
-            track_id = int(request.args.get('track_id') or 0)
+            track_id = _sample_track_key(request.args.get('track_id'))
             buckets = int(request.args.get('buckets') or 1500)
         except (TypeError, ValueError):
-            return jsonify({"success": False, "data": None, "error": "track_id and buckets must be integers"}), 400
+            return jsonify({"success": False, "data": None, "error": "track_id is required and buckets must be a whole number"}), 400
         try:
             payload, status = fetch_peaks(track_id, buckets, stem=request.args.get('stem') or None)
             return jsonify({"success": True, "data": payload, "error": None}), status
@@ -2145,7 +2152,7 @@ def sample_stems_web():
         from api.sample import separate_stems, SampleHttpError
         data = request.get_json(silent=True) or {}
         try:
-            track_id = int(data.get('track_id') or 0)
+            track_id = _sample_track_key(data.get('track_id'))
         except (TypeError, ValueError):
             return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
         try:
@@ -2163,7 +2170,7 @@ def sample_stems_status_web():
     try:
         from api.sample import stems_status, SampleHttpError
         try:
-            track_id = int(request.args.get('track_id') or 0)
+            track_id = _sample_track_key(request.args.get('track_id'))
         except (TypeError, ValueError):
             return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
         try:
@@ -2176,7 +2183,7 @@ def sample_stems_status_web():
         return jsonify({"success": False, "data": None, "error": str(e)}), 500
 
 
-@app.route('/api/sample/stems/<int:track_id>/<stem>/audio', methods=['GET'])
+@app.route('/api/sample/stems/<track_id>/<stem>/audio', methods=['GET'])
 def sample_stem_audio_web(track_id, stem):
     try:
         from api.sample import stem_audio_path, SampleHttpError

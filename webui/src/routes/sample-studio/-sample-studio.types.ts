@@ -9,8 +9,14 @@
  * endpoints.
  */
 
+/**
+ * A native catalogue track ID, normalized to text by the API mapper.
+ * Media-server identifiers remain in Library-v2 mappings.
+ */
+export type TrackId = string;
+
 export interface StudioTrack {
-  id: number;
+  id: TrackId;
   title: string;
   artist_name?: string | null;
   album_title?: string | null;
@@ -34,8 +40,22 @@ export function analysisErrorMessage(status: AnalysisStatus): string {
   return tail || 'Analysis failed';
 }
 
+/**
+ * Why the analysis request itself failed. The server's own words when it
+ * answered (readJson puts them on the error), the connection only when it
+ * didn't. This used to blame the connection for every failure, which hid a
+ * 400 on every jellyfin and navidrome track.
+ */
+export function analysisLoadError(error: unknown): string {
+  const offline =
+    'Could not reach SoulSync to load the analysis. Check your connection and try again.';
+  if (!(error instanceof Error)) return offline;
+  if (error instanceof TypeError || error.name === 'TimeoutError') return offline;
+  return error.message.trim() || offline;
+}
+
 export interface SampleAnalysis {
-  track_id: number;
+  track_id: TrackId;
   status: AnalysisStatus;
   bpm: number | null;
   onsets: number[];
@@ -133,7 +153,7 @@ export const DEFAULT_FX: RenderFx = {
 export type StemsStatus = string;
 
 export interface StemsInfo {
-  track_id: number;
+  track_id: TrackId;
   status: StemsStatus;
   stems: StemName[];
   backend?: string;
@@ -151,7 +171,7 @@ export interface StashEntry {
   id: number;
   name: string;
   tags: string[];
-  track_id: number;
+  track_id: TrackId | null;
   track_title: string;
   artist_name: string;
   start_s: number;

@@ -107,12 +107,12 @@ def test_retry_clears_recorded_error(db_only):
 
     # Without retry: sticky error, no re-queue.
     assert sample_api.fetch_analysis(4243)[0]["status"].startswith("error:")
-    assert ('shared', 4243) not in sample_worker._pending
+    assert ('shared', '4243') not in sample_worker._pending
 
     # With retry: re-queued to pending, then fails again (it really re-ran).
     payload, _ = sample_api.fetch_analysis(4243, retry=True)
     assert payload["status"] == "pending"
-    assert ('shared', 4243) in sample_worker._pending
+    assert ('shared', '4243') in sample_worker._pending
     _wait_for_status(4243, "error:")
 
 

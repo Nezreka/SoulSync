@@ -4820,6 +4820,39 @@ class RepairWorker:
         return {'success': True, 'action': 'removed_empty_folder',
                 'message': f'Removed empty folder: {_name}'}
 
+    def _write_bpm_tag(self, file_path, bpm):
+        """put an applied bpm into the file too. it only ever reached the
+        database, so players and media servers never saw it. the deezer
+        "BPM" tag setting turns this off. returns a note for the message."""
+        if self._config_manager and self._config_manager.get('deezer.tags.bpm', True) is False:
+            return ' (BPM tags are off in settings, file not changed)'
+        try:
+            bpm = float(bpm)
+        except (TypeError, ValueError):
+            return ''
+        import math
+        if not math.isfinite(bpm) or bpm <= 0 or not file_path:
+            return ''
+        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else ''
+        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder,
+                                      config_manager=self._config_manager)
+        if not resolved or not os.path.exists(resolved):
+            return ' (file not reachable, saved in SoulSync only)'
+        from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
+        keys = hand_tagged_path_keys(self.db)
+        if is_hand_tagged_path(file_path, keys) or is_hand_tagged_path(resolved, keys):
+            return ' (hand-tagged file preserved, saved in SoulSync only)'
+        try:
+            from core.tag_writer import write_tags_to_file
+            result = write_tags_to_file(resolved, {'bpm': int(round(bpm))}, embed_cover=False)
+        except Exception as e:  # noqa: BLE001 - the db value already landed
+            logger.warning("Could not write BPM to %s: %s", resolved, e)
+            return ' (could not write the file tag)'
+        if not result.get('success') or 'bpm' not in (result.get('written_fields') or []):
+            logger.warning("BPM tag not written to %s: %s", resolved, result.get('error'))
+            return ' (could not write the file tag)'
+        return ', written to the file'
+
     def _fix_metadata_gap(self, entity_type, entity_id, file_path, details):
         """Apply found metadata fields to the track."""
         found_fields = details.get('found_fields')
@@ -4847,21 +4880,50 @@ class RepairWorker:
                 native_updates[column] = value
         if not native_updates:
             return {'success': False, 'error': 'No applicable metadata fields to update'}
+        effective_bpm = native_updates.get('bpm')
         conn = None
         try:
             conn = self.db._get_connection()
+            if 'bpm' in native_updates:
+                from core.library2.metadata_overrides import get_field_overrides
+                override = get_field_overrides(conn, entity_type='track', entity_id=native_track_id).get('bpm')
+                if override is not None:
+                    effective_bpm = override.value
+                if file_path:
+                    from core.library2.sql_util import owner_clause
+                    paths = [r[0] for r in conn.execute(
+                        "SELECT f.path FROM lib2_track_files f WHERE f.track_id=? "
+                        "AND COALESCE(f.file_state,'active')='active' "
+                        f"{owner_clause(column='f.owner_profile_id')}", (native_track_id,))]
+                    # The reviewed file must still belong to this track/library.
+                    # The shared resolver allows the same container/host mapping
+                    # used by playback; an unrelated finding path is refused.
+                    path_key = os.path.normcase(os.path.abspath(file_path))
+                    matches = any(os.path.normcase(os.path.abspath(p)) == path_key for p in paths if p)
+                    if not matches:
+                        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else ''
+                        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
+                        matches = bool(resolved) and any(
+                            _resolve_file_path(p, self.transfer_folder, download_folder, config_manager=self._config_manager) == resolved
+                            for p in paths if p)
+                    if not matches:
+                        return {'success': False, 'error': 'The reviewed file no longer belongs to this track/library; rerun the job'}
             set_parts = [f"{column} = ?" for column in native_updates]
-            conn.execute(
+            updated = conn.execute(
                 f"UPDATE lib2_tracks SET {', '.join(set_parts)}, "
                 "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (*native_updates.values(), native_track_id),
             )
+            if not updated.rowcount:
+                return {'success': False, 'error': 'Library-v2 track no longer exists'}
             conn.commit()
         finally:
             if conn:
                 conn.close()
-        return {'success': True, 'action': 'applied_metadata',
-                'message': f'Applied metadata: {", ".join(native_updates)}'}
+        message = f'Applied metadata: {", ".join(native_updates)}'
+        if 'bpm' in native_updates:
+            message += self._write_bpm_tag(file_path, effective_bpm)
+        return {'success': True, 'action': 'applied_metadata', 'message': message}
 
     def _fix_unwanted_content(self, entity_type, entity_id, file_path, details):
         """Remove unwanted content (live, commentary, interview, spoken word) from library."""

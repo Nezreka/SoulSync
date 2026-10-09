@@ -15,7 +15,7 @@ import {
   studioStashQueryOptions,
   studioTrackSearchQueryOptions,
 } from '../-sample-studio.api';
-import { analysisErrorMessage, isAnalysisError } from '../-sample-studio.types';
+import { analysisErrorMessage, analysisLoadError, isAnalysisError } from '../-sample-studio.types';
 import { DEFAULT_FILTERS } from '../-sample-studio.types';
 import { LibraryPanel } from './library-panel';
 import styles from './sample-studio-page.module.css';
@@ -64,7 +64,7 @@ export function SampleStudioPage() {
     selected && analysis && isAnalysisError(analysis.status)
       ? analysisErrorMessage(analysis.status)
       : selected && analysisQuery.error
-        ? 'Could not load the analysis for this track. Check your connection and try again.'
+        ? analysisLoadError(analysisQuery.error)
         : null;
 
   const retryAnalysis = () => {
@@ -122,14 +122,19 @@ export function SampleStudioPage() {
    *  full recipe to the editor. */
   const restoreStashEntry = (entry: StashEntry) => {
     setStashError(null);
-    if (selected?.id === entry.track_id) {
+    // stash rows used to come back numeric while tracks came back as text,
+    // so this never matched and reopening a chop reloaded its own track
+    if (selected && String(selected.id) === String(entry.track_id)) {
       setStemSource(entry.stem ?? null);
       setRestore({ entry, nonce: Date.now() });
       return;
     }
     void (async () => {
       try {
-        const track = await lookupStudioTrack(entry.track_id, entry.track_title, entry.artist_name);
+        const track =
+          entry.track_id === null
+            ? null
+            : await lookupStudioTrack(entry.track_id, entry.track_title, entry.artist_name);
         if (!track) {
           setStashError(
             `Couldn’t find “${entry.track_title}” in your library — it may have been removed.`,
