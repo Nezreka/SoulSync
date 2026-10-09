@@ -514,6 +514,58 @@ def test_playlist_track_falls_back_to_its_artist_when_the_source_has_no_credit(m
     assert album["artists"] == [{"name": "Solo Artist"}]
 
 
+def test_deezer_search_track_gets_its_albums_artist_and_count(monkeypatch):
+    """#1605 (cremonies): 'How Far I'll Go' downloaded alone from deezer search
+    on a spotify-primary install came out as Auli'i Cravalho, 4/1. the search
+    now sends the track's own album id and the backfill asks deezer for it."""
+    from core.metadata import album_tracks, registry
+    calls = []
+    monkeypatch.setattr(registry, "get_primary_source", lambda: "spotify")
+    monkeypatch.setattr(album_tracks, "get_album_for_source", lambda s, a, **_k: calls.append((s, a)) or {
+        "id": "14582002", "release_date": "2016-11-18", "total_tracks": 59, "album_type": "album",
+        "artists": [{"name": "Lin-Manuel Miranda", "id": "1545788"}],
+    })
+    deps = _build_deps()
+    _seed_task("t22", track_info={
+        "id": "136340808", "source": "deezer", "track_number": 4,
+        "album": {"id": "14582002", "name": "Moana (Deluxe)", "images": [], "release_date": None},
+    })
+    track = _Track(album="Moana (Deluxe)", artists=["Auli'i Cravalho"])
+
+    dc.attempt_download_with_candidates("t22", [_Candidate()], track, batch_id=None, deps=deps)
+
+    assert calls == [("deezer", "14582002")]
+    album = matched_downloads_context["user1::song.flac"]["spotify_album"]
+    assert album["artists"] == [{"name": "Lin-Manuel Miranda", "id": "1545788"}]
+    assert album["total_tracks"] == 59
+
+
+def test_deezer_search_single_keeps_its_real_single_type(monkeypatch):
+    """#1605: the search no longer calls every track a single, so a real
+    single has to get its type from the lookup, not the 'album' default."""
+    from core.metadata import album_tracks, registry
+    monkeypatch.setattr(registry, "get_primary_source", lambda: "spotify")
+    monkeypatch.setattr(album_tracks, "get_album_for_source", lambda *_a, **_k: {
+        "id": "9", "release_date": "2024-01-01", "total_tracks": 1, "album_type": "single",
+        "artists": [{"name": "Solo"}],
+    })
+    deps = _build_deps()
+    _seed_task("t23", track_info={"source": "deezer", "track_number": 1,
+                                  "album": {"id": "9", "name": "Hit"}})
+    dc.attempt_download_with_candidates("t23", [_Candidate()], _Track(album="Hit", artists=["Solo"]),
+                                        batch_id=None, deps=deps)
+    assert matched_downloads_context["user1::song.flac"]["spotify_album"]["album_type"] == "single"
+
+
+def test_album_type_still_defaults_to_album_when_nothing_names_one(monkeypatch):
+    _patch_primary_source(monkeypatch, "itunes", None)
+    deps = _build_deps()
+    _seed_task("t24", track_info={"track_number": 1, "album": {"id": "it-y", "name": "Some Album"}})
+    dc.attempt_download_with_candidates("t24", [_Candidate()], _Track(album="Some Album"),
+                                        batch_id=None, deps=deps)
+    assert matched_downloads_context["user1::song.flac"]["spotify_album"]["album_type"] == "album"
+
+
 def test_the_artist_page_section_lock_reaches_the_album_context():
     """an artist-page download locks the release type to its section; the
     context the path builder reads has to keep that lock"""
@@ -705,3 +757,126 @@ def test_size_limit_skips_oversized_candidate_before_download(monkeypatch, small
     result = dc.attempt_download_with_candidates('size-cap', rows, track, deps=deps)
     assert result is smaller_available
     assert deps.download_orchestrator.download_calls == ([('user1', 'small.flac', 35_000_000)] if smaller_available else [])
+
+
+def _release_candidate(indexer, title='Artist-Album-WEB-FLAC-2023-GROUPA'):
+    from core.download_plugins.types import TrackResult
+    row = TrackResult(username='usenet', filename=f'ssc1-test-{indexer}||{title}',
+                      artist='Artist', title='Album', size=1000, bitrate=None,
+                      duration=None, quality='flac', free_upload_slots=1,
+                      upload_speed=0, queue_length=0,
+                      _source_metadata={'protocol': 'usenet', 'release_title': title,
+                                        'indexer_id': indexer})
+    row.confidence = 0.9
+    return row
+
+
+def test_release_fetch_failure_uses_alternative_before_next_release():
+    class Downloader(_FakeSoulseek):
+        async def download(self, username, filename, size, **kwargs):
+            self.download_calls.append((username, filename, size))
+            return None if 'test-1||' in filename else 'dl-alternative'
+    downloader = Downloader()
+    _seed_task('release')
+    first, alternative = _release_candidate(1), _release_candidate(2)
+    assert dc.attempt_download_with_candidates('release', [first, alternative], _Track(), 'batch',
+                                               _build_deps(soulseek=downloader), quality_first=True)
+    assert download_tasks['release']['filename'] == alternative.filename
+    assert download_tasks['release']['candidate_count'] == 1
+    assert [c[1] for c in downloader.download_calls] == [first.filename, alternative.filename]
+
+
+def test_retry_can_use_grouped_alternative_after_primary_transfer_error():
+    from core.downloads.candidates import dedupe_cross_source_pool
+    first, alternative = _release_candidate(1), _release_candidate(2)
+    grouped = dedupe_cross_source_pool([first, alternative])
+    _seed_task('release', used_sources={f'usenet_{first.filename}'})
+    assert dc.attempt_download_with_candidates('release', grouped, _Track(), 'batch', _build_deps(), quality_first=True)
+    assert download_tasks['release']['filename'] == alternative.filename
+
+
+def test_content_retry_skips_release_on_all_indexers_even_after_new_search(monkeypatch):
+    from core.downloads import monitor
+    from types import SimpleNamespace
+    first, alternative = _release_candidate(1), _release_candidate(2)
+    _seed_task('release')
+    assert dc.attempt_download_with_candidates('release', [first, alternative], _Track(), 'batch', _build_deps(), quality_first=True)
+    monkeypatch.setattr(monitor, 'missing_download_executor', SimpleNamespace(submit=lambda *args: None))
+    monkeypatch.setattr(monitor, '_download_track_worker', lambda *args: None)
+    monkeypatch.setattr(monitor.config_manager, 'get', lambda key, default=None: default)
+    assert monitor.requeue_quarantined_task_for_retry('release', 'batch', 'integrity')
+    # New tokens/GUIDs for the same release must not bypass content rejection.
+    fresh = [_release_candidate(3), _release_candidate(4)]
+    different = _release_candidate(5, title='Artist-Album-REPACK-WEB-FLAC-2023-GROUPA')
+    downloader = _FakeSoulseek()
+    assert dc.attempt_download_with_candidates('release', [*fresh, different], _Track(), 'batch',
+                                               _build_deps(soulseek=downloader), quality_first=True)
+    assert [c[1] for c in downloader.download_calls] == [different.filename]
+
+
+@pytest.mark.parametrize('failure_kind,blocked', [('content', True), ('transport', False)])
+def test_monitor_release_errors_distinguish_content_from_transport(monkeypatch, failure_kind, blocked):
+    import time
+    from core.downloads import monitor
+    first = _release_candidate(1)
+    _seed_task('release')
+    assert dc.attempt_download_with_candidates('release', [first], _Track(), 'batch', _build_deps(), quality_first=True)
+    monkeypatch.setattr(monitor, '_make_context_key', lambda u, f: f'{u}::{f}')
+    monkeypatch.setattr(monitor, '_orphaned_download_keys', set())
+    task = download_tasks['release']
+    task['status_change_time'] = 0
+    task['status'] = 'downloading'
+    lookup = {f'usenet::{first.filename}': {'state': 'Completed, Errored', 'failure_kind': failure_kind}}
+    monitor.WebUIDownloadMonitor()._should_retry_task('release', task, lookup, time.time(), [])
+    assert bool(task.get('failed_release_ids')) is blocked
+    assert task['status'] == 'searching'
+
+
+def test_fresh_signed_token_after_transfer_failure_uses_other_indexer():
+    first, alternate = _release_candidate(1), _release_candidate(2)
+    _seed_task('release')
+    assert dc.attempt_download_with_candidates('release', [first, alternate], _Track(), 'batch', _build_deps(), quality_first=True)
+    task = download_tasks['release']
+    task.pop('download_id')
+    task['status'] = 'searching'
+    first.filename = 'ssc1-renewed||Artist-Album-WEB-FLAC-2023-GROUPA'
+    downloader = _FakeSoulseek()
+    assert dc.attempt_download_with_candidates('release', [first, alternate], _Track(), 'batch',
+                                               _build_deps(soulseek=downloader), quality_first=True)
+    assert [c[1] for c in downloader.download_calls] == [alternate.filename]
+
+
+def test_cached_retry_preserves_untried_indexer_inside_group(monkeypatch):
+    from core.downloads import task_worker
+    from types import SimpleNamespace
+    first, alternate = _release_candidate(1), _release_candidate(2)
+    grouped = dc.dedupe_cross_source_pool([first, alternate])
+    _seed_task('release', used_sources={f'usenet_{first.filename}'})
+    download_tasks['release']['cached_candidates'] = grouped
+    monkeypatch.setattr(task_worker, '_candidate_ordering', lambda _: (True, []))
+    downloader = _FakeSoulseek()
+    def attempt(task_id, candidates, track, batch_id, **kwargs):
+        return dc.attempt_download_with_candidates(task_id, candidates, track, batch_id,
+                                                   _build_deps(soulseek=downloader), **kwargs)
+    deps = SimpleNamespace(attempt_download_with_candidates=attempt)
+    assert task_worker._try_cached_candidates('release', 'batch', _Track(), deps)
+    assert download_tasks['release']['filename'] == alternate.filename
+
+
+def test_projected_alternative_inherits_validated_root_match_evidence():
+    from core.download_plugins.usenet import UsenetDownloadPlugin
+    from core.prowlarr_client import ProwlarrClient
+    rows = [ProwlarrClient()._parse_result({
+        'guid': str(i), 'indexerId': i, 'protocol': 'usenet', 'size': 1000,
+        'title': 'Artist-Album-WEB-FLAC-2023-GROUPA',
+        'downloadUrl': f'https://indexer-{i}.invalid/release',
+    }) for i in (1, 2)]
+    tracks, _ = UsenetDownloadPlugin()._project_results(rows)
+    assert len(tracks) == 1
+    root = tracks[0]
+    root.confidence = 0.94
+    root.version_type = 'original'
+    _seed_task('release', used_sources={f'usenet_{root.filename}'})
+    assert dc.attempt_download_with_candidates('release', tracks, _Track(), 'batch', _build_deps(), quality_first=True)
+    assert download_tasks['release']['filename'] == root._release_sources[0].filename
+    assert download_tasks['release']['picked_candidate']['confidence'] == 0.94

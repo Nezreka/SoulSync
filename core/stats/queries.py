@@ -16,7 +16,7 @@ import traceback
 from datetime import date, timedelta
 from typing import Any, Callable, Optional
 
-from core.listening_scope import listening_owner, owner_clause, owner_key
+from core.listening_scope import listening_owner, owner_clause, owner_key, play_duration_sql
 
 logger = logging.getLogger(__name__)
 
@@ -572,7 +572,7 @@ def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
         cursor = conn.cursor()
 
         cursor.execute(
-            f"""SELECT COUNT(*), COALESCE(SUM(lh.duration_ms), 0)
+            f"""SELECT COUNT(*), COALESCE(SUM({play_duration_sql('lh')}), 0)
                 FROM listening_history lh WHERE {window} AND {scope}"""
         )
         total_row = cursor.fetchone()
@@ -596,7 +596,7 @@ def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
         discoveries = cursor.fetchone()[0] or 0
 
         cursor.execute(
-            f"""SELECT date(lh.played_at) AS d, COALESCE(SUM(lh.duration_ms), 0)
+            f"""SELECT date(lh.played_at) AS d, COALESCE(SUM({play_duration_sql('lh')}), 0)
                 FROM listening_history lh
                 WHERE {window} AND {scope}
                 GROUP BY d"""

@@ -2,6 +2,7 @@
 node_modules
 static/dist
 test-results
+visual-report
 
 # Rendered by src/test/layout-fixtures.test.tsx before every offline layout
 # run, so committing it would only ever go stale.

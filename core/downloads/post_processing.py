@@ -23,7 +23,6 @@ import shutil
 import time
 import traceback
 from dataclasses import dataclass
-from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -36,7 +35,7 @@ from core.imports.context import (
     get_import_original_search,
     normalize_import_context,
 )
-from core.imports.filename import extract_track_number_from_filename, parse_filename_metadata
+from core.imports.filename import extract_track_number_from_filename
 from core.metadata import enrichment as metadata_enrichment
 from core.runtime_state import (
     download_tasks,
@@ -78,34 +77,11 @@ def _found_file_matches_expected(found_file: Optional[str],
     )
 
 
-def _normalize_match_text(value: str) -> str:
-    return ''.join(ch.lower() for ch in str(value or '') if ch.isalnum())
-
-
 def _release_audio_match_score(path: str, expected_title: str, expected_artist: str) -> float:
-    parsed = parse_filename_metadata(path)
-    parsed_title = parsed.get('title') or Path(path).stem
-    parsed_artist = parsed.get('artist') or ''
-    expected_title_norm = _normalize_match_text(expected_title)
-    parsed_title_norm = _normalize_match_text(parsed_title)
-    if expected_title_norm and (
-        expected_title_norm in parsed_title_norm or parsed_title_norm in expected_title_norm
-    ):
-        title_score = 1.0
-    else:
-        title_score = SequenceMatcher(
-            None,
-            expected_title_norm,
-            parsed_title_norm,
-        ).ratio()
-    if expected_artist and parsed_artist:
-        artist_score = SequenceMatcher(
-            None,
-            _normalize_match_text(expected_artist),
-            _normalize_match_text(parsed_artist),
-        ).ratio()
-        return (title_score * 0.75) + (artist_score * 0.25)
-    return title_score
+    from core.downloads.release_import import read_release_file, release_match_score
+    return release_match_score(read_release_file(path), {
+        'name': expected_title, 'artists': [{'name': expected_artist}],
+    })
 
 
 def _track_title_from_task(track_info: Any, context: Optional[dict]) -> str:
@@ -156,6 +132,7 @@ class PostProcessDeps:
     post_process_with_verification: Callable
     mark_task_completed: Callable[[str, Optional[dict]], None]
     on_download_completed: Callable[[str, str, bool], None]
+    process_release_file: Optional[Callable] = None
 
 
 def _get_task_context(make_context_key, username, filename, task_id):
@@ -301,6 +278,7 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
         # RESILIENT FILE-FINDING LOOP: Try up to 3 times with delays
         found_file = None
         file_location = None
+        release_album = None
 
         # CRITICAL FIX: For YouTube downloads, the filename in task is 'id||title' (metadata),
         # but the actual file on disk is the remuxed/transcoded audio (e.g. Title.mp3).
@@ -333,32 +311,27 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                         artist_ctx = get_import_context_artist(context)
                         expected_artist = artist_ctx.get('name', '') if isinstance(artist_ctx, dict) else ''
 
-                    scored_files = [
-                        (_release_audio_match_score(path, expected_title, expected_artist), path)
-                        for path in audio_files
-                        if _is_audio_file(path)
-                    ]
-                    scored_files.sort(reverse=True)
-                    if scored_files:
-                        best_score, best_path = scored_files[0]
-                        logger.info(
-                            "[Post-Processing] Best %s release file for '%s': %s (score %.2f)",
-                            task.get('username'), expected_title, best_path, best_score,
-                        )
-                        if best_score >= 0.80:
-                            copied_path = _copy_release_audio_to_transfer(best_path, transfer_dir)
-                            if copied_path:
-                                found_file = copied_path
-                                file_location = 'download'
-                                logger.info(
-                                    "[Post-Processing] Copied matched %s release file to transfer: %s",
-                                    task.get('username'), copied_path,
-                                )
-                        else:
-                            logger.warning(
-                                "[Post-Processing] No %s release file met match threshold for '%s' (best %.2f)",
-                                task.get('username'), expected_title, best_score,
-                            )
+                    from core.downloads.release_import import (
+                        profile_formats, read_release_file, select_requested_file,
+                    )
+                    from core.quality.selection import load_profile_by_id
+                    release_files = [read_release_file(deps.docker_resolve_path(path))
+                                     for path in audio_files if _is_audio_file(path)]
+                    expected_track = dict(track_info) if isinstance(track_info, dict) else {}
+                    expected_track['name'] = expected_title
+                    if not expected_track.get('artists'):
+                        expected_track['artists'] = [{'name': expected_artist}]
+                    selected = select_requested_file(
+                        release_files, expected_track,
+                        profile_formats(load_profile_by_id(expected_track.get('quality_profile_id'))))
+                    if selected:
+                        logger.info("[Post-Processing] Matched %s release file for %r: %s",
+                                    task.get('username'), expected_title, selected.path)
+                        copied_path = _copy_release_audio_to_transfer(selected.path, transfer_dir)
+                        if copied_path:
+                            found_file = copied_path
+                            file_location = 'download'
+                            release_album = (release_files, selected)
                     if not found_file:
                         with tasks_lock:
                             if task_id in download_tasks:
@@ -649,8 +622,19 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
 
             if context:
                 logger.info(f"[Post-Processing] Found matched context, running full post-processing for: {context_key}")
+                if release_album:
+                    context.pop('_pipeline_import_succeeded', None)  # this attempt's outcome only
                 # Run the existing post-processing logic with verification
                 deps.post_process_with_verification(context_key, context, found_file, task_id, batch_id)
+                if release_album and context.get('_pipeline_import_succeeded') and deps.process_release_file:
+                    # The requested track is done and its task completed. The
+                    # profile may also want the album's other tracks from it.
+                    from core.downloads.release_import import import_album_tracks
+                    try:
+                        import_album_tracks(context_key, context, *release_album, transfer_dir,
+                                            deps.process_release_file, _copy_release_audio_to_transfer)
+                    except Exception as album_error:  # the completed request must stay completed
+                        logger.error(f"[Post-Processing] Album tracks import failed: {album_error}")
             else:
                 # No matched context - just mark as completed since file exists
                 #

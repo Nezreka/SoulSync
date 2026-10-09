@@ -335,3 +335,113 @@ def test_slskd_overview_trims_the_completed_flood(monkeypatch):
     assert len(data['items']) == 103
     assert len(data['uploads']) == 25
     assert data['counts'] == {'downloads_completed': 300, 'uploads_completed': 500}
+
+
+# ── match & import ───────────────────────────────────────────────────────────
+
+def _match_client(monkeypatch, tmp_path, *, denied=None, torrent=None):
+    import sqlite3
+    import api.helpers as helpers
+    import core.client_match as cm
+    path = str(tmp_path / "music.db")
+    conn = sqlite3.connect(path)
+    cm.ensure_schema(conn.cursor())
+    conn.commit()
+    conn.close()
+    store = cm.MusicMatchStore(lambda: sqlite3.connect(path))
+    monkeypatch.setattr(cm, "music_store", lambda: store)
+    monkeypatch.setattr(cm, "ensure_watcher", lambda *a, **k: False)   # no thread in tests
+    monkeypatch.setattr(cm, "card_register", lambda row: None)
+    monkeypatch.setattr(helpers, "download_permission_error", lambda: denied)
+    return _client(monkeypatch, torrent=torrent), store
+
+
+_MUSIC = {"client": "torrent", "id": "ABCDEF", "kind": "album",
+          "match": {"id": "alb1", "name": "In Rainbows", "artist": "Radiohead", "source": "deezer"},
+          "release_title": "Radiohead - In Rainbows (2007) [FLAC]"}
+
+
+def test_a_music_match_is_kept_for_the_watcher(monkeypatch, tmp_path):
+    c, store = _match_client(monkeypatch, tmp_path)
+    body = c.post('/api/clients/match/music', json=_MUSIC).get_json()
+    assert body['success'] is True
+    [row] = store.active()
+    assert row['client_ref'] == 'ABCDEF' and row['kind'] == 'album'
+    # matching the same download again would import it twice
+    again = c.post('/api/clients/match/music', json={**_MUSIC, 'id': 'abcdef'})
+    assert again.status_code == 409
+
+
+@pytest.mark.parametrize('change', [{'client': 'soulseek'}, {'id': ''}, {'kind': 'movie'},
+                                    {'match': {'name': 'x'}}])
+def test_a_music_match_needs_a_download_and_a_pick(monkeypatch, tmp_path, change):
+    c, store = _match_client(monkeypatch, tmp_path)
+    assert c.post('/api/clients/match/music', json={**_MUSIC, **change}).status_code == 400
+    assert store.active() == []
+
+
+def test_a_music_match_takes_the_download_permission(monkeypatch, tmp_path):
+    from flask import jsonify
+    c, store = _match_client(monkeypatch, tmp_path)
+    import api.helpers as helpers
+    with c.application.app_context():
+        refusal = (jsonify({"success": False, "error": "no"}), 403)
+    monkeypatch.setattr(helpers, "download_permission_error", lambda: refusal)
+    assert c.post('/api/clients/match/music', json=_MUSIC).status_code == 403
+    assert store.active() == []
+
+
+def test_the_suggest_route_guesses_from_the_name(monkeypatch):
+    c = _client(monkeypatch)
+    body = c.get('/api/clients/match/suggest?name=Ted.Lasso.S04E10.1080p.WEB.H264-CAKES').get_json()
+    assert body['kind'] == 'episode' and body['query'] == 'Ted Lasso'
+    assert body['season'] == 4 and body['episode'] == 10
+
+
+def test_the_files_route_says_whether_soulsync_can_see_them(monkeypatch, tmp_path):
+    import core.download_plugins.album_bundle as bundle
+    on_disk = tmp_path / "Movie.2026.1080p"
+    on_disk.mkdir()
+
+    class _Adapter:
+        async def get_status(self, ref):
+            return TorrentStatus(id=ref, name='m', state='seeding', progress=1.0, size=1,
+                                 downloaded=1, download_speed=0, upload_speed=0,
+                                 content_path='/client/Movie.2026.1080p')
+
+    monkeypatch.setattr(bundle, 'resolve_reported_save_path', lambda p: str(on_disk))
+    c = _client(monkeypatch, torrent=_Adapter())
+    body = c.get('/api/clients/match/files?client=torrent&id=ABCDEF').get_json()
+    assert body['visible'] is True and body['reported_path'] == '/client/Movie.2026.1080p'
+    monkeypatch.setattr(bundle, 'resolve_reported_save_path', lambda p: str(tmp_path / 'nope'))
+    assert c.get('/api/clients/match/files?client=torrent&id=ABCDEF').get_json()['visible'] is False
+
+
+def test_a_soulseek_music_match_packs_its_folder(monkeypatch, tmp_path):
+    from core.audiobook_soulseek import decode_refs
+    c, store = _match_client(monkeypatch, tmp_path)
+    files = ["Music\\Radiohead\\In Rainbows\\01.flac", "Music\\Radiohead\\In Rainbows\\02.flac"]
+    body = {**_MUSIC, "client": "soulseek", "id": "", "username": "peer", "files": files}
+    assert c.post('/api/clients/match/music', json=body).get_json()['success'] is True
+    [row] = store.active()
+    assert row['client'] == 'soulseek'
+    assert decode_refs(row['client_ref'])['refs'] == files
+    assert c.post('/api/clients/match/music', json=body).status_code == 409
+
+
+def test_a_matched_soulseek_transfer_is_labelled_by_its_id_or_filename(monkeypatch):
+    from core.download_plugins.types import DownloadStatus as DS
+    rows = [DS(id='t1', filename='a\\x.flac', username='peer', state='InProgress', progress=10,
+               size=1, transferred=0, speed=0),
+            DS(id='t2', filename='a\\y.flac', username='peer', state='InProgress', progress=10,
+               size=1, transferred=0, speed=0)]
+
+    class _Slskd(_FakeSlskd):
+        async def get_all_downloads(self):
+            return rows
+
+    known = {'slskd': {('id', 't1'): {'kind': 'audiobook', 'title': 'Dune'},
+                       ('peer', 'a\\y.flac'): {'kind': 'album', 'title': 'In Rainbows'}}}
+    c = _client(monkeypatch, slskd=_Slskd(), known=known)
+    items = c.get('/api/clients/slskd').get_json()['items']
+    assert [i.get('soulsync', {}).get('title') for i in items] == ['Dune', 'In Rainbows']

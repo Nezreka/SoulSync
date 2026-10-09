@@ -27,7 +27,7 @@ user's key.
 from __future__ import annotations
 
 # The extension's fetch() calls send these; the preflight must allow them.
-_ALLOWED_HEADERS = "Authorization, Content-Type, X-Requested-With"
+_ALLOWED_HEADERS = "Authorization, Content-Type, X-Requested-With, X-API-Key"
 
 # Everything the API serves today, plus room for growth.
 _ALLOWED_METHODS = "GET, POST, PUT, PATCH, DELETE, OPTIONS"

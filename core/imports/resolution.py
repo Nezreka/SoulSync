@@ -201,6 +201,11 @@ def _build_single_import_context_payload(
                 album_id = typed_album.id
             if typed_album.release_date:
                 release_date = typed_album.release_date
+            elif album_data.get('release_date'):
+                # the itunes and discogs clients hand back an already
+                # normalized album, which their raw-shape converters can't
+                # read a date from
+                release_date = str(album_data['release_date'])
             if typed_album.album_type:
                 album_type = typed_album.album_type
             if typed_album.total_tracks:

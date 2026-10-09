@@ -137,6 +137,21 @@ def owner_clause(owner: Optional[int], alias: str = "") -> str:
     return f"+{prefix}profile_id = {owner_i}"
 
 
+def play_duration_sql(alias: str = "") -> str:
+    """sql for how long one play lasted, in ms.
+
+    only web-player plays carry a duration. plex, last.fm and listenbrainz
+    plays come in without one, so 689 plays summed to 45 minutes. those fall
+    back to the length of the library track the play is linked to. the cast
+    matters: db_track_id is an integer and tracks.id is text, and without it
+    sqlite scans every track for every play.
+    """
+    col = f"{alias}." if alias else "listening_history."
+    return (f"(CASE WHEN {col}duration_ms > 0 THEN {col}duration_ms "
+            f"ELSE COALESCE((SELECT _pt.duration FROM tracks _pt "
+            f"WHERE _pt.id = CAST({col}db_track_id AS TEXT)), 0) END)")
+
+
 def owner_key(base: str, owner: Optional[int]) -> str:
     """a metadata key per pile. the shared pile keeps the old bare key so every
     cache and import state written before this still reads."""

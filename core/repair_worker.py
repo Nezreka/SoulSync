@@ -4047,6 +4047,27 @@ class RepairWorker:
             n += 1
         return dest
 
+    def _redundant_single_keep_reason(self, single_path, album_path):
+        """why the single must stay, or None when the album copy is a separate
+        file on disk."""
+        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
+        try:
+            album_resolved = _resolve_file_path(album_path, self.transfer_folder, download_folder,
+                                                config_manager=self._config_manager) if album_path else None
+            single_resolved = _resolve_file_path(single_path, self.transfer_folder, download_folder,
+                                                 config_manager=self._config_manager) if single_path else None
+        except Exception as e:
+            return f'Could not check the album copy: {e} — keeping single'
+        if not album_resolved or not os.path.exists(album_resolved):
+            return 'Album copy is not on disk — keeping single'
+        if single_resolved and os.path.exists(single_resolved):
+            try:
+                if os.path.samefile(album_resolved, single_resolved):
+                    return 'Single and album entries are the same file — keeping it'
+            except OSError:
+                pass
+        return None
+
     def _fix_single_album_redundant(self, entity_type, entity_id, file_path, details):
         """Remove the single/EP version, keeping the album version."""
         single_info = details.get('single_track', {})
@@ -4063,13 +4084,22 @@ class RepairWorker:
             conn = self.db._get_connection()
             cursor = conn.cursor()
             album_id = album_info.get('id')
+            album_path = album_info.get('file_path')
             if album_id:
-                cursor.execute("SELECT id FROM tracks WHERE id = ?", (album_id,))
-                if not cursor.fetchone():
+                cursor.execute("SELECT id, file_path FROM tracks WHERE id = ?", (album_id,))
+                row = cursor.fetchone()
+                if not row:
                     return {'success': False, 'error': 'Album version no longer exists in library — keeping single'}
+                album_path = row[1] or album_path
         finally:
             if conn:
                 conn.close()
+
+        # the album copy has to be a different file that's really there, or
+        # removing the single deletes the only copy (#1611: one file, two rows)
+        keep_error = self._redundant_single_keep_reason(single_path, album_path)
+        if keep_error:
+            return {'success': False, 'error': keep_error}
 
         # Delete the single file from disk BEFORE touching the DB: if the file
         # delete fails, the library row (and the finding) stays intact so the

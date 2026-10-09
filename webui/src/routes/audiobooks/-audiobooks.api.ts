@@ -468,17 +468,32 @@ export async function fetchReleases(asin: string): Promise<AudiobookReleaseCandi
   }
 }
 
-/** Begin a search. Returns the job id to poll, or null if it could not start. */
+/**
+ * Begin a search. Returns the job id to poll, or null if it could not start.
+ *
+ * `query` is one the user typed. It replaces the generated queries outright;
+ * empty means the normal automatic search. `defaultQuery` is what the
+ * automatic search leads with, so the search box can start from it.
+ */
 export async function startReleaseSearch(
   asin: string,
-): Promise<{ id: string; pollMs: number } | null> {
+  query = '',
+): Promise<{ id: string; pollMs: number; defaultQuery: string } | null> {
   if (!asin) return null;
   try {
-    const data = await readJson<{ success?: boolean; id?: string; poll_ms?: number }>(
-      audiobookClient.post(`audiobooks/releases/${encodeURIComponent(asin)}/start`),
+    const data = await readJson<{
+      success?: boolean;
+      id?: string;
+      poll_ms?: number;
+      default_query?: string;
+    }>(
+      audiobookClient.post(
+        `audiobooks/releases/${encodeURIComponent(asin)}/start`,
+        query ? { json: { query } } : undefined,
+      ),
     );
     if (!data?.success || !data.id) return null;
-    return { id: data.id, pollMs: data.poll_ms || 1200 };
+    return { id: data.id, pollMs: data.poll_ms || 1200, defaultQuery: data.default_query || '' };
   } catch (err) {
     console.error(`Failed to start a release search for ${asin}:`, err);
     return null;
@@ -767,18 +782,33 @@ export async function clearBlocklist(): Promise<boolean> {
 export async function grabRelease(
   asin: string,
   release: AudiobookReleaseCandidate,
-): Promise<{ ok: boolean; error: string; ref: string }> {
+): Promise<{ ok: boolean; error: string; ref: string; adopted: boolean }> {
   try {
-    const data = await readJson<{ success?: boolean; error?: string; ref?: string }>(
-      audiobookClient.post('audiobooks/grab', { json: { asin, release } }),
-    );
+    const data = await readJson<{
+      success?: boolean;
+      error?: string;
+      ref?: string;
+      adopted?: boolean;
+    }>(audiobookClient.post('audiobooks/grab', { json: { asin, release } }));
     // The ref is how the row that was clicked follows its own download.
-    return { ok: Boolean(data?.success), error: data?.error || '', ref: data?.ref || '' };
+    // `adopted`: the client already had this torrent, so it was picked up
+    // where it is instead of being added again.
+    return {
+      ok: Boolean(data?.success),
+      error: data?.error || '',
+      ref: data?.ref || '',
+      adopted: Boolean(data?.adopted),
+    };
   } catch (err) {
     console.error('Failed to grab the release:', err);
     // readJson put the server's reason on the error (already owned, the
     // download client refused, disk full). "Request failed" hid all of them.
-    return { ok: false, error: err instanceof Error ? err.message : 'Request failed', ref: '' };
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Request failed',
+      ref: '',
+      adopted: false,
+    };
   }
 }
 

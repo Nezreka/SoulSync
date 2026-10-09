@@ -77,20 +77,27 @@ def _persist_paused(service: EnrichmentService, paused: bool) -> None:
         )
 
 
+def _yield_name(service: EnrichmentService):
+    from core.enrichment.yield_policy import yield_name_for_service
+    return yield_name_for_service(service.id, service.auto_pause_token)
+
+
 def _drop_auto_pause_marker(service: EnrichmentService) -> None:
-    if service.auto_pause_token is None or _auto_paused_discard is None:
+    name = _yield_name(service)
+    if name is None or _auto_paused_discard is None:
         return
     try:
-        _auto_paused_discard(service.auto_pause_token)
+        _auto_paused_discard(name)
     except Exception as e:
         logger.debug("auto-pause marker discard: %s", e)
 
 
 def _add_yield_override(service: EnrichmentService) -> None:
-    if service.auto_pause_token is None or _yield_override_add is None:
+    name = _yield_name(service)
+    if name is None or _yield_override_add is None:
         return
     try:
-        _yield_override_add(service.auto_pause_token)
+        _yield_override_add(name)
     except Exception as e:
         logger.debug("yield override add: %s", e)
 

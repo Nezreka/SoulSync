@@ -40,7 +40,8 @@ function stubFetch(analysisBody: unknown, analysisStatus = 200) {
       let body: unknown = {};
       let status = 200;
       if (url.includes('/api/library/recently-added')) {
-        body = { success: true, data: { items: [track], type: 'tracks' } };
+        // what the server really sends: the dashboard's album rail
+        body = { success: true, albums: [] };
       } else if (url.includes('/api/library/tracks')) {
         body = { success: true, data: { tracks: [track] } };
       } else if (url.includes('/api/sample/peaks')) {
@@ -154,7 +155,7 @@ describe('sample-studio route', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = input instanceof Request ? input.url : String(input);
-        if (url.includes('/api/library/tracks')) searched.push(url);
+        if (url.includes('/api/library/tracks?')) searched.push(url);
         return stubbedResponse(url, analysis, 200);
       }),
     );
@@ -238,7 +239,8 @@ function stubbedResponse(url: string, analysisBody: unknown, analysisStatus = 20
   let body: unknown = {};
   let status = 200;
   if (url.includes('/api/library/recently-added')) {
-    body = { success: true, data: { items: [track], type: 'tracks' } };
+    // what the server really sends: the dashboard's album rail
+    body = { success: true, albums: [] };
   } else if (url.includes('/api/library/tracks')) {
     body = { success: true, data: { tracks: [track] } };
   } else if (url.includes('/api/sample/peaks')) {

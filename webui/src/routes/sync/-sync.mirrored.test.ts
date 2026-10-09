@@ -290,7 +290,7 @@ describe('mirroredHash', () => {
 /* ── The DETAIL modal's helpers (openMirroredPlaylistModal, 1086-1100) ─────── */
 
 describe('the detail modal tables are NOT the card tables', () => {
-  it('carries the seven keys the detail modal has, and not the card key', () => {
+  it('carries the keys the detail modal has, and not the card key', () => {
     expect(MIRRORED_DETAIL_SOURCE_ICONS).toEqual({
       spotify: '🎵',
       spotify_public: '🎵',
@@ -299,6 +299,7 @@ describe('the detail modal tables are NOT the card tables', () => {
       beatport: '🎛',
       deezer: '🎧',
       qobuz: '♫',
+      soulsync: '♥',
     });
     // The card knows `file`; the detail modal does not (571 vs 1086).
     expect('file' in MIRRORED_DETAIL_SOURCE_ICONS).toBe(false);
@@ -310,7 +311,7 @@ describe('the detail modal tables are NOT the card tables', () => {
     }
   });
 
-  it('labels the same seven keys, with Spotify twice (1087)', () => {
+  it('labels the same keys, with Spotify twice (1087)', () => {
     expect(MIRRORED_DETAIL_SOURCE_LABELS).toEqual({
       spotify: 'Spotify',
       spotify_public: 'Spotify',
@@ -319,6 +320,7 @@ describe('the detail modal tables are NOT the card tables', () => {
       beatport: 'Beatport',
       deezer: 'Deezer',
       qobuz: 'Qobuz',
+      soulsync: 'SoulSync',
     });
     expect(Object.keys(MIRRORED_DETAIL_SOURCE_LABELS)).toEqual(
       Object.keys(MIRRORED_DETAIL_SOURCE_ICONS),

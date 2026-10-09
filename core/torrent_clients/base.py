@@ -80,6 +80,37 @@ class TorrentStatus:
     # back to their own clock when None.
     ratio: Optional[float] = None
     seeding_time: Optional[int] = None
+    # the v1 info-hash, for clients whose ``id`` is not the hash (aria2's gid).
+    # None means ``id`` already is the hash.
+    info_hash: Optional[str] = None
+
+
+class AdoptedRef(str):
+    """A torrent ref for a torrent the client ALREADY had.
+
+    Still a plain str to every caller. One that cares (the audiobook grab) can
+    tell the user the existing download was picked up rather than added.
+    """
+
+
+async def find_existing_torrent(adapter: "TorrentClientAdapter", info_hash: str) -> Optional[str]:
+    """The client's own id for the torrent with this info-hash, or None.
+
+    Lists rather than asks by hash, because not every client keys on the hash
+    (aria2 tracks a gid). A client that cannot be listed answers None, so the
+    caller falls through to a normal add.
+    """
+    wanted = str(info_hash or '').lower()
+    if not wanted:
+        return None
+    try:
+        statuses = await adapter.get_all()
+    except Exception:  # noqa: BLE001 - an unlistable client is just "not found"
+        return None
+    for status in statuses or []:
+        if str(status.info_hash or status.id or '').lower() == wanted:
+            return status.id
+    return None
 
 
 @runtime_checkable
@@ -214,6 +245,7 @@ async def add_torrent_smart(
     save_path: Optional[str] = None,
     fallback_magnet: Optional[str] = None,
     verify_files=None,
+    adopt_existing: bool = False,
 ) -> Optional[str]:
     """Add a release the way Sonarr/Radarr do: magnets go straight to the
     client; HTTP download links are fetched server-side and handed over as
@@ -240,11 +272,31 @@ async def add_torrent_smart(
     from utils.logging_config import get_logger
     logger = get_logger('torrent.add')
 
+    async def _adopt(info_hash):
+        """``adopt_existing``: a torrent the client already holds is tracked,
+        not re-added. clients refuse the duplicate, which read as a failed grab
+        while the finished files sat in the client."""
+        if not adopt_existing or not info_hash:
+            return None
+        found = await find_existing_torrent(adapter, info_hash)
+        if found:
+            logger.info("Torrent client already holds %s — adopting it", str(info_hash)[:12])
+            return AdoptedRef(found)
+        return None
+
+    from core.torrent_clients.qbittorrent import _magnet_hash
+
     if not str(url_or_magnet or '').lower().startswith(('http://', 'https://')):
+        adopted = await _adopt(_magnet_hash(url_or_magnet))
+        if adopted:
+            return adopted
         return await adapter.add_torrent(url_or_magnet, category=category, save_path=save_path)
 
     file_bytes, magnet = await _fetch_torrent_payload_async(url_or_magnet)
     if magnet:
+        adopted = await _adopt(_magnet_hash(magnet))
+        if adopted:
+            return adopted
         return await adapter.add_torrent(magnet, category=category, save_path=save_path)
     if file_bytes is not None:
         if verify_files is not None:
@@ -257,6 +309,10 @@ async def add_torrent_smart(
                 ok, reason = verify_files(names)
                 if not ok:
                     raise ReleaseRejected(reason)
+        from core.quality.torrent_contents import torrent_info_hash
+        adopted = await _adopt(torrent_info_hash(file_bytes))
+        if adopted:
+            return adopted
         return await adapter.add_torrent_file(file_bytes, category=category, save_path=save_path)
 
     if fallback_magnet:
@@ -265,6 +321,9 @@ async def add_torrent_smart(
             "release's magnet link",
             _strip_query(url_or_magnet),
         )
+        adopted = await _adopt(_magnet_hash(fallback_magnet))
+        if adopted:
+            return adopted
         return await adapter.add_torrent(fallback_magnet, category=category, save_path=save_path)
 
     logger.warning(

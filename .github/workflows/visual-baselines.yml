@@ -1,0 +1,62 @@
+name: Render visual baselines
+
+# Renders fresh screenshot baselines for webui/tests/visual and uploads them
+# as the visual-baselines artifact, so nobody needs Docker to update them.
+# It never commits: download the artifact into
+# webui/tests/visual/__screenshots__/, review the PNGs and commit them
+# yourself (see webui/tests/visual/README.md).
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or SHA to render (defaults to the branch the workflow runs on)
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Same image as the webui-visual job in build-and-test.yml, so these
+    # baselines match what that job compares against. Keep the tag in step
+    # with @playwright/test in webui/package.json.
+    container:
+      image: mcr.microsoft.com/playwright:v1.59.1-jammy
+      options: --ipc=host
+
+    defaults:
+      run:
+        working-directory: webui
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build webui
+        run: npm run build
+
+      # Start from an empty folder so the artifact holds only the shots the
+      # suite takes now.
+      - name: Render baselines
+        run: |
+          rm -rf tests/visual/__screenshots__
+          node scripts/visual.mjs --update-snapshots=all
+
+      # The folder's contents sit at the artifact root (desktop/, mobile/),
+      # so it unzips straight into webui/tests/visual/__screenshots__/.
+      - name: Upload baselines
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-baselines
+          path: webui/tests/visual/__screenshots__/
+          if-no-files-found: error
+          retention-days: 7

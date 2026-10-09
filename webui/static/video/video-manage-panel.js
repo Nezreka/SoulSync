@@ -33,7 +33,7 @@
     // ── one-time styles ──────────────────────────────────────────────────────
     function ensureStyles() {
         if (document.getElementById('vmg-styles')) return;
-        var A = 'var(--accent-rgb, 88 101 242)';
+        var A = 'var(--accent-rgb)';
         var css =
             '.vmg-overlay{position:fixed;inset:0;z-index:9100;background:rgba(5,5,8,.55);backdrop-filter:blur(4px);' +
                 'opacity:0;transition:opacity .22s ease;}' +

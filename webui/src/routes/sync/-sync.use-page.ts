@@ -49,8 +49,9 @@ export interface SyncPage {
   sidebarVisible: boolean;
   /** The shell calls this on every tab switch — the vanilla re-hides there. */
   onTabChange: () => void;
-  /** Handed to MirroredTab. */
-  registerMirroredReload: (reload: () => void) => void;
+  /** Handed to MirroredTab. `key` names the instance: the Mirrored and My
+   *  Playlists tabs are two of them, and a pipeline run has to refresh both. */
+  registerMirroredReload: (reload: () => void, key?: string) => void;
   /**
    * Refetch the mirrored rows. The page already holds the tab's reload for the
    * pipeline controller; the import tab needs the same one, because
@@ -75,10 +76,10 @@ export function useSyncPage(): SyncPage {
     spotifyOrder.current = playlistIds;
   }, []);
 
-  /** The mirrored tab's row refetch, filled on its mount. */
-  const mirroredReload = useRef<(() => void) | undefined>(undefined);
-  const registerMirroredReload = useCallback((reload: () => void) => {
-    mirroredReload.current = reload;
+  /** Each mirrored tab's row refetch, filled on its mount. */
+  const mirroredReloads = useRef(new Map<string, () => void>());
+  const registerMirroredReload = useCallback((reload: () => void, key = 'mirrored') => {
+    mirroredReloads.current.set(key, reload);
   }, []);
 
   const verticals = useSyncVerticals();
@@ -87,7 +88,9 @@ export function useSyncPage(): SyncPage {
     () => mirroredPipelineStateWriter(verticals.mirrored),
     [verticals.mirrored],
   );
-  const reloadMirrored = useCallback(() => mirroredReload.current?.(), []);
+  const reloadMirrored = useCallback(() => {
+    for (const reload of mirroredReloads.current.values()) reload();
+  }, []);
   const pipeline = useMirroredPipeline({ onState: onPipelineState, reload: reloadMirrored });
 
   /**

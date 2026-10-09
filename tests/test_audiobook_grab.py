@@ -58,7 +58,7 @@ def test_torrent_grab_returns_the_tracking_ref():
          patch("core.torrent_clients.base.add_torrent_smart",
                new=_async_return("hash-1")) as _:
         result = grab_torrent("magnet:?xt=urn:btih:abc")
-    assert result == {"ok": True, "ref": "hash-1"}
+    assert result == {"ok": True, "ref": "hash-1", "adopted": False}
 
 
 def test_torrent_grab_without_a_client_is_a_readable_error():

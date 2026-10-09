@@ -519,6 +519,9 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False, pro
                 'refresh_only': bool(refresh_only),
                 'profile_id': int(profile_id),
                 '_automation_id': _playlist_pipeline_state_key(playlist_id, profile_id),
+                # the user clicked Sync & download, so tracks they once removed
+                # from the wishlist come back; schedules keep the ignore-list (#1603)
+                'user_initiated': True,
             },
             deps,
             refresh_fn=auto_refresh_mirrored,
@@ -583,7 +586,8 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
         playlist = _owned_mirrored_playlist(database, playlist_id)
         if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
-        if playlist.get('source') in ('file', 'beatport'):
+        from core.playlists.user_playlists import PIPELINE_SKIPPED_SOURCES
+        if playlist.get('source') in PIPELINE_SKIPPED_SOURCES:
             return jsonify({"error": "This playlist source cannot be refreshed by the pipeline"}), 400
         if _get_automation_deps() is None:
             return jsonify({"error": "Playlist pipeline is not available"}), 503

@@ -83,9 +83,12 @@ def match_source_tracks(
 ) -> List[Tuple[Dict[str, Any], Optional[Any]]]:
     """Pair each library track to a source track.
 
-    Disc+track number is authoritative; falls back to title similarity. A source
-    track is consumed once. Returns ``[(library_track, source_track_or_None)]``
-    in library order, so unmatched library tracks surface as ``None``.
+    Disc+track number wins, unless the library title clearly names a different
+    source track: then the title wins (#1610, "Coastin'" carried track 5 and got
+    re-tagged as track 5 "Antenna"). A title that matches nothing (junk like
+    "Track 01") still pairs by position. A source track is consumed once.
+    Returns ``[(library_track, source_track_or_None)]`` in library order, so
+    unmatched library tracks surface as ``None``.
     """
     by_pos: Dict[Tuple[int, int], int] = {}
     for i, st in enumerate(source_tracks):
@@ -95,32 +98,51 @@ def match_source_tracks(
         d = _int_or_none(_get(st, 'disc_number', default=1)) or 1
         by_pos.setdefault((d, t), i)
 
+    source_norms = [_norm_title(_get(st, 'name', 'title', 'track_name')) for st in source_tracks]
+
+    def _score(lt_norm: str, i: int) -> float:
+        return SequenceMatcher(None, lt_norm, source_norms[i]).ratio()
+
+    def _best_title(lt_norm: str, skip: set) -> Tuple[Optional[int], float]:
+        best_idx, best_score = None, 0.0
+        if lt_norm:
+            for i in range(len(source_tracks)):
+                if i in skip:
+                    continue
+                score = _score(lt_norm, i)
+                if score > best_score:
+                    best_score, best_idx = score, i
+        return best_idx, best_score
+
     used: set = set()
-    pairs: List[Tuple[Dict[str, Any], Optional[Any]]] = []
-    for lt in library_tracks:
+    matched: Dict[int, int] = {}       # library index -> source index
+    title_first: List[int] = []
+    # pass 1: positions, unless the title says it's another track
+    for li, lt in enumerate(library_tracks):
         t = _int_or_none(lt.get('track_number'))
         d = _int_or_none(lt.get('disc_number')) or 1
         idx = by_pos.get((d, t)) if t is not None else None
-        if idx is not None and idx not in used:
-            used.add(idx)
-            pairs.append((lt, source_tracks[idx]))
+        if idx is None or idx in used:
+            title_first.append(li)
             continue
-        # Title-similarity fallback over still-unused source tracks.
         lt_norm = _norm_title(lt.get('title'))
-        best_idx, best_score = None, 0.0
-        if lt_norm:
-            for i, st in enumerate(source_tracks):
-                if i in used:
-                    continue
-                score = SequenceMatcher(None, lt_norm, _norm_title(_get(st, 'name', 'title', 'track_name'))).ratio()
-                if score > best_score:
-                    best_score, best_idx = score, i
+        if lt_norm and _score(lt_norm, idx) < title_threshold:
+            other, other_score = _best_title(lt_norm, {idx})
+            if other is not None and other_score >= title_threshold:
+                title_first.append(li)
+                continue
+        used.add(idx)
+        matched[li] = idx
+
+    # pass 2: title similarity over the source tracks still free
+    for li in title_first:
+        best_idx, best_score = _best_title(_norm_title(library_tracks[li].get('title')), used)
         if best_idx is not None and best_score >= title_threshold:
             used.add(best_idx)
-            pairs.append((lt, source_tracks[best_idx]))
-        else:
-            pairs.append((lt, None))
-    return pairs
+            matched[li] = best_idx
+
+    return [(lt, source_tracks[matched[li]] if li in matched else None)
+            for li, lt in enumerate(library_tracks)]
 
 
 def _target_for_track(source_track: Any, album_meta: Dict[str, Any]) -> Dict[str, Any]:

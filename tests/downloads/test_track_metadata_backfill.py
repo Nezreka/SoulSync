@@ -612,3 +612,54 @@ def test_a_missing_credit_alone_never_adds_a_spotify_call():
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+# ── #1605: the album id belongs to the track's own source ──
+
+def _deezer_album():
+    return {"id": "14582002", "name": "Moana (Deluxe)", "release_date": "2016-11-18",
+            "total_tracks": 59, "album_type": "album",
+            "artists": [{"name": "Lin-Manuel Miranda", "id": "1545788"}]}
+
+
+def test_backfill_asks_the_tracks_own_source_not_the_primary():
+    """#1605 (cremonies): a deezer search track on a spotify-primary install. the
+    album id is deezer's, the spotify skip used to drop it and the song came out
+    4/1 under its singer instead of lin-manuel miranda 4/59."""
+    ctx = {"id": "14582002", "name": "Moana (Deluxe)", "release_date": "",
+           "total_tracks": 0, "album_type": "album", "artists": []}
+    calls = []
+
+    def get_album(source, album_id):
+        calls.append((source, album_id))
+        return _deezer_album()
+
+    assert backfill_album_context_from_source(ctx, "spotify", get_album, album_source="deezer") is True
+    assert calls == [("deezer", "14582002")]
+    assert ctx["artists"] == [{"name": "Lin-Manuel Miranda", "id": "1545788"}]
+    assert ctx["total_tracks"] == 59
+
+
+def test_backfill_uses_the_tracks_source_over_another_primary():
+    calls = []
+    backfill_album_context_from_source(
+        _lean_ctx("14582002"), "itunes",
+        lambda s, a: calls.append((s, a)) or _deezer_album(), album_source="Deezer")
+    assert calls == [("deezer", "14582002")]
+
+
+def test_backfill_ignores_a_source_that_is_not_a_metadata_source():
+    # a download source or stray label must not hijack the lookup
+    calls = []
+    backfill_album_context_from_source(
+        _lean_ctx(), "itunes", lambda s, a: calls.append((s, a)) or _itunes_album(),
+        album_source="soulseek")
+    assert calls == [("itunes", "itunes-123")]
+
+
+def test_backfill_still_skips_a_spotify_sourced_track():
+    # spotify keeps its own track-details hydrate, no new spotify calls
+    called = []
+    assert backfill_album_context_from_source(
+        _lean_ctx(), "itunes", lambda *a: called.append(a), album_source="spotify") is False
+    assert called == []

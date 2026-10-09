@@ -762,3 +762,28 @@ describe('bitrateClass', () => {
     expect(bitrateClass(0)).toBe('low');
   });
 });
+
+describe('playlistTrackPayload', () => {
+  it("uses a compilation row's own artist over the page's", async () => {
+    const { playlistTrackPayload } = await import('./-artist-detail.enhanced-album');
+    expect(
+      playlistTrackPayload(
+        { title: 'Song', artist_name: 'Guest', duration: 180000 },
+        { title: 'Comp', thumb_url: '/api/image/1' },
+        { name: 'Various Artists' },
+      ),
+    ).toEqual({
+      track_name: 'Song',
+      artist_name: 'Guest',
+      album_name: 'Comp',
+      duration_ms: 180000,
+      image_url: '/api/image/1',
+    });
+  });
+
+  it("falls back to the page's artist, and is null without a title", async () => {
+    const { playlistTrackPayload } = await import('./-artist-detail.enhanced-album');
+    expect(playlistTrackPayload({ title: 'Song' }, {}, { name: 'Band' })?.artist_name).toBe('Band');
+    expect(playlistTrackPayload({}, {}, { name: 'Band' })).toBeNull();
+  });
+});

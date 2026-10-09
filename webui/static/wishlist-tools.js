@@ -3996,7 +3996,7 @@ async function openMetadataCacheDetail(source, entityType, entityId) {
             addRow('Disc Number', data.disc_number);
             addRow('Explicit', data.explicit ? 'Yes' : 'No');
             addRow('ISRC', data.isrc);
-            if (data.preview_url) addRow('Preview', `<a href="${data.preview_url}" target="_blank" style="color:var(--accent,#6d5dfc)">Listen</a>`);
+            if (data.preview_url) addRow('Preview', `<a href="${data.preview_url}" target="_blank" style="color:var(--accent)">Listen</a>`);
         }
 
         fieldsHtml += '</table>';

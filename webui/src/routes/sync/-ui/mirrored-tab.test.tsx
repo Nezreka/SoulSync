@@ -1495,3 +1495,101 @@ describe('MirroredTab — select mode and batch delete (#1219)', () => {
     expect(screen.getByText('0 selected')).toBeInTheDocument();
   });
 });
+
+describe('MirroredTab — My Playlists scope', () => {
+  const MINE = {
+    id: 7,
+    name: 'Late night',
+    source: 'soulsync',
+    source_playlist_id: 'abc',
+    track_count: 2,
+    discovered_count: 0,
+    updated_at: '2026-01-15T11:30:00Z',
+  };
+
+  it('each tab shows only its own playlists', async () => {
+    stubFetch();
+    responder = (url) => (url === '/api/mirrored-playlists' ? [ROW, MINE] : { states: [] });
+    const { unmount } = render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    expect(screen.queryByText('Late night')).toBeNull();
+    unmount();
+
+    stubFetch();
+    render(<Harness scope="user" />);
+    await waitFor(() => expect(screen.getByText('Late night')).toBeInTheDocument());
+    expect(screen.queryByText('Road Trip')).toBeNull();
+    expect(screen.getByText('My playlists')).toBeInTheDocument();
+    // a user playlist has no source to point anywhere
+    fireEvent.click(document.querySelector('.pl-card-more') as HTMLElement);
+    const items = [...document.querySelectorAll('.pl-menu-item')].map((b) => b.textContent);
+    expect(items).toContain('Rename');
+    expect(items).not.toContain('Edit source link');
+  });
+
+  it('registers its reload under its own key so the page refreshes both tabs', async () => {
+    stubFetch();
+    responder = () => [];
+    const keys: (string | undefined)[] = [];
+    render(<Harness scope="user" registerReload={(_fn, key) => keys.push(key)} />);
+    await waitFor(() => expect(keys).toContain('my-playlists'));
+    expect(keys).not.toContain('mirrored');
+  });
+
+  it('+ New playlist makes one and opens it', async () => {
+    stubFetch();
+    const toast = vi.fn();
+    (window as { showToast?: unknown }).showToast = toast;
+    let made = false;
+    responder = (url, method) => {
+      if (url === '/api/user-playlists' && method === 'POST') {
+        made = true;
+        return { success: true, id: 7 };
+      }
+      if (url === '/api/mirrored-playlists') return made ? [MINE] : [];
+      if (url === '/api/mirrored-playlists/7') return { ...MINE, tracks: [] };
+      return { states: [] };
+    };
+    render(<Harness scope="user" />);
+    await waitFor(() =>
+      expect(screen.getByText(/Start one with \+ New playlist/)).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByText('+ New playlist'));
+    const input = screen.getByLabelText('New playlist name');
+    expect((screen.getByText('Create') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(input, { target: { value: '  Late night ' } });
+    fireEvent.click(screen.getByText('Create'));
+    await waitFor(() => expect(screen.getByText('Your Playlist')).toBeInTheDocument());
+    const post = calls.find((c) => c.url === '/api/user-playlists' && c.method === 'POST');
+    expect(post?.body).toEqual({ name: 'Late night', tracks: [] });
+    expect(toast).toHaveBeenCalledWith('Made "Late night"', 'success');
+    expect(screen.queryByLabelText('New playlist name')).toBeNull();
+  });
+
+  it('removing a track from the detail saves it and shows the saved list', async () => {
+    stubFetch();
+    let removed = false;
+    const tracks = [
+      { position: 1, track_name: 'One', artist_name: 'A' },
+      { position: 2, track_name: 'Two', artist_name: 'B' },
+    ];
+    responder = (url, method) => {
+      if (url === '/api/mirrored-playlists') return [MINE];
+      if (url === '/api/user-playlists/7/tracks/1' && method === 'DELETE') {
+        removed = true;
+        return { success: true, track_count: 1 };
+      }
+      if (url === '/api/mirrored-playlists/7')
+        return { ...MINE, tracks: removed ? [{ ...tracks[1], position: 1 }] : tracks };
+      return { states: [] };
+    };
+    render(<Harness scope="user" />);
+    await waitFor(() => expect(screen.getByText('Late night')).toBeInTheDocument());
+    fireEvent.click(document.querySelector('#mirrored-card-7') as HTMLElement);
+    await waitFor(() => expect(screen.getByText('One')).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText('Remove One from this playlist'));
+    await waitFor(() => expect(screen.queryByText('One')).toBeNull());
+    expect(screen.getByText('Two')).toBeInTheDocument();
+    expect(removed).toBe(true);
+  });
+});

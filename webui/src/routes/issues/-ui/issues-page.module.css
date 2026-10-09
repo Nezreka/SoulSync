@@ -737,8 +737,8 @@
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.03em;
-  color: rgb(var(--accent-rgb, 29, 185, 84));
-  background: rgba(var(--accent-rgb, 29, 185, 84), 0.14);
+  color: rgb(var(--accent-rgb));
+  background: rgba(var(--accent-rgb), 0.14);
 }
 
 .issuesMore {
@@ -878,7 +878,7 @@
 
 .bulkQuiet {
   font-weight: 500;
-  color: rgb(var(--accent-light-rgb, var(--accent-rgb)));
+  color: rgb(var(--accent-light-rgb));
 }
 
 .bulkDanger {

@@ -70,3 +70,22 @@ def genre_names_from_response(data: Any) -> Dict[int, str]:
         if genre_id not in _NOT_A_GENRE and name:
             out[genre_id] = name
     return out
+
+
+def album_genre_names(album_data: Any) -> List[str]:
+    """genre names off a raw deezer /album/{id} answer (its genres.data)."""
+    genres = album_data.get('genres') if isinstance(album_data, dict) else None
+    rows = genres.get('data') if isinstance(genres, dict) else None
+    names: List[str] = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        try:
+            if int(row.get('id')) in _NOT_A_GENRE:
+                continue
+        except (TypeError, ValueError):
+            pass
+        name = str(row.get('name') or '').strip()
+        if name and name not in names:
+            names.append(name)
+    return names

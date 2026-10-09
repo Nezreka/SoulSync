@@ -2,8 +2,9 @@
  * Sample Studio — API layer.
  *
  * Library search reuses the session-auth GET /api/library/tracks wrapper
- * (free-text `q` over title + artist) and GET /api/library/recently-added
- * (default browse view). Analysis + peaks come from the Phase 1 api/sample.py
+ * (free-text `q` over title + artist) and GET /api/library/tracks/recent
+ * (default browse view). not /api/library/recently-added: that's the
+ * dashboard's album rail, and asking it for tracks always failed. Analysis + peaks come from the Phase 1 api/sample.py
  * endpoints via the session-auth /api/sample/* wrappers in web_server.py.
  */
 
@@ -40,11 +41,6 @@ interface TrackSearchResponse {
   tracks: StudioTrack[];
 }
 
-interface RecentlyAddedResponse {
-  items: StudioTrack[];
-  type: string;
-}
-
 interface AnalysisPayload {
   track_id: number;
   status: AnalysisStatus;
@@ -61,12 +57,12 @@ export function studioTrackSearchQueryOptions(query: string) {
     queryKey: [...SAMPLE_STUDIO_QUERY_KEY, 'tracks', q] as const,
     queryFn: async (): Promise<StudioTrack[]> => {
       if (!q) {
-        const payload = await readJson<Envelope<RecentlyAddedResponse>>(
-          apiClient.get('library/recently-added', {
-            searchParams: { type: 'tracks', limit: 50 },
+        const payload = await readJson<Envelope<TrackSearchResponse>>(
+          apiClient.get('library/tracks/recent', {
+            searchParams: { limit: 50 },
           }),
         );
-        return payload.data.items.map(toStudioTrack);
+        return payload.data.tracks.map(toStudioTrack);
       }
       const payload = await readJson<Envelope<TrackSearchResponse>>(
         apiClient.get('library/tracks', {

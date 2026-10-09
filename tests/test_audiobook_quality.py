@@ -221,3 +221,112 @@ def test_leaving_dramatisations_on_keeps_them_visible():
     drama = _ranked_release("Project Hail Mary GraphicAudio")
     with _config({"audiobooks.quality.allow_dramatized": True}):
         assert len(rank_releases([drama], _book(), 0.0, "any")) == 1
+
+
+# ---------------------------------------------------------------------------
+# Allowed formats
+# ---------------------------------------------------------------------------
+
+def test_every_format_is_allowed_by_default():
+    with _config({}):
+        assert profile()["allowed_formats"] == []
+    for fmt in DEFAULT_FORMAT_ORDER:
+        assert rejection(_release(audio_format=fmt), DEFAULTS) == ""
+
+
+def test_the_allowed_formats_are_normalised():
+    with _config({"audiobooks.quality.allowed_formats": [" M4B", ".mp3", "m4b", ""]}):
+        assert profile()["allowed_formats"] == ["m4b", "mp3"]
+
+
+def test_allowed_formats_naming_no_real_format_restrict_nothing():
+    # A garbled setting must not quietly refuse every release.
+    with _config({"audiobooks.quality.allowed_formats": ["torrent", "usenet"]}):
+        assert profile()["allowed_formats"] == []
+
+
+def test_allowed_formats_written_as_text_still_read():
+    with _config({"audiobooks.quality.allowed_formats": "m4b, mp3"}):
+        assert profile()["allowed_formats"] == ["m4b", "mp3"]
+
+
+def test_a_format_left_out_is_refused():
+    # Preferred Format only ranks; this is what keeps an MP3 from being grabbed
+    # when no M4B turned up.
+    prof = {**DEFAULTS, "allowed_formats": ["m4b"]}
+    assert "MP3" in rejection(_release(audio_format="mp3"), prof)
+
+
+def test_an_allowed_format_is_kept():
+    prof = {**DEFAULTS, "allowed_formats": ["m4b", "mp3"]}
+    assert rejection(_release(audio_format="mp3"), prof) == ""
+
+
+def test_a_release_of_unknown_format_is_not_refused():
+    # A torrent title that names no format would otherwise always be hidden.
+    prof = {**DEFAULTS, "allowed_formats": ["m4b"]}
+    assert rejection(_release(audio_format=""), prof) == ""
+
+
+def test_the_ranker_drops_a_format_that_is_not_allowed():
+    from core.audiobook_release_search import rank_releases
+
+    mp3 = _ranked_release()
+    mp3.audio_format = "mp3"
+    m4b = _ranked_release()
+    m4b.audio_format = "m4b"
+    with _config({"audiobooks.quality.allowed_formats": ["m4b"]}):
+        assert rank_releases([mp3], _book(), 0.0, "any") == []
+        assert len(rank_releases([m4b], _book(), 0.0, "any")) == 1
+
+
+# ---------------------------------------------------------------------------
+# One file or several
+# ---------------------------------------------------------------------------
+
+def _soulseek_release(files):
+    return _release(soulseek={"file_count": files, "files": [{}] * files})
+
+
+def test_any_layout_is_the_default():
+    with _config({}):
+        assert profile()["file_layout"] == "any"
+    assert rejection(_soulseek_release(30), DEFAULTS) == ""
+    assert rejection(_soulseek_release(1), DEFAULTS) == ""
+
+
+@pytest.mark.parametrize("bad", ["both", "", None, 3])
+def test_a_nonsense_layout_reads_as_any(bad):
+    with _config({"audiobooks.quality.file_layout": bad}):
+        assert profile()["file_layout"] == "any"
+
+
+def test_the_layout_is_normalised():
+    with _config({"audiobooks.quality.file_layout": " Single "}):
+        assert profile()["file_layout"] == "single"
+
+
+def test_single_refuses_a_folder_of_chapters():
+    prof = {**DEFAULTS, "file_layout": "single"}
+    assert "30 files" in rejection(_soulseek_release(30), prof)
+    assert rejection(_soulseek_release(1), prof) == ""
+
+
+def test_multiple_refuses_a_lone_file():
+    prof = {**DEFAULTS, "file_layout": "multiple"}
+    assert "single file" in rejection(_soulseek_release(1), prof)
+    assert rejection(_soulseek_release(30), prof) == ""
+
+
+def test_a_release_with_no_known_file_count_is_not_refused():
+    # A torrent or NZB is a title and a size; hiding them all would hide most
+    # of what a search finds.
+    for layout in ("single", "multiple"):
+        assert rejection(_release(), {**DEFAULTS, "file_layout": layout}) == ""
+
+
+def test_the_file_count_falls_back_to_the_file_list():
+    from core.audiobook_quality import file_count
+
+    assert file_count(_release(soulseek={"files": [{}, {}, {}]})) == 3
+    assert file_count(_release()) is None

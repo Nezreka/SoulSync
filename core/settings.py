@@ -1052,6 +1052,12 @@ class ConfigManager:
                     # GraphicAudio and the like. On by default because they are
                     # already shown-but-outranked; turning this off removes them.
                     "allow_dramatized": True,
+                    # Formats a release may be in at all; empty allows every
+                    # format. Unlike format_order this rejects, not ranks.
+                    "allowed_formats": [],
+                    # "single", "multiple" or "any": whether a book arrives as
+                    # one file or several. Rejects only where the count is known.
+                    "file_layout": "any",
                 },
                 # How long a short book is kept staged before giving up. Torrents
                 # finish late and uploaders repair releases, so patience is right;

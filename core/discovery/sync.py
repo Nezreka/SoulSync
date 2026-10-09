@@ -316,6 +316,7 @@ def run_sync_task(
     deps: SyncDeps = None,
     sync_mode: str = 'reconcile',  # #1289: safer default (preserves server edits)
     skip_wishlist_add: bool = False,
+    user_initiated: bool = False,
 ):
     """The actual sync function that runs in the background thread."""
     sync_states = deps.sync_states
@@ -581,7 +582,9 @@ def run_sync_task(
                 return
 
         # Run the sync (this is a blocking call within this thread)
-        result = deps.run_async(sync_service.sync_playlist(playlist, download_missing=False, profile_id=profile_id, sync_mode=sync_mode))
+        result = deps.run_async(sync_service.sync_playlist(
+            playlist, download_missing=False, profile_id=profile_id, sync_mode=sync_mode,
+            user_initiated=user_initiated))
 
         # Clear progress callback immediately to prevent race condition where a
         # late-firing progress callback overwrites the "finished" state below

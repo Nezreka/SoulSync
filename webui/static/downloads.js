@@ -631,7 +631,7 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                                                    onchange="updateTrackSelectionCount('${virtualPlaylistId}')">
                                         </td>
                                         <td class="track-number">${index + 1}</td>
-                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(virtualPlaylistId, index)}${escapeHtml(track.name)}</td>
+                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(virtualPlaylistId, index)}${renderModalTrackPlaylistButton(virtualPlaylistId, index)}${escapeHtml(track.name)}</td>
                                         <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
                                         <td class="track-duration">${formatDuration(track.duration_ms)}</td>
                                         <td class="track-match-status match-checking" id="match-${virtualPlaylistId}-${index}">🔍 Pending</td>
@@ -1546,7 +1546,7 @@ async function openDownloadMissingWishlistModal(category = null, selectedTrackId
                                 ${tracks.map((track, index) => `
                                     <tr data-track-index="${index}">
                                         <td class="track-number">${index + 1}</td>
-                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(playlistId, index)}${escapeHtml(track.name)}</td>
+                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(playlistId, index)}${renderModalTrackPlaylistButton(playlistId, index)}${escapeHtml(track.name)}</td>
                                         <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
                                         <td class="track-match-status match-checking" id="match-${playlistId}-${index}">🔍 Pending</td>
                                         <td class="track-download-status" id="download-${playlistId}-${index}">-</td>
@@ -2069,6 +2069,37 @@ function getModalTrackAlbumTitle(track, process = null) {
 
 function renderModalTrackPlayButton(playlistId, trackIndex) {
     return `<button class="modal-track-play-btn" onclick="event.stopPropagation(); playDownloadModalTrack('${escapeForInlineJs(playlistId)}', ${trackIndex})" title="Play track">&#9654;</button>`;
+}
+
+// the add-to-playlist picker lives in the react bundle (features/playlists),
+// so this only hands it the row's artist + title
+function renderModalTrackPlaylistButton(playlistId, trackIndex) {
+    return `<button class="modal-track-play-btn modal-track-add-btn" onclick="event.stopPropagation(); addDownloadModalTrackToPlaylist('${escapeForInlineJs(playlistId)}', ${trackIndex}, this)" title="Add to playlist" aria-label="Add to playlist"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M14 10H3v2h11v-2zm0-4H3v2h11V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM3 16h7v-2H3v2z"/></svg></button>`;
+}
+
+function addDownloadModalTrackToPlaylist(playlistId, trackIndex, button) {
+    const process = activeDownloadProcesses[playlistId];
+    const track = process?.tracks?.[trackIndex] || playlistTrackCache[playlistId]?.[trackIndex];
+    if (!track) {
+        showToast('Track is no longer available in this modal', 'error');
+        return;
+    }
+    if (typeof window.openAddToPlaylist !== 'function') {
+        showToast('Playlists are still loading, try again in a moment', 'error');
+        return;
+    }
+    // the main artist, not the joined credit: identify matches on it
+    const artists = Array.isArray(track.artists) ? track.artists : [];
+    const first = artists[0];
+    let artistName = (typeof first === 'string' ? first : first?.name)
+        || getModalTrackArtistName(track, process?.artist?.name || '');
+    if (artistName === 'Unknown Artist') artistName = '';
+    window.openAddToPlaylist({
+        track_name: track.name || track.title || '',
+        artist_name: artistName || '',
+        album_name: getModalTrackAlbumTitle(track, process) || '',
+        duration_ms: Number(track.duration_ms) || 0,
+    }, button);
 }
 
 async function playTrackFromLibraryOrStream(track, albumTitle = '', artistName = '') {

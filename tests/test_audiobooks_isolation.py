@@ -201,6 +201,8 @@ def test_only_the_acquisition_routes_write_anything():
     # supposed to be read-only.
     allowed_writers = {"/api/audiobooks/wishlist", "/api/audiobooks/wishlist/<asin>",
                        "/api/audiobooks/wishlist/search", "/api/audiobooks/wishlist/<asin>/search", "/api/audiobooks/grab",
+                       # clients-tab match & import: records a download like a grab
+                       "/api/audiobooks/adopt",
                        # Following an author is acquisition too: it is what
                        # feeds the wishlist without the user asking again.
                        "/api/audiobooks/watchlist", "/api/audiobooks/watchlist/<path:name>",
@@ -359,15 +361,19 @@ def test_wanting_a_book_starts_no_thread():
 
 
 def test_grabbing_wakes_the_download_monitor():
-    source = (_ROOT / "api/audiobooks.py").read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == "grab":
-            body = ast.dump(node)
-            assert "audiobook_download_monitor" in body
-            assert "ensure_started" in body
-            return
-    raise AssertionError("grab route not found")
+    # the grab route records through record_grab, which a clients-tab match
+    # shares, so the wake-up has to live there
+    def function(path, name):
+        tree = ast.parse((_ROOT / path).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == name:
+                return ast.dump(node)
+        raise AssertionError(f"{name} not found in {path}")
+
+    assert "record_grab" in function("api/audiobooks.py", "grab")
+    recorder = function("core/audiobook_grab.py", "record_grab")
+    assert "audiobook_download_monitor" in recorder
+    assert "ensure_started" in recorder
 
 
 def test_boot_starts_only_the_download_monitor():

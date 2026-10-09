@@ -8,6 +8,8 @@ it's a torrent). The filesystem is injected so it's all unit-tested without disk
 
 from __future__ import annotations
 
+import pytest
+
 import json
 import os
 
@@ -379,13 +381,16 @@ def _probed(minutes):
             "width": 1920, "height": 1080, "video_codec": "x264", "audio_codec": "aac"}
 
 
-def test_import_rejects_truncated_file():
-    # a 20-minute file for a 42-minute episode is a partial download or the wrong file
+def test_import_rejects_a_sample_length_episode():
+    # sonarr's rule: the show's runtime only picks the sample threshold (10 min for
+    # an hour show). a 5-minute file is a sample; a 20-minute one is an episode.
     dl = _episode_dl("Breaking Bad S01E01 1080p WEB-DL", season=1, episode=1)
     p = importer.plan_import(dl, "/dl/x/bb.s01e01.mkv", list_dir=lambda d: [],
-                             probe=_probed(20), expected_duration_sec=42 * 60)
-    assert p["action"] == "reject" and "20 of 42" in p["reason"]
-
+                             probe=_probed(5), expected_duration_sec=42 * 60)
+    assert p["action"] == "reject" and "sample" in p["reason"] and p.get("bad_release")
+    p2 = importer.plan_import(dl, "/dl/x/bb.s01e01.mkv", list_dir=lambda d: [],
+                              probe=_probed(20), expected_duration_sec=42 * 60)
+    assert p2["action"] == "import"
 
 def test_import_accepts_full_length_file():
     dl = _episode_dl("Breaking Bad S01E01 1080p WEB-DL", season=1, episode=1)
@@ -401,25 +406,19 @@ def test_duration_check_skipped_when_expected_unknown():
     assert p["action"] == "import"   # can't judge — never reject on a guess
 
 
-def test_duration_check_scales_for_multi_episode_span():
-    # S01E01E02 at 80 min ≈ 2× a 42-min episode — not truncated
+def test_a_multi_episode_file_is_never_short_of_one_episode():
     dl = _episode_dl("Breaking Bad S01E01E02 1080p WEB-DL", season=1, episode=1)
     p = importer.plan_import(dl, "/dl/x/bb.s01e01e02.mkv", list_dir=lambda d: [],
                              probe=_probed(80), expected_duration_sec=42 * 60)
     assert p["action"] == "import"
-    # but 20 min for the two-parter IS truncated
-    p2 = importer.plan_import(dl, "/dl/x/bb.s01e01e02.mkv", list_dir=lambda d: [],
-                              probe=_probed(20), expected_duration_sec=42 * 60)
-    assert p2["action"] == "reject"
 
-
-def test_duration_reject_is_a_context_reject_not_a_blocklist():
-    # a duration mismatch retries the next candidate — it doesn't prove the release bad
-    dl = _episode_dl("Breaking Bad S01E01 1080p WEB-DL", season=1, episode=1)
-    p = importer.plan_import(dl, "/dl/x/bb.s01e01.mkv", list_dir=lambda d: [],
-                             probe=_probed(20), expected_duration_sec=42 * 60)
+def test_a_short_movie_is_a_context_reject_not_a_blocklist():
+    # a film under half its runtime retries the next candidate; it doesn't prove
+    # the release bad
+    dl = _movie_dl("The Matrix 1999 1080p BluRay")
+    p = importer.plan_import(dl, "/dl/x/matrix.1999.1080p.bluray.mkv", list_dir=lambda d: [],
+                             probe=_probed(50), expected_duration_sec=120 * 60)
     assert p["action"] == "reject" and not p.get("bad_release")
-
 
 def test_duration_accepts_commercial_free_episode_cut():
     # reality TV: TMDB lists the 60-min broadcast slot (with commercials), the file
@@ -431,21 +430,27 @@ def test_duration_accepts_commercial_free_episode_cut():
     assert p["action"] == "import"
 
 
-def test_duration_still_rejects_badly_truncated_episode():
-    # 36 of 60 min (0.60) is well under the episode bar — still caught
-    dl = _episode_dl("Below Deck Mediterranean S11E17 1080p WEB h264-EDITH",
-                     season=11, episode=17)
-    p = importer.plan_import(dl, "/dl/x/below.deck.med.s11e17.mkv", list_dir=lambda d: [],
-                             probe=_probed(36), expected_duration_sec=60 * 60)
-    assert p["action"] == "reject" and "36 of 60" in p["reason"]
+@pytest.mark.parametrize("actual, listed", [
+    (42, 85),    # halloween baking championship s12e04: a 43 min show stored at 85
+    (43, 159),   # name that tune s06e02: a new episode with a placeholder runtime
+    (10, 20),    # family guy s00e28: a special shorter than the show's usual length
+    (36, 60),    # a commercial-free cut of an hour slot
+])
+def test_bad_tv_runtime_metadata_never_fails_a_real_episode(actual, listed):
+    # each of these failed a good file on every retry before
+    dl = _episode_dl("Some Show S12E04 1080p WEB h264-EDITH", season=12, episode=4)
+    p = importer.plan_import(dl, "/dl/x/some.show.s12e04.mkv", list_dir=lambda d: [],
+                             probe=_probed(actual), expected_duration_sec=listed * 60)
+    assert p["action"] == "import", p.get("reason")
 
-
-def test_duration_movie_bar_unchanged():
-    # movies keep the tighter 0.75 bar — TMDB film runtimes have no commercials in them
+def test_duration_movie_bar_is_half_the_runtime():
+    # a film's runtime is reliable, so a movie keeps a check, but a different cut
+    # (theatrical vs extended) is not a truncation: only under half fails
     dl = _movie_dl("The Matrix 1999 1080p BluRay")
     p = importer.plan_import(dl, "/dl/x/matrix.1999.1080p.bluray.mkv", list_dir=lambda d: [],
-                             probe=_probed(84), expected_duration_sec=120 * 60)
-    assert p["action"] == "reject" and "84 of 120" in p["reason"]
+                             probe=_probed(50), expected_duration_sec=120 * 60)
+    assert p["action"] == "reject" and "50 of 120" in p["reason"]
     p2 = importer.plan_import(dl, "/dl/x/matrix.1999.1080p.bluray.mkv", list_dir=lambda d: [],
-                              probe=_probed(118), expected_duration_sec=120 * 60)
+                              probe=_probed(84), expected_duration_sec=120 * 60)
     assert p2["action"] == "import"
+

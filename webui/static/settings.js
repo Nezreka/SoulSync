@@ -91,7 +91,7 @@ const _QP_BUNDLE_CONTROL_IDS = new Set([
 const _QP_PROFILE_CONTROL_IDS = new Set([
     ..._QP_BUNDLE_CONTROL_IDS,
     'quality-fallback-enabled', 'quality-search-mode', 'quality-rank-candidates',
-    'quality-upgrade-policy', 'quality-upgrade-cutoff',
+    'quality-upgrade-policy', 'quality-upgrade-cutoff', 'quality-release-import-mode',
 ]);
 
 // Route a Quality-page change to the profile editor's lightweight autosave.
@@ -1911,6 +1911,15 @@ function toggleAudiobookSource(src, on) {
     renderAudiobookHybrid();
 }
 
+// the sources audiobooks actually download through: the chain in hybrid mode,
+// the one picked source otherwise.
+function _audiobookActiveSources() {
+    const mode = document.getElementById('audiobook-download-mode')?.value;
+    if (!mode) return [];
+    const ids = mode === 'hybrid' ? _audiobookHybrid : [mode];
+    return ids.filter(s => AUDIOBOOK_SOURCES.includes(s));
+}
+
 // The chain only applies in hybrid mode; a single-source mode has nothing to
 // order, so showing the rows there would imply a choice that does nothing.
 function onAudiobookModeChange() {
@@ -2381,6 +2390,10 @@ async function testAllSources(opts = {}) {
         sources.add(mode);
     }
     if (sources.size === 0) sources.add('soulseek');
+    // the audiobook chain is its own setting. a user whose books come over
+    // torrent but whose music never does saw a grey torrent tile forever,
+    // because only the music chain got probed.
+    for (const id of _audiobookActiveSources()) sources.add(id);
 
     // Torrent/Usenet downloads go through Prowlarr — its connection must be
     // established first or those source tests fail. Probe Prowlarr up front.
@@ -2653,7 +2666,7 @@ function buildArtSourceList() {
     if (!container) return;
     container.innerHTML = '';
     if (!_artVisualOrder.length) {
-        container.innerHTML = '<div style="padding:10px;color:var(--text-secondary,#888);font-size:13px;">No connected art sources available.</div>';
+        container.innerHTML = '<div style="padding:10px;color:#888;font-size:13px;">No connected art sources available.</div>';
         return;
     }
     const enabledOrder = getArtOrder();
@@ -3315,6 +3328,16 @@ async function loadSettingsData() {
             ? abq.format_order
             : ['m4b', 'm4a', 'mp3', 'opus', 'ogg', 'flac'];
         abVal(document.getElementById('audiobook-format-first'), abOrder[0] || 'm4b');
+        // Empty means every format, so a fresh install shows them all on.
+        const abAllowed = Array.isArray(abq.allowed_formats) ? abq.allowed_formats : [];
+        document.getElementById('audiobook-allowed-formats')?.querySelectorAll('input').forEach(box => {
+            box.checked = !abAllowed.length || abAllowed.includes(box.value);
+        });
+        // "any" shows both switches on; "single"/"multiple" shows just that one.
+        const abLayout = abq.file_layout || 'any';
+        document.getElementById('audiobook-file-layout')?.querySelectorAll('input').forEach(box => {
+            box.checked = abLayout === 'any' || abLayout === box.value;
+        });
         abVal(document.getElementById('audiobook-min-bitrate'), abq.min_bitrate_kbps ?? 0);
         abVal(document.getElementById('audiobook-max-bitrate'), abq.max_bitrate_kbps ?? 0);
         abChecked(document.getElementById('audiobook-allow-dramatized'),
@@ -4159,6 +4182,9 @@ function populateQualityProfileUI(profile) {
     const rankCandidatesCheckbox = document.getElementById('quality-rank-candidates');
     if (rankCandidatesCheckbox) rankCandidatesCheckbox.checked = profile.rank_candidates_by_quality === true;
 
+    const releaseImportSelect = document.getElementById('quality-release-import-mode');
+    if (releaseImportSelect) releaseImportSelect.value = profile.release_import_mode === 'album_tracks' ? 'album_tracks' : 'requested_tracks';
+
     const upgradePolicySelect = document.getElementById('quality-upgrade-policy');
     if (upgradePolicySelect) {
         upgradePolicySelect.value = ['until_cutoff', 'until_top'].includes(profile.upgrade_policy)
@@ -4395,6 +4421,7 @@ async function applyQualityPreset(presetName) {
                 ...preset,
                 search_mode: uiState.search_mode,
                 rank_candidates_by_quality: uiState.rank_candidates_by_quality,
+                release_import_mode: uiState.release_import_mode,
             };
             currentQualityProfile = merged;
             window._suppressSettingsAutoSave = true;
@@ -4497,6 +4524,7 @@ function collectQualityProfileFromUI() {
         fallback_enabled: document.getElementById('quality-fallback-enabled')?.checked ?? true,
         search_mode: document.getElementById('quality-search-mode')?.value === 'best_quality' ? 'best_quality' : 'priority',
         rank_candidates_by_quality: document.getElementById('quality-rank-candidates')?.checked ?? false,
+        release_import_mode: document.getElementById('quality-release-import-mode')?.value === 'album_tracks' ? 'album_tracks' : 'requested_tracks',
         upgrade_policy: document.getElementById('quality-upgrade-policy')?.value === 'until_cutoff' ? 'until_cutoff' : 'acceptable',
         upgrade_cutoff_index: parseInt(document.getElementById('quality-upgrade-cutoff')?.value || '0', 10) || 0,
         ranked_targets,
@@ -6518,6 +6546,25 @@ async function saveSettings(quiet = false) {
                     const rest = ['m4b', 'm4a', 'mp3', 'opus', 'ogg', 'flac']
                         .filter(f => f !== first);
                     return [first, ...rest];
+                })(),
+                // Every format on is stored as [] ("no restriction"), so a format
+                // added later is not refused by a list that predates it.
+                // Undefined when the toggles are not on the page, like _cfgBool,
+                // so a missing panel cannot wipe a stored restriction.
+                allowed_formats: (function () {
+                    const group = document.getElementById('audiobook-allowed-formats');
+                    if (!group) return undefined;
+                    const boxes = [...group.querySelectorAll('input')];
+                    const on = boxes.filter(box => box.checked).map(box => box.value);
+                    return on.length === boxes.length ? [] : on;
+                })(),
+                // Exactly one switch on picks that layout; both on, or both off,
+                // means either. Undefined when the switches are not on the page.
+                file_layout: (function () {
+                    const group = document.getElementById('audiobook-file-layout');
+                    if (!group) return undefined;
+                    const on = [...group.querySelectorAll('input')].filter(box => box.checked);
+                    return on.length === 1 ? on[0].value : 'any';
                 })(),
                 min_bitrate_kbps: Math.max(0,
                     _cfgInt('audiobook-min-bitrate', 0)),

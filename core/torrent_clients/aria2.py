@@ -58,7 +58,7 @@ class Aria2Adapter:
     DEFAULT_TIMEOUT = 15
     _STATUS_KEYS = ['gid', 'status', 'totalLength', 'completedLength', 'downloadSpeed',
                     'uploadSpeed', 'connections', 'numSeeders', 'dir', 'files',
-                    'errorMessage', 'bittorrent']
+                    'errorMessage', 'bittorrent', 'infoHash']
 
     def __init__(self) -> None:
         self._load_config()
@@ -179,6 +179,8 @@ class Aria2Adapter:
             save_path=item.get('dir'),
             files=file_paths,
             error=item.get('errorMessage') or None,
+            # aria2's id is a gid, so the hash rides separately
+            info_hash=str(item.get('infoHash') or '').lower() or None,
         )
 
     # ── remove / pause / resume ──

@@ -477,6 +477,54 @@ def apply_album_year_fix(
     return result
 
 
+def _same_title(a: Any, b: Any) -> bool:
+    return str(a or '').strip().casefold() == str(b or '').strip().casefold()
+
+
+def release_group_holding_tracks(
+    mb_client: Any,
+    album_title: str,
+    artist_name: str,
+    track_titles: Optional[List[str]],
+    max_titles: int = 2,
+) -> Optional[Tuple[str, Optional[str]]]:
+    """the one release group, titled like the album, whose releases carry the
+    library's tracks. (rg_mbid, a release mbid in it) or None when the tracks
+    don't settle it.
+
+    weezer has eight albums called "Weezer". the title alone picked the red
+    album (2008) for buddy holly, which is on the blue album (1994) (#1609).
+    """
+    hits: Dict[str, int] = {}
+    a_release: Dict[str, Optional[str]] = {}
+    for title in [t for t in (track_titles or []) if t][:max_titles]:
+        try:
+            recordings = mb_client.search_recording(title, artist_name, limit=25)
+        except Exception as e:
+            logger.debug("recording search for '%s' failed: %s", title, e)
+            continue
+        if not isinstance(recordings, list):
+            continue
+        groups = set()
+        for rec in recordings:
+            if not isinstance(rec, dict) or not _same_title(rec.get('title'), title):
+                continue
+            for rel in rec.get('releases') or []:
+                if not isinstance(rel, dict) or not _same_title(rel.get('title'), album_title):
+                    continue
+                rg_id = (rel.get('release-group') or {}).get('id')
+                if rg_id:
+                    groups.add(rg_id)
+                    a_release.setdefault(rg_id, rel.get('id'))
+        for rg_id in groups:
+            hits[rg_id] = hits.get(rg_id, 0) + 1
+        ranked = sorted(hits.items(), key=lambda kv: -kv[1])
+        # one clear winner, else let the next track break the tie
+        if ranked and (len(ranked) == 1 or ranked[0][1] > ranked[1][1]):
+            return ranked[0][0], a_release.get(ranked[0][0])
+    return None
+
+
 def resolve_canonical_album_year(
     mb_client: Any,
     album_title: str,
@@ -486,8 +534,12 @@ def resolve_canonical_album_year(
     track_count: int = 0,
     prefer_original_year: bool = True,
     memo: Optional[Dict[str, Any]] = None,
+    track_titles: Optional[List[str]] = None,
 ) -> Optional[Tuple[str, Optional[str], Optional[str], Optional[str]]]:
     """Resolve the canonical release year from MusicBrainz.
+
+    ``track_titles`` (the library's tracks on this album) settle which album
+    is meant when the artist has several with the same title (#1609).
 
     Returns:
         (canonical_year, canonical_date, release_mbid, release_group_mbid) or None.
@@ -500,6 +552,8 @@ def resolve_canonical_album_year(
         (barcode or '').strip(),
         (album_title or '').strip().lower(),
         (artist_name or '').strip().lower(),
+        # two same-titled albums in one library are different answers
+        tuple(sorted(str(t).casefold() for t in (track_titles or []))),
     )
     if memo is not None and memo_key in memo:
         return memo[memo_key]
@@ -509,12 +563,44 @@ def resolve_canonical_album_year(
             memo[memo_key] = val
         return val
 
+    def _from_track_group(found):
+        """the year of the release group the tracks are on."""
+        rg_id, rel_id = found
+        try:
+            rg = mb_client.get_release_group(rg_id) or {}
+        except Exception as e:
+            logger.debug("release group %s lookup failed: %s", rg_id, e)
+            return None
+        rg_date = rg.get('first-release-date')
+        year = extract_year(rg_date)
+        if not year:
+            return None
+        return (year, rg_date, rel_id, rg_id)
+
+    def _tracks_say_otherwise(rg_id):
+        """a release group picked by title alone, checked against the tracks.
+        a better answer when the tracks sit on a different same-titled album,
+        else None."""
+        if not track_titles:
+            return None
+        found = release_group_holding_tracks(mb_client, album_title, artist_name, track_titles)
+        if not found or found[0] == rg_id:
+            return None
+        return _from_track_group(found)
+
     # 1. Pinned or known MusicBrainz release ID
     if musicbrainz_release_id:
         try:
             rel = mb_client.get_release(musicbrainz_release_id, includes=['release-groups'])
             if rel:
                 rg = rel.get('release-group') or {}
+                # a stored id can come from a title-only match too. a
+                # disambiguated group ("Red Album") means same-titled albums
+                # exist, so check the tracks really are on it
+                if rg.get('disambiguation') and prefer_original_year:
+                    better = _tracks_say_otherwise(rg.get('id'))
+                    if better:
+                        return _cache_and_return(better)
                 rg_date = rg.get('first-release-date')
                 rel_date = rel.get('date')
                 chosen_date = (rg_date if prefer_original_year and rg_date else (rel_date or rg_date))
@@ -554,6 +640,15 @@ def resolve_canonical_album_year(
     if album_title and artist_name:
         try:
             search_results = mb_client.search_release(album_title, artist_name, limit=5)
+            same_titled_groups = {
+                (r.get('release-group') or {}).get('id')
+                for r in (search_results or []) if isinstance(r, dict)
+            } - {None}
+            if len(same_titled_groups) > 1 and prefer_original_year:
+                # several albums answer to this title. the first hit is a
+                # coin toss, let the tracks decide or don't guess
+                found = release_group_holding_tracks(mb_client, album_title, artist_name, track_titles)
+                return _cache_and_return(_from_track_group(found) if found else None)
             if search_results:
                 best = search_results[0]
                 rg = best.get('release-group') or {}
@@ -750,6 +845,7 @@ class AlbumReleaseYearRepairJob(RepairJob):
                     track_count=len(tracks),
                     prefer_original_year=prefer_original_year,
                     memo=memo,
+                    track_titles=[t['title'] for t in eligible_tracks if t['title']],
                 )
 
                 if not canonical:

@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.5.2"
+_SOULSYNC_BASE_VERSION = "3.5.3"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -1780,6 +1780,26 @@ def library_tracks_web():
         return jsonify({"success": True, "data": {"tracks": tracks}, "error": None})
     except Exception as e:
         logger.error(f"web /api/library/tracks failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/library/tracks/recent', methods=['GET'])
+def library_recent_tracks_web():
+    """Newest library tracks for the Sample Studio panel before you search.
+
+    /api/library/recently-added is the dashboard's album rail, which is why
+    this has its own path.
+    """
+    try:
+        from api.sample import recent_library_tracks
+
+        try:
+            limit = min(100, max(1, int(request.args.get('limit') or 50)))
+        except (TypeError, ValueError):
+            limit = 50
+        return jsonify({"success": True, "data": {"tracks": recent_library_tracks(limit)}, "error": None})
+    except Exception as e:
+        logger.error(f"web /api/library/tracks/recent failed: {e}")
         return jsonify({"success": False, "data": None, "error": str(e)}), 500
 
 
@@ -4085,53 +4105,35 @@ def get_activity_logs():
         return jsonify({'logs': [f'Error reading activity feed: {str(e)}']})
 
 # --- Internal API Key Management (browser-only, no auth) ---
+# Same logic as the /api/v1/api-keys routes (api/key_store.py); these are the
+# session-authed doors the Settings page uses.
 @app.route('/api/v1/api-keys-internal', methods=['GET'])
 @admin_only
 def list_api_keys_internal():
     """List API keys for the settings page (no auth required — same as all UI routes)."""
-    keys = config_manager.get('api_keys', [])
-    safe_keys = [
-        {
-            "id": k.get("id"),
-            "label": k.get("label", ""),
-            "key_prefix": k.get("key_prefix", ""),
-            "created_at": k.get("created_at"),
-            "last_used_at": k.get("last_used_at"),
-        }
-        for k in keys
-    ]
-    return jsonify({"success": True, "data": {"keys": safe_keys}})
+    from api import key_store
+    from api.helpers import api_success
+    return api_success({"keys": key_store.list_keys(config_manager)})
 
 @app.route('/api/v1/api-keys-internal/generate', methods=['POST'])
 @admin_only
 def generate_api_key_internal():
     """Generate API key from settings page (no auth required)."""
-    from api.auth import generate_api_key
+    from api import key_store
+    from api.helpers import api_success
     body = request.get_json(silent=True) or {}
-    label = body.get("label", "")
-    raw_key, record = generate_api_key(label)
-    keys = config_manager.get('api_keys', [])
-    keys.append(record)
-    config_manager.set('api_keys', keys)
-    return jsonify({"success": True, "data": {
-        "key": raw_key,
-        "id": record["id"],
-        "label": record["label"],
-        "key_prefix": record["key_prefix"],
-        "created_at": record["created_at"],
-    }}), 201
+    raw_key, record = key_store.create_key(config_manager, body.get("label", ""))
+    return api_success(key_store.created_view(raw_key, record), status=201)
 
 @app.route('/api/v1/api-keys-internal/revoke/<key_id>', methods=['DELETE'])
 @admin_only
 def revoke_api_key_internal(key_id):
     """Revoke API key from settings page (no auth required)."""
-    keys = config_manager.get('api_keys', [])
-    original_len = len(keys)
-    keys = [k for k in keys if k.get("id") != key_id]
-    if len(keys) == original_len:
-        return jsonify({"success": False, "error": {"message": "Key not found"}}), 404
-    config_manager.set('api_keys', keys)
-    return jsonify({"success": True, "data": {"message": "API key revoked"}})
+    from api import key_store
+    from api.helpers import api_success, api_error
+    if not key_store.revoke_key(config_manager, key_id):
+        return api_error("NOT_FOUND", "Key not found", 404)
+    return api_success({"message": "API key revoked"})
 
 
 @app.route('/api/settings', methods=['GET', 'POST'])
@@ -16240,6 +16242,7 @@ def _build_post_processing_deps():
         enhance_file_metadata=_enhance_file_metadata,
         wipe_source_tags=_wipe_source_tags,
         post_process_with_verification=_post_process_matched_download_with_verification,
+        process_release_file=_post_process_matched_download,
         mark_task_completed=_mark_task_completed,
         on_download_completed=_on_download_completed,
     )
@@ -20070,6 +20073,7 @@ from core.discovery.endpoints import (  # noqa: E402
     playlist_name_attr_or_unknown as _pl_name_attr_or_unknown,
     playlist_name_strict as _pl_name_strict,
     playlist_name_safe as _pl_name_safe,
+    source_skipped_counts as _source_skipped_counts,
 )
 
 # ── per-source playlist systems live in api/source_playlists.py now ──────────
@@ -23223,41 +23227,34 @@ app.register_blueprint(_bp_quar())
 # Download-client hub - the Clients tab on the downloads page (api/clients.py).
 def _client_known_items():
     """What SoulSync itself dispatched, per client, so hub rows can say what
-    they are. Video side keys off video_downloads.client_ref (torrent hash /
-    nzo id) or (username, filename) for soulseek grabs; music side off the
-    in-memory download_tasks. Best effort - a broken half never hides the
-    other's labels."""
-    known = {'torrent': {}, 'usenet': {}, 'slskd': {}}
-    try:
+    they are (and the clients tab only offers match & import on the rest).
+    Composed in core/client_match.py; this only hands it the live sources."""
+    from core.client_match import compose_known
+
+    def _video_rows():
         from api.video import get_video_db
-        for dl in get_video_db().list_video_downloads(limit=200):
-            if not isinstance(dl, dict):
-                continue
-            label = {'kind': dl.get('kind') or 'video',
-                     'title': dl.get('title') or dl.get('release_title') or ''}
-            ref = str(dl.get('client_ref') or '').strip()
-            source = dl.get('source')
-            if source == 'torrent' and ref:
-                known['torrent'][ref.lower()] = label
-            elif source == 'usenet' and ref:
-                known['usenet'][ref] = label
-            elif source == 'soulseek' and dl.get('username') and dl.get('filename'):
-                known['slskd'][(dl['username'], dl['filename'])] = label
-    except Exception as _vk_exc:
-        logger.debug(f"[Clients] video known-items unavailable: {_vk_exc}")
-    try:
+        return get_video_db().list_video_downloads(limit=200)
+
+    def _music_tasks():
         with tasks_lock:
-            tasks_snapshot = [t for t in download_tasks.values() if isinstance(t, dict)]
-        for t in tasks_snapshot:
-            username, filename = t.get('username'), t.get('filename')
-            if not username or not filename:
-                continue
-            ti = t.get('track_info') if isinstance(t.get('track_info'), dict) else {}
-            known['slskd'][(username, filename)] = {
-                'kind': 'track', 'title': ti.get('name') or t.get('track_name') or ''}
-    except Exception as _mk_exc:
-        logger.debug(f"[Clients] music known-items unavailable: {_mk_exc}")
-    return known
+            return [t for t in download_tasks.values() if isinstance(t, dict)]
+
+    def _audiobook_rows():
+        from core.audiobook_database import get_audiobook_db
+        return get_audiobook_db().get_downloads()
+
+    def _music_match_rows():
+        from core.client_match import music_store
+        return music_store().recent()
+
+    return compose_known(
+        video_rows=_video_rows,
+        music_tasks=_music_tasks,
+        audiobook_rows=_audiobook_rows,
+        torrent_plugin=lambda: download_orchestrator.client('torrent'),
+        usenet_plugin=lambda: download_orchestrator.client('usenet'),
+        music_matches=_music_match_rows,
+    )
 
 from api.clients import configure as _cfg_cl, create_blueprint as _bp_cl
 # the orchestrator, NOT SoulseekClient - web_server never binds a global
@@ -23364,6 +23361,11 @@ _cfg_mpl(
     _get_automation_deps=lambda: _automation_deps,
 )
 app.register_blueprint(_bp_mpl())
+
+# user playlists (made inside soulsync, stored as mirrored playlists)
+from api.user_playlists import configure as _cfg_upl, create_blueprint as _bp_upl
+_cfg_upl(get_database=get_database)
+app.register_blueprint(_bp_upl())
 
 # beatport chart discovery/sync (rides the source_playlists spine)
 from api.beatport_charts import configure as _cfg_bpc, create_blueprint as _bp_bpc
@@ -23616,6 +23618,14 @@ try:
 except Exception:
     logger.warning("could not start the video download monitor at boot", exc_info=True)
 
+# Clients-tab music matches waiting on their download: resume following them at
+# boot. It stops by itself when nothing is pending.
+try:
+    from core.client_match import ensure_watcher as _ensure_client_match_watcher
+    _ensure_client_match_watcher(app)
+except Exception:
+    logger.warning("could not start the clients-tab match watcher at boot", exc_info=True)
+
 
 def _emit_rate_monitor_loop():
     """Background thread that pushes API call rate data every 1 second for speedometer gauges.
@@ -23734,7 +23744,8 @@ def _emit_enrichment_status_loop():
                     w.paused = True
                     _download_auto_paused.add(name)
                     _auto_yield_cause[name] = reason
-                    logger.debug(f"Auto-paused {name} during active {reason}")
+                    # once per pause (guarded by `not w.paused`), so it can be info
+                    logger.info(f"Auto-paused {name} during active {reason}")
                 elif not reason and name in _download_auto_paused:
                     # Don't override an explicit user pause. If config says the worker
                     # was paused via the UI, leave it paused and just drop the auto-pause
@@ -24159,6 +24170,9 @@ def _emit_discovery_progress_loop():
                             'results': state.get('discovery_results', state.get('results', [])),
                             'complete': state.get('phase') == 'discovered',
                         }
+                        skipped = _source_skipped_counts(state)
+                        if skipped:
+                            payload['source_skipped'] = skipped
                         socketio.emit('discovery:progress', payload, room=f'discovery:{pid}')
                     except Exception as e:
                         logger.debug("discovery progress emit failed: %s", e)

@@ -21,7 +21,7 @@
 
 .tab {
   background: rgba(255, 255, 255, 0.05);
-  color: var(--text-secondary, #9aa0aa);
+  color: var(--text-secondary);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 999px;
   padding: 7px 18px;
@@ -85,7 +85,7 @@
 
 .labelMeta {
   font-size: 12px;
-  color: var(--text-secondary, #8a909a);
+  color: #8a909a;
   margin-top: 4px;
 }
 
@@ -308,7 +308,7 @@
 
 .podcastAuthor {
   font-size: 12px;
-  color: var(--text-secondary, #9aa0aa);
+  color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -318,3 +318,56 @@ def test_the_narrator_choice_reaches_the_search(mode):
         _wait(start(BOOK, narrator_mode=mode))
 
     assert seen["narrator_mode"] == mode
+
+
+# ---------------------------------------------------------------------------
+# A query the user typed
+# ---------------------------------------------------------------------------
+
+class _StubProwlarr:
+    """Answers every query with the same postings, and remembers what it was asked."""
+
+    def __init__(self, titles):
+        self.titles = titles
+        self.queries = []
+
+    def is_configured(self):
+        return True
+
+    async def search(self, query, categories=None, limit=None, **kwargs):
+        from types import SimpleNamespace
+        self.queries.append(query)
+        return [SimpleNamespace(title=t, guid=f"g{i}", protocol="torrent",
+                                indexer_name="MAM", size=800_000_000,
+                                download_url="https://example.invalid/a.torrent",
+                                magnet_uri=None, seeders=5, publish_date="")
+                for i, t in enumerate(self.titles)]
+
+
+def _typed_search(query, titles):
+    stub = _StubProwlarr(titles)
+    with _chain(("torrent",)), \
+         patch("core.prowlarr_client.ProwlarrClient", return_value=stub):
+        state = _wait(start(BOOK, query=query))
+    return stub, state
+
+
+def test_a_typed_query_is_the_only_query_sent():
+    stub, _ = _typed_search("Hail Mary Part 1 of 2 GraphicAudio", ["Project Hail Mary M4B"])
+    assert stub.queries == ["Hail Mary Part 1 of 2 GraphicAudio"]
+
+
+def test_a_typed_query_shows_releases_named_unlike_the_catalogue():
+    # the reason anyone types a query: the release is not named like the book
+    odd = "Rocky and Grace Full Cast GraphicAudio M4B"
+    _, typed = _typed_search("Rocky and Grace GraphicAudio", [odd])
+    assert [r["title"] for r in typed["releases"]] == [odd]
+    # the automatic search still drops it as a different book
+    _, auto = _typed_search("", [odd])
+    assert auto["releases"] == []
+
+
+def test_no_typed_query_keeps_the_generated_variants():
+    stub, _ = _typed_search("   ", [])
+    assert stub.queries[0] == "Andy Weir Project Hail Mary"
+    assert len(stub.queries) > 1

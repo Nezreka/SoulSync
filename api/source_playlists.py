@@ -190,7 +190,15 @@ def search_spotify_tracks():
         else:
             if _hydrabase_worker() and _dev_mode_enabled():
                 _hydrabase_worker().enqueue(query, 'tracks')
-            tracks = _spotify_client().search_tracks(query, limit=limit)
+            client = _spotify_client()
+            # with a title to aim at, spotify answers first and the fallback
+            # source gets search_song, not the plain free-text search the
+            # client falls back to. deezer's free text leaves originals out
+            # and the rerank can't surface what never came back (#1601).
+            tracks = client.search_tracks(query, limit=limit, allow_fallback=not track_q)
+            if not tracks and track_q:
+                from core.metadata.song_search import search_song
+                tracks = search_song(client._fallback, track_q, artist_q, limit=limit)
 
         # Local rerank — same helper Deezer + iTunes use. Spotify's
         # ranking is usually clean but karaoke / cover variants do
@@ -1512,7 +1520,14 @@ def start_tidal_discovery(playlist_id):
             existing_state = tidal_discovery_states[playlist_id]
             if existing_state['phase'] == 'discovering':
                 return jsonify({"error": "Discovery already in progress"}), 400
-            # Update existing state for discovery
+            # Update existing state for discovery. take the playlist we just
+            # fetched, or a re-run walks the old track list (#1613).
+            existing_state['playlist'] = target_playlist
+            existing_state['spotify_total'] = len(target_playlist.tracks)
+            existing_state['spotify_matches'] = 0
+            existing_state['discovery_progress'] = 0
+            existing_state['discovery_results'] = []
+            existing_state['wing_it_count'] = 0
             existing_state['phase'] = 'discovering'
             existing_state['status'] = 'discovering'
             existing_state['last_accessed'] = time.time()
@@ -1688,7 +1703,8 @@ def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discove
             db_id_to_track[mt['id']] = mt
             sid = mt.get('source_track_id', '')
             if sid:
-                source_id_to_db_id[str(sid)] = mt['id']
+                # a playlist can hold the same track twice, one row each
+                source_id_to_db_id.setdefault(str(sid), []).append(mt['id'])
             pos = mt.get('position')
             if pos is not None:
                 position_to_db_id[pos] = mt['id']
@@ -1715,8 +1731,11 @@ def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discove
             # Method 1: match by source track ID
             source_track = result.get('tidal_track') or result.get('source_track') or {}
             source_tid = str(source_track.get('id', '')) if source_track else ''
-            if source_tid and source_tid in source_id_to_db_id:
-                db_track_id = source_id_to_db_id[source_tid]
+            if source_tid and source_id_to_db_id.get(source_tid):
+                # hand the rows out in order so each duplicate gets one result,
+                # the last row keeps answering if results outnumber rows
+                rows = source_id_to_db_id[source_tid]
+                db_track_id = rows.pop(0) if len(rows) > 1 else rows[0]
 
             # Method 2: match by position/index
             if not db_track_id:
@@ -5268,6 +5287,7 @@ def _run_sync_task(
     playlist_image_url='',
     sync_mode=None,
     skip_wishlist_add=False,
+    user_initiated=False,
 ):
     # When a caller doesn't specify a mode — the mirrored auto-sync + Playlist
     # Pipeline (auto_sync_playlist), iTunes-link sync, Wing It — honor the user's
@@ -5291,6 +5311,7 @@ def _run_sync_task(
         _build_sync_deps(),
         sync_mode=sync_mode,
         skip_wishlist_add=skip_wishlist_add,
+        user_initiated=user_initiated,
     )
 
 

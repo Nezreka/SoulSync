@@ -108,19 +108,24 @@ def test_once_per_task_not_per_query(monkeypatch):
     assert _ids(tracks)[0] == "136340808"
 
 
-def test_without_a_hint_nothing_changes(monkeypatch):
+def test_without_a_hint_the_plain_results_come_first(monkeypatch):
+    """a typed query has no hint: the plain search runs first and its results
+    stay (the exact-title search only adds to them, see
+    test_deezer_exact_title_search.py)"""
     c, calls = _client(monkeypatch)
     tracks, _ = c._search_sync("how far ill go")
-    assert _ids(tracks) == ["1"] and len(calls) == 1
+    assert _ids(tracks)[0] == "1"
+    assert calls[0][1]["q"] == "how far ill go"
 
 
-def test_no_artist_means_no_title_only_guess(monkeypatch):
-    """dozens of songs share a title: without the artist the scoped search
-    would only add noise"""
+def test_a_hint_without_an_artist_runs_no_hinted_title_search(monkeypatch):
+    """dozens of songs share a title, so the hint's own title search needs the
+    artist. the typed-query title search still runs, see
+    test_deezer_exact_title_search.py"""
     c, calls = _client(monkeypatch)
     with track_hint_context({"title": "How Far I'll Go", "artist": "", "deezer_id": None}):
         c._search_sync("how far ill go")
-    assert not any(str(p.get("q", "")).startswith("track:") for _, p in calls)
+    assert not any(p.get("q") == 'track:"How Far I\'ll Go"' for _, p in calls)
 
 
 # -- the seam: orchestrator search -> source thread --

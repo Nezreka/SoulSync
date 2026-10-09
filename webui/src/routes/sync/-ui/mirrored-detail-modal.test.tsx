@@ -139,3 +139,104 @@ describe('MirroredDetailModal', () => {
     expect(h.onClose).toHaveBeenCalled();
   });
 });
+
+describe('MirroredDetailModal — a user playlist', () => {
+  const MINE = {
+    name: 'Late night',
+    source: 'soulsync',
+    tracks: [
+      { position: 1, track_name: 'One', artist_name: 'A' },
+      { position: 2, track_name: 'Two', artist_name: 'B' },
+      { position: 3, track_name: 'Three', artist_name: 'C' },
+    ],
+  };
+
+  it('reads as yours: no source pill, no Edit Source, no refresh', () => {
+    renderModal(MINE, {
+      onRefreshFromSource: vi.fn(),
+      onRemoveTrack: vi.fn(),
+      onReorder: vi.fn(),
+    });
+    expect(screen.getByText('Your Playlist')).toBeInTheDocument();
+    expect(screen.queryByText('SoulSync')).toBeNull();
+    expect(screen.queryByText('Edit Source')).toBeNull();
+    expect(screen.queryByText(/^Refresh from/)).toBeNull();
+    expect(screen.getByText('Delete playlist')).toBeInTheDocument();
+    expect(screen.getByText('Sync & download')).toBeInTheDocument();
+  });
+
+  it('removes by position, and locks the other rows until the refetch lands', () => {
+    const onRemoveTrack = vi.fn();
+    renderModal(MINE, { onRemoveTrack, onReorder: vi.fn() });
+    fireEvent.click(screen.getByLabelText('Remove Two from this playlist'));
+    expect(onRemoveTrack).toHaveBeenCalledWith(2);
+    // a stale position could hit the wrong track
+    expect(
+      (screen.getByLabelText('Remove One from this playlist') as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it('drag and drop hands over the whole new order', () => {
+    const onReorder = vi.fn();
+    renderModal(MINE, { onRemoveTrack: vi.fn(), onReorder });
+    const rows = document.querySelectorAll('.mm-row');
+    const dataTransfer = { setData: vi.fn(), effectAllowed: '' };
+    fireEvent.dragStart(rows[2], { dataTransfer });
+    fireEvent.dragOver(rows[0], { dataTransfer });
+    fireEvent.drop(rows[0], { dataTransfer });
+    expect(onReorder).toHaveBeenCalledWith([3, 1, 2]);
+  });
+
+  it('dropping a row on itself does nothing', () => {
+    const onReorder = vi.fn();
+    renderModal(MINE, { onRemoveTrack: vi.fn(), onReorder });
+    const row = document.querySelectorAll('.mm-row')[1];
+    const dataTransfer = { setData: vi.fn(), effectAllowed: '' };
+    fireEvent.dragStart(row, { dataTransfer });
+    fireEvent.drop(row, { dataTransfer });
+    expect(onReorder).not.toHaveBeenCalled();
+  });
+
+  it('a synced mirror stays read-only even if edit handlers are passed', () => {
+    renderModal({ ...MINE, source: 'spotify' }, { onRemoveTrack: vi.fn(), onReorder: vi.fn() });
+    expect(document.querySelector('.mm-row-remove')).toBeNull();
+    expect(document.querySelector('.mm-row')?.getAttribute('draggable')).toBeNull();
+  });
+
+  it('an empty one says how to fill it', () => {
+    renderModal({ ...MINE, tracks: [] }, { onRemoveTrack: vi.fn(), onReorder: vi.fn() });
+    expect(
+      screen.getByText('Nothing in here yet. Add songs with the + on any track.'),
+    ).toBeInTheDocument();
+  });
+});
+
+describe('MirroredDetailModal — add to playlist', () => {
+  it('every row of a synced mirror can be copied onto your playlist', () => {
+    renderModal({
+      name: 'Release Radar',
+      source: 'spotify',
+      tracks: [
+        { position: 1, track_name: 'One', artist_name: 'A' },
+        { position: 2, track_name: 'Two', artist_name: 'B' },
+      ],
+    });
+    expect(screen.getByLabelText('Add One to a playlist')).toHaveClass('mm-row-add');
+    expect(screen.getByLabelText('Add Two to a playlist')).toBeInTheDocument();
+    // still read-only: copying is not editing
+    expect(document.querySelector('.mm-row-remove')).toBeNull();
+  });
+
+  it('your own playlist gets it beside remove, so a song can go to another list', () => {
+    renderModal(
+      {
+        name: 'Mine',
+        source: 'soulsync',
+        tracks: [{ position: 1, track_name: 'One', artist_name: 'A' }],
+      },
+      { onRemoveTrack: vi.fn(), onReorder: vi.fn() },
+    );
+    expect(screen.getByLabelText('Add One to a playlist')).toBeInTheDocument();
+    expect(screen.getByLabelText('Remove One from this playlist')).toBeInTheDocument();
+  });
+});

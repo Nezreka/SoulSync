@@ -14,6 +14,7 @@ from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 from pathlib import Path
 from utils.logging_config import get_logger
+from core.quality.schema import normalize_release_import_mode
 
 logger = get_logger("music_database")
 
@@ -1677,6 +1678,23 @@ class MusicDatabase:
                     except Exception as e:
                         logger.debug("Failed to add %s column: %s", _sh_col, e)
 
+            # Repair: single tracks and some albums were recorded as playlists
+            # and showed on the dashboard's playlist card (#1591). cheap and
+            # idempotent, so it just runs every start.
+            try:
+                from core.downloads.history import ALBUM_PREFIXES, SINGLE_TRACK_PREFIXES
+                for _sh_type, _sh_prefixes in (('track', SINGLE_TRACK_PREFIXES),
+                                               ('album', ALBUM_PREFIXES)):
+                    _sh_like = " OR ".join("playlist_id LIKE ?" for _ in _sh_prefixes)
+                    cursor.execute(
+                        f"UPDATE sync_history SET sync_type = ? "
+                        f"WHERE (sync_type = 'playlist' OR sync_type IS NULL OR sync_type = '') "
+                        f"AND ({_sh_like})",
+                        (_sh_type, *(p + '%' for p in _sh_prefixes)),
+                    )
+            except Exception as e:
+                logger.debug("Failed to repair sync_history types: %s", e)
+
             # Migration: add track_artist column for per-track artist on compilations/DJ mixes
             try:
                 cursor.execute("SELECT track_artist FROM tracks LIMIT 1")
@@ -1867,6 +1885,12 @@ class MusicDatabase:
                 _ensure_artist_credits(cursor)
             except Exception as e:
                 logger.error(f"track_artist_credits schema init failed: {e}")
+            # clients-tab music matches: a download followed to the import page
+            try:
+                from core.client_match import ensure_schema as _ensure_client_matches
+                _ensure_client_matches(cursor)
+            except Exception as e:
+                logger.error(f"client_music_matches schema init failed: {e}")
             self._normalize_genres_to_json(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
@@ -7119,6 +7143,7 @@ class MusicDatabase:
         exactly what would make a "vs last month" delta lie."""
         if not where:
             return dict(self._EMPTY_OVERVIEW)
+        from core.listening_scope import play_duration_sql
         conn = None
         try:
             conn = self._get_connection()
@@ -7126,7 +7151,7 @@ class MusicDatabase:
             cursor.execute(f"""
                 SELECT
                     COUNT(*) as total_plays,
-                    COALESCE(SUM(duration_ms), 0) as total_time_ms,
+                    COALESCE(SUM({play_duration_sql()}), 0) as total_time_ms,
                     COUNT(DISTINCT artist) as unique_artists,
                     COUNT(DISTINCT album) as unique_albums,
                     COUNT(DISTINCT title || '|||' || COALESCE(artist, '')) as unique_tracks
@@ -7696,7 +7721,7 @@ class MusicDatabase:
 
         conn = None
         try:
-            from core.listening_scope import owner_clause
+            from core.listening_scope import owner_clause, play_duration_sql
             scope = owner_clause(self._listening_owner(profile_id))
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -7705,7 +7730,7 @@ class MusicDatabase:
 
             cursor.execute(f"""
                 SELECT COUNT(*),
-                       COALESCE(SUM(duration_ms), 0),
+                       COALESCE(SUM({play_duration_sql()}), 0),
                        COUNT(DISTINCT LOWER(artist)),
                        COUNT(DISTINCT LOWER(album)),
                        COUNT(DISTINCT LOWER(title) || '|||' || LOWER(COALESCE(artist, ''))),
@@ -7731,7 +7756,7 @@ class MusicDatabase:
             # Per-month plays + minutes, folded onto the dense strip.
             cursor.execute(f"""
                 SELECT strftime('%Y-%m', played_at) AS ym,
-                       COUNT(*), COALESCE(SUM(duration_ms), 0)
+                       COUNT(*), COALESCE(SUM({play_duration_sql()}), 0)
                 FROM listening_history {window}
                 GROUP BY ym
             """, span)
@@ -13665,6 +13690,7 @@ class MusicDatabase:
             "search_mode": row["search_mode"] or "priority",
             "rank_candidates_by_quality": bool(row["rank_candidates_by_quality"]),
             "ranked_targets": ranked_targets,
+            "release_import_mode": normalize_release_import_mode(_row_value(row, "release_import_mode")),
             "acoustid_required": bool(row["acoustid_required"]),
             "downsample_enabled": bool(row["downsample_enabled"]),
             "deep_audio_verify": bool(row["deep_audio_verify"]),
@@ -13707,6 +13733,7 @@ class MusicDatabase:
             "lossy_copy_codec": str(profile.get("lossy_copy_codec") or "mp3"),
             "lossy_copy_bitrate": str(profile.get("lossy_copy_bitrate") or "320"),
             "lossy_copy_delete_original": 1 if profile.get("lossy_copy_delete_original") else 0,
+            "release_import_mode": normalize_release_import_mode(profile.get("release_import_mode")),
         }
 
     # SQLite has no native boolean type — these columns are stored as 0/1.
@@ -13732,6 +13759,7 @@ class MusicDatabase:
             profiles = []
             for row in rows:
                 profile = dict(row)
+                profile["release_import_mode"] = normalize_release_import_mode(profile.get("release_import_mode"))
                 for col in self._QUALITY_PROFILE_BOOL_COLUMNS:
                     if col in profile:
                         profile[col] = bool(profile[col])
@@ -13758,12 +13786,12 @@ class MusicDatabase:
                         search_mode, rank_candidates_by_quality, upgrade_policy,
                         upgrade_cutoff_index, acoustid_required, downsample_enabled, deep_audio_verify,
                         replace_lower_quality, lossy_copy_enabled, lossy_copy_codec,
-                        lossy_copy_bitrate, lossy_copy_delete_original, is_default)
+                        lossy_copy_bitrate, lossy_copy_delete_original, release_import_mode, is_default)
                    VALUES (:name, :description, :ranked_targets, :fallback_enabled,
                            :search_mode, :rank_candidates_by_quality, :upgrade_policy,
                            :upgrade_cutoff_index, :acoustid_required, :downsample_enabled, :deep_audio_verify,
                            :replace_lower_quality, :lossy_copy_enabled, :lossy_copy_codec,
-                           :lossy_copy_bitrate, :lossy_copy_delete_original, 0)""",
+                           :lossy_copy_bitrate, :lossy_copy_delete_original, :release_import_mode, 0)""",
                 {"name": name, "description": "Custom profile", **params},
             )
             conn.commit()
@@ -13791,6 +13819,7 @@ class MusicDatabase:
                           replace_lower_quality=:replace_lower_quality, lossy_copy_enabled=:lossy_copy_enabled,
                           lossy_copy_codec=:lossy_copy_codec, lossy_copy_bitrate=:lossy_copy_bitrate,
                           lossy_copy_delete_original=:lossy_copy_delete_original,
+                          release_import_mode=:release_import_mode,
                           updated_at=CURRENT_TIMESTAMP
                     WHERE id=:profile_id""",
                 {"profile_id": profile_id, **params},
@@ -14235,7 +14264,7 @@ class MusicDatabase:
     _QUALITY_BUNDLE_COLUMNS = (
         "acoustid_required", "downsample_enabled", "deep_audio_verify",
         "replace_lower_quality", "lossy_copy_enabled", "lossy_copy_codec",
-        "lossy_copy_bitrate", "lossy_copy_delete_original",
+        "lossy_copy_bitrate", "lossy_copy_delete_original", "release_import_mode",
     )
 
     def _write_default_quality_profile_row(self, profile: dict) -> None:

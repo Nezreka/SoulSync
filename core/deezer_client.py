@@ -201,6 +201,9 @@ class Track:
     album_type: Optional[str] = None
     total_tracks: Optional[int] = None
     explicit: Optional[bool] = None
+    # the track's own album. search only gives {id, title, cover}, the album
+    # artist and track count need /album/{id} (#1605)
+    album_id: Optional[str] = None
 
     @classmethod
     def from_deezer_track(cls, track_data: Dict[str, Any]) -> 'Track':
@@ -266,6 +269,8 @@ class Track:
             total_tracks=nb_tracks,
             explicit=(bool(track_data['explicit_lyrics'])
                       if track_data.get('explicit_lyrics') is not None else None),
+            album_id=(str(album_data['id'])
+                      if isinstance(album_data, dict) and album_data.get('id') else None),
         )
 
 
@@ -924,6 +929,11 @@ class DeezerClient:
                 'artists': [artist_name]
             },
             'is_album_track': (album_data.get('nb_tracks', 0) if isinstance(album_data, dict) else 0) > 1,
+            # the download tagger and the bpm backfill read these off the top
+            # level, and only ever found them in raw_data, so neither got a
+            # deezer bpm or isrc
+            'bpm': track_data.get('bpm') or 0,
+            'isrc': track_data.get('isrc') or '',
             'raw_data': track_data
         }
 
@@ -955,6 +965,7 @@ class DeezerClient:
 
     def _build_album_result(self, album_data: Dict[str, Any], album_id: str, include_tracks: bool = True) -> Dict[str, Any]:
         """Build Spotify-compatible album result from Deezer data"""
+        from core.metadata.deezer_genres import album_genre_names
         images = []
         for size_key, height in [('cover_xl', 1000), ('cover_big', 500), ('cover_medium', 250), ('cover_small', 56)]:
             if album_data.get(size_key):
@@ -982,6 +993,8 @@ class DeezerClient:
             'release_date': album_data.get('release_date', ''),
             'total_tracks': album_data.get('nb_tracks', 0),
             'album_type': album_type,
+            # deezer keeps genre on the album, never the track or artist (#1607)
+            'genres': album_genre_names(album_data),
             'external_urls': {'deezer': album_data.get('link', '')},
             'uri': f"deezer:album:{album_data.get('id', '')}",
             '_source': 'deezer',
@@ -1472,36 +1485,97 @@ class DeezerClient:
             logger.error(f"Error searching for artist '{artist_name}': {e}")
             return None
 
+    @staticmethod
+    def _fold_title(text: str) -> str:
+        """Lowercase, drop accents and punctuation, for exact-title compare."""
+        import unicodedata
+        text = unicodedata.normalize("NFKD", str(text or ""))
+        text = "".join(ch for ch in text if not unicodedata.combining(ch)).lower()
+        text = re.sub("['\u2019\u2018`]", "", text)
+        return re.sub(r"[\W_]+", " ", text).strip()
+
+    def _pick_album_by_title(self, results: List[Dict[str, Any]], artist_name: str,
+                             album_title: str) -> Optional[Dict[str, Any]]:
+        """Pick the result whose title is exactly ``album_title`` (folded).
+
+        With an artist, the exact-title result by that artist wins. With no
+        artist the title alone decides. For "Various Artists" the exact-title
+        result credited to Various Artists wins, else a lone exact title. None
+        otherwise, so the caller falls back to its older behavior.
+        """
+        wanted = self._fold_title(album_title)
+        if not wanted:
+            return None
+        exact = [r for r in results if self._fold_title(r.get('title', '')) == wanted]
+        if not exact:
+            return None
+
+        def credit(r):
+            return str((r.get('artist') or {}).get('name') or '')
+
+        artist = (artist_name or '').strip()
+        if not artist:
+            return exact[0]
+        if self._fold_title(artist) in ('various artists', 'various', 'va'):
+            for r in exact:
+                if self._fold_title(credit(r)) == 'various artists':
+                    return r
+            # no VA credit: a lone exact title is the album (a soundtrack deezer
+            # credits to its composer). several means a generic title like
+            # "Greatest Hits" where any one would be a guess, so fall back
+            return exact[0] if len(exact) == 1 else None
+        for r in exact:
+            if artist_name_matches(artist, credit(r)):
+                return r
+        return None
+
     @rate_limited
+    def _album_search_request(self, query: str, limit: Optional[int] = None):
+        params = {'q': query}
+        if limit:
+            params['limit'] = limit
+        response = self.session.get(f"{self.BASE_URL}/search/album", params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        if 'error' in data:
+            logger.error(f"Deezer API error searching album '{query}': {data['error']}")
+            return None
+        return data.get('data', []) or []
+
     def search_album(self, artist_name: str, album_title: str) -> Optional[Dict[str, Any]]:
         """
         Search for an album by artist name and album title (enrichment interface).
 
+        A plain "{artist} {album}" query lets other albums by the same artist
+        (or, for "Various Artists", other compilations) outrank the one asked
+        for, so taking results[0] picked the wrong album. The title goes in
+        album:"..." with 50 results and the exact-title album is chosen; the
+        plain query stays as the fallback when nothing matches exactly.
+
         Args:
-            artist_name: Name of the artist
-            album_title: Title of the album
+            artist_name: Name of the artist (may be empty)
+            album_title: Title of the album (may be empty)
 
         Returns:
             Album dict from Deezer or None if not found
         """
         try:
-            query = f"{artist_name} {album_title}"
-            response = self.session.get(
-                f"{self.BASE_URL}/search/album",
-                params={'q': query},
-                timeout=10
-            )
-            response.raise_for_status()
+            result = None
+            if album_title and album_title.strip():
+                try:
+                    results = self._album_search_request(
+                        self._build_advanced_query(album=album_title), limit=50)
+                    result = self._pick_album_by_title(results or [], artist_name, album_title)
+                except Exception as e:
+                    logger.debug("album:\"title\" search failed, using plain query: %s", e)
 
-            data = response.json()
-            if 'error' in data:
-                logger.error(f"Deezer API error searching album '{query}': {data['error']}")
-                return None
+            if result is None:
+                query = f"{artist_name} {album_title}"
+                results = self._album_search_request(query)
+                if results:
+                    result = results[0]
 
-            results = data.get('data', [])
-            if results and len(results) > 0:
-                result = results[0]
-                # Cache the album entity
+            if result:
                 try:
                     cache = get_metadata_cache()
                     cache.store_entity('deezer', 'album', str(result.get('id', '')), result)
@@ -1561,6 +1635,64 @@ class DeezerClient:
         except Exception as e:
             logger.error(f"Error searching for track '{artist_name} - {track_title}': {e}")
             return None
+
+    def get_album_tracks_raw(self, album_id) -> List[Dict[str, Any]]:
+        """Raw track dicts of one Deezer album (``/album/{id}/tracks``).
+
+        The album's own tracklist holds songs that Deezer's search index leaves
+        out, and it needs no artist to find them. Reads and writes the same
+        ``album_tracks`` cache entry the playlist track-position pass uses, so
+        the worker fetches an album once, not once per track. [] on failure."""
+        aid = str(album_id)
+        cache = None
+        try:
+            cache = get_metadata_cache()
+            cached = cache.get_entity('deezer', 'album_tracks', aid)
+            if cached and cached.get('data'):
+                return list(cached['data'])
+        except Exception as e:   # noqa: BLE001 - the cache is best-effort
+            logger.debug("album_tracks cache read failed for %s: %s", aid, e)
+
+        try:
+            items = self._fetch_album_tracks(aid)
+        except Exception as e:
+            logger.debug("album tracklist %s failed: %s", aid, e)
+            return []
+        if items and cache is not None:
+            try:
+                cache.store_entity('deezer', 'album_tracks', aid, {'data': items})
+            except Exception as e:   # noqa: BLE001
+                logger.debug("album_tracks cache store failed for %s: %s", aid, e)
+        return items
+
+    @rate_limited
+    def _fetch_album_tracks(self, album_id: str) -> List[Dict[str, Any]]:
+        data = self._api_get(f'album/{album_id}/tracks', {'limit': 500}, use_token=False)
+        items = data.get('data') if isinstance(data, dict) else None
+        return list(items or [])
+
+    @staticmethod
+    def pick_track_from_list(tracks: List[Dict[str, Any]], track_title: str,
+                             track_number: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """The song called ``track_title`` among one album's tracks.
+
+        Exact title first, then the same song with harmless extras
+        ("Remastered 2022"). A live/remix/other-song title never counts. When
+        several tie (a disc 2 repeat), the one at ``track_number`` wins."""
+        if not tracks or not track_title:
+            return None
+        ranked = [(_title_rank(track_title, t.get('title') or ''), i, t)
+                  for i, t in enumerate(tracks)]
+        ranked = [r for r in ranked if r[0] in (_EXACT_TITLE, _SAME_SONG)]
+        if not ranked:
+            return None
+        best_rank = min(r[0] for r in ranked)
+        best = [r for r in ranked if r[0] == best_rank]
+        if track_number and len(best) > 1:
+            for _, _, t in best:
+                if t.get('track_position') == track_number:
+                    return t
+        return best[0][2]
 
     @rate_limited
     def _search_track_raw(self, query: str) -> List[Dict[str, Any]]:

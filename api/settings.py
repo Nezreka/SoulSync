@@ -3,7 +3,8 @@ Settings and API key management endpoints.
 """
 
 from flask import request, current_app
-from .auth import require_api_key, generate_api_key, _hash_key
+from . import key_store
+from .auth import require_api_key
 from .helpers import api_success, api_error
 
 # Keys that must NEVER be exposed via the API
@@ -77,19 +78,7 @@ def register_routes(bp):
         """List all API keys (prefix + label only, never the full key)."""
         try:
             cfg = current_app.soulsync["config_manager"]
-            keys = cfg.get("api_keys", [])
-            return api_success({
-                "keys": [
-                    {
-                        "id": k.get("id"),
-                        "label": k.get("label", ""),
-                        "key_prefix": k.get("key_prefix", ""),
-                        "created_at": k.get("created_at"),
-                        "last_used_at": k.get("last_used_at"),
-                    }
-                    for k in keys
-                ]
-            })
+            return api_success({"keys": key_store.list_keys(cfg)})
         except Exception as e:
             return api_error("SETTINGS_ERROR", str(e), 500)
 
@@ -106,18 +95,8 @@ def register_routes(bp):
 
         try:
             cfg = current_app.soulsync["config_manager"]
-            raw_key, record = generate_api_key(label)
-            keys = cfg.get("api_keys", [])
-            keys.append(record)
-            cfg.set("api_keys", keys)
-
-            return api_success({
-                "key": raw_key,
-                "id": record["id"],
-                "label": record["label"],
-                "key_prefix": record["key_prefix"],
-                "created_at": record["created_at"],
-            }, status=201)
+            raw_key, record = key_store.create_key(cfg, label)
+            return api_success(key_store.created_view(raw_key, record), status=201)
         except Exception as e:
             return api_error("SETTINGS_ERROR", str(e), 500)
 
@@ -127,14 +106,8 @@ def register_routes(bp):
         """Revoke (delete) an API key by its ID."""
         try:
             cfg = current_app.soulsync["config_manager"]
-            keys = cfg.get("api_keys", [])
-            original_len = len(keys)
-            keys = [k for k in keys if k.get("id") != key_id]
-
-            if len(keys) == original_len:
+            if not key_store.revoke_key(cfg, key_id):
                 return api_error("NOT_FOUND", "API key not found.", 404)
-
-            cfg.set("api_keys", keys)
             return api_success({"message": "API key revoked."})
         except Exception as e:
             return api_error("SETTINGS_ERROR", str(e), 500)
@@ -150,24 +123,12 @@ def register_routes(bp):
         """
         try:
             cfg = current_app.soulsync["config_manager"]
-            existing = cfg.get("api_keys", [])
-            if existing:
+            body = request.get_json(silent=True) or {}
+            created = key_store.bootstrap_key(cfg, body.get("label", "Default"))
+            if created is None:
                 return api_error("FORBIDDEN",
                                  "API keys already exist. Use an authenticated request to create more.", 403)
-
-            body = request.get_json(silent=True) or {}
-            label = body.get("label", "Default")
-
-            raw_key, record = generate_api_key(label)
-            cfg.set("api_keys", [record])
-
-            return api_success({
-                "key": raw_key,
-                "id": record["id"],
-                "label": record["label"],
-                "key_prefix": record["key_prefix"],
-                "created_at": record["created_at"],
-            }, status=201)
+            return api_success(key_store.created_view(*created), status=201)
         except Exception as e:
             return api_error("SETTINGS_ERROR", str(e), 500)
 

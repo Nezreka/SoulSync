@@ -19,6 +19,7 @@ import {
   foundArtistLine,
   formatDuration,
   mergeArtistFaces,
+  playlistTrackOf,
   rankPlaylists,
   shelfAlbums,
   trackIdentity,
@@ -329,6 +330,7 @@ export function SearchResults({
         playTitle={libraryRow ? 'Play from library' : 'Stream this track'}
         onOpen={() => onTrackClick(track)}
         onPlay={() => onTrackPlay(track, libraryRow)}
+        playlistTrack={playlistTrackOf(track)}
       />
     );
   };

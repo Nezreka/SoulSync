@@ -1335,7 +1335,7 @@
         let html = `<h2 style="margin:0 0 6px;font-size:19px;color:#fff;">🧪 API Explorer</h2>` +
             `<p style="margin:0 0 16px;font-size:13.5px;color:rgba(255,255,255,0.6);max-width:72ch;">` +
             `Try every endpoint live against this server — requests run from your browser against ` +
-            `<code style="color:#fff;">${_DD_API_BASE}</code> with your key as a Bearer token (or <code style="color:#fff;">?api_key=</code>). ` +
+            `<code style="color:#fff;">${_DD_API_BASE}</code> with your key as a Bearer token (or an <code style="color:#fff;">X-API-Key</code> header, or <code style="color:#fff;">?api_key=</code>). ` +
             `An API key acts with <strong style="color:#fff;">admin rights</strong>: POST / PUT / PATCH / DELETE endpoints act on your live library.</p>`;
 
         // API key bar

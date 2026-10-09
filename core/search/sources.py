@@ -106,7 +106,11 @@ def _search_kind_raw(client, query: str, kind: str, source_name: Optional[str] =
     if kind == "tracks":
         tracks = []
         try:
-            track_objs = client.search_tracks(query, limit=10, **extra)
+            # Deezer's free text can leave the real song out of the page
+            # entirely; for a query that names an artist this also runs the
+            # exact-title search (other sources: unchanged).
+            from core.metadata.song_search import search_typed_query
+            track_objs = search_typed_query(client, query, limit=10, **extra)
             for track in track_objs:
                 artist_name = ', '.join(track.artists) if track.artists else 'Unknown Artist'
                 tracks.append({
@@ -129,6 +133,10 @@ def _search_kind_raw(client, query: str, kind: str, source_name: Optional[str] =
                     # were tagged with only the primary artist until a Retag).
                     "source": source_name or "",
                     "album": track.album,
+                    # only sources that know it (deezer). lets a single-track
+                    # download look up its real album instead of posing as a
+                    # one-track single (#1605)
+                    "album_id": getattr(track, "album_id", None),
                     "duration_ms": track.duration_ms,
                     "image_url": track.image_url,
                     "release_date": track.release_date,

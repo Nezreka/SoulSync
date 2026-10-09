@@ -293,6 +293,13 @@ def _build_album_info_typed(album_data: Dict[str, Any], album_id: str,
 
     ctx = album.to_context_dict()
 
+    # the itunes and discogs clients return an already-normalized album
+    # ('release_date'), while their converters read the raw api shape
+    # ('releaseDate', 'year'), so the date came out empty and a matched
+    # import filed under "Rise" instead of "[2013] Rise"
+    if not ctx.get('release_date') and album_data.get('release_date'):
+        ctx['release_date'] = str(album_data['release_date'])
+
     # Preserve original `images` list shape from the raw input — the
     # legacy path passed the source's full multi-resolution images
     # array through verbatim. Some downstream consumers iterate the

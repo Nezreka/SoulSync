@@ -84,6 +84,13 @@ def _decrypt_chunk(chunk: bytes, key: bytes) -> bytes:
 from core.download_plugins.base import DownloadSourcePlugin
 
 
+def _keep_album_artist(album_artists: dict, album_id: str, album_data) -> None:
+    """remember an /album/{id} response's own artist as {'name', 'id'}."""
+    artist = album_data.get('artist') if isinstance(album_data, dict) else None
+    if isinstance(artist, dict) and artist.get('name'):
+        album_artists[album_id] = {'name': artist['name'], 'id': str(artist.get('id') or '')}
+
+
 class DeezerDownloadClient(DownloadSourcePlugin):
     """Deezer download client using ARL token authentication."""
 
@@ -561,6 +568,10 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             # (It used to get the PLAYLIST's track count — a 12-track album
             # imported from a 1582-track playlist claimed 1582 tracks.)
             album_track_counts = {}
+            # the album's own artist, from the same /album/{id} response. without
+            # it a playlist track's album artist fell back to the track's singer
+            # and one soundtrack split across artist folders (#1605)
+            album_artists = {}
             # Deezer PLAYLIST tracks do NOT carry `track_position` (only `/track/<id>`
             # and `/album/<id>/tracks` do), so numbering them by their playlist index
             # poisons the real album track number — which then rides into the wishlist
@@ -600,6 +611,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                             album_release_dates[aid] = cached['release_date']
                             if cached.get('nb_tracks'):
                                 album_track_counts[aid] = cached['nb_tracks']
+                            _keep_album_artist(album_artists, aid, cached)
                     except Exception as e:
                         logger.debug("cache get_entity album release_date: %s", e)
                 # Cache miss — fetch from API
@@ -614,6 +626,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                             album_release_dates[aid] = a_data.get('release_date', '')
                             if a_data.get('nb_tracks'):
                                 album_track_counts[aid] = a_data['nb_tracks']
+                            _keep_album_artist(album_artists, aid, a_data)
                             # Store in metadata cache for future use
                             if cache:
                                 try:
@@ -653,6 +666,9 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                         # lookup failed entirely.
                         'total_tracks': album_track_counts.get(album_id) or total_tracks,
                         'id': album_id,
+                        # only when the lookup named one, the download's album
+                        # backfill still fills it otherwise
+                        **({'artists': [album_artists[album_id]]} if album_id in album_artists else {}),
                     },
                     'duration_ms': t.get('duration', 0) * 1000,
                     # REAL album position (resolved above); the playlist index is a last
@@ -932,8 +948,16 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             resp.raise_for_status()
             data = resp.json()
 
+            items = list(data.get('data', []))
+            items.extend(self._exact_title_items(query, items))
+
             results = []
-            for item in data.get('data', []):
+            seen_ids = set()
+            for item in items:
+                item_id = str((item or {}).get('id') or '')
+                if item_id in seen_ids:
+                    continue
+                seen_ids.add(item_id)
                 tr = self._item_to_track_result(item)
                 if tr:
                     results.append(tr)
@@ -951,6 +975,62 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         except Exception as e:
             logger.error(f"Deezer search failed: {e}")
             return [], []
+
+    def _exact_title_items(self, query: str, plain_items: List[dict]) -> List[dict]:
+        """Extra results from Deezer's ``track:"title"`` filter.
+
+        Plain ``/search`` ranks reprises, karaoke and key-shifted copies first and
+        can leave the original out of the page entirely (e.g. "How Far I'll Go"
+        by Auli'i Cravalho), so no matching step downstream can pick it. The
+        exact-title filter does return it. The artist in the query is found from
+        the plain results' own artist names (see ``core.deezer_track_query``).
+
+        Skipped (no request) when a download hint is active (the hint search
+        covers it), or when the plain results already hold the exact
+        title by the artist the query names. Best-effort: any failure returns []
+        and the plain results stand.
+        """
+        try:
+            # A queued download carries the song itself (see _hinted_tracks),
+            # which already runs a title-scoped search. Only a typed query
+            # (no hint) needs this one, so a playlist doesn't pay for both.
+            from core.downloads.track_hint import current_track_hint
+            hint = current_track_hint()
+            if hint and (hint.get('deezer_id') or (hint.get('title') and hint.get('artist'))):
+                return []
+            from core.deezer_track_query import (
+                exact_title_queries, plain_has_exact_title, query_is_an_artist,
+            )
+            names = []
+            pairs = []
+            for it in plain_items:
+                artist = it.get('artist') if isinstance(it, dict) else None
+                if isinstance(artist, dict) and artist.get('name'):
+                    names.append(artist['name'])
+                    pairs.append((it.get('title') or '', artist['name']))
+            # The plain search already found the song (the usual case): one
+            # request per query, not two. A playlist makes many of these.
+            if plain_has_exact_title(query, pairs):
+                return []
+            # "taylor swift" is an artist search. track:"taylor swift" only finds
+            # songs that happen to be called that, so it's a wasted request
+            if query_is_an_artist(query, names):
+                return []
+            extra: List[dict] = []
+            for scoped in exact_title_queries(query, names):
+                resp = self._api_get(
+                    'https://api.deezer.com/search',
+                    params={'q': scoped, 'limit': 30},
+                    timeout=getattr(self._config, 'get_source_search_timeout', lambda: None)() or 10,
+                )
+                if resp is None:
+                    continue
+                resp.raise_for_status()
+                extra.extend(resp.json().get('data', []))
+            return extra
+        except Exception as e:   # noqa: BLE001 - the plain search already has its answer
+            logger.debug("Deezer exact-title search skipped for '%s': %s", query, e)
+            return []
 
     # ─── Download ────────────────────────────────────────────────
 

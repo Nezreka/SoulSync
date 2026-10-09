@@ -605,7 +605,9 @@ class SpotifyWorker:
             self._mark_status('artist', artist_id, 'matched')
             return
 
-        results = self.client.search_artists(artist_name, limit=5)
+        # allow_fallback=False: a deezer/itunes answer gets thrown away below
+        # anyway, so don't spend the request on it (#1592)
+        results = self.client.search_artists(artist_name, limit=5, allow_fallback=False)
         if not results:
             self._mark_status('artist', artist_id, 'not_found')
             self.stats['not_found'] += 1
@@ -857,7 +859,8 @@ class SpotifyWorker:
         # Pass artist + album names separately too, so the no-creds Spotify Free
         # path can resolve the album via the artist's discography (SpotipyFree has
         # no album-name search) when bridging a budget/rate-limit ban.
-        results = self.client.search_albums(query, limit=5, artist=artist_name, album=album_name)
+        results = self.client.search_albums(query, limit=5, artist=artist_name, album=album_name,
+                                           allow_fallback=False)
 
         if not results:
             self._mark_status('album', album_id, 'not_found')
@@ -913,7 +916,7 @@ class SpotifyWorker:
             return
 
         query = f"{artist_name} {track_name}" if artist_name else track_name
-        results = self.client.search_tracks(query, limit=5)
+        results = self.client.search_tracks(query, limit=5, allow_fallback=False)
 
         if not results:
             self._mark_status('track', track_id, 'not_found')

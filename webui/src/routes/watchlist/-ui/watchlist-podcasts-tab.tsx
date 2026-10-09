@@ -151,7 +151,7 @@ export function WatchlistPodcastsTab({ profileId, searchFilter = '' }: Watchlist
     <div className={styles.podcastsTabContainer}>
       {filteredPodcasts.length === 0 ? (
         <div className="watchlist-page-empty" style={{ padding: '40px 0' }}>
-          <p style={{ color: 'var(--text-secondary, #9aa0aa)' }}>
+          <p style={{ color: 'var(--text-secondary)' }}>
             No podcasts match &quot;{searchFilter}&quot;
           </p>
         </div>
