@@ -165,18 +165,17 @@ def _normalize_title(s):
 
 
 def _credited_to(release, artist_name, mb_service, memo):
-    """release_by_artist, with the artist's musicbrainz id as a second chance: a
-    credit in another script ("宇多田ヒカル" for "Hikaru Utada") only matches by id.
-    the id lookup is cached and runs only when the names disagree."""
-    if release_by_artist(release, artist_name):
-        return True
+    """release_by_artist, with the artist's musicbrainz id: a credit in another
+    script ("宇多田ヒカル" for "Hikaru Utada") only matches by id, and a credit
+    with the same name but another id is a different band. the id lookup is
+    cached (memo, and match_artist's own cache)."""
     if 'mbid' not in memo:
         try:
             memo['mbid'] = (mb_service.match_artist(artist_name) or {}).get('mbid')
         except Exception as e:  # noqa: BLE001 - no id means names only
             logger.debug("match_artist for release check failed: %s", e)
             memo['mbid'] = None
-    return bool(memo['mbid']) and release_by_artist(release, artist_name, memo['mbid'])
+    return release_by_artist(release, artist_name, memo['mbid'], mbid_name=artist_name)
 
 
 def _find_best_release(album_name, artist_name, track_count, mb_service, barcode: Optional[str] = None):

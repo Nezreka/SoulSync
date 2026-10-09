@@ -469,7 +469,8 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
         from core.metadata.musicbrainz_tags import release_by_artist
         expected_artists = [pp.get("batch_artist_name"), artist_name, metadata.get("album_artist")]
         if (release_detail and not pinned_release
-                and not release_by_artist(release_detail, expected_artists, pp.get("artist_mbid"))):
+                and not release_by_artist(release_detail, expected_artists, pp.get("artist_mbid"),
+                                          mbid_name=track_artist_name)):
             logger.info("MusicBrainz release %s is not by '%s'; not using it",
                         pp["release_mbid"], pp.get("batch_artist_name") or artist_name)
             release_detail = {}
