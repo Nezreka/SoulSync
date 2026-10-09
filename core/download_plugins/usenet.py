@@ -830,12 +830,15 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         primary = audio_files[0]
         with self._lock:
             row = self.active_downloads.get(download_id)
-            if _cancel_requested(row):
+            if row is not None and _cancel_requested(row):
                 return
-            row['state'] = 'Completed, Succeeded'
-            row['progress'] = 100.0
-            row['file_path'] = str(primary)
-            row['audio_files'] = [str(path) for path in audio_files]
+            if row is not None:
+                row['state'] = 'Completed, Succeeded'
+                row['progress'] = 100.0
+                row['file_path'] = str(primary)
+                row['audio_files'] = [str(path) for path in audio_files]
+        if row is None and self._persisted_cancel(download_id):
+            return
         self._persist_terminal_grab(
             download_id, completed=True, output_path=str(local_path))
         logger.info("Usenet download complete: %s -> %s (%d audio files)",
@@ -846,12 +849,18 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
     ) -> None:
         with self._lock:
             row = self.active_downloads.get(download_id)
-            if _cancel_requested(row):
+            if row is not None and _cancel_requested(row):
                 # Upstream: a cancelled download is never turned into a
                 # failure. Ours: its grab keeps the cancel state as well.
                 return
-            row['state'] = 'Completed, Errored'
-            row['error'] = message
+            if row is not None:
+                row['state'] = 'Completed, Errored'
+                row['error'] = message
+        # Ours: a request-bound grab is settled even with no row in memory
+        # (the central monitor's path) -- unless the user cancelled it and
+        # the row went with the cancel.
+        if row is None and self._persisted_cancel(download_id):
+            return
         logger.error("Usenet download %s failed: %s", download_id[:8], message)
         self._persist_terminal_grab(
             download_id,
@@ -942,6 +951,23 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 if row is not None:
                     row['state'] = 'Cancelled' if cancel_confirmed else 'Cancelling'
         return cancel_confirmed
+
+    def _persisted_cancel(self, download_id: str) -> bool:
+        """Whether the persisted grab says the user cancelled this download."""
+        conn = _grabs_conn()
+        if conn is None:
+            return False
+        try:
+            from core.acquisition.grabs import (
+                STATUS_CANCEL_PENDING, STATUS_CANCELLED, get_grab,
+            )
+            grab = get_grab(conn, download_id)
+            return (grab or {}).get("status") in (STATUS_CANCEL_PENDING, STATUS_CANCELLED)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("grab lookup for %s failed: %s", download_id[:8], exc)
+            return False
+        finally:
+            conn.close()
 
     def _persisted_job_id(self, download_id: str) -> Optional[str]:
         """External client job id from the persisted grab (dd28-14)."""
