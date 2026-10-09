@@ -37,8 +37,14 @@ export async function fetchReidentifySources(): Promise<ReidentifySource[]> {
 export async function reidentifySearchRequest(
   source: string,
   query: string,
+  track?: { title: string; artist: string },
 ): Promise<ReidentifyResult[]> {
-  const url = `/api/reidentify/search?source=${encodeURIComponent(source)}&q=${encodeURIComponent(query)}`;
+  // the track's own title/artist let the server use the source's song search
+  // instead of free text, which buried the original on deezer (#1565)
+  const trackParams = track?.title
+    ? `&title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(track.artist)}`
+    : '';
+  const url = `/api/reidentify/search?source=${encodeURIComponent(source)}&q=${encodeURIComponent(query)}${trackParams}`;
   const response = await fetch(url);
   const data = await response.json();
   return (data && data.results) || [];

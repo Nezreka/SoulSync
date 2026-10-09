@@ -106,3 +106,51 @@ def test_every_relayed_view_exists_on_the_video_blueprint():
     assert wanted
     missing = [name for name in wanted if f"video_api.{name}" not in app.view_functions]
     assert missing == []
+
+
+def _fake_channel():
+    return {"youtube_id": "UCtest123", "title": "Test Channel",
+            "avatar_url": "https://example.com/a.jpg", "videos": []}
+
+
+def test_youtube_channel_relay_validation(client):
+    # resolve without a url -> 400 v1 error envelope
+    r = client.get("/api/v1/video/youtube/resolve")
+    assert r.status_code == 400
+    assert r.get_json()["error"]["code"] == "YOUTUBE_ERROR"
+
+    # follow without url/channel -> 400
+    r = client.post("/api/v1/video/youtube/follow", json={})
+    assert r.status_code == 400
+    assert r.get_json()["error"]["code"] == "YOUTUBE_ERROR"
+
+    # unfollow without youtube_id -> 400
+    r = client.post("/api/v1/video/youtube/unfollow", json={})
+    assert r.status_code == 400
+    assert r.get_json()["error"]["code"] == "YOUTUBE_ERROR"
+
+
+def test_youtube_follow_unfollow_round_trip(client):
+    import core.video.youtube as ytmod
+
+    channel = _fake_channel()
+    with patch.object(ytmod, "resolve_channel", return_value=dict(channel)):
+        r = client.get("/api/v1/video/youtube/resolve?url=https://www.youtube.com/@test")
+        assert r.status_code == 200, r.get_json()
+        data = r.get_json()["data"]
+        assert data["following"] is False
+        assert data["channel"]["youtube_id"] == "UCtest123"
+
+        r = client.post("/api/v1/video/youtube/follow",
+                        json={"url": "https://www.youtube.com/@test"})
+        assert r.status_code == 200, r.get_json()
+        assert r.get_json()["data"]["following"] is True
+
+    # resolve again: now followed
+    with patch.object(ytmod, "resolve_channel", return_value=dict(channel)):
+        r = client.get("/api/v1/video/youtube/resolve?url=https://www.youtube.com/@test")
+        assert r.get_json()["data"]["following"] is True
+
+    r = client.post("/api/v1/video/youtube/unfollow", json={"youtube_id": "UCtest123"})
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["data"]["following"] is False

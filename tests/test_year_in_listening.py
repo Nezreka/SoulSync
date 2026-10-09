@@ -23,6 +23,9 @@ import pytest
 
 from database.music_database import MusicDatabase
 
+# hour-of-day reads played_at in the server's local time; seeded hours are utc
+pytestmark = pytest.mark.usefixtures('utc_server')
+
 
 NOW = datetime(2026, 8, 14, 12, 0, 0)   # a Friday, mid-month
 

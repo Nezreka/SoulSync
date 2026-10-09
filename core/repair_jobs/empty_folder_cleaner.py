@@ -85,11 +85,14 @@ class EmptyFolderCleanerJob(RepairJob):
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
 
-        root = context.transfer_folder
-        if not root or not os.path.isdir(root):
+        from core.repair_jobs.base import all_library_roots
+        # #1504: clean every library root (shared + own), not just shared.
+        roots = [os.path.realpath(r) for r in all_library_roots(context)]
+        if not roots:
             logger.info("[Empty Folder Cleaner] library root not available — skipping")
             return result
-        root = os.path.realpath(root)
+        # #1504: never delete any library root itself (shared or own).
+        protected_roots = set(roots)
 
         ignore_junk = True
         ignore_disposable = False
@@ -112,87 +115,88 @@ class EmptyFolderCleanerJob(RepairJob):
 
         flagged = set()   # dir paths we'd remove → a parent sees them as "gone"
 
-        # topdown=False ⇒ deepest first, so children are decided before parents.
-        for dirpath, dirnames, filenames in os.walk(root, topdown=False):
-            if context.check_stop():
-                return result
-            real = os.path.realpath(dirpath)
-            if real == root:
-                continue                      # never the library root itself
-            if os.path.islink(dirpath):
-                continue                      # don't delete symlinked dirs
-            if is_internal_transfer_dir(dirpath, root):
-                # SoulSync's own folders: the recoverable `deleted` quarantine
-                # and the atomic-publish staging tree. Staging is full of
-                # legitimately-empty album dirs while an album is still landing
-                # — deleting them pulls the tree out from under an in-flight
-                # publish. A bottom-up walk cannot prune `dirnames`, so the skip
-                # has to be here.
-                continue
-            result.scanned += 1
+        for root in roots:
+            # topdown=False ⇒ deepest first, so children are decided before parents.
+            for dirpath, dirnames, filenames in os.walk(root, topdown=False):
+                if context.check_stop():
+                    return result
+                real = os.path.realpath(dirpath)
+                if real in protected_roots:
+                    continue                      # never a library root itself
+                if os.path.islink(dirpath):
+                    continue                      # don't delete symlinked dirs
+                if is_internal_transfer_dir(dirpath, root):
+                    # SoulSync's own folders: the recoverable `deleted` quarantine
+                    # and the atomic-publish staging tree. Staging is full of
+                    # legitimately-empty album dirs while an album is still landing
+                    # — deleting them pulls the tree out from under an in-flight
+                    # publish. A bottom-up walk cannot prune `dirnames`, so the skip
+                    # has to be here.
+                    continue
+                result.scanned += 1
 
-            surviving = [d for d in dirnames
-                         if os.path.join(dirpath, d) not in flagged]
-            if not dir_is_removable(filenames, surviving,
-                                    ignore_junk=ignore_junk, ignore_disposable=ignore_disposable):
-                result.skipped += 1
-                continue
+                surviving = [d for d in dirnames
+                             if os.path.join(dirpath, d) not in flagged]
+                if not dir_is_removable(filenames, surviving,
+                                        ignore_junk=ignore_junk, ignore_disposable=ignore_disposable):
+                    result.skipped += 1
+                    continue
 
-            flagged.add(dirpath)
-            junk = [f for f in filenames if is_junk(f) or is_release_junk(f)]
-            # Files that will be swept along with the folder (junk + release junk
-            # always; images/sidecars only when the residual option is on).
-            # Must match _purgeable() in remove_empty_folder (#1289).
-            purgeable = [f for f in filenames
-                         if is_junk(f) or is_release_junk(f)
-                         or (ignore_disposable and is_disposable(f))]
-            residual = [f for f in purgeable if not is_junk(f)]
-            rel = os.path.relpath(dirpath, root)
-            if context.report_progress:
-                context.report_progress(log_line=f'Empty folder: {rel}', log_type='info')
-            if context.create_finding:
-                try:
-                    if residual:
-                        extra = f' (only {len(residual)} leftover image/sidecar file(s))'
-                    elif junk:
-                        extra = f' (only {len(junk)} junk file(s))'
-                    else:
-                        extra = ''
-                    inserted = context.create_finding(
-                        job_id=self.job_id,
-                        finding_type='empty_folder',
-                        severity='info',
-                        entity_type='folder',
-                        entity_id=dirpath,
-                        file_path=dirpath,
-                        title=f'Empty folder: {os.path.basename(dirpath) or rel}',
-                        description=(f'"{rel}" holds no music' + extra + ' — safe to remove.'),
-                        details={
-                            'folder_path': dirpath,
-                            'junk_files': junk,
-                            'purgeable_files': purgeable,
-                            'remove_junk': ignore_junk,
-                            'remove_disposable': ignore_disposable,
-                        })
-                    if inserted:
-                        result.findings_created += 1
-                    else:
-                        result.findings_skipped_dedup += 1
-                except Exception as e:
-                    logger.debug("[Empty Folder Cleaner] create finding failed for %s: %s", dirpath, e)
-                    result.errors += 1
+                flagged.add(dirpath)
+                junk = [f for f in filenames if is_junk(f) or is_release_junk(f)]
+                # Files that will be swept along with the folder (junk + release junk
+                # always; images/sidecars only when the residual option is on).
+                # Must match _purgeable() in remove_empty_folder (#1289).
+                purgeable = [f for f in filenames
+                             if is_junk(f) or is_release_junk(f)
+                             or (ignore_disposable and is_disposable(f))]
+                residual = [f for f in purgeable if not is_junk(f)]
+                rel = os.path.relpath(dirpath, root)
+                if context.report_progress:
+                    context.report_progress(log_line=f'Empty folder: {rel}', log_type='info')
+                if context.create_finding:
+                    try:
+                        if residual:
+                            extra = f' (only {len(residual)} leftover image/sidecar file(s))'
+                        elif junk:
+                            extra = f' (only {len(junk)} junk file(s))'
+                        else:
+                            extra = ''
+                        inserted = context.create_finding(
+                            job_id=self.job_id,
+                            finding_type='empty_folder',
+                            severity='info',
+                            entity_type='folder',
+                            entity_id=dirpath,
+                            file_path=dirpath,
+                            title=f'Empty folder: {os.path.basename(dirpath) or rel}',
+                            description=(f'"{rel}" holds no music' + extra + ' — safe to remove.'),
+                            details={
+                                'folder_path': dirpath,
+                                'junk_files': junk,
+                                'purgeable_files': purgeable,
+                                'remove_junk': ignore_junk,
+                                'remove_disposable': ignore_disposable,
+                            })
+                        if inserted:
+                            result.findings_created += 1
+                        else:
+                            result.findings_skipped_dedup += 1
+                    except Exception as e:
+                        logger.debug("[Empty Folder Cleaner] create finding failed for %s: %s", dirpath, e)
+                        result.errors += 1
 
         logger.info("[Empty Folder Cleaner] %d folders scanned, %d empty flagged",
                     result.scanned, result.findings_created)
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
-        root = context.transfer_folder
-        if not root or not os.path.isdir(root):
-            return 0
+        from core.repair_jobs.base import all_library_roots
+        # #1504: count across every library root.
         total = 0
-        for _dp, dirnames, _f in walk_library(root):
-            total += len(dirnames)
+        for lib_root in all_library_roots(context):
+            for _dp, dirnames, _f in walk_library(lib_root):
+                total += len(dirnames)
         return total
 
 

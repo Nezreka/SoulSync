@@ -104,6 +104,12 @@ export interface GapRelease extends DiscographyRelease {
   /** Which grid it belongs in. */
   _bucket: DiscographyBucket;
   /**
+   * #1450: stamped by the backend (GET .../discography/gap-fill) from the
+   * combined base+gap edition group. A missing flag reads as preferred
+   * (stale responses predate it).
+   */
+  edition_preferred?: boolean;
+  /**
    * Track count for the ownership stream ONLY.
    *
    * Deliberately not `track_count`: the vanilla's gap card carried no track
@@ -145,10 +151,25 @@ export function gapReleasesFromResponse(payload: unknown): GapRelease[] {
         _gap_track_count: (gap.track_count as number) || (gap.total_tracks as number) || 0,
         _gap_source: (gap.gap_source as string) || undefined,
         _bucket: BUCKET_FOR[key],
+        // #1450: edition flag from the backend's combined base+gap group.
+        edition_preferred: gap.edition_preferred as boolean | undefined,
       });
     }
   }
   return releases;
+}
+
+/**
+ * #1450: base-release ids whose `edition_preferred` stamp the combined
+ * base+gap edition group overturned (under `one_complete` the base response
+ * may have stamped the standard edition `true` while the gap deluxe won).
+ * The modal flips those cards' pre-check back off. Always an array from the
+ * backend; anything else is treated as empty.
+ */
+export function gapEditionSupersededFromResponse(payload: unknown): Set<unknown> {
+  const raw = (payload as { edition_superseded?: unknown })?.edition_superseded;
+  if (!Array.isArray(raw)) return new Set();
+  return new Set<unknown>(raw);
 }
 
 /**

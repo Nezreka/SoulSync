@@ -40,10 +40,19 @@ describe('Library settings media tabs', () => {
       currentTarget: music,
       preventDefault() {},
     } as unknown as KeyboardEvent & { currentTarget: Element });
-    const video = document.getElementById('organization-video-tab')!;
-    expect(document.activeElement).toBe(video);
-    expect(video.getAttribute('aria-selected')).toBe('true');
+    const books = document.getElementById('organization-audiobooks-tab')!;
+    expect(document.activeElement).toBe(books);
+    expect(books.getAttribute('aria-selected')).toBe('true');
     expect(music.tabIndex).toBe(-1);
+  });
+  it('orders the tabs music, audiobooks, podcasts, video on both cards', () => {
+    for (const card of document.querySelectorAll('.stg-media-card'))
+      expect([...card.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toEqual([
+        'Music',
+        'Audiobooks',
+        'Podcasts',
+        'Video',
+      ]);
   });
   it('keeps all four sets of controls in exactly one panel each', () => {
     for (const [id, panel] of [
@@ -51,9 +60,30 @@ describe('Library settings media tabs', () => {
       ['video-movies-path', 'folders-video-panel'],
       ['template-album-path', 'organization-music-panel'],
       ['vo-movie-template', 'organization-video-panel'],
+      ['audiobooks-path', 'folders-audiobooks-panel'],
+      ['podcasts-path', 'folders-podcasts-panel'],
+      ['template-audiobook-path', 'organization-audiobooks-panel'],
+      ['audiobook-recycle-deletes', 'organization-audiobooks-panel'],
+      ['audiobook-format-first', 'organization-audiobooks-panel'],
+      ['audiobook-marketplace', 'organization-audiobooks-panel'],
+      ['audiobook-write-nfo', 'organization-audiobooks-panel'],
+      ['template-podcast-path', 'organization-podcasts-panel'],
+      ['podcast-media-format', 'organization-podcasts-panel'],
+      ['download-path', 'folders-music-panel'],
+      ['template-sample-path', 'organization-music-panel'],
+      ['disc-label', 'organization-music-panel'],
     ]) {
       expect(document.querySelectorAll(`#${id}`).length).toBe(1);
       expect(document.getElementById(id)!.closest('[role="tabpanel"]')!.id).toBe(panel);
     }
   });
+});
+it('lets four tabs share a phone-width row', () => {
+  // measured in chromium: at 100px minimum each the switcher was 435px wide in
+  // a 375px viewport and pushed the page sideways.
+  const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
+  // style.css is crlf, so match across any line ending
+  expect(css).toMatch(
+    /@media \(max-width: 600px\) \{\s*#settings-page \.stg-media-card \.stg-media-switcher \{[^}]*\}\s*[^}]*\.stg-media-switcher button \{[^}]*min-width: 0/,
+  );
 });

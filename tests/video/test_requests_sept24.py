@@ -157,7 +157,9 @@ def test_show_request_progress_counts_episodes(client):
             {"episode_number": 2, "title": "b"}]}]})
     rid = _file(c, 2, kind="show", tmdb_id=55, title="Show").get_json()["id"]
     c.post(f"/api/video/requests/{rid}/approve")
-    db.add_episodes_to_wishlist(55, "Show", [{"season_number": 1, "episode_number": 2}])
+    # progress annotation scopes to the request's profile (2) — seed that profile
+    db.add_episodes_to_wishlist(55, "Show", [{"season_number": 1, "episode_number": 2}],
+                               profile_id=2)
     row = next(r for r in c.get("/api/video/requests").get_json()["requests"] if r["id"] == rid)
     assert row["progress"]["owned"] == 1 and row["progress"]["wanted"] == 1
     assert row["state"] == "partial"
@@ -170,11 +172,17 @@ def test_request_quality_profile_lands_on_the_wishlist(client):
     qp = cur.lastrowid
     conn.commit()
     conn.close()
+    # quality profiles are admin-only: a non-admin's pick is ignored at filing
     rid = _file(c, 2, quality_profile_id=qp).get_json()["id"]
+    assert db.get_video_request(rid)["quality_profile_id"] is None
+    # admin filing keeps the pick, and it lands on the wishlist on approve
+    rid = _file(c, 1, quality_profile_id=qp).get_json()["id"]
     assert db.get_video_request(rid)["quality_profile_id"] == qp
     assert _file(c, 3, tmdb_id=9, title="x", quality_profile_id=99999).status_code == 200
     c.post(f"/api/video/requests/{rid}/approve")
     conn = db._get_connection()
-    got = conn.execute("SELECT quality_profile_id FROM video_wishlist WHERE tmdb_id=438631").fetchone()[0]
+    got = conn.execute(
+        "SELECT quality_profile_id FROM video_wishlist WHERE tmdb_id=438631 AND profile_id=1"
+    ).fetchone()[0]
     conn.close()
     assert got == qp

@@ -440,10 +440,12 @@ describe('SpotifyTab', () => {
     const seen: string[][] = [];
     responder = () => [SPOTIFY_ROW, { id: 99, name: 'Second', track_count: 3 }];
     render(<SpotifyTab registerRows={(ids) => seen.push(ids)} />);
-    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
 
+    // Wait for the registration itself, not just the rendered text: it fires
+    // from a passive effect after the rows commit, so asserting right after
+    // the text appears races the effect flush (flaked in CI).
     // Ids are coerced to strings, matching what the selection store holds.
-    expect(seen.at(-1)).toEqual(['p1', '99']);
+    await waitFor(() => expect(seen.at(-1)).toEqual(['p1', '99']));
   });
 
   it('registers an EMPTY list before anything has loaded', async () => {
@@ -476,6 +478,10 @@ describe('SpotifyTab', () => {
     }
     const { rerender } = render(<Wrapper tick={0} />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    // Same passive-effect race as the display-order test: the rows-loaded
+    // registration flushes after the text commits, so wait for it before
+    // counting — mount registers [] and the load registers ['p1'].
+    await waitFor(() => expect(calls).toBe(2));
     const after = calls;
     rerender(<Wrapper tick={1} />);
     rerender(<Wrapper tick={2} />);

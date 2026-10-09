@@ -575,6 +575,14 @@ declare global {
     onBlocklistSearchInput?: () => void;
     blockFromSearch?: (payloadEnc: string) => Promise<void>;
     unblockEntry?: (id: number) => Promise<void>;
+    /** src/shell/sidebar-weather.ts: the weather line + particle scene (oct 6). */
+    initSidebarWeather?: () => void;
+    /** re-runnable weather boot, called from settings.js after a location/enabled change. */
+    bootSidebarWeather?: () => Promise<void>;
+    /** settings > advanced > developer: preview a sky in this tab only */
+    getWeatherPreview?: () => { preset: string; date: string | null } | null;
+    setWeatherPreview?: (preview: { preset: string; date: string | null } | null) => void;
+    weatherPreviewPresets?: () => Array<{ key: string; label: string }>;
     /** shared-helpers.js html escaper (also re-declared by downloads.js) */
     escapeHtml?: (text: unknown) => string;
     /** init.js - the active profile, or null before profiles load */
@@ -590,6 +598,7 @@ declare global {
     toggleOriginEntry?: (id: number, on: boolean) => void;
     toggleAllOriginEntries?: (on: boolean) => void;
     deleteSelectedOriginEntries?: (singleId?: number) => Promise<void>;
+    removeSelectedOriginEntries?: (singleId?: number) => Promise<void>;
     openMyAccountsModal?: () => void;
     /** clears vanilla's listenbrainz playlist caches after a connect/disconnect (init.js) */
     _invalidateListenBrainzCache?: () => void;

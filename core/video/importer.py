@@ -48,6 +48,20 @@ _SAMPLE = re.compile(r"(^|[.\-_ ])sample([.\-_ ]|$)", re.I)
 # short get caught.
 _RUNTIME_FLOOR = {"movie": 15 * 60, "episode": 90}
 
+
+def _episode_sample_limit(expected_sec: float) -> float:
+    """Below this a file is a sample, not the episode. Sonarr's own tiers, keyed
+    off the show's runtime: 15s for a short under 3 min, 90s up to 10 min, 5 min
+    up to 30 min, 10 min for anything longer."""
+    minutes = (expected_sec or 0) / 60
+    if minutes <= 3:
+        return 15
+    if minutes <= 10:
+        return 90
+    if minutes <= 30:
+        return 300
+    return 600
+
 # Source ranking for the upgrade comparison (mirrors the quality ladder order).
 _SRC_RANK = {"remux": 6, "bluray": 5, "web-dl": 4, "webrip": 3, "hdtv": 2, "dvd": 1}
 
@@ -293,23 +307,27 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
         if probe.get("video_codec") and not parsed.get("codec"):
             parsed["codec"] = probe["video_codec"]
 
-    # Duration-vs-expected: the probed runtime against the item's known runtime.
-    # A file running far shorter than the film/episode is a truncated download or
-    # the wrong file wearing the right name — reject it instead of filing a broken
-    # item. Multi-episode spans scale the expectation (S01E01E02 ≈ 2× one episode).
-    # Unknown expected runtime → no judgement (never reject on a guess).
-    # Episodes get a looser bar than movies: TV metadata runtimes are the broadcast
-    # slot WITH commercials (~60 min), while the files are the commercial-free cut
-    # (~42 min) — 0.70 of "expected" is a healthy episode, not a truncation.
+    # Duration-vs-expected. TV runtime metadata cannot be trusted to reject a file:
+    # a new episode carries a placeholder (Name That Tune S06E02 listed at 159 min,
+    # title "TBA"), a slot-length runtime gets stored for one episode (Halloween
+    # Baking Championship S12E04 at 85 min for a 43 min show), and specials are
+    # whatever length they are. Every one of those failed a perfectly good file,
+    # over and over. So episodes do what Sonarr does: the expected runtime only
+    # picks a SAMPLE threshold (a 10 min floor for an hour show, not "65% of 85").
+    # Movies keep a check, because a film's runtime is reliable, but only for a
+    # file under half of it: a truncated download or the wrong file, never a cut.
+    # Soulseek truncations are caught by the advertised-size check either way.
+    # Unknown expected runtime: the absolute floor above has already run.
     if probe is not None and not force and expected_duration_sec:
         actual = probe.get("duration_sec") or 0
         if probe.get("ok") and actual > 0:
-            span = 1
-            if scope == "episode" and parsed.get("episode") and parsed.get("episode_end"):
-                span = max(1, (parsed.get("episode_end") or 0) - parsed["episode"] + 1)
-            want = float(expected_duration_sec) * span
-            ratio = 0.65 if scope == "episode" else 0.75
-            if want > 0 and actual < ratio * want:
+            want = float(expected_duration_sec)
+            if scope == "episode":
+                limit = _episode_sample_limit(want)
+                if actual < limit:
+                    return _reject("Runtime is only %d min — looks like a sample/clip, not the episode"
+                                   % int(actual // 60), bad_release=True)
+            elif scope == "movie" and want > 0 and actual < 0.5 * want:
                 return _reject("Runs %d of %d min — truncated download or the wrong file"
                                % (int(actual // 60), int(want // 60)))
 

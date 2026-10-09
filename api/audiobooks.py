@@ -25,6 +25,7 @@ Acquisition (all scoped to the audiobook subsystem):
   - POST   /api/audiobooks/wishlist/<asin>/search: search and grab one book now.
   - GET    /api/audiobooks/releases/<asin>:   what the indexers actually have.
   - POST   /api/audiobooks/grab:              send one release to the download client.
+  - POST   /api/audiobooks/adopt:             follow a download already in the client (clients tab).
   - GET    /api/audiobooks/downloads:         what is downloading or has finished.
   - GET    /api/audiobooks/watchlist:         authors being followed.
   - POST   /api/audiobooks/watchlist:         follow an author.
@@ -45,6 +46,7 @@ tell which half of the app asked.
 
 from __future__ import annotations
 
+import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -817,14 +819,22 @@ def create_audiobooks_blueprint() -> Blueprint:
         if book is None:
             return jsonify({"success": False, "error": f"No audiobook found for {asin}"}), 404
 
+        from core.audiobook_release_search import build_queries
+
         narrator_mode = _narrator_mode_for(asin)
-        job_id = start(book.to_dict(), narrator_mode=narrator_mode, limit=_limit(25))
+        body = request.get_json(silent=True) or {}
+        query = str(body.get("query") or "").strip() if isinstance(body, dict) else ""
+        job_id = start(book.to_dict(), narrator_mode=narrator_mode, limit=_limit(25),
+                       query=query)
         return jsonify({
             "success": True,
             "id": job_id,
             "asin": asin,
             "narrator_mode": narrator_mode,
             "narrators": book.narrator_names,
+            # what the search box starts with: the query the automatic search
+            # leads with, so editing it starts from what was actually sent
+            "default_query": next(iter(build_queries(book.to_dict())), ""),
             # What the client should wait between polls. Matches video's cadence.
             "poll_ms": 1200,
         })
@@ -1153,61 +1163,128 @@ def create_audiobooks_blueprint() -> Blueprint:
         if not result.get("ok"):
             return jsonify({"success": False, "error": result.get("error") or "Grab failed"}), 502
 
-        asin = str(body.get("asin") or "").strip()
+        from core.audiobook_grab import record_grab
+
         ref = str(result.get("ref") or "")
-        # Torrents and NZBs are one job, so the handle IS the ref. A Soulseek
-        # folder is many transfers and carries its own.
-        client_ref = str(result.get("client_ref") or ref)
-        db = get_audiobook_db()
+        record_grab(
+            get_audiobook_db(),
+            asin=str(body.get("asin") or "").strip(),
+            ref=ref,
+            # Torrents and NZBs are one job, so the handle IS the ref. A Soulseek
+            # folder is many transfers and carries its own.
+            client_ref=str(result.get("client_ref") or ref),
+            release=release,
+            title=str(body.get("title") or ""),
+            author=str(body.get("author") or ""),
+            cover_url=str(body.get("cover_url") or ""),
+            book=book_payload,
+            profile_id=_profile(),
+        )
+        return jsonify({"success": True, "ref": ref, "adopted": bool(result.get("adopted"))})
 
-        # Two records, deliberately. The audiobook database keeps the history
-        # and the completeness bookkeeping; the shared runtime state puts the
-        # book on the existing Downloads page with the existing cards, flagged
-        # so is_music_batch() keeps the music engine off it.
-        if ref:
-            from core.audiobook_download_state import register_download
-
-            book = book_payload or {}
-            series_list = book.get("series") or []
-            register_download(
-                task_id=ref,
-                title=str(book.get("title") or body.get("title")
-                          or release.get("title") or ""),
-                author=(book.get("author_names") or [str(body.get("author") or "")])[0],
-                series=str((series_list[0] or {}).get("title") or "") if series_list else "",
-                artwork_url=str(book.get("cover_url") or body.get("cover_url") or ""),
-                protocol=str(release.get("protocol") or ""),
-                size_bytes=int(release.get("size_bytes") or 0),
-                username=str(release.get("indexer") or "") if str(release.get("protocol") or "").lower() == "soulseek" else "",
-                release_title=str(release.get("title") or ""),
-            )
-            db.record_download(
-                download_id=ref,
-                asin=asin,
-                title=str(body.get("title") or release.get("title") or ""),
-                source=str(release.get("protocol") or ""),
-                client_id=client_ref,
-                release_title=str(release.get("title") or ""),
-                release_guid=str(release.get("guid") or ""),
-                indexer=str(release.get("indexer") or ""),
-                author=str(body.get("author") or ""),
-                bytes_total=int(release.get("size_bytes") or 0),
-                book=book_payload,
-            )
-
-        if asin:
-            from core.audiobook_database import STATUS_GRABBED
-            # Only moves a row that already exists — grabbing something that was
-            # never wishlisted must not silently add it.
-            db.mark_wishlist_status(asin, STATUS_GRABBED, profile_id=_profile())
-
-        # Something is now downloading, so start watching for it to finish even
-        # if the monitor was asleep at boot.
+    def _adopt_has_no_audio(source, client_ref, files):
+        """a FINISHED download whose files on disk hold no audio. anything we
+        can't see yet (still downloading, path not mapped) is let through and
+        the monitor judges it once it lands."""
+        from core.audiobook_completeness import _AUDIO_EXTENSIONS, has_files_but_no_audio
+        if source == "soulseek":
+            names = [str(f) for f in (files or []) if f]
+            return bool(names) and not any(
+                os.path.splitext(n.replace("\\", "/"))[1].lower() in _AUDIO_EXTENSIONS for n in names)
         try:
-            from core.audiobook_download_monitor import ensure_started
-            ensure_started(force=True)
+            from core.audiobook_download_monitor import _get_status, _resolve_path, normalize_state
+            status = _get_status(source, client_ref)
+            if status is None or normalize_state(status) != "completed":
+                return False
+            reported = (getattr(status, "content_path", None) or getattr(status, "save_path", None)
+                        or getattr(status, "path", None))
+            resolved = _resolve_path(reported) if reported else None
+            return bool(resolved) and has_files_but_no_audio(resolved)
         except Exception as exc:                            # noqa: BLE001
-            logger.debug("Could not wake the download monitor: %s", exc)
+            logger.debug("Could not look inside %s %s before adopting: %s", source, client_ref, exc)
+            return False
+
+    @bp.route("/adopt", methods=["POST"])
+    def adopt():
+        """Match & import from the clients tab: follow a torrent or NZB that is
+        already in the download client, as if it had been grabbed here.
+
+        Body: {source: torrent|usenet, client_ref, asin, release_title,
+        size_bytes}, or for a soulseek folder {source: soulseek, username,
+        files: [remote filename, ...], asin, ...}. Writes the same records a
+        grab writes, so the monitor imports it once the client says it is
+        complete.
+        """
+        denied = _download_denied()
+        if denied is not None:
+            return denied
+
+        from core.audiobook_grab import record_grab
+
+        body = request.get_json(silent=True) or {}
+        source = str(body.get("source") or "").lower()
+        client_ref = str(body.get("client_ref") or "").strip()
+        if source == "soulseek":
+            # the transfers are already in slskd: pack them the way a soulseek
+            # grab does, so the same status / landing-path code follows them
+            from core.client_match import soulseek_job
+            files = [str(f) for f in (body.get("files") or []) if f]
+            username = str(body.get("username") or "").strip()
+            client_ref = soulseek_job(username, files) if username and files else ""
+        asin = str(body.get("asin") or "").strip()
+        if source not in ("torrent", "usenet", "soulseek") or not client_ref:
+            return jsonify({"success": False, "error": "Missing the download to match."}), 400
+        if not asin:
+            return jsonify({"success": False, "error": "Pick the book this download is."}), 400
+
+        book = get_audiobook_client().get_book(asin, marketplace=_marketplace())
+        if book is None:
+            return jsonify({"success": False, "error": f"No audiobook found for {asin}"}), 404
+
+        # an ebook in the audiobook category matched fine, showed as claimed,
+        # and then sat "importing" forever because there was nothing to play
+        if _adopt_has_no_audio(source, client_ref, body.get("files")):
+            return jsonify({
+                "success": False,
+                "no_audio": True,
+                "error": "There's no audio in this download (it looks like an ebook), "
+                         "so it can't be imported as an audiobook.",
+            }), 409
+
+        db = get_audiobook_db()
+        if db.is_owned(asin) and not body.get("force"):
+            return jsonify({
+                "success": False,
+                "owned": True,
+                "error": "That book is already in your library. Send force to import it anyway.",
+            }), 409
+        # torrent refs are info-hashes, which clients report in either case.
+        # a soulseek folder gets a short stable id; its transfers ride in
+        # client_ref, the same split a soulseek grab makes
+        import hashlib
+        ref = (f"slsk:{hashlib.sha1(client_ref.encode()).hexdigest()[:16]}" if source == "soulseek"
+               else client_ref.lower() if source == "torrent" else client_ref)
+        stored = client_ref if source == "soulseek" else ref
+        if any(str(row.get("client_id") or "").lower() == stored.lower()
+               for row in db.get_downloads(active_only=True)):
+            return jsonify({"success": False,
+                            "error": "SoulSync is already following this download."}), 409
+
+        book_payload = book.to_dict()
+        record_grab(
+            db,
+            asin=asin,
+            ref=ref,
+            client_ref=stored,
+            release={"protocol": source,
+                     "title": str(body.get("release_title") or ""),
+                     "size_bytes": int(body.get("size_bytes") or 0)},
+            title=str(book_payload.get("title") or ""),
+            author=str((book_payload.get("author_names") or [""])[0]),
+            cover_url=str(book_payload.get("cover_url") or ""),
+            book=book_payload,
+            profile_id=_profile(),
+        )
         return jsonify({"success": True, "ref": ref})
 
     @bp.route("/downloads", methods=["GET"])

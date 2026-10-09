@@ -26,6 +26,6 @@
 
 .reportButton:focus-visible {
   outline: none;
-  border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.6);
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb, 29, 185, 84), 0.2);
+  border-color: rgba(var(--accent-rgb), 0.6);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.2);
 }

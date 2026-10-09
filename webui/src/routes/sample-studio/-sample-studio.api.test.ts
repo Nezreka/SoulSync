@@ -249,17 +249,20 @@ describe('stems + stash requests', () => {
 });
 
 describe('studioTrackSearchQueryOptions', () => {
-  it('empty query hits recently-added', async () => {
-    routes['recently-added'] = ok({
+  it('empty query lists recent tracks, not the dashboard album rail', async () => {
+    // /api/library/recently-added is the dashboard's albums; asking it for
+    // tracks always came back without data and the panel said search failed
+    routes['recently-added'] = ok({ success: true, albums: [] });
+    routes['library/tracks/recent'] = ok({
       success: true,
-      data: { items: [{ id: 1 }], type: 'tracks' },
+      data: { tracks: [{ id: 1 }] },
       error: null,
     });
     const opts = studioTrackSearchQueryOptions('   ');
     expect(typeof opts.queryFn).toBe('function');
     const tracks = await opts.queryFn!({} as never);
     expect(tracks).toEqual([{ id: 1 }]);
-    expect(calls[0].url).toContain('recently-added');
+    expect(calls[0].url).toContain('library/tracks/recent');
   });
 
   it('a query hits the track search', async () => {
@@ -294,10 +297,10 @@ describe('studioTrackSearchQueryOptions', () => {
     ]);
   });
 
-  it('converts recently-added durations from milliseconds to seconds', async () => {
-    routes['recently-added'] = ok({
+  it('converts recent-track durations from milliseconds to seconds', async () => {
+    routes['library/tracks/recent'] = ok({
       success: true,
-      data: { items: [{ id: 1, duration: 120000 }], type: 'tracks' },
+      data: { tracks: [{ id: 1, duration: 120000 }] },
       error: null,
     });
     const opts = studioTrackSearchQueryOptions('   ');

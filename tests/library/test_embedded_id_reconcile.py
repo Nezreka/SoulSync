@@ -236,3 +236,51 @@ def test_a_worker_that_wins_the_race_keeps_its_id(monkeypatch):
     assert totals.conflicts == 1
     assert cur.execute(
         "SELECT musicbrainz_id FROM lib2_artists WHERE id=2").fetchone()[0] == 'WORKER-WON'
+
+
+# ---------------------------------------------------------------------------
+# Upstream a61506e58: the MusicBrainz recording id is reconciled as well
+# ---------------------------------------------------------------------------
+
+REC = '1f9df192-a621-4f54-8850-2c5373b7eac9'
+
+
+def test_picard_mp3_recording_id_is_read_and_reconciled(tmp_path):
+    # picard keeps the recording id in a UFID frame and the album /
+    # release-track ids in TXXX frames. The reader only walked TXXX, so the
+    # mp3 never got a recording id while its flac twin did.
+    from mutagen.id3 import ID3, TXXX, UFID
+
+    from core.library.file_tags import read_embedded_tags
+
+    path = tmp_path / 'friend.mp3'
+    path.write_bytes((bytes([0xFF, 0xFB, 0x90, 0x64]) + bytes(413)) * 10)
+    tags = ID3()
+    tags.add(UFID(owner='http://musicbrainz.org', data=REC.encode('ascii')))
+    tags.add(TXXX(encoding=3, desc='MusicBrainz Release Track Id',
+                  text=['aaaaaaaa-0000-0000-0000-000000000001']))
+    tags.save(str(path))
+
+    embedded = read_embedded_tags(str(path))['tags']
+    assert embedded['musicbrainz_trackid'] == REC
+    assert embedded['musicbrainz_releasetrackid'] == 'aaaaaaaa-0000-0000-0000-000000000001'
+
+    conn, cur = _make_library_db()
+    totals = reconcile_library(conn, _reader({'/a.flac': embedded}))
+
+    assert totals.ids_filled == 1
+    assert cur.execute(
+        "SELECT musicbrainz_id FROM lib2_tracks WHERE id=1").fetchone()[0] == REC
+
+
+def test_recording_id_is_lowercased_and_junk_is_not_filled():
+    conn, cur = _make_library_db()
+    reconcile_library(conn, _reader({
+        '/a.flac': {'musicbrainz_trackid': REC.upper()},
+        '/b.flac': {'musicbrainz_trackid': 'not-a-recording-id'},
+    }))
+
+    assert cur.execute(
+        "SELECT musicbrainz_id FROM lib2_tracks WHERE id=1").fetchone()[0] == REC
+    assert cur.execute(
+        "SELECT musicbrainz_id FROM lib2_tracks WHERE id=2").fetchone()[0] is None

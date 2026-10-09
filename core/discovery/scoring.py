@@ -217,6 +217,10 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
         best_confidence = 0.0
         min_confidence = 0.9
 
+        # deezer's free text can leave the original out entirely (#1565)
+        from core.metadata.song_search import with_song_first_pass
+        _source = with_song_first_pass(itunes_client, track_name, artist_name)
+
         for query_idx, search_query in enumerate(search_queries):
             try:
                 logger.debug(f"Tidal query {query_idx + 1}/{len(search_queries)}: {search_query} ({source_name})")
@@ -226,7 +230,7 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
                     if not results:
                         continue
                 else:
-                    results = itunes_client.search_tracks(search_query, limit=10)
+                    results = _source.search_tracks(search_query, limit=10)
                     if not results:
                         continue
 

@@ -13,6 +13,7 @@ export function MobileTrackActions({
   isAdmin,
   onPlay,
   onQueue,
+  onAddToPlaylist,
   onTagPreview,
   onSourceInfo,
   onRedownload,
@@ -24,6 +25,8 @@ export function MobileTrackActions({
   isAdmin: boolean;
   onPlay: () => void;
   onQueue: () => void;
+  /** opens the playlist picker; absent when the row has no title/artist */
+  onAddToPlaylist?: () => void;
   onTagPreview: () => void;
   onSourceInfo: () => void;
   onRedownload: () => void;
@@ -66,6 +69,11 @@ export function MobileTrackActions({
               <span className="popover-icon">+</span>Add to Queue
             </button>
           </>
+        ) : null}
+        {onAddToPlaylist ? (
+          <button type="button" onClick={run(onAddToPlaylist)}>
+            <span className="popover-icon">≡</span>Add to playlist
+          </button>
         ) : null}
         {isAdmin && hasFile ? (
           <button type="button" onClick={run(onTagPreview)}>

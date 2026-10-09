@@ -51,6 +51,8 @@ describe('stats helpers', () => {
     const now = new Date('2026-05-14T12:00:00.000Z').getTime();
     expect(formatRelativePlayedAt('2026-05-14T11:15:00.000Z', now)).toBe('45m ago');
     expect(formatRelativePlayedAt('2026-05-14T08:00:00.000Z', now)).toBe('4h ago');
+    // the history's own utc stamp, whatever zone the browser is in
+    expect(formatRelativePlayedAt('2026-05-14 11:15:00', now)).toBe('45m ago');
   });
 
   it('groups db storage rows into Other after the top eight', () => {

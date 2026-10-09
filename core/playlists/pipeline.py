@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List
 
 from core.profile_context import get_background_profile
+from core.playlists.user_playlists import PIPELINE_SKIPPED_SOURCES
 
 
 DISCOVERY_TIMEOUT_SECONDS = 3600
@@ -157,7 +158,8 @@ def run_mirrored_playlist_pipeline(
                 automation_id,
                 [pl for pl in playlists if pl.get('id')],
                 sync_one_fn=lambda pl: sync_one_fn(
-                    {'playlist_id': str(pl['id']), '_automation_id': None, '_user_initiated': bool(config.get('_user_initiated'))},
+                    {'playlist_id': str(pl['id']), '_automation_id': None,
+                     'user_initiated': bool(config.get('user_initiated'))},
                     deps,
                 ),
                 sync_id_for_fn=lambda pl: f"auto_mirror_{pl['id']}",
@@ -173,12 +175,17 @@ def run_mirrored_playlist_pipeline(
         duration = int(time.time() - pipeline_start)
         # M13/M14: the final status reflects a failed/timed-out discovery
         # phase instead of claiming a clean success.
+        skipped = sync_summary.get('skipped', 0)
         if discovery_status == 'completed':
             final_log_line = f'Pipeline finished in {duration // 60}m {duration % 60}s'
             final_log_type = 'success'
         else:
             final_log_line = (f'Pipeline finished in {duration // 60}m {duration % 60}s '
                               f'— discovery {discovery_status}: {discovery_error}')
+            final_log_type = 'warning'
+        # #1549: surface unidentified tracks instead of claiming 100% clean.
+        if skipped > 0:
+            final_log_line += f' — {skipped} track{"s" if skipped != 1 else ""} need identification'
             final_log_type = 'warning'
         deps.update_progress(
             automation_id,
@@ -339,7 +346,7 @@ def _resolve_pipeline_playlists(
 
 
 def _filter_refreshable_playlists(playlists: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    return [pl for pl in playlists if pl.get('source', '') not in ('file', 'beatport')]
+    return [pl for pl in playlists if pl.get('source', '') not in PIPELINE_SKIPPED_SOURCES]
 
 
 def _summarize_playlist_names(playlists: List[Dict[str, Any]]) -> str:

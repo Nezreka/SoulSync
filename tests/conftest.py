@@ -28,6 +28,24 @@ import tempfile as _tempfile
 import atexit as _atexit
 import shutil as _shutil
 
+# Under pytest-xdist, workers inherit the controller's environment, so the
+# guards below would see the controller's temp paths and skip: every worker
+# then shares ONE set of temp DBs. That collides at runtime, and a worker
+# that hits the shared DB during collection errors out and collects a
+# different test set, which xdist rejects ("Different tests were collected").
+# A path carrying our test-tmp marker was minted by a parent conftest, never
+# by a user, so a worker discards it and mints its own; explicit user
+# overrides (no marker) are kept.
+_XDIST_WORKER = _os.environ.get('PYTEST_XDIST_WORKER', '')
+if _XDIST_WORKER and 'soulsync-testdb-' in _os.environ.get('DATABASE_PATH', ''):
+    for _var in ('SOULSYNC_TEST_DB_READY', 'DATABASE_PATH',
+                 'VIDEO_DATABASE_PATH', 'SOULSYNC_CONFIG_PATH'):
+        _os.environ.pop(_var, None)
+if _XDIST_WORKER and 'soulsync-test-imagecache-' in _os.environ.get('SOULSYNC_IMAGE_CACHE_DIR', ''):
+    _os.environ.pop('SOULSYNC_IMAGE_CACHE_DIR', None)
+if _XDIST_WORKER and 'soulsync-test-audiobooks-' in _os.environ.get('AUDIOBOOK_DATABASE_PATH', ''):
+    _os.environ.pop('AUDIOBOOK_DATABASE_PATH', None)
+
 if not _os.environ.get('SOULSYNC_TEST_DB_READY'):
     _TEST_DB_DIR = _tempfile.mkdtemp(prefix='soulsync-testdb-')
     _os.environ['DATABASE_PATH'] = _os.path.join(_TEST_DB_DIR, 'test_music_library.db')
@@ -1124,6 +1142,21 @@ def _inert_video_download_monitor():
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _soulseek_ownership_in_memory():
+    """keep the soulseek ownership registry in memory for the suite.
+
+    production saves it in the metadata table so a restart remembers which
+    slskd transfers are ours. every test client shares one session temp db, so
+    saving would leak one test's "owned" ids into the next. tests of the
+    saved registry turn it back on with their own store.
+    """
+    from core.soulseek_client import SoulseekClient
+    SoulseekClient.PERSIST_OWNERSHIP = False
+    yield
+    SoulseekClient.PERSIST_OWNERSHIP = True
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _inert_music_disk_guard():
     """Pin the music min-free-disk guard OFF for the whole suite.
 
@@ -1531,3 +1564,22 @@ def _web_server_clients_start_as_the_admin():
         yield
     finally:
         ws.app.test_client_class = saved
+
+
+@pytest.fixture
+def server_tz(monkeypatch):
+    """set the server's local timezone for one test. played_at is stored
+    utc and hour-of-day charts read it in local time, so a test that seeds
+    hours picks the zone it means. call with a tz name, e.g. server_tz('UTC')"""
+    def _set(name):
+        monkeypatch.setenv('TZ', name)
+        time.tzset()
+    yield _set
+    monkeypatch.undo()
+    time.tzset()
+
+
+@pytest.fixture
+def utc_server(server_tz):
+    """the server's local time is utc: a stored hour is the hour shown"""
+    server_tz('UTC')

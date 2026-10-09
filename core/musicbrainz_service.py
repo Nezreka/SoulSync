@@ -19,6 +19,14 @@ logger = get_logger("musicbrainz_service")
 # are ambiguous, so they get one retry rather than standing forever.
 _NO_ALIASES = {'aliases': [], 'resolved': True}
 
+# #1509 — recording-match duration gate. A legit recording-vs-file length
+# difference (encoder padding, silence trims, remaster drift) is a few
+# seconds; a same-titled recording by a different band — the reported class —
+# is typically tens of seconds off (61s in the report). The gate only fires
+# on a numeric MB `length`; a candidate with no length is not punished for
+# missing data.
+RECORDING_DURATION_TOLERANCE_MS = 30_000
+
 
 class MusicBrainzService:
     """Service layer for MusicBrainz integration with caching and matching logic"""
@@ -493,8 +501,27 @@ class MusicBrainzService:
             logger.warning(f"Error matching release '{album_name}': {e}")
             return None
     
+    @staticmethod
+    def _recording_credit_artist_mbids(result: Dict[str, Any]) -> set:
+        """The artist MBIDs a recording candidate is credited to (lowercased).
+
+        MusicBrainz's `/recording` search always returns `artist-credit` with
+        the artist entity's `id` — the printed name can collide across bands,
+        the id cannot. An empty set means the candidate carried no parseable
+        identity at all, which is missing data, not a mismatch.
+        """
+        mbids = set()
+        for credit in result.get('artist-credit') or []:
+            artist = credit.get('artist') if isinstance(credit, dict) else None
+            mbid = (artist or {}).get('id') if isinstance(artist, dict) else None
+            if mbid:
+                mbids.add(str(mbid).strip().lower())
+        return mbids
+
     def _score_recording_candidates(self, track_name: str, artist_name: Optional[str],
-                                    results: list, *, artist_pinned: bool) -> tuple:
+                                    results: list, *, artist_pinned: bool,
+                                    artist_mbid: Optional[str] = None,
+                                    duration_ms: Optional[int] = None) -> tuple:
         """Shared scoring pass for both the plain and artist-pinned recording
         searches — same title-similarity gate and confidence formula either
         way. When ``artist_pinned`` is True the query already constrained the
@@ -502,11 +529,29 @@ class MusicBrainzService:
         (full artist bonus) without re-checking the printed credit text —
         that's the whole point of pinning.
 
+        When the caller already knows the artist's MBID (``artist_mbid``), the
+        printed credit is not trusted on its own: two different bands can
+        share a name, and the stranger's credit then outscores the real
+        artist's because its credit IS the exact query string (#1509). On the
+        name-based pass a candidate is skipped unless one of its credited
+        artists carries the known identity; the artist-pinned pass is not
+        gated (its ``arid:`` query already constrained identity server-side).
+        When ``duration_ms`` is given, a candidate whose MB ``length`` is
+        further off than RECORDING_DURATION_TOLERANCE_MS is a different
+        recording wearing the same title and is skipped too (both passes).
+
         Returns (best_match, best_confidence).
         """
         best_match = None
         best_confidence = 0
         query_markers = recording_version_markers(track_name)
+        artist_mbid = (str(artist_mbid or '').strip().lower()) or None
+        try:
+            duration_ms = int(duration_ms) if duration_ms else None
+        except (TypeError, ValueError):
+            duration_ms = None
+        if duration_ms is not None and duration_ms <= 0:
+            duration_ms = None
 
         for result in results:
             mb_title = result.get('title', '')
@@ -540,6 +585,42 @@ class MusicBrainzService:
                     f"({sorted(candidate_markers)}) — skipping"
                 )
                 continue
+
+            # #1509 — artist-identity gate: when the caller's artist MBID is
+            # known, the printed credit alone is not enough evidence. A
+            # same-named stranger's credit matches the query name exactly
+            # and would otherwise outscore the real artist. Skip any
+            # candidate not credited to the known identity. Candidates with
+            # no parseable credit MBIDs pass — missing data is not a
+            # mismatch. Only the name-based pass is gated: the artist-pinned
+            # pass already constrained identity server-side via `arid:`, so
+            # a client-side re-check there could only reject on MB
+            # index lag (merged artists, credit renames).
+            if artist_mbid and not artist_pinned:
+                credit_mbids = self._recording_credit_artist_mbids(result)
+                if credit_mbids and artist_mbid not in credit_mbids:
+                    logger.debug(
+                        f"Recording '{mb_title}' rejected: credited to "
+                        f"{sorted(credit_mbids)}, not artist {artist_mbid}"
+                    )
+                    continue
+
+            # #1509 — duration gate: a candidate whose length is far from the
+            # file's is a different recording wearing the same title
+            # (209s vs 270s in the report). Only fires on a numeric MB
+            # length.
+            if duration_ms:
+                try:
+                    mb_length = int(result.get('length') or 0)
+                except (TypeError, ValueError):
+                    mb_length = 0
+                if mb_length > 0 and abs(mb_length - duration_ms) > RECORDING_DURATION_TOLERANCE_MS:
+                    logger.debug(
+                        f"Recording '{mb_title}' rejected: length {mb_length}ms "
+                        f"is further than {RECORDING_DURATION_TOLERANCE_MS}ms "
+                        f"from the file's {duration_ms}ms"
+                    )
+                    continue
 
             # If we have artist info, check artist match too
             artist_bonus = 0
@@ -637,11 +718,18 @@ class MusicBrainzService:
         self._save_to_cache('artist_recording_pin', artist_name, None, None, top, top.get('score', 0) or 0)
         return None
 
-    def _match_recording_by_artist_pin(self, track_name: str, artist_name: str) -> tuple:
+    def _match_recording_by_artist_pin(self, track_name: str, artist_name: str, *,
+                                       artist_mbid: Optional[str] = None,
+                                       duration_ms: Optional[int] = None) -> tuple:
         """Fallback for `match_recording` when the strict name+artist search
-        found nothing usable. Resolves the artist to an MBID via the
-        alias-aware artist search and retries the recording search pinned to
-        that identity (`arid:<mbid>`) instead of the printed credit text.
+        found nothing usable. Retries the recording search pinned to the
+        artist's MBID (`arid:<mbid>`) instead of the printed credit text.
+
+        When the caller already knows the artist's MBID (e.g. `match_artist`
+        resolved it earlier in the pipeline), it is used directly — the
+        name-based re-resolution is skipped, saving a round trip. Otherwise
+        the artist is resolved via the alias-aware artist search, and only an
+        unambiguous resolution is pinned.
 
         A transport failure in either request propagates: `match_recording`
         catches it, returns None and — unlike its "no results" branch — writes
@@ -649,31 +737,74 @@ class MusicBrainzService:
         30 days. Returns (best_match, best_confidence), (None, 0) on no pin /
         no result.
         """
-        artist_mbid = self._resolve_unambiguous_artist_mbid(artist_name)
+        if artist_mbid is None:
+            artist_mbid = self._resolve_unambiguous_artist_mbid(artist_name)
         if not artist_mbid:
             return None, 0
         results = self.mb_client.search_recording_by_artist_mbid(
             track_name, artist_mbid, limit=5, raise_on_error=True)
         if not results:
             return None, 0
+        # No identity gate here: the `arid:` query already constrained the
+        # artist server-side — that's the whole point of pinning. Only the
+        # duration gate still applies.
         return self._score_recording_candidates(
-            track_name, artist_name, results, artist_pinned=True)
+            track_name, artist_name, results, artist_pinned=True,
+            duration_ms=duration_ms)
 
-    def match_recording(self, track_name: str, artist_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def match_recording(self, track_name: str, artist_name: Optional[str] = None, *,
+                        artist_mbid: Optional[str] = None,
+                        duration_ms: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """
         Match a recording (track) by name to MusicBrainz
+
+        Args:
+            track_name: The track title to look up.
+            artist_name: The artist name as printed on the file.
+            artist_mbid: The artist's MusicBrainz id, when the caller already
+                resolved it (e.g. via `match_artist`). Candidates are then
+                required to be credited to that identity (#1509: a same-named
+                band's recording can otherwise outscore the real artist's),
+                and the artist MBID becomes part of the cache key so a
+                name-only cached miss can never be served to an
+                identity-pinned lookup.
+            duration_ms: The file's duration in milliseconds, when known.
+                Candidates whose MusicBrainz `length` is further off than
+                RECORDING_DURATION_TOLERANCE_MS are rejected as a different
+                recording wearing the same title.
 
         Returns:
             Dict with 'mbid', 'title', 'confidence' or None if no good match
         """
+        artist_mbid = (str(artist_mbid or '').strip().lower()) or None
+        try:
+            duration_ms = int(duration_ms) if duration_ms else None
+        except (TypeError, ValueError):
+            duration_ms = None
+        if duration_ms is not None and duration_ms <= 0:
+            duration_ms = None
+
+        # #1509: the known artist identity is part of the cache identity. A
+        # name-only lookup can cache the wrong band's recording under
+        # (track, name); an identity-pinned lookup must never read that row
+        # back — or write its answer over it — so it gets its own key. The
+        # MBID is lowercased so the same identity always maps to one row.
+        cache_artist_name = artist_name
+        if artist_mbid:
+            cache_artist_name = f"{artist_name or ''} [mbid:{artist_mbid}]"
+
         # Check cache first
-        cached = self._check_cache('recording', track_name, artist_name)
+        cached = self._check_cache('recording', track_name, cache_artist_name)
         if cached:
             logger.debug(f"Cache hit for recording '{track_name}'")
+            cached_metadata = cached.get('metadata')
             return {
                 'mbid': cached['musicbrainz_id'],
                 'title': track_name,
                 'confidence': cached['confidence'],
+                'recording_disambiguation': (
+                    cached_metadata.get('disambiguation') if isinstance(cached_metadata, dict) else None
+                ),
                 'cached': True
             }
 
@@ -687,7 +818,8 @@ class MusicBrainzService:
             best_match, best_confidence = (None, 0)
             if results:
                 best_match, best_confidence = self._score_recording_candidates(
-                    track_name, artist_name, results, artist_pinned=False)
+                    track_name, artist_name, results, artist_pinned=False,
+                    artist_mbid=artist_mbid, duration_ms=duration_ms)
 
             # The `artist:"..."` clause on a strict recording search matches
             # the CREDIT printed on that recording, never the artist entity's
@@ -695,11 +827,13 @@ class MusicBrainzService:
             # romanised or cross-script artist name (e.g. "Tatsuro Yamashita"
             # for a recording credited "山下達郎") therefore finds nothing no
             # matter how exact the title is. When the plain search came back
-            # empty, or nothing on it cleared the title-similarity gate, retry
-            # once pinned to the artist's resolved MBID instead of its name.
-            if not best_match and artist_name and str(artist_name).strip():
+            # empty, or nothing on it cleared the gates, retry once pinned to
+            # the artist's MBID instead of its name — the caller's, when it
+            # already resolved one, so no extra artist search is spent.
+            if not best_match and (artist_mbid or (artist_name and str(artist_name).strip())):
                 pin_match, pin_confidence = self._match_recording_by_artist_pin(
-                    track_name, artist_name)
+                    track_name, artist_name or '', artist_mbid=artist_mbid,
+                    duration_ms=duration_ms)
                 if pin_match:
                     best_match, best_confidence = pin_match, pin_confidence
 
@@ -707,14 +841,14 @@ class MusicBrainzService:
                 # `results` (the strict search) tells "genuinely nothing
                 # came back" apart from "something came back but every
                 # candidate — including any from the artist-pinned retry —
-                # failed the title-similarity gate". Same cached values
-                # either way (mbid=None, confidence 0), only the log text
-                # tells them apart, same as before this fallback existed.
+                # failed the gates". Same cached values either way
+                # (mbid=None, confidence 0), only the log text tells them
+                # apart, same as before this fallback existed.
                 if results:
                     logger.info(f"Low confidence match for recording '{track_name}' (best: {best_confidence})")
                 else:
                     logger.info(f"No MusicBrainz results for recording '{track_name}'")
-                self._save_to_cache('recording', track_name, artist_name, None, None, best_confidence)
+                self._save_to_cache('recording', track_name, cache_artist_name, None, None, best_confidence)
                 return None
 
             # Only return matches with confidence >= 70%
@@ -723,7 +857,7 @@ class MusicBrainzService:
                 mb_title = best_match.get('title')
 
                 # Save to cache
-                self._save_to_cache('recording', track_name, artist_name, mbid, best_match, best_confidence)
+                self._save_to_cache('recording', track_name, cache_artist_name, mbid, best_match, best_confidence)
 
                 logger.info(f"Matched recording '{track_name}' → '{mb_title}' (MBID: {mbid}, confidence: {best_confidence})")
 
@@ -731,11 +865,12 @@ class MusicBrainzService:
                     'mbid': mbid,
                     'title': mb_title,
                     'confidence': best_confidence,
+                    'recording_disambiguation': best_match.get('disambiguation'),
                     'cached': False
                 }
             else:
                 logger.info(f"Low confidence match for recording '{track_name}' (best: {best_confidence})")
-                self._save_to_cache('recording', track_name, artist_name, None, None, best_confidence)
+                self._save_to_cache('recording', track_name, cache_artist_name, None, None, best_confidence)
                 return None
 
         except Exception as e:
@@ -1299,8 +1434,14 @@ class MusicBrainzService:
         """Update album with MusicBrainz release ID"""
         self._record_mbid('album', album_id, mbid, status)
 
-    def update_track_mbid(self, track_id: int, mbid: Optional[str], status: str):
-        """Update track with MusicBrainz recording ID"""
+    def update_track_mbid(self, track_id: int, mbid: Optional[str], status: str,
+                          recording_disambiguation: Optional[str] = None):
+        """Update track with MusicBrainz recording ID.
+
+        ``recording_disambiguation`` is accepted for upstream's call shape
+        (5170059ed). Library v2 keeps no column for it: nothing reads the
+        stored value, the comment reaches the file as MUSICBRAINZ_TRACKCOMMENT.
+        """
         self._record_mbid('track', track_id, mbid, status)
 
 

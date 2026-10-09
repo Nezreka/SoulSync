@@ -216,6 +216,11 @@ def _build_single_import_context_payload(
                 album_id = typed_album.id
             if typed_album.release_date:
                 release_date = typed_album.release_date
+            elif album_data.get('release_date'):
+                # the itunes and discogs clients hand back an already
+                # normalized album, which their raw-shape converters can't
+                # read a date from
+                release_date = str(album_data['release_date'])
             if typed_album.album_type:
                 album_type = typed_album.album_type
             if typed_album.total_tracks:
@@ -266,6 +271,9 @@ def _build_single_import_context_payload(
         'album_id': album_id,
         'album_type': album_type,
         'release_date': release_date,
+        # #1536: recording disambiguation ("acoustic", "live") for the
+        # single-import filename/tag layers.
+        'disambiguation': str(_extract_lookup_value(track_data, 'disambiguation', default='') or '').strip(),
         '_source': source or '',
     }
 

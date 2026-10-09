@@ -1329,6 +1329,8 @@ class RepairWorker:
         # Skipped after a failure or a user stop: a partial view is not evidence.
         if run_status == 'completed':
             self.retire_vanished_findings(job_id)
+            if job_id == 'orphan_file_detector':
+                self.retire_tracked_orphan_findings()
 
         duration = time.time() - start_time
 
@@ -2264,6 +2266,48 @@ class RepairWorker:
             if conn:
                 conn.close()
         return retired
+
+    def retire_tracked_orphan_findings(self) -> int:
+        """Close pending orphan findings whose files were imported after detection.
+
+        A completed scan reports only *new* orphans; it does not otherwise
+        reconcile existing findings. Read the current catalogue here so a scan
+        that finds zero orphans can retire its stale pending rows.
+        """
+        from core.repair_jobs.orphan_file_detector import (
+            is_tracked_path, known_file_suffixes,
+        )
+
+        try:
+            suffixes = known_file_suffixes(self.db)
+            conn = self.db._get_connection()
+            try:
+                rows = conn.execute(
+                    "SELECT id, file_path FROM repair_findings "
+                    "WHERE job_id = 'orphan_file_detector' "
+                    "AND finding_type = 'orphan_file' AND status = 'pending' "
+                    "AND file_path IS NOT NULL AND file_path != ''"
+                ).fetchall()
+                tracked = [row[0] for row in rows
+                           if os.path.isfile(row[1])
+                           and is_tracked_path(row[1], suffixes)]
+                if tracked:
+                    conn.executemany(
+                        "UPDATE repair_findings SET status = 'resolved', "
+                        "user_action = 'already_tracked', resolved_at = CURRENT_TIMESTAMP, "
+                        "updated_at = CURRENT_TIMESTAMP "
+                        "WHERE id = ? AND status = 'pending'",
+                        ((finding_id,) for finding_id in tracked),
+                    )
+                    conn.commit()
+                    logger.info("Retired %d orphan finding(s) now tracked in the database",
+                                len(tracked))
+                return len(tracked)
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error("Could not reconcile tracked orphan findings: %s", e, exc_info=True)
+            return 0
 
     def resolve_finding(self, finding_id: int, action: str = None) -> bool:
         """Resolve a finding with an optional action."""
@@ -3858,6 +3902,27 @@ class RepairWorker:
             if not os.path.exists(resolved):
                 return {'success': True, 'action': 'already_gone',
                         'message': 'File was already removed'}
+
+            # The file may have entered the catalogue since the finding was
+            # raised. Fail closed if the DB cannot be read: neither action may
+            # move or delete a file whose current status is unknown.
+            from core.repair_jobs.orphan_file_detector import (
+                is_tracked_path, known_file_suffixes,
+            )
+            try:
+                suffixes = known_file_suffixes(self.db)
+            except Exception as e:
+                logger.error("Could not recheck orphan file against tracks: %s", e,
+                             exc_info=True)
+                return {'success': False, 'error':
+                        'Could not verify whether this file is now tracked; no file was changed'}
+            if is_tracked_path(resolved, suffixes):
+                return {'success': True, 'action': 'already_tracked',
+                        'message': 'File is now tracked in the library; no file was changed'}
+            if is_tracked_path(resolved, suffixes, min_depth=1):
+                return {'success': False, 'error':
+                        'Another library track has the same filename, but its album path '
+                        'differs; verify this orphan manually before moving or deleting it'}
 
             if fix_action == 'staging':
                 # Move to staging folder

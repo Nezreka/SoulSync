@@ -139,6 +139,33 @@ def test_start_wishlist_sets_sync_type_wishlist(db):
     assert row['sync_type'] == 'wishlist'
 
 
+@pytest.mark.parametrize('playlist_id', [
+    'enhanced_search_track_123', 'gsearch_track_Tame_Impala_Dracula',
+])
+def test_start_single_track_from_search_is_not_a_playlist(db, playlist_id):
+    """#1591: search sends is_album_download False for a single track, and
+    it landed on the dashboard's playlist card as a playlist."""
+    history.record_sync_history_start(
+        db, batch_id='b1', playlist_id=playlist_id, playlist_name='Dracula',
+        tracks=[{'name': 'Dracula'}],
+        is_album_download=False, album_context={'name': 'Dracula'},
+        artist_context={'name': 'Tame Impala'}, playlist_folder_mode=False,
+    )
+    assert db.get_latest_sync_history_by_playlist(playlist_id)['sync_type'] == 'track'
+
+
+def test_start_album_id_is_an_album_even_without_the_flag(db):
+    """discover_cache_ albums go through the youtube modal, which never sets
+    is_album_download."""
+    history.record_sync_history_start(
+        db, batch_id='b1', playlist_id='discover_cache_9', playlist_name='Moana',
+        tracks=[{'name': 't1'}],
+        is_album_download=False, album_context=None, artist_context=None,
+        playlist_folder_mode=False,
+    )
+    assert db.get_latest_sync_history_by_playlist('discover_cache_9')['sync_type'] == 'album'
+
+
 def test_start_pulls_thumb_from_album_context_images_list(db):
     history.record_sync_history_start(
         db, batch_id='b1', playlist_id='spot_pl', playlist_name='Alb',

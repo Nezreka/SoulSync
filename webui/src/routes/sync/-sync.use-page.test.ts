@@ -190,6 +190,22 @@ describe('what it assembles', () => {
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
+  it('reloads both mirrored tabs, and a re-register replaces rather than stacks', () => {
+    // a pipeline run from My Playlists has to refresh that tab too, not just
+    // Mirrored. a remount registering again must not double the refetch.
+    const mirrored = vi.fn();
+    const mine = vi.fn();
+    const { result } = renderHook(() => useSyncPage());
+    act(() => {
+      result.current.registerMirroredReload(mirrored);
+      result.current.registerMirroredReload(mine, 'my-playlists');
+      result.current.registerMirroredReload(mine, 'my-playlists');
+    });
+    result.current.reloadMirrored();
+    expect(mirrored).toHaveBeenCalledTimes(1);
+    expect(mine).toHaveBeenCalledTimes(1);
+  });
+
   it('starts with no modal open', () => {
     const { result } = renderHook(() => useSyncPage());
     expect(result.current.modals.open).toBeNull();

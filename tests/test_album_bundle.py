@@ -699,6 +699,193 @@ def test_resolve_protocol_neutral_path_mappings_key(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# resolve_reported_save_path — single-FILE torrents. qBittorrent's
+# content_path for a single-file torrent names the file itself (the standard
+# shape for audiobook downloads). The resolver used to be directory-only, so
+# a UNC content_path like \\NAS\Media\...\Book.m4b could never resolve: the
+# basename fallback required a directory, and the audio walker reported
+# "No audio files in the download" for a file sitting right there
+# (SeadogsBooty, Oct 2026). The audiobook monitor calls the resolver with no
+# expected name, straight off the client's content_path.
+# ---------------------------------------------------------------------------
+
+
+def _single_file_cfg(tmp_path: Path):
+    """SoulSync-side layout mirroring the report: the book file visible at
+    <torrent_download_path>/<filename>, the client's UNC path not."""
+    incoming = tmp_path / "Incoming" / "Audiobooks"
+    incoming.mkdir(parents=True)
+    book = incoming / "Columbus Day (R.C. Bray).m4b"
+    book.write_bytes(b"fake-m4b")
+    return incoming, book, _cfg({'download_source.torrent_download_path': str(incoming)})
+
+
+def test_resolve_single_file_unc_content_path_without_expect_name(tmp_path: Path) -> None:
+    """The production audiobook path: the monitor calls the resolver with no
+    expected name, and the client's UNC content_path names the single .m4b
+    file. Must resolve to the container-visible file, not the UNC path."""
+    _incoming, book, cfg = _single_file_cfg(tmp_path)
+    reported = r"\\10.10.16.115\Media\Torrents\Incoming\Audiobooks\Columbus Day (R.C. Bray).m4b"
+    assert resolve_reported_save_path(reported, config_get=cfg) == str(book)
+
+
+def test_resolve_single_file_basename_fallback_with_expect_name(tmp_path: Path) -> None:
+    """With the torrent name known (== the filename for single-file
+    torrents), the basename fallback hands back the file itself — returning
+    the shared download root would let the caller walk every other download
+    in it against this job."""
+    _incoming, book, cfg = _single_file_cfg(tmp_path)
+    reported = r"\\10.10.16.115\Media\Torrents\Incoming\Audiobooks\Columbus Day (R.C. Bray).m4b"
+    resolved = resolve_reported_save_path(reported, config_get=cfg,
+                                          expect_name="Columbus Day (R.C. Bray).m4b")
+    assert resolved == str(book)
+
+
+def test_resolve_single_file_verbatim_when_directly_readable(tmp_path: Path) -> None:
+    """Mounts already line up and the reported path IS the file: return it
+    unchanged, no translation needed."""
+    book = tmp_path / "Book.m4b"
+    book.write_bytes(b"fake-m4b")
+    assert resolve_reported_save_path(str(book), config_get=_cfg({})) == str(book)
+
+
+def test_resolve_rejects_file_when_name_mismatches_expect_name(tmp_path: Path) -> None:
+    """A same-basename file that is NOT the expected torrent must not win —
+    the content check applies to files as well as directories."""
+    incoming = tmp_path / "incoming"
+    incoming.mkdir()
+    (incoming / "Some Other Book.m4b").write_bytes(b"fake-m4b")
+    cfg = _cfg({'download_source.torrent_download_path': str(incoming)})
+    reported = r"\\10.10.16.115\Media\Torrents\Incoming\Audiobooks\Some Other Book.m4b"
+    # The expected name doesn't match the file: no resolution, the reported
+    # path comes back unchanged so the caller's error names it honestly.
+    assert resolve_reported_save_path(reported, config_get=cfg,
+                                      expect_name="Columbus Day (R.C. Bray).m4b") == reported
+
+
+def test_resolve_root_step_returns_file_for_single_file_torrent(tmp_path: Path) -> None:
+    """Step 4 (the roots themselves): when the expected name is a single file
+    under a root, the file is returned — never the whole shared root."""
+    root = tmp_path / "incoming"
+    root.mkdir()
+    book = root / "Columbus Day (R.C. Bray).m4b"
+    book.write_bytes(b"fake-m4b")
+    cfg = _cfg({'download_source.torrent_download_path': str(root)})
+    # The reported basename doesn't exist locally, so only the roots step
+    # can resolve — via the expected file name.
+    resolved = resolve_reported_save_path(r"\\NAS\Media\SomeOtherFolder", config_get=cfg,
+                                          expect_name="Columbus Day (R.C. Bray).m4b")
+    assert resolved == str(book)
+
+
+def test_resolve_root_step_still_returns_root_for_multi_file_torrent(tmp_path: Path) -> None:
+    """Back-compat pin for step 4: when the expected name is a FOLDER under
+    the root, the root itself is still returned (save-dir semantics)."""
+    root = tmp_path / "incoming"
+    (root / "My Release").mkdir(parents=True)
+    cfg = _cfg({'download_source.torrent_download_path': str(root)})
+    resolved = resolve_reported_save_path(r"\\NAS\Media\SomeOtherFolder", config_get=cfg,
+                                          expect_name="My Release")
+    assert resolved == str(root)
+
+
+def test_resolve_mapping_to_single_file(tmp_path: Path) -> None:
+    """An explicit remote-path mapping that translates to a single file
+    resolves to the file."""
+    book = tmp_path / "Book.m4b"
+    book.write_bytes(b"fake-m4b")
+    cfg = _cfg({'download_source.path_mappings': [
+        {'from': r'\\NAS\Media\Audiobooks', 'to': str(tmp_path)},
+    ]})
+    resolved = resolve_reported_save_path(r"\\NAS\Media\Audiobooks\Book.m4b", config_get=cfg)
+    assert resolved == str(book)
+
+
+def test_resolve_expect_name_cannot_escape_the_root(tmp_path: Path) -> None:
+    """expect_name is client-reported (a torrent/job name). A hostile name
+    carrying path components must never resolve outside the download root —
+    the old step 4 only ever returned the root directory itself, so the
+    traversed path was never handed to a caller."""
+    root = tmp_path / "incoming"
+    (root / "sub").mkdir(parents=True)
+    outside = tmp_path / "secret-track.mp3"
+    outside.write_bytes(b"ID3")
+    cfg = _cfg({'download_source.torrent_download_path': str(root)})
+    reported = r"\\NAS\Media\Audiobooks"
+    resolved = resolve_reported_save_path(reported, config_get=cfg,
+                                          expect_name="sub/../../secret-track.mp3")
+    # Fail-closed: the reported path comes back unchanged, never the file
+    # outside the root.
+    assert resolved == reported
+    assert Path(resolved) != outside
+
+
+def test_resolve_basename_fallback_prefers_newest_across_roots(tmp_path: Path) -> None:
+    """Two roots hold the same filename (a stale usenet copy and the fresh
+    torrent download — single-file audiobooks reuse the uploader's canonical
+    filename across sources, and usenet roots sort first). The most recently
+    written one wins: that is the download that just finished."""
+    import os
+    import time
+
+    usenet_root = tmp_path / "usenet-complete"
+    torrent_root = tmp_path / "torrent-incoming"
+    usenet_root.mkdir()
+    torrent_root.mkdir()
+    stale = usenet_root / "Book.m4b"
+    fresh = torrent_root / "Book.m4b"
+    stale.write_bytes(b"stale")
+    fresh.write_bytes(b"fresh")
+    now = time.time()
+    os.utime(stale, (now - 3600, now - 3600))   # an hour old
+    os.utime(fresh, (now, now))                 # just finished
+    cfg = _cfg({'download_source.usenet_download_path': str(usenet_root),
+                'download_source.torrent_download_path': str(torrent_root)})
+    resolved = resolve_reported_save_path(r"\\NAS\Media\Book.m4b", config_get=cfg)
+    assert resolved == str(fresh)
+
+
+def test_resolve_basename_fallback_tie_keeps_config_order(tmp_path: Path) -> None:
+    """Exact mtime ties are deterministic: the first root in config order wins."""
+    import os
+
+    a = tmp_path / 'a'
+    b = tmp_path / 'b'
+    a.mkdir()
+    b.mkdir()
+    fa = a / 'Book.m4b'
+    fb = b / 'Book.m4b'
+    fa.write_bytes(b'x')
+    fb.write_bytes(b'x')
+    stamp = 1_700_000_000.0
+    os.utime(fa, (stamp, stamp))
+    os.utime(fb, (stamp, stamp))
+    cfg = _cfg({'download_source.usenet_download_path': str(a),
+                'download_source.torrent_download_path': str(b)})
+    assert resolve_reported_save_path(r'\\NAS\Media\Book.m4b', config_get=cfg) == str(fa)
+
+
+def test_resolve_mapping_rejects_dotdot_escape(tmp_path: Path) -> None:
+    """A client-reported path must never escape the mapping target via '..'.
+    The old directory-only gates rejected file escapes implicitly; the
+    file-aware steps reject them explicitly instead."""
+    target = tmp_path / 'mapped'
+    target.mkdir()
+    outside = tmp_path / 'secret.mp3'
+    outside.write_bytes(b'ID3')
+    cfg = _cfg({'download_source.path_mappings': [
+        {'from': '/data/dl', 'to': str(target)},
+    ]})
+    reported = '/data/dl/../../secret.mp3'
+    resolved = resolve_reported_save_path(reported, config_get=cfg)
+    # Fail-closed: the reported path comes back unchanged, never the file
+    # outside the mapping target.
+    assert resolved == reported
+    assert Path(resolved) != outside
+
+
+
+# ---------------------------------------------------------------------------
 # poll_album_download — lifted poll loop for both torrent + usenet plugins.
 # ---------------------------------------------------------------------------
 
@@ -1686,3 +1873,45 @@ def test_music_size_limit_uses_album_duration_and_never_falls_back_to_oversized(
     fits = _Release('Artist Album FLAC', 400_000_000, seeders=5)
     assert pick_best_album_release([huge, fits], _flac_quality_guess, expected_duration_seconds=2700) is fits
     assert pick_best_album_release([huge], _flac_quality_guess, expected_duration_seconds=2700) is None
+
+
+def test_resolve_single_file_in_client_category_subfolder(tmp_path: Path) -> None:
+    """the download root is the client's Incoming folder and the audiobooks
+    category saves one level down. the file is at <root>/Audiobooks/<file>,
+    never <root>/<file>, so the bare basename lookup missed it."""
+    incoming = tmp_path / "Incoming"
+    (incoming / "Audiobooks").mkdir(parents=True)
+    book = incoming / "Audiobooks" / "Columbus Day (R.C. Bray).m4b"
+    book.write_bytes(b"fake-m4b")
+    cfg = _cfg({'download_source.torrent_download_path': str(incoming)})
+    reported = r"\\10.10.16.115\Media\Torrents\Incoming\Audiobooks\Columbus Day (R.C. Bray).m4b"
+    assert resolve_reported_save_path(reported, config_get=cfg) == str(book)
+
+
+def test_resolve_category_subfolder_beats_same_name_at_root(tmp_path: Path) -> None:
+    """parent + name is the more specific match: a same-named file at the
+    root (an older grab) must not win over the one in the reported folder,
+    even when the root copy is newer."""
+    import os
+    incoming = tmp_path / "Incoming"
+    (incoming / "Audiobooks").mkdir(parents=True)
+    book = incoming / "Audiobooks" / "Book.m4b"
+    book.write_bytes(b"right")
+    stale = incoming / "Book.m4b"
+    stale.write_bytes(b"wrong")
+    os.utime(book, (1_000_000, 1_000_000))
+    cfg = _cfg({'download_source.torrent_download_path': str(incoming)})
+    reported = r"\\NAS\Media\Incoming\Audiobooks\Book.m4b"
+    assert resolve_reported_save_path(reported, config_get=cfg) == str(book)
+
+
+def test_resolve_bare_basename_still_works_without_the_parent(tmp_path: Path) -> None:
+    """no category subfolder on this side: the bare name at the root still
+    resolves like before."""
+    incoming = tmp_path / "Incoming"
+    incoming.mkdir()
+    book = incoming / "Book.m4b"
+    book.write_bytes(b"x")
+    cfg = _cfg({'download_source.torrent_download_path': str(incoming)})
+    assert resolve_reported_save_path(r"\\NAS\Media\Whatever\Audiobooks\Book.m4b",
+                                      config_get=cfg) == str(book)

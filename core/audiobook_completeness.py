@@ -77,6 +77,25 @@ def measure_duration_seconds(path: Path) -> Optional[float]:
         return None
 
 
+def has_files_but_no_audio(path: Any) -> bool:
+    """the download is on disk and none of it is audio: an ebook, a pdf, a
+    cover scan. waiting cannot fix that. a path that is missing or empty is
+    NOT this, it may still be arriving."""
+    root = Path(str(path or ""))
+    if not str(path or "") or not root.exists():
+        return False
+    if root.is_file():
+        return root.suffix.lower() not in _AUDIO_EXTENSIONS
+    found_any = False
+    for p in root.rglob("*"):
+        if not p.is_file():
+            continue
+        if p.suffix.lower() in _AUDIO_EXTENSIONS:
+            return False
+        found_any = True
+    return found_any
+
+
 def collect_audio(folder: Path) -> List[Path]:
     """Every audio file under a download, recursively."""
     root = Path(folder)

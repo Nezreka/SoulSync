@@ -496,7 +496,7 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
                 'album_type_locked': bool(explicit_album.get('album_type_locked')),
                 'total_tracks': explicit_album.get('total_tracks', 0),
                 'total_discs': explicit_album.get('total_discs', 1),
-                'artists': explicit_album.get('artists', [{'name': spotify_artist_ctx.get('name', '')}])
+                'artists': explicit_album.get('artists') or [{'name': track_info.get('_fallback_album_artist') or spotify_artist_ctx.get('name', '')}]
             }
             is_album_ctx = True
             has_clean_data = True

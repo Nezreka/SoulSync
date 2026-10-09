@@ -128,16 +128,28 @@ export function enrichAlbumTracks(
  * `artists` prefers the real list over the joined "A, B" display string: that
  * string is what made collab downloads land tagged with a single combined
  * artist, because resolve_track_artists saw one value.
+ *
+ * when the search knows the track's album id, send that and nothing made up.
+ * the download looks the album up for its real artist and track count. calling
+ * it a one-track single tagged a soundtrack song as 4/1 under its singer (#1605)
  */
 export function enrichSingleTrack(track: SearchTrack): Record<string, unknown> {
-  const albumObject = {
-    name: track.album,
-    id: null,
-    album_type: 'single',
-    images: track.image_url ? [{ url: track.image_url }] : [],
-    release_date: track.release_date || null,
-    total_tracks: 1,
-  };
+  const images = track.image_url ? [{ url: track.image_url }] : [];
+  const albumObject = track.album_id
+    ? {
+        name: track.album,
+        id: String(track.album_id),
+        images,
+        release_date: track.release_date || null,
+      }
+    : {
+        name: track.album,
+        id: null,
+        album_type: 'single',
+        images,
+        release_date: track.release_date || null,
+        total_tracks: 1,
+      };
   return {
     id: track.id,
     name: track.name,

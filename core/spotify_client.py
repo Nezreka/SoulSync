@@ -1690,8 +1690,9 @@ class SpotifyClient:
         # Free should serve (no-auth / rate-limited / budget / worker prefer-free) OR
         # when it's simply available (opted-in) and official above returned nothing —
         # so an authed-but-broken official Spotify falls back to Free instead of empty.
-        if allow_fallback and (self._free_active() or self._free_available()
-                               or (prefer_free and self._free_installed())):
+        # not allow_fallback-gated: free IS Spotify (see get_track_details)
+        if (self._free_active() or self._free_available()
+                or (prefer_free and self._free_installed())):
             try:
                 objs = [Track.from_spotify_track(t)
                         for t in self._free_meta.search_tracks(query, effective_limit)]
@@ -1773,8 +1774,9 @@ class SpotifyClient:
         # No-creds Spotify (SpotipyFree): keep Spotify catalog/matching when official
         # can't serve (no auth / rate-limited / worker prefer-free) OR when it's opted-in
         # and official above returned nothing — before the iTunes/Deezer fallback.
-        if allow_fallback and (self._free_active() or self._free_available()
-                               or (prefer_free and self._free_installed())):
+        # not allow_fallback-gated: free IS Spotify (see get_track_details)
+        if (self._free_active() or self._free_available()
+                or (prefer_free and self._free_installed())):
             try:
                 objs = [Artist.from_spotify_artist(a)
                         for a in self._free_meta.search_artists(query, limit)]
@@ -1859,8 +1861,9 @@ class SpotifyClient:
         # opted-in and official above returned nothing — before the iTunes/Deezer fallback.
         # Albums have no name-search upstream, so resolve via the artist's discography —
         # needs artist + album names.
-        if allow_fallback and (self._free_active() or self._free_available()
-                               or (prefer_free and self._free_installed())) and artist and album:
+        # not allow_fallback-gated: free IS Spotify (see get_track_details)
+        if (self._free_active() or self._free_available()
+                or (prefer_free and self._free_installed())) and artist and album:
             try:
                 objs = [Album.from_spotify_album(a)
                         for a in self._free_meta.search_albums_via_artist(artist, album, min(limit, 10))]

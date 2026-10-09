@@ -16,6 +16,7 @@ _ALLOWED_GET = frozenset({
     '/api/profiles/current',         # how the frontend detects login state
     '/api/setup/status',             # first-run check runs before the login screen
     '/api/auth/recovery-question',   # forgot-password: fetch the security question
+    '/api/auth/plex/available',      # sign in with plex: show the button or not
 })
 
 # POST endpoints that drive the login flow.
@@ -23,6 +24,8 @@ _ALLOWED_POST = frozenset({
     '/api/auth/login',
     '/api/auth/logout',
     '/api/auth/recovery-reset',      # forgot-password: answer + set a new password
+    '/api/auth/plex/start',          # sign in with plex: the pin, bound to this session
+    '/api/auth/plex/check',          # sign in with plex: poll it, sign in on approval
 })
 
 

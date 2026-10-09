@@ -355,6 +355,7 @@ function renderDiscoveryFixResults(tracks, fixModalOverlay) {
         card.innerHTML = `
             <div class="fix-result-card-content">
                 <div class="fix-result-title">${escapeHtml(track.name || 'Unknown Track')}</div>
+                ${track.disambiguation ? `<div class="fix-result-disambiguation">Recording note: ${escapeHtml(track.disambiguation)}</div>` : ''}
                 <div class="fix-result-artist">${escapeHtml((track.artists || ['Unknown Artist']).join(', '))}</div>
                 <div class="fix-result-album">${escapeHtml(track.album || 'Unknown Album')}</div>
                 <div class="fix-result-duration">${formatDuration(track.duration_ms || 0)}</div>
@@ -421,7 +422,9 @@ async function selectDiscoveryFixTrack(track) {
                 artists: track.artists,
                 album: track.album,
                 duration_ms: track.duration_ms,
-                image_url: track.image_url || null
+                image_url: track.image_url || null,
+                source: track.source,
+                disambiguation: track.disambiguation || ''
             }
         };
 
@@ -4007,7 +4010,7 @@ async function openMetadataCacheDetail(source, entityType, entityId) {
             addRow('Disc Number', data.disc_number);
             addRow('Explicit', data.explicit ? 'Yes' : 'No');
             addRow('ISRC', data.isrc);
-            if (data.preview_url) addRow('Preview', `<a href="${data.preview_url}" target="_blank" style="color:var(--accent,#6d5dfc)">Listen</a>`);
+            if (data.preview_url) addRow('Preview', `<a href="${data.preview_url}" target="_blank" style="color:var(--accent)">Listen</a>`);
         }
 
         fieldsHtml += '</table>';

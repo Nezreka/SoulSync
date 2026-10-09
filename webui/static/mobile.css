@@ -1881,7 +1881,7 @@
        halves (.vst-half) are excluded because this chain's specificity beats
        their own min-height: 208px — their content is absolutely positioned, so
        "winning" here collapses each half to a 38px sliver on phones. */
-    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not(.vst-half):not([data-import-page-result-row]):not([data-import-page-inline-action]) {
+    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not(.vst-half):not([data-import-page-result-row]):not([data-import-page-inline-action]):not(.modal-track-play-btn):not(.cancel-track-btn) {
         min-height: 38px;
     }
 
@@ -3959,5 +3959,227 @@ html.download-modal-open body {
     }
     .download-missing-modal-footer {
         padding-bottom: max(12px, env(safe-area-inset-bottom));
+    }
+}
+
+/* download modal rows on a phone: a table can't fit eight columns in 390px, so
+   each row becomes a little card. title on top, artist under it, the two
+   statuses stacked on the right. the cells keep their ids so the live
+   updaters still find them. */
+@media (max-width: 768px) {
+    .download-missing-modal-content .download-tracks-table,
+    .download-missing-modal-content .download-tracks-table thead,
+    .download-missing-modal-content .download-tracks-table tbody {
+        display: block;
+        width: 100%;
+    }
+
+    /* the header keeps select-all and the track label, the rest is said by the rows */
+    .download-missing-modal-content .download-tracks-table thead tr {
+        display: flex;
+        align-items: center;
+    }
+    .download-missing-modal-content .download-tracks-table thead th {
+        display: none;
+    }
+    .download-missing-modal-content .download-tracks-table thead th.track-select-header,
+    .download-missing-modal-content .download-tracks-table:has(.track-select-header) thead th:nth-child(3),
+    .download-missing-modal-content .download-tracks-table:not(:has(.track-select-header)) thead th:nth-child(2) {
+        display: block;
+        background: none;
+        border: none;
+        text-align: left;
+    }
+    .download-missing-modal-content .download-tracks-table thead tr {
+        background: linear-gradient(180deg, rgba(28,28,28,0.95), rgba(22,22,22,0.95));
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .download-missing-modal-content .download-tracks-table tbody tr {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto auto;
+        grid-template-areas:
+            "sel name   match    act"
+            "sel artist download act";
+        align-items: center;
+        column-gap: 10px;
+        row-gap: 3px;
+        padding: 10px 12px 10px 4px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+    }
+    .download-missing-modal-content .download-tracks-table tbody tr:last-child {
+        border-bottom: none;
+    }
+    .download-missing-modal-content .download-tracks-table tbody td {
+        display: block;
+        padding: 0;
+        border: none;
+        max-width: none;
+        width: auto;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .download-missing-modal-content .download-tracks-table tbody td.track-select-cell {
+        grid-area: sel;
+        align-self: center;
+    }
+    .download-missing-modal-content .download-tracks-table tbody td.track-number,
+    .download-missing-modal-content .download-tracks-table tbody td.track-duration {
+        display: none;
+    }
+    .download-missing-modal-content .download-tracks-table tbody td.track-name {
+        grid-area: name;
+        font-size: 14px;
+        line-height: 26px;
+    }
+    /* the artist lines up under the title, past the play + add buttons (26px + 8px each) */
+    .download-missing-modal-content .download-tracks-table tbody td.track-artist {
+        grid-area: artist;
+        font-size: 12.5px;
+        text-align: left;
+        padding-left: 68px;
+    }
+    .download-missing-modal-content .download-tracks-table tbody td.track-match-status,
+    .download-missing-modal-content .download-tracks-table tbody td.track-download-status {
+        display: block;
+        font-size: 10px;
+        text-align: right;
+        overflow: visible;
+    }
+    .download-missing-modal-content .download-tracks-table tbody td.track-match-status {
+        grid-area: match;
+    }
+    .download-missing-modal-content .download-tracks-table tbody td.track-download-status {
+        grid-area: download;
+    }
+    .download-missing-modal-content .download-tracks-table tbody td.track-actions {
+        grid-area: act;
+        overflow: visible;
+    }
+    /* the pill sits behind the status text; sized to the cell now that the
+       cell is only as wide as its text */
+    .download-missing-modal-content .download-tracks-table tbody td.track-download-status[data-state] {
+        padding: 4px 10px;
+    }
+    .download-missing-modal-content .download-tracks-table tbody td.track-download-status[data-state]::before {
+        width: 100%;
+        height: 100%;
+    }
+    /* a bare "-" means no action, it doesn't need a column */
+    .download-missing-modal-content .download-tracks-table tbody td.track-actions:not(:has(*)) {
+        display: none;
+    }
+
+    /* the two progress cards stack; side by side they ran off the right edge */
+    .download-missing-modal-content .download-progress-section {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 8px;
+        padding: 10px 0;
+    }
+    .download-missing-modal-content .progress-item {
+        padding: 10px 14px;
+    }
+    .download-missing-modal-content .progress-label {
+        margin-bottom: 7px;
+    }
+    .download-missing-modal-content .progress-item .progress-bar {
+        margin-bottom: 0;
+    }
+
+    /* four stat tiles in a row only fit "downloaded" once the tiles and labels
+       stop padding so wide */
+    .download-missing-modal-content .download-dashboard-stats {
+        gap: 6px;
+        padding: 12px 8px;
+    }
+    .download-missing-modal-content .dashboard-stat {
+        padding: 10px 2px;
+    }
+    .download-missing-modal-content .dashboard-stat-label {
+        font-size: 9px;
+        letter-spacing: 0.02em;
+    }
+}
+
+/* discover mix modal on a phone: the header actions and the selection bar wrap
+   instead of running off the right edge, and the compact rows drop the number
+   and album columns so the title and artist get the width. */
+@media (max-width: 768px) {
+    .mix-modal {
+        position: relative;
+        width: 100%;
+        max-width: calc(100vw - 16px);
+        max-height: 90vh;
+        max-height: 90dvh;
+    }
+    .mix-modal-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+        padding: 16px 16px 14px;
+    }
+    .mix-modal-header > div:first-child {
+        padding-right: 36px;
+    }
+    .mix-modal-title {
+        font-size: 20px;
+    }
+    .mix-modal-actions {
+        flex-wrap: wrap;
+    }
+    .mix-modal-actions .btn {
+        flex: 1 1 0;
+        justify-content: center;
+    }
+    .mix-modal-close {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+    }
+
+    .mix-modal-selbar {
+        flex-wrap: wrap;
+        row-gap: 8px;
+        column-gap: 10px;
+        padding: 10px 12px;
+    }
+    .mix-selbar-spacer {
+        display: none;
+    }
+    /* select-all and the count share the first line, the buttons split the second */
+    .mix-sel-count {
+        flex: 1 1 auto;
+        text-align: right;
+    }
+    .mix-modal-selbar .btn {
+        flex: 1 1 0;
+        justify-content: center;
+        white-space: nowrap;
+    }
+
+    .mix-modal-body {
+        padding: 8px 8px 16px;
+    }
+
+    .discover-playlist-track-compact {
+        grid-template-columns: 40px minmax(0, 1fr) auto 32px;
+        gap: 10px;
+        padding: 8px;
+    }
+    .discover-playlist-track-compact.has-select {
+        grid-template-columns: 22px 40px minmax(0, 1fr) auto 32px;
+    }
+    .discover-playlist-track-compact .track-compact-number,
+    .discover-playlist-track-compact .track-compact-album {
+        display: none;
+    }
+    .track-compact-name {
+        font-size: 14px;
+    }
+    .track-compact-artist {
+        font-size: 12px;
     }
 }

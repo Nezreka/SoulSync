@@ -426,6 +426,10 @@ def _normalize_track_result(track: Any, source: str) -> Dict[str, Any]:
         "image_url": str(image_url or ""),
         "track_number": track_number,
         "source": source,
+        # #1536: recording disambiguation from MusicBrainz ("acoustic",
+        # "live"). _extract_value reads dataclass attrs as well as dict
+        # keys, so the Track.disambiguation field survives normalization.
+        "disambiguation": str(_extract_value(track, "disambiguation", default="") or "").strip(),
     }
 
 
@@ -628,9 +632,15 @@ def refresh_import_suggestions_cache():
     start_import_suggestions_cache()
 
 
-def collect_staging_files(file_paths: Optional[Iterable[str]] = None) -> List[Dict[str, Any]]:
-    """Collect audio files from the staging area with normalized metadata."""
-    staging_path = get_staging_path()
+def collect_staging_files(file_paths: Optional[Iterable[str]] = None,
+                          root: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Collect audio files from the staging area with normalized metadata.
+
+    ``root`` walks another folder instead. A clients-tab match imports its copy
+    from a private folder the auto-import worker never scans, so the two can't
+    both import the same files.
+    """
+    staging_path = root or get_staging_path()
     file_filter: Optional[set[str]] = set(file_paths) if file_paths else None
     staging_files: List[Dict[str, Any]] = []
 

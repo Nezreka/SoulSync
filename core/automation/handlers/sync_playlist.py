@@ -309,7 +309,11 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
             sync_id, sync_name, tracks_json, auto_id,
             int(pl.get('profile_id') or 1), pl.get('image_url', ''),
         ),
-        kwargs={'skip_wishlist_add': skip_wishlist_add, 'user_initiated': bool(config.get('_user_initiated'))},
+        kwargs={
+            'skip_wishlist_add': skip_wishlist_add,
+            # a playlist's own Sync & download click, not a schedule (#1603)
+            'user_initiated': bool(config.get('user_initiated')),
+        },
         daemon=True,
         name=f'auto-sync-{playlist_id}',
     ).start()

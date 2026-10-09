@@ -206,8 +206,8 @@ class DeezerWorker:
     def _normalize_name(self, name: str) -> str:
         """Normalize name for comparison"""
         name = name.lower().strip()
-        name = re.sub(r'\s+[-–—]\s+.*$', '', name)
         name = re.sub(r'\s*\(.*?\)\s*', ' ', name)
+        name = re.sub(r'\s+[-–—]\s+.*$', '', name)
         name = re.sub(r'[^\w\s]', '', name)
         name = re.sub(r'\s+', ' ', name).strip()
         return name
@@ -477,6 +477,34 @@ class DeezerWorker:
             self.stats['not_found'] += 1
             logger.debug(f"No match for album '{album_name}'")
 
+    def _track_from_matched_album(self, track_id: int, track_name: str) -> Optional[Dict[str, Any]]:
+        """The track's entry in its album's Deezer tracklist, or None when the
+        album has no Deezer match or the title isn't on it."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            # Library v2: the album's Deezer id lives in external_ids.
+            cursor.execute(
+                "SELECT json_extract(al.external_ids, '$.deezer'), t.track_number "
+                "FROM lib2_tracks t JOIN lib2_albums al ON t.album_id = al.id "
+                "WHERE t.id = ?", (track_id,))
+            row = cursor.fetchone()
+        except Exception as e:
+            logger.debug("album lookup for track %s failed: %s", track_id, e)
+            return None
+        finally:
+            if conn:
+                conn.close()
+        if not row or not row[0]:
+            return None
+        try:
+            tracks = self.client.get_album_tracks_raw(row[0])
+            return self.client.pick_track_from_list(tracks, track_name, row[1])
+        except Exception as e:
+            logger.debug("album tracklist match for '%s' failed: %s", track_name, e)
+            return None
+
     def _process_track(self, track_id: int, track_name: str, artist_name: str, item: Dict[str, Any]):
         """Process a track: search Deezer, verify, fetch full details for BPM, store metadata"""
         # Issue #501: honor manual matches (see _process_album).
@@ -496,7 +524,13 @@ class DeezerWorker:
                 self.stats['matched'] += 1
             return
 
-        result = self.client.search_track(artist_name, track_name)
+        # the album is matched before its tracks (artists, albums, then tracks),
+        # so look the song up in that album's own tracklist first. an artist
+        # search fails when the library credits the album to "Various Artists"
+        # or a label, and Deezer's search index leaves some songs out entirely.
+        result = self._track_from_matched_album(track_id, track_name)
+        if result is None:
+            result = self.client.search_track(artist_name, track_name)
         if result:
             result_name = result.get('title', '')
             if self._name_matches(track_name, result_name):

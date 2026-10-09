@@ -18,6 +18,18 @@ from __future__ import annotations
 import sys
 import types
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _restore_video_db():
+    """_client() sets api.video._video_db directly; restore it after each
+    test so the stub can't leak into other test modules."""
+    import api.video as videoapi
+    original = videoapi._video_db
+    yield
+    videoapi._video_db = original
+
 from flask import Flask
 
 
@@ -149,7 +161,7 @@ def test_grab_movie_hydrates_the_full_wishlist_row(monkeypatch):
     assert blob["added_via"] == {"source": "movie-night"}
     # No similar/recommendation rails in the blob — lean card fields only.
     assert "similar" not in blob and "recommendations" not in blob
-    assert searches == [("movie", 603, {})]
+    assert searches == [("movie", 603, {"profile_id": 1})]
 
 
 def test_grab_movie_degrades_to_bus_context_when_tmdb_is_down(monkeypatch):
@@ -169,7 +181,7 @@ def test_grab_movie_degrades_to_bus_context_when_tmdb_is_down(monkeypatch):
     assert add["year"] == 1999
     assert add["poster_url"] == "https://img/fc.jpg"
     assert add["detail_json"] is None       # honest bare row, filled in later
-    assert searches == [("movie", 550, {})]
+    assert searches == [("movie", 550, {"profile_id": 1})]
     # No title from ANY source → the grab is refused, not a nameless row.
     r2 = c.post("/api/video/watch/grab", json={"kd": "m", "id": 551})
     assert r2.status_code == 400
@@ -193,7 +205,7 @@ def test_grab_episode_carries_still_air_date_and_season_poster(monkeypatch):
     assert ep["air_date"] == "2011-04-17"
     assert ep["still_url"] == "https://img/e1.jpg"
     assert ep["season_poster_url"] == "https://img/s1.jpg"
-    assert searches == [("episode", 1399, {"season_number": 1, "episode_number": 1})]
+    assert searches == [("episode", 1399, {"season_number": 1, "episode_number": 1, "profile_id": 1})]
     # Episodes without S+E are refused.
     assert c.post("/api/video/watch/grab",
                   json={"kd": "t", "id": 1399, "ti": "GoT"}).status_code == 400

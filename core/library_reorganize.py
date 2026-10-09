@@ -107,6 +107,52 @@ def _same_physical_file(left: Any, right: Any) -> bool:
         return False
 
 
+def resolve_album_profile_id(db, album_id, tracks=None, resolve_file_path_fn=None) -> Optional[int]:
+    """the owning profile for a reorganize operation (#1504).
+
+    File location wins over the DB: resolve the first track's on-disk path
+    and match it against own-library roots. Falls back to the album row's
+    ``owner_profile_id``. Returns None for the shared library (unchanged
+    behavior)."""
+    from core.imports.paths import profile_id_for_path
+    # 1. file location wins — where the files actually sit right now
+    try:
+        track_list = tracks
+        if track_list is None:
+            _, track_list = load_album_and_tracks(db, album_id)
+        for t in track_list or []:
+            db_path = t.get('file_path') if isinstance(t, dict) else None
+            if not db_path:
+                continue
+            resolved = resolve_file_path_fn(db_path) if resolve_file_path_fn else db_path
+            if resolved:
+                pid = profile_id_for_path(resolved)
+                if pid:
+                    return pid
+                break  # resolved but shared — don't keep looking
+    except Exception as e:
+        logger.debug("[Reorganize] profile resolution from path failed: %s", e)
+    # 2. DB fallback: whose library the album's files are recorded in. Ours:
+    # Library v2 keeps the owner per file, not per album row.
+    try:
+        conn = db._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT f.owner_profile_id FROM lib2_track_files f"
+                "  JOIN lib2_tracks t ON t.id = f.track_id"
+                " WHERE t.album_id = ? AND COALESCE(f.file_state,'active') = 'active'"
+                "   AND f.owner_profile_id IS NOT NULL"
+                " ORDER BY f.is_primary DESC, f.id LIMIT 1", (str(album_id),)
+            ).fetchone()
+            if row and row[0]:
+                return int(row[0])
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("[Reorganize] profile resolution from album row failed: %s", e)
+    return None
+
+
 def _safe_filename(name: str) -> str:
     """Strip path-illegal characters so we can use the value as a
     filename component on the staging path."""
@@ -1324,6 +1370,7 @@ def _build_post_process_context(
     record_type: Optional[str] = None,
     type_source: Optional[str] = None,
     album_artist: Optional[str] = None,
+    profile_id: Optional[int] = None,
 ) -> dict:
     """Build the same shape `import_album_process` builds so post-process
     treats this exactly like a fresh download with full Spotify-style
@@ -1331,7 +1378,12 @@ def _build_post_process_context(
 
     ``local_title`` is the user's own current track title — used only to
     carry a featured-artist credit forward when feat_in_title is on and the
-    API doesn't supply one (#1078)."""
+    API doesn't supply one (#1078).
+
+    ``profile_id`` (#1504): the owning profile for own-library files. Stamped
+    into the context so ``transfer_root_for_context()`` routes the destination
+    to the profile's own library instead of the shared folder. None = shared
+    (unchanged behavior)."""
     track_number = int(api_track.get('track_number') or 1)
     disc_number = int(api_track.get('disc_number') or 1)
     track_artists = api_track.get('artists')
@@ -1525,6 +1577,10 @@ def _build_post_process_context(
         # album and both the Tools job and Reorganize All silently no-opped
         # after a template change.
         '_no_album_folder_reuse': True,
+        # #1504: own-library routing. stamped at the operation entry point;
+        # transfer_root_for_context() reads it to pick the profile's own
+        # library root instead of the shared folder. None = shared.
+        'profile_id': profile_id,
     }
 
 
@@ -1538,6 +1594,7 @@ def preview_album_reorganize(
     primary_source: Optional[str] = None,
     strict_source: bool = False,
     metadata_source: str = 'api',
+    profile_id: Optional[int] = None,
 ) -> dict:
     """Compute the planned destination paths for a reorganize WITHOUT
     moving any files. The preview UI uses this to show users what the
@@ -1684,6 +1741,7 @@ def preview_album_reorganize(
             record_type=plan.get('record_type') or album_data.get('record_type'),
             album_artist=artist_name,
             type_source=plan.get('source'),
+            profile_id=profile_id,
         )
         # `_build_final_path_for_track` switches between ALBUM and SINGLE
         # modes based on `album_info.get('is_album')` — must be passed,
@@ -1889,6 +1947,7 @@ class _RunContext:
     transfer_dir: Optional[str] = None      # anchors the #746 /deleted-quarantine skip
     record_type: Optional[str] = None
     source: Optional[str] = None            # the metadata source the plan resolved
+    profile_id: Optional[int] = None        # #1504: owning profile for own-library files
 
     def emit(self, **updates) -> None:
         """Fire the progress callback. Caller is responsible for
@@ -1977,6 +2036,7 @@ def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, st
         record_type=ctx.record_type,
         album_artist=ctx.artist_name,
         type_source=ctx.source,
+        profile_id=ctx.profile_id,
     )
     context_key = f"reorganize_{ctx.album_id}_{track_id}_{uuid.uuid4().hex[:8]}"
     try:
@@ -2008,6 +2068,36 @@ def _finalize_track(ctx: _RunContext, track_id, resolved_src, new_path) -> bool:
     purposes — the file is at both locations, the DB still points to
     the old path, and counting it as "moved" overstates how many
     tracks the user can actually find via the UI."""
+    # #1504: cross-library move guard. a reorganize may rename within a
+    # library but must NEVER move a file across a library boundary
+    # (own->shared, shared->own, own->other-own). this is the backstop
+    # that would have prevented the ~600-file incident: with profile_id
+    # stamped correctly the destination is always in the right library,
+    # so this should never fire. if it does, something is very wrong —
+    # leave the original alone, remove the stray new file, and fail loud.
+    from core.imports.paths import library_containing
+    try:
+        if library_containing(resolved_src) != library_containing(new_path):
+            logger.error(
+                "[Reorganize] REFUSING cross-library move: %s -> %s "
+                "(source library %s, destination library %s). leaving original "
+                "in place.",
+                resolved_src, new_path,
+                library_containing(resolved_src), library_containing(new_path),
+            )
+            try:
+                if os.path.exists(new_path) and os.path.normpath(resolved_src) != os.path.normpath(new_path):
+                    os.remove(new_path)
+            except OSError:
+                pass
+            ctx.record_error(
+                track_id, f"track {track_id}",
+                f"refusing cross-library move {resolved_src} -> {new_path}",
+                kind='failed',
+            )
+            return False
+    except Exception as guard_err:
+        logger.warning("[Reorganize] move-guard check failed: %s", guard_err)
     if ctx.update_track_path_fn:
         try:
             ctx.update_track_path_fn(track_id, new_path)
@@ -2147,6 +2237,7 @@ def reorganize_album(
     strict_source: bool = False,
     stop_check: Optional[Callable[[], bool]] = None,
     metadata_source: str = 'api',
+    profile_id: Optional[int] = None,
 ) -> dict:
     """Run a single album through the post-processing pipeline.
 
@@ -2311,6 +2402,7 @@ def reorganize_album(
         transfer_dir=transfer_dir,
         record_type=plan.get('record_type') or album_data.get('record_type'),
         source=plan.get('source'),
+        profile_id=profile_id,
     )
 
     try:
@@ -2501,6 +2593,7 @@ def reorganize_album_rename_only(
     metadata_source: str = 'api',
     stop_check: Optional[Callable[[], bool]] = None,
     preview_fn: Optional[Callable] = None,
+    profile_id: Optional[int] = None,
 ) -> dict:
     """RENAME-ONLY reorganize (#875): move each track's file to the path the current
     naming scheme dictates, and nothing else — no copy-to-staging, no re-tag, no
@@ -2534,6 +2627,7 @@ def reorganize_album_rename_only(
         build_final_path_fn=build_final_path_fn,
         primary_source=primary_source, strict_source=strict_source,
         metadata_source=metadata_source,
+        profile_id=profile_id,
     )
     summary['source'] = preview.get('source')
     if not preview.get('success'):
@@ -2566,6 +2660,23 @@ def reorganize_album_rename_only(
 
         current_abs = t.get('current_path_abs')
         new_abs = t.get('new_path_abs')
+        # #1504: cross-library move guard (same as _finalize_track).
+        try:
+            from core.imports.paths import library_containing
+            if library_containing(current_abs) != library_containing(new_abs):
+                logger.error(
+                    "[Reorganize/rename] REFUSING cross-library move: %s -> %s",
+                    current_abs, new_abs,
+                )
+                summary['failed'] += 1
+                summary['errors'].append({
+                    'track_id': t.get('track_id'), 'title': title,
+                    'error': f'refusing cross-library move {current_abs} -> {new_abs}',
+                })
+                _emit(failed=summary['failed'], errors=list(summary['errors']))
+                continue
+        except Exception as guard_err:
+            logger.warning("[Reorganize/rename] move-guard check failed: %s", guard_err)
         ok, err = _rename_track_in_place(current_abs, new_abs)
         if not ok:
             summary['failed'] += 1

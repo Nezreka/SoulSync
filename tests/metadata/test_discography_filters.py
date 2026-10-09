@@ -382,3 +382,390 @@ class TestTrackAlreadyOwned:
         db = _FakeDB((None, 0.0))
         track_already_owned(db, 'Track', 'Artist', 'Album', None)
         assert db.calls[0]['server_source'] is None
+
+
+
+
+# ---------------------------------------------------------------------------
+# watchlist exclusion labeling  (#1550)
+# ---------------------------------------------------------------------------
+#
+# The watchlist scanner deliberately skips releases the user's filters
+# exclude, but the artist page marked them as bare "missing" — which reads
+# as a broken scanner. These helpers compute the same verdict the scanner
+# would, so the artist page can label the release instead.
+
+
+class _FakeWatchlistDB:
+    """Minimal stand-in exposing get_watchlist_artists(profile_id=...)."""
+
+    def __init__(self, rows=(), exc=None):
+        self._rows = list(rows)
+        self._exc = exc
+        self.seen_profiles = []
+
+    def get_watchlist_artists(self, profile_id=1):
+        self.seen_profiles.append(profile_id)
+        if self._exc is not None:
+            raise self._exc
+        return self._rows
+
+
+def _watch_artist(name, **prefs):
+    defaults = dict(
+        include_live=False,
+        include_remixes=False,
+        include_acoustic=False,
+        include_instrumentals=False,
+        include_compilations=False,
+        include_albums=True,
+        include_eps=True,
+        include_singles=True,
+    )
+    defaults.update(prefs)
+    return SimpleNamespace(artist_name=name, **defaults)
+
+
+def _cfg_no_override():
+    """Ambient-config pin: global override OFF unless a test says otherwise.
+
+    Without this, the tests below would silently change behavior if the
+    ambient config ever enabled the override.
+    """
+    return SimpleNamespace(get=lambda key, default=None: {
+        'watchlist.global_override_enabled': False,
+        'watchlist.exclude_terms': '',
+    }.get(key, default))
+
+
+@pytest.fixture()
+def _no_global_override(monkeypatch):
+    import core.settings
+
+    monkeypatch.setattr(core.settings, 'config_manager', _cfg_no_override(), raising=False)
+
+
+class TestResolveWatchlistContentSettings:
+    def test_returns_effective_prefs_for_watched_artist(self, _no_global_override):
+        from core.metadata.discography_filters import resolve_watchlist_content_settings
+
+        db = _FakeWatchlistDB([_watch_artist('Étienne de Crécy', include_remixes=True)])
+        settings = resolve_watchlist_content_settings(db, 'Étienne de Crécy')
+        assert settings['include_remixes'] is True
+        assert settings['include_live'] is False
+        assert settings['include_singles'] is True  # release-type defaults True
+        assert db.seen_profiles == [1]
+
+    def test_unwatched_artist_returns_none(self, _no_global_override):
+        from core.metadata.discography_filters import resolve_watchlist_content_settings
+
+        db = _FakeWatchlistDB([_watch_artist('Someone Else')])
+        assert resolve_watchlist_content_settings(db, 'Étienne de Crécy') is None
+
+    def test_name_match_ignores_diacritics_and_case(self, _no_global_override):
+        """Watchlist rows store the name as-added (source-dependent); the
+        artist page may pass a diacritic-folded variant."""
+        from core.metadata.discography_filters import resolve_watchlist_content_settings
+
+        db = _FakeWatchlistDB([_watch_artist('Étienne de Crécy')])
+        assert resolve_watchlist_content_settings(db, 'Etienne de Crecy') is not None
+        assert resolve_watchlist_content_settings(db, 'ÉTIENNE DE CRÉCY') is not None
+
+    def test_exact_match_wins_over_folded_collision(self, _no_global_override):
+        """Two distinct rows folding together ('José' vs 'Jose' as separate
+        artists): the exact one wins."""
+        from core.metadata.discography_filters import resolve_watchlist_content_settings
+
+        jose_plain = _watch_artist('Jose', include_remixes=True)
+        jose_accent = _watch_artist('José', include_remixes=False)
+        db = _FakeWatchlistDB([jose_accent, jose_plain])
+        settings = resolve_watchlist_content_settings(db, 'Jose')
+        assert settings['include_remixes'] is True
+
+    def test_ambiguous_folded_match_returns_none(self, _no_global_override):
+        """No exact match and several rows fold together: ambiguous — yield
+        no label rather than risk the WRONG artist's settings."""
+        from core.metadata.discography_filters import resolve_watchlist_content_settings
+
+        db = _FakeWatchlistDB([_watch_artist('José'), _watch_artist('Jose')])
+        # No exact match for 'JOSÉ' (case differs from both rows); both rows
+        # fold to 'jose' -> ambiguous -> None.
+        assert resolve_watchlist_content_settings(db, 'JOSÉ') is None
+
+    def test_db_failure_returns_none(self, _no_global_override):
+        from core.metadata.discography_filters import resolve_watchlist_content_settings
+
+        db = _FakeWatchlistDB(exc=RuntimeError('db locked'))
+        assert resolve_watchlist_content_settings(db, 'Artist') is None
+
+    def test_empty_artist_name_skips_db(self, _no_global_override):
+        from core.metadata.discography_filters import resolve_watchlist_content_settings
+
+        db = _FakeWatchlistDB([_watch_artist('Artist')])
+        assert resolve_watchlist_content_settings(db, '') is None
+        assert db.seen_profiles == []
+
+    def test_explicit_profile_id_used(self, _no_global_override):
+        from core.metadata.discography_filters import resolve_watchlist_content_settings
+
+        db = _FakeWatchlistDB([_watch_artist('Artist')])
+        resolve_watchlist_content_settings(db, 'Artist', profile_id=3)
+        assert db.seen_profiles == [3]
+
+    def test_global_override_wins_over_row(self, monkeypatch):
+        """Mirrors WatchlistScanner._apply_global_watchlist_overrides."""
+        from core.metadata.discography_filters import resolve_watchlist_content_settings
+
+        fake_cfg = SimpleNamespace(get=lambda key, default=None: {
+            'watchlist.global_override_enabled': True,
+            'watchlist.global_include_live': False,
+            'watchlist.global_include_remixes': True,
+            'watchlist.global_include_acoustic': False,
+            'watchlist.global_include_instrumentals': False,
+            'watchlist.global_include_compilations': False,
+            'watchlist.global_include_albums': True,
+            'watchlist.global_include_eps': True,
+            'watchlist.global_include_singles': False,
+            'watchlist.exclude_terms': '',
+        }.get(key, default))
+        import core.settings
+
+        monkeypatch.setattr(core.settings, 'config_manager', fake_cfg, raising=False)
+        db = _FakeWatchlistDB([_watch_artist('Artist')])  # row: remixes off, singles on
+        settings = resolve_watchlist_content_settings(db, 'Artist')
+        assert settings['include_remixes'] is True   # global wins
+        assert settings['include_singles'] is False  # global wins
+
+
+class TestReleaseKindForScan:
+    def test_track_count_buckets_match_scanner(self):
+        from core.metadata.discography_filters import release_kind_for_scan
+
+        assert release_kind_for_scan(1) == 'singles'
+        assert release_kind_for_scan(3) == 'singles'
+        assert release_kind_for_scan(4) == 'eps'
+        assert release_kind_for_scan(6) == 'eps'
+        assert release_kind_for_scan(7) == 'albums'
+        assert release_kind_for_scan(12) == 'albums'
+        # A 2-track provider-labeled EP is a "single" to the scanner.
+        assert release_kind_for_scan(2) == 'singles'
+        assert release_kind_for_scan('12') == 'albums'
+
+    def test_unknown_count_returns_none_never_guesses(self):
+        """The scan `continue`s on empty track lists before classifying, so
+        an unknown count means the scan never reaches the release-type gate
+        — the caller must skip that gate, not guess a bucket."""
+        from core.metadata.discography_filters import release_kind_for_scan
+
+        assert release_kind_for_scan(0) is None
+        assert release_kind_for_scan(None) is None
+        assert release_kind_for_scan('bogus') is None
+        assert release_kind_for_scan(-3) is None
+
+
+class TestContentExclusionReason:
+    def _settings(self, **over):
+        base = dict(
+            include_live=False, include_remixes=False, include_acoustic=False,
+            include_instrumentals=False, include_compilations=False,
+            include_albums=True, include_eps=True, include_singles=True,
+            exclude_terms=[],
+        )
+        base.update(over)
+        return base
+
+    def test_issue_1550_olympic_mix_is_remix(self):
+        """The exact #1550 report: 'Am I Wrong (Olympic Mix)' trips the
+        remix filter with default (exclude) preferences."""
+        from core.metadata.discography_filters import content_exclusion_reason
+
+        assert content_exclusion_reason(
+            self._settings(), 'Am I Wrong (Olympic Mix)', 'Am I Wrong (Olympic Mix)', 'singles'
+        ) == 'remix'
+
+    def test_release_type_gate_checked_first(self):
+        """A watched artist with singles off: every single is skipped by
+        the scan regardless of content — the same 'missing with no
+        explanation' confusion as #1550."""
+        from core.metadata.discography_filters import content_exclusion_reason
+
+        settings = self._settings(include_singles=False)
+        assert content_exclusion_reason(settings, 'Plain Song', 'Plain Song', 'singles') == 'singles'
+        assert content_exclusion_reason(settings, 'Plain Song', 'Plain Album', 'albums') is None
+        ep_settings = self._settings(include_eps=False)
+        assert content_exclusion_reason(ep_settings, 'Plain Song', 'Plain EP', 'eps') == 'eps'
+
+    def test_unknown_kind_skips_release_type_gate(self):
+        """Count unknown -> kind None -> no release-type guess, but content
+        gates still apply."""
+        from core.metadata.discography_filters import content_exclusion_reason
+
+        settings = self._settings(include_singles=False)
+        assert content_exclusion_reason(settings, 'Plain Song', 'Plain Song', None) is None
+        assert content_exclusion_reason(settings, 'Song (Remix)', 'Song', None) == 'remix'
+
+    def test_release_type_defaults_include(self):
+        """include_albums/eps/singles default True (unlike the content
+        filters) — matching the scanner's getattr defaults."""
+        from core.metadata.discography_filters import content_exclusion_reason
+
+        assert content_exclusion_reason({}, 'Plain Song', 'Plain Song', 'singles') is None
+
+    def test_compilation_before_content_filters(self):
+        from core.metadata.discography_filters import content_exclusion_reason
+
+        assert content_exclusion_reason(
+            self._settings(), 'Song', 'Greatest Hits', 'albums'
+        ) == 'compilation'
+        assert content_exclusion_reason(
+            self._settings(include_compilations=True), 'Song', 'Greatest Hits', 'albums'
+        ) is None
+
+    def test_content_types(self):
+        from core.metadata.discography_filters import content_exclusion_reason
+
+        cases = [
+            ('Song (Live at Leeds)', 'Song', 'live'),
+            ('Song (Acoustic)', 'Song', 'acoustic'),
+            ('Song (Instrumental)', 'Song', 'instrumental'),
+        ]
+        for track, album, expected in cases:
+            assert content_exclusion_reason(self._settings(), track, album, 'singles') == expected
+
+    def test_custom_exclude_terms_are_the_final_gate(self):
+        """Mirrors the scan: custom terms are checked after all built-in
+        content-type filters."""
+        from core.metadata.discography_filters import content_exclusion_reason
+
+        settings = self._settings(exclude_terms=['demo', 'xyz'])
+        assert content_exclusion_reason(settings, 'Song (Demo)', 'Song', 'singles') == 'custom'
+        assert content_exclusion_reason(settings, 'Ordinary Song', 'Ordinary', 'singles') is None
+        # Built-in gates still win the ordering.
+        both = self._settings(exclude_terms=['mix'])
+        assert content_exclusion_reason(both, 'Song (Club Mix)', 'Song', 'singles') == 'remix'
+
+    def test_plain_release_returns_none(self):
+        from core.metadata.discography_filters import content_exclusion_reason
+
+        assert content_exclusion_reason(
+            self._settings(), 'Ordinary Song', 'Ordinary Album', 'albums'
+        ) is None
+
+    def test_empty_settings_returns_none(self):
+        from core.metadata.discography_filters import content_exclusion_reason
+
+        assert content_exclusion_reason(None, 'Song (Remix)', 'Song', 'singles') is None
+        assert content_exclusion_reason({}, 'Song (Remix)', 'Song', 'singles') is None
+
+
+class TestAttachWatchlistExclusion:
+    def _settings_for(self, db, artist):
+        from core.metadata.discography_filters import resolve_watchlist_content_settings
+
+        return resolve_watchlist_content_settings(db, artist)
+
+    def test_missing_single_gets_remix_label(self, _no_global_override):
+        from core.metadata.discography_filters import attach_watchlist_exclusion
+
+        db = _FakeWatchlistDB([_watch_artist('Étienne de Crécy')])
+        settings = self._settings_for(db, 'Étienne de Crécy')
+        event = {'status': 'missing', 'expected_tracks': 1, 'name': 'Am I Wrong (Olympic Mix)'}
+        out = attach_watchlist_exclusion(event, settings, 'Am I Wrong (Olympic Mix)')
+        assert out['watchlist_excluded'] == 'remix'
+        assert out is event  # mutates in place
+
+    def test_missing_album_with_albums_off_gets_release_type_label(self, _no_global_override):
+        from core.metadata.discography_filters import attach_watchlist_exclusion
+
+        db = _FakeWatchlistDB([_watch_artist('Artist', include_albums=False)])
+        settings = self._settings_for(db, 'Artist')
+        event = {'status': 'missing', 'expected_tracks': 12}
+        out = attach_watchlist_exclusion(event, settings, 'Some Album')
+        assert out['watchlist_excluded'] == 'albums'
+
+    def test_missing_with_no_attributable_reason_stamps_none(self, _no_global_override):
+        """The key is ALWAYS stamped when settings exist and the release is
+        missing — None clears a stale label from an earlier event."""
+        from core.metadata.discography_filters import attach_watchlist_exclusion
+
+        db = _FakeWatchlistDB([_watch_artist('Artist')])
+        settings = self._settings_for(db, 'Artist')
+        event = {'status': 'missing', 'expected_tracks': 1}
+        out = attach_watchlist_exclusion(event, settings, 'Ordinary Song')
+        assert out['watchlist_excluded'] is None
+
+    def test_owned_release_untouched(self, _no_global_override):
+        from core.metadata.discography_filters import attach_watchlist_exclusion
+
+        db = _FakeWatchlistDB([_watch_artist('Artist')])
+        settings = self._settings_for(db, 'Artist')
+        event = {'status': 'completed', 'expected_tracks': 1}
+        assert attach_watchlist_exclusion(event, settings, 'Song (Remix)') == event
+        assert 'watchlist_excluded' not in event
+
+    def test_no_settings_leaves_event_untouched(self):
+        from core.metadata.discography_filters import attach_watchlist_exclusion
+
+        event = {'status': 'missing', 'expected_tracks': 1}
+        assert attach_watchlist_exclusion(event, None, 'Song (Remix)') == event
+        assert 'watchlist_excluded' not in event
+
+    def test_non_dict_event_passthrough(self):
+        from core.metadata.discography_filters import attach_watchlist_exclusion
+
+        assert attach_watchlist_exclusion(None, {'include_remixes': False}, 'X') is None
+
+    def test_custom_term_label(self, monkeypatch):
+        """A release skipped solely by a user custom term gets the 'custom'
+        label — the scan's final gate is mirrored."""
+        from core.metadata.discography_filters import attach_watchlist_exclusion
+
+        import core.settings
+
+        monkeypatch.setattr(core.settings, 'config_manager', SimpleNamespace(
+            get=lambda key, default=None: {
+                'watchlist.global_override_enabled': False,
+                'watchlist.exclude_terms': 'demo',
+            }.get(key, default)
+        ), raising=False)
+        db = _FakeWatchlistDB([_watch_artist('Artist')])
+        settings = self._settings_for(db, 'Artist')
+        event = {'status': 'missing', 'expected_tracks': 1}
+        out = attach_watchlist_exclusion(event, settings, 'Song (Demo)')
+        assert out['watchlist_excluded'] == 'custom'
+
+
+class TestWatchlistExclusionReasonWrapper:
+    def test_wrapper_end_to_end(self, _no_global_override):
+        from core.metadata.discography_filters import watchlist_exclusion_reason
+
+        db = _FakeWatchlistDB([_watch_artist('Étienne de Crécy')])
+        assert watchlist_exclusion_reason(
+            db, 'Étienne de Crécy', 'Am I Wrong (Olympic Mix)', 'Am I Wrong (Olympic Mix)',
+            release_kind='singles',
+        ) == 'remix'
+
+    def test_wrapper_release_kind_required(self, _no_global_override):
+        from core.metadata.discography_filters import watchlist_exclusion_reason
+
+        db = _FakeWatchlistDB([_watch_artist('Artist', include_singles=False)])
+        assert watchlist_exclusion_reason(
+            db, 'Artist', 'Plain Song', 'Plain Song', release_kind='singles'
+        ) == 'singles'
+        # No default to silently guess from: release_kind is required.
+        with pytest.raises(TypeError):
+            watchlist_exclusion_reason(db, 'Artist', 'Plain Song', 'Plain Song')
+
+    def test_wrapper_unwatched_or_empty(self, _no_global_override):
+        from core.metadata.discography_filters import watchlist_exclusion_reason
+
+        db = _FakeWatchlistDB([_watch_artist('Other')])
+        assert watchlist_exclusion_reason(
+            db, 'Artist', 'Song (Remix)', 'Song', release_kind='singles'
+        ) is None
+        assert watchlist_exclusion_reason(
+            db, '', 'Song', 'Song', release_kind='singles'
+        ) is None
+        assert watchlist_exclusion_reason(
+            db, 'Artist', '', 'Song', release_kind='singles'
+        ) is None

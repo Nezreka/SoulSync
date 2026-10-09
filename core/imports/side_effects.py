@@ -46,6 +46,25 @@ def _primary_track_artist_name(track_info: Dict[str, Any]) -> str:
     return str((track_info or {}).get("artist", "") or "")
 
 
+def _recording_identity(context: Dict[str, Any]) -> tuple[str | None, str | None]:
+    """Return a recording MBID and its comment only when they belong together."""
+    track_info = get_import_track_info(context) or get_import_search_result(context)
+    source_ids = get_import_source_ids(context)
+    source_mbid = source_ids["track_id"] if get_import_source(context).lower() == "musicbrainz" else ""
+    embedded_mbid = (context.get("_embedded_id_tags") or {}).get("MUSICBRAINZ_RECORDING_ID")
+    candidate = embedded_mbid or track_info.get("musicbrainz_recording_id") or source_mbid
+    track_mbid = str(candidate or "").strip().lower() or None
+    if not track_mbid:
+        return None, None
+
+    disambiguation = context.get("_recording_disambiguation")
+    if disambiguation is None and str(
+        track_info.get("musicbrainz_recording_id") or source_mbid or ""
+    ).strip().lower() == track_mbid:
+        disambiguation = track_info.get("disambiguation")
+    return track_mbid, str(disambiguation or "").strip() or None
+
+
 def _stable_soulsync_id(text: str) -> str:
     return str(abs(int(hashlib.md5(text.encode("utf-8", errors="replace")).hexdigest(), 16)) % (10 ** 9))
 
@@ -451,7 +470,7 @@ def record_download_provenance(context: Dict[str, Any],
         deezer_track_id = _embedded("DEEZER_TRACK_ID")
         tidal_track_id = _embedded("TIDAL_TRACK_ID")
         qobuz_track_id = _embedded("QOBUZ_TRACK_ID")
-        musicbrainz_recording_id = _embedded("MUSICBRAINZ_RECORDING_ID")
+        musicbrainz_recording_id, recording_disambiguation = _recording_identity(context)
         audiodb_id = _embedded("AUDIODB_TRACK_ID")
         soul_id = _embedded("SOUL_ID")
         isrc = context.get("_isrc")
@@ -477,6 +496,7 @@ def record_download_provenance(context: Dict[str, Any],
             tidal_track_id=tidal_track_id,
             qobuz_track_id=qobuz_track_id,
             musicbrainz_recording_id=musicbrainz_recording_id,
+            recording_disambiguation=recording_disambiguation,
             audiodb_id=audiodb_id,
             soul_id=soul_id,
             isrc=isrc,
@@ -613,6 +633,23 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         if not album_name:
             album_name = track_info.get("name", "Unknown")
 
+        # #1562: the release kind the download pipeline already carries
+        # (post_processing stamps album_info['record_type']). Before this,
+        # the import wrote no kind at all — record_type was only backfilled
+        # by the enrichment sweep, so freshly imported releases were
+        # kind-blind (and the single/album gates lenient-always) until the
+        # workers ran. album_type is the fallback; '' stays unknown.
+        _import_record_type = ""
+        if isinstance(album_info, dict):
+            _import_record_type = (
+                album_info.get("record_type") or album_info.get("album_type") or ""
+            )
+        if not _import_record_type:
+            _import_record_type = (
+                album_ctx.get("record_type") or album_ctx.get("album_type") or ""
+            )
+        _import_record_type = str(_import_record_type).strip().lower()
+
         track_name = get_import_clean_title(
             context,
             album_info=album_info,
@@ -706,7 +743,9 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         # Per-recording identifiers — `isrc` is the better cross-source dedup
         # signal (labels embed it in the audio), `musicbrainz_recording_id`
         # comes off the provider response or a Picard-tagged file.
-        track_mbid = (track_info.get("musicbrainz_recording_id") or "").strip().lower() or None
+        # Upstream 5170059ed: the embedded tag or a MusicBrainz source id
+        # counts too, not only the provider response.
+        track_mbid, _recording_disambiguation = _recording_identity(context)
         track_isrc = (track_info.get("isrc") or "").strip().upper() or None
         # Whatever the pipeline resolved for this item (a wishlist row's or
         # Auto-Import's own override, or None for "follow the app-wide
@@ -772,6 +811,7 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                             "year": year, "track_count": total_tracks,
                             "duration": album_total_duration_ms})
             else:
+                newest_album = cursor.execute("SELECT MAX(id) FROM lib2_albums").fetchone()[0] or 0
                 catalogue_album = upsert_album(
                     cursor, server_source="soulsync", server_id=album_server_id,
                     artist_id=catalogue_artist, title=album_name, year=year,
@@ -783,6 +823,13 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                     # aware. The writer's own title fallback would fold a
                     # second release of the same name straight back in.
                     title_fallback=not mb_release_id)
+                if _import_record_type and catalogue_album and catalogue_album > newest_album:
+                    # Upstream #1562: a release this import creates carries the
+                    # kind the download already knows. Only a NEW row: the
+                    # catalogue's default 'album' is indistinguishable from a
+                    # kind a provider wrote, so an existing row is left alone.
+                    cursor.execute("UPDATE lib2_albums SET album_type=? WHERE id=?",
+                                   (_import_record_type, catalogue_album))
             _fill_external_id(cursor, "lib2_albums", catalogue_album, source, album_source_id)
             from core.library2.reorganize_plan import record_filed_release
             record_filed_release(cursor, catalogue_album, context)

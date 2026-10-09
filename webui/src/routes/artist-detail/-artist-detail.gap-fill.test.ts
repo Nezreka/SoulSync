@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   dedupeGaps,
+  gapEditionSupersededFromResponse,
   gapFillEnabled,
   gapFillUrl,
   gapNorm,
@@ -175,6 +176,35 @@ describe('gapReleasesFromResponse', () => {
   it('survives a response with no gaps at all', () => {
     expect(gapReleasesFromResponse({})).toEqual([]);
     expect(gapReleasesFromResponse(null)).toEqual([]);
+  });
+});
+
+describe('#1450 gap edition flags', () => {
+  it('carries the backend edition_preferred stamp through to the card', () => {
+    const [preferred, other] = gapReleasesFromResponse({
+      gaps: {
+        albums: [
+          { id: 'g1', title: 'Album (Deluxe)', edition_preferred: true },
+          { id: 'g2', title: 'Album (Tour Edition)', edition_preferred: false },
+        ],
+      },
+    });
+    expect(preferred.edition_preferred).toBe(true);
+    expect(other.edition_preferred).toBe(false);
+  });
+
+  it('leaves the flag undefined when the backend predates it', () => {
+    const [gap] = gapReleasesFromResponse({ gaps: { albums: [{ id: 'g1', title: 'X' }] } });
+    expect(gap.edition_preferred).toBeUndefined();
+  });
+
+  it('parses edition_superseded into a set, tolerating junk', () => {
+    expect(gapEditionSupersededFromResponse({ edition_superseded: ['b1', 'b2'] })).toEqual(
+      new Set(['b1', 'b2']),
+    );
+    expect(gapEditionSupersededFromResponse({})).toEqual(new Set());
+    expect(gapEditionSupersededFromResponse({ edition_superseded: 'b1' })).toEqual(new Set());
+    expect(gapEditionSupersededFromResponse(null)).toEqual(new Set());
   });
 });
 

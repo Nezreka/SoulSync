@@ -50,6 +50,11 @@ def auto_scan_library(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str,
     if not deps.web_scan_manager:
         return {'status': 'error', 'reason': 'Scan manager not available'}
 
+    # #1615: one scan per download run, not per batch. the last batch to
+    # finish sends 'false' and that one scans for all of them
+    if (config.get('_event_data') or {}).get('more_batches_pending') == 'true':
+        return {'status': 'skipped', 'reason': 'More downloads still running, the last one scans'}
+
     # If another automation is already tracking the scan, just forward
     # the request — the original tracker keeps emitting progress.
     if deps.state.is_scan_library_active():

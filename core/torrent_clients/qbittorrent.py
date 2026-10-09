@@ -340,6 +340,17 @@ class QBittorrentAdapter:
         before = self._all_hashes()
         if before is None:
             return None
+        # qbittorrent refuses a .torrent it already holds, and the hash poll
+        # below then finds nothing new, so a re-grab of a finished download
+        # read as "the client didn't accept the release". the magnet path
+        # adopts the existing torrent; a .torrent file (what mam and most
+        # private trackers hand out) has to be hashed to do the same.
+        from core.quality.torrent_contents import torrent_info_hash
+        existing = torrent_info_hash(file_bytes)
+        if existing and existing in {h.lower() for h in before}:
+            logger.info("qBittorrent already holds %s — adopting the existing "
+                        "torrent instead of adding it again", existing[:12])
+            return existing
         data = {'category': cat}
         if save_path or self._save_path:
             data['savepath'] = save_path or self._save_path
@@ -407,6 +418,7 @@ class QBittorrentAdapter:
             content_path=item.get('content_path'),   # exact path to this torrent's file/folder
             ratio=float(item['ratio']) if item.get('ratio') is not None else None,
             seeding_time=int(item['seeding_time']) if isinstance(item.get('seeding_time'), (int, float)) else None,
+            category=str(item.get('category') or '') or None,
         )
 
     async def remove(self, torrent_id: str, delete_files: bool = False) -> bool:

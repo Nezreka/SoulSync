@@ -3944,7 +3944,7 @@ function _promptNotifyConfig(groupName) {
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
 
         overlay.innerHTML = `
-            <div style="background:var(--bg-secondary, #1e1e2e);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:28px;max-width:420px;width:90%;color:var(--text-primary, #fff);font-family:inherit;">
+            <div style="background:var(--bg-secondary, #1e1e2e);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:28px;max-width:420px;width:90%;color:var(--text-primary);font-family:inherit;">
                 <h3 style="margin:0 0 6px;font-size:1.1em;">Configure Notifications</h3>
                 <p style="margin:0 0 18px;font-size:0.85em;opacity:0.5;">${groupName} includes notification steps. Choose how to get notified.</p>
                 <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px;">
@@ -3960,7 +3960,7 @@ function _promptNotifyConfig(groupName) {
                 </div>
                 <div style="display:flex;gap:10px;justify-content:flex-end;">
                     <button id="deploy-notify-cancel" style="padding:8px 20px;border:1px solid rgba(255,255,255,0.1);border-radius:8px;background:transparent;color:rgba(255,255,255,0.7);cursor:pointer;font-size:0.88em;">Cancel</button>
-                    <button id="deploy-notify-confirm" style="padding:8px 20px;border:none;border-radius:8px;background:var(--accent-color,#1db954);color:#fff;cursor:pointer;font-size:0.88em;font-weight:600;">Deploy</button>
+                    <button id="deploy-notify-confirm" style="padding:8px 20px;border:none;border-radius:8px;background:var(--accent);color:#fff;cursor:pointer;font-size:0.88em;font-weight:600;">Deploy</button>
                 </div>
             </div>
         `;

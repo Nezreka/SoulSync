@@ -262,6 +262,20 @@ def _extract_tags(audio: Any, symbols: Any) -> Dict[str, str]:
                     out[key] = val
         except Exception as exc:  # noqa: S110 — optional TXXX walk
             logger.debug("ID3 TXXX walk failed: %s", exc)
+        # UFID: picard (and soulsync's own writer) keep the musicbrainz
+        # RECORDING id in a UFID frame, not a TXXX one. without this an mp3
+        # showed every musicbrainz id except the recording.
+        try:
+            for frame in tags.getall("UFID"):
+                if getattr(frame, "owner", "") != "http://musicbrainz.org":
+                    continue
+                data = getattr(frame, "data", b"")
+                val = (data.decode("ascii", "ignore") if isinstance(data, bytes)
+                       else str(data or "")).strip()
+                if val:
+                    out.setdefault("musicbrainz_trackid", val)
+        except Exception as exc:  # noqa: S110 — optional UFID walk
+            logger.debug("ID3 UFID walk failed: %s", exc)
         # USLT (unsynchronised lyrics).
         try:
             for frame in tags.getall("USLT"):

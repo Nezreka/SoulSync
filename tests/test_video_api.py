@@ -1940,3 +1940,102 @@ def test_additional_library_paths_roundtrip_validate_and_preserve(tmp_path):
     assert client.get(url).get_json()["movies_path"] == "/new"
     client.post(url, json={"movies_additional_paths": []})
     assert client.get(url).get_json()["movies_additional_paths"] == []
+
+
+def _adopt_client(tmp_path, monkeypatch):
+    import api.video as videoapi
+    import core.video.download_monitor as mon
+    from database.video_database import VideoDatabase
+    monkeypatch.setattr(mon, "ensure_started", lambda *a, **k: None)   # no monitor thread
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    db.set_setting("movies_path", "/media/movies")
+    db.set_setting("tv_path", "/media/tv")
+    videoapi._video_db = db
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    return app.test_client()
+
+
+def test_adopting_a_client_download_writes_the_row_a_grab_would(tmp_path, monkeypatch):
+    """match & import from the clients tab: the torrent is already in the client,
+    so nothing is sent to it; the same row a torrent grab writes is recorded and
+    the monitor imports it like any other."""
+    import api.video as videoapi
+    client = _adopt_client(tmp_path, monkeypatch)
+    try:
+        r = client.post("/api/video/downloads/adopt", json={
+            "source": "torrent", "client_ref": "abc123", "kind": "show",
+            "title": "Ted Lasso", "media_id": 97546, "media_source": "tmdb",
+            "release_title": "Ted Lasso S04E10 1080p WEB H264-CAKES", "size_bytes": 1400,
+            "search_ctx": {"scope": "episode", "title": "Ted Lasso", "season": 4, "episode": 10}})
+        assert r.get_json()["ok"] is True
+        [row] = client.get("/api/video/downloads/active").get_json()["downloads"]
+        assert row["source"] == "torrent" and row["client_ref"] == "abc123"
+        assert row["kind"] == "show" and row["target_dir"] == "/media/tv"
+        assert row["status"] == "downloading"
+        # a second match of the same download would import the files twice
+        again = client.post("/api/video/downloads/adopt", json={
+            "source": "torrent", "client_ref": "ABC123", "kind": "show", "title": "Ted Lasso"})
+        assert again.status_code == 409
+    finally:
+        videoapi._video_db = None
+
+
+def test_adopting_needs_a_download_and_a_match(tmp_path, monkeypatch):
+    import api.video as videoapi
+    client = _adopt_client(tmp_path, monkeypatch)
+    try:
+        for body in ({"source": "soulseek", "client_ref": "x", "kind": "movie", "title": "T"},
+                     {"source": "torrent", "kind": "movie", "title": "T"},
+                     {"source": "torrent", "client_ref": "x", "kind": "music", "title": "T"},
+                     {"source": "torrent", "client_ref": "x", "kind": "movie"}):
+            assert client.post("/api/video/downloads/adopt", json=body).status_code == 400
+        assert client.get("/api/video/downloads/active").get_json()["downloads"] == []
+    finally:
+        videoapi._video_db = None
+
+
+def test_adopting_takes_the_download_permission(tmp_path):
+    c = _client_as(tmp_path, is_admin=True, can_download=False)
+    assert c.post("/api/video/downloads/adopt", json={}).status_code == 403
+
+
+def test_adopting_a_soulseek_movie_follows_its_biggest_video_file(tmp_path, monkeypatch):
+    import api.video as videoapi
+    client = _adopt_client(tmp_path, monkeypatch)
+    try:
+        files = [{"filename": "Movies\\Heat (1995)\\Heat.1995.1080p.mkv", "size": 9000},
+                 {"filename": "Movies\\Heat (1995)\\Sample\\heat-sample.mkv", "size": 50},
+                 {"filename": "Movies\\Heat (1995)\\Heat.nfo", "size": 1}]
+        r = client.post("/api/video/downloads/adopt", json={
+            "source": "soulseek", "username": "peer", "files": files, "kind": "movie",
+            "title": "Heat", "media_id": 949, "media_source": "tmdb",
+            "search_ctx": {"scope": "movie", "title": "Heat"}})
+        assert r.get_json()["ok"] is True
+        [row] = client.get("/api/video/downloads/active").get_json()["downloads"]
+        assert row["source"] == "soulseek" and row["username"] == "peer"
+        assert row["filename"] == "Movies\\Heat (1995)\\Heat.1995.1080p.mkv"
+        assert client.post("/api/video/downloads/adopt", json={
+            "source": "soulseek", "username": "peer", "files": files[:1], "kind": "movie",
+            "title": "Heat"}).status_code == 409
+    finally:
+        videoapi._video_db = None
+
+
+def test_adopting_a_soulseek_season_makes_one_row_per_episode(tmp_path, monkeypatch):
+    import json as _json
+    import api.video as videoapi
+    client = _adopt_client(tmp_path, monkeypatch)
+    try:
+        files = [{"filename": f"TV\\Ted Lasso\\S04\\Ted.Lasso.S04E0{n}.1080p.mkv", "size": 100}
+                 for n in (1, 2)] + [{"filename": "TV\\Ted Lasso\\S04\\extras.mkv", "size": 5}]
+        r = client.post("/api/video/downloads/adopt", json={
+            "source": "soulseek", "username": "peer", "files": files, "kind": "show",
+            "title": "Ted Lasso", "media_id": 97546, "media_source": "tmdb",
+            "search_ctx": {"scope": "season", "title": "Ted Lasso", "season": 4}})
+        assert len(r.get_json()["ids"]) == 2
+        rows = client.get("/api/video/downloads/active").get_json()["downloads"]
+        episodes = sorted(_json.loads(d["search_ctx"])["episode"] for d in rows)
+        assert episodes == [1, 2]
+    finally:
+        videoapi._video_db = None

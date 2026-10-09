@@ -1,11 +1,16 @@
 """Tests for the BPM backfill repair job (#1476)."""
+import json
 import sys
 import os
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from core.repair_jobs.bpm_backfill import BpmBackfillJob
 from core.repair_jobs import get_all_jobs
+from core.repair_worker import RepairWorker
+from database.music_database import MusicDatabase
 
 
 def test_job_registered():

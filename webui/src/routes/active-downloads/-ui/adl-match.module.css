@@ -1,0 +1,385 @@
+/* the match & import window: type, search, pick, then one primary action */
+
+.popup {
+  width: min(680px, 100%);
+}
+
+.eyebrow {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgb(var(--accent-rgb));
+  margin-bottom: 4px;
+}
+
+.raw {
+  display: block;
+  max-width: 520px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.types {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.type {
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.type:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.type[data-on] {
+  background: rgba(var(--accent-rgb), 0.16);
+  border-color: rgba(var(--accent-rgb), 0.45);
+  color: rgb(var(--accent-rgb));
+}
+
+.searchRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.input {
+  flex: 1 1 220px;
+  min-width: 0;
+  height: 44px;
+  box-sizing: border-box;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.25);
+  color: #f5f5f7;
+  font: inherit;
+  font-size: 14px;
+}
+
+.input:focus,
+.number input:focus {
+  outline: none;
+  border-color: rgba(var(--accent-rgb), 0.6);
+}
+
+.number {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.number input {
+  width: 64px;
+  height: 44px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.25);
+  color: #f5f5f7;
+  font: inherit;
+  font-size: 14px;
+}
+
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 72px;
+}
+
+.note {
+  margin: 0;
+  padding: 18px 0;
+  text-align: center;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.hit {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.hit:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.hit[data-on] {
+  background: rgba(var(--accent-rgb), 0.08);
+  border-color: rgba(var(--accent-rgb), 0.45);
+}
+
+.art {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  object-fit: cover;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 15px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.hitText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hitTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f5f5f7;
+}
+
+.hitMeta {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.radio {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+}
+
+.hit[data-on] .radio {
+  border-color: rgb(var(--accent-rgb));
+  background: radial-gradient(circle, rgb(var(--accent-rgb)) 0 4px, transparent 5px);
+}
+
+.files {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: rgba(245, 165, 36, 0.08);
+  border: 1px solid rgba(245, 165, 36, 0.25);
+}
+
+.files[data-ok] {
+  background: rgba(var(--accent-rgb), 0.08);
+  border-color: rgba(var(--accent-rgb), 0.22);
+}
+
+.filesTitle {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.filesPath {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  overflow-wrap: anywhere;
+}
+
+.error {
+  margin: 0;
+  font-size: 13px;
+  color: #fca5a5;
+}
+
+.primary,
+.secondary,
+.ghost {
+  height: 44px;
+  padding: 0 20px;
+  border-radius: 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.primary {
+  border: 0;
+  background: rgb(var(--accent-rgb));
+  color: #04130a;
+}
+
+.primary:disabled {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.45);
+  cursor: default;
+}
+
+.secondary {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: transparent;
+  color: #f5f5f7;
+}
+
+.secondary:disabled {
+  color: rgba(255, 255, 255, 0.35);
+  cursor: default;
+}
+
+.ghost {
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+@media (max-width: 640px) {
+  .types {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* the bulk review list: one row per download, its guess, change, untick */
+
+.bulkPopup {
+  width: min(760px, 100%);
+}
+
+.bulkList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bulkRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  transition:
+    border-color 0.15s,
+    opacity 0.15s;
+}
+
+.bulkRow[data-status='none'] {
+  border-style: dashed;
+}
+
+.bulkRow[data-status='guessing'] {
+  opacity: 0.6;
+}
+
+.bulkRow[data-status='done'] {
+  border-color: rgba(var(--accent-rgb), 0.35);
+}
+
+.bulkRow[data-status='failed'] {
+  border-color: rgba(255, 99, 99, 0.45);
+}
+
+.bulkCheck {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  accent-color: rgb(var(--accent-rgb));
+  cursor: pointer;
+}
+
+.bulkCheck:disabled {
+  cursor: default;
+}
+
+.bulkRaw {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bulkError {
+  font-size: 12px;
+  color: #ff8a8a;
+}
+
+.bulkDone,
+.bulkWorking {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.bulkDone {
+  color: rgb(var(--accent-rgb));
+}
+
+.bulkWorking {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.bulkSummary {
+  margin-right: auto;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+}

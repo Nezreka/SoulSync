@@ -76,7 +76,21 @@ export const EMPTY_GLOBAL_CONFIG: WatchlistGlobalConfig = {
   include_instrumentals: false,
   exclude_terms: '',
   global_auto_download: true,
+  // #1450: defaults match the server ("all" = today's behaviour, opt-in).
+  edition_preference: 'all',
+  prefer_explicit_edition: true,
 };
+
+/**
+ * #1450: the three edition-preference choices as compact toggle pills,
+ * reusing the .watchlist-filter-btn pill style the discography modal's
+ * Future-releases rows use (NOT another tall checkbox stack).
+ */
+const EDITION_PILL_OPTIONS = [
+  ['all', 'All editions'],
+  ['one_standard', 'One per album · Standard'],
+  ['one_complete', 'One per album · Most complete'],
+] as const;
 
 /**
  * Whether the save is allowed to proceed.
@@ -309,8 +323,65 @@ export function WatchlistGlobalSettingsModal({ profileId, initialConfig, onClose
               </label>
             </div>
 
+            {/* Outside the dimmed override block like Auto-Download: this is a
+                global preference, not a per-artist override. Compact pill
+                rows in the .watchlist-filter-btn toggle style, matching the
+                discography modal's Future-releases rows. */}
             <div className="config-section">
-              <h3 className="config-section-title">Custom Exclusion Terms</h3>
+              <h3 className="config-section-title">Edition Preference</h3>
+              <p className="config-section-subtitle">
+                When an album exists in several editions, scan for and pre-check one edition per
+                album instead of every edition
+              </p>
+              <div className="discog-future-row">
+                <span className="discog-future-label">Editions</span>
+                <div
+                  className="discog-future-pills"
+                  role="radiogroup"
+                  aria-label="Edition preference"
+                >
+                  {EDITION_PILL_OPTIONS.map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      role="radio"
+                      aria-checked={config.edition_preference === value}
+                      className={`watchlist-filter-btn${
+                        config.edition_preference === value ? ' active' : ''
+                      }`}
+                      onClick={() =>
+                        setConfig((previous) => ({ ...previous, edition_preference: value }))
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="discog-future-row" style={{ marginTop: 8 }}>
+                <span className="discog-future-label">Tie-break</span>
+                <div className="discog-future-pills">
+                  <button
+                    type="button"
+                    aria-pressed={config.prefer_explicit_edition}
+                    className={`watchlist-filter-btn${
+                      config.prefer_explicit_edition ? ' active' : ''
+                    }`}
+                    onClick={() =>
+                      setConfig((previous) => ({
+                        ...previous,
+                        prefer_explicit_edition: !previous.prefer_explicit_edition,
+                      }))
+                    }
+                  >
+                    Prefer explicit edition
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="config-section">
+              <h3 className="config-section-title">Custom Exclusion Terms</h3>{' '}
               <p className="config-section-subtitle">
                 Comma-separated terms — tracks or albums matching any term will be skipped during
                 scans

@@ -55,6 +55,43 @@ def test_spotify_data_shape_basic():
     }]
 
 
+def test_manual_musicbrainz_comment_survives_sync_conversion():
+    results = [{'spotify_data': {
+        'id': 'rec-acoustic', 'name': 'Song', 'artists': ['Artist'], 'album': 'Album',
+        'source': 'musicbrainz', 'disambiguation': 'acoustic',
+    }}]
+
+    assert convert_results_to_spotify_tracks(results, 'YouTube')[0] == {
+        'id': 'rec-acoustic', 'name': 'Song', 'artists': ['Artist'], 'album': 'Album',
+        'duration_ms': 0, 'source': 'musicbrainz',
+        'disambiguation': 'acoustic',
+    }
+
+
+def test_fix_payload_and_beatport_conversion_keep_recording_comment():
+    from api.beatport_charts import convert_beatport_results_to_spotify_tracks
+    from api.source_playlists import _build_fix_modal_spotify_data
+
+    selected = {
+        'id': 'rec-acoustic', 'name': 'Song', 'artists': ['Artist'],
+        'album': 'Album', 'source': 'musicbrainz',
+        'disambiguation': 'acoustic',
+    }
+    saved = _build_fix_modal_spotify_data(selected)
+    assert saved['name'] == 'Song'
+    assert saved['disambiguation'] == 'acoustic'
+
+    synced = convert_beatport_results_to_spotify_tracks([{'spotify_data': saved}])
+    assert synced[0]['source'] == 'musicbrainz'
+    assert synced[0]['disambiguation'] == 'acoustic'
+
+    non_musicbrainz = convert_beatport_results_to_spotify_tracks([{'spotify_data': {
+        'id': 'sp-track', 'name': 'Song', 'artists': ['Artist'], 'album': 'Album',
+        'source': 'spotify',
+    }}])
+    assert non_musicbrainz[0]['source'] == 'beatport'
+
+
 def test_spotify_data_duration_defaults_to_zero():
     results = [{'spotify_data': {'id': 'x', 'name': 'n', 'artists': [], 'album': 'a'}}]
     out = convert_results_to_spotify_tracks(results, 'Deezer')
@@ -1172,4 +1209,3 @@ def test_update_match_no_state_and_no_originals_still_404():
         'identifier': 'gone', 'track_index': 0, 'spotify_track': {'id': 'x'}})
     body, code = update_discovery_match({}, gj, **kw)
     assert code == 404 and body == {'error': 'Identification state not found'}
-

@@ -19,6 +19,14 @@ import re
 DEFAULT_CATEGORY_NAMES = frozenset({
     'albums', 'singles', 'eps', 'compilations', 'mixtapes',
     'discography', 'music', 'downloads',
+    # release-type folders in the singular, which is how soulsync's own
+    # Artist/$albumtype/... template names them. a library copied back into
+    # staging as A Skylit Drive/Album/[2013] Rise filed every album under an
+    # artist called "Album" (discord, SeadogsBooty: mp3/Album/Album/...)
+    'album', 'single', 'ep', 'compilation', 'mixtape',
+    'live', 'soundtrack', 'soundtracks', 'ost', 'remix', 'remixes',
+    'anthology', 'demo', 'demos', 'bootleg', 'bootlegs', 'other',
+    'singles & eps', 'eps & singles',
     # download client / arr containers. a torrent client's completed folder
     # mounted inside staging named the artist "qbittorrent" (discord,
     # Tostadaman: /downloads/qbittorrent -> /MUSIC/qbittorrent/...)

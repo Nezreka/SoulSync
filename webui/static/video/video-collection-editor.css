@@ -15,7 +15,7 @@
 
 .vce-overlay {
     position: fixed; inset: 0; z-index: 9300;
-    --a: var(--accent-rgb, 88, 101, 242);
+    --a: var(--accent-rgb);
     --s1: rgba(255, 255, 255, 0.032);
     --s2: rgba(255, 255, 255, 0.055);
     --line: rgba(255, 255, 255, 0.07);

@@ -231,6 +231,48 @@ def test_a_series_book_gets_a_series_query():
     assert "The Stormlight Archive 3" in build_queries(book)
 
 
+def test_a_single_digit_volume_is_also_tried_zero_padded():
+    # Indexers match words: "Lights Out 3" never finds "Lights Out 03 - Game On".
+    book = dict(BOOK, series=[{"title": "Lights Out", "sequence": "3"}])
+    queries = build_queries(book)
+    assert queries.index("Lights Out 3") < queries.index("Lights Out 03")
+
+
+@pytest.mark.parametrize("sequence", ["12", "3.5", "1-3"])
+def test_other_volumes_are_not_padded(sequence):
+    book = dict(BOOK, series=[{"title": "Lights Out", "sequence": sequence}])
+    assert [q for q in build_queries(book) if q.startswith("Lights Out")] == [
+        f"Lights Out {sequence}"
+    ]
+
+
+@pytest.mark.parametrize("title", [
+    "Game On (Lights Out 3)",
+    "Game On [Lights Out 3]",
+    "Game On (Lights Out 3) (German edition)",
+])
+def test_a_trailing_bracketed_suffix_is_left_out_of_the_queries(title):
+    # Localised Audible stores append the series or edition to the title; the
+    # release is "Navessa Allen - Lights Out 03 - Game On (Ungekuerzt)".
+    book = {"title": title, "author_names": ["Navessa Allen"],
+            "series": [{"title": "Lights Out", "sequence": "3"}]}
+    assert build_queries(book) == [
+        "Navessa Allen Game On",
+        "Game On",
+        "Lights Out 3",
+        "Lights Out 03",
+    ]
+
+
+def test_a_title_that_is_only_brackets_is_kept():
+    assert build_queries({"title": "(Untitled)", "author_names": []}) == ["(Untitled)"]
+
+
+def test_brackets_inside_the_title_are_kept():
+    book = {"title": "The (Mostly) True Story", "author_names": []}
+    assert build_queries(book) == ["The (Mostly) True Story"]
+
+
 def test_queries_are_deduplicated():
     book = {"title": "Dune", "author_names": []}
     assert build_queries(book) == ["Dune"]
@@ -1488,3 +1530,42 @@ def test_single_word_title_without_author_penalized():
     assert len(ranked) == 1
     assert ranked[0].title == real_book.title
 
+
+# a book SOLD in parts (graphicaudio's "The Reckoning (Part 1 of 2)") is its
+# own catalogue entry with its own runtime. the posting of that part is the
+# whole thing, not a fragment, and the other part is a different product.
+RECKONING_PART_1 = {
+    "asin": "B0RECKON01",
+    "title": "The Reckoning (Part 1 of 2) (Dramatized Adaptation)",
+    "author_names": ["Caroline Peckham", "Susanne Valenti"],
+    "narrator_names": [],
+    "runtime_minutes": 398,
+    "series": [],
+}
+
+
+def test_the_books_own_part_is_not_a_fragment():
+    release = _release(
+        "The Reckoning (Part 1 of 2) by Caroline Peckham, Susanne Valenti [ENG / M4B] [VIP]")
+    ranked = rank_releases([release], RECKONING_PART_1, 0.0, "any")
+    assert len(ranked) == 1
+    assert ranked[0].part_verdict == "match"
+    assert "will not import" not in ranked[0].short_warning
+
+
+def test_the_other_part_is_dropped_not_grabbed():
+    # the automatic wishlist grabs whatever ranks first, so a part 2 posting
+    # must never stand in for the part 1 book
+    part_1 = _release(
+        "The Reckoning (Part 1 of 2) by Caroline Peckham, Susanne Valenti [ENG / M4B] [VIP]")
+    part_2 = _release(
+        "The Reckoning (Part 2 of 2) by Caroline Peckham, Susanne Valenti [ENG / M4B] [VIP]",
+        guid="guid-2")
+    ranked = rank_releases([part_2, part_1], RECKONING_PART_1, 0.0, "any")
+    assert [r.guid for r in ranked] == ["guid-1"]
+
+
+def test_a_whole_book_still_warns_about_a_part_posting():
+    warning = rank_releases([_release("The Way of Kings (1 of 5)")], BOOK, 0.0, "any")[0]
+    assert warning.part_verdict == "unknown"
+    assert "will not import" in warning.short_warning

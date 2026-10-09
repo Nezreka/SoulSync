@@ -144,6 +144,23 @@ def search_spotify():
         logger.error(f"Error searching Spotify: {e}")
         return jsonify({"error": str(e)}), 500
 
+_SPOTIFY_ID_RE = re.compile(r'[A-Za-z0-9]{22}')
+
+
+def _is_spotify_id(track_id) -> bool:
+    """spotify ids are 22 base62 chars. deezer, itunes and discogs ids are
+    numbers, so a fallback result can't pass for a spotify one."""
+    return bool(_SPOTIFY_ID_RE.fullmatch(str(track_id or '')))
+
+
+def _spotify_fallback_source() -> str:
+    try:
+        name = _spotify_client()._fallback_source
+    except Exception:  # noqa: BLE001 - same default the client uses
+        name = None
+    return name if isinstance(name, str) and name else 'deezer'
+
+
 @bp.route('/api/spotify/search_tracks', methods=['GET'])
 def search_spotify_tracks():
     """Search for tracks on Spotify - used by discovery fix modal"""
@@ -173,7 +190,15 @@ def search_spotify_tracks():
         else:
             if _hydrabase_worker() and _dev_mode_enabled():
                 _hydrabase_worker().enqueue(query, 'tracks')
-            tracks = _spotify_client().search_tracks(query, limit=limit)
+            client = _spotify_client()
+            # with a title to aim at, spotify answers first and the fallback
+            # source gets search_song, not the plain free-text search the
+            # client falls back to. deezer's free text leaves originals out
+            # and the rerank can't surface what never came back (#1601).
+            tracks = client.search_tracks(query, limit=limit, allow_fallback=not track_q)
+            if not tracks and track_q:
+                from core.metadata.song_search import search_song
+                tracks = search_song(client._fallback, track_q, artist_q, limit=limit)
 
         # Local rerank — same helper Deezer + iTunes use. Spotify's
         # ranking is usually clean but karaoke / cover variants do
@@ -187,6 +212,10 @@ def search_spotify_tracks():
                 expected_artist=artist_q,
             )
 
+        # spotify falls back to the configured metadata source when its api
+        # errors, so say where each result really came from. the fix modal
+        # saves it, instead of stamping a deezer id as spotify (#1565).
+        fallback_name = 'hydrabase' if use_hydrabase else _spotify_fallback_source()
         tracks_dict = [{
             'id': t.id,
             'name': t.name,
@@ -194,6 +223,7 @@ def search_spotify_tracks():
             'album': t.album,
             'duration_ms': t.duration_ms,
             'image_url': getattr(t, 'image_url', None),
+            'source': 'spotify' if _is_spotify_id(t.id) else fallback_name,
         } for t in tracks]
 
         return jsonify({'tracks': tracks_dict})
@@ -413,6 +443,7 @@ def search_musicbrainz_tracks():
             'duration_ms': t.duration_ms,
             'image_url': t.image_url,
             'source': 'musicbrainz',
+            'disambiguation': t.disambiguation or '',
         } for t in tracks]
 
         return jsonify({'tracks': tracks_dict})
@@ -1489,7 +1520,14 @@ def start_tidal_discovery(playlist_id):
             existing_state = tidal_discovery_states[playlist_id]
             if existing_state['phase'] == 'discovering':
                 return jsonify({"error": "Discovery already in progress"}), 400
-            # Update existing state for discovery
+            # Update existing state for discovery. take the playlist we just
+            # fetched, or a re-run walks the old track list (#1613).
+            existing_state['playlist'] = target_playlist
+            existing_state['spotify_total'] = len(target_playlist.tracks)
+            existing_state['spotify_matches'] = 0
+            existing_state['discovery_progress'] = 0
+            existing_state['discovery_results'] = []
+            existing_state['wing_it_count'] = 0
             existing_state['phase'] = 'discovering'
             existing_state['status'] = 'discovering'
             existing_state['last_accessed'] = time.time()
@@ -1665,7 +1703,8 @@ def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discove
             db_id_to_track[mt['id']] = mt
             sid = mt.get('source_track_id', '')
             if sid:
-                source_id_to_db_id[str(sid)] = mt['id']
+                # a playlist can hold the same track twice, one row each
+                source_id_to_db_id.setdefault(str(sid), []).append(mt['id'])
             pos = mt.get('position')
             if pos is not None:
                 position_to_db_id[pos] = mt['id']
@@ -1692,8 +1731,11 @@ def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discove
             # Method 1: match by source track ID
             source_track = result.get('tidal_track') or result.get('source_track') or {}
             source_tid = str(source_track.get('id', '')) if source_track else ''
-            if source_tid and source_tid in source_id_to_db_id:
-                db_track_id = source_id_to_db_id[source_tid]
+            if source_tid and source_id_to_db_id.get(source_tid):
+                # hand the rows out in order so each duplicate gets one result,
+                # the last row keeps answering if results outnumber rows
+                rows = source_id_to_db_id[source_tid]
+                db_track_id = rows.pop(0) if len(rows) > 1 else rows[0]
 
             # Method 2: match by position/index
             if not db_track_id:
@@ -4396,6 +4438,8 @@ def update_youtube_discovery_match():
                 'image_url': image_url,
                 'source': match_source,
             }
+            if spotify_track.get('disambiguation'):
+                matched_data['disambiguation'] = spotify_track['disambiguation']
             cache_db = get_database()
             cache_db.save_discovery_cache_match(
                 cache_key[0], cache_key[1], _get_active_discovery_source(), 1.0, matched_data,
@@ -4502,6 +4546,8 @@ def _build_fix_modal_spotify_data(spotify_track):
     for k in ('source', 'provider', 'isrc', 'track_number', 'disc_number', 'release_date'):
         if spotify_track.get(k) is not None:
             data[k] = spotify_track[k]
+    if spotify_track.get('disambiguation'):
+        data['disambiguation'] = spotify_track['disambiguation']
     return data
 
 
@@ -5044,6 +5090,8 @@ def update_ytmusic_discovery_match():
                 'image_url': image_url,
                 'source': match_source,
             }
+            if spotify_track.get('disambiguation'):
+                matched_data['disambiguation'] = spotify_track['disambiguation']
             cache_db = get_database()
             cache_db.save_discovery_cache_match(
                 cache_key[0], cache_key[1], _get_active_discovery_source(), 1.0, matched_data,

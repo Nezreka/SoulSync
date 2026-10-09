@@ -59,6 +59,9 @@ export interface DiscographyRelease {
   owned?: boolean | null;
   owned_track_count?: number;
   total_track_count?: number;
+  /** #1550: watchlist content-type exclusion reason ('remix', 'live', ...)
+   * carried from the completion event; null when the scan would not skip it. */
+  watchlist_excluded?: string | null;
   [key: string]: unknown;
 }
 

@@ -266,30 +266,44 @@ export function OperationsStudio({
   }, [jobs]);
 
   // Compute Authority Buckets (Uses both groups & catalog)
-  const { safeCount, suggestionCount, quarantineCount } = useMemo(() => {
-    let safe = 0;
-    let suggestions = 0;
-    let quarantine = 0;
+  const { safeCount, suggestionCount, quarantineCount, topSuggestion, topQuarantine } =
+    useMemo(() => {
+      let safe = 0;
+      let suggestions = 0;
+      let quarantine = 0;
+      // the biggest type in each bucket, which its button opens. the buckets
+      // are destructive / fixable, not severity, so filtering the list by
+      // severity showed something else (orphans are 'info' but quarantined)
+      let topSuggestion = { type: '', count: 0 };
+      let topQuarantine = { type: '', count: 0 };
 
-    for (const g of groups) {
-      const count = g.pending ?? (g as any).count ?? 0;
-      if (count <= 0) continue;
+      for (const g of groups) {
+        const count = g.pending ?? (g as any).count ?? 0;
+        if (count <= 0) continue;
 
-      const info = catalog[g.finding_type];
-      const isDestructive = info ? info.destructive : (g as any).destructive;
-      const isFixable = info ? info.fixable : (g as any).fixable;
+        const info = catalog[g.finding_type];
+        const isDestructive = info ? info.destructive : (g as any).destructive;
+        const isFixable = info ? info.fixable : (g as any).fixable;
 
-      if (isDestructive) {
-        quarantine += count;
-      } else if (isFixable) {
-        safe += count;
-      } else {
-        suggestions += count;
+        if (isDestructive) {
+          quarantine += count;
+          if (count > topQuarantine.count) topQuarantine = { type: g.finding_type, count };
+        } else if (isFixable) {
+          safe += count;
+        } else {
+          suggestions += count;
+          if (count > topSuggestion.count) topSuggestion = { type: g.finding_type, count };
+        }
       }
-    }
 
-    return { safeCount: safe, suggestionCount: suggestions, quarantineCount: quarantine };
-  }, [groups, catalog]);
+      return {
+        safeCount: safe,
+        suggestionCount: suggestions,
+        quarantineCount: quarantine,
+        topSuggestion: topSuggestion.type,
+        topQuarantine: topQuarantine.type,
+      };
+    }, [groups, catalog]);
 
   // Executive Health Score
   const healthScore = useMemo(() => {
@@ -519,7 +533,7 @@ export function OperationsStudio({
                 type="button"
                 className="operations-triage-btn suggestions"
                 disabled={suggestionCount === 0}
-                onClick={() => onShowFindings('', { severity: 'info' })}
+                onClick={() => onShowFindings('', { findingType: topSuggestion })}
               >
                 Review Suggestions ➔
               </button>
@@ -544,7 +558,7 @@ export function OperationsStudio({
                 type="button"
                 className="operations-triage-btn quarantine"
                 disabled={quarantineCount === 0}
-                onClick={() => onShowFindings('', { severity: 'error' })}
+                onClick={() => onShowFindings('', { findingType: topQuarantine })}
               >
                 🛡️ Inspect Quarantine ➔
               </button>

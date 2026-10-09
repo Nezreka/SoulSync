@@ -4,6 +4,8 @@ const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
 
 export default defineConfig({
   testDir: './tests',
+  // Screenshot baselines have their own config and Docker runner (npm run test:visual).
+  testIgnore: ['**/tests/visual/**'],
   timeout: 30_000,
   use: {
     // CI images may provide a system Chromium, while local development uses

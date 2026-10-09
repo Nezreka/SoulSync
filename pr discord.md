@@ -1,13 +1,17 @@
-**SoulSync 3.5.0 is out** :musical_note:
+**SoulSync 3.5.3 is out** :musical_note:
 
-Video Discover got the full music-side treatment: story blocks, trailers, genre art, a hero badge, story tickers, and tiles that fade in with your posters. Video detail pages now have an "I have this" button for when auto-matching misses, and rematching a video actually refreshes its artwork.
+My Playlists: make your own playlists and add any track from anywhere in the app, search, library, discover, the now playing view. They identify, sync to your server and download missing like mirrored playlists, and adding a song that's already there asks first, even when it's a remaster or radio edit.
 
-Sync went per-profile: server playlists show whose is whose, mirrors with the same name stop overwriting each other, and deleted tracks get noticed on the next sync. Non-admin automations re-arm after a restart instead of running once and dying quietly.
+The Clients tab can match & import downloads SoulSync didn't start, for music, audiobooks and video, including Soulseek folders. Cards got a redesign with one clear action each.
 
-Under the hood: providers stop false rate-limiting when an ID contains 429 or 503, canonical lookups send each provider its own artist ID (no more 400 invalid mbid from MusicBrainz), singles stop merging into same-named album folders, your custom single path template is honored, lossy copies keep native tags and cover art, and the companion extension gets a chat tab plus video badges.
+Audiobooks: choose allowed formats and one file vs several, a failed download tries the next release right away, and Soulseek books survive slskd clearing finished chapters (thanks @curiousmoose24). You can also type your own release search, and the series strip shows what you own.
 
-Since those notes were drafted there's more: a big clarity pass from discussion #1289 — safer defaults (sync defaults to Reconcile so Navidrome edits survive, "Transfer is my permanent library" on by default), clearer language across the app (Discovery → Identify), and an honesty overhaul of the import inbox (partial imports, stale rows, match stealing). Repair jobs now run on the automation engine, there's a new BPM backfill job, and manual match opens with a worklist of everything unmatched.
+BPM Backfill now fills BPM across the whole library, from Deezer or local analysis, and downloads get Deezer's BPM and ISRC tags. Sample Studio analyzes MP3 and M4A files without ffmpeg on PATH and lists your tracks before you search (thanks Specialmed).
 
-Also in: a community fix batch (wishlist album scope, discography substring matching, working AudioDB key, Audible marketplace setting), playlist sync no longer re-downloads what you deleted unless you ask (Sync vs Sync + download), video calendar cards show their full status, Deezer reissue years stop marking owned albums missing, and new v1 API endpoints powering the extension's mini player.
+Tidal playlists load every track: SoulSync asked for the US catalogue, so non-US accounts lost tracks. Duplicates and videos are counted too (#1613).
 
-Full notes on GitHub. Enjoy! :tada:
+Deezer matching picks the right album for soundtracks and compilations and reaches the original song from more searches (thanks @cremonies). Deezer downloads keep their album artist and genre.
+
+Also: enrichment workers stop staying paused, a dead HiFi pool stops slowing every track, re-tag and release year repairs stop picking the wrong track or album, video episodes import like Sonarr judges them, API key fixes (thanks @splitsec2), and accent colours that never showed now do (thanks @Thundernerd).
+
+Full notes on GitHub.

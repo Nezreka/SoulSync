@@ -1,3 +1,5 @@
+import type { UserPlaylistTrack } from '@/features/playlists/user-playlists';
+
 import type { EnhancedAlbum, EnhancedTrack } from './-artist-detail.enhanced';
 
 import { extractFormat, formatDurationMs } from './-artist-detail.enhanced';
@@ -804,6 +806,27 @@ export function trackFileName(track: EnhancedTrack): string {
  * something to stream, and the art falls back to the ARTIST thumbnail so a
  * queued track from an album with no cover still shows something.
  */
+/** what the add-to-playlist button adds: the row's title and artist, plus
+ *  album and length to help identify pick the right version. */
+export function playlistTrackPayload(
+  track: EnhancedTrack,
+  album: EnhancedAlbum,
+  artist: Record<string, unknown> | undefined,
+): UserPlaylistTrack | null {
+  const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+  const title = text(track.title);
+  // a compilation row carries its own artist; the page's artist is the fallback
+  const by = text(track.artist_name) || text(track.artist) || text(artist?.name);
+  if (!title || !by) return null;
+  return {
+    track_name: title,
+    artist_name: by,
+    album_name: text(album.title),
+    duration_ms: typeof track.duration === 'number' ? track.duration : 0,
+    image_url: text(album.thumb_url) || null,
+  };
+}
+
 export function queueTrackPayload(
   track: EnhancedTrack,
   album: EnhancedAlbum,

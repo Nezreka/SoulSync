@@ -116,6 +116,9 @@ def _normalize_match_track(track: Dict[str, Any], source: str, album: Dict[str, 
         "uri": track.get("uri", ""),
         "album": track_album,
         "source": track_source,
+        # #1536: recording disambiguation ("acoustic", "live") so the manual
+        # album-import flow can carry it to the filename/tag layers.
+        "disambiguation": str(track.get("disambiguation") or "").strip(),
     }
 
 
@@ -254,6 +257,11 @@ def build_album_import_context(
         "album_type": track_album_type,
         "release_date": track_album_release,
         "source": source,
+        # #1536: recording disambiguation ("acoustic", "live") carried from
+        # the search result so the filename template and tag writer can use
+        # it. Empty for non-MusicBrainz sources — same graceful-absent
+        # pattern as the album-level disambiguation below.
+        "disambiguation": str(track.get("disambiguation") or "").strip(),
     }
 
     normalized_album = {
@@ -317,8 +325,12 @@ def build_album_import_match_payload(
     album_artist: str = "",
     file_paths: Optional[Iterable[str]] = None,
     source: Optional[str] = None,
+    root: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Build the album import match payload using provider-priority metadata lookup."""
+    """Build the album import match payload using provider-priority metadata lookup.
+
+    ``root`` matches files from a folder other than staging (see
+    collect_staging_files)."""
     album_response = get_artist_album_tracks(
         album_id,
         artist_name=album_artist,
@@ -356,7 +368,7 @@ def build_album_import_match_payload(
             "resolved_album_id": album_response.get("resolved_album_id") or album_id,
         }
 
-    staging_files = collect_staging_files(file_paths)
+    staging_files = collect_staging_files(file_paths, root=root)
     album_name_for_match = album.get("name") or album_name or ""
     normalized_tracks = [
         _normalize_match_track(track, source, album) for track in tracks

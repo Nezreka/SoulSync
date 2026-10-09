@@ -95,6 +95,11 @@ export function useAccessibleModal<T extends HTMLElement = HTMLDivElement>(
     target.focus();
 
     const onKeyDown = (e: KeyboardEvent) => {
+      // a popover opened from inside the dialog (add to playlist) renders
+      // outside it. its keys are its own: escape closes the popover, not the
+      // dialog under it, and tab moves through the popover.
+      const target = e.target as Element | null;
+      if (target && !dialog.contains(target) && target.closest?.('[data-popover-layer]')) return;
       if (e.key === 'Escape') {
         e.stopPropagation();
         closeRef.current();

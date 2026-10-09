@@ -421,7 +421,6 @@ SYSTEM_AUTOMATIONS = [
         'trigger_type': 'daily_time',                  # daily; catalogs change slowly
         'trigger_config': {'time': '03:30'},           # staggered off the people scan
         'action_type': 'video_scan_watchlist_studios',
-        'initial_delay': 1500,
         'owned_by': 'video',
     },
     {
@@ -689,7 +688,12 @@ class AutomationEngine:
                 existing = self.db.get_system_automation_by_action(spec['action_type'])
 
             if existing:
-                if spec.get('initial_delay') is not None:
+                # The last_run/interval path is for 'schedule' (interval-based)
+                # triggers only. A timed trigger (daily_time etc.) with an
+                # initial_delay must NOT take this path — _calc_delay_seconds
+                # on {'time': '03:30'} yields a meaningless 3600, causing a
+                # duplicate run ~1h after the scheduled one on restart.
+                if spec.get('initial_delay') is not None and spec.get('trigger_type') == 'schedule':
                     # Compute full interval from trigger config
                     full_interval = self._calc_delay_seconds(spec['trigger_config'])
                     initial_delay = spec['initial_delay']
@@ -746,6 +750,7 @@ class AutomationEngine:
         self._fix_wishlist_processor_rename()
         self._fix_rss_sync_cadence()
         self._fix_orphaned_system_actions()
+        self._fix_refresh_stale_catchup()
 
     def _fix_orphaned_system_actions(self):
         """Delete system rows whose action_type has NO registered handler.
@@ -864,11 +869,18 @@ class AutomationEngine:
         interval fires reliably but at a time that drifts with every restart (5 min
         after startup, then +24h). Now that the seeder arms timed triggers, rewrite
         the live row to run at a fixed 1am (better for 'today's airings' — queues the
-        day overnight). Matches only the is_system row; idempotent (no-op once the row
-        is already daily_time)."""
+        day overnight). Matches only the is_system row with the OLD 24h-interval
+        shape — a hand-tuned trigger (e.g. weekly_time) is left alone. Idempotent."""
         try:
             auto = self.db.get_system_automation_by_action('video_add_airing_episodes')
-            if not auto or auto.get('trigger_type') == 'daily_time':
+            if not auto or auto.get('trigger_type') != 'schedule':
+                return
+            try:
+                old_cfg = json.loads(auto.get('trigger_config') or '{}')
+            except (TypeError, ValueError):
+                return
+            if old_cfg not in ({'interval': 24, 'unit': 'hours'},
+                               {'interval': 1, 'unit': 'days'}):
                 return
             cfg = {'time': '01:00'}
             nr_dt = next_run_at('daily_time', cfg, now_utc=_utcnow(), default_tz=self._default_tz)
@@ -885,8 +897,8 @@ class AutomationEngine:
         rolling 7-day interval to fixed weekly times — TV Mondays 02:00, Movies
         Tuesdays 02:00 (different days so they never overlap). The seeder only
         creates rows, never updates a drifted trigger; this rewrites the live rows.
-        Only converts the original interval rows (skips once trigger_type is already
-        weekly_time, so a hand-tuned day/time sticks). Idempotent."""
+        Only converts the original 7-day-interval rows — a hand-tuned trigger
+        (e.g. daily_time) is left alone. Idempotent."""
         targets = {
             'video_deep_scan_tv': {'time': '02:00', 'days': ['mon']},
             'video_deep_scan_movies': {'time': '02:00', 'days': ['tue']},
@@ -894,7 +906,13 @@ class AutomationEngine:
         for action_type, cfg in targets.items():
             try:
                 auto = self.db.get_system_automation_by_action(action_type)
-                if not auto or auto.get('trigger_type') == 'weekly_time':
+                if not auto or auto.get('trigger_type') != 'schedule':
+                    continue
+                try:
+                    old_cfg = json.loads(auto.get('trigger_config') or '{}')
+                except (TypeError, ValueError):
+                    continue
+                if old_cfg != {'interval': 7, 'unit': 'days'}:
                     continue
                 nr_dt = next_run_at('weekly_time', cfg, now_utc=_utcnow(), default_tz=self._default_tz)
                 self.db.update_automation(
@@ -916,6 +934,58 @@ class AutomationEngine:
             return max(0, int(remaining))
         except (ValueError, TypeError):
             return 0
+
+    def _fix_refresh_stale_catchup(self):
+        """Overdue catch-up for the 23:00 airing-schedule refresh.
+
+        A daily_time slot missed while the box sleeps is discarded, not made up.
+        If the box slept through 23:00 (or the run failed), the 01:00 airing run
+        reads a stale calendar, covers the window, and advances the bookmark past
+        it — episodes announced during the stale window are never offered.
+
+        If the refresh stamp is older than ~24h (or missing), arm a catch-up run
+        soon after boot instead of waiting for the next 23:00 slot. Does not
+        clobber an existing future next_run (manual edit / already scheduled).
+
+        The 24h threshold is INDEPENDENT of the 7-day UI staleness flag: the UI
+        says "distrust the calendar", the catch-up says "missed yesterday's run".
+        """
+        try:
+            auto = self.db.get_system_automation_by_action('video_refresh_airing_schedules')
+            if not auto or not auto.get('enabled'):
+                return
+            # Don't clobber a run that's about to happen anyway (within 60 min).
+            # A *failed* run still advances next_run by a full day, so a distant
+            # future next_run with a stale stamp means the run was missed or
+            # failed — that is exactly when the catch-up must fire.
+            nr = auto.get('next_run')
+            if nr:
+                try:
+                    nr_dt = datetime.strptime(nr, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                    if 0 < (nr_dt - _utcnow()).total_seconds() <= 3600:
+                        return
+                except (ValueError, TypeError):
+                    pass
+            # Check the stamp age via the video DB
+            try:
+                from api.video import get_video_db
+                freshness = get_video_db().calendar_schedule_freshness()
+            except Exception:   # noqa: BLE001 - video DB unavailable; skip catch-up
+                return
+            age_days = freshness.get('age_days')
+            # None = never refreshed (or unreadable) → catch up. >1.0 = missed
+            # the daily run → catch up. <=1.0 = fresh enough → wait for 23:00.
+            if age_days is not None and age_days <= 1.0:
+                return
+            # Stale (or never refreshed): run soon after boot
+            catchup = _utc_after(300)  # 5 min — off the boot path, before the 01:00 airing run
+            self.db.update_automation(auto['id'], next_run=catchup)
+            logger.info("Airing-schedule refresh is stale (last: %s, age %.1f days); "
+                        "catch-up scheduled in 5 min",
+                        freshness.get('refreshed_at'),
+                        age_days if age_days is not None else -1)
+        except Exception:
+            logger.exception("refresh stale catch-up failed")
 
     # --- Lifecycle ---
 
@@ -1178,6 +1248,7 @@ class AutomationEngine:
         action_config['_automation_id'] = automation_id
         action_config['_automation_name'] = auto.get('name', '')
         action_config['_manual_run'] = False
+        action_config['_trigger_tz'] = self._default_tz
         # Merge event data so action handlers can access trigger context
         if event_data:
             action_config['_event_data'] = event_data
@@ -1302,7 +1373,9 @@ class AutomationEngine:
             return
 
         auto = self.db.get_automation(automation_id)
-        if not auto or not auto.get('enabled'):
+        if not auto or (not auto.get('enabled') and not skip_delay):
+            # A disabled automation never runs on schedule, but an explicit
+            # manual Run Now (skip_delay=True) always executes it.
             return
 
         # Global per-side pause: a scheduled slot is skipped but the schedule
@@ -1359,6 +1432,7 @@ class AutomationEngine:
         action_config['_automation_id'] = automation_id
         action_config['_automation_name'] = auto.get('name', '')
         action_config['_manual_run'] = bool(skip_delay)
+        action_config['_trigger_tz'] = self._default_tz
         if profile_id is not None:
             action_config['_profile_id'] = profile_id
         # The profile this run acts AS: an explicit trigger profile, else the

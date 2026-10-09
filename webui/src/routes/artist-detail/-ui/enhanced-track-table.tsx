@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 
+import { AddToPlaylistButton, openAddToPlaylist } from '@/features/playlists/add-to-playlist';
 import { getShellBridge } from '@/platform/shell/bridge';
 
 import type { EnhancedAlbum, EnhancedTrack } from '../-artist-detail.enhanced';
@@ -10,6 +11,7 @@ import {
   formatTrackBitrate,
   getAlbumTrackRows,
   trackBitrateTitle,
+  playlistTrackPayload,
   queueTrackPayload,
   sortedTrackRows,
   sortIndicator,
@@ -512,29 +514,38 @@ function TrackRow({
       </td>
 
       <td className="col-queue">
-        {track.file_path ||
-        (missing && (track as { _hasActionableContext?: boolean })._hasActionableContext) ? (
-          <span className="lib-row-queue">
-            <button
-              type="button"
-              className="enhanced-playnext-btn lib-row-btn"
-              title={missing ? 'Download automatically and play next' : 'Play next'}
-              aria-label={missing ? 'Download automatically and play next' : 'Play next'}
-              onClick={act(() => enqueue(true))}
-            >
-              <PlayNextIcon size={15} />
-            </button>
-            <button
-              type="button"
-              className="enhanced-queue-btn lib-row-btn"
-              title={missing ? 'Add to queue and download automatically' : 'Add to queue'}
-              aria-label={missing ? 'Add to queue and download automatically' : 'Add to queue'}
-              onClick={act(() => enqueue(false))}
-            >
-              <PlusIcon size={15} />
-            </button>
-          </span>
-        ) : null}
+        <span className="lib-row-queue">
+          {track.file_path ||
+          (missing && (track as { _hasActionableContext?: boolean })._hasActionableContext) ? (
+            <>
+              <button
+                type="button"
+                className="enhanced-playnext-btn lib-row-btn"
+                title={missing ? 'Download automatically and play next' : 'Play next'}
+                aria-label={missing ? 'Download automatically and play next' : 'Play next'}
+                onClick={act(() => enqueue(true))}
+              >
+                <PlayNextIcon size={15} />
+              </button>
+              <button
+                type="button"
+                className="enhanced-queue-btn lib-row-btn"
+                title={missing ? 'Add to queue and download automatically' : 'Add to queue'}
+                aria-label={missing ? 'Add to queue and download automatically' : 'Add to queue'}
+                onClick={act(() => enqueue(false))}
+              >
+                <PlusIcon size={15} />
+              </button>
+            </>
+          ) : null}
+          {/* a missing row can go on a playlist too: identify finds it and the
+              playlist's sync downloads it */}
+          <AddToPlaylistButton
+            track={playlistTrackPayload(track, album, artist)}
+            className="lib-row-btn"
+            size={15}
+          />
+        </span>
       </td>
 
       {isAdmin ? (
@@ -678,6 +689,11 @@ function TrackRow({
             isAdmin={isAdmin}
             onPlay={play}
             onQueue={() => enqueue(false)}
+            onAddToPlaylist={
+              playlistTrackPayload(track, album, artist)
+                ? () => openAddToPlaylist(playlistTrackPayload(track, album, artist)!)
+                : undefined
+            }
             onTagPreview={onTagPreview}
             onSourceInfo={() => onSourceInfo(null)}
             onRedownload={onRedownload}

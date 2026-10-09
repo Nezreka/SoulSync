@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.5.0"
+_SOULSYNC_BASE_VERSION = "3.5.3"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -1917,6 +1917,26 @@ def library_tracks_web():
         return jsonify({"success": True, "data": {"tracks": tracks}, "error": None})
     except Exception as e:
         logger.error(f"web /api/library/tracks failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+@app.route('/api/library/tracks/recent', methods=['GET'])
+def library_recent_tracks_web():
+    """Newest library tracks for the Sample Studio panel before you search.
+
+    /api/library/recently-added is the dashboard's album rail, which is why
+    this has its own path.
+    """
+    try:
+        from api.sample import recent_library_tracks
+
+        try:
+            limit = min(100, max(1, int(request.args.get('limit') or 50)))
+        except (TypeError, ValueError):
+            limit = 50
+        return jsonify({"success": True, "data": {"tracks": recent_library_tracks(limit)}, "error": None})
+    except Exception as e:
+        logger.error(f"web /api/library/tracks/recent failed: {e}")
         return jsonify({"success": False, "data": None, "error": str(e)}), 500
 
 
@@ -4188,53 +4208,35 @@ def get_activity_logs():
         return jsonify({'logs': [f'Error reading activity feed: {str(e)}']})
 
 # --- Internal API Key Management (browser-only, no auth) ---
+# Same logic as the /api/v1/api-keys routes (api/key_store.py); these are the
+# session-authed doors the Settings page uses.
 @app.route('/api/v1/api-keys-internal', methods=['GET'])
 @admin_only
 def list_api_keys_internal():
     """List API keys for the settings page (no auth required — same as all UI routes)."""
-    keys = config_manager.get('api_keys', [])
-    safe_keys = [
-        {
-            "id": k.get("id"),
-            "label": k.get("label", ""),
-            "key_prefix": k.get("key_prefix", ""),
-            "created_at": k.get("created_at"),
-            "last_used_at": k.get("last_used_at"),
-        }
-        for k in keys
-    ]
-    return jsonify({"success": True, "data": {"keys": safe_keys}})
+    from api import key_store
+    from api.helpers import api_success
+    return api_success({"keys": key_store.list_keys(config_manager)})
 
 @app.route('/api/v1/api-keys-internal/generate', methods=['POST'])
 @admin_only
 def generate_api_key_internal():
     """Generate API key from settings page (no auth required)."""
-    from api.auth import generate_api_key
+    from api import key_store
+    from api.helpers import api_success
     body = request.get_json(silent=True) or {}
-    label = body.get("label", "")
-    raw_key, record = generate_api_key(label)
-    keys = config_manager.get('api_keys', [])
-    keys.append(record)
-    config_manager.set('api_keys', keys)
-    return jsonify({"success": True, "data": {
-        "key": raw_key,
-        "id": record["id"],
-        "label": record["label"],
-        "key_prefix": record["key_prefix"],
-        "created_at": record["created_at"],
-    }}), 201
+    raw_key, record = key_store.create_key(config_manager, body.get("label", ""))
+    return api_success(key_store.created_view(raw_key, record), status=201)
 
 @app.route('/api/v1/api-keys-internal/revoke/<key_id>', methods=['DELETE'])
 @admin_only
 def revoke_api_key_internal(key_id):
     """Revoke API key from settings page (no auth required)."""
-    keys = config_manager.get('api_keys', [])
-    original_len = len(keys)
-    keys = [k for k in keys if k.get("id") != key_id]
-    if len(keys) == original_len:
-        return jsonify({"success": False, "error": {"message": "Key not found"}}), 404
-    config_manager.set('api_keys', keys)
-    return jsonify({"success": True, "data": {"message": "API key revoked"}})
+    from api import key_store
+    from api.helpers import api_success, api_error
+    if not key_store.revoke_key(config_manager, key_id):
+        return api_error("NOT_FOUND", "Key not found", 404)
+    return api_success({"message": "API key revoked"})
 
 
 @app.route('/api/settings', methods=['GET', 'POST'])
@@ -5045,6 +5047,27 @@ def detect_media_server_endpoint():
     else:
         add_activity_item("", "Auto-Detect Failed", f"No {server_type} server found", "Now")
         return jsonify({"success": False, "error": f"No {server_type} server found on common local addresses."})
+
+@app.route('/api/plex/verify-token', methods=['POST'])
+@admin_only
+def verify_plex_token():
+    """does this token reach this server url? for re-linking an already
+    configured plex: the new token is only saved when it works against the
+    server soulsync uses now, so linking the wrong plex account can't
+    overwrite a working connection. admin only: it connects to the url given"""
+    try:
+        data = request.get_json(silent=True) or {}
+        url = str(data.get('url') or '').strip()
+        token = str(data.get('token') or '').strip()
+        if not url or not token:
+            return jsonify({"success": False, "error": "url and token are required"}), 400
+        from plexapi.server import PlexServer
+        server = PlexServer(url, token, timeout=10)
+        return jsonify({"success": True, "server_name": server.friendlyName})
+    except Exception as e:
+        logger.info(f"Plex re-link: new token does not reach the configured server: {e}")
+        return jsonify({"success": False, "error": "That Plex account can't reach the server at this URL"})
+
 
 @app.route('/api/plex/pin/start', methods=['POST'])
 def start_plex_pin_auth():
@@ -9429,7 +9452,10 @@ def reidentify_search():
             limit = max(1, min(50, int(request.args.get('limit', 25))))
         except (TypeError, ValueError):
             limit = 25
-        rows = search_release_candidates(source, query, limit=limit)
+        rows = search_release_candidates(
+            source, query, limit=limit,
+            title=(request.args.get('title') or '').strip(),
+            artist=(request.args.get('artist') or '').strip())
         return jsonify({"success": True, "source": source, "results": rows})
     except Exception as e:
         logger.error(f"Re-identify search error: {e}")
@@ -10100,7 +10126,8 @@ def reorganize_album_preview(album_id):
         mode: 'api' (default — query metadata source) or 'tags' (read
             embedded file tags as the source of truth, issue #592)."""
     try:
-        from core.library_reorganize import preview_album_reorganize
+        from core.library_reorganize import preview_album_reorganize, resolve_album_profile_id
+        from core.imports.paths import library_root_for_profile
         data = request.get_json() or {}
         chosen_source = data.get('source') or None
         metadata_source = data.get('mode') or config_manager.get(
@@ -10108,17 +10135,30 @@ def reorganize_album_preview(album_id):
         ) or 'api'
         if metadata_source not in ('api', 'tags'):
             metadata_source = 'api'
-        transfer_dir = config_root_path(
-            config_manager.get('soulseek.transfer_path', './Transfer'), './Transfer')
+        db = get_database()
+        # #1504: resolve the owning profile so preview destinations are
+        # computed against the right library root, not the shared folder.
+        profile_id = resolve_album_profile_id(
+            db, album_id, resolve_file_path_fn=_resolve_library_file_path)
+        # #1504: a non-admin profile may only reorganize albums they own.
+        if (profile_id != getattr(g, 'profile_id', None)
+                and not getattr(g, 'is_admin', False)):
+            return jsonify({"success": False, "error": "Not your album"}), 403
+        transfer_dir = (
+            library_root_for_profile(profile_id, announce=False)
+            or config_root_path(
+                config_manager.get('soulseek.transfer_path', './Transfer'), './Transfer')
+        )
         result = preview_album_reorganize(
             album_id=album_id,
-            db=get_database(),
+            db=db,
             transfer_dir=transfer_dir,
             resolve_file_path_fn=_resolve_library_file_path,
             build_final_path_fn=_build_final_path_for_track,
             primary_source=chosen_source,
             strict_source=bool(chosen_source),
             metadata_source=metadata_source,
+            profile_id=profile_id,
         )
         if result.get('status') == 'no_album':
             return jsonify({"success": False, "error": "Album not found"}), 404
@@ -10162,6 +10202,15 @@ def reorganize_album_files(album_id):
         meta = get_database().get_album_display_meta(album_id)
         if meta is None:
             return jsonify({"success": False, "error": "Album not found"}), 404
+
+        # #1504: ownership check — a non-admin profile may only reorganize
+        # albums they own.
+        from core.library_reorganize import resolve_album_profile_id
+        _owner = resolve_album_profile_id(
+            get_database(), album_id, resolve_file_path_fn=_resolve_library_file_path)
+        if (_owner != getattr(g, 'profile_id', None)
+                and not getattr(g, 'is_admin', False)):
+            return jsonify({"success": False, "error": "Not your album"}), 403
 
         result = get_queue().enqueue(
             album_id=str(album_id),
@@ -10556,6 +10605,9 @@ def _get_file_not_found_error(file_path):
     return 'File not found on disk'
 
 
+from api.content_guard import VOUCHED_KEY as _CONTENT_GUARD_VOUCHED  # noqa: E402
+
+
 @app.route('/api/library/play', methods=['POST'])
 def library_play_track():
     """Start playing a track directly from the user's library (no download needed)."""
@@ -10615,7 +10667,11 @@ def library_play_track():
                 "file_path": None if stream_url else file_path,
                 "stream_url": stream_url,
                 "error_message": None,
-                "is_library": True
+                "is_library": True,
+                # the kids guard checked this exact file before the route
+                # ran; /stream/audio serves it to them only while it's still
+                # what the session plays
+                _CONTENT_GUARD_VOUCHED: stream_url or file_path,
             })
 
         return jsonify({"success": True, "message": "Library track ready for playback"})
@@ -10637,7 +10693,7 @@ def library_log_play():
         from core.playback.play_log import build_play_event
         data = request.get_json(silent=True) or {}
         track = data.get('track') or data
-        played_at = datetime.now().isoformat()
+        played_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         duration_ms = data.get('duration_ms', 0)
         event = build_play_event(track, played_at, duration_ms)
         if not event:
@@ -13961,6 +14017,8 @@ def _apply_path_template(template: str, context: dict) -> str:
         'year': str(clean_context.get('year', '')),
         'quality': clean_context.get('quality', ''),
         'disambiguation': clean_context.get('disambiguation', ''),
+        # #1536: recording disambiguation, distinct from the album's $disambiguation.
+        'track_disambiguation': clean_context.get('track_disambiguation', ''),
     }
     for var_name, val in _bracket_map.items():
         result = result.replace('${' + var_name + '}', val)
@@ -13980,6 +14038,9 @@ def _apply_path_template(template: str, context: dict) -> str:
     result = result.replace('$artist', clean_context.get('artist', 'Unknown Artist'))
     result = result.replace('$album', clean_context.get('album', 'Unknown Album'))
     result = result.replace('$title', clean_context.get('title', 'Unknown Track'))
+    # $track_disambiguation must replace before $track: it starts with $track,
+    # so the shorter replace would otherwise eat its prefix.
+    result = result.replace('$track_disambiguation', clean_context.get('track_disambiguation', ''))
     # $cdnum must replace before $track to avoid conflict with variables that
     # start with "$c" — no such variable exists today but this ordering
     # mirrors the "longest first" rule used throughout this function.
@@ -15332,6 +15393,7 @@ def _build_post_processing_deps():
         enhance_file_metadata=_enhance_file_metadata,
         wipe_source_tags=_wipe_source_tags,
         post_process_with_verification=_post_process_matched_download_with_verification,
+        process_release_file=_post_process_matched_download,
         mark_task_completed=_mark_task_completed,
         on_download_completed=_on_download_completed,
     )
@@ -16987,8 +17049,11 @@ def get_server_playlists():
                     'owner': getattr(pl, 'owner', None)}
 
         others = []
+        server_admin = []
         if scope.is_admin:
-            mine, groups = admin_split(active_server, base, get_database())
+            mine, admin_groups, groups = admin_split(active_server, base, get_database())
+            server_admin = [{'owner': grp['owner'], 'profile': grp['profile'],
+                             'playlists': [_row(p) for p in grp['playlists']]} for grp in admin_groups]
             others = [{'owner': grp['owner'], 'profile': grp['profile'],
                        'playlists': [_row(p) for p in grp['playlists']]} for grp in groups]
         else:
@@ -16997,6 +17062,7 @@ def get_server_playlists():
             "success": True,
             "server_type": active_server,
             "playlists": [_row(p) for p in mine],
+            "server_admin": server_admin,
             "others": others,
             "scope": 'admin' if scope.is_admin else ('own' if scope.acting_as else 'shared'),
             "acting_as": scope.acting_as,
@@ -19213,6 +19279,7 @@ from core.discovery.endpoints import (  # noqa: E402
     playlist_name_attr_or_unknown as _pl_name_attr_or_unknown,
     playlist_name_strict as _pl_name_strict,
     playlist_name_safe as _pl_name_safe,
+    source_skipped_counts as _source_skipped_counts,
 )
 
 # ── per-source playlist systems live in api/source_playlists.py now ──────────
@@ -22583,7 +22650,8 @@ _cfg_autom(get_database_=get_database, config_manager_=config_manager,
 app.register_blueprint(_bp_autom())
 # Login/session endpoints (api/login.py).
 from api.login import configure as _cfg_login, create_blueprint as _bp_login
-_cfg_login(get_database_=get_database)
+_cfg_login(get_database_=get_database, config_manager_=config_manager,
+           get_plex_client_=lambda: media_server_engine.client('plex') if media_server_engine else None)
 app.register_blueprint(_bp_login())
 # Quarantine review endpoints (api/quarantine.py).
 from api.quarantine import configure as _cfg_quar, create_blueprint as _bp_quar
@@ -22601,41 +22669,34 @@ app.register_blueprint(_bp_quar())
 # Download-client hub - the Clients tab on the downloads page (api/clients.py).
 def _client_known_items():
     """What SoulSync itself dispatched, per client, so hub rows can say what
-    they are. Video side keys off video_downloads.client_ref (torrent hash /
-    nzo id) or (username, filename) for soulseek grabs; music side off the
-    in-memory download_tasks. Best effort - a broken half never hides the
-    other's labels."""
-    known = {'torrent': {}, 'usenet': {}, 'slskd': {}}
-    try:
+    they are (and the clients tab only offers match & import on the rest).
+    Composed in core/client_match.py; this only hands it the live sources."""
+    from core.client_match import compose_known
+
+    def _video_rows():
         from api.video import get_video_db
-        for dl in get_video_db().list_video_downloads(limit=200):
-            if not isinstance(dl, dict):
-                continue
-            label = {'kind': dl.get('kind') or 'video',
-                     'title': dl.get('title') or dl.get('release_title') or ''}
-            ref = str(dl.get('client_ref') or '').strip()
-            source = dl.get('source')
-            if source == 'torrent' and ref:
-                known['torrent'][ref.lower()] = label
-            elif source == 'usenet' and ref:
-                known['usenet'][ref] = label
-            elif source == 'soulseek' and dl.get('username') and dl.get('filename'):
-                known['slskd'][(dl['username'], dl['filename'])] = label
-    except Exception as _vk_exc:
-        logger.debug(f"[Clients] video known-items unavailable: {_vk_exc}")
-    try:
+        return get_video_db().list_video_downloads(limit=200)
+
+    def _music_tasks():
         with tasks_lock:
-            tasks_snapshot = [t for t in download_tasks.values() if isinstance(t, dict)]
-        for t in tasks_snapshot:
-            username, filename = t.get('username'), t.get('filename')
-            if not username or not filename:
-                continue
-            ti = t.get('track_info') if isinstance(t.get('track_info'), dict) else {}
-            known['slskd'][(username, filename)] = {
-                'kind': 'track', 'title': ti.get('name') or t.get('track_name') or ''}
-    except Exception as _mk_exc:
-        logger.debug(f"[Clients] music known-items unavailable: {_mk_exc}")
-    return known
+            return [t for t in download_tasks.values() if isinstance(t, dict)]
+
+    def _audiobook_rows():
+        from core.audiobook_database import get_audiobook_db
+        return get_audiobook_db().get_downloads()
+
+    def _music_match_rows():
+        from core.client_match import music_store
+        return music_store().recent()
+
+    return compose_known(
+        video_rows=_video_rows,
+        music_tasks=_music_tasks,
+        audiobook_rows=_audiobook_rows,
+        torrent_plugin=lambda: download_orchestrator.client('torrent'),
+        usenet_plugin=lambda: download_orchestrator.client('usenet'),
+        music_matches=_music_match_rows,
+    )
 
 from api.clients import configure as _cfg_cl, create_blueprint as _bp_cl
 # the orchestrator, NOT SoulseekClient - web_server never binds a global
@@ -22743,6 +22804,11 @@ _cfg_mpl(
 )
 app.register_blueprint(_bp_mpl())
 
+# user playlists (made inside soulsync, stored as mirrored playlists)
+from api.user_playlists import configure as _cfg_upl, create_blueprint as _bp_upl
+_cfg_upl(get_database=get_database)
+app.register_blueprint(_bp_upl())
+
 # beatport chart discovery/sync (rides the source_playlists spine)
 from api.beatport_charts import configure as _cfg_bpc, create_blueprint as _bp_bpc
 _cfg_bpc(
@@ -22796,20 +22862,47 @@ from core.sample.worker import configure as _cfg_sample
 _cfg_sample(config_manager_=config_manager,
             resolve_path_fn=_resolve_library_file_path, warm=False)
 
+def _start_music_video_request_download(data):
+    """Starter for approved music video requests: takes the request data dict,
+    validates the music videos path, and kicks off the download.
+    Returns a dict (with optional 'error'/'code') like the download route."""
+    video_id = str(data.get('video_id') or '')
+    url = str(data.get('url') or '')
+    if not video_id or not url:
+        return {"error": "Missing video_id or url", "code": 400}
+    if _music_video.is_in_flight(video_id):
+        return {"error": "Already downloading", "code": 409}
+    music_videos_path = config_manager.get('library.music_videos_path', '') or ''
+    if not music_videos_path.strip():
+        return {"error": "Music Videos directory not configured. Set it in Settings > Downloads.", "code": 400}
+    music_videos_path = config_root_path(music_videos_path)
+    try:
+        os.makedirs(music_videos_path, exist_ok=True)
+        test_file = os.path.join(music_videos_path, '.soulsync_write_test')
+        with open(test_file, 'w') as f:
+            f.write('test')
+        os.remove(test_file)
+    except (OSError, PermissionError) as e:
+        return {"error": f"Music Videos directory is not writable: {e}", "code": 400}
+    # Build the data dict the download pipeline expects
+    dl_data = {
+        "video_id": video_id,
+        "url": url,
+        "title": data.get("title") or "",
+        "channel": data.get("channel") or "",
+        "thumbnail": data.get("thumbnail") or data.get("thumbnail_url") or "",
+    }
+    result = _music_video.start(dl_data, music_videos_path, _music_video_deps())
+    return result or {}
+
 # music requests: what a profile without download rights asked for
 from api.music_requests import configure as _cfg_mr, create_blueprint as _bp_mr
-_cfg_mr(get_database=get_database)
+_cfg_mr(get_database=get_database, start_music_video=_start_music_video_request_download)
 app.register_blueprint(_bp_mr())
 
 # kids profiles: explicit music can't play and drops out of search/tracklists
 from api.content_guard import register as _reg_content_guard
-def _stream_is_library():
-    sess = _current_stream_state()
-    with sess.lock:
-        return bool(sess.get("is_library")) and sess.get("status") == "ready"
-
-
-_reg_content_guard(app, get_database=get_database, stream_is_library=_stream_is_library)
+_reg_content_guard(app, get_database=get_database, get_stream_state=_current_stream_state)
 
 # profile housekeeping: admin audit log, sign out everywhere, invites, avatars
 from api.profile_admin import configure as _cfg_pa, create_blueprint as _bp_pa
@@ -22937,6 +23030,12 @@ app.register_blueprint(_create_podcasts_blueprint())
 # never touches the music worker pool, wishlist or batches)
 from api.audiobooks import create_audiobooks_blueprint as _create_audiobooks_blueprint
 app.register_blueprint(_create_audiobooks_blueprint())
+
+# Sidebar weather (api/sidebar_weather.py): opt-in Open-Meteo fetch with a
+# 30-min lazy cache. Blank weather.location = feature off.
+from api.sidebar_weather import configure as _cfg_sw, create_blueprint as _bp_sw
+_cfg_sw(config_manager=config_manager)
+app.register_blueprint(_bp_sw())
 
 # NOTE: the audiobook wishlist is NOT started here. It is drained by the shared
 # automation engine as the 'audiobook_process_wishlist' system automation, the same
@@ -23342,6 +23441,14 @@ _register_library_v2_routes(
     integrity_report_runner=_run_library_v2_integrity_report,
 )
 
+# Clients-tab music matches waiting on their download: resume following them at
+# boot. It stops by itself when nothing is pending.
+try:
+    from core.client_match import ensure_watcher as _ensure_client_match_watcher
+    _ensure_client_match_watcher(app)
+except Exception:
+    logger.warning("could not start the clients-tab match watcher at boot", exc_info=True)
+
 
 def _emit_rate_monitor_loop():
     """Background thread that pushes API call rate data every 1 second for speedometer gauges.
@@ -23460,7 +23567,8 @@ def _emit_enrichment_status_loop():
                     w.paused = True
                     _download_auto_paused.add(name)
                     _auto_yield_cause[name] = reason
-                    logger.debug(f"Auto-paused {name} during active {reason}")
+                    # once per pause (guarded by `not w.paused`), so it can be info
+                    logger.info(f"Auto-paused {name} during active {reason}")
                 elif not reason and name in _download_auto_paused:
                     # Don't override an explicit user pause. If config says the worker
                     # was paused via the UI, leave it paused and just drop the auto-pause
@@ -23885,6 +23993,9 @@ def _emit_discovery_progress_loop():
                             'results': state.get('discovery_results', state.get('results', [])),
                             'complete': state.get('phase') == 'discovered',
                         }
+                        skipped = _source_skipped_counts(state)
+                        if skipped:
+                            payload['source_skipped'] = skipped
                         socketio.emit('discovery:progress', payload, room=f'discovery:{pid}')
                     except Exception as e:
                         logger.debug("discovery progress emit failed: %s", e)

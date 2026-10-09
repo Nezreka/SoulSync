@@ -34,6 +34,8 @@ const SOURCE_ICON_CLASSES: Readonly<Record<string, string>> = {
   soulsync_discovery: 'soulsync-discovery-icon',
   'soulsync-discovery-sync': 'soulsync-discovery-icon',
   mirrored: 'mirrored-icon',
+  soulsync: 'my-playlists-icon',
+  'my-playlists': 'my-playlists-icon',
   file: 'import-file-icon',
   'import-file': 'import-file-icon',
 };

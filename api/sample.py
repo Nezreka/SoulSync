@@ -152,6 +152,20 @@ def search_library_tracks(q=None, title="", artist="", limit=50):
     return _merge_track_rows([rows], limit)
 
 
+def recent_library_tracks(limit=50):
+    """Newest tracks in the library, for the Sample Studio panel before a search.
+
+    the panel used to ask /api/library/recently-added for these, but that
+    path belongs to the dashboard's album rail, so the empty panel always
+    said search failed.
+    """
+    from api.serializers import serialize_track
+
+    limit = max(1, min(int(limit or 50), 200))
+    rows = get_database().api_get_recently_added(entity_type="tracks", limit=limit)
+    return [serialize_track(row) for row in rows]
+
+
 def fetch_analysis(track_id: int, retry: bool = False):
     """Cached analysis row, or enqueue + return pending status.
 

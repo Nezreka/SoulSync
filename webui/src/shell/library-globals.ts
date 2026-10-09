@@ -467,7 +467,18 @@ export async function playLibraryTrack(
       }),
     });
 
-    const result = (await response.json()) as { success?: boolean; error?: string };
+    const result = (await response.json()) as {
+      success?: boolean;
+      error?: string;
+      restricted?: boolean;
+    };
+    if (result.restricted) {
+      // this profile can't play it (kids limits). the shared fetch hook
+      // already said so; a streaming fallback would only be refused too
+      hideLoadingAnimation();
+      clearTrack();
+      return;
+    }
     if (!result.success) {
       // File not on disk - fall back to streaming from configured source
       console.warn('Library file not found, falling back to stream source');

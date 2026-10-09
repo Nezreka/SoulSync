@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import { AddToPlaylistButton } from '@/features/playlists/add-to-playlist';
 import { getShellBridge } from '@/platform/shell/bridge';
 import { profileAsksFirst } from '@/platform/shell/download-rights';
 
@@ -130,6 +131,15 @@ export function TopTracksSidebar({ artistId, artistName }: Props) {
             <span className="hero-top-track-name" title={track.name}>
               {track.name}
             </span>
+            <AddToPlaylistButton
+              track={{
+                track_name: track.name ?? '',
+                // the main artist, not the joined credit: identify matches on it
+                artist_name: track.artists?.[0]?.name || artistName,
+              }}
+              className="hero-top-track-add"
+              size={12}
+            />
             {state.downloadable ? (
               <button
                 type="button"

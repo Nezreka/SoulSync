@@ -26,14 +26,40 @@ logger = get_logger("api.login")
 # clears only the account that succeeded, so signing in as yourself no longer
 # resets your guesses at someone else's.
 login_limiter = TargetedLimiter(max_attempts=10, window_seconds=300)
+# every plex sign-in start is an outbound call to plex.tv that makes a pin
+# under this install's client id. counted per ip on EVERY start, not just
+# failures, so nobody can make the server spray pins (plex.tv would throttle
+# the client id for everyone)
+plex_start_limiter = TargetedLimiter(max_attempts=8, window_seconds=300)
+# a browser polls /check about every 1.5s; faster than this is answered
+# "pending" without asking plex.tv
+_PLEX_CHECK_MIN_INTERVAL = 1.0
 
 # injected by configure()
 get_database = None
+config_manager = None
+get_plex_client = None
 
 
-def configure(*, get_database_):
-    global get_database
+def configure(*, get_database_, config_manager_=None, get_plex_client_=None):
+    global get_database, config_manager, get_plex_client
     get_database = get_database_
+    config_manager = config_manager_
+    get_plex_client = get_plex_client_
+
+
+def _complete_sign_in(database, profile_id):
+    """the session a successful sign-in gets, password or plex alike"""
+    session['login_authenticated'] = True
+    session['profile_id'] = profile_id
+    # the epoch this sign-in counts under ("sign out everywhere" moves it)
+    session['profile_epoch'] = (database.get_profile(profile_id) or {}).get('session_epoch', 0)
+    from core.security.devices import start_device
+    start_device(session, database.add_profile_device, profile_id,
+                 request.headers.get('User-Agent', ''), request.remote_addr or '')
+    session['device_owner'] = profile_id
+    # A fresh login also clears any stale launch-PIN flag.
+    session.pop('launch_pin_verified', None)
 
 
 bp = Blueprint('login', __name__)
@@ -67,21 +93,103 @@ def auth_login():
             return jsonify({'success': False, 'error': 'Invalid username or password'}), 401
 
         login_limiter.record_success(_ip, username)
-        session['login_authenticated'] = True
-        session['profile_id'] = profile['id']
-        # the epoch this sign-in counts under ("sign out everywhere" moves it)
-        session['profile_epoch'] = (database.get_profile(profile['id']) or {}).get('session_epoch', 0)
-        from core.security.devices import start_device
-        start_device(session, database.add_profile_device, profile['id'],
-                     request.headers.get('User-Agent', ''), request.remote_addr or '')
-        session['device_owner'] = profile['id']
-        # A fresh login also clears any stale launch-PIN flag.
-        session.pop('launch_pin_verified', None)
+        _complete_sign_in(database, profile['id'])
         return jsonify({'success': True, 'profile': {
             'id': profile['id'], 'name': profile['name'], 'is_admin': profile['is_admin'],
         }})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _plex_signin_enabled():
+    return bool(config_manager and config_manager.get('security.plex_signin', False))
+
+
+@bp.route('/api/auth/plex/available', methods=['GET'])
+def plex_signin_available():
+    """whether the login screen offers sign in with plex"""
+    return jsonify({'success': True, 'enabled': _plex_signin_enabled()})
+
+
+@bp.route('/api/auth/plex/start', methods=['POST'])
+def plex_signin_start():
+    """a plex pin for this browser, and plex's page to approve it. the pin
+    is remembered in this session only, so nobody else can claim it"""
+    if not _plex_signin_enabled():
+        return jsonify({'success': False, 'error': 'Plex sign-in is turned off'}), 403
+    _ip = request.remote_addr or 'unknown'
+    _now = time.time()
+    _locked, _retry_after = plex_start_limiter.is_locked(_ip, '<plex>', _now)
+    if _locked:
+        return (jsonify({'success': False, 'error': 'Too many attempts — please wait and try again'}),
+                429, {'Retry-After': str(_retry_after)})
+    plex_start_limiter.record_failure(_ip, '<plex>', _now)  # every start counts
+    try:
+        from core.security import plex_signin
+        cid = plex_signin.client_identifier(config_manager)
+        pin = plex_signin.start_pin(cid)
+        session['plex_signin_pin'] = pin['id']
+        session.pop('plex_signin_checked_at', None)
+        return jsonify({'success': True, 'url': pin['url']})
+    except Exception as e:
+        logger.error(f"Plex sign-in could not start: {e}")
+        return jsonify({'success': False, 'error': "Couldn't reach Plex. Try again in a moment."}), 502
+
+
+@bp.route('/api/auth/plex/check', methods=['POST'])
+def plex_signin_check():
+    """poll the session's pin. pending until the user approves it on plex,
+    then signed in (or told why not)"""
+    if not _plex_signin_enabled():
+        return jsonify({'success': False, 'error': 'Plex sign-in is turned off'}), 403
+    pin_id = session.get('plex_signin_pin')
+    if not pin_id:
+        return jsonify({'success': False, 'error': 'Start Plex sign-in first'}), 400
+    _now = time.time()
+    if _now - float(session.get('plex_signin_checked_at') or 0) < _PLEX_CHECK_MIN_INTERVAL:
+        return jsonify({'success': True, 'pending': True})
+    session['plex_signin_checked_at'] = _now
+    try:
+        import requests as _requests
+        from core.security import plex_signin
+        cid = plex_signin.client_identifier(config_manager)
+        try:
+            account_token = plex_signin.check_pin(cid, pin_id)
+        except _requests.HTTPError as e:
+            if getattr(e.response, 'status_code', None) == 404:
+                # plex pins expire: start over
+                session.pop('plex_signin_pin', None)
+                return jsonify({'success': False, 'error': 'Plex sign-in expired. Try again.'}), 410
+            logger.warning(f"Plex sign-in check failed, will retry: {e}")
+            return jsonify({'success': True, 'pending': True})
+        except _requests.RequestException as e:
+            # a blip talking to plex.tv: keep waiting, the next poll retries
+            logger.warning(f"Plex sign-in check failed, will retry: {e}")
+            return jsonify({'success': True, 'pending': True})
+        if not account_token:
+            return jsonify({'success': True, 'pending': True})
+        session.pop('plex_signin_pin', None)
+        plex = get_plex_client() if get_plex_client else None
+        machine = plex_signin.server_machine_id(plex)
+        if not machine:
+            return jsonify({'success': False, 'error': "SoulSync isn't connected to a Plex server"}), 503
+        account = plex_signin.resolve_account(account_token, machine)
+        database = get_database()
+        result = plex_signin.sign_in(
+            database, account,
+            allow_create=bool(config_manager.get('security.plex_signin_auto_create', True)),
+            default_can_download=bool(config_manager.get('security.plex_signin_default_can_download', False)),
+        )
+        if result.error:
+            return jsonify({'success': False, 'error': result.error}), 403
+        _complete_sign_in(database, result.profile_id)
+        profile = database.get_profile(result.profile_id) or {}
+        return jsonify({'success': True, 'pending': False, 'created': result.created, 'profile': {
+            'id': result.profile_id, 'name': profile.get('name'), 'is_admin': bool(profile.get('is_admin')),
+        }})
+    except Exception as e:
+        logger.error(f"Plex sign-in failed: {e}")
+        return jsonify({'success': False, 'error': "Plex sign-in failed. Try again."}), 502
 
 
 @bp.route('/api/auth/logout', methods=['POST'])

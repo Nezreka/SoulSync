@@ -695,7 +695,7 @@ function showWitnessMeDialog(orphanCount) {
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
 
         overlay.innerHTML = `
-            <div style="background:var(--bg-secondary, #1e1e2e);border:2px solid #e74c3c;border-radius:12px;padding:28px;max-width:480px;width:90%;color:var(--text-primary, #fff);font-family:inherit;">
+            <div style="background:var(--bg-secondary, #1e1e2e);border:2px solid #e74c3c;border-radius:12px;padding:28px;max-width:480px;width:90%;color:var(--text-primary);font-family:inherit;">
                 <h3 style="margin:0 0 8px;color:#e74c3c;font-size:1.2em;">Mass Deletion Warning</h3>
                 <p style="margin:0 0 12px;font-size:0.95em;opacity:0.9;">
                     You are about to <strong>permanently delete ${orphanCount.toLocaleString()} files</strong> from your disk.
@@ -709,9 +709,9 @@ function showWitnessMeDialog(orphanCount) {
                 </p>
                 <input type="text" id="witness-me-input" autocomplete="off" spellcheck="false"
                        placeholder="Type the phrase here..."
-                       style="width:100%;padding:10px;border:1px solid #555;border-radius:6px;background:var(--bg-primary, #111);color:var(--text-primary, #fff);font-size:1em;margin:8px 0 16px;box-sizing:border-box;">
+                       style="width:100%;padding:10px;border:1px solid #555;border-radius:6px;background:#111;color:var(--text-primary);font-size:1em;margin:8px 0 16px;box-sizing:border-box;">
                 <div style="display:flex;gap:10px;justify-content:flex-end;">
-                    <button id="witness-cancel" style="padding:8px 20px;border:1px solid #555;border-radius:6px;background:transparent;color:var(--text-primary, #fff);cursor:pointer;font-size:0.9em;">
+                    <button id="witness-cancel" style="padding:8px 20px;border:1px solid #555;border-radius:6px;background:transparent;color:var(--text-primary);cursor:pointer;font-size:0.9em;">
                         Cancel
                     </button>
                     <button id="witness-confirm" disabled
@@ -1025,9 +1025,15 @@ function initializeWebSocket() {
     // 'tool:stream' is intentionally NOT wired: stream state is per-listener
     // (session cookie), so the global broadcast could only carry the DEFAULT
     // session's eternal "stopped" — the player polls /api/stream/status instead.
-    socket.on('tool:duplicate-cleaner', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateDuplicateCleanProgressFromData(data); });
-    socket.on('tool:db-update', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateDbProgressFromData(data); });
-    socket.on('tool:metadata', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateMetadataStatusFromData(data); });
+    // The Tools page is React now and each of these cards polls its own
+    // status and renders it. The old vanilla writers still targeted the same
+    // element ids, so two writers took turns on one card: the db updater's
+    // progress line flipped between "tracks" (React) and a hardcoded
+    // "artists" (vanilla) every second during the tag reconcile. Only the
+    // quick-access signal stays here.
+    socket.on('tool:duplicate-cleaner', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); });
+    socket.on('tool:db-update', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); });
+    socket.on('tool:metadata', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); });
     socket.on('tool:logs', (data) => updateLogsFromData(data));
 
     // Phase 5 event listeners (sync/discovery progress + scans)

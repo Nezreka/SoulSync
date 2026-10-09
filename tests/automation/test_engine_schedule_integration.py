@@ -492,6 +492,46 @@ def test_airing_automation_migration_is_idempotent():
     db2.update_automation.assert_not_called()
 
 
+def test_airing_migration_preserves_hand_tuned_trigger():
+    # a user who changed the airing automation to weekly_time must NOT get it
+    # silently rewritten to daily 01:00 on boot
+    db = MagicMock()
+    db.get_system_automation_by_action.return_value = {
+        'id': 42, 'is_system': 1, 'trigger_type': 'weekly_time',
+        'trigger_config': json.dumps({'time': '09:00', 'days': ['sun']})}
+    AutomationEngine(db)._fix_airing_automation_schedule()
+    db.update_automation.assert_not_called()
+
+
+def test_airing_migration_ignores_non_24h_schedule():
+    # a schedule row that isn't the old 24h shape (hand-tuned interval) stays
+    db = MagicMock()
+    db.get_system_automation_by_action.return_value = {
+        'id': 42, 'is_system': 1, 'trigger_type': 'schedule',
+        'trigger_config': json.dumps({'interval': 12, 'unit': 'hours'})}
+    AutomationEngine(db)._fix_airing_automation_schedule()
+    db.update_automation.assert_not_called()
+
+
+def test_deep_scan_migration_preserves_hand_tuned_trigger():
+    # a user who changed a deep scan to daily_time must NOT get it rewritten
+    db = MagicMock()
+    db.get_system_automation_by_action.side_effect = lambda a: {
+        'id': 7, 'is_system': 1, 'trigger_type': 'daily_time',
+        'trigger_config': json.dumps({'time': '04:00'})}
+    AutomationEngine(db)._fix_deep_scan_schedules()
+    db.update_automation.assert_not_called()
+
+
+def test_deep_scan_migration_ignores_non_7d_schedule():
+    db = MagicMock()
+    db.get_system_automation_by_action.side_effect = lambda a: {
+        'id': 7, 'is_system': 1, 'trigger_type': 'schedule',
+        'trigger_config': json.dumps({'interval': 3, 'unit': 'days'})}
+    AutomationEngine(db)._fix_deep_scan_schedules()
+    db.update_automation.assert_not_called()
+
+
 def test_deep_scans_migrate_to_fixed_weekly_times():
     """The two video deep scans move from a rolling 7-day interval to fixed weekly
     times — TV Mondays 02:00, Movies Tuesdays 02:00."""
@@ -590,3 +630,174 @@ def test_rss_sync_cadence_migration_leaves_custom_rows_alone():
         'trigger_config': json.dumps({'interval': 5, 'unit': 'minutes'})}
     AutomationEngine(db)._fix_rss_sync_cadence()
     db.update_automation.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Fix 7: the seeder's interval branch is gated on trigger_type == 'schedule'.
+# A timed spec (daily_time etc.) with initial_delay must NOT take the
+# last_run/interval path — _calc_delay_seconds({'time': '03:30'}) yields a
+# meaningless 3600, causing duplicate runs after restart.
+# ---------------------------------------------------------------------------
+
+
+def test_no_timed_spec_carries_initial_delay():
+    from core.automation_engine import SYSTEM_AUTOMATIONS
+    timed = {'daily_time', 'weekly_time', 'monthly_time'}
+    bad = [s['name'] for s in SYSTEM_AUTOMATIONS
+           if s.get('trigger_type') in timed and s.get('initial_delay') is not None]
+    assert bad == [], f"timed specs must not set initial_delay (interval-path trap): {bad}"
+
+
+def test_seeder_routes_timed_spec_with_initial_delay_to_schedule_path(monkeypatch):
+    # regression: if someone puts initial_delay on a daily_time spec again,
+    # the seeder must take the timed path (next_run_at), not the interval path.
+    # deterministic: next_run_at is stubbed, so no wall-clock dependence.
+    from datetime import datetime, timezone
+    from unittest.mock import MagicMock
+    import core.automation_engine as eng
+
+    spec = {
+        'name': 'Synthetic Daily', 'trigger_type': 'daily_time',
+        'trigger_config': {'time': '03:30'}, 'action_type': 'synthetic_daily',
+        'initial_delay': 1500,  # the trap: must be ignored for timed triggers
+    }
+    monkeypatch.setattr(eng, 'SYSTEM_AUTOMATIONS', [spec])
+
+    sentinel = datetime(2030, 5, 6, 3, 30, tzinfo=timezone.utc)
+    seen = {}
+    def fake_next_run_at(trigger_type, trigger_config, **kw):
+        seen['trigger_type'] = trigger_type
+        seen['trigger_config'] = trigger_config
+        return sentinel
+    monkeypatch.setattr(eng, 'next_run_at', fake_next_run_at)
+
+    db_mock = MagicMock()
+    db_mock.get_system_automation_by_action.side_effect = [
+        None, {'id': 99, 'next_run': None, 'last_run': None, 'last_error': None}]
+    db_mock.create_automation.return_value = 99
+    engine = eng.AutomationEngine(db_mock)
+    for name in ('_fix_video_scan_default', '_fix_airing_automation_schedule',
+                 '_fix_deep_scan_schedules', '_fix_wishlist_processor_rename',
+                 '_fix_rss_sync_cadence', '_fix_orphaned_system_actions'):
+        monkeypatch.setattr(engine, name, lambda: None)
+
+    engine.ensure_system_automations()
+
+    # the timed path was taken: next_run_at called with the spec's schedule
+    assert seen.get('trigger_type') == 'daily_time'
+    assert seen.get('trigger_config') == {'time': '03:30'}
+    # and next_run was armed from its return (not now+1500s)
+    armed = [c.kwargs['next_run'] for c in db_mock.update_automation.call_args_list
+             if c.args[0] == 99 and 'next_run' in (c.kwargs or {})]
+    assert armed, "seeder should have armed next_run for the timed spec"
+    assert armed[0] == '2030-05-06 03:30:00' 
+
+
+# ---------------------------------------------------------------------------
+# Fix 9: refresh staleness — zero-show stamps, stale catch-up on boot.
+# ---------------------------------------------------------------------------
+
+
+def test_refresh_stale_catchup_arms_soon_run_when_stale(monkeypatch):
+    from unittest.mock import MagicMock
+    import core.automation_engine as eng
+
+    db_mock = MagicMock()
+    db_mock.get_system_automation_by_action.return_value = {
+        'id': 55, 'enabled': 1, 'next_run': None}
+    # video DB says 30 days old (well past the 24h catch-up threshold)
+    fake_video_db = MagicMock()
+    fake_video_db.calendar_schedule_freshness.return_value = {
+        'refreshed_at': '2020-01-01 00:00:00', 'stale': True, 'age_days': 30}
+    monkeypatch.setattr('api.video.get_video_db', lambda: fake_video_db)
+
+    engine = eng.AutomationEngine(db_mock)
+    engine._fix_refresh_stale_catchup()
+
+    db_mock.update_automation.assert_called_once()
+    args, kwargs = db_mock.update_automation.call_args
+    assert args[0] == 55
+    # next_run is ~5 min from now, not the next 23:00 slot
+    from datetime import datetime, timezone
+    nr_dt = datetime.strptime(kwargs['next_run'], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+    delta = (nr_dt - datetime.now(timezone.utc)).total_seconds()
+    assert 0 < delta < 600, f"catch-up should be soon, got {kwargs['next_run']}"
+
+
+def test_refresh_catchup_threshold_is_24h_not_7d(monkeypatch):
+    # the catch-up threshold (~24h, missed daily run) is INDEPENDENT of the
+    # 7-day UI staleness flag. 33h old (slept through 23:00) must catch up;
+    # 12h old must not.
+    from unittest.mock import MagicMock
+    import core.automation_engine as eng
+
+    for age_days, should_catch_up in [(1.375, True), (0.5, False), (None, True)]:
+        db_mock = MagicMock()
+        db_mock.get_system_automation_by_action.return_value = {
+            'id': 55, 'enabled': 1, 'next_run': None}
+        fake_video_db = MagicMock()
+        fake_video_db.calendar_schedule_freshness.return_value = {
+            'refreshed_at': '2020-01-01 00:00:00',
+            'stale': (age_days or 999) > 7, 'age_days': age_days}
+        monkeypatch.setattr('api.video.get_video_db', lambda: fake_video_db)
+
+        eng.AutomationEngine(db_mock)._fix_refresh_stale_catchup()
+        if should_catch_up:
+            db_mock.update_automation.assert_called_once()
+        else:
+            db_mock.update_automation.assert_not_called()
+        db_mock.reset_mock()
+
+
+def test_refresh_stale_catchup_skips_when_fresh(monkeypatch):
+    from unittest.mock import MagicMock
+    import core.automation_engine as eng
+
+    db_mock = MagicMock()
+    db_mock.get_system_automation_by_action.return_value = {
+        'id': 55, 'enabled': 1, 'next_run': None}
+    fake_video_db = MagicMock()
+    fake_video_db.calendar_schedule_freshness.return_value = {
+        'refreshed_at': '2030-01-01 00:00:00', 'stale': False, 'age_days': 0.1}
+    monkeypatch.setattr('api.video.get_video_db', lambda: fake_video_db)
+
+    eng.AutomationEngine(db_mock)._fix_refresh_stale_catchup()
+    db_mock.update_automation.assert_not_called()
+
+
+def test_refresh_stale_catchup_does_not_clobber_imminent_next_run(monkeypatch):
+    # a run ~30 min out is about to happen anyway — let it, don't re-arm
+    from unittest.mock import MagicMock
+    from datetime import datetime, timezone, timedelta
+    import core.automation_engine as eng
+
+    soon = (datetime.now(timezone.utc) + timedelta(minutes=30)).strftime('%Y-%m-%d %H:%M:%S')
+    db_mock = MagicMock()
+    db_mock.get_system_automation_by_action.return_value = {
+        'id': 55, 'enabled': 1, 'next_run': soon}
+    fake_video_db = MagicMock()
+    fake_video_db.calendar_schedule_freshness.return_value = {
+        'refreshed_at': None, 'stale': True, 'age_days': 30}
+    monkeypatch.setattr('api.video.get_video_db', lambda: fake_video_db)
+
+    eng.AutomationEngine(db_mock)._fix_refresh_stale_catchup()
+    db_mock.update_automation.assert_not_called()
+
+
+def test_refresh_catchup_fires_after_failed_run_distant_next_run(monkeypatch):
+    # the audit's "(or the 23:00 run failed)" case: a failed run still advances
+    # next_run by a full day, so a distant future next_run + stale stamp must
+    # NOT suppress the catch-up
+    from unittest.mock import MagicMock
+    import core.automation_engine as eng
+
+    db_mock = MagicMock()
+    db_mock.get_system_automation_by_action.return_value = {
+        'id': 55, 'enabled': 1, 'next_run': '2030-01-01 23:00:00'}
+    fake_video_db = MagicMock()
+    fake_video_db.calendar_schedule_freshness.return_value = {
+        'refreshed_at': '2020-01-01 00:00:00', 'stale': True, 'age_days': 30}
+    monkeypatch.setattr('api.video.get_video_db', lambda: fake_video_db)
+
+    eng.AutomationEngine(db_mock)._fix_refresh_stale_catchup()
+    db_mock.update_automation.assert_called_once()

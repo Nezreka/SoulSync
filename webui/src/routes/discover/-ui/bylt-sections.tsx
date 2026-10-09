@@ -1,5 +1,7 @@
 import { useState } from 'react';
 
+import { AddToPlaylistButton } from '@/features/playlists/add-to-playlist';
+
 import type { ByltSection, ByltTrack } from '../-discover.bylt';
 
 import {
@@ -293,6 +295,11 @@ function ByltTrackRow({
             {pending ? '…' : '▶'}
           </button>
         ) : null}
+        <AddToPlaylistButton
+          track={{ track_name: row.title, artist_name: row.artist, album_name: row.album }}
+          className="btn btn--sm btn--secondary"
+          size={14}
+        />
         {onDownloadTrack && !row.owned ? (
           <button
             type="button"

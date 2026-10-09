@@ -1368,7 +1368,14 @@ class NavidromeClient(MediaServerClient):
                 elif hasattr(track, 'id'):
                     track_ids.append(str(track.id))
 
-            if not track_ids:
+            if not track_ids and playlist_id is None:
+                # #1543: allow creating an EMPTY playlist (new mirror with
+                # no library matches yet — tracks land on later syncs).
+                # The Subsonic createPlaylist accepts a name with no songIds.
+                # Emptying an EXISTING playlist via update is still refused;
+                # the sync service's zero-match guard owns that decision.
+                logger.info(f"Creating empty Navidrome playlist '{name}'")
+            elif not track_ids:
                 logger.warning(f"No valid tracks provided for playlist '{name}'")
                 return False
 
@@ -1544,6 +1551,51 @@ class NavidromeClient(MediaServerClient):
         except Exception as e:
             logger.error(f"Error fetching Navidrome playlist {playlist_id}: {e}")
             return None
+
+    def get_user(self, username: str) -> Optional[Dict[str, Any]]:
+        """Fetch a Navidrome user via Subsonic getUser.
+
+        Returns the user dict (with adminRole etc.) or None when the lookup
+        fails. Never raises.
+        """
+        if not username:
+            return None
+        if not self.ensure_connection():
+            return None
+        try:
+            response = self._make_request('getUser', {'username': str(username)})
+            user = (response or {}).get('user')
+            return user if isinstance(user, dict) else None
+        except Exception as e:  # noqa: BLE001 - lookup is best-effort
+            logger.debug("getUser failed for %r: %s", username, e)
+            return None
+
+    _ADMIN_ROLE_CACHE_TTL = 3600  # 1 hour
+
+    def is_server_admin(self, username: str) -> Optional[bool]:
+        """Whether a Navidrome user has the admin role.
+
+        Results are cached for an hour to avoid a getUser call per playlist
+        owner on every page load. Returns None when the role cannot be
+        determined (lookup failed) — callers should preserve existing
+        behavior in that case. Never raises.
+        """
+        if not username:
+            return None
+        cache = getattr(self, '_admin_role_cache', None)
+        if cache is None:
+            cache = {}
+            self._admin_role_cache = cache
+        now = time.time()
+        hit = cache.get(str(username).lower())
+        if hit is not None and now - hit[1] < self._ADMIN_ROLE_CACHE_TTL:
+            return hit[0]
+        user = self.get_user(username)
+        if user is None:
+            return None
+        is_admin = bool(user.get('adminRole'))
+        cache[str(username).lower()] = (is_admin, now)
+        return is_admin
 
     def _follow_playlist_id(
         self, playlist_name: str, playlist_id: Optional[str]

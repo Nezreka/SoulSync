@@ -125,14 +125,15 @@ def _run_batch(todo: List[Dict[str, Any]], media_type: str, *, all_sources: bool
 
 
 def manual_search(scope: str, tmdb_id, season_number=None, episode_number=None,
-                  *, all_sources: bool = False) -> Dict[str, Any]:
+                  *, all_sources: bool = False, profile_id: int = 1) -> Dict[str, Any]:
     """Kick a background search for one wished item (or a season/show of
     episodes). Returns immediately: {queued, skipped, total}. 'skipped' =
     already downloading / already being searched."""
     from api.video import get_video_db
     media_type = "movie" if scope == "movie" else "episode"
     items = get_video_db().wishlist_manual_search_items(
-        scope, tmdb_id, season_number=season_number, episode_number=episode_number)
+        scope, tmdb_id, season_number=season_number, episode_number=episode_number,
+        profile_id=profile_id)
     if not items:
         return {"queued": 0, "skipped": 0, "total": 0}
     todo = _prepare(items, media_type, user_initiated=True)
@@ -148,14 +149,21 @@ def manual_search(scope: str, tmdb_id, season_number=None, episode_number=None,
 
 def search_all() -> Dict[str, str]:
     """Run the full (gated) wishlist drain NOW for both kinds, in the background.
-    Per kind: 'started', 'busy' (a drain tick is already running), or 'empty'."""
+    Per kind: 'started', 'busy' (a drain tick is already running), or 'empty'.
+    Scoped to the requesting profile's wishlist — a user clicking "search all"
+    searches their own list, not everyone's."""
     from api.video import get_video_db
+    from core.profile_context import get_current_profile_id
     db = get_video_db()
+    try:
+        pid = int(get_current_profile_id() or 1)
+    except Exception:
+        pid = 1
     out: Dict[str, str] = {}
     # due_only=False: the user asked for everything NOW. Backoff paces the
     # machine's own hourly tick, it does not overrule a person clicking search.
-    for media_type, fetch in (("movie", lambda: db.movie_wishlist_to_download(due_only=False)),
-                              ("episode", lambda: db.episode_wishlist_to_download(due_only=False))):
+    for media_type, fetch in (("movie", lambda: db.movie_wishlist_to_download(due_only=False, profile_id=pid)),
+                              ("episode", lambda: db.episode_wishlist_to_download(due_only=False, profile_id=pid))):
         if vpw.is_running(media_type):
             out[media_type] = "busy"
             continue

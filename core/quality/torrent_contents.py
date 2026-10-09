@@ -67,6 +67,35 @@ def _text(raw: Any) -> str:
     return str(raw or '')
 
 
+def torrent_info_hash(payload: Optional[bytes]) -> Optional[str]:
+    """The v1 info-hash of a .torrent (sha1 of its raw ``info`` dict), or None.
+
+    It is what a torrent client calls the torrent, so it is how we ask whether
+    the client already holds this one. Hashed from the original bytes rather
+    than a re-encode, so a non-canonical .torrent still hashes the way the
+    client hashed it. Never raises, same contract as the rest of this module.
+    """
+    if not payload or not isinstance(payload, (bytes, bytearray)):
+        return None
+    if len(payload) > MAX_TORRENT_BYTES:
+        return None
+    data = bytes(payload)
+    try:
+        if data[:1] != b'd':
+            return None
+        index = 1
+        while data[index:index + 1] != b'e':
+            key, index = _decode(data, index)
+            start = index
+            _, index = _decode(data, index)
+            if key == b'info':
+                import hashlib
+                return hashlib.sha1(data[start:index]).hexdigest()
+    except Exception as e:
+        logger.debug("could not hash .torrent: %s", e)
+    return None
+
+
 def torrent_file_entries(payload: Optional[bytes]) -> Optional[List[Tuple[str, int]]]:
     """Every file inside a .torrent as ``(name, size_bytes)``, or None.
 

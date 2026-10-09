@@ -302,39 +302,85 @@ def _run_wishlist_cycle(
         residual_tracks = grouping.residual_tracks if grouping is not None else owner_tracks
         residual_count = len(residual_tracks) if residual_tracks else 0
         if residual_tracks:
-            residual_batch_id = _alloc_id()
-            residual_name = (
-                f"Wishlist (Auto - {cycle.capitalize()})" if auto_initiated
-                else "Wishlist (Residual)"
-            )
-            with runtime.tasks_lock:
-                runtime.download_batches[residual_batch_id] = make_wishlist_batch_row(
-                    playlist_id=playlist_id,
-                    playlist_name=residual_name,
-                    track_count=residual_count,
-                    max_concurrent=runtime.get_batch_max_concurrent(),
-                    profile_id=owner_profile_id,
-                    phase='queued',
-                    run_id=run_id,
-                    extra_fields=extra_fields,
+            # #1548: group residual tracks by their source playlist so a
+            # playlist sync's missing tracks download as a playlist-named
+            # batch (firing batch_complete for the scanner) instead of
+            # vanishing into the generic residual bucket.
+            playlist_groups: dict[str, list] = {}
+            generic_residual: list = []
+            for track in residual_tracks:
+                playlist_name = None
+                if track.get('source_type') == 'playlist':
+                    source_info = track.get('source_info') or {}
+                    if isinstance(source_info, dict):
+                        playlist_name = source_info.get('playlist_name')
+                if playlist_name:
+                    playlist_groups.setdefault(playlist_name, []).append(track)
+                else:
+                    generic_residual.append(track)
+
+            # Playlist-named batches first, then the generic residual.
+            batch_groups: list[tuple[str, list]] = [
+                (name, tracks) for name, tracks in playlist_groups.items()
+            ]
+            if generic_residual:
+                generic_name = (
+                    f"Wishlist (Auto - {cycle.capitalize()})" if auto_initiated
+                    else "Wishlist (Residual)"
                 )
-            submitted.append(residual_batch_id)
-            residual_total += residual_count
-            runtime.missing_download_executor.submit(
-                runtime.run_full_missing_tracks_process,
-                residual_batch_id, playlist_id, residual_tracks,
-            )
-            if auto_initiated:
-                logger.info(
-                    f"Starting wishlist residual batch {residual_batch_id} with {residual_count} tracks "
-                    f"({'singles' if cycle == 'singles' else 'unbucketed albums'}) "
-                    f"[run {run_id[:8]}] [profile {owner_profile_id}]"
+                batch_groups.append((generic_name, generic_residual))
+
+            for batch_name, batch_tracks in batch_groups:
+                batch_id = _alloc_id()
+                batch_count = len(batch_tracks)
+                with runtime.tasks_lock:
+                    runtime.download_batches[batch_id] = make_wishlist_batch_row(
+                        playlist_id=playlist_id,
+                        playlist_name=batch_name,
+                        track_count=batch_count,
+                        max_concurrent=runtime.get_batch_max_concurrent(),
+                        profile_id=owner_profile_id,
+                        phase='queued',
+                        run_id=run_id,
+                        extra_fields=extra_fields,
+                    )
+                submitted.append(batch_id)
+                residual_total += batch_count
+                runtime.missing_download_executor.submit(
+                    runtime.run_full_missing_tracks_process,
+                    batch_id, playlist_id, batch_tracks,
                 )
-            else:
-                logger.info(
-                    f"[Manual-Wishlist] Residual per-track batch {residual_batch_id} "
-                    f"with {residual_count} tracks [profile {owner_profile_id}]"
+                # #1548: playlist-named batches get their own log; the generic
+                # residual keeps the old message so existing tests pass.
+                is_playlist_batch = batch_name not in (
+                    f"Wishlist (Auto - {cycle.capitalize()})",
+                    "Wishlist (Residual)",
                 )
+                if auto_initiated:
+                    if is_playlist_batch:
+                        logger.info(
+                            f"Starting wishlist playlist batch {batch_id} '{batch_name}' "
+                            f"with {batch_count} tracks [run {run_id[:8]}] [profile {owner_profile_id}]"
+                        )
+                    else:
+                        logger.info(
+                            f"Starting wishlist residual batch {batch_id} with {batch_count} tracks "
+                            f"({'singles' if cycle == 'singles' else 'unbucketed albums'}) "
+                            f"[run {run_id[:8]}] [profile {owner_profile_id}]"
+                        )
+                else:
+                    if is_playlist_batch:
+                        logger.info(
+                            f"[Manual-Wishlist] Playlist batch {batch_id} '{batch_name}' "
+                            f"with {batch_count} tracks [profile {owner_profile_id}]"
+                        )
+                    else:
+                        logger.info(
+                            f"[Manual-Wishlist] Residual per-track batch {batch_id} "
+                            f"with {batch_count} tracks [profile {owner_profile_id}]"
+                        )
+            # Skip the old single-residual-batch block below.
+            continue
 
     return {
         'submitted': submitted,

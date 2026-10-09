@@ -32,12 +32,17 @@ status updater, DB) all injected via `CandidatesDeps`.
 from __future__ import annotations
 
 import re
+from copy import copy
 from utils.logging_config import get_logger
 import os
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from core.downloads.track_metadata_backfill import hydrate_download_metadata
+from core.download_plugins.release_identity import (
+    candidate_release_key, candidate_release_id, candidate_endpoint_id,
+    dedupe_release_candidates, release_sources,
+)
 from core.downloads.peer_observation import peer_availability_key, peer_speed
 from core.text.normalize import normalize_key
 from core.runtime_state import (
@@ -238,6 +243,8 @@ def _identity_key(candidate):
     Returns None when the candidate carries no usable identity — such rows
     are never collapsed, whatever else they match.
     """
+    if _candidate_source_name(candidate) in ('torrent', 'usenet'):
+        return candidate_release_key(candidate)
     artist = getattr(candidate, 'artist', None) or ''
     title = getattr(candidate, 'title', None) or ''
     try:
@@ -270,9 +277,11 @@ def dedupe_cross_source_pool(ranked):
     recording on a second source. Rows without a usable identity are always
     kept. Ordering otherwise untouched.
     """
-    seen = set()
-    out = []
-    for row in ranked:
+    seen, out = set(), []
+    for row in dedupe_release_candidates(ranked):
+        if _candidate_source_name(row) in ('torrent', 'usenet'):
+            out.append(row)
+            continue
         key = _identity_key(row)
         if key is None or key not in seen:
             out.append(row)
@@ -569,8 +578,21 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
         # the quality and took it, for this one grab.
         quality_overridden = user_manual_pick and bool(task.get('_override_quality', False))
 
-    # Try each candidate until one succeeds (like GUI's fallback logic)
-    for candidate_index, candidate in enumerate(candidates):
+    # Endpoint fallback happens WITHIN each ranked release slot. A failed
+    # fetch may use another indexer, without spending extra candidate slots.
+    walk = []
+    for i, row in enumerate(candidates):
+        for source in release_sources(row):
+            if source is not row:
+                source = copy(source)
+                # Validation scored the release root. Endpoint alternatives
+                # represent its identical content and inherit that decision.
+                for field in ('confidence', 'version_type', 'preferred_version_hit',
+                              'soulseek_match_evidence'):
+                    if hasattr(row, field):
+                        setattr(source, field, getattr(row, field))
+            walk.append((i, source))
+    for candidate_index, candidate in walk:
         # Check cancellation before each attempt
         with tasks_lock:
             if task_id not in download_tasks:
@@ -582,6 +604,17 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                 return False
             download_tasks[task_id]['current_candidate_index'] = candidate_index
             
+        release_id = candidate_release_id(candidate)
+        endpoint_id = candidate_endpoint_id(candidate)
+        with tasks_lock:
+            task = download_tasks.get(task_id) or {}
+            rejected_releases = task.get('failed_release_ids') or ()
+            attempted_endpoints = task.get('used_release_sources') or ()
+        if release_id and release_id in rejected_releases:
+            continue
+        if endpoint_id and endpoint_id in attempted_endpoints:
+            continue
+
         # Create source key to avoid duplicate attempts (like GUI)
         source_key = f"{candidate.username}_{candidate.filename}"
         is_slow_fallback = source_key == slow_fallback_key
@@ -692,7 +725,9 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                     'name': fallback_album.get('name', '') or track.album,
                     'release_date': fallback_album.get('release_date', ''),
                     'image_url': fallback_image_url,
-                    'album_type': fallback_album.get('album_type', 'album'),
+                    # 'album' only after the backfill below, so a search track
+                    # that sent no type gets its album's real one (#1605)
+                    'album_type': fallback_album.get('album_type') or None,
                     'album_type_locked': bool(fallback_album.get('album_type_locked')),
                     'total_tracks': fallback_album.get('total_tracks', 0),
                     'total_discs': fallback_album.get('total_discs', 1),
@@ -710,11 +745,19 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                 from core.metadata.album_tracks import get_album_for_source as _get_album_for_source
                 backfill_album_context_from_source(
                     spotify_album_context, _meta_registry.get_primary_source(), _get_album_for_source,
+                    album_source=(track_info or {}).get('source') or (track_info or {}).get('_source'),
                 )
             except Exception as _bf_err:  # noqa: BLE001 — never let backfill break a download
                 logger.debug("[Context] primary-source album backfill skipped: %s", _bf_err)
-            if not spotify_album_context.get('artists') and track.artists:
-                spotify_album_context['artists'] = [{'name': track.artists[0]}]
+            if not spotify_album_context.get('album_type'):
+                spotify_album_context['album_type'] = 'album'
+            if not spotify_album_context.get('artists'):
+                # a wishlist album with no credit falls back to ONE singer for
+                # the whole album, so a failed lookup still keeps one folder (#1616)
+                _fb_album_artist = (track_info or {}).get('_fallback_album_artist') or (
+                    track.artists[0] if track.artists else '')
+                if _fb_album_artist:
+                    spotify_album_context['artists'] = [{'name': _fb_album_artist}]
 
             download_payload = candidate.__dict__
 
@@ -777,6 +820,11 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
             with tasks_lock:
                 if task_id in download_tasks:
                     download_tasks[task_id]['used_sources'].add(source_key)
+                    # Upstream (#1604): one attempt per indexer endpoint of a
+                    # release, so a renewed signed URL is not retried.
+                    if endpoint_id:
+                        download_tasks[task_id].setdefault(
+                            'used_release_sources', set()).add(endpoint_id)
                     # A new transfer starts a new observed-speed window; only
                     # the retained slow fallback keeps its exemption.
                     download_tasks[task_id].pop('_observed_speed_tracker', None)
@@ -1014,6 +1062,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                             download_tasks[task_id]['download_id'] = download_id
                             download_tasks[task_id]['username'] = username
                             download_tasks[task_id]['filename'] = filename
+                            download_tasks[task_id]['release_id'] = release_id
                             # what won, for the live status payload (#1156) —
                             # the peer's queue/slot stats explain a 'Queued,
                             # Remotely' better than any status word can

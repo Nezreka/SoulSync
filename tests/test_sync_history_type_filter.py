@@ -75,6 +75,38 @@ class TestTheFilterRunsBeforeTheLimit:
         assert len(entries) == 2
 
 
+class TestOldRowsAreRepaired:
+    def test_single_tracks_and_albums_saved_as_playlists_leave_the_feed(self, tmp_path):
+        """#1591: rows written before the fix are retyped on the next start."""
+        from database.music_database import MusicDatabase
+        path = str(tmp_path / "m.db")
+        db = MusicDatabase(database_path=path)
+        conn = db._get_connection()
+        for pid, name in (("enhanced_search_track_1", "Dracula"),
+                          ("gsearch_track_x", "How Far I'll Go"),
+                          ("discover_cache_2", "Moana"),
+                          ("auto_mirror_3", "Disney Jams")):
+            conn.execute(
+                "INSERT INTO sync_history (batch_id, playlist_id, playlist_name, "
+                "sync_type, source, profile_id, tracks_json) "
+                "VALUES (?, ?, ?, 'playlist', 'spotify', 1, '[]')",
+                (pid, pid, name))
+        conn.commit()
+        conn.close()
+
+        # a restart: schema setup only runs once per path per process
+        import database.music_database as mdb
+        mdb._database_initialized_paths.discard(str(db.database_path.resolve()))
+        db = MusicDatabase(database_path=path)
+        entries, _ = db.get_sync_history(limit=10, profile_id=1, sync_type='playlist')
+        assert [e["playlist_name"] for e in entries] == ["Disney Jams"]
+        types = {e["playlist_id"]: e["sync_type"]
+                 for e in db.get_sync_history(limit=10, profile_id=1)[0]}
+        assert types["enhanced_search_track_1"] == "track"
+        assert types["gsearch_track_x"] == "track"
+        assert types["discover_cache_2"] == "album"
+
+
 class TestWiring:
     def test_the_endpoint_passes_sync_type_through(self):
         import ast

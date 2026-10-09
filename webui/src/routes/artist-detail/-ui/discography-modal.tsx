@@ -4,14 +4,19 @@ import { profileAsksFirst } from '@/platform/shell/download-rights';
 
 import type {
   DiscogAlbumUpdate,
+  DiscogEntry,
   DiscogFilters,
   DiscogModalData,
   DiscogRelease,
+  DiscogTotals,
+  FailedRelease,
+  FutureReleases,
 } from '../-artist-detail.discography-modal';
 import type { Discography } from '../-artist-detail.types';
 
 import {
   buildDiscographyPayload,
+  defaultFutureReleases,
   DISCOG_DEFAULT_FILTERS,
   discogCardView,
   discogCardVisible,
@@ -19,6 +24,7 @@ import {
   discogItemStatus,
   loadDiscographyForModal,
   streamDiscographyDownload,
+  watchArtistWithSettings,
 } from '../-artist-detail.discography-modal';
 import { releaseSectionType } from '../-artist-detail.open-release';
 import { BodyPortal } from './portal';
@@ -31,6 +37,45 @@ import { BodyPortal } from './portal';
  * buildDiscographyPayload.
  */
 
+/** The boolean keys of the Future releases settings (everything except the
+ * tri-state auto_download_pref). */
+type FutureBoolKey = {
+  [K in keyof FutureReleases]: FutureReleases[K] extends boolean ? K : never;
+}[keyof FutureReleases];
+
+/** One compact pill-toggle row for the Future releases section — the same
+ * toggle pills the watchlist page uses, instead of a tall checkbox stack. */
+function FuturePillRow({
+  label,
+  options,
+  future,
+  onToggle,
+}: {
+  label: string;
+  options: ReadonlyArray<readonly [FutureBoolKey, string]>;
+  future: FutureReleases;
+  onToggle: (key: FutureBoolKey) => void;
+}): React.ReactNode {
+  return (
+    <div className="discog-future-row">
+      <span className="discog-future-label">{label}</span>
+      <div className="discog-future-pills">
+        {options.map(([key, pillLabel]) => (
+          <button
+            type="button"
+            key={key}
+            className={`watchlist-filter-btn${future[key] ? ' active' : ''}`}
+            aria-pressed={future[key]}
+            onClick={() => onToggle(key)}
+          >
+            {pillLabel}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 type ProgressState = Record<
   string,
   { status: 'waiting' | 'active' | 'done' | 'skipped' | 'error'; text: string }
@@ -41,44 +86,64 @@ export function DiscographyModal({
   artistName,
   artistImage,
   discography,
+  editionSuperseded,
   onClose,
+  watchlistIdentity = null,
 }: {
   libraryArtistId: unknown;
   artistName: string;
   artistImage: string;
   /** what the page is showing: the modal lists exactly these */
   discography: Discography;
+  /**
+   * #1450: base-release ids whose edition_preferred stamp the combined
+   * base+gap edition group overturned; those cards' pre-checks flip off.
+   */
+  editionSuperseded?: Set<unknown>;
   onClose: () => void;
+  /** canonical identity for the watchlist add; null hides the combined button */
+  watchlistIdentity?: { id: unknown; name: string } | null;
 }) {
   const [data, setData] = useState<DiscogModalData | null>(null);
   const [filters, setFilters] = useState<DiscogFilters>(DISCOG_DEFAULT_FILTERS);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [phase, setPhase] = useState<'pick' | 'progress'>('pick');
   const [progress, setProgress] = useState<ProgressState>({});
-  const [totals, setTotals] = useState<{ total_added: number; total_skipped: number } | null>(null);
+  const [totals, setTotals] = useState<DiscogTotals | null>(null);
+  /** one-time init from the download filters; independent after that */
+  const [future, setFuture] = useState<FutureReleases>(() =>
+    defaultFutureReleases(DISCOG_DEFAULT_FILTERS),
+  );
+  const [watchNote, setWatchNote] = useState<string | null>(null);
+  /** cards shown in the progress phase; a retry swaps in just the failures */
+  const [activeCards, setActiveCards] = useState<
+    { release: DiscogRelease; view: ReturnType<typeof discogCardView> }[]
+  >([]);
 
   useEffect(() => {
     let cancelled = false;
     window.showToast?.('Loading discography...', 'info');
-    void loadDiscographyForModal(libraryArtistId, artistName, discography).then((result) => {
-      if (cancelled) return;
-      if (!result) {
-        window.showToast?.(
-          'No discography found. Try searching this artist from the Search page instead.',
-          'error',
-        );
-        onClose();
-        return;
-      }
-      setData(result);
-      // Unowned releases come pre-checked. The library path has no completion
-      // cache (that belonged to the OLD search page), so everything starts on.
-      const next = new Set<string>();
-      for (const release of result.releases) {
-        if (discogCardView(release, {}).checkedByDefault) next.add(String(release.id));
-      }
-      setChecked(next);
-    });
+    void loadDiscographyForModal(libraryArtistId, artistName, discography, editionSuperseded).then(
+      (result) => {
+        if (cancelled) return;
+        if (!result) {
+          window.showToast?.(
+            'No discography found. Try searching this artist from the Search page instead.',
+            'error',
+          );
+          onClose();
+          return;
+        }
+        setData(result);
+        // Unowned releases come pre-checked. The library path has no completion
+        // cache (that belonged to the OLD search page), so everything starts on.
+        const next = new Set<string>();
+        for (const release of result.releases) {
+          if (discogCardView(release, {}).checkedByDefault) next.add(String(release.id));
+        }
+        setChecked(next);
+      },
+    );
     return () => {
       cancelled = true;
     };
@@ -114,26 +179,21 @@ export function DiscographyModal({
     setChecked(next);
   };
 
-  const start = async () => {
-    if (visibleChecked.length === 0 || !data) return;
-    // request limit used up: core.js says so instead of adds the server drops
-    if (asksFirst && window.checkMusicRequestQuota && !(await window.checkMusicRequestQuota())) {
-      return;
-    }
+  const runStream = async (
+    entries: DiscogEntry[],
+    progressCards: { release: DiscogRelease; view: ReturnType<typeof discogCardView> }[],
+    onDone: (finished: DiscogTotals) => void,
+  ) => {
     // The download payload is built from VISIBLE checked cards (#877).
-    const entries = visibleChecked.map((c) => ({
-      id: c.release.id,
-      name: c.view.albumName,
-      tracks: c.view.tracks,
-      gapSource: c.release._gap_source || null,
-      albumType: releaseSectionType(c.release),
-    }));
+    setActiveCards(progressCards);
     setPhase('progress');
     const initial: ProgressState = {};
-    for (const c of visibleChecked) {
+    for (const c of progressCards) {
       initial[String(c.release.id)] = { status: 'active', text: 'Waiting...' };
     }
     setProgress(initial);
+    setTotals(null);
+    setWatchNote(null);
 
     try {
       await streamDiscographyDownload(
@@ -158,7 +218,7 @@ export function DiscographyModal({
           }));
         },
         (finished) => {
-          setTotals(finished);
+          onDone(finished);
           // a requester hears who it went to
           if (asksFirst && finished.total_added > 0) window.announceWishlistRequest?.();
         },
@@ -166,6 +226,67 @@ export function DiscographyModal({
     } catch (error) {
       window.showToast?.(`Discography download failed: ${(error as Error).message}`, 'error');
     }
+  };
+
+  const start = async (withWatch: boolean) => {
+    if (visibleChecked.length === 0 || !data) return;
+    // request limit used up: core.js says so instead of adds the server drops
+    if (asksFirst && window.checkMusicRequestQuota && !(await window.checkMusicRequestQuota())) {
+      return;
+    }
+    const entries = visibleChecked.map((c) => ({
+      id: c.release.id,
+      name: c.view.albumName,
+      tracks: c.view.tracks,
+      gapSource: c.release._gap_source || null,
+      albumType: releaseSectionType(c.release),
+    }));
+    // The watchlist half runs AFTER the stream so a watch failure can never
+    // roll back queued downloads; each half reports its own outcome.
+    const settings = withWatch && watchlistIdentity ? future : null;
+    await runStream(entries, visibleChecked, (finished) => {
+      setTotals(finished);
+      if (!settings || !watchlistIdentity) return;
+      void watchArtistWithSettings(watchlistIdentity.id, watchlistIdentity.name, settings)
+        .then(({ message }) => {
+          setWatchNote(`👁 Watching ${watchlistIdentity.name}${message ? ` — ${message}` : ''}`);
+          if (typeof window.updateWatchlistCount === 'function') window.updateWatchlistCount();
+        })
+        .catch((error: Error) => {
+          setWatchNote(`👁 Watchlist add failed: ${error.message}`);
+        });
+    });
+  };
+
+  /** Re-run just the releases that failed resolution — they never reached the
+   * wishlist (no tracks to add), so without this they would vanish silently. */
+  const retryFailed = async () => {
+    const failed = totals?.failed_releases ?? [];
+    if (!data || failed.length === 0) return;
+    const entries: DiscogEntry[] = failed.map((f) => {
+      const t = (f.album_type || '').toLowerCase();
+      const albumType =
+        t === 'ep' || t === 'single' || t === 'compilation' || t === 'album' ? t : undefined;
+      return {
+        id: f.album_id,
+        name: f.name,
+        tracks: 0,
+        gapSource: f.source,
+        ...(albumType ? { albumType } : {}),
+      };
+    });
+    const cardsForRetry = failed.map((f) => {
+      const release = {
+        id: f.album_id,
+        name: f.name,
+        _type: 'album',
+        _gap_source: f.source ?? undefined,
+      } as DiscogRelease;
+      return { release, view: discogCardView(release, {}) };
+    });
+    await runStream(entries, cardsForRetry, (finished) => {
+      setTotals(finished);
+    });
   };
 
   // BodyPortal is load-bearing: this mounts from inside the hero, whose
@@ -251,7 +372,7 @@ export function DiscographyModal({
             </div>
           ) : (
             <div className="discog-progress" id="discog-progress">
-              {visibleChecked.map((card) => {
+              {activeCards.map((card) => {
                 const state = progress[String(card.release.id)];
                 return (
                   <div
@@ -283,13 +404,97 @@ export function DiscographyModal({
             </div>
           )}
 
+          {phase === 'pick' && watchlistIdentity ? (
+            <div className="discog-future" id="discog-future">
+              <div className="discog-future-head">
+                <span className="discog-future-icon">👁</span>
+                <div>
+                  <div className="discog-future-title">Future releases</div>
+                  <div className="discog-future-sub">
+                    What the watchlist grabs later — applies to Wishlist + Watchlist
+                  </div>
+                </div>
+              </div>
+              <div className="discog-future-rows">
+                <FuturePillRow
+                  label="Release types"
+                  options={[
+                    ['include_albums', 'Albums'],
+                    ['include_eps', 'EPs'],
+                    ['include_singles', 'Singles'],
+                  ]}
+                  future={future}
+                  onToggle={(key) => setFuture((prev) => ({ ...prev, [key]: !prev[key] }))}
+                />
+                <FuturePillRow
+                  label="Include"
+                  options={[
+                    ['include_live', 'Live'],
+                    ['include_remixes', 'Remixes'],
+                    ['include_acoustic', 'Acoustic'],
+                    ['include_compilations', 'Compilations'],
+                    ['include_instrumentals', 'Instrumentals'],
+                  ]}
+                  future={future}
+                  onToggle={(key) => setFuture((prev) => ({ ...prev, [key]: !prev[key] }))}
+                />
+                <div className="discog-future-row">
+                  <span className="discog-future-label">New releases</span>
+                  <select
+                    className="discog-future-select"
+                    aria-label="New releases from this artist"
+                    value={future.auto_download_pref ?? ''}
+                    onChange={(event) =>
+                      setFuture((prev) => ({
+                        ...prev,
+                        auto_download_pref:
+                          event.target.value === '' ? null : (event.target.value as 'on' | 'off'),
+                      }))
+                    }
+                  >
+                    <option value="">Follow global setting</option>
+                    <option value="on">Download automatically</option>
+                    <option value="off">Follow only — I&apos;ll pick</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           <div className="discog-footer" id="discog-footer">
             <div className="discog-footer-info" id="discog-footer-info">
-              {phase === 'pick'
-                ? footer.info
-                : totals
-                  ? `Done — ${totals.total_added} tracks added, ${totals.total_skipped} skipped`
-                  : 'Processing... this may take a moment'}
+              {phase === 'pick' ? (
+                footer.info
+              ) : totals ? (
+                <>
+                  <div>
+                    Done — {totals.total_added} tracks added, {totals.total_skipped} skipped
+                  </div>
+                  {watchNote ? <div className="discog-watch-note">{watchNote}</div> : null}
+                  {totals.failed_releases.length > 0 ? (
+                    <div className="discog-failed">
+                      <span>
+                        {totals.failed_releases.length} release
+                        {totals.failed_releases.length !== 1 ? 's' : ''} couldn&apos;t be resolved (
+                        {totals.failed_releases
+                          .slice(0, 3)
+                          .map((f) => f.name)
+                          .join(', ')}
+                        {totals.failed_releases.length > 3 ? ', …' : ''})
+                      </span>{' '}
+                      <button
+                        className="discog-retry-btn"
+                        type="button"
+                        onClick={() => void retryFailed()}
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                'Processing... this may take a moment'
+              )}
             </div>
             <div className="discog-footer-actions">
               {phase === 'pick' ? (
@@ -302,11 +507,24 @@ export function DiscographyModal({
                     id="discog-submit-btn"
                     type="button"
                     disabled={footer.disabled}
-                    onClick={() => void start()}
+                    onClick={() => void start(false)}
                   >
                     <span className="discog-submit-icon">⬇</span>
                     <span id="discog-submit-text">{footer.submitText}</span>
                   </button>
+                  {watchlistIdentity ? (
+                    <button
+                      className="discog-submit-btn discog-both-btn"
+                      id="discog-both-btn"
+                      type="button"
+                      disabled={footer.disabled}
+                      title="Queue the selected releases and add the artist to the watchlist"
+                      onClick={() => void start(true)}
+                    >
+                      <span className="discog-submit-icon">👁</span>
+                      <span id="discog-both-text">{footer.bothText}</span>
+                    </button>
+                  ) : null}
                 </>
               ) : (
                 <>

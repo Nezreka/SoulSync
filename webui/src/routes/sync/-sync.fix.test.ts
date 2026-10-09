@@ -217,6 +217,18 @@ describe('wire calls', () => {
     });
   });
 
+  it('carries recording disambiguation without changing the selected title', () => {
+    const body = buildUpdateMatchBody('mirrored_5', 3, 'Src', 'Artist', {
+      id: 'mbid',
+      name: 'Dear Maria, Count Me In',
+      disambiguation: 'Connect Sets acoustic',
+    });
+    expect(body.spotify_track).toMatchObject({
+      name: 'Dear Maria, Count Me In',
+      disambiguation: 'Connect Sets acoustic',
+    });
+  });
+
   it('postUnmatch posts identifier + track_index to the ladder base', async () => {
     stubFetch();
     await postUnmatch(SYNC_SOURCES.spotify_public, 'h4sh', 2);

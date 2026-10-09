@@ -6,6 +6,8 @@
  * list position, and that is demonstrably wrong.
  */
 
+import type { UserPlaylistTrack } from '@/features/playlists/user-playlists';
+
 import type {
   EnhancedSearchResponse,
   SearchAlbum,
@@ -317,6 +319,23 @@ export function artistMetaLine(inLibrary: boolean): string {
 }
 
 /** A track's display line — `artist • album`, skipping whichever is missing. */
+/**
+ * what the + adds to a playlist. the first artist, not the joined "A, B"
+ * display string: identify matches on the main artist.
+ */
+export function playlistTrackOf(track: SearchTrack): UserPlaylistTrack | null {
+  const artist = (track.artists?.[0] || track.artist || '').trim();
+  const title = (track.name || '').trim();
+  if (!artist || !title) return null;
+  return {
+    track_name: title,
+    artist_name: artist,
+    album_name: track.album || '',
+    duration_ms: track.duration_ms || 0,
+    image_url: track.image_url || null,
+  };
+}
+
 export function trackMetaLine(track: SearchTrack): string {
   return [track.artist, track.album].filter(Boolean).join(' • ');
 }

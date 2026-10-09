@@ -11,7 +11,6 @@ from core.matching_engine import MusicMatchingEngine, MatchResult
 from core.discovery.wing_it import is_stub_id, should_wishlist_stub
 
 logger = get_logger("sync_service")
-_sync_user_initiated = contextvars.ContextVar('sync_user_initiated', default=False)
 
 # Per-artist track pool cap. High enough that no plausible artist hits it
 # (the largest catalogs in our test libraries sit in the low thousands), low
@@ -100,6 +99,13 @@ def _source_label(spotify_track) -> str:
 # every await below it in that task and to nothing else.
 _sync_profile_id: "contextvars.ContextVar[Optional[int]]" = contextvars.ContextVar(
     "sync_profile_id", default=None)
+
+# a sync the user clicked for, not a scheduled one. its wishlist adds are
+# user adds, so a track they once removed from the wishlist comes back
+# instead of sitting on the ignore-list (#1603). task-scoped for the same
+# reason as _sync_profile_id.
+_sync_user_initiated: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "sync_user_initiated", default=False)
 
 
 def navidrome_client_for_profile(profile_id, client):
@@ -526,20 +532,21 @@ class PlaylistSyncService:
             profile_id=profile_id,
         )
 
-    async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None, sync_mode: str = 'replace', user_initiated: bool = False) -> SyncResult:
+    async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None, sync_mode: str = 'replace',
+                            user_initiated: bool = False) -> SyncResult:
         # scoped to this task, not the shared instance (see _sync_profile_id).
         # the library scope rides along: "do we own this" is answered through
         # the profile's library, not the app account's (#1199)
         from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
         _profile_token = _sync_profile_id.set(profile_id)
-        _intent_token = _sync_user_initiated.set(user_initiated)
+        _user_token = _sync_user_initiated.set(bool(user_initiated))
         _scope_token = set_library_scope(library_scope_for_profile(profile_id))
         try:
             return await self._sync_playlist(playlist, download_missing, profile_id, sync_mode)
         finally:
             reset_library_scope(_scope_token)
+            _sync_user_initiated.reset(_user_token)
             _sync_profile_id.reset(_profile_token)
-            _sync_user_initiated.reset(_intent_token)
 
     async def _sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool, profile_id, sync_mode: str) -> SyncResult:
         # Check if THIS specific playlist is already syncing
@@ -734,11 +741,46 @@ class PlaylistSyncService:
                     logger.error("No active media client available for playlist sync")
                     sync_success = False
                 elif not matched_tracks and media_client.is_connected():
-                    # There is nothing safe to write, but these missing tracks
-                    # still need the wishlist step below. Never empty an existing
-                    # playlist just because this scan found no matches.
-                    logger.info("No library matches for %r; keeping the server playlist and processing missing tracks", playlist.name)
-                    sync_success = True
+                    # #1543: a zero-match scan must not wipe an EXISTING
+                    # server playlist — but a brand-new mirror has no server
+                    # playlist yet, and the first pipeline run should leave
+                    # one on the server. Only a mirror (strict prefixed sync
+                    # id) with no resolvable server playlist gets an empty
+                    # one created; everything else keeps the legacy skip.
+                    # Navidrome-only; other servers keep the legacy skip.
+                    from core.sync.mirrored_server_link import (
+                        mirrored_pk_from_sync_id,
+                    )
+                    _is_mirror = mirrored_pk_from_sync_id(
+                        getattr(playlist, 'id', '')) is not None
+                    _mirror_server_id = (
+                        self._resolve_mirrored_server_playlist_id(
+                            playlist, server_type, media_client, profile_id)
+                        if server_type == 'navidrome' and _is_mirror
+                        else 'legacy'
+                    )
+                    if _mirror_server_id is None:
+                        logger.info(
+                            "No library matches for %r and no server playlist "
+                            "exists; creating an empty one", playlist.name)
+                        _created = await asyncio.to_thread(
+                            media_client.create_playlist, playlist.name, [])
+                        if _created:
+                            # Link it so the next sync follows the server ID.
+                            self._resolve_mirrored_server_playlist_id(
+                                playlist, server_type, media_client, profile_id)
+                            sync_success = True
+                        else:
+                            logger.error(
+                                "Failed to create empty server playlist for %r",
+                                playlist.name)
+                            sync_success = False
+                    else:
+                        # There is nothing safe to write, but these missing tracks
+                        # still need the wishlist step below. Never empty an existing
+                        # playlist just because this scan found no matches.
+                        logger.info("No library matches for %r; keeping the server playlist and processing missing tracks", playlist.name)
+                        sync_success = True
                 else:
                     logger.info(
                         f"Syncing playlist '{playlist.name}' to {server_type.upper()} server "

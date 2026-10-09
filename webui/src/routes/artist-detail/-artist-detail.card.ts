@@ -14,7 +14,29 @@ export type CompletionClass = 'checking' | 'completed' | 'nearly_complete' | 'pa
 export interface CompletionOverlay {
   className: CompletionClass;
   label: string;
+  /** Optional tooltip, e.g. why a missing release is excluded by filters. */
+  title?: string;
 }
+
+/**
+ * #1550: human phrases for the watchlist exclusion reasons the backend
+ * attaches to "missing" releases the scan deliberately skips. The scan
+ * honors the user's own content-type and release-type filters; the artist
+ * page used to show those as a bare "Missing", which reads as a broken
+ * scanner — naming the exclusion explains why the scan will never pick
+ * the release up.
+ */
+const WATCHLIST_EXCLUSION_PHRASES: Record<string, string> = {
+  albums: 'albums',
+  eps: 'EPs',
+  singles: 'singles',
+  compilation: 'compilations',
+  live: 'live recordings',
+  remix: 'remixes',
+  acoustic: 'acoustic versions',
+  instrumental: 'instrumentals',
+  custom: 'a custom filter term',
+};
 
 /** `release-card album-card` plus a state suffix. Both classes matter:
  *  `.release-card` keeps the existing filter/state CSS and JS queries working,
@@ -50,6 +72,21 @@ export function completionOverlay(
   }
 
   if (!release.owned) {
+    // #1550: the watchlist scan deliberately skips releases the user's own
+    // filters exclude. Name the exclusion instead of a bare "Missing".
+    const reason = typeof release.watchlist_excluded === 'string' ? release.watchlist_excluded : '';
+    // Own-property guard: a crafted reason like 'constructor' must not
+    // resolve through the prototype chain into a garbage label.
+    const phrase = Object.hasOwn(WATCHLIST_EXCLUSION_PHRASES, reason)
+      ? WATCHLIST_EXCLUSION_PHRASES[reason]
+      : undefined;
+    if (phrase) {
+      return {
+        className: 'missing',
+        label: `Missing · excluded: ${phrase}`,
+        title: `Your watchlist filters exclude ${phrase}, so the watchlist scan skips this release. You can still download it manually.`,
+      };
+    }
     return { className: 'missing', label: 'Missing' };
   }
 

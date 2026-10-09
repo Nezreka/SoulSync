@@ -8,7 +8,7 @@
 
 .voe-overlay {
     position: fixed; inset: 0; z-index: 9300;
-    --a: var(--accent-rgb, 88, 101, 242);
+    --a: var(--accent-rgb);
     display: none; flex-direction: column;
     background: #0a0a0e; color: #e9ecf3;
     opacity: 0; transition: opacity .24s ease;

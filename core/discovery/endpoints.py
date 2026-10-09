@@ -59,7 +59,7 @@ def convert_results_to_spotify_tracks(
                 'album': spotify_data['album'],
                 'duration_ms': spotify_data.get('duration_ms', 0),
             }
-            for k in ('source', 'provider', 'isrc', 'release_date'):
+            for k in ('source', 'provider', 'isrc', 'release_date', 'disambiguation'):
                 if spotify_data.get(k) is not None:
                     track[k] = spotify_data[k]
                 elif result.get(k) is not None:
@@ -90,7 +90,7 @@ def convert_results_to_spotify_tracks(
                 'duration_ms': dur,
             }
             match_data = result.get('match_data') or result.get('matched_data') or {}
-            for k in ('source', 'provider', 'isrc', 'release_date'):
+            for k in ('source', 'provider', 'isrc', 'release_date', 'disambiguation'):
                 if result.get(k) is not None:
                     track[k] = result[k]
                 elif isinstance(match_data, dict) and match_data.get(k) is not None:
@@ -388,6 +388,21 @@ def get_sync_status(
         return {"error": str(e)}, 500
 
 
+def source_skipped_counts(state: Dict[str, Any]) -> Optional[Dict[str, int]]:
+    """Playlist entries the source never handed over, or None if there were none.
+
+    tidal drops videos and tracks outside the account's region before
+    discovery sees them. without this the modal says 364/364 for a 395
+    track playlist and looks like it's lying (#1613).
+    """
+    playlist = state.get('playlist')
+    skipped = {
+        'videos': int(getattr(playlist, 'skipped_videos', 0) or 0),
+        'unavailable': int(getattr(playlist, 'unavailable_tracks', 0) or 0),
+    }
+    return skipped if skipped['videos'] or skipped['unavailable'] else None
+
+
 def get_discovery_status(
     states: Dict[str, Any],
     key: str,
@@ -413,7 +428,7 @@ def get_discovery_status(
         state = states[key]
         state['last_accessed'] = time.time()
 
-        return {
+        body = {
             'phase': state['phase'],
             'status': state['status'],
             'progress': state['discovery_progress'],
@@ -421,7 +436,11 @@ def get_discovery_status(
             'spotify_total': state['spotify_total'],
             'results': state['discovery_results'],
             'complete': state['phase'] == 'discovered',
-        }, 200
+        }
+        skipped = source_skipped_counts(state)
+        if skipped:
+            body['source_skipped'] = skipped
+        return body, 200
     except Exception as e:
         logger.error(f"Error getting {error_label} discovery status: {e}")
         return {"error": str(e)}, 500

@@ -1293,3 +1293,136 @@ def test_delete_rejects_manifest_escape_before_moving_any_file(client, wishlist_
     assert result.status_code == 400
     discard.assert_not_called()
     assert wishlist_db.get_library_entry('local:copy') is not None
+
+
+def test_a_typed_query_reaches_the_search(client, catalog, wishlist_db):
+    catalog.get_book.return_value = _item(asin="B1")
+    with patch("core.audiobook_search_job.start", return_value="job-1") as start:
+        body = client.post("/api/audiobooks/releases/B1/start",
+                           json={"query": "The Reckoning Part 1 of 2 GraphicAudio"}).get_json()
+    assert start.call_args.kwargs["query"] == "The Reckoning Part 1 of 2 GraphicAudio"
+    # the box starts from what the automatic search leads with
+    assert body["default_query"]
+
+
+# ---------------------------------------------------------------------------
+# Match & import from the clients tab
+# ---------------------------------------------------------------------------
+
+_HASH = "ABCDEF0123456789ABCDEF0123456789ABCDEF01"
+
+
+def _adopt(client, **overrides):
+    body = {"source": "torrent", "client_ref": _HASH, "asin": "B1",
+            "release_title": "Andy.Weir.-.Project.Hail.Mary.M4B", "size_bytes": 900}
+    body.update(overrides)
+    return client.post("/api/audiobooks/adopt", json=body)
+
+
+def test_adopting_follows_the_download_like_a_grab(client, catalog, wishlist_db):
+    catalog.get_book.return_value = _item(asin="B1")
+    resp = _adopt(client)
+    assert resp.status_code == 200 and resp.get_json()["success"] is True
+    # the monitor walks exactly these rows, so this is what makes it import
+    [row] = wishlist_db.get_downloads(active_only=True)
+    assert row["client_id"] == _HASH.lower()
+    assert row["source"] == "torrent"
+    assert row["asin"] == "B1"
+    assert row["title"] == "Project Hail Mary"
+
+
+def test_adopting_moves_a_wishlisted_row_along(client, catalog, wishlist_db):
+    catalog.get_book.return_value = _item(asin="B1")
+    client.post("/api/audiobooks/wishlist", json={"asin": "B1"})
+    _adopt(client)
+    assert wishlist_db.get_wishlist()[0]["status"] == "grabbed"
+
+
+def test_adopting_the_same_download_twice_is_refused(client, catalog, wishlist_db):
+    catalog.get_book.return_value = _item(asin="B1")
+    assert _adopt(client).status_code == 200
+    # either case: clients report info-hashes both ways
+    assert _adopt(client, client_ref=_HASH.lower()).status_code == 409
+    assert len(wishlist_db.get_downloads(active_only=True)) == 1
+
+
+@pytest.mark.parametrize("overrides", [{"source": "soulseek"}, {"client_ref": ""}, {"asin": ""}])
+def test_adopting_without_the_essentials_is_a_400(client, catalog, wishlist_db, overrides):
+    assert _adopt(client, **overrides).status_code == 400
+    assert wishlist_db.get_downloads() == []
+
+
+def test_adopting_an_unknown_book_is_a_404(client, catalog, wishlist_db):
+    catalog.get_book.return_value = None
+    assert _adopt(client).status_code == 404
+
+
+def test_adopting_a_soulseek_folder_packs_it_like_a_grab(client, catalog, wishlist_db):
+    from core.audiobook_soulseek import decode_refs
+    catalog.get_book.return_value = _item(asin="B1")
+    files = ["Books\\Andy Weir\\Project Hail Mary\\01.mp3", "Books\\Andy Weir\\Project Hail Mary\\02.mp3"]
+    resp = client.post("/api/audiobooks/adopt", json={
+        "source": "soulseek", "username": "peer", "files": files, "asin": "B1",
+        "release_title": "Project Hail Mary", "size_bytes": 10})
+    assert resp.status_code == 200
+    [row] = wishlist_db.get_downloads(active_only=True)
+    assert row["source"] == "soulseek" and row["download_id"].startswith("slsk:")
+    # the monitor reads this with the same decode a soulseek grab's row gets
+    assert decode_refs(row["client_id"]) == {"username": "peer", "refs": files,
+                                             "folder": "Project Hail Mary"}
+    again = client.post("/api/audiobooks/adopt", json={
+        "source": "soulseek", "username": "peer", "files": files, "asin": "B1"})
+    assert again.status_code == 409
+
+
+
+# an ebook claimed as an audiobook used to match, show as claimed, and then sit
+# "importing" forever. the claim now looks inside a finished download first
+
+def _client_reports(path, state="completed"):
+    from types import SimpleNamespace
+    status = SimpleNamespace(state=state, progress=1.0 if state == "completed" else 0.4,
+                             content_path=str(path), save_path=str(path))
+    return patch("core.audiobook_download_monitor._get_status", return_value=status)
+
+
+def _identity_resolve():
+    return patch("core.audiobook_download_monitor._resolve_path", side_effect=lambda p: p)
+
+
+def test_adopting_a_finished_ebook_is_refused(client, catalog, wishlist_db, tmp_path):
+    catalog.get_book.return_value = _item(asin="B1")
+    epub = tmp_path / "Blaze.epub"
+    epub.write_bytes(b"x")
+    with _client_reports(epub), _identity_resolve():
+        resp = _adopt(client)
+    assert resp.status_code == 409
+    assert resp.get_json()["no_audio"] is True
+    assert wishlist_db.get_downloads() == []
+
+
+def test_adopting_a_finished_audiobook_folder_still_works(client, catalog, wishlist_db, tmp_path):
+    catalog.get_book.return_value = _item(asin="B1")
+    folder = tmp_path / "book"
+    folder.mkdir()
+    (folder / "cover.jpg").write_bytes(b"x")
+    (folder / "01.mp3").write_bytes(b"x")
+    with _client_reports(folder), _identity_resolve():
+        assert _adopt(client).status_code == 200
+
+
+def test_adopting_an_unfinished_download_is_judged_later(client, catalog, wishlist_db, tmp_path):
+    catalog.get_book.return_value = _item(asin="B1")
+    epub = tmp_path / "Blaze.epub"
+    epub.write_bytes(b"x")
+    with _client_reports(epub, state="downloading"), _identity_resolve():
+        assert _adopt(client).status_code == 200
+
+
+def test_adopting_a_soulseek_folder_of_ebooks_is_refused(client, catalog, wishlist_db):
+    catalog.get_book.return_value = _item(asin="B1")
+    resp = client.post("/api/audiobooks/adopt", json={
+        "source": "soulseek", "username": "peer", "asin": "B1",
+        "files": ["Books\\Stephen King\\Blaze.epub", "Books\\Stephen King\\Blaze.pdf"]})
+    assert resp.status_code == 409
+    assert wishlist_db.get_downloads() == []

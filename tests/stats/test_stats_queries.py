@@ -9,6 +9,9 @@ import pytest
 from core.stats import queries
 from database.music_database import MusicDatabase
 
+# hour-of-day reads played_at in the server's local time; seeded hours are utc
+pytestmark = pytest.mark.usefixtures('utc_server')
+
 
 # ---------------------------------------------------------------------------
 # Fixtures

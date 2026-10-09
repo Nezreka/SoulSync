@@ -25,6 +25,13 @@ from api.source_playlists import (
 )
 from core.metadata import normalize_image_url as fix_artist_image_url
 from core.library2.provider_ids import ARTIST_IDS_SQL as _ARTIST_IDS_SQL
+from core.edition_grouping import (
+    EDITION_PREFERENCE_ALL,
+    EDITION_PREFERENCE_ONE_COMPLETE,
+    EDITION_PREFERENCE_ONE_STANDARD,
+    edition_group_key,
+    reduce_edition_group,
+)
 from core.search import by_id as _search_by_id
 from core.search import orchestrator as _search_orchestrator
 from core.metadata.cache import get_metadata_cache
@@ -104,6 +111,145 @@ def _resolve_source_artist_name(source, artist_id):
     except Exception as e:
         logger.debug(f"Source artist name resolution failed for {source}:{artist_id}: {e}")
         return ''
+
+
+def _read_edition_settings():
+    """Return ``(preference, prefer_explicit)`` for issue #1450.
+
+    Reads the stored ``watchlist.edition_preference`` /
+    ``watchlist.prefer_explicit_edition`` settings, normalizing any unknown
+    preference value to ``"all"``. Never raises: falls back to ``("all",
+    True)`` when no config manager is injected (tests, CLI contexts).
+    """
+    preference = EDITION_PREFERENCE_ALL
+    prefer_explicit = True
+    try:
+        if config_manager is not None:
+            preference = config_manager.get(
+                'watchlist.edition_preference', EDITION_PREFERENCE_ALL)
+            prefer_explicit = bool(
+                config_manager.get('watchlist.prefer_explicit_edition', True))
+    except Exception:
+        preference, prefer_explicit = EDITION_PREFERENCE_ALL, True
+    if preference not in (EDITION_PREFERENCE_ONE_STANDARD,
+                          EDITION_PREFERENCE_ONE_COMPLETE):
+        preference = EDITION_PREFERENCE_ALL
+    return preference, prefer_explicit
+
+
+def _annotate_edition_preference(discography):
+    """Stamp ``edition_preferred`` on every release in the discography buckets.
+
+    Issue #1450 (one edition per album): the Download Discography modal reads
+    this flag to pre-check only the preferred edition of each album while
+    leaving the other editions visible and hand-checkable. The release dicts
+    carry ``track_count`` and ``explicit`` already, which is what the shared
+    grouping helper reads.
+
+    With the default ``"all"`` preference every release is stamped ``True``,
+    which preserves today's pre-check behaviour exactly; missing flags on the
+    client side must also read as preferred.
+    """
+    if not isinstance(discography, dict):
+        return discography
+    preference, prefer_explicit = _read_edition_settings()
+
+    for bucket in ('albums', 'eps', 'singles'):
+        releases = discography.get(bucket)
+        if not isinstance(releases, list):
+            continue
+        if preference == EDITION_PREFERENCE_ALL:
+            for release in releases:
+                if isinstance(release, dict):
+                    release['edition_preferred'] = True
+            continue
+        groups = {}
+        for release in releases:
+            if not isinstance(release, dict):
+                continue
+            key = edition_group_key(
+                str(release.get('name') or release.get('title') or ''))
+            groups.setdefault(key, []).append(release)
+        for group in groups.values():
+            picked_ids = {id(r) for r in reduce_edition_group(
+                group, preference, prefer_explicit)}
+            for release in group:
+                release['edition_preferred'] = id(release) in picked_ids
+    return discography
+
+
+def _annotate_gap_edition_preference(base, gaps):
+    """Stamp ``edition_preferred`` on gap-fill cards; return superseded base ids.
+
+    Issue #1450 (one edition per album): gap-fill cards bypass the page's
+    ``_annotate_edition_preference`` and arrive flag-less in the Download
+    Discography modal, where a missing flag reads as preferred — so e.g. a
+    gap "Album (Deluxe)" would be pre-checked even under ``one_standard``.
+
+    For each gap release, the edition group is formed from the BASE releases
+    with the same :func:`edition_group_key` PLUS the gap releases with that
+    key (the gap endpoint's ``base`` holds the same artist-detail release
+    cards the page renders, carrying ``id``/``track_count``/``explicit``),
+    reduced with the stored preference via :func:`reduce_edition_group`. The
+    gap release is stamped ``edition_preferred=True`` only when it is the
+    pick.
+
+    Returns a list of base-release ids whose ``edition_preferred`` the client
+    must flip to ``False``: under ``one_complete`` the base response may
+    already have stamped the standard edition ``True`` while the combined
+    group picks the gap deluxe. Under ``one_standard`` the base pick stays
+    correct, so the list is naturally empty; under ``"all"`` every gap card
+    is stamped ``True`` and no list is needed.
+
+    ``base`` and ``gaps`` are ``{'albums': [...], 'eps': [...], 'singles':
+    [...]}`` dicts; anything missing is treated as empty.
+    """
+    preference, prefer_explicit = _read_edition_settings()
+    superseded = []
+
+    def _bucket(d, name):
+        releases = (d or {}).get(name)
+        return releases if isinstance(releases, list) else []
+
+    def _title(release):
+        return str(release.get('name') or release.get('title') or '')
+
+    if preference == EDITION_PREFERENCE_ALL:
+        for bucket in ('albums', 'eps', 'singles'):
+            for release in _bucket(gaps, bucket):
+                if isinstance(release, dict):
+                    release['edition_preferred'] = True
+        return superseded
+
+    for bucket in ('albums', 'eps', 'singles'):
+        base_groups = {}
+        for release in _bucket(base, bucket):
+            if isinstance(release, dict):
+                base_groups.setdefault(
+                    edition_group_key(_title(release)), []).append(release)
+        gap_groups = {}
+        for release in _bucket(gaps, bucket):
+            if isinstance(release, dict):
+                gap_groups.setdefault(
+                    edition_group_key(_title(release)), []).append(release)
+        for key, gap_group in gap_groups.items():
+            base_group = base_groups.get(key, [])
+            combined = list(base_group) + list(gap_group)
+            picked = set(map(id, reduce_edition_group(
+                combined, preference, prefer_explicit)))
+            for release in gap_group:
+                release['edition_preferred'] = id(release) in picked
+            if base_group:
+                # What the page stamped on the base-only group: any base pick
+                # the combined group no longer picks must flip to False.
+                page_picked = set(map(id, reduce_edition_group(
+                    base_group, preference, prefer_explicit)))
+                for release in base_group:
+                    if (id(release) in page_picked
+                            and id(release) not in picked
+                            and release.get('id') is not None):
+                        superseded.append(release['id'])
+    return superseded
 
 
 def _build_source_only_artist_detail(artist_id, artist_name, source):
@@ -189,6 +335,10 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
         lastfm_api_key=lastfm_api_key,
         discography_loader=_get_artist_detail_discography,
     )
+    # #1450: same edition_preferred stamping as the library path above, so
+    # the Download Discography modal pre-checks work for source-only artists.
+    if isinstance(payload, dict) and isinstance(payload.get('discography'), dict):
+        _annotate_edition_preference(payload['discography'])
     return jsonify(payload), status
 
 
@@ -664,7 +814,7 @@ def get_artist_discography_gap_fill(artist_id):
         from core.metadata.lookup import MetadataLookupOptions
         from core.metadata.discography_strict import get_artist_detail_discography
 
-        def _fetch(source, source_artist_id, name=''):
+        def _fetch(source, source_artist_id, name='', dedup_variants=True):
             # OTHER-source fetches pass NO artist name: the per-source lookup
             # has an internal search-by-name fallback when the id yields
             # nothing (album_tracks.get_artist_albums_for_source), and a stale
@@ -681,6 +831,7 @@ def get_artist_discography_gap_fill(artist_id):
                     max_pages=0,
                     limit=200,
                     artist_source_ids=artist_source_ids or None,
+                    dedup_variants=dedup_variants,
                 ),
             )
             if disc.get('state') != 'results':
@@ -694,9 +845,18 @@ def get_artist_discography_gap_fill(artist_id):
         # so ragnarlotus's Library-discography-source setting (#1068 — primary /
         # automatic / explicit) picks the source exactly like the page's own
         # load, and read back which source actually answered.
+        #
+        # #1450: the base fetch mirrors the page's dedup setting — under
+        # one_standard/one_complete the page keeps both variants (see
+        # get_artist_detail), so the edition-supersede computation below must
+        # see the same release set the page annotated.
+        base_dedup_variants = _read_edition_settings()[0] not in (
+            EDITION_PREFERENCE_ONE_STANDARD,
+            EDITION_PREFERENCE_ONE_COMPLETE,
+        )
         if base_source:
             base = _fetch(base_source, artist_source_ids.get(base_source) or artist_id,
-                          name=artist_name)
+                          name=artist_name, dedup_variants=base_dedup_variants)
             resolved_base = base_source
         else:
             disc = get_artist_detail_discography(
@@ -705,6 +865,7 @@ def get_artist_discography_gap_fill(artist_id):
                 options=MetadataLookupOptions(
                     skip_cache=False, max_pages=0, limit=200,
                     artist_source_ids=artist_source_ids or None,
+                    dedup_variants=base_dedup_variants,
                 ),
             )
             if disc.get('state') == 'results':
@@ -719,6 +880,7 @@ def get_artist_discography_gap_fill(artist_id):
             # No base to diff against — returning gaps would duplicate the page
             return jsonify({"success": True, "gaps": {"albums": [], "eps": [], "singles": []},
                             "sources_checked": [], "base_source": resolved_base,
+                            "edition_superseded": [],
                             "note": "Base discography unavailable."})
 
         candidates = [s for s in ('spotify', 'deezer', 'itunes', 'musicbrainz')
@@ -726,6 +888,7 @@ def get_artist_discography_gap_fill(artist_id):
         if not candidates:
             return jsonify({"success": True, "gaps": {"albums": [], "eps": [], "singles": []},
                             "sources_checked": [], "base_source": resolved_base,
+                            "edition_superseded": [],
                             "note": "No other sources have a verified id for this artist yet "
                                     "(enrichment provides them)."})
 
@@ -738,8 +901,12 @@ def get_artist_discography_gap_fill(artist_id):
                 checked.append(source)
 
         gaps = gap_fill_buckets(base, others, checked)
+        # #1450: stamp edition_preferred on the gap cards and learn which
+        # base-release stamps the combined edition groups overturn.
+        edition_superseded = _annotate_gap_edition_preference(base, gaps)
         return jsonify({"success": True, "gaps": gaps,
-                        "sources_checked": checked, "base_source": resolved_base})
+                        "sources_checked": checked, "base_source": resolved_base,
+                        "edition_superseded": edition_superseded})
     except Exception as e:
         logger.error(f"Discography gap-fill failed for {artist_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -1855,6 +2022,11 @@ def download_discography(artist_id):
         total_skipped_artist = 0
         total_skipped_filter = 0
         total_skipped_owned = 0
+        # Releases that failed resolution entirely ("Album not found", source
+        # errors, empty tracklists). Their tracks never reach the wishlist, so
+        # without this list they vanish silently. The completion line carries
+        # them back with everything the client needs to retry the release.
+        failed_releases = []
 
         def generate_ndjson():
             nonlocal total_added, total_skipped, total_skipped_artist, total_skipped_filter, total_skipped_owned
@@ -1874,6 +2046,13 @@ def download_discography(artist_id):
 
                     if not result.get('success'):
                         message = result.get('error') or 'Album not found'
+                        failed_releases.append({
+                            "album_id": album_id,
+                            "name": hint_album_name or album_id,
+                            "source": source_override,
+                            "album_type": entry.get('album_type') or '',
+                            "error": message,
+                        })
                         yield json.dumps({
                             "album_id": album_id,
                             "name": hint_album_name or album_id,
@@ -1900,6 +2079,13 @@ def download_discography(artist_id):
                     resolved_source = result.get('source') or source_override or 'unknown'
 
                     if not tracks:
+                        failed_releases.append({
+                            "album_id": album_id,
+                            "name": album_name,
+                            "source": source_override,
+                            "album_type": entry.get('album_type') or '',
+                            "error": "No tracks",
+                        })
                         yield json.dumps({
                             "album_id": album_id,
                             "name": album_name,
@@ -1924,6 +2110,7 @@ def download_discography(artist_id):
                         candidate_tracks=owned_candidate_tracks,
                         metadata_source=resolved_source,
                         card_source_id=resolved_album_id,
+                        card_album_type=album_type,
                     )
                     ownership_candidates = (owned_candidate_tracks if release_tracks is None
                                             else release_tracks)
@@ -2035,6 +2222,13 @@ def download_discography(artist_id):
                     }) + '\n'
 
                 except Exception as album_err:
+                    failed_releases.append({
+                        "album_id": album_id,
+                        "name": hint_album_name or album_id,
+                        "source": source_override,
+                        "album_type": entry.get('album_type') or '',
+                        "error": str(album_err),
+                    })
                     yield json.dumps({
                         "album_id": album_id,
                         "name": hint_album_name or album_id,
@@ -2056,6 +2250,7 @@ def download_discography(artist_id):
                 "total_skipped_filter": total_skipped_filter,
                 "total_skipped_owned": total_skipped_owned,
                 "total_albums": len(album_entries),
+                "failed_releases": failed_releases,
             }) + '\n'
 
         # Response instead of app.response_class: identical class, no app import

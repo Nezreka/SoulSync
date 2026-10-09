@@ -704,6 +704,23 @@ def _adopt_loose_tracks(cons_files, tag: str, album_context=None) -> None:
         logger.error(f"{tag} Loose-track adoption failed (non-fatal): {cons_err}")
 
 
+# a batch that downloaded something while others were still going. the last
+# batch to finish scans for it. CALLED UNDER tasks_lock, like its reader.
+_scan_owed = False
+
+
+def _other_music_batches_pending(batch_id: str) -> bool:
+    """any other music batch still queued or running. CALLED UNDER tasks_lock."""
+    for other_id, other in download_batches.items():
+        if other_id == batch_id or not isinstance(other, dict):
+            continue
+        if not is_music_batch(other_id, other):
+            continue
+        if other.get('phase') not in ('complete', 'error', 'cancelled', 'failed'):
+            return True
+    return False
+
+
 def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
                          queue: list, finished_count: int, tag: str) -> dict:
     """Flip a finished batch to 'complete' and do the bookkeeping that has to
@@ -733,8 +750,14 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
     successful_downloads = finished_count - failed_count
     add_activity_item("", "Download Batch Complete", f"'{playlist_name}' - {successful_downloads} tracks downloaded", "Now")
 
-    # Emit batch_complete event for automation engine (only if something downloaded)
-    if successful_downloads > 0:
+    # Emit batch_complete event for automation engine (only if something downloaded).
+    # #1615: a wishlist run is one batch per album, and each one fired its own
+    # library scan. the scan now waits for the last music batch, which also
+    # pays the scan an earlier batch owed even when it downloaded nothing.
+    global _scan_owed
+    more_pending = _other_music_batches_pending(batch_id)
+    if successful_downloads > 0 or (_scan_owed and not more_pending):
+        _scan_owed = more_pending
         try:
             if deps.automation_engine:
                 deps.automation_engine.emit('batch_complete', {
@@ -742,6 +765,7 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
                     'total_tracks': str(len(queue)),
                     'completed_tracks': str(successful_downloads),
                     'failed_tracks': str(failed_count),
+                    'more_batches_pending': 'true' if more_pending else 'false',
                 })
         except Exception as e:
             logger.debug("batch_complete emit failed: %s", e)

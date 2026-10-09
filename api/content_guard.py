@@ -6,10 +6,16 @@ through each one this hooks the app once (register(app)):
   hard block (before the route runs, 403 restricted)
     POST /api/library/play        body file_path / track_id
     GET  /stream/library-audio    ?path= / ?track_id=
-    POST /api/stream/start, GET /stream/audio
-                                  playing a soulseek search result: there's
-                                  no explicit data on a peer's file, so a
-                                  hide_explicit profile can't play them at all
+    POST /api/stream/start        playing a soulseek search result: there's
+    POST /api/verification/<id>/play, /api/quarantine/<id>/play
+                                  no explicit data on a peer's file or an
+                                  unchecked download, so a hide_explicit
+                                  profile can't play them at all
+    GET  /stream/audio            serves whatever the listener's session
+                                  points at. allowed only while that's the
+                                  library file /api/library/play checked
+                                  (it vouches for it in the session); once
+                                  anything else moves the session on, no
 
   filtered (after the route, only for a hide_explicit profile)
     POST /api/enhanced-search                 spotify_tracks / spotify_albums
@@ -46,7 +52,7 @@ from utils.logging_config import get_logger
 logger = get_logger("content_guard")
 
 _get_database = None
-_stream_is_library = None
+_get_stream_state = None
 
 _ALBUM_TRACKS = re.compile(r"^/api/album/[^/]+/tracks$")
 _ENHANCED_ARTIST = re.compile(r"^/api/library/artist/[^/]+/enhanced$")
@@ -83,23 +89,43 @@ def track_is_explicit(db, file_path=None, track_id=None, lib2_track_id=None) -> 
                                          lib2_track_id=lib2_track_id, track_id=track_id)
 
 
-_UNVOUCHED_STREAMS = {("/api/stream/start", "POST"), ("/stream/audio", "GET")}
+_UNVOUCHED_STREAMS = {("/api/stream/start", "POST")}
+_REVIEW_PLAY = re.compile(r"^/api/(verification|quarantine)/[^/]+/play$")
+# the session key /api/library/play sets to the file (or server stream) it
+# checked. /stream/audio for a kid only serves while the session still
+# points at exactly that
+VOUCHED_KEY = "vouched_source"
+
+
+def session_source(state) -> str:
+    """what a stream session currently plays: its server stream or its file"""
+    return str(state.get("stream_url") or state.get("file_path") or "")
+
+
+def _stream_is_vouched() -> bool:
+    if _get_stream_state is None:
+        return False
+    sess = _get_stream_state()
+    with sess.lock:
+        if sess.get("status") != "ready" or not sess.get("is_library"):
+            return False
+        vouched = sess.get(VOUCHED_KEY)
+        return bool(vouched) and vouched == session_source(sess)
 
 
 def _guard_play():
     path = request.path
-    if (path, request.method) in _UNVOUCHED_STREAMS:
-        # /stream/audio is also how the player plays a LIBRARY track: POST
-        # /api/library/play (checked below) readies it, then the audio element
-        # fetches it here. only a stream that isn't one of those is unvouched,
-        # or a kid couldn't play even the clean tracks
-        if path == "/stream/audio" and _stream_is_library is not None:
-            try:
-                if _stream_is_library():
-                    return None
-            except Exception:  # noqa: BLE001 - unreadable state: treat it as unvouched
-                logger.debug("content guard: stream state unreadable", exc_info=True)
+    if (path, request.method) in _UNVOUCHED_STREAMS or (
+            request.method == "POST" and _REVIEW_PLAY.match(path)):
         return _restricted() if _hide_explicit() else None
+    if path == "/stream/audio" and request.method == "GET":
+        if not _hide_explicit():
+            return None
+        try:
+            return None if _stream_is_vouched() else _restricted()
+        except Exception:  # noqa: BLE001 - can't tell what it is, don't play it
+            logger.exception("content guard: stream session unreadable")
+            return _restricted()
     lib2_tid = None
     if path == "/api/library/play" and request.method == "POST":
         data = request.get_json(silent=True) or {}
@@ -238,11 +264,10 @@ def _filter_response(response):
     return response
 
 
-def register(app, get_database, stream_is_library=None):
-    """hook the kids guard into the app. once, from web_server.
-    ``stream_is_library``: is this listener's ready stream a library track."""
-    global _get_database, _stream_is_library
+def register(app, get_database, get_stream_state=None):
+    """hook the kids guard into the app. once, from web_server."""
+    global _get_database, _get_stream_state
     _get_database = get_database
-    _stream_is_library = stream_is_library
+    _get_stream_state = get_stream_state
     app.before_request(_guard_play)
     app.after_request(_filter_response)

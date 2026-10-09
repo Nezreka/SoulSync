@@ -267,3 +267,47 @@ def test_reconcile_exception_does_not_trigger_replace():
     service = PlaylistSyncService.__new__(PlaylistSyncService)
     assert not service._reconcile_or_replace(client, 'P', [])
     client.update_playlist.assert_not_called()
+
+
+# #1571: soulsync stores its own mount (/Media/Media/Music/...), navidrome
+# reports its own (/music/...). Same file, different prefix.
+_LOCAL = '/Media/Media/Music/The Killers/The Killers - Hot Fuss (Limited Edition)/11 - Everything Will Be Alright.flac'
+_SERVER = '/music/The Killers/The Killers - Hot Fuss (Limited Edition)/11 - Everything Will Be Alright.flac'
+
+
+def test_resolve_stale_id_across_mount_prefixes():
+    db = _old_db(_LOCAL)
+    songs = {'live': {'id': 'live', 'title': 'Song', 'duration': 180, 'path': _SERVER}}
+    result = resolve_tracks([SimpleNamespace(ratingKey='old')], songs, db)
+    assert result[0].ratingKey == 'live'
+
+
+def test_shared_tail_across_mounts_still_aborts():
+    db = _old_db(_LOCAL)
+    songs = {
+        'a': {'id': 'a', 'title': 'Song', 'path': _SERVER},
+        'b': {'id': 'b', 'title': 'Song', 'path': '/other' + _SERVER},
+    }
+    with pytest.raises(IdentityError):
+        resolve_tracks([SimpleNamespace(ratingKey='old')], songs, db)
+
+
+def test_tail_match_still_needs_the_same_recording():
+    db = _old_db(_LOCAL)
+    songs = {'live': {'id': 'live', 'title': 'Other Song', 'path': _SERVER}}
+    with pytest.raises(IdentityError):
+        resolve_tracks([SimpleNamespace(ratingKey='old')], songs, db)
+
+
+def test_repair_merges_a_row_stored_in_the_local_mount(tmp_path):
+    from database.music_database import MusicDatabase
+    db = MusicDatabase(tmp_path / 'test.db')
+    with db._get_connection() as c:
+        c.execute("INSERT INTO artists(id,name,server_source) VALUES('artist','Artist','navidrome')")
+        c.execute("INSERT INTO albums(id,artist_id,title,server_source) VALUES('album','artist','Album','navidrome')")
+        c.execute("INSERT INTO tracks(id,album_id,artist_id,title,file_path,server_source) VALUES('old','album','artist','Song',?,'navidrome')", (_LOCAL,))
+        c.execute("INSERT INTO tracks(id,album_id,artist_id,title,file_path,server_source) VALUES('live','album','artist','Song',?,'navidrome')", (_SERVER,))
+        c.commit()
+    assert repair_rekeyed_tracks(db, {'live': {'id': 'live', 'title': 'Song', 'path': _SERVER}}) == 1
+    with db._get_connection() as c:
+        assert [r[0] for r in c.execute("SELECT id FROM tracks")] == ['live']

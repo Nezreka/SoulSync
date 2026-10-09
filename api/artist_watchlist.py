@@ -26,6 +26,10 @@ from core.api_validation import parse_strict_bool, parse_strict_id, parse_strict
 from core.artist_source_lookup import (
     sources_resolvable_in_library as _core_sources_resolvable_in_library,
 )
+from core.edition_grouping import (
+    EDITION_PREFERENCE_ALL as _EDITION_PREFERENCE_ALL,
+    EDITION_PREFERENCE_VALUES as _EDITION_PREFERENCE_VALUES,
+)
 from core.artists.map import _artmap_cache_invalidate
 from core.library2.provider_ids import ARTIST_IDS_SQL as _ARTIST_IDS_SQL
 from core.metadata.registry import get_spotify_client
@@ -2043,6 +2047,12 @@ def watchlist_global_config():
                 # purpose -- folding it in would force auto-download on for
                 # everyone already using that switch for formats.
                 'global_auto_download': config_manager.get('watchlist.global_auto_download', True),
+                # #1450: one-edition-per-album preference. "all" (default) is
+                # today's behaviour -- the feature is fully opt-in.
+                'edition_preference': config_manager.get(
+                    'watchlist.edition_preference', _EDITION_PREFERENCE_ALL),
+                'prefer_explicit_edition': config_manager.get(
+                    'watchlist.prefer_explicit_edition', True),
             }
             return jsonify({"success": True, "config": config})
 
@@ -2078,12 +2088,24 @@ def watchlist_global_config():
             config_manager.set('watchlist.exclude_terms', exclude_terms)
             global_auto_download = bool(data.get('global_auto_download', True))
             config_manager.set('watchlist.global_auto_download', global_auto_download)
+            # #1450: validate against the enum; anything else falls back to
+            # "all" (today's behaviour) rather than persisting a bad value.
+            edition_preference = data.get('edition_preference', _EDITION_PREFERENCE_ALL)
+            if edition_preference not in _EDITION_PREFERENCE_VALUES:
+                edition_preference = _EDITION_PREFERENCE_ALL
+            config_manager.set('watchlist.edition_preference', edition_preference)
+            # Distinct from content_filter.prefer_explicit (Soulseek candidate
+            # re-ranking): this one tie-breaks the edition pick when reducing
+            # an album's editions down to one.
+            prefer_explicit_edition = bool(data.get('prefer_explicit_edition', True))
+            config_manager.set('watchlist.prefer_explicit_edition', prefer_explicit_edition)
 
             logger.info(f"Updated global watchlist config: override={global_override_enabled}, "
                   f"albums={include_albums}, eps={include_eps}, singles={include_singles}, "
                   f"live={include_live}, remixes={include_remixes}, acoustic={include_acoustic}, "
                   f"compilations={include_compilations}, instrumentals={include_instrumentals}, "
-                  f"exclude_terms='{exclude_terms}'")
+                  f"exclude_terms='{exclude_terms}', edition_preference='{edition_preference}', "
+                  f"prefer_explicit_edition={prefer_explicit_edition}")
 
             return jsonify({
                 "success": True,
@@ -2100,6 +2122,8 @@ def watchlist_global_config():
                     'include_instrumentals': include_instrumentals,
                     'exclude_terms': exclude_terms,
                     'global_auto_download': global_auto_download,
+                    'edition_preference': edition_preference,
+                    'prefer_explicit_edition': prefer_explicit_edition,
                 }
             })
 

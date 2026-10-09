@@ -214,6 +214,22 @@ class TestScanLibrary:
         result = auto_scan_library({'_automation_id': 'a'}, deps)
         assert result == {'status': 'error', 'reason': 'Scan manager not available'}
 
+    def test_a_batch_with_more_coming_leaves_the_scan_to_the_last_one(self):
+        # #1615: one scan per download run, not one per album batch
+        scanner = _StubScanManager()
+        deps = _build_deps(web_scan_manager=scanner)
+        result = auto_scan_library(
+            {'_automation_id': 'a', '_event_data': {'more_batches_pending': 'true'}}, deps)
+        assert result['status'] == 'skipped'
+        assert scanner.request_calls == []
+
+    def test_the_last_batch_scans(self):
+        scanner = _StubScanManager(status_responses=[{'status': 'idle'}])
+        deps = _build_deps(web_scan_manager=scanner)
+        auto_scan_library(
+            {'_automation_id': 'a', '_event_data': {'more_batches_pending': 'false'}}, deps)
+        assert scanner.request_calls == ['Automation trigger']
+
     def test_already_tracked_returns_skipped(self):
         # Pre-set the state flag — handler should short-circuit.
         state = AutomationState()

@@ -66,7 +66,8 @@ def _publish(job_id: str, **fields: Any) -> None:
         job["updated_at"] = _now()
 
 
-def _run_search(job_id: str, book: Dict[str, Any], narrator_mode: str, limit: int) -> None:
+def _run_search(job_id: str, book: Dict[str, Any], narrator_mode: str, limit: int,
+                min_relevance: float = 0.5) -> None:
     """Drive both sources, publishing the ranked pool after each step."""
     from core.audiobook_release_search import (
         configured_chain,
@@ -81,7 +82,7 @@ def _run_search(job_id: str, book: Dict[str, Any], narrator_mode: str, limit: in
     chain = configured_chain()
 
     def republish(stage: str, complete: bool = False) -> None:
-        ranked = rank_releases(deduplicate(collected), book, 0.5, narrator_mode)[:limit]
+        ranked = rank_releases(deduplicate(collected), book, min_relevance, narrator_mode)[:limit]
         _publish(job_id, stage=stage, releases=[r.to_dict() for r in ranked],
                  complete=complete)
 
@@ -89,7 +90,8 @@ def _run_search(job_id: str, book: Dict[str, Any], narrator_mode: str, limit: in
         if {"torrent", "usenet"} & set(chain):
             try:
                 for step in iter_prowlarr_releases(
-                    book, limit=limit, narrator_mode=narrator_mode,
+                    book, limit=limit, min_relevance=min_relevance,
+                    narrator_mode=narrator_mode,
                 ):
                     collected = list(step["releases"])
                     republish(f"Searching indexers — {step['query']}")
@@ -112,7 +114,8 @@ def _run_search(job_id: str, book: Dict[str, Any], narrator_mode: str, limit: in
             try:
                 from core.audiobook_soulseek import search as search_soulseek
                 collected.extend(search_soulseek(
-                    book, limit=limit, narrator_mode=narrator_mode,
+                    book, limit=limit, min_relevance=min_relevance,
+                    narrator_mode=narrator_mode,
                 ))
             except Exception as exc:                        # noqa: BLE001
                 logger.warning("Soulseek leg of job %s failed: %s", job_id, exc)
@@ -145,9 +148,23 @@ def _run_search(job_id: str, book: Dict[str, Any], narrator_mode: str, limit: in
                     job["error"] = "The search stopped unexpectedly."
 
 
-def start(book: Dict[str, Any], narrator_mode: str = "exact", limit: int = 25) -> str:
-    """Begin a search and return its id. Never blocks on the search itself."""
+def start(book: Dict[str, Any], narrator_mode: str = "exact", limit: int = 25,
+          query: str = "") -> str:
+    """Begin a search and return its id. Never blocks on the search itself.
+
+    ``query`` is one the user typed. it replaces the generated variants, and the
+    title-relevance floor goes with them: the release is named differently from
+    the catalogue entry, which is the whole reason they typed it. every other
+    check (wrong part, wrong language, too small, blocked) still applies.
+    """
+    from core.audiobook_release_search import TYPED_QUERY_KEY
+
     _prune()
+    query = str(query or "").strip()[:200]
+    min_relevance = 0.5
+    if query:
+        book = {**book, TYPED_QUERY_KEY: query}
+        min_relevance = 0.0
     job_id = uuid.uuid4().hex
 
     with _lock:
@@ -164,7 +181,7 @@ def start(book: Dict[str, Any], narrator_mode: str = "exact", limit: int = 25) -
 
     # Daemon so a wedged indexer can never hold the process open at shutdown.
     thread = threading.Thread(
-        target=_run_search, args=(job_id, book, narrator_mode, limit),
+        target=_run_search, args=(job_id, book, narrator_mode, limit, min_relevance),
         name=f"audiobook-search-{job_id[:8]}", daemon=True,
     )
     thread.start()

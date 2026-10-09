@@ -170,7 +170,19 @@ def _detect_title_version(title: str) -> str:
         from core.matching_engine import MusicMatchingEngine
         _match_engine = MusicMatchingEngine()
     version_type, _ = _match_engine.detect_version_type(title)
+    # an explicit cut is the recording musicbrainz lists under the bare title
+    # (it never writes "explicit" in a recording title), so for verification
+    # it's the original. deezer names whole albums "(Album Version Explicit)",
+    # and every track of one was quarantined as the wrong version (#1579).
+    # the clean edit is the one that really differs and stays strict. ranking
+    # (#923) keeps the explicit type, it reads detect_version_type directly
+    if version_type in _SAME_RECORDING_AS_ORIGINAL:
+        return 'original'
     return version_type
+
+
+# version labels that name the same recording as the bare title
+_SAME_RECORDING_AS_ORIGINAL = frozenset({'explicit'})
 
 
 def _alias_aware_artist_sim(expected_artist: str, actual_artist: str,

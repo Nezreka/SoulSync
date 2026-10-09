@@ -265,6 +265,9 @@ class DatabaseUpdateWorker:
                 self._emit_signal('error', "Library upgrade in progress; media scan deferred")
                 return
             self._can_detach_server_mappings(0)
+            # mounts and library paths may have changed since the last scan
+            from core.library.server_paths import reset as _reset_server_paths
+            _reset_server_paths()
 
             if self.full_refresh:
                 logger.info(
@@ -518,6 +521,9 @@ class DatabaseUpdateWorker:
                 self._emit_signal('error', "Library upgrade in progress; media scan deferred")
                 return
             self._can_detach_server_mappings(0)
+            # mounts and library paths may have changed since the last scan
+            from core.library.server_paths import reset as _reset_server_paths
+            _reset_server_paths()
 
             logger.info(f"Starting deep library scan for {self.server_type}")
             self._emit_signal('phase_changed', "Deep scan: Connecting to media server...")

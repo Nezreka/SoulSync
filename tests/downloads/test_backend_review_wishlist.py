@@ -24,6 +24,7 @@ _MAP_NAMES = {
     "wishlist_album_disc_counts",
     "wishlist_album_artist_map",
     "wishlist_album_context_map",
+    "wishlist_album_fallback_artist",
 }
 
 
@@ -139,6 +140,7 @@ def _stamp_wishlist_track(track, first_pass_ns):
         "wishlist_album_artist_map": first_pass_ns["wishlist_album_artist_map"],
         "wishlist_album_context_map": first_pass_ns["wishlist_album_context_map"],
         "wishlist_album_disc_counts": first_pass_ns["wishlist_album_disc_counts"],
+        "wishlist_album_fallback_artist": first_pass_ns["wishlist_album_fallback_artist"],
     }
     prelude = "track_info = res['track'].copy()"
     exec(prelude, ns)
@@ -275,3 +277,52 @@ def test_c3_agreeing_tracks_keep_shared_album_artist():
     stamped = _stamp_wishlist_track(victim, first_pass)
     ctx_name = stamped.get("_explicit_artist_context", {}).get("name")
     assert ctx_name == "Real Artist"
+
+
+
+# ---------------------------------------------------------------------------
+# #1616: an album with no stored credit is not filed under its singer
+# ---------------------------------------------------------------------------
+
+def _uncredited_soundtrack_tracks():
+    """two rows of a VA soundtrack whose stored album has no artists and no
+    track count, the shape a deezer playlist sync leaves on the wishlist."""
+    def row(title, singer):
+        return {
+            "name": title,
+            "artist": singer,
+            "artists": [{"name": singer}],
+            "spotify_data": {
+                "name": title,
+                "artists": [{"name": singer}],
+                "disc_number": 1,
+                "album": {"id": "moana", "name": "Moana (Deluxe Edition)",
+                          "release_date": "2017-01-06"},
+            },
+        }
+    return row("How Far I'll Go", "Auli'i Cravalho"), row("You're Welcome", "Dwayne Johnson")
+
+
+def test_1616_no_album_credit_leaves_the_folder_to_the_album_lookup():
+    first, second = _uncredited_soundtrack_tracks()
+    first_pass = _run_wishlist_first_pass([first, second])
+    for track in (first, second):
+        stamped = _stamp_wishlist_track(track, first_pass)
+        assert "_explicit_artist_context" not in stamped
+        assert stamped["_is_explicit_album_download"] is True
+        # one fallback for the whole album, so a failed lookup keeps one folder
+        assert stamped["_fallback_album_artist"] == "Auli'i Cravalho"
+
+
+def test_1616_unknown_track_count_stays_unknown_for_the_lookup():
+    first, _second = _uncredited_soundtrack_tracks()
+    stamped = _stamp_wishlist_track(first, _run_wishlist_first_pass([first]))
+    assert stamped["_explicit_album_context"]["total_tracks"] == 0
+
+
+def test_1616_a_stored_album_credit_is_still_used():
+    _poisoned, victim = _poisoned_wishlist_tracks()
+    stamped = _stamp_wishlist_track(victim, _run_wishlist_first_pass([victim]))
+    assert stamped["_explicit_artist_context"]["name"] == "Real Artist"
+    assert "_fallback_album_artist" not in stamped
+    assert stamped["_explicit_album_context"]["total_tracks"] == 2

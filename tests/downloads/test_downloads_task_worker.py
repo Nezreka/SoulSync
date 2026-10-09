@@ -48,6 +48,7 @@ class _FakeClient:
         self.exclude_calls = []  # exclude_sources arg per search() call
         self.search_modes = []
         self.search_profile_ids = []
+        self.hint_calls = []     # track_hint arg per search() call (#1582)
         self._client_map = {}
         for k, v in (subclients or {}).items():
             if k in self._CLIENT_NAMES:
@@ -61,11 +62,12 @@ class _FakeClient:
 
     async def search(self, query, timeout=30, exclude_sources=None,
                      progress_callback=None, search_mode=None,
-                     quality_profile_id=None):
+                     quality_profile_id=None, track_hint=None):
         self.search_calls.append((query, timeout))
         self.exclude_calls.append(exclude_sources)
         self.search_modes.append(search_mode)
         self.search_profile_ids.append(quality_profile_id)
+        self.hint_calls.append(track_hint)
         return (self._results, None)
 
 
@@ -477,7 +479,7 @@ def test_first_query_success_returns_after_storing_source():
     assert download_tasks['t1']['status'] == 'searching'
 
 
-def test_torrent_mode_uses_album_release_after_track_queries():
+def test_torrent_mode_carries_album_hint_without_global_album_queries():
     _seed_task(track_info={
         'id': 'sp-1', 'name': 'Money', 'artists': ['Pink Floyd'],
         'album': 'The Dark Side of the Moon', 'duration_ms': 383000,
@@ -493,7 +495,8 @@ def test_torrent_mode_uses_album_release_after_track_queries():
     tw.download_track_worker('t1', 'b1', deps)
 
     assert client.search_calls[0][0] == 'Pink Floyd Money'
-    assert client.search_calls[-1][0] == 'Pink Floyd The Dark Side of the Moon'
+    assert all(q != 'Pink Floyd The Dark Side of the Moon' for q, _ in client.search_calls)
+    assert all(h.get('album') == 'The Dark Side of the Moon' for h in client.hint_calls)
 
 
 def test_no_results_marks_not_found_and_calls_completion():
@@ -585,7 +588,7 @@ def test_cancellation_mid_query_returns_without_completion():
     rec = _Recorder()
 
     def _cancel_during_search(query, timeout=30, exclude_sources=None,
-                              progress_callback=None, search_mode=None):
+                              progress_callback=None, search_mode=None, track_hint=None):
         download_tasks['t1']['status'] = 'cancelled'
 
         async def _empty():
@@ -849,7 +852,7 @@ def test_search_ticker_never_takes_tasks_lock():
 
     class _CallbackUnderLock(_FakeClient):
         async def search(self, query, timeout=30, exclude_sources=None,
-                         progress_callback=None, search_mode=None):
+                         progress_callback=None, search_mode=None, track_hint=None):
             if progress_callback:
                 with tasks_lock:
                     progress_callback([object()] * 3, [], 2)
@@ -1105,3 +1108,20 @@ def test_worker_catalog_miss_falls_through_to_ytsearch():
     tw.download_track_worker('t1', 'b1', deps)
     assert attempted == [[{'username': 'youtube', 'filename': 'remix'}]]
     assert yt.calls == [('Artist Remix', 30, False)]
+
+
+def test_the_search_carries_the_song_with_its_own_artist():
+    """#1582: a catalog source gets the song itself, not just the query
+    string. the artist is the track's own, never the album artist"""
+    _seed_task(track_info={'id': '136340808', 'uri': 'deezer:track:136340808',
+                           'name': "How Far I'll Go", 'artists': [{'name': "Auli'i Cravalho"}],
+                           'album': {'name': 'Moana', 'artists': [{'name': 'Various Artists'}]},
+                           'duration_ms': 163000})
+    sk = _FakeClient(results=[])
+    deps, _ = _build_deps(soulseek=sk, matching=_FakeMatchEngine(queries=['q1', 'q2']))
+    tw.download_track_worker('t1', 'b1', deps)
+    assert sk.hint_calls and all(h == {"title": "How Far I'll Go", "artist": "Auli'i Cravalho",
+                                       "album": "Moana", "deezer_id": "136340808"} for h in sk.hint_calls)
+    # one dict for the whole task, so a source can cache in it
+    assert len({id(h) for h in sk.hint_calls}) == 1
+

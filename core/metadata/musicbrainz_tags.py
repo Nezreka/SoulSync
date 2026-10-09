@@ -76,13 +76,45 @@ def track_title_agrees(title, track, threshold=0.7):
     return False
 
 
-def credit_tags(credits, album=False):
+def _credit_sort_name(entry):
+    artist = entry.get("artist") or {}
+    return artist.get("sort-name") or entry.get("name") or artist.get("name", "")
+
+
+def _credit_matches(entry, expected):
+    """A credit entry names one of the expected artists: the credited name
+    or the artist's own name folds equal to an expected name (#1510)."""
+    from core.text.fold import fold_title
+    names = {fold_title(entry.get("name") or "", drop_brackets=False),
+             fold_title((entry.get("artist") or {}).get("name") or "", drop_brackets=False)}
+    return bool(names & expected)
+
+
+def credit_tags(credits, album=False, expected_names=None):
+    """#1510: when ``expected_names`` (the primary source's artist names) is
+    given, the sort tag keeps only the sort names of the credited artists
+    that match those names — join phrases are preserved between matched
+    entries — and no sort tag is emitted at all when nothing matches. the
+    other tags (ARTISTS, the MusicBrainz ids) keep the full credit; without
+    ``expected_names`` behavior is unchanged from before."""
     entries = [c for c in credits or [] if isinstance(c, dict)]
     names = [c.get("name") or c.get("artist", {}).get("name") for c in entries]
     ids = [c.get("artist", {}).get("id") for c in entries]
-    sorts = "".join((c.get("artist", {}).get("sort-name") or c.get("name") or
-                     c.get("artist", {}).get("name", "")) + c.get("joinphrase", "")
-                    for c in entries).strip()
+    if expected_names:
+        from core.text.fold import fold_title
+        expected = {fold_title(n, drop_brackets=False) for n in expected_names if n}
+        expected.discard("")
+        sort_entries = [c for c in entries if _credit_matches(c, expected)]
+        # join phrases glue matched neighbours; the last match never dangles one
+        parts = []
+        for i, c in enumerate(sort_entries):
+            parts.append(_credit_sort_name(c))
+            if i < len(sort_entries) - 1:
+                parts.append(c.get("joinphrase") or "")
+        sorts = "".join(parts).strip()
+    else:
+        sorts = "".join(_credit_sort_name(c) + c.get("joinphrase", "")
+                        for c in entries).strip()
     tags = {}
     if sorts:
         tags["ALBUMARTISTSORT" if album else "ARTISTSORT"] = sorts
@@ -93,8 +125,8 @@ def credit_tags(credits, album=False):
     return tags
 
 
-def release_tags(release):
-    tags = credit_tags(release.get("artist-credit"), album=True)
+def release_tags(release, album_artist_names=None):
+    tags = credit_tags(release.get("artist-credit"), album=True, expected_names=album_artist_names)
     rg = release.get("release-group") or {}
     if release.get("id"):
         tags["MUSICBRAINZ_RELEASE_ID"] = release["id"]

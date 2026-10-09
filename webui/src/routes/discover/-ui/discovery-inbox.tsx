@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
+import { AddToPlaylistButton } from '@/features/playlists/add-to-playlist';
 import { browserSafeImageUrl } from '@/platform/artwork-thumb';
 
 import type { InboxItem, InboxView } from '../-discover.inbox';
@@ -232,6 +233,14 @@ function InboxRow({
           <a className="btn btn--sm btn--secondary" href={artistPath}>
             Artist
           </a>
+        ) : null}
+        {/* a saved track recommendation can go straight onto a playlist */}
+        {item.kind === 'saved_rec' && item.payload?.entity_type === 'track' ? (
+          <AddToPlaylistButton
+            track={{ track_name: item.title, artist_name: item.artist_name ?? '' }}
+            className="discover-inbox-icon"
+            size={15}
+          />
         ) : null}
         {/* one visible action per row; save and dismiss are quiet icons
             beside it, the way a mail client does triage */}

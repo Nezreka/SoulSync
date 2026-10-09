@@ -2,7 +2,7 @@
  * Sample Studio — shared types.
  *
  * Track rows come from GET /api/library/tracks and
- * GET /api/library/recently-added (serialize_track shape), normalized by
+ * GET /api/library/tracks/recent (serialize_track shape), normalized by
  * toStudioTrack in -sample-studio.api.ts. NOTE: `duration` is SECONDS here —
  * serialize_track ships milliseconds (the tracks.duration DB unit) and the
  * mapper converts. Analysis/peaks come from the Phase 1 api/sample.py

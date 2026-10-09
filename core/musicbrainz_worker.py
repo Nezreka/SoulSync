@@ -10,6 +10,19 @@ from core.library2.worker_support import owned_album_titles, provider_id_conflic
 
 logger = get_logger("musicbrainz_worker")
 
+
+def track_match_artists(track_artist, library_artist):
+    """artist names to try for a track's recording match, in order: the track's
+    own credit, then the library (album) artist. one entry when they're the
+    same, so a normal album asks exactly what it always did."""
+    own = str(track_artist or '').strip()
+    library = str(library_artist or '').strip()
+    if not own or own.casefold() == library.casefold():
+        # same artist, keep the library's spelling so its mbid pin still works
+        return [library_artist]
+    return [own, library_artist] if library else [own]
+
+
 class MusicBrainzWorker:
     """Background worker for enriching library with MusicBrainz IDs"""
 
@@ -167,11 +180,26 @@ class MusicBrainzWorker:
             from core.worker_utils import read_enrichment_priority
 
             conn = self.db._get_connection()
-            return next_pending(
+            item = next_pending(
                 conn, 'musicbrainz',
                 retry_after_days=self.retry_days,
                 pinned=read_enrichment_priority('musicbrainz') or None,
             )
+            if item and item.get('type') == 'track':
+                # Upstream (#1509, #1608): the track's own length gates the
+                # recording match, and the artist the track itself is credited
+                # to is asked before the album's (a soundtrack's singer).
+                row = conn.execute(
+                    "SELECT t.duration, "
+                    "(SELECT ar.name FROM lib2_track_artists ta "
+                    "   JOIN lib2_artists ar ON ar.id = ta.artist_id "
+                    "  WHERE ta.track_id = t.id "
+                    "  ORDER BY CASE WHEN ta.role = 'primary' THEN 0 ELSE 1 END, "
+                    "           ta.position, ta.artist_id LIMIT 1) "
+                    "FROM lib2_tracks t WHERE t.id = ?", (item['id'],)).fetchone()
+                if row:
+                    item['duration'], item['track_artist'] = row[0], row[1]
+            return item
 
         except Exception as e:
             logger.error(f"Error getting next item: {e}")
@@ -338,10 +366,31 @@ class MusicBrainzWorker:
                     logger.debug(f"No match for album '{item_name}'")
 
             elif item_type == 'track':
-                artist_name = item.get('artist')
-                result = self.mb_service.match_recording(item_name, artist_name)
+                # The artist pass runs before tracks (priority 1), so the
+                # catalogue usually already holds this artist's MBID — pass
+                # it in so the recording match is gated on the known identity
+                # (#1509) instead of trusting the printed credit text. The
+                # track's own duration (ms) feeds the length gate the same
+                # way. Both are best-effort: None falls back to the old
+                # name-only behaviour.
+                #
+                # the track's own artist goes first. on a soundtrack the library
+                # artist is the album's (lin-manuel miranda), the recording is
+                # credited to the singer, so asking by the album artist finds
+                # nothing (#1608). the album artist is still the fallback.
+                result = None
+                for artist_name in track_match_artists(item.get('track_artist'), item.get('artist')):
+                    artist_mbid = self.mb_service._artist_row_mbid(artist_name)
+                    result = self.mb_service.match_recording(
+                        item_name, artist_name,
+                        artist_mbid=artist_mbid,
+                        duration_ms=item.get('duration'))
+                    if result and result.get('mbid'):
+                        break
                 if result and result.get('mbid'):
-                    self.mb_service.update_track_mbid(item_id, result['mbid'], 'matched')
+                    self.mb_service.update_track_mbid(
+                        item_id, result['mbid'], 'matched',
+                        recording_disambiguation=result.get('recording_disambiguation'))
                     self.stats['matched'] += 1
                     logger.info(f"Matched track '{item_name}' → MBID: {result['mbid']}")
                 else:

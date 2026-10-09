@@ -532,3 +532,32 @@ describe('the results layout helpers', () => {
     expect(shelfColumns(80, 168, 14)).toBe(1);
   });
 });
+
+describe('playlistTrackOf', () => {
+  it('takes the main artist, not the joined credit', async () => {
+    const { playlistTrackOf } = await import('./-search.helpers');
+    expect(
+      playlistTrackOf({
+        name: 'Love.',
+        artist: 'Kendrick Lamar, Zacari',
+        artists: ['Kendrick Lamar', 'Zacari'],
+        album: 'DAMN.',
+        duration_ms: 213000,
+        image_url: 'https://img/x.jpg',
+      }),
+    ).toEqual({
+      track_name: 'Love.',
+      artist_name: 'Kendrick Lamar',
+      album_name: 'DAMN.',
+      duration_ms: 213000,
+      image_url: 'https://img/x.jpg',
+    });
+  });
+
+  it('falls back to the display artist, and gives up without one', async () => {
+    const { playlistTrackOf } = await import('./-search.helpers');
+    expect(playlistTrackOf({ name: 'A', artist: 'B' })?.artist_name).toBe('B');
+    expect(playlistTrackOf({ name: 'A' })).toBeNull();
+    expect(playlistTrackOf({ artist: 'B' })).toBeNull();
+  });
+});

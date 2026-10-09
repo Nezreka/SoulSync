@@ -677,7 +677,7 @@
 
 .trackRow {
   display: grid;
-  grid-template-columns: 22px 40px minmax(0, 1fr) auto auto 34px;
+  grid-template-columns: 22px 40px minmax(0, 1fr) auto auto 34px 34px;
   align-items: center;
   gap: 12px;
   padding: 9px 14px;
@@ -1254,7 +1254,7 @@
 
   /* no hover on a phone: play takes the number's place for good */
   .trackRow {
-    grid-template-columns: 22px 40px minmax(0, 1fr) 34px;
+    grid-template-columns: 22px 40px minmax(0, 1fr) 34px 34px;
     gap: 10px;
     padding-inline: 10px;
   }

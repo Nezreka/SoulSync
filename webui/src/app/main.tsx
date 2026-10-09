@@ -2,6 +2,7 @@ import '@vitejs/plugin-react/preamble';
 import { createRoot } from 'react-dom/client';
 
 import { mountCandidateInspectorHost } from '@/features/downloads/inspector-modal';
+import { mountAddToPlaylistHost } from '@/features/playlists/add-to-playlist';
 import { mountLibraryDiscographySourceSelector } from '@/features/settings/library-discography-source';
 import { bindWindowWebRouter, SHELL_LIBRARY_SCOPE_CHANGED_EVENT } from '@/platform/shell/bridge';
 import { ROUTER_ROOT_ID } from '@/platform/shell/route-controllers';
@@ -65,4 +66,5 @@ export async function bootstrapApp() {
 
 void mountLibraryDiscographySourceSelector();
 mountCandidateInspectorHost();
+mountAddToPlaylistHost();
 void bootstrapApp();

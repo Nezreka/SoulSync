@@ -56,6 +56,16 @@ describe('phase display', () => {
     );
   });
 
+  it('counts clients-tab matches as downloads, not tracks', () => {
+    const matched = batch({
+      batch_type: 'client_match',
+      phase: 'downloading',
+      completed: 1,
+      total: 2,
+    });
+    expect(phaseDisplay(matched).text).toBe('1/2 downloads');
+  });
+
   it('covers the remaining phases', () => {
     expect(phaseDisplay(batch({ phase: 'analysis' }))).toEqual({
       text: 'Analyzing...',

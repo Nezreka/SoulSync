@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { profileAsksFirst } from '@/platform/shell/download-rights';
+
 import type { BasicSource } from '../-basic.types';
 import type {
   SearchAlbum,
@@ -8,9 +10,11 @@ import type {
   SearchLabel,
   SearchPlaylist,
   SearchTrack,
+  SearchVideo,
 } from '../-search.types';
 import type { LibraryCheckTrack } from '../-search.types';
 import type { ResultFilter } from './search-results';
+import type { VideoProgress } from './video-grid';
 
 import { startDownload } from '../-basic.actions';
 import { sourceLabel as basicSourceLabel } from '../-basic.api';
@@ -151,7 +155,37 @@ export function SearchPage() {
 
   const ownership = useLibraryCheck(results.albums, results.tracks);
   const artistImages = useArtistImages(results.db_artists, results.artists, state.activeSource);
-  const { progress: videoProgress, download: downloadVideo } = useVideoDownloads();
+  const {
+    progress: videoProgress,
+    download: downloadVideo,
+    request: requestVideo,
+    requested: requestedVideos,
+  } = useVideoDownloads();
+
+  // a profile without download rights asks instead of downloading. read at
+  // click time, not render time: a profile switch changes the answer.
+  const handleVideoAcquire = useCallback(
+    (video: SearchVideo) => {
+      if (profileAsksFirst()) {
+        void requestVideo(video);
+      } else {
+        downloadVideo(video);
+      }
+    },
+    [downloadVideo, requestVideo],
+  );
+
+  // Requested videos show the saved tick so the card stops looking clickable.
+  // Display-only: the grid's states are download-shaped, and a requested video
+  // never enters the download flow (request() no-ops on re-click).
+  const videoProgressForGrid = useMemo(() => {
+    if (requestedVideos.size === 0) return videoProgress;
+    const merged: Record<string, VideoProgress> = { ...videoProgress };
+    for (const id of requestedVideos) {
+      if (!merged[id]) merged[id] = { state: 'completed', percent: 100 };
+    }
+    return merged;
+  }, [videoProgress, requestedVideos]);
 
   /**
    * Resolve a pasted link or id on its owning source (#775).
@@ -513,7 +547,7 @@ export function SearchPage() {
                 labels={labels}
                 query={state.query}
                 videos={results.videos}
-                videoProgress={videoProgress}
+                videoProgress={videoProgressForGrid}
                 ownership={ownership}
                 artistImages={artistImages}
                 filter={filter}
@@ -529,7 +563,7 @@ export function SearchPage() {
                   if (row) playOwnedTrack(row);
                   else void streamSearchTrack(track);
                 }}
-                onVideoDownload={downloadVideo}
+                onVideoDownload={handleVideoAcquire}
               />
             </div>
           </div>

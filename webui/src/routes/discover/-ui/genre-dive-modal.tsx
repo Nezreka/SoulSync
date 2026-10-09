@@ -1,3 +1,6 @@
+import { AddToPlaylistButton } from '@/features/playlists/add-to-playlist';
+import addStyles from '@/features/playlists/add-to-playlist.module.css';
+
 import type { CacheItem } from '../-discover.cache-sections';
 
 import {
@@ -226,6 +229,17 @@ function DiveBody({
                 <div className="genre-dive-track-duration">
                   {formatDuration(t.duration_ms as number | undefined)}
                 </div>
+                <AddToPlaylistButton
+                  track={{
+                    track_name: String(t.name ?? ''),
+                    artist_name: String(t.artist_name ?? ''),
+                    album_name: String(t.album_name ?? ''),
+                    duration_ms: Number(t.duration_ms) || 0,
+                    image_url: t.image_url ? String(t.image_url) : null,
+                  }}
+                  className={addStyles.button}
+                  size={15}
+                />
               </div>
             ))}
           </div>

@@ -47,6 +47,61 @@ describe('completionOverlay', () => {
     });
   });
 
+  it('#1550: names the watchlist exclusion on a missing release', () => {
+    // A single the user's own content filters exclude (remix with
+    // include_remixes off) is skipped by the scan on purpose — the card
+    // must say why instead of a bare "Missing" that reads as a broken scan.
+    expect(completionOverlay({ owned: false, watchlist_excluded: 'remix' }, false)).toEqual({
+      className: 'missing',
+      label: 'Missing · excluded: remixes',
+      title:
+        'Your watchlist filters exclude remixes, so the watchlist scan skips this release. You can still download it manually.',
+    });
+  });
+
+  it('#1550: phrases release-type exclusions too', () => {
+    expect(completionOverlay({ owned: false, watchlist_excluded: 'singles' }, false)?.label).toBe(
+      'Missing · excluded: singles',
+    );
+  });
+
+  it('#1550: unknown reasons fall back to a bare Missing', () => {
+    // Includes prototype-chain names: the phrase lookup is own-property
+    // guarded, so these must never render a garbage label.
+    for (const bogus of ['bogus', 'constructor', 'toString', '__proto__']) {
+      expect(completionOverlay({ owned: false, watchlist_excluded: bogus }, false)).toEqual({
+        className: 'missing',
+        label: 'Missing',
+      });
+    }
+  });
+
+  it('#1550: every backend reason code has a phrase', () => {
+    const cases: Array<[string, string]> = [
+      ['albums', 'Missing · excluded: albums'],
+      ['eps', 'Missing · excluded: EPs'],
+      ['singles', 'Missing · excluded: singles'],
+      ['compilation', 'Missing · excluded: compilations'],
+      ['live', 'Missing · excluded: live recordings'],
+      ['remix', 'Missing · excluded: remixes'],
+      ['acoustic', 'Missing · excluded: acoustic versions'],
+      ['instrumental', 'Missing · excluded: instrumentals'],
+      ['custom', 'Missing · excluded: a custom filter term'],
+    ];
+    for (const [reason, label] of cases) {
+      expect(completionOverlay({ owned: false, watchlist_excluded: reason }, false)?.label).toBe(
+        label,
+      );
+    }
+  });
+
+  it('#1550: no exclusion note without a reason', () => {
+    expect(completionOverlay({ owned: false, watchlist_excluded: null }, false)).toEqual({
+      className: 'missing',
+      label: 'Missing',
+    });
+  });
+
   describe('object track_completion', () => {
     it('is complete only when NOTHING is missing', () => {
       const overlay = completionOverlay(

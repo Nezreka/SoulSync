@@ -46,11 +46,12 @@ from core.automation.handlers.download_cleanup import (
 )
 from core.automation.handlers.run_script import auto_run_script
 from core.automation.handlers.search_and_download import auto_search_and_download
-from core.automation.handlers.video_auto_wishlist_airing import auto_video_add_airing_episodes
-from core.automation.handlers.video_refresh_airing_schedules import auto_video_refresh_airing_schedules
-from core.automation.handlers.video_reenrich_stale import auto_video_reenrich_stale
+from core.automation.handlers.video_auto_wishlist_airing import auto_video_add_airing_episodes_all_profiles, is_airing_already_running
+from core.automation.handlers.video_refresh_airing_schedules import auto_video_refresh_airing_schedules, is_refresh_already_running
+from core.automation.handlers.video_reenrich_stale import auto_video_reenrich_stale, is_reenrich_already_running
 from core.automation.handlers.video_clean_youtube import auto_video_clean_youtube_episodes
 from core.automation.handlers.video_purge_recycle import auto_video_purge_recycle_bin
+from core.automation.handlers.video_profile_fanout import run_per_profile
 from core.automation.handlers.video_scan_watchlist_people import auto_video_scan_watchlist_people
 from core.automation.handlers.video_scan_watchlist_studios import auto_video_scan_watchlist_studios
 from core.automation.handlers.video_scan_watchlist_channels import auto_video_scan_watchlist_channels
@@ -325,19 +326,22 @@ def register_all(deps: AutomationDeps) -> None:
     # Sonarr-style: wishlist every episode airing today (for followed shows).
     engine.register_action_handler(
         'video_add_airing_episodes',
-        lambda config: auto_video_add_airing_episodes(config, deps),
+        lambda config: auto_video_add_airing_episodes_all_profiles(config, deps),
+        guard_fn=is_airing_already_running,
     )
     # Keep the calendar honest: re-pull TMDB episode schedules for still-airing watchlist
     # shows (the airing automation above reads the LOCAL calendar, so it needs this fresh).
     engine.register_action_handler(
         'video_refresh_airing_schedules',
         lambda config: auto_video_refresh_airing_schedules(config, deps),
+        guard_fn=is_refresh_already_running,
     )
     # Freshness: rolling re-enrichment of the stalest matched library items (oldest-refreshed
     # first, skipping anything already fresh) so ratings/overviews/art never go out of date.
     engine.register_action_handler(
         'video_reenrich_stale',
         lambda config: auto_video_reenrich_stale(config, deps),
+        guard_fn=is_reenrich_already_running,
     )
     # YouTube retention: delete channel episodes outside each channel's keep window (opt-in
     # per channel; default keeps everything). The history row stays so it's not re-downloaded.
@@ -356,22 +360,26 @@ def register_all(deps: AutomationDeps) -> None:
     # People: wishlist every un-owned movie followed actors/directors made (catalog + upcoming).
     engine.register_action_handler(
         'video_scan_watchlist_people',
-        lambda config: auto_video_scan_watchlist_people(config, deps),
+        lambda config: run_per_profile(
+            lambda d, _pid, _own: auto_video_scan_watchlist_people(config, d), deps, ['person']),
     )
     # Studios: wishlist every un-owned movie a followed studio produced (catalog + upcoming).
     engine.register_action_handler(
         'video_scan_watchlist_studios',
-        lambda config: auto_video_scan_watchlist_studios(config, deps),
+        lambda config: run_per_profile(
+            lambda d, _pid, _own: auto_video_scan_watchlist_studios(config, d), deps, ['studio']),
     )
     # Channels: new long-form uploads from followed YouTube channels (forward + last-N net).
     engine.register_action_handler(
         'video_scan_watchlist_channels',
-        lambda config: auto_video_scan_watchlist_channels(config, deps),
+        lambda config: run_per_profile(
+            lambda d, _pid, _own: auto_video_scan_watchlist_channels(config, d), deps, ['channel']),
     )
     # Playlists: mirror followed YouTube playlists (whole list + new additions; playlist-as-show).
     engine.register_action_handler(
         'video_scan_watchlist_playlists',
-        lambda config: auto_video_scan_watchlist_playlists(config, deps),
+        lambda config: run_per_profile(
+            lambda d, _pid, _own: auto_video_scan_watchlist_playlists(config, d), deps, ['playlist']),
     )
     # Stage 2 — PROCESSORS that drain the wishlist by downloading. Movie/episode go through
     # slskd (search → pick best → grab); the guard skips an hourly tick while a drain is still

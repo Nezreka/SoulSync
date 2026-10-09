@@ -67,6 +67,23 @@ describe('applyDiscovery', () => {
     expect(completed.rows).toHaveLength(1);
   });
 
+  it('carries the skipped entries, and a results payload without them clears them (#1613)', () => {
+    const gappy = applyDiscovery(base, SYNC_SOURCES.tidal, {
+      results: [],
+      source_skipped: { videos: 2, unavailable: 29 },
+    });
+    expect(gappy.sourceSkipped).toEqual({ videos: 2, unavailable: 29 });
+    // a bare phase payload keeps what it had
+    expect(applyDiscovery(gappy, SYNC_SOURCES.tidal, { complete: true }).sourceSkipped).toEqual({
+      videos: 2,
+      unavailable: 29,
+    });
+    // a re-run that skipped nothing sends results with no source_skipped
+    expect(
+      applyDiscovery(gappy, SYNC_SOURCES.tidal, { results: [] }).sourceSkipped,
+    ).toBeUndefined();
+  });
+
   it('uses the Qobuz found-variant through the config', () => {
     const q = applyDiscovery(freshSourceState(SYNC_SOURCES.qobuz, '9'), SYNC_SOURCES.qobuz, {
       results: [{ qobuz_track: { name: 'A', artists: [] }, status: 'Found' }],

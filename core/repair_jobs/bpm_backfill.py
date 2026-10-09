@@ -106,6 +106,7 @@ class BpmBackfillJob(RepairJob):
             context.update_progress(0, total)
 
         logger.info("Found %d tracks missing BPM", total)
+        unreachable = 0
 
         if context.report_progress:
             context.report_progress(phase=f'Finding BPM for {total} tracks...', total=total)
@@ -149,18 +150,27 @@ class BpmBackfillJob(RepairJob):
 
             # 2. Fall back to local analysis
             if bpm_value is None and local_available and file_path:
-                try:
-                    local_path = file_path if os.path.exists(file_path) else resolve_lib2_path(
-                        file_path, config_manager=context.config_manager)
-                    if local_path:
+                local_path = file_path if os.path.exists(file_path) else resolve_lib2_path(
+                    file_path, config_manager=context.config_manager)
+                if not local_path:
+                    # upstream 1db9c12bf: counted and reported below, never silent
+                    unreachable += 1
+                else:
+                    try:
                         from core.sample.isolated import analyze_track_isolated
                         analysis = analyze_track_isolated(local_path)
                         bpm_val = analysis.get('bpm')
                         if bpm_val and float(bpm_val) > 0:
                             bpm_value = round(float(bpm_val), 1)
                             bpm_source = 'local'
-                except Exception as e:
-                    logger.debug("Local BPM analysis failed for track %s: %s", track_id, e)
+                    except Exception as e:
+                        result.errors += 1
+                        logger.warning("Local BPM analysis failed for track %s: %s", track_id, e)
+                        if context.report_progress:
+                            context.report_progress(
+                                log_line=f'Could not analyze {title or "Unknown"}: {e}',
+                                log_type='error'
+                            )
 
             # Create finding for user review
             if bpm_value:
@@ -220,6 +230,15 @@ class BpmBackfillJob(RepairJob):
             context.update_progress(total, total)
         if tracks:
             _gap_cursor(context, _BPM_CURSOR_KEY, int(tracks[-1]['track_id']))
+
+        if unreachable:
+            logger.warning("BPM backfill: %d track files couldn't be found on disk", unreachable)
+            if context.report_progress:
+                context.report_progress(
+                    log_line=f"{unreachable} track files couldn't be found from here, so they weren't analyzed. "
+                             "Check that SoulSync can see your music folder.",
+                    log_type='error'
+                )
 
         logger.info("BPM backfill scan: %d tracks checked, %d BPM found, %d skipped",
                     result.scanned, result.findings_created, result.skipped)

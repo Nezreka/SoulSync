@@ -107,6 +107,30 @@ describe('applyCompletionEvent', () => {
     expect(next.singles?.[0].owned).toBe(false);
   });
 
+  it('#1550: carries the watchlist exclusion reason onto the release', () => {
+    const next = applyCompletionEvent(disc, {
+      id: 3,
+      status: 'missing',
+      watchlist_excluded: 'remix',
+    });
+    expect(next.singles?.[0].watchlist_excluded).toBe('remix');
+  });
+
+  it('#1550: leaves the field untouched when the event lacks the key', () => {
+    const next = applyCompletionEvent(disc, { id: 3, status: 'missing' });
+    expect(next.singles?.[0].watchlist_excluded).toBeUndefined();
+  });
+
+  it('#1550: a later event without the key does not clobber the label', () => {
+    const labeled = applyCompletionEvent(disc, {
+      id: 3,
+      status: 'missing',
+      watchlist_excluded: 'remix',
+    });
+    const next = applyCompletionEvent(labeled, { id: 3, status: 'missing' });
+    expect(next.singles?.[0].watchlist_excluded).toBe('remix');
+  });
+
   it('returns the SAME object when nothing matched, so React does not re-render', () => {
     expect(applyCompletionEvent(disc, { id: 999, status: 'ok' })).toBe(disc);
     expect(applyCompletionEvent(disc, {})).toBe(disc);

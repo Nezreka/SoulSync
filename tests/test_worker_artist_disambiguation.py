@@ -72,7 +72,7 @@ def test_spotify_picks_artist_overlapping_owned_catalog():
     w.db = _DB(OWNED)
     w.stats = {'matched': 0, 'not_found': 0, 'errors': 0}
     w.client = types.SimpleNamespace(
-        search_artists=lambda name, limit=5: [WRONG, RIGHT],   # wrong ranked first
+        search_artists=lambda name, limit=5, **k: [WRONG, RIGHT],   # wrong ranked first
         get_artist_albums=lambda aid: ALBUMS.get(aid, []),
     )
     captured = {}

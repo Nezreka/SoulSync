@@ -2,6 +2,7 @@ import requests
 import asyncio
 import threading
 import aiohttp
+import json
 import os
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
@@ -30,6 +31,9 @@ from core.quality.source_map import AUDIO_EXTENSIONS, format_from_extension
 from utils.async_helpers import run_async
 
 logger = get_logger("soulseek_client")
+
+# guards the read-merge-write of the saved ownership registry
+_REGISTRY_LOCK = threading.Lock()
 
 
 # slskd HTTP timeouts. Issue #499: long-running download sessions
@@ -110,10 +114,12 @@ class SoulseekClient(DownloadSourcePlugin):
         # Ownership registries for a SHARED slskd: every download id/filename
         # and search id this client created, so cleanup can scope to its own
         # state instead of clearing other clients' (Lidarr's slskd plugin, a
-        # second SoulSync, a manual download in slskd's own UI). In-memory by
-        # design: after a restart, pre-restart transfers are simply left alone.
+        # second SoulSync, a manual download in slskd's own UI). saved in the
+        # metadata table so a restart doesn't forget them: in-memory only, every
+        # pre-restart transfer looked foreign and piled up in slskd forever.
         self._own_downloads: Dict[str, set] = {}  # username -> {slskd transfer id}
         self._own_search_ids: set = set()
+        self._registry_loaded = False
 
         # Rate limiting for searches: the 35/220 window lives in the shared
         # core.slskd_throttle (one budget with the video side). The min-delay
@@ -718,7 +724,7 @@ class SoulseekClient(DownloadSourcePlugin):
                 logger.debug(f"Full response (type: {type(response)}): {response}")
                 return [], []
 
-            self._owned_searches().add(str(search_id))
+            self._remember_own_search(search_id)
             
             logger.info(f"Search initiated with ID: {search_id}")
             
@@ -872,16 +878,13 @@ class SoulseekClient(DownloadSourcePlugin):
                 if response is not None:  # 201 Created might return download info
                     logger.info(f"[SUCCESS] Started download: {filename} from {username}")
                     # Try to extract download ID from response if available
-                    if isinstance(response, dict) and 'id' in response:
-                        logger.debug(f"Got download ID from response: {response['id']}")
-                        return response['id']
-                    elif isinstance(response, list) and len(response) > 0 and 'id' in response[0]:
-                        logger.debug(f"Got download ID from response list: {response[0]['id']}")
-                        return response[0]['id']
-                    else:
-                        # Fallback to filename if no ID in response
-                        logger.debug(f"No ID in response, using filename as fallback: {response}")
-                        return filename
+                    transfer_id = self._extract_transfer_id(response, filename)
+                    if transfer_id is not None:
+                        logger.debug(f"Got download ID from response: {transfer_id}")
+                        return transfer_id
+                    # Fallback to filename if no ID in response
+                    logger.debug(f"No ID in response, using filename as fallback: {response}")
+                    return filename
                 else:
                     logger.debug("Web interface endpoint returned no response")
                     
@@ -907,16 +910,13 @@ class SoulseekClient(DownloadSourcePlugin):
                     if response is not None:
                         logger.info(f"[SUCCESS] Started download: {filename} from {username} using endpoint: {endpoint}")
                         # Try to extract download ID from response if available
-                        if isinstance(response, dict) and 'id' in response:
-                            logger.debug(f"Got download ID from response: {response['id']}")
-                            return response['id']
-                        elif isinstance(response, list) and len(response) > 0 and 'id' in response[0]:
-                            logger.debug(f"Got download ID from response list: {response[0]['id']}")
-                            return response[0]['id']
-                        else:
-                            # Fallback to filename if no ID in response
-                            logger.debug(f"No ID in response, using filename as fallback: {response}")
-                            return filename
+                        transfer_id = self._extract_transfer_id(response, filename)
+                        if transfer_id is not None:
+                            logger.debug(f"Got download ID from response: {transfer_id}")
+                            return transfer_id
+                        # Fallback to filename if no ID in response
+                        logger.debug(f"No ID in response, using filename as fallback: {response}")
+                        return filename
                     else:
                         logger.debug(f"Endpoint {endpoint} returned no response")
                         
@@ -943,16 +943,13 @@ class SoulseekClient(DownloadSourcePlugin):
                     if response is not None:
                         logger.info(f"[SUCCESS] Started download: {filename} from {username} using fallback endpoint: {endpoint}")
                         # Try to extract download ID from response if available
-                        if isinstance(response, dict) and 'id' in response:
-                            logger.debug(f"Got download ID from response: {response['id']}")
-                            return response['id']
-                        elif isinstance(response, list) and len(response) > 0 and 'id' in response[0]:
-                            logger.debug(f"Got download ID from response list: {response[0]['id']}")
-                            return response[0]['id']
-                        else:
-                            # Fallback to filename if no ID in response
-                            logger.debug(f"No ID in response, using filename as fallback: {response}")
-                            return filename
+                        transfer_id = self._extract_transfer_id(response, filename)
+                        if transfer_id is not None:
+                            logger.debug(f"Got download ID from response: {transfer_id}")
+                            return transfer_id
+                        # Fallback to filename if no ID in response
+                        logger.debug(f"No ID in response, using filename as fallback: {response}")
+                        return filename
                     else:
                         logger.debug(f"Fallback endpoint {endpoint} returned no response")
                         
@@ -967,6 +964,34 @@ class SoulseekClient(DownloadSourcePlugin):
             logger.error(f"Error starting download: {e}")
             return None
     
+    @staticmethod
+    def _extract_transfer_id(response, filename: str):
+        """Pull the slskd transfer id out of an enqueue reply, or None.
+
+        slskd 0.25.x/0.26 answers POST transfers/downloads/{user} with
+        ``201 {"enqueued": [Transfer, ...], "failed": [...]}``: no top-level
+        ``id``. Match the enqueued transfer by filename; a single-file
+        request has one entry, so fall back to it when the filename was
+        normalised by the peer. The older bare ``{"id": ...}`` / ``[{"id":
+        ...}]`` shapes are still read.
+        """
+        if isinstance(response, dict):
+            enqueued = response.get('enqueued')
+            if isinstance(enqueued, list):
+                items = [t for t in enqueued if isinstance(t, dict) and t.get('id')]
+                for t in items:
+                    if t.get('filename') == filename:
+                        return t['id']
+                if len(items) == 1:
+                    return items[0]['id']
+                return None
+            if 'id' in response:
+                return response['id']
+        elif isinstance(response, list) and response and isinstance(response[0], dict) \
+                and 'id' in response[0]:
+            return response[0]['id']
+        return None
+
     @staticmethod
     def _looks_like_transfer_id(value: str) -> bool:
         """Whether this is a slskd transfer UUID rather than a filename.
@@ -1357,7 +1382,70 @@ class SoulseekClient(DownloadSourcePlugin):
             return 'own'
         return scope if scope in ('own', 'all') else 'own'
 
-    def _owned_downloads(self) -> dict:
+    # one saved list shared by every client instance (the music plugin, the
+    # shared audiobook/chat client). off in the test suite, see conftest.
+    PERSIST_OWNERSHIP = True
+    _REGISTRY_KEY = 'soulseek_owned_transfers'
+
+    @staticmethod
+    def _store_read() -> dict:
+        from database.music_database import get_database
+        raw = get_database().get_metadata(SoulseekClient._REGISTRY_KEY)
+        data = json.loads(raw) if raw else {}
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _store_write(data: dict) -> None:
+        from database.music_database import get_database
+        get_database().set_metadata(SoulseekClient._REGISTRY_KEY, json.dumps(data))
+
+    def _store_update(self, *, add_download=None, drop_downloads=(), add_search=None,
+                      drop_searches=()) -> None:
+        """read, apply the change, write. read-merge-write so two client
+        instances don't overwrite each other's ids."""
+        if not self.PERSIST_OWNERSHIP:
+            return
+        try:
+            with _REGISTRY_LOCK:
+                data = self._store_read()
+                downloads = data.get('downloads') if isinstance(data.get('downloads'), dict) else {}
+                searches = set(data.get('searches') or [])
+                if add_download:
+                    user, tid = add_download
+                    ids = set(downloads.get(user) or [])
+                    ids.add(tid)
+                    downloads[user] = sorted(ids)
+                for user, tid in drop_downloads:
+                    ids = set(downloads.get(user) or [])
+                    ids.discard(tid)
+                    if ids:
+                        downloads[user] = sorted(ids)
+                    else:
+                        downloads.pop(user, None)
+                if add_search:
+                    searches.add(add_search)
+                searches.difference_update(drop_searches)
+                self._store_write({'downloads': downloads, 'searches': sorted(searches)})
+        except Exception as e:  # noqa: BLE001 - saving is best effort, memory still has it
+            logger.debug("could not save soulseek ownership registry: %s", e)
+
+    def _sync_registry_from_store(self) -> None:
+        """pull every id any instance saved into memory. cleanup calls this
+        first so it sees the ids from before a restart and from other clients."""
+        if not self.PERSIST_OWNERSHIP:
+            return
+        try:
+            data = self._store_read()
+        except Exception as e:  # noqa: BLE001 - fall back to what memory has
+            logger.debug("could not read soulseek ownership registry: %s", e)
+            return
+        downloads = data.get('downloads') if isinstance(data.get('downloads'), dict) else {}
+        reg = self._own_downloads_raw()
+        for user, ids in downloads.items():
+            reg.setdefault(user, set()).update(str(i) for i in (ids or []))
+        self._own_searches_raw().update(str(i) for i in (data.get('searches') or []))
+
+    def _own_downloads_raw(self) -> dict:
         # Lazy: parts of the app (and the pinning tests) build this client
         # without __init__, so the registry self-creates on first touch.
         reg = getattr(self, '_own_downloads', None)
@@ -1365,16 +1453,55 @@ class SoulseekClient(DownloadSourcePlugin):
             reg = self._own_downloads = {}
         return reg
 
-    def _owned_searches(self) -> set:
+    def _own_searches_raw(self) -> set:
         reg = getattr(self, '_own_search_ids', None)
         if reg is None:
             reg = self._own_search_ids = set()
         return reg
 
+    def _ensure_registry_loaded(self) -> None:
+        if not getattr(self, '_registry_loaded', False):
+            self._registry_loaded = True
+            self._sync_registry_from_store()
+
+    def _owned_downloads(self) -> dict:
+        self._ensure_registry_loaded()
+        return self._own_downloads_raw()
+
+    def _owned_searches(self) -> set:
+        self._ensure_registry_loaded()
+        return self._own_searches_raw()
+
+    def _remember_own_search(self, search_id) -> None:
+        if not search_id:
+            return
+        self._owned_searches().add(str(search_id))
+        self._store_update(add_search=str(search_id))
+
+    def _forget_own_search(self, search_id) -> None:
+        self._owned_searches().discard(str(search_id))
+        self._store_update(drop_searches=[str(search_id)])
+
+    def _owned_download_pairs(self) -> set:
+        return {(user, tid) for user, ids in self._owned_downloads().items() for tid in ids}
+
+    def _prune_owned_downloads(self, listed: set, before: set) -> None:
+        """drop owned ids slskd no longer lists (removed by hand, or by another
+        cleanup), so the saved list can't grow forever. ``listed`` is every
+        (username, id) in a full successful listing; only ids already owned
+        ``before`` that listing are pruned, so one enqueued mid-listing stays."""
+        stale = sorted(pair for pair in before if pair not in listed)
+        if not stale:
+            return
+        for user, tid in stale:
+            self._own_downloads_raw().get(user, set()).discard(tid)
+        self._store_update(drop_downloads=stale)
+
     def _remember_own_download(self, username: str, token) -> None:
         if not username or not token:
             return
         self._owned_downloads().setdefault(username, set()).add(str(token))
+        self._store_update(add_download=(username, str(token)))
 
     def _owns_download(self, username: str, file_data: dict) -> bool:
         owned = self._owned_downloads().get(username)
@@ -1384,8 +1511,10 @@ class SoulseekClient(DownloadSourcePlugin):
 
     def _forget_own_download(self, username: str, file_data: dict) -> None:
         owned = self._owned_downloads().get(username)
-        if owned:
-            owned.discard(str(file_data.get('id', '')))
+        tid = str(file_data.get('id', ''))
+        if owned and tid in owned:
+            owned.discard(tid)
+            self._store_update(drop_downloads=[(username, tid)])
 
     @staticmethod
     def _is_terminal_state(state) -> bool:
@@ -1417,6 +1546,8 @@ class SoulseekClient(DownloadSourcePlugin):
 
             from urllib.parse import quote
             scope = self._cleanup_scope()
+            if scope == 'own':
+                self._sync_registry_from_store()
             cancelled = 0
             failed = 0
             skipped_foreign = 0
@@ -1438,6 +1569,7 @@ class SoulseekClient(DownloadSourcePlugin):
                         result = await self._make_request('DELETE', endpoint)
                         if result is not None:
                             cancelled += 1
+                            self._forget_own_download(username, file_data)
                         else:
                             failed += 1
 
@@ -1487,6 +1619,8 @@ class SoulseekClient(DownloadSourcePlugin):
 
         try:
             from urllib.parse import quote
+            self._sync_registry_from_store()
+            owned_before = self._owned_download_pairs()
             response = await self._make_request('GET', 'transfers/downloads')
             if not response:
                 logger.debug("No downloads listed; nothing to clear")
@@ -1495,12 +1629,15 @@ class SoulseekClient(DownloadSourcePlugin):
             removed = 0
             failed = 0
             foreign = 0
+            listed = set()
             for user_data in response:
                 username = user_data.get('username', '')
                 if not username:
                     continue
                 for directory in user_data.get('directories', []):
                     for file_data in directory.get('files', []):
+                        if file_data.get('id'):
+                            listed.add((username, str(file_data.get('id'))))
                         if not self._is_terminal_state(file_data.get('state')):
                             continue
                         if not self._owns_download(username, file_data):
@@ -1517,6 +1654,9 @@ class SoulseekClient(DownloadSourcePlugin):
                         else:
                             failed += 1
 
+            if isinstance(response, list):
+                # a full listing: owned ids slskd no longer has are gone for good
+                self._prune_owned_downloads(listed, owned_before)
             if removed or failed:
                 logger.info(f"Cleared {removed} of this client's completed downloads from slskd "
                             f"({failed} failed; left {foreign} belonging to other clients)")
@@ -1609,6 +1749,7 @@ class SoulseekClient(DownloadSourcePlugin):
             if scope == 'own':
                 # slskd keeps ONE search list for every client; only remove
                 # the searches this client started.
+                self._sync_registry_from_store()
                 searches = [s for s in searches
                             if str(s.get('id', '')) in self._owned_searches()]
 
@@ -1628,7 +1769,7 @@ class SoulseekClient(DownloadSourcePlugin):
                     success = await self.delete_search(search_id)
                     if success:
                         deleted_count += 1
-                        self._owned_searches().discard(str(search_id))
+                        self._forget_own_search(search_id)
                     else:
                         failed_count += 1
                 else:
@@ -1662,6 +1803,7 @@ class SoulseekClient(DownloadSourcePlugin):
             if self._cleanup_scope() == 'own':
                 # Shared slskd: only this client's searches are counted or
                 # deleted, sorted by startedAt since the list is unordered.
+                self._sync_registry_from_store()
                 searches = [s for s in searches
                             if str(s.get('id', '')) in self._owned_searches()]
                 searches.sort(key=lambda s: str(s.get('startedAt', '')))
@@ -1686,7 +1828,7 @@ class SoulseekClient(DownloadSourcePlugin):
                     success = await self.delete_search(search_id)
                     if success:
                         deleted_count += 1
-                        self._owned_searches().discard(str(search_id))
+                        self._forget_own_search(search_id)
                     else:
                         failed_count += 1
                 else:
@@ -1724,6 +1866,7 @@ class SoulseekClient(DownloadSourcePlugin):
                 # shared by every slskd client, and its order is not
                 # guaranteed, so sort our own by startedAt and keep the
                 # newest. Other clients' searches are never deleted.
+                self._sync_registry_from_store()
                 searches = [s for s in searches
                             if str(s.get('id', '')) in self._owned_searches()]
                 searches.sort(key=lambda s: str(s.get('startedAt', '')))
@@ -1748,7 +1891,7 @@ class SoulseekClient(DownloadSourcePlugin):
                     success = await self.delete_search(search_id)
                     if success:
                         deleted_count += 1
-                        self._owned_searches().discard(str(search_id))
+                        self._forget_own_search(search_id)
                     else:
                         failed_count += 1
                 else:

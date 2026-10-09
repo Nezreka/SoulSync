@@ -36,6 +36,7 @@ import { DiscographyModal } from './discography-modal';
 import { EnrichmentCoverage } from './enrichment-coverage';
 import { BodyPortal } from './portal';
 import { TopTracksSidebar } from './top-tracks-sidebar';
+import { WatchlistAddModal } from './watchlist-add-modal';
 
 interface Props {
   artist: ArtistInfo;
@@ -56,6 +57,12 @@ interface Props {
   canDelete?: boolean;
   /** A source match changed; the page re-reads the artist. */
   onMatchesChanged?: () => void;
+  /**
+   * #1450: base-release ids whose edition_preferred stamp the combined
+   * base+gap edition group overturned; passed to the Download Discography
+   * modal so those cards' pre-checks flip off.
+   */
+  editionSuperseded?: Set<unknown>;
 }
 
 /**
@@ -152,6 +159,7 @@ export function ArtistHero({
   canFixMatches = false,
   canDelete = false,
   onMatchesChanged,
+  editionSuperseded,
 }: Props) {
   const [deleting, setDeleting] = useState(false);
   /**
@@ -212,6 +220,7 @@ export function ArtistHero({
   /** null = unknown (check pending/failed); the vanilla left the default label. */
   const [watching, setWatching] = useState<boolean | null>(null);
   const [watchlistBusy, setWatchlistBusy] = useState(false);
+  const [watchlistAddOpen, setWatchlistAddOpen] = useState(false);
   const [downloadingDiscog, setDownloadingDiscog] = useState(false);
   const asksFirst = profileAsksFirst();
   /** A freshly applied photo shows immediately, as the vanilla swapped the
@@ -277,20 +286,29 @@ export function ArtistHero({
     };
   }, [watchlistId]);
 
+  /**
+   * Watching → one click removes (unchanged). Not watching → the settings
+   * modal opens instead of a blind add, so per-artist settings are set at
+   * add time (like the video side's watchlist pop-in).
+   */
   const toggleWatchlist = async () => {
     if (!watchlist || watchlistBusy) return;
-    setWatchlistBusy(true);
-    try {
-      const { watching: next, message } = await toggleWatchlistRequest(
-        watchlist.id,
-        watchlist.name,
-      );
-      setWatching(next);
-      window.showToast?.(message, 'success');
-    } catch (error) {
-      window.showToast?.(`Error: ${(error as Error).message}`, 'error');
+    if (watching) {
+      setWatchlistBusy(true);
+      try {
+        const { watching: next, message } = await toggleWatchlistRequest(
+          watchlist.id,
+          watchlist.name,
+        );
+        setWatching(next);
+        window.showToast?.(message, 'success');
+      } catch (error) {
+        window.showToast?.(`Error: ${(error as Error).message}`, 'error');
+      }
+      setWatchlistBusy(false);
+      return;
     }
-    setWatchlistBusy(false);
+    setWatchlistAddOpen(true);
   };
   // Only after `complete`, matching the vanilla: the set accumulates through
   // the whole stream but the block was not rendered until it ended.
@@ -304,7 +322,21 @@ export function ArtistHero({
           artistName={String(artist.name || '')}
           artistImage={appliedPhoto || image.primary || ''}
           discography={discography}
+          editionSuperseded={editionSuperseded}
           onClose={() => setDownloadingDiscog(false)}
+          watchlistIdentity={watchlist ? { id: watchlist.id, name: watchlist.name } : null}
+        />
+      ) : null}
+      {watchlistAddOpen && watchlist ? (
+        <WatchlistAddModal
+          artist={{
+            id: watchlist.id,
+            name: watchlist.name,
+            imageUrl: appliedPhoto || image.primary || '',
+          }}
+          onClose={() => setWatchlistAddOpen(false)}
+          onWatched={() => setWatching(true)}
+          onDownloadExisting={() => setDownloadingDiscog(true)}
         />
       ) : null}
       {pickingPhoto ? (

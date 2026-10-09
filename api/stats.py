@@ -217,6 +217,16 @@ def stats_recent():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@bp.route('/api/stats/weekly-digest', methods=['GET'])
+def stats_weekly_digest():
+    """This-week listening digest for the dashboard banner."""
+    try:
+        data = _stats_queries.get_weekly_digest(get_database(),
+                                                profile_id=get_current_profile_id())
+        return jsonify({'success': True, **data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 def _fix_stats_listening_image_url(thumb_url):
     """Fast browser-safe image URL fixer for stats detail rows.

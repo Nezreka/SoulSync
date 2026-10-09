@@ -29,6 +29,11 @@ logger = get_logger("audiobook_quality")
 # it and pays several times the size.
 DEFAULT_FORMAT_ORDER: List[str] = ["m4b", "m4a", "mp3", "opus", "ogg", "flac"]
 
+# Every format a release can be identified as, from a title or from Soulseek's
+# file extensions. An allowed-formats setting is read against this, so a value
+# that names no real format reads as "no restriction" rather than refusing all.
+KNOWN_FORMATS = frozenset(DEFAULT_FORMAT_ORDER) | {"aac", "wav", "wma"}
+
 # The spread between the best and worst format, shared out over the order. Kept
 # well under the relevance weight: a beautifully formatted wrong book is still
 # the wrong book.
@@ -42,7 +47,16 @@ DEFAULTS: Dict[str, Any] = {
     # GraphicAudio and the like. On by default because they are still shown
     # today, merely outranked — turning this off is what removes them.
     "allow_dramatized": True,
+    # Formats a release may be in at all. Empty means every format: a list
+    # that named all six would quietly refuse any format added later.
+    "allowed_formats": [],
+    # "single" (the whole book in one file), "multiple" (a file per chapter or
+    # part), or "any". Only a release whose file count is known can be held to
+    # it, which today is Soulseek: a torrent or NZB is a title and a size.
+    "file_layout": "any",
 }
+
+FILE_LAYOUTS = ("any", "single", "multiple")
 
 
 def profile() -> Dict[str, Any]:
@@ -71,7 +85,30 @@ def profile() -> Dict[str, Any]:
         except (TypeError, ValueError):
             values[key] = 0
     values["allow_dramatized"] = bool(values.get("allow_dramatized", True))
+    allowed = values.get("allowed_formats") or []
+    if isinstance(allowed, str):
+        allowed = allowed.split(",")
+    values["allowed_formats"] = [
+        fmt for fmt in dict.fromkeys(str(f).strip().lower().lstrip(".") for f in allowed)
+        if fmt in KNOWN_FORMATS
+    ]
+    layout = str(values.get("file_layout") or "any").strip().lower()
+    values["file_layout"] = layout if layout in FILE_LAYOUTS else "any"
     return values
+
+
+def file_count(release: Any) -> Optional[int]:
+    """How many audio files a release holds, or None when it cannot be known."""
+    payload = getattr(release, "soulseek", None)
+    if not isinstance(payload, dict):
+        return None
+    count = payload.get("file_count")
+    if count is None:
+        count = len(payload.get("files") or [])
+    try:
+        return int(count) or None
+    except (TypeError, ValueError):
+        return None
 
 
 def format_scores(prof: Optional[Dict[str, Any]] = None) -> Dict[str, float]:
@@ -98,6 +135,24 @@ def rejection(release: Any, prof: Optional[Dict[str, Any]] = None) -> str:
 
     if not prof["allow_dramatized"] and getattr(release, "dramatized", False):
         return "Dramatised adaptations are turned off in your audiobook quality profile."
+
+    # A release whose format is unknown (a torrent title that does not say) is
+    # let through: refusing it would hide most torrents, and the bitrate and
+    # completeness checks still apply to it.
+    allowed = prof["allowed_formats"]
+    audio_format = str(getattr(release, "audio_format", "") or "").lower()
+    if allowed and audio_format and audio_format not in allowed:
+        return f"{audio_format.upper()} is not one of the formats you allow."
+
+    # Unknown file counts are let through, like unknown formats: a torrent or
+    # NZB does not say, and refusing them all would hide most of the results.
+    layout = prof["file_layout"]
+    count = file_count(release) if layout != "any" else None
+    if count is not None:
+        if layout == "single" and count > 1:
+            return f"{count} files; you asked for the whole book in a single file."
+        if layout == "multiple" and count == 1:
+            return "A single file; you asked for a book split into several files."
 
     implied = getattr(release, "implied_kbps", None)
     floor = prof["min_bitrate_kbps"]

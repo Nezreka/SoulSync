@@ -790,3 +790,31 @@ def test_qbit_add_torrent_handles_qbittorrent_4_fails_not_held():
     assert res is None
 
 
+
+# ---------------------------------------------------------------------------
+# the client's own category, for the clients tab's category filter
+# ---------------------------------------------------------------------------
+
+def test_qbit_reports_the_torrent_category() -> None:
+    adapter = _qbit_with_config()
+    base = {'hash': 'x', 'name': 'X', 'state': 'uploading', 'progress': 1.0, 'size': 1,
+            'downloaded': 1, 'dlspeed': 0, 'upspeed': 0}
+    assert adapter._parse_status({**base, 'category': 'SoulSync Audiobooks'}).category == 'SoulSync Audiobooks'
+    assert adapter._parse_status({**base, 'category': ''}).category is None
+
+
+def test_transmission_reports_its_first_label() -> None:
+    adapter = _trans_with_config()
+    base = {'hashString': 'x', 'name': 'X', 'status': 6, 'percentDone': 1.0, 'totalSize': 1}
+    assert adapter._parse_status({**base, 'labels': ['', 'ebooks', 'other']}).category == 'ebooks'
+    assert adapter._parse_status(base).category is None
+    assert 'labels' in TransmissionAdapter._STATUS_FIELDS
+
+
+def test_deluge_reports_its_label() -> None:
+    adapter = DelugeAdapter.__new__(DelugeAdapter)
+    base = {'hash': 'x', 'name': 'X', 'state': 'Seeding', 'progress': 100.0, 'total_size': 1}
+    assert adapter._parse_status({**base, 'label': 'tv'}).category == 'tv'
+    # label plugin off: deluge leaves the key out
+    assert adapter._parse_status(base).category is None
+    assert 'label' in DelugeAdapter._STATUS_FIELDS

@@ -39,6 +39,16 @@ DEFAULT_POLL_SECONDS = 20.0
 GIVE_UP_AFTER_MISSES = 8
 _misses: Dict[str, int] = {}
 
+# a failed download goes straight on to the next-best release (the failed one
+# is already blocked, so the search cannot hand it back) instead of waiting out
+# the wishlist's retry backoff. a Soulseek peer that never answers is common,
+# and six hours per dead peer meant a book with dozens of sources sat idle.
+# capped per book so a run of bad sources falls back to the normal backoff
+# rather than searching in a tight loop.
+DEFAULT_IMMEDIATE_FALLBACKS = 5
+_fallbacks: Dict[str, int] = {}
+_fallbacks_lock = threading.Lock()
+
 
 def normalize_state(status: Any) -> str:
     """Collapse a client's own vocabulary into downloading / completed / failed.
@@ -158,7 +168,13 @@ def process_download(
         verdict = check_complete(str(resolved), row)
         patch["completeness"] = verdict.get("reason", "")
         if not verdict.get("complete"):
-            if verdict.get("expired"):
+            if verdict.get("no_audio"):
+                # files but no audio, an ebook claimed as an audiobook. staging
+                # held these as "importing" for the whole window, and no amount
+                # of waiting turns an epub into a book you can listen to
+                patch["status"] = "failed"
+                patch["error"] = "No audio in this download, only other files (an ebook?)"
+            elif verdict.get("expired"):
                 patch["status"] = "failed"
                 patch["error"] = (
                     f"Never completed: {verdict.get('reason') or 'still incomplete'}"
@@ -299,6 +315,9 @@ def _check_complete(source_path: str, row: Dict[str, Any]) -> Dict[str, Any]:
 
     verdict = assess(source_path, expected, tolerance_from_settings(),
                      abridged=abridged)
+    if not verdict.get("complete") and not verdict.get("files"):
+        from core.audiobook_completeness import has_files_but_no_audio
+        verdict["no_audio"] = has_files_but_no_audio(source_path)
     if not verdict.get("complete"):
         verdict["expired"] = staging_expired(
             row.get("created_at") or 0, staging_days_from_settings(),
@@ -483,6 +502,7 @@ def tick(db: Any = None) -> Dict[str, int]:
                     _book_for(row), imported_path or patch.get("save_path", ""),
                     download_id=row["download_id"], origin="soulsync",
                 )
+            _forget_fallbacks(asin)
             logger.info("Audiobook imported: %s -> %s", row.get("title"), imported_path)
         elif patch.get("status") == "staged":
             # "importing" on the card, and deliberately NOT an error: the book is
@@ -500,7 +520,70 @@ def tick(db: Any = None) -> Dict[str, int]:
                     asin, STATUS_FAILED, profile_id=None,
                     error=str(patch.get("error") or ""),
                 )
+                _try_next_release(database, asin)
     return summary
+
+
+def _fallback_limit() -> int:
+    try:
+        from core.settings import config_manager
+        value = config_manager.get("audiobooks.immediate_fallback_attempts",
+                                   DEFAULT_IMMEDIATE_FALLBACKS)
+        return max(0, int(DEFAULT_IMMEDIATE_FALLBACKS if value is None else value))
+    except Exception:                                       # noqa: BLE001
+        return DEFAULT_IMMEDIATE_FALLBACKS
+
+
+def _forget_fallbacks(asin: str) -> None:
+    with _fallbacks_lock:
+        _fallbacks.pop(asin, None)
+
+
+def _spawn(target: Callable[..., Any], *args: Any) -> None:
+    threading.Thread(target=target, args=args,
+                     name="audiobook-fallback", daemon=True).start()
+
+
+def _try_next_release(database: Any, asin: str) -> bool:
+    """Search again for a book whose download just failed, without the backoff.
+
+    Off the monitor thread: a search waits on every source, and the tick must
+    keep polling the downloads that are still moving.
+    """
+    limit = _fallback_limit()
+    with _fallbacks_lock:
+        used = _fallbacks.get(asin, 0)
+        if used >= limit:
+            _fallbacks.pop(asin, None)
+            if limit:
+                logger.info("Audiobook %s failed %d releases in a row; leaving it to the wishlist backoff",
+                            asin, used)
+            return False
+        _fallbacks[asin] = used + 1
+    _spawn(_run_fallback, database, asin, used + 1, limit)
+    return True
+
+
+def _run_fallback(database: Any, asin: str, attempt: int, limit: int) -> None:
+    from core.audiobook_database import STATUS_FAILED
+    from core.audiobook_wishlist_worker import process_one
+
+    try:
+        for profile_id in database.profiles_with_rows():
+            row = database.get_wishlist_entry(asin, profile_id=profile_id)
+            # only a row still sitting on "failed": a wishlist pass or a manual
+            # search may already have picked it up, and the library may have it
+            if not row or row.get("status") != STATUS_FAILED:
+                continue
+            logger.info("Audiobook download for %s failed; trying the next release (%d/%d)",
+                        asin, attempt, limit)
+            if not process_one(row, db=database).get("grabbed"):
+                _forget_fallbacks(asin)
+            return
+        _forget_fallbacks(asin)
+    except Exception as exc:                                # noqa: BLE001
+        _forget_fallbacks(asin)
+        logger.warning("Could not try the next release for %s: %s", asin, exc, exc_info=True)
 
 
 def cancel_downloads(task_ids=None, db=None):

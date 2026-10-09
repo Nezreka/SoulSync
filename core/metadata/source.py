@@ -58,6 +58,12 @@ mb_artist_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 mb_artist_cache_lock = threading.RLock()
 mb_artist_detail_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 mb_artist_detail_cache_lock = threading.RLock()
+# #1513: Last.fm artist top-tags used as a genre fallback. Cached per
+# (normalized artist name, whitelist hash) so an album's tracks hit Last.fm
+# once, not per track, and config changes don't serve stale genres.
+_LFM_ARTIST_TAGS_CACHE_MAX_ENTRIES = 1024
+lfm_artist_tags_cache: "OrderedDict[tuple, list[str]]" = OrderedDict()
+lfm_artist_tags_cache_lock = threading.RLock()
 logger = _create_logger("metadata.source")
 
 _SOURCE_NETWORK_EXCEPTIONS = (requests.RequestException, socket.timeout, TimeoutError)
@@ -122,6 +128,7 @@ SOURCE_TAG_CONFIG = {
     "MUSICBRAINZ_ARTIST_ID": "musicbrainz.tags.artist_id",
     "MUSICBRAINZ_RELEASE_ID": "musicbrainz.tags.release_id",
     "MUSICBRAINZ_ALBUMCOMMENT": "musicbrainz.tags.release_comment",
+    "MUSICBRAINZ_TRACKCOMMENT": "musicbrainz.tags.recording_comment",
     "MUSICBRAINZ_RELEASEGROUPID": "musicbrainz.tags.release_group_id",
     "MUSICBRAINZ_ALBUMARTISTID": "musicbrainz.tags.album_artist_id",
     "MUSICBRAINZ_RELEASETRACKID": "musicbrainz.tags.release_track_id",
@@ -163,6 +170,7 @@ ID3_TAG_MAP = {
     "MUSICBRAINZ_ARTIST_ID": ("TXXX", "MusicBrainz Artist Id"),
     "MUSICBRAINZ_RELEASE_ID": ("TXXX", "MusicBrainz Album Id"),
     "MUSICBRAINZ_ALBUMCOMMENT": ("TXXX", "MusicBrainz Album Comment"),
+    "MUSICBRAINZ_TRACKCOMMENT": ("TXXX", "MusicBrainz Track Comment"),
     "MUSICBRAINZ_RELEASEGROUPID": ("TXXX", "MusicBrainz Release Group Id"),
     "MUSICBRAINZ_ALBUMARTISTID": ("TXXX", "MusicBrainz Album Artist Id"),
     "MUSICBRAINZ_RELEASETRACKID": ("TXXX", "MusicBrainz Release Track Id"),
@@ -189,6 +197,7 @@ MP4_TAG_MAP = {
     "MUSICBRAINZ_ARTIST_ID": "MusicBrainz Artist Id",
     "MUSICBRAINZ_RELEASE_ID": "MusicBrainz Album Id",
     "MUSICBRAINZ_ALBUMCOMMENT": "MusicBrainz Album Comment",
+    "MUSICBRAINZ_TRACKCOMMENT": "MusicBrainz Track Comment",
     "MUSICBRAINZ_RELEASEGROUPID": "MusicBrainz Release Group Id",
     "MUSICBRAINZ_ALBUMARTISTID": "MusicBrainz Album Artist Id",
     "MUSICBRAINZ_RELEASETRACKID": "MusicBrainz Release Track Id",
@@ -313,7 +322,28 @@ def _cached_mb_artist_details(mb_service, artist_mbid: str) -> Optional[Dict[str
     return detail
 
 
-def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
+def _audio_file_duration_ms(audio_file) -> Optional[int]:
+    """Best-effort duration (ms) of the downloaded file for the MusicBrainz
+    recording match (#1509 duration gate). None when unknown — the gate
+    simply doesn't apply. Never raises: mutagen may be missing and files may
+    be unreadable; either way the match falls back to name/identity only.
+    """
+    if not audio_file:
+        return None
+    try:
+        symbols = get_mutagen_symbols()
+        if not symbols:
+            return None
+        audio = symbols.File(str(audio_file))
+        length = getattr(getattr(audio, "info", None), "length", None)
+        if length and float(length) > 0:
+            return int(float(length) * 1000)
+    except Exception:  # noqa: BLE001, S110 — probe failure means 'unknown', never a reject
+        pass
+    return None
+
+
+def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str, audio_file=None) -> None:
     if cfg.get("musicbrainz.embed_tags", True) is False:
         return
     if not track_title or not artist_name:
@@ -325,13 +355,30 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
         return
 
     pinned_release = metadata.get("musicbrainz_release_id")
+
+    # Resolve the artist identity FIRST: the recording lookup below takes it
+    # as a hard gate (#1509 — a same-named band's recording can otherwise
+    # outscore the real artist's on printed-credit text alone).
+    track_artist_name = metadata.get("artist", "") or artist_name
+    if ", " in track_artist_name:
+        track_artist_name = track_artist_name.split(", ")[0]
+    artist_result = None if pinned_release else _cached_mb_artist(mb_service, track_artist_name)
+    if artist_result and artist_result.get("mbid"):
+        pp["artist_mbid"] = artist_result["mbid"]
+        pp["id_tags"]["MUSICBRAINZ_ARTIST_ID"] = pp["artist_mbid"]
+
     details = {}
     searched_recording = None
-    result = None if pinned_release else _call_source_lookup("MusicBrainz recording", mb_service.match_recording, track_title, artist_name)
+    result = None if pinned_release else _call_source_lookup(
+        "MusicBrainz recording", mb_service.match_recording, track_title, artist_name,
+        artist_mbid=pp.get("artist_mbid"),
+        duration_ms=_audio_file_duration_ms(audio_file))
     if result and result.get("mbid"):
         pp["recording_mbid"] = result["mbid"]
         searched_recording = result["mbid"]
         pp["id_tags"]["MUSICBRAINZ_RECORDING_ID"] = pp["recording_mbid"]
+        if result.get("recording_disambiguation") is not None:
+            pp["recording_disambiguation"] = str(result["recording_disambiguation"]).strip()
         details = _call_source_lookup(
             "MusicBrainz recording details",
             mb_service.mb_client.get_recording,
@@ -343,14 +390,6 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
             if isrcs:
                 pp["isrc"] = isrcs[0]
             pp["mb_genres"] = [g["name"] for g in sorted(details.get("genres", []), key=lambda x: x.get("count", 0), reverse=True)]
-
-    track_artist_name = metadata.get("artist", "") or artist_name
-    if ", " in track_artist_name:
-        track_artist_name = track_artist_name.split(", ")[0]
-    artist_result = None if pinned_release else _cached_mb_artist(mb_service, track_artist_name)
-    if artist_result and artist_result.get("mbid"):
-        pp["artist_mbid"] = artist_result["mbid"]
-        pp["id_tags"]["MUSICBRAINZ_ARTIST_ID"] = pp["artist_mbid"]
 
     album_name_for_mb = metadata.get("album", "")
     if album_name_for_mb or pinned_release:
@@ -464,6 +503,9 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
                                     if release_recording.get("id"):
                                         pp["recording_mbid"] = release_recording["id"]
                                         pp["id_tags"]["MUSICBRAINZ_RECORDING_ID"] = release_recording["id"]
+                                        pp["recording_disambiguation"] = (
+                                            release_recording.get("disambiguation") or ""
+                                        ).strip()
                                     break
                             break
                 except (ValueError, TypeError):
@@ -471,7 +513,13 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
 
     if pp["release_mbid"] and release_detail:
         from core.metadata.musicbrainz_tags import release_tags, credit_tags
-        pp["id_tags"].update(release_tags(release_detail))
+        # #1510: ALBUMARTISTSORT names the sort names of the album artist(s)
+        # the primary source settled on (album_artist, plus the full list when
+        # the album context names more than one) — or is left out entirely
+        # when no credit matches, instead of sorting under the whole credit.
+        album_names = [n for n in dict.fromkeys(
+            [metadata.get("album_artist")] + list(metadata.get("_album_artists_list") or [])) if n]
+        pp["id_tags"].update(release_tags(release_detail, album_artist_names=album_names or None))
         # Recording details must correspond to the final release recording,
         # not the earlier name-search result (which can be a different version).
         if pp["recording_mbid"]:
@@ -482,7 +530,20 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
             pp["isrc"] = (final_recording.get("isrcs") or [None])[0]
             pp["mb_isrcs"] = final_recording.get("isrcs") or []
             pp["mb_genres"] = [g["name"] for g in sorted(final_recording.get("genres", []), key=lambda g: g.get("count", 0), reverse=True)]
-            pp["id_tags"].update(credit_tags(final_recording.get("artist-credit")))
+            recording_disambiguation = (final_recording.get("disambiguation") or "").strip()
+            if "disambiguation" in final_recording:
+                pp["recording_disambiguation"] = recording_disambiguation
+            # #1510: ARTISTSORT keeps only the sort names of the credited
+            # artists that match the primary source's artist list — or is
+            # left out entirely when nothing matches — so the sort tag names
+            # the same artists ARTIST/ARTISTS do (#1425 did ARTISTS).
+            pp["id_tags"].update(credit_tags(final_recording.get("artist-credit"),
+                                             expected_names=metadata.get("_artists_list")))
+            # #1536: the recording's disambiguation ("acoustic", "live") —
+            # track-level mirror of MUSICBRAINZ_ALBUMCOMMENT. Already in the
+            # fetched recording dict; no extra lookup needed.
+            if recording_disambiguation:
+                pp["id_tags"]["MUSICBRAINZ_TRACKCOMMENT"] = recording_disambiguation
 
     # Genre fallback chain: most MusicBrainz recordings don't carry genres at
     # the track level, but releases and artists usually do. If the recording
@@ -875,9 +936,9 @@ def _process_bandcamp_source(pp: dict, metadata: dict, cfg, runtime, track_title
             pp["bandcamp_label"] = bc_label
 
 
-def _process_source_enrichment(source_name: str, pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str, provenance=None) -> None:
+def _process_source_enrichment(source_name: str, pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str, provenance=None, audio_file=None) -> None:
     if source_name == "musicbrainz":
-        _process_musicbrainz_source(pp, metadata, cfg, runtime, track_title, artist_name)
+        _process_musicbrainz_source(pp, metadata, cfg, runtime, track_title, artist_name, audio_file=audio_file)
     elif source_name == "deezer":
         _process_deezer_source(pp, metadata, cfg, runtime, track_title, artist_name, provenance=provenance)
     elif source_name == "audiodb":
@@ -916,6 +977,84 @@ def _more_precise_date(existing: Any, new: Any) -> str:
     ):
         return existing_str
     return new_str
+
+
+def _lastfm_artist_genre_fallback(lf_client, artist_name: str, cfg) -> list[str]:
+    """Return genre names from the artist's Last.fm top tags (#1513).
+
+    Used when no genre source yields a genre and the
+    ``lastfm.tags.artist_genre_fallback`` setting is enabled. Only tags with
+    weight >= 10 are considered, filtered through the genre whitelist so
+    non-genre tags ("seen live", etc.) never become genres. Results (including
+    empty) are cached per normalized artist name + whitelist — one album's
+    tracks hit Last.fm once, and a Last.fm outage doesn't stall every track.
+    """
+    key = str(artist_name or "").strip().lower()
+    if not key or lf_client is None:
+        return []
+    # Cache key includes the whitelist so config changes don't serve stale genres.
+    from core.genre_filter import DEFAULT_GENRES, _normalize_for_match
+    user_genres = cfg.get("genre_whitelist.genres", None) if cfg else None
+    whitelist = user_genres if isinstance(user_genres, list) and user_genres else DEFAULT_GENRES
+    wl_key = hash(tuple(sorted(_normalize_for_match(g) for g in whitelist)))
+    cache_key = (key, wl_key)
+    with lfm_artist_tags_cache_lock:
+        cached = _bounded_cache_get(lfm_artist_tags_cache, cache_key)
+        if cached is not None:
+            return list(cached)
+    genres = []
+    try:
+        tags = lf_client.get_artist_top_tags(artist_name)
+    except Exception:
+        logger.debug("Last.fm artist tags lookup failed for %r", artist_name)
+        tags = []
+    if tags:
+        # Weight threshold: Last.fm counts are 0-100, reporter proposed 10.
+        candidates = []
+        for tag in tags:
+            if not isinstance(tag, dict):
+                continue
+            name = tag.get("name", "")
+            try:
+                weight = int(tag.get("count", 0))
+            except (TypeError, ValueError):
+                weight = 0
+            if name and weight >= 10:
+                candidates.append(str(name))
+        # Filter through the genre whitelist. Use exact normalized matching
+        # only — translate_genre's fuzzy 'accepted' would let near-misses
+        # ("seen live" ~ "sea shanty") leak into the genre frame.
+        lookup = {_normalize_for_match(g): g for g in whitelist}
+        seen = set()
+        for candidate in candidates:
+            norm = _normalize_for_match(candidate)
+            matched = lookup.get(norm)
+            if matched and norm not in seen:
+                seen.add(norm)
+                genres.append(matched)
+            if len(genres) >= 5:
+                break
+    # Cache even empty results (negative caching) so a Last.fm outage or an
+    # artist with no valid genres doesn't re-hit the network per track.
+    with lfm_artist_tags_cache_lock:
+        _bounded_cache_set(lfm_artist_tags_cache, cache_key, list(genres), _LFM_ARTIST_TAGS_CACHE_MAX_ENTRIES)
+    return genres
+
+
+def _write_genre_frame(audio_file, genres: list[str], cfg, symbols, source: str = "merged") -> None:
+    """Write a genre list to the audio file's genre frame (ID3/TCON, Vorbis GENRE, MP4 ©gen)."""
+    if not genres:
+        return
+    genre_string = ", ".join(genres)
+    from core.metadata.multi_value import genre_values
+    genres_out = genre_values(genres, bool(cfg.get("metadata_enhancement.tags.write_multi_artist", False)))
+    if isinstance(audio_file.tags, symbols.ID3):
+        audio_file.tags.add(symbols.TCON(encoding=3, text=genres_out))
+    elif is_vorbis_like(audio_file, symbols):
+        audio_file["GENRE"] = genres_out
+    elif isinstance(audio_file, symbols.MP4):
+        audio_file["\xa9gen"] = genres_out
+    logger.info("Genres %s: %s", source, genre_string)
 
 
 def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols):
@@ -1023,29 +1162,51 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
             enrichment_genres += pp["bandcamp_tags"]
         if enrichment_genres:
             from core.genre_filter import filter_genres as _filter_genres
+            from core.genre_filter import _normalize_for_match
 
             enrichment_genres = _filter_genres(enrichment_genres, cfg)
             source_genres = [g.strip() for g in str(metadata.get("genre", "")).split(",") if g.strip()]
             seen = set()
             merged = []
             for genre in source_genres + enrichment_genres:
-                key = genre.strip().lower()
+                # #1512: dedupe on normalized genre identity so spelling
+                # variants ("Hip-Hop" vs "Hip Hop", "R&B" vs "RnB") collapse
+                # to the first spelling instead of surviving as duplicates.
+                # Note: _normalize_for_match's alias table now doubles as tag
+                # identity — any future alias added for whitelist matching
+                # will also change what counts as a duplicate genre here.
+                key = _normalize_for_match(genre)
                 if key and key not in seen:
                     seen.add(key)
                     merged.append(genre.strip().title())
                 if len(merged) >= 5:
                     break
             if merged:
-                genre_string = ", ".join(merged)
-                from core.metadata.multi_value import genre_values
-                genres_out = genre_values(merged, bool(cfg.get("metadata_enhancement.tags.write_multi_artist", False)))
-                if isinstance(audio_file.tags, symbols.ID3):
-                    audio_file.tags.add(symbols.TCON(encoding=3, text=genres_out))
-                elif is_vorbis_like(audio_file, symbols):
-                    audio_file["GENRE"] = genres_out
-                elif isinstance(audio_file, symbols.MP4):
-                    audio_file["\xa9gen"] = genres_out
-                logger.info("Genres merged: %s", genre_string)
+                _write_genre_frame(audio_file, merged, cfg, symbols)
+        elif cfg.get("lastfm.tags.artist_genre_fallback", False):
+            # #1513: no genre source yielded anything — fall back to the
+            # artist's Last.fm top tags (opt-in, off by default). Source genres
+            # from the download (metadata["genre"]) are kept, mirroring the
+            # merge path above.
+            fallback_genres = _lastfm_artist_genre_fallback(
+                pp.get("_lf_client_for_genre_fallback"),
+                pp.get("_artist_name_for_genre_fallback") or metadata.get("artist", ""),
+                cfg,
+            )
+            if fallback_genres:
+                source_genres = [g.strip() for g in str(metadata.get("genre", "")).split(",") if g.strip()]
+                # Merge source genres + fallback, deduped, capped at 5.
+                seen = set()
+                merged_fallback = []
+                for genre in source_genres + fallback_genres:
+                    key = genre.strip().lower()
+                    if key and key not in seen:
+                        seen.add(key)
+                        merged_fallback.append(genre.strip().title())
+                    if len(merged_fallback) >= 5:
+                        break
+                if merged_fallback:
+                    _write_genre_frame(audio_file, merged_fallback, cfg, symbols, source="fallback")
 
     isrc_candidates = []
     if pp["isrc"] and _tag_enabled(cfg, "musicbrainz.tags.isrc"):
@@ -1172,6 +1333,25 @@ def _album_artist_names(artists) -> list:
         if name and name != "Unknown Artist" and name not in names:
             names.append(name)
     return names if len(names) > 1 else []
+
+
+def _source_album_genres(album_ctx, source: str, source_ids: dict) -> list:
+    """the album's own genres: from the context when it has them, else from
+    deezer's /album/{id} (cached, the download already looked it up). only
+    deezer is asked, other sources keep genre on the artist. never raises."""
+    names = album_ctx.get("genres") if isinstance(album_ctx, dict) else None
+    if isinstance(names, list) and names:
+        return [str(g) for g in names if isinstance(g, str) and g.strip()]
+    album_id = str((source_ids or {}).get("album_id") or "")
+    if (source or "").strip().lower() != "deezer" or not album_id.isdigit():
+        return []
+    try:
+        from core.metadata.registry import get_deezer_client
+        album = get_deezer_client().get_album_metadata(album_id, include_tracks=False) or {}
+        return [g for g in (album.get("genres") or []) if isinstance(g, str) and g.strip()]
+    except Exception as e:
+        logger.debug("deezer album genres for %s: %s", album_id, e)
+        return []
 
 
 def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> dict:
@@ -1415,7 +1595,9 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
         if release_date:
             metadata["date"] = release_date
 
-    genres = artist_dict.get("genres") or []
+    # deezer's artist has no genres, its album does. without this every deezer
+    # download got no genre unless musicbrainz or last.fm had one (#1607)
+    genres = artist_dict.get("genres") or _source_album_genres(album_ctx, source, source_ids)
     if genres:
         from core.genre_filter import filter_genres
 
@@ -1609,9 +1791,20 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
 
         for source_name in source_order:
             _process_source_enrichment(source_name, pp, metadata, cfg, runtime, track_title, artist_name,
-                                       provenance=cached_meta)
+                                       provenance=cached_meta, audio_file=audio_file)
 
-        if not pp["id_tags"] and not pp["deezer_bpm"] and not pp["deezer_isrc"] and not pp["tidal_bpm"] and not pp["hifi_bpm"] and not pp["hifi_copyright"] and not pp["audiodb_mood"] and not pp["audiodb_style"] and not pp["bandcamp_url"] and not pp["bandcamp_tags"]:
+        # #1513: stash the Last.fm client + artist name for the genre fallback
+        # in _write_embedded_metadata (opt-in, only fetched if no genre source
+        # yields anything).
+        fallback_enabled = cfg.get("lastfm.tags.artist_genre_fallback", False)
+        if fallback_enabled:
+            lastfm_worker = getattr(runtime, "lastfm_worker", None)
+            pp["_lf_client_for_genre_fallback"] = lastfm_worker.client if lastfm_worker else None
+            pp["_artist_name_for_genre_fallback"] = artist_name
+
+        # Skip the early return when the genre fallback is on — there may be
+        # genres to write even if no other metadata was enriched.
+        if not fallback_enabled and not pp["id_tags"] and not pp["deezer_bpm"] and not pp["deezer_isrc"] and not pp["tidal_bpm"] and not pp["hifi_bpm"] and not pp["hifi_copyright"] and not pp["audiodb_mood"] and not pp["audiodb_style"] and not pp["bandcamp_url"] and not pp["bandcamp_tags"]:
             return
 
         release_year = _write_embedded_metadata(audio_file, metadata, pp, cfg, symbols)
@@ -1630,6 +1823,7 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
         if isinstance(context, dict):
             try:
                 context["_embedded_id_tags"] = dict(pp.get("id_tags") or {})
+                context["_recording_disambiguation"] = pp.get("recording_disambiguation")
                 isrc_value = (
                     pp.get("isrc") or pp.get("deezer_isrc") or pp.get("tidal_isrc")
                     or pp.get("hifi_isrc") or pp.get("qobuz_isrc")

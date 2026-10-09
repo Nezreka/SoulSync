@@ -58,7 +58,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.settings import config_manager
-from core.archive_pipeline import AUDIO_EXTENSIONS, collect_audio_after_extraction
+from core.archive_pipeline import (
+    AUDIO_EXTENSIONS,
+    collect_audio_after_extraction,
+    extract_archive,
+    is_archive,
+    walk_audio_files,
+)
 from core.download_plugins.album_bundle import (
     TransientMissCounter,
     copy_audio_files_atomically,
@@ -72,6 +78,7 @@ from core.download_plugins.album_bundle import (
 )
 from core.download_plugins.base import DownloadSourcePlugin
 from core.download_plugins.candidate_store import get_candidate_store
+from core.download_plugins.release_identity import dedupe_prowlarr_releases, torrent_hash_evidence, release_sources, release_evidence as get_release_evidence
 from core.download_plugins.torrent_stall import (
     StallTracker,
     get_min_seeders,
@@ -200,13 +207,13 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
     ) -> Tuple[List[TrackResult], List[AlbumResult]]:
         if not self._prowlarr.is_configured():
             return ([], [])
-        results = await prowlarr_search_with_variants(
+        results = await prowlarr_track_search(
             self._prowlarr, query, "torrent", timeout=timeout,
         )
         return self._project_results(results)
 
     def _project_results(
-        self, results: List[ProwlarrSearchResult]
+        self, results: List[ProwlarrSearchResult], *, release_evidence=None
     ) -> Tuple[List[TrackResult], List[AlbumResult]]:
         """Turn Prowlarr releases into TrackResult / AlbumResult
         shaped objects. One TrackResult + one AlbumResult per
@@ -215,7 +222,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         without downloading the actual torrent."""
         tracks: List[TrackResult] = []
         albums: List[AlbumResult] = []
-        for result in results:
+        for result in dedupe_prowlarr_releases(results):
+            evidence = release_evidence or get_release_evidence(result)
             if result.protocol != 'torrent':
                 continue
             # Prefer the .torrent URL over the magnet (#1139). A magnet gives
@@ -238,7 +246,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             # delta ported onto both: the indexer's categories travel with the
             # candidate, because `evaluate_release` judges on that evidence
             # before it falls back to parsing the title.
-            candidate_metadata = {'categories': list(result.categories or [])}
+            candidate_metadata = {'categories': list(evidence.categories or []),
+                                  'release_title': evidence.title}
             track_token = get_candidate_store().put(
                 _encode_candidate(download_url, result.magnet_uri),
                 result_kind="track",
@@ -251,11 +260,11 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             )
             filename = f"{track_token}{_FILENAME_SEP}{result.title}"
             audio_quality = audio_quality_from_release(
-                result.title,
-                result.categories,
+                evidence.title,
+                evidence.categories,
             )
             quality = audio_quality.format
-            parsed_artist, parsed_title = _parse_release_title(result.title)
+            parsed_artist, parsed_title = _parse_release_title(evidence.title)
             tr = TrackResult(
                 username='torrent',
                 filename=filename,
@@ -291,9 +300,15 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                     'publish_date': result.publish_date,
                     'protocol': 'torrent',
                     'release_title': result.title,
+                    'info_hash': torrent_hash_evidence(result)[0],
+                    'hash_conflict': torrent_hash_evidence(result)[1],
                     'categories': list(result.categories or []),
                 },
             )
+            tr._release_sources = [
+                source for raw in result._release_sources
+                for source in self._project_results([raw], release_evidence=evidence)[0]
+            ]
             tracks.append(tr)
             album_track = replace(
                 tr, filename=f"{album_token}{_FILENAME_SEP}{result.title}")
@@ -350,7 +365,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         if allowed_formats:
             ok, why = evaluate_release(
                 allowed_formats,
-                display_name,
+                candidate_metadata.get('release_title') or display_name,
                 categories=candidate_metadata.get('categories'),
             )
             if not ok:
@@ -378,7 +393,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
 
         thread = threading.Thread(
             target=self._download_thread,
-            args=(download_id, download_url, display_name, fallback_magnet,
+            args=(download_id, download_url, candidate_metadata.get('release_title') or display_name, fallback_magnet,
                   allowed_formats, candidate_metadata.get('categories')),
             daemon=True,
             name=f'torrent-dl-{download_id[:8]}',
@@ -420,7 +435,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                         display_name, rejected.reason)
             self._mark_error(
                 download_id,
-                f"Does not match the quality profile: {rejected.reason}")
+                f"Does not match the quality profile: {rejected.reason}", failure_kind='content')
             return
         except Exception as e:
             self._mark_error(download_id, f"add_torrent failed: {e}")
@@ -548,8 +563,9 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
 
     def _finalize_download(self, download_id: str, save_path: Optional[str],
                            torrent_name: Optional[str] = None) -> None:
-        """Adapter said complete. Walk the directory + pick the
-        first audio file as the canonical ``file_path``."""
+        """Adapter said complete. Resolve the client-reported path, then walk
+        the directory — or take a resolved single file directly — and pick
+        the first audio file as the canonical ``file_path``."""
         if not save_path:
             self._mark_error(download_id, "Torrent completed but no save_path reported")
             return
@@ -567,15 +583,27 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         # download root from donating the "first audio file" of some OTHER
         # torrent that happens to live there.
         walk_root = Path(local_path)
-        if torrent_name and (walk_root / torrent_name).is_dir():
-            # is_dir, not exists: a single-FILE torrent's name points at the
-            # file itself, and the audio walker only walks directories.
-            walk_root = walk_root / torrent_name
-        try:
-            audio_files = collect_audio_after_extraction(walk_root)
-        except Exception as e:
-            self._mark_error(download_id, f"Post-extract walk failed: {e}")
-            return
+        if walk_root.is_file():
+            # A single-FILE torrent whose client path needed remapping: the
+            # resolver handed back the file itself. Take it directly (archives
+            # extract first) — the audio walker only walks directories, and
+            # walking the file's parent (usually the shared download root)
+            # would pick up every other torrent's audio instead.
+            try:
+                audio_files = _audio_from_single_file(walk_root)
+            except Exception as e:
+                self._mark_error(download_id, f"Post-extract walk failed: {e}")
+                return
+        else:
+            if torrent_name and (walk_root / torrent_name).is_dir():
+                # is_dir, not exists: a single-FILE torrent's name points at the
+                # file itself, and the audio walker only walks directories.
+                walk_root = walk_root / torrent_name
+            try:
+                audio_files = collect_audio_after_extraction(walk_root)
+            except Exception as e:
+                self._mark_error(download_id, f"Post-extract walk failed: {e}")
+                return
         if not audio_files:
             suffix = f" (resolved: {local_path})" if local_path != save_path else ""
             self._mark_error(download_id, f"No audio files found in {save_path}{suffix}")
@@ -600,13 +628,14 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         if completed_hash:
             self._apply_seed_policy(completed_hash, torrent_name)
 
-    def _mark_error(self, download_id: str, message: str) -> None:
+    def _mark_error(self, download_id: str, message: str, *, failure_kind='transport') -> None:
         logger.error("Torrent download %s failed: %s", download_id[:8], message)
         with self._lock:
             row = self.active_downloads.get(download_id)
             if row is not None:
                 row['state'] = 'Completed, Errored'
                 row['error'] = message
+                row['failure_kind'] = failure_kind
 
     def _apply_seed_policy(self, torrent_hash: str, title: Optional[str]) -> None:
         """Route a completed grab per the seed-enforcement mode. 'client' writes
@@ -813,41 +842,40 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                     picked.title, picked.size / 1_048_576, picked.seeders, picked.indexer_name)
         _emit('queued', release=picked.title, size=picked.size, seeders=picked.seeders)
 
-        # Phase 2: hand to adapter. Fetch the .torrent server-side first —
-        # the client often can't reach Prowlarr itself (split containers).
-        try:
-            from core.torrent_clients.base import ReleaseRejected, add_torrent_smart
+        # Phase 2: try the preserved indexer endpoints for this release.
+        # A fetch/add error can be endpoint-specific. A verified content
+        # rejection is terminal for the whole identified release.
+        from core.torrent_clients.base import ReleaseRejected, add_torrent_smart
 
-            # #1149: the title got us this far; the FILE LIST is the evidence.
-            # This runs inside add_torrent_smart because that is where the
-            # fetched payload already lives, so verification costs no extra
-            # request and happens strictly before the client is handed
-            # anything.
-            def _verify(names):
-                if not allowed_formats:
-                    return True, ''
-                return evaluate_release(
-                    allowed_formats,
-                    picked.title,
-                    file_names=names,
-                    categories=getattr(picked, 'categories', None),
-                )
+        def _verify(names):
+            if not allowed_formats:
+                return True, ''
+            return evaluate_release(
+                allowed_formats, get_release_evidence(picked).title, file_names=names,
+                categories=getattr(get_release_evidence(picked), 'categories', None),
+            )
 
-            torrent_id = run_async(add_torrent_smart(
-                adapter, download_url, fallback_magnet=picked.magnet_uri,
-                verify_files=_verify))
-        except ReleaseRejected as rejected:
-            logger.info("[Torrent album] Refused '%s' after reading its file list: %s",
-                        picked.title, rejected.reason)
-            result['error'] = f'Release does not match the quality profile: {rejected.reason}'
-            # Fallback-eligible: the next source may have a release that does.
-            result['fallback'] = True
-            return result
-        except Exception as e:
-            result['error'] = f'Torrent client refused the release: {e}'
-            return result
+        torrent_id = None
+        for source in release_sources(picked):
+            source_url = source.download_url or source.magnet_uri
+            if not source_url:
+                continue
+            try:
+                torrent_id = run_async(add_torrent_smart(
+                    adapter, source_url, fallback_magnet=source.magnet_uri,
+                    verify_files=_verify))
+            except ReleaseRejected as rejected:
+                logger.info("[Torrent album] Refused '%s' after reading its file list: %s",
+                            picked.title, rejected.reason)
+                result['error'] = f'Release does not match the quality profile: {rejected.reason}'
+                result['fallback'] = True
+                return result
+            except Exception:  # endpoint unavailable; keep its URLs out of logs
+                torrent_id = None
+            if torrent_id:
+                break
         if not torrent_id:
-            result['error'] = 'Torrent client refused the release'
+            result['error'] = 'Torrent client refused the release on every indexer source'
             return result
 
         # Phase 3: poll until complete. The lifted helper handles
@@ -945,50 +973,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         except Exception:   # noqa: BLE001 - the name is an assist, not a requirement
             torrent_name = None
 
-        # content_path is qBittorrent's absolute path to THIS torrent's own
-        # file or folder, and it is the reliable answer to "which of the
-        # things in the shared download dir is mine" — the release's on-disk
-        # folder often differs from the torrent's display NAME, which is what
-        # the save_path + name walk below assumes. The video side has resolved
-        # completed torrents this way for a while; the music album flow never
-        # adopted it, and that is the "completed and seeding in qBittorrent,
-        # but SoulSync says No audio files found" half of #1139.
-        walk_root = None
-        single_file = None
-        if content_path:
-            resolved_content = resolve_reported_save_path(content_path)
-            candidate = Path(resolved_content)
-            if candidate.is_dir():
-                walk_root = candidate
-                logger.info("[Torrent album] Using client content_path %r -> %r",
-                            content_path, str(walk_root))
-            elif candidate.is_file() and candidate.suffix.lower() in AUDIO_EXTENSIONS:
-                # A single-FILE torrent. Deliberately NOT walking its parent:
-                # for these the parent is usually the shared download root, and
-                # walking it would stage every other torrent's audio too. We
-                # already know exactly which file is ours.
-                single_file = candidate
-                logger.info("[Torrent album] Single-file torrent via content_path -> %r",
-                            str(candidate))
-            # A single non-audio file (an archive) falls through to the
-            # save_path walk below, which extracts before collecting.
-
-        local_path = resolve_reported_save_path(save_path, expect_name=torrent_name)
-        if local_path != save_path:
-            logger.info("[Torrent album] Resolved client path %r -> %r", save_path, local_path)
-        if walk_root is None:
-            walk_root = Path(local_path)
-            if torrent_name and (walk_root / torrent_name).is_dir():
-                # is_dir, not exists: a single-FILE torrent's name points at the
-                # file itself, and the audio walker only walks directories.
-                walk_root = walk_root / torrent_name
         try:
-            # single_file is set only when content_path named ONE audio file:
-            # we already know exactly which file is ours, and walking its
-            # parent (usually the shared download root) would stage every
-            # other torrent's audio with it.
-            audio_files = ([single_file] if single_file
-                           else collect_audio_after_extraction(walk_root))
+            audio_files, scope = _collect_album_audio(save_path, torrent_name, content_path)
         except Exception as e:
             result['error'] = f'Failed to walk audio files: {e}'
             result['fallback'] = True
@@ -998,7 +984,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             # reads identically whether the release genuinely has none or the
             # path simply isn't reachable from this process — and the second is
             # a remote-path-mapping problem the user can actually fix.
-            result['error'] = _no_audio_diagnosis(save_path, walk_root)
+            result['error'] = _no_audio_diagnosis(save_path, scope)
             # The bits may well be on disk, so per-track can still succeed
             # where this bundle could not.
             result['fallback'] = True
@@ -1022,6 +1008,118 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
 # ---------------------------------------------------------------------------
 
 
+def _audio_from_single_file(path: Path) -> List[Path]:
+    """Audio files for a download that resolved to ONE file, not a folder.
+
+    A single-FILE torrent's resolved path names the file itself. Audio files
+    are taken directly; single-file ARCHIVES are extracted and the extraction
+    walked; anything else yields nothing. Always returns absolute paths,
+    matching ``walk_audio_files`` — downstream stages persist these paths and
+    do real file IO on them.
+
+    an archive unpacks into its own folder next to it, never into its parent.
+    the parent is usually the shared download root, and walking it would hand
+    this job every other download's audio.
+    """
+    resolved = Path(path).resolve()
+    if resolved.suffix.lower() in AUDIO_EXTENSIONS:
+        return [resolved]
+    if is_archive(resolved):
+        extracted = extract_archive(resolved, extract_to=_archive_extract_dir(resolved))
+        if extracted is not None:
+            return walk_audio_files(Path(extracted))
+    return []
+
+
+_ARCHIVE_SUFFIXES = ('.tar.gz', '.tar.bz2', '.tar.xz', '.tgz', '.tar', '.zip', '.rar', '.7z')
+
+
+def _archive_extract_dir(archive: Path) -> Path:
+    """'<dir>/Album.tar.gz' -> '<dir>/Album'. falls back to '<name>.extracted'
+    when the stem would be empty or is the archive itself."""
+    name = archive.name
+    stem = name
+    for suffix in _ARCHIVE_SUFFIXES:
+        if name.lower().endswith(suffix):
+            stem = name[:-len(suffix)]
+            break
+    if not stem or stem == name:
+        stem = name + '.extracted'
+    return archive.parent / stem
+
+
+def _collect_album_audio(
+    save_path: Optional[str],
+    torrent_name: Optional[str],
+    content_path: Optional[str],
+) -> Tuple[List[Path], str]:
+    """Resolve the client's paths for an album torrent and collect this
+    release's audio files.
+
+    ``content_path`` (qBittorrent's path to THIS torrent's own file/folder)
+    is preferred — it is the reliable answer to "which of the things in the
+    shared download dir is mine". Otherwise the save path is resolved against
+    the torrent name. A resolved single FILE is taken directly (archives
+    extracted first): walking its parent — usually the shared download root —
+    would stage every other torrent's audio, and the directory walker finds
+    nothing in a file.
+
+    Returns ``(audio_files, scope)`` where ``scope`` is the path actually
+    consulted (walked directory or single file), for the no-audio diagnosis.
+    Raises whatever the walk/extraction raises; the caller reports it.
+    """
+    # content_path is qBittorrent's absolute path to THIS torrent's own
+    # file or folder, and it is the reliable answer to "which of the
+    # things in the shared download dir is mine" — the release's on-disk
+    # folder often differs from the torrent's display NAME, which is what
+    # the save_path + name walk below assumes. The video side has resolved
+    # completed torrents this way for a while; the music album flow never
+    # adopted it, and that is the "completed and seeding in qBittorrent,
+    # but SoulSync says No audio files found" half of #1139.
+    walk_root = None
+    single_file = None
+    if content_path:
+        resolved_content = resolve_reported_save_path(content_path)
+        candidate = Path(resolved_content)
+        if candidate.is_dir():
+            walk_root = candidate
+            logger.info("[Torrent album] Using client content_path %r -> %r",
+                        content_path, str(walk_root))
+        elif candidate.is_file() and candidate.suffix.lower() in AUDIO_EXTENSIONS:
+            # A single-FILE torrent. Deliberately NOT walking its parent:
+            # for these the parent is usually the shared download root, and
+            # walking it would stage every other torrent's audio too. We
+            # already know exactly which file is ours.
+            single_file = candidate
+            logger.info("[Torrent album] Single-file torrent via content_path -> %r",
+                        str(candidate))
+        # A single non-audio file (an archive) falls through to the
+        # save_path walk below, which extracts before collecting.
+
+    local_path = resolve_reported_save_path(save_path, expect_name=torrent_name)
+    if local_path != save_path:
+        logger.info("[Torrent album] Resolved client path %r -> %r", save_path, local_path)
+    if walk_root is None:
+        walk_root = Path(local_path)
+        if walk_root.is_file():
+            # No content_path from this client: the resolver handed back the
+            # single FILE itself. Same direct handling as the content_path
+            # branch — including archives, which extract before collecting.
+            single_files = _audio_from_single_file(walk_root)
+            return single_files, str(walk_root)
+        if torrent_name and (walk_root / torrent_name).is_dir():
+            # is_dir, not exists: a single-FILE torrent's name points at the
+            # file itself, and the audio walker only walks directories.
+            walk_root = walk_root / torrent_name
+    if single_file is not None:
+        # single_file is set only when content_path named ONE audio file:
+        # we already know exactly which file is ours, and walking its
+        # parent (usually the shared download root) would stage every
+        # other torrent's audio with it.
+        return [single_file.resolve()], str(single_file)
+    return collect_audio_after_extraction(walk_root), str(walk_root)
+
+
 def _no_audio_diagnosis(reported_path: str, walk_root) -> str:
     """Explain WHY an apparently-successful torrent staged nothing (#1139).
 
@@ -1039,9 +1137,10 @@ def _no_audio_diagnosis(reported_path: str, walk_root) -> str:
     """
     root = Path(walk_root)
     try:
-        reachable = root.is_dir()
+        is_file = root.is_file()
+        reachable = is_file or root.is_dir()
     except OSError:
-        reachable = False
+        is_file, reachable = False, False
     where = f'{reported_path}' + (f' (resolved: {root})' if str(root) != reported_path else '')
     if not reachable:
         return (
@@ -1050,6 +1149,8 @@ def _no_audio_diagnosis(reported_path: str, walk_root) -> str:
             f'(download_source.path_mappings) pointing the client\'s completed-download '
             f'directory at the one SoulSync sees.'
         )
+    if is_file:
+        return f'No audio files found in {where} (the file is readable but holds no audio)'
     return f'No audio files found in {where} (the folder is readable but holds no audio)'
 
 
@@ -1063,17 +1164,45 @@ def _decode_filename(filename: str) -> Tuple[Optional[str], str]:
     return (url, display)
 
 
+_SCENE_SOURCE = r'(?:WEB|\d*CD[SM]?|VINYL|VLS|SACD|DVD)'
+_SCENE_CODEC = r'(?:FLAC|ALAC|APE|WAV|MP3|AAC|OGG|OPUS)'
 _SCENE_AUDIO_SUFFIX = re.compile(
     r'-(?:(?:16|24|32)[-_ ]?BIT-)?'
-    r'(?:\d{2,3}(?:[._]\d+)?-KHZ-)?'
-    r'(?:(?:WEB|CD|VINYL|SACD|DVD)-(?:FLAC|ALAC|APE|WAV|MP3|AAC|OGG|OPUS)(?:-(?:19|20)\d{2})?'
-    r'|(?:FLAC|ALAC|APE|WAV|MP3|AAC|OGG|OPUS)-(?:19|20)\d{2})'
-    r'(?:-[A-Z0-9]+)?$',
+    r'(?:\d{2,3}(?:[._-]\d{1,3})?-?KHZ-)?'
+    rf'(?:{_SCENE_SOURCE}-{_SCENE_CODEC}(?:-(?:19|20)\d{{2}})?'
+    rf'|{_SCENE_CODEC}-(?:19|20)\d{{2}}'
+    rf'|{_SCENE_SOURCE}-(?:19|20)\d{{2}})'
+    r'(?:-[A-Z0-9_]+)?$',
     re.IGNORECASE,
 )
 
 
-def _parse_release_title(title: str, *, artist_hint: Optional[str] = None) -> Tuple[str, str]:
+def _scene_boundary(name: str, artist_hint: Optional[str], title_hints) -> List[str]:
+    """Split an unspaced scene name ``Artist-Album`` into its two parts.
+
+    A hyphenated artist ("Jay-Z", "G-Eazy") makes the first hyphen a guess.
+    The requested song or album ending the name is evidence for the boundary,
+    then the requested artist starting it; only then the first hyphen.
+    """
+    for hint in title_hints or ():
+        words = re.findall(r'[^\W_]+', str(hint or ''))
+        if words:
+            pattern = r'[\W_]*'.join(map(re.escape, words))
+            match = re.fullmatch(rf'(.+?)[\s_]*-[\s_]*({pattern})', name, re.IGNORECASE)
+            if match:
+                return [match.group(1), match.group(2)]
+    if artist_hint:
+        # The requested artist is useful only if the actual release starts
+        # with that full name followed by a separator.
+        hint_pattern = re.escape(artist_hint.strip()).replace(r'\ ', r'[ ._]+')
+        match = re.match(rf'^{hint_pattern}[\s_]*-[\s_]*(.+)$', name, re.IGNORECASE)
+        if match:
+            return [artist_hint.strip(), match.group(1)]
+    return name.split('-', 1)
+
+
+def _parse_release_title(title: str, *, artist_hint: Optional[str] = None,
+                         title_hints=()) -> Tuple[str, str]:
     """Split a release title into ``(artist, title)`` using the
     ``Artist - Title`` / ``Artist - Album`` convention almost every
     indexer follows. Scene releases also use ``Artist-Album-WEB-FLAC-...``;
@@ -1094,20 +1223,17 @@ def _parse_release_title(title: str, *, artist_hint: Optional[str] = None) -> Tu
     cleaned = re.sub(r'\s*[\[\(][^\]\)]*[\]\)]\s*$', '', title.strip())
     scene_suffix = _SCENE_AUDIO_SUFFIX.search(cleaned)
     if scene_suffix:
-        cleaned = cleaned[:scene_suffix.start()].replace('_', ' ').strip()
+        # Underscores become spaces only after the split, so an album's own
+        # "_-_" is not mistaken for the artist boundary.
+        cleaned = cleaned[:scene_suffix.start()].strip()
     # Prefer a spaced boundary: it preserves hyphenated artist names such
     # as "Jay-Z - Album". A hint must never shorten an explicit artist name.
     parts = re.split(r'\s+-\s+|\s+-(?=\S)|(?<=\S)-\s+', cleaned, maxsplit=1)
     if len(parts) == 1 and scene_suffix:
-        if artist_hint:
-            # With no spaces, "Jay-Z-Album" cannot identify the boundary on
-            # its own. The requested artist is useful only if the actual
-            # release starts with that full name followed by a separator.
-            hint_pattern = re.escape(artist_hint.strip()).replace(r'\ ', r'[ ._]+')
-            match = re.match(rf'^{hint_pattern}\s*-\s*(.+)$', cleaned, re.IGNORECASE)
-            if match:
-                return artist_hint.strip(), match.group(1).strip()
-        parts = cleaned.split('-', 1)
+        parts = _scene_boundary(cleaned, artist_hint, title_hints)
+    if scene_suffix:
+        cleaned = cleaned.replace('_', ' ').strip()
+        parts = [part.replace('_', ' ') for part in parts]
     if len(parts) == 2:
         artist = parts[0].strip()
         rest = parts[1].strip()
@@ -1127,7 +1253,85 @@ def _guess_quality_from_title(title: str) -> str:
     return audio_quality_from_release_title(title).format
 
 
+async def prowlarr_track_search(
+    prowlarr: ProwlarrClient, query: str, protocol: str, *, timeout: Optional[int] = None,
+) -> List[ProwlarrSearchResult]:
+    """Collect a track query plus one known artist/album hint for this source.
+
+    The hint belongs to one worker task. Cache the album answer (including an
+    empty answer or transport error) across its track-query ladder so retries
+    do not multiply album requests. Only release plugins opt into this helper.
+    """
+    from core.downloads.track_hint import current_track_hint
+
+    hint = current_track_hint() or {}
+    artist = str(hint.get('artist') or '').strip()
+    album = str(hint.get('album') or '').strip()
+    title = str(hint.get('title') or '').strip()
+    additional = []
+    if artist and album and album.casefold() not in ('unknown album', title.casefold()):
+        additional.append(f"{artist} {album}")
+    cache = hint.setdefault('_prowlarr_album_queries', {}) if hint else None
+    return await prowlarr_search_with_variants(
+        prowlarr, query, protocol, timeout=timeout,
+        additional_queries=additional, additional_query_cache=cache,
+    )
+
+
 async def prowlarr_search_with_variants(
+    prowlarr: ProwlarrClient,
+    query: str,
+    protocol: str,
+    *,
+    timeout: Optional[int] = None,
+    categories=DEFAULT_MUSIC_CATEGORIES,
+    additional_queries=(),
+    additional_query_cache=None,
+) -> List[ProwlarrSearchResult]:
+    """Track variants plus at most one artist/album query, de-duplicated.
+
+    Raw hits are not proof of a match: the album query must still run after
+    irrelevant track hits. The worker applies its ordinary artist, version
+    and quality gates to the combined result. Direct track hits remain first.
+    Every query uses the existing supported free-text endpoint and throttle.
+    """
+    protocol = canonical_protocol(protocol)
+    additional = list(additional_queries)[:1]
+    album_keys = {' '.join(str(value or '').split()).casefold() for value in additional}
+    queries = [query, *additional]
+    results, seen, searched = [], set(), set()
+    first_error = None
+    for candidate_query in queries:
+        query_key = ' '.join(str(candidate_query or '').split()).casefold()
+        if not query_key or query_key in searched:
+            continue
+        searched.add(query_key)
+        cache_key = (protocol, query_key)
+        cache_album = query_key in album_keys and additional_query_cache is not None
+        cached = cache_album and cache_key in additional_query_cache
+        try:
+            answer = additional_query_cache[cache_key] if cached else await _prowlarr_search_query_with_variants(
+                prowlarr, candidate_query, protocol, timeout=timeout, categories=categories)
+            if isinstance(answer, Exception):
+                raise answer
+            if cache_album:
+                additional_query_cache[cache_key] = answer
+        except ProwlarrSearchError as exc:
+            first_error = first_error or exc
+            if cache_album:
+                additional_query_cache[cache_key] = exc
+            continue
+        for result in answer:
+            key = (result.indexer_id, result.guid or result.download_url or result.magnet_uri or result.title)
+            if key not in seen:
+                seen.add(key)
+                results.append(result)
+    if not results and first_error is not None:
+        raise first_error
+    return dedupe_prowlarr_releases(results)
+
+
+async def _prowlarr_search_query_with_variants(
     prowlarr: ProwlarrClient,
     query: str,
     protocol: str,
@@ -1291,4 +1495,6 @@ def _row_to_status(row: Dict[str, Any]) -> DownloadStatus:
         time_remaining=None,
         file_path=row.get('file_path'),
         audio_files=row.get('audio_files') or None,
+        error=row.get('error'),
+        failure_kind=row.get('failure_kind'),
     )

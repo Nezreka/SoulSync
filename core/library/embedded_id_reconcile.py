@@ -17,16 +17,18 @@ conflict. The artist a file's ``*_artist_id`` tag names is resolved through
 compilation or a featured track it is not the album's primary artist and must
 not be written there.
 
-Scope note: the MusicBrainz *recording* (track) ID is intentionally not
-reconciled — on ID3 it lives in a ``UFID`` frame the shared reader
-doesn't surface and the Vorbis ``musicbrainz_trackid`` convention is
-format-ambiguous. MB *album* and *artist* IDs (which drive most worker
-API calls) ARE reconciled, as are the clean per-provider track/album/
-artist IDs of the other services.
+The MusicBrainz *recording* id is reconciled too. picard and soulsync's
+own writer agree on where it lives: the ID3 ``UFID`` frame (which the shared
+reader now surfaces) and the Vorbis ``musicbrainz_trackid`` field. without
+it an mp3 kept every musicbrainz id but the recording, while its flac twin
+had one, so the two copies didn't look like the same song. only a real
+MBID-shaped value is filled, so an old tagger that put something else in
+``musicbrainz_trackid`` can't plant junk.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -42,6 +44,7 @@ _RECONCILE_FIELDS = (
     ('itunes_artist_id',     'artist', 'itunes_artist_id',     'itunes_match_status'),
     ('musicbrainz_albumid',  'album',  'musicbrainz_release_id', 'musicbrainz_match_status'),
     ('musicbrainz_artistid', 'artist', 'musicbrainz_id',       'musicbrainz_match_status'),
+    ('musicbrainz_trackid',  'track',  'musicbrainz_recording_id', 'musicbrainz_match_status'),
     ('deezer_track_id',      'track',  'deezer_id',            'deezer_match_status'),
     ('deezer_album_id',      'album',  'deezer_id',            'deezer_match_status'),
     ('deezer_artist_id',     'artist', 'deezer_id',            'deezer_match_status'),
@@ -60,6 +63,11 @@ _RECONCILE_FIELDS = (
     # urls are different urls and aren't carried in the file).
     ('lastfm_url',           'track',  'lastfm_url',           'lastfm_match_status'),
 )
+
+
+# embedded keys whose value must be a musicbrainz id to count
+_MBID_KEYS = frozenset({'musicbrainz_trackid'})
+_MBID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
 
 
 def _clean(value: Any) -> Optional[str]:
@@ -200,6 +208,12 @@ def reconcile_library(
                     value = _single_value(tags.get(tag))
                     if not value:
                         continue
+                    if tag in _MBID_KEYS:
+                        # Upstream (a61506e58): only an MBID-shaped recording
+                        # id counts, so an old tagger's junk is never filled.
+                        value = value.lower()
+                        if not _MBID_RE.match(value):
+                            continue
                     service = status_column.removesuffix('_match_status')
                     entity_id = entity_ids[entity]
                     if entity_id is None:

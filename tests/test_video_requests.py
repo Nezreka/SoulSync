@@ -92,7 +92,8 @@ def test_approve_movie_lands_on_the_wishlist(app_db, video_wishlist_forensics):
     # runs off a daemon thread against the live get_video_db(). Each leaves a
     # different fingerprint below, so the next red run names the cause instead
     # of costing another 45-minute re-roll.
-    counts = db.wishlist_counts()
+    # approve writes to the requester's profile (per-profile wishlists), not profile 1
+    counts = db.wishlist_counts(profile_id=5)
     if counts.get("movie") != 1:
         import api.video as videoapi
         conn = db.connect()
@@ -123,6 +124,27 @@ def test_approve_movie_lands_on_the_wishlist(app_db, video_wishlist_forensics):
     assert client.post("/api/video/requests/%d/approve" % rid).status_code == 409
 
 
+def test_approve_writes_to_every_claimant_profile(app_db):
+    client, db, persona = app_db
+    # two members ask for the same movie
+    _as_member(persona, pid=5, name="Kid")
+    rid1 = client.post("/api/video/requests",
+                       json={"kind": "movie", "tmdb_id": 603, "title": "The Matrix",
+                             "year": 1999}).get_json()["id"]
+    _as_member(persona, pid=6, name="Other")
+    rid2 = client.post("/api/video/requests",
+                       json={"kind": "movie", "tmdb_id": 603, "title": "The Matrix",
+                             "year": 1999}).get_json()["id"]
+    # admin approves one — both claims resolve, both profiles get the wish
+    persona.update({"profile_id": 1, "is_admin": True})
+    out = client.post("/api/video/requests/%d/approve" % rid1).get_json()
+    assert out["success"] and out["approved"] == 2
+    assert db.wishlist_counts(profile_id=5).get("movie") == 1
+    assert db.wishlist_counts(profile_id=6).get("movie") == 1
+    assert db.get_video_request(rid1)["status"] == "approved"
+    assert db.get_video_request(rid2)["status"] == "approved"
+
+
 def test_approve_show_expands_the_monitor_policy(app_db, monkeypatch):
     client, db, persona = app_db
 
@@ -142,7 +164,8 @@ def test_approve_show_expands_the_monitor_policy(app_db, monkeypatch):
     persona.update({"profile_id": 1, "is_admin": True})
     out = client.post("/api/video/requests/%d/approve" % rid).get_json()
     assert out["success"] and out["wished"] == 1
-    assert db.wishlist_counts().get("episode") == 1
+    # episodes land on the requester's profile (per-profile wishlists)
+    assert db.wishlist_counts(profile_id=5).get("episode") == 1
 
 
 def test_deny_and_withdraw_edges(app_db):

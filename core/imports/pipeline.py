@@ -78,7 +78,7 @@ from core.runtime_state import (
     tasks_lock,
 )
 from core.metadata.artwork import download_cover_art
-from core.metadata.common import wipe_source_tags
+from core.metadata.common import strip_musicbrainz_identity_tags, wipe_source_tags
 from core.imports.tag_policy import should_wipe_tags_on_enhancement_failure
 from core.imports.quality_replace import is_profile_upgrade
 from core.metadata.enrichment import enhance_file_metadata
@@ -2192,6 +2192,13 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                     "[Metadata] Enhancement failed but import has clean/matched metadata — "
                     "preserving the file's existing tags (not wiping): %s",
                     os.path.basename(file_path))
+                # #1555: the preserved tags can carry the Soulseek uploader's
+                # FOREIGN MusicBrainz album ids. One divergent release id is
+                # enough to split the album into duplicate entries on the
+                # media server while its siblings carry SoulSync's pinned
+                # release id. Strip only the album-identity ids; everything
+                # else stays exactly as the #804 protection requires.
+                strip_musicbrainz_identity_tags(file_path)
 
         if _upgrade_snapshot is not None:
             file_path, _upgrade_companions = _prepare_upgrade_artifact(

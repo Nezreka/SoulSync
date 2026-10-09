@@ -1,7 +1,7 @@
 # SoulSync WebUI Dockerfile
 # Multi-architecture support for AMD64 and ARM64
 
-FROM node:24-slim AS webui-builder
+FROM --platform=$BUILDPLATFORM node:24-slim AS webui-builder
 
 WORKDIR /app/webui
 
@@ -42,14 +42,6 @@ RUN echo "yt-dlp nightly for build ${COMMIT_SHA}" && \
 # Stage 2: Runtime — only runtime dependencies, no build tools
 FROM python:3.11-slim
 
-# Copy pre-built virtualenv from builder
-COPY --from=builder /opt/venv /opt/venv
-ENV VIRTUAL_ENV=/opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Set working directory
-WORKDIR /app
-
 # Install runtime-only system dependencies (no gcc/build tools).
 # unzip is needed by the Deno installer below.
 # flac: the Corrupt File Detector's preferred decode test (`flac -t` also
@@ -74,6 +66,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # if the install ever breaks.
 RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh && \
     deno --version
+
+# Copy pre-built virtualenv from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Set working directory
+WORKDIR /app
 
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash --uid 1000 soulsync

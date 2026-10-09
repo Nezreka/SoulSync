@@ -33,6 +33,10 @@ def repair_scan_roots(context: Any) -> list[str]:
         from core.library2.file_delete import _library_roots
 
         candidates.extend(_library_roots(context.config_manager))
+    # Upstream #1504: own-library roots too, not only the shared folder.
+    from core.repair_jobs.base import all_library_roots
+
+    candidates.extend(all_library_roots(context))
     for candidate in candidates:
         resolved = _path_key(candidate)
         if resolved and os.path.isdir(resolved) and resolved not in roots:

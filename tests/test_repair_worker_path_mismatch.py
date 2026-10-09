@@ -91,6 +91,27 @@ def test_media_server_path_updates_db_by_track_id(tmp_path):
         assert conn.execute("SELECT path FROM lib2_track_files WHERE track_id=20").fetchone()[0] == os.path.normpath(str(dst))
 
 
+
+def test_media_server_path_updates_db_for_a_text_track_id(tmp_path):
+    """#1574: navidrome ids are TEXT. int() on one fell back to the path match,
+    which misses when the stored path is the server's view, so the file moved
+    and the row kept pointing at the old place."""
+    db, w = _worker(tmp_path)
+    lib = tmp_path / "library"
+    src = lib / "Artist" / "Wrong Folder" / "song.flac"
+    dst = lib / "Artist" / "Album" / "01 - song.flac"
+    os.makedirs(src.parent, exist_ok=True)
+    src.write_text("audio")
+    _insert_track(db, "4EBOgUpJ2Htx6F4iXLwJRI", "/music/Artist/Wrong Folder/song.flac")
+
+    details = {'from': 'x', 'to': 'y', 'from_abs': str(src), 'to_abs': str(dst)}
+    res = w._fix_path_mismatch('track', '4EBOgUpJ2Htx6F4iXLwJRI', str(src), details)
+    assert res['success'] is True, res
+    with db._get_connection() as conn:
+        row = conn.execute(
+            "SELECT file_path FROM tracks WHERE id='4EBOgUpJ2Htx6F4iXLwJRI'").fetchone()
+    assert row[0] == os.path.normpath(str(dst))
+
 def test_legacy_finding_without_abs_outside_transfer_is_guarded(tmp_path):
     """Old findings (no _abs) whose reconstructed path escapes the transfer folder
     are rejected with a clear 're-scan' message — never silently mangled."""

@@ -232,3 +232,24 @@ def test_approving_a_legacy_finding_never_mangles_a_ddtt_name(tmp_path):
     assert res2['success'] is True
     assert (Path(w.transfer_folder) / "02 - Beta Song.flac").is_file()
     assert not g.exists()
+
+
+def test_approving_a_finding_writes_the_number_for_a_text_track_id(tmp_path):
+    """#1574: track ids are TEXT. int('1Brn5V...') raised, the debug log
+    swallowed it, and the DB kept the wrong number while the file was fixed."""
+    w = _worker(tmp_path)
+    with w.db._get_connection() as conn:
+        conn.execute("INSERT INTO artists (id, name) VALUES ('ar-1', 'Artist')")
+        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES ('al-1', 'ar-1', 'Album')")
+        conn.execute(
+            "INSERT INTO tracks (id, album_id, artist_id, title, track_number) "
+            "VALUES ('1Brn5VRAOwLXeKdKaj6gwu', 'al-1', 'ar-1', 'Beta Song', 1)")
+    f = Path(w.transfer_folder) / "01 - Beta Song.flac"
+    _make_flac(f, {'title': 'Beta Song', 'tracknumber': '1/3'})
+
+    details = {'correct_track_num': 2, 'total_tracks': 3, 'new_filename': '02 - Beta Song.flac'}
+    res = w._fix_track_number('track', '1Brn5VRAOwLXeKdKaj6gwu', str(f), details)
+    assert res['success'] is True
+    with w.db._get_connection() as conn:
+        row = conn.execute("SELECT track_number FROM tracks WHERE id = '1Brn5VRAOwLXeKdKaj6gwu'").fetchone()
+    assert row['track_number'] == 2
