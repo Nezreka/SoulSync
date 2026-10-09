@@ -122,6 +122,42 @@ describe('TidalTab', () => {
     expect(screen.getByText('100%')).toBeInTheDocument();
   });
 
+  it("#1613: the mirror carries what tidal couldn't load, and only when tidal said", async () => {
+    stubFetch();
+    window.showToast = vi.fn() as typeof window.showToast;
+    responder = (url) => {
+      if (url === '/api/tidal/playlists') {
+        return [
+          { id: 't1', name: 'Gappy', track_count: 0 },
+          { id: 't2', name: 'Whole', track_count: 0 },
+        ];
+      }
+      if (url === '/api/tidal/playlist/t1') {
+        return {
+          tracks: [{ name: 'S1', artists: ['A1'], id: 'x' }],
+          source_skipped: { videos: 1, unavailable: 29 },
+        };
+      }
+      if (url === '/api/tidal/playlist/t2') {
+        return { tracks: [{ name: 'S2', artists: ['A2'], id: 'y' }], source_skipped: null };
+      }
+      return { success: true };
+    };
+    render(<TidalHarness />);
+    fireEvent.click(screen.getByText('🔄 Refresh'));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url === '/api/mirror-playlist')).toHaveLength(2),
+    );
+    const bodies = calls
+      .filter((c) => c.url === '/api/mirror-playlist')
+      .map((c) => c.body as Record<string, unknown>);
+    const gappy = bodies.find((b) => b.source_playlist_id === 't1')!;
+    const whole = bodies.find((b) => b.source_playlist_id === 't2')!;
+    expect(gappy.source_skipped).toEqual({ videos: 1, unavailable: 29 });
+    // null is sent, so the stored note clears
+    expect(whole).toHaveProperty('source_skipped', null);
+  });
+
   it('a playlist that arrives WITH tracks mirrors immediately, no per-playlist fetch (28-36)', async () => {
     stubFetch();
     responder = (url) => {

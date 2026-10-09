@@ -1211,6 +1211,10 @@ def prepare_mirrored_discovery(playlist_id):
             'url': f"mirrored://{playlist['source']}/{playlist['source_playlist_id']}",
             'source': playlist['source']
         }
+        # what the source skipped when it was mirrored, for the identify window (#1613)
+        skipped = playlist.get('source_skipped') or {}
+        playlist_data['skipped_videos'] = skipped.get('videos', 0)
+        playlist_data['unavailable_tracks'] = skipped.get('unavailable', 0)
 
         youtube_playlist_states[url_hash] = {
             'playlist': playlist_data,

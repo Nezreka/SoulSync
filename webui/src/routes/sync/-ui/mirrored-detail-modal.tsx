@@ -36,6 +36,7 @@ import {
   mirroredTotalRuntime,
   timeAgo,
 } from '../-sync.mirrored';
+import { skippedNoteText } from '../-sync.modal-core';
 import { AddToPlaylistButton } from '../../../features/playlists/add-to-playlist';
 import { isUserPlaylist, movedOrder } from '../../../features/playlists/user-playlists';
 
@@ -194,6 +195,8 @@ export function MirroredDetailModal({
   const srcLabel = mirroredDetailSourceLabel(source);
   const heroArt = mirroredHeroArt(data.image_url, tracks);
   const { totalMs, label: totalLabel } = mirroredTotalRuntime(tracks);
+  // why a 395 track playlist mirrors as 365 (#1613)
+  const skippedNote = own ? null : skippedNoteText(data.source_skipped ?? undefined, srcLabel);
 
   return (
     <div
@@ -238,6 +241,7 @@ export function MirroredDetailModal({
                   {own ? 'Edited' : 'Mirrored'} {timeAgo(data.updated_at || data.mirrored_at, now)}
                 </span>
               </div>
+              {skippedNote ? <div className="mm-skipped-note">{skippedNote}</div> : null}
             </div>
           </div>
           <button type="button" className="mm-close" onClick={onClose} aria-label="Close">

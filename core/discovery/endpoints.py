@@ -395,11 +395,23 @@ def source_skipped_counts(state: Dict[str, Any]) -> Optional[Dict[str, int]]:
     discovery sees them. without this the modal says 364/364 for a 395
     track playlist and looks like it's lying (#1613).
     """
-    playlist = state.get('playlist')
-    skipped = {
-        'videos': int(getattr(playlist, 'skipped_videos', 0) or 0),
-        'unavailable': int(getattr(playlist, 'unavailable_tracks', 0) or 0),
-    }
+    return playlist_skipped_counts(state.get('playlist'))
+
+
+def playlist_skipped_counts(playlist: Any) -> Optional[Dict[str, int]]:
+    """the same counts off one playlist, a tidal Playlist or a plain dict.
+
+    a mirrored playlist's discovery state carries a dict, so the counts a
+    mirror saved reach the identify window too.
+    """
+    def count(name: str) -> int:
+        value = playlist.get(name) if isinstance(playlist, dict) else getattr(playlist, name, 0)
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    skipped = {'videos': count('skipped_videos'), 'unavailable': count('unavailable_tracks')}
     return skipped if skipped['videos'] or skipped['unavailable'] else None
 
 

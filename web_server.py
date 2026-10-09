@@ -20942,7 +20942,9 @@ def mirror_playlist_endpoint():
             quality_profile_id=quality_profile_id,
             description=data.get('description'),
             owner=data.get('owner'),
-            image_url=data.get('image_url')
+            image_url=data.get('image_url'),
+            # only a source that reports skips sends the key; leaving it out keeps the stored counts
+            **({'source_skipped': data.get('source_skipped')} if 'source_skipped' in data else {}),
         )
 
         if playlist_id is None:

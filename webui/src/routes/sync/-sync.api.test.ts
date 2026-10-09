@@ -214,6 +214,18 @@ describe('page-level endpoints', () => {
     ]);
   });
 
+  it('#1613: buildMirrorPayload sends source_skipped only when the source set it', () => {
+    expect(buildMirrorPayload('deezer', 5, 'L', [])).not.toHaveProperty('source_skipped');
+    expect(buildMirrorPayload('tidal', 5, 'L', [], { source_skipped: null })).toHaveProperty(
+      'source_skipped',
+      null,
+    );
+    expect(
+      buildMirrorPayload('tidal', 5, 'L', [], { source_skipped: { unavailable: 29 } })
+        .source_skipped,
+    ).toEqual({ unavailable: 29 });
+  });
+
   it('postMirrorPlaylist ships a buildMirrorPayload body verbatim', async () => {
     stubFetch({ success: true });
     const payload = buildMirrorPayload('tidal', 5, 'List', [{ name: 'X', artists: ['A'] }]);

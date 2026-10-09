@@ -1434,6 +1434,7 @@ class MusicDatabase:
             self._add_mirrored_playlist_organize_column(cursor)
             self._add_mirrored_playlist_custom_name_column(cursor)
             self._add_mirrored_playlist_quality_profile_column(cursor)
+            self._add_mirrored_playlist_source_skipped_column(cursor)
 
             # Add notification columns to automations (migration)
             self._add_automation_notify_columns(cursor)
@@ -2806,6 +2807,38 @@ class MusicDatabase:
                 logger.info("Added cover_tiles column to mirrored_playlists table")
         except Exception as e:
             logger.error(f"Error adding cover_tiles column to mirrored_playlists: {e}")
+
+    def _add_mirrored_playlist_source_skipped_column(self, cursor):
+        """add source_skipped: what the source never handed over (#1613).
+
+        json like {"videos": 1, "unavailable": 29}, NULL when nothing was
+        skipped. tidal drops tracks outside the account's region before
+        the mirror sees them, so without this a 395 track playlist mirrors
+        as 365 and nothing says why.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = {c[1] for c in cursor.fetchall()}
+            if cols and 'source_skipped' not in cols:
+                cursor.execute("ALTER TABLE mirrored_playlists ADD COLUMN source_skipped TEXT DEFAULT NULL")
+                logger.info("Added source_skipped column to mirrored_playlists table")
+        except Exception as e:
+            logger.error(f"Error adding source_skipped column to mirrored_playlists: {e}")
+
+    @staticmethod
+    def _source_skipped_json(skipped) -> Optional[str]:
+        """the stored form of a skipped-counts dict, None when nothing was skipped."""
+        if not isinstance(skipped, dict):
+            return None
+        clean = {}
+        for key in ('videos', 'unavailable'):
+            try:
+                n = int(skipped.get(key) or 0)
+            except (TypeError, ValueError):
+                n = 0
+            if n > 0:
+                clean[key] = n
+        return json.dumps(clean) if clean else None
 
     def _add_mirrored_playlist_quality_profile_column(self, cursor):
         """Add the native per-playlist Quality Profile assignment.
@@ -23994,6 +24027,9 @@ class MusicDatabase:
         A new mirror inherits the current global Quality Profile. Refreshing
         an existing mirror preserves its durable assignment unless the caller
         explicitly supplies a new one.
+
+        ``source_skipped`` works the same way: pass it (a dict or None) and
+        it replaces the stored counts, leave it out and they stay.
         """
         from core.playlists.source_refs import coalesce_mirror_track, stable_source_track_id
 
@@ -24032,8 +24068,8 @@ class MusicDatabase:
                     INSERT INTO mirrored_playlists
                         (source, source_playlist_id, name, description, owner,
                          image_url, track_count, profile_id, quality_profile_id,
-                         updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                         source_skipped, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(source, source_playlist_id, profile_id) DO UPDATE SET
                         name = excluded.name,
                         description = COALESCE(NULLIF(excluded.description, ''), mirrored_playlists.description),
@@ -24044,13 +24080,19 @@ class MusicDatabase:
                             WHEN ? THEN excluded.quality_profile_id
                             ELSE mirrored_playlists.quality_profile_id
                         END,
+                        source_skipped = CASE
+                            WHEN ? THEN excluded.source_skipped
+                            ELSE mirrored_playlists.source_skipped
+                        END,
                         updated_at = CURRENT_TIMESTAMP
                 """, (
                     source, source_playlist_id, name,
                     kwargs.get('description'), kwargs.get('owner'),
                     kwargs.get('image_url'), len(tracks), profile_id,
                     resolved_quality_profile_id,
+                    self._source_skipped_json(kwargs.get('source_skipped')),
                     1 if quality_profile_id is not None else 0,
+                    1 if 'source_skipped' in kwargs else 0,
                 ))
                 playlist_id = cursor.execute(
                     "SELECT id FROM mirrored_playlists WHERE source=? AND source_playlist_id=? AND profile_id=?",
@@ -24292,7 +24334,38 @@ class MusicDatabase:
             return None
         pl = dict(row)
         pl['organize_by_playlist'] = bool(pl.get('organize_by_playlist', 0))
+        try:
+            pl['source_skipped'] = json.loads(pl['source_skipped']) if pl.get('source_skipped') else None
+        except (TypeError, ValueError):
+            pl['source_skipped'] = None
         return pl
+
+    def set_mirrored_playlist_source_skipped(
+        self,
+        source: str,
+        source_playlist_id: str,
+        skipped: Optional[Dict[str, int]],
+        profile_id: Optional[int] = None,
+    ) -> bool:
+        """store what the source skipped on an existing mirror, without touching its tracks.
+
+        for a fresh fetch that isn't a mirror write (identify re-pulls the
+        playlist). no mirror yet means nothing to update.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
+                cursor.execute(
+                    "UPDATE mirrored_playlists SET source_skipped = ? "
+                    "WHERE source = ? AND source_playlist_id = ?" + owner_sql,
+                    [self._source_skipped_json(skipped), source, str(source_playlist_id), *owner_params],
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error saving skipped counts for {source}:{source_playlist_id}: {e}")
+            return False
 
     def get_mirrored_playlist_by_source(
         self,

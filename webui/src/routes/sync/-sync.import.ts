@@ -5,6 +5,8 @@
  * column-map selects) become parameters here.
  */
 
+import type { SourceSkipped } from './-sync.state';
+
 /** The one track shape the whole import/mirror pipeline speaks. */
 export interface ImportTrack {
   track_name: string;
@@ -304,6 +306,11 @@ export interface MirrorPayload {
   description: string;
   owner: string;
   image_url: string;
+  /**
+   * what the source never handed over (#1613). only a source that reports it
+   * sets the key; null clears the stored note, a missing key keeps it.
+   */
+  source_skipped?: SourceSkipped | null;
 }
 
 /**
@@ -316,7 +323,12 @@ export function buildMirrorPayload(
   sourceId: string | number,
   name: string,
   tracks: MirrorSourceTrack[],
-  metadata: { description?: string; owner?: string; image_url?: string } = {},
+  metadata: {
+    description?: string;
+    owner?: string;
+    image_url?: string;
+    source_skipped?: SourceSkipped | null;
+  } = {},
 ): MirrorPayload {
   // Operator precedence transcribed exactly (stats-automations.js 471-477):
   // the artist `|| ''` binds only to the NON-array branch, so empty-array
@@ -342,7 +354,7 @@ export function buildMirrorPayload(
     extra_data: t.extra_data || null,
   }));
 
-  return {
+  const payload: MirrorPayload = {
     source,
     source_playlist_id: String(sourceId),
     name,
@@ -351,4 +363,6 @@ export function buildMirrorPayload(
     owner: metadata.owner || '',
     image_url: metadata.image_url || '',
   };
+  if (metadata.source_skipped !== undefined) payload.source_skipped = metadata.source_skipped;
+  return payload;
 }

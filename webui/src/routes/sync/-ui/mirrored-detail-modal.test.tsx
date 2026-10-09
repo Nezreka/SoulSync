@@ -53,6 +53,23 @@ describe('MirroredDetailModal', () => {
     expect(document.querySelector('.mm-col-dur')?.textContent).toBe('Time');
   });
 
+  it("#1613: says what the source couldn't load", () => {
+    renderModal({
+      name: "Cam's playlist",
+      source: 'tidal',
+      source_skipped: { videos: 1, unavailable: 29 },
+      tracks: [],
+    });
+    expect(document.querySelector('.mm-skipped-note')?.textContent).toBe(
+      "29 tracks couldn't be loaded from Tidal (removed or not available in your region) · 1 video skipped",
+    );
+  });
+
+  it('#1613: no note when nothing was skipped', () => {
+    renderModal({ name: 'Whole', source: 'tidal', source_skipped: null, tracks: [] });
+    expect(document.querySelector('.mm-skipped-note')).toBeNull();
+  });
+
   it('shows the empty line rather than an empty list (1145)', () => {
     renderModal({ name: 'Empty', source: 'spotify', tracks: [] });
     expect(screen.getByText('No tracks in this mirror yet.')).toBeInTheDocument();
