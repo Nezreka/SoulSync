@@ -1226,6 +1226,12 @@ def _merge_upgraded_album_folder(context, artist_context, album_info, old_album_
         logger.error("[M5] Album folder merge failed (non-fatal): %s", e)
 
 
+def owning_batch_id(context):
+    """the batch a file was downloaded for. the verification wrapper pops
+    batch_id (it owns the completion callbacks) and keeps it here instead."""
+    return context.get('batch_id') or context.get('_owning_batch_id')
+
+
 def post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=None):
     """Import one finished download, under the library it was decided for (#1199).
 
@@ -2562,7 +2568,7 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
 
         try:
             completed_path = context.get('_final_processed_path', final_path)
-            batch_id_for_consistency = context.get('batch_id')
+            batch_id_for_consistency = owning_batch_id(context)
             if completed_path and batch_id_for_consistency and album_info and album_info.get('is_album'):
                 _file_info = {
                     'path': str(completed_path),
@@ -2736,12 +2742,20 @@ def post_process_matched_download_with_verification(context_key, context, file_p
         # (no extra context key), and popped again before the wrapper continues.
         if original_batch_id and config_manager.get('album_downloads.atomic_publish', False):
             context['_atomic_publish_batch_id'] = original_batch_id
-        post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=metadata_runtime)
-        context.pop('_atomic_publish_batch_id', None)
-        if original_task_id:
-            context['task_id'] = original_task_id
-        if original_batch_id:
-            context['batch_id'] = original_batch_id
+        # the album-consistency registration needs the batch too. without it
+        # no batched download ever reached the album pass (#1618).
+        # the staging route never puts batch_id in its context, so the argument
+        # is the fallback.
+        context['_owning_batch_id'] = original_batch_id or batch_id
+        try:
+            post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=metadata_runtime)
+        finally:
+            context.pop('_atomic_publish_batch_id', None)
+            context.pop('_owning_batch_id', None)
+            if original_task_id:
+                context['task_id'] = original_task_id
+            if original_batch_id:
+                context['batch_id'] = original_batch_id
 
         if context.get('_upgrade_rejected'):
             failure_msg = context.get(

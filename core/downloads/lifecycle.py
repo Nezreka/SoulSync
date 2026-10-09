@@ -899,6 +899,7 @@ def _run_batch_completion_side_effects(batch_id: str, batch: dict, deps: Lifecyc
                         release_mbid=selected_release_id(_cons_album),
                         file_lock_fn=get_file_lock,
                         barcode=_cons_barcode,
+                        total_tracks=_cons_album.get('total_tracks', 0),
                     )
                     if _cons_result.get('success'):
                         logger.info(f"{cons_tag} {_cons_result['tags_written']}/{_cons_result['total_files']} files "

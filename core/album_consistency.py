@@ -40,6 +40,15 @@ _ALBUM_LEVEL_TAGS = [
     'ASIN',
 ]
 
+# a track joining the album on disk copies these from the folder. the date
+# and label too: a late track that only took the ids kept the year and label
+# of the release it was first tagged with, a 1980 single (#1618)
+_ADOPTED_TAGS = _ALBUM_LEVEL_TAGS + ['DATE', 'LABEL']
+
+# picard writes these as native id3 frames / an mp4 atom, not TXXX (write_tag)
+_NATIVE_ID3 = {'DATE': 'TDRC', 'LABEL': 'TPUB'}
+_NATIVE_MP4 = {'DATE': '\xa9day'}
+
 # Vorbis comment keys (FLAC/OGG) — same as _ALBUM_LEVEL_TAGS (uppercase)
 # ID3 TXXX desc mapping
 _ID3_TXXX_MAP = {
@@ -461,6 +470,7 @@ def _read_tag_from_file(audio, tag_key):
     try:
         if isinstance(audio.tags, ID3):
             frame, desc = ID3_TAG_MAP.get(tag_key, ('TXXX', tag_key))
+            frame = _NATIVE_ID3.get(tag_key, frame)
             if frame != 'TXXX':
                 vals = audio.tags.getall(frame)
                 if vals and vals[0].text:
@@ -473,6 +483,9 @@ def _read_tag_from_file(audio, tag_key):
             vals = audio.get(VORBIS_TAG_MAP.get(tag_key, tag_key)) or audio.get(tag_key)
             return str(vals[0]) if vals else None
         elif isinstance(audio, MP4):
+            if tag_key in _NATIVE_MP4:
+                vals = audio.get(_NATIVE_MP4[tag_key])
+                return str(vals[0]) if vals else None
             key = _MP4_KEY_PREFIX + MP4_TAG_MAP.get(tag_key, tag_key)
             vals = audio.get(key)
             if vals:
@@ -480,6 +493,89 @@ def _read_tag_from_file(audio, tag_key):
     except Exception:
         return None
     return None
+
+
+def _delete_tag_from_file(audio, tag_key):
+    """drop one album-level tag, under every key _read_tag_from_file looks at."""
+    from core.metadata.source import ID3_TAG_MAP, VORBIS_TAG_MAP, MP4_TAG_MAP, SOURCE_TAG_CONFIG
+    from core.metadata.common import get_config_manager
+    cfg = get_config_manager()
+    setting = SOURCE_TAG_CONFIG.get(tag_key)
+    if cfg.get('musicbrainz.embed_tags', True) is False or (setting and cfg.get(setting, True) is False):
+        return
+    try:
+        if isinstance(audio.tags, ID3):
+            frame, desc = ID3_TAG_MAP.get(tag_key, ('TXXX', tag_key))
+            frame = _NATIVE_ID3.get(tag_key, frame)
+            if frame != 'TXXX':
+                audio.tags.delall(frame)
+            for name in (desc, _ID3_TXXX_MAP.get(tag_key, tag_key)):
+                audio.tags.delall('TXXX:' + str(name))
+        elif isinstance(audio, (FLAC, OggVorbis, OggOpus)):
+            for key in {VORBIS_TAG_MAP.get(tag_key, tag_key), tag_key}:
+                if key in audio:
+                    del audio[key]
+        elif isinstance(audio, MP4):
+            audio.pop(_NATIVE_MP4.get(tag_key) or _MP4_KEY_PREFIX + MP4_TAG_MAP.get(tag_key, tag_key), None)
+    except Exception as e:
+        logger.debug(f"Failed to delete tag {tag_key}: {e}")
+
+
+def _native_tag_policy(path):
+    """Read existing Library-v2 manual/pin policy; never refresh or write it."""
+    from contextlib import closing
+    from database.music_database import get_database
+    from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
+    from core.library2.metadata_overrides import get_field_overrides
+    from core.library2.validation import edition_reference
+
+    db = get_database()
+    if is_hand_tagged_path(path, hand_tagged_path_keys(db)):
+        return True, set()
+    protected = set()
+    fields = {'title': 'ALBUM', 'release_date': 'DATE', 'year': 'DATE',
+              'album_type': 'RELEASETYPE', 'label': 'LABEL', 'barcode': 'BARCODE',
+              'country': 'RELEASECOUNTRY', 'status': 'RELEASESTATUS'}
+    with closing(db._get_connection()) as conn:
+        rows = conn.execute(
+            "SELECT t.id, t.album_id, al.primary_artist_id, al.canonical_locked "
+            "FROM lib2_track_files f JOIN lib2_tracks t ON t.id=f.track_id "
+            "JOIN lib2_albums al ON al.id=t.album_id "
+            "WHERE f.path=? AND COALESCE(f.file_state,'active')='active'", (str(path),)).fetchall()
+        for row in rows:
+            if row['canonical_locked']:
+                return True, set()
+            reference = edition_reference(conn, row['id'], {})
+            for kind, entity_id in [('release_group', row['album_id']),
+                                    ('release_edition', reference.get('edition_id'))]:
+                if entity_id:
+                    overrides = get_field_overrides(conn, entity_type=kind, entity_id=entity_id)
+                    protected.update(fields[k] for k in overrides if k in fields)
+            if row['primary_artist_id'] and 'name' in get_field_overrides(
+                    conn, entity_type='artist', entity_id=row['primary_artist_id']):
+                protected.add('ALBUMARTIST')
+    return False, protected
+
+
+def _apply_adopted_tags(audio, adopt_tags, adopt_album, adopt_artist, protected=()):
+    """write the folder's album-level tags onto a new file. a file moving to the
+    folder's release also loses the album fields the folder doesn't carry: they
+    belong to the release it was tagged with first (that single's catalog number)."""
+    from core.metadata.common import get_config_manager
+    folder_release = adopt_tags.get('MUSICBRAINZ_RELEASE_ID')
+    own_release = _read_tag_from_file(audio, 'MUSICBRAINZ_RELEASE_ID')
+    if (folder_release and own_release and own_release != folder_release
+            and get_config_manager().get('musicbrainz.embed_tags', True) is not False):
+        for tag_key in _ADOPTED_TAGS:
+            if tag_key not in adopt_tags and tag_key not in protected:
+                _delete_tag_from_file(audio, tag_key)
+    for tag_key, value in adopt_tags.items():
+        if tag_key not in protected:
+            _write_tag_to_file(audio, tag_key, value)
+    if adopt_album and 'ALBUM' not in protected:
+        _write_standard_tag(audio, 'album', adopt_album)
+    if adopt_artist and 'ALBUMARTIST' not in protected:
+        _write_standard_tag(audio, 'albumartist', adopt_artist)
 
 
 def _read_standard_tag(audio, tag_name):
@@ -535,7 +631,7 @@ def _adopt_album_tags_from_siblings(file_infos):
     if not siblings:
         return None
 
-    tag_votes = {k: Counter() for k in _ALBUM_LEVEL_TAGS}
+    tag_votes = {k: Counter() for k in _ADOPTED_TAGS}
     album_votes: Counter = Counter()
     artist_votes: Counter = Counter()
     read_any = False
@@ -548,7 +644,7 @@ def _adopt_album_tags_from_siblings(file_infos):
         if audio is None:
             continue
         read_any = True
-        for k in _ALBUM_LEVEL_TAGS:
+        for k in _ADOPTED_TAGS:
             v = _read_tag_from_file(audio, k)
             if v:
                 tag_votes[k][v] += 1
@@ -601,7 +697,7 @@ def adopt_sibling_tags_for_loose_tracks(file_infos, file_lock_fn=None) -> Dict[s
     by_folder: Dict[str, List[Dict[str, Any]]] = {}
     for fi in file_infos:
         path = fi.get('path')
-        if path and os.path.exists(path):
+        if path and os.path.exists(path) and not _native_tag_policy(path)[0]:
             by_folder.setdefault(os.path.dirname(os.path.normpath(path)), []).append(fi)
 
     for infos in by_folder.values():
@@ -625,12 +721,10 @@ def adopt_sibling_tags_for_loose_tracks(file_infos, file_lock_fn=None) -> Dict[s
                                     f"its album is \"{own_album}\", the folder's is \"{adopt_album}\"")
                         result['gated'] += 1
                         continue
-                    for tag_key, value in adopt_tags.items():
-                        _write_tag_to_file(audio, tag_key, value)
-                    if adopt_album:
-                        _write_standard_tag(audio, 'album', adopt_album)
-                    if adopt_artist:
-                        _write_standard_tag(audio, 'albumartist', adopt_artist)
+                    skip, protected = _native_tag_policy(path)
+                    if skip:
+                        continue
+                    _apply_adopted_tags(audio, adopt_tags, adopt_album, adopt_artist, protected)
                     _atomic_save(audio)
                     result['written'] += 1
             except Exception as e:
@@ -642,6 +736,15 @@ def adopt_sibling_tags_for_loose_tracks(file_infos, file_lock_fn=None) -> Dict[s
     return result
 
 
+def _album_track_count(total_tracks, file_infos) -> int:
+    """the album's own track count when the source knows it, else the files."""
+    try:
+        total = int(total_tracks or 0)
+    except (TypeError, ValueError):
+        total = 0
+    return max(total, len(file_infos))
+
+
 def run_album_consistency(
     file_infos: List[Dict[str, Any]],
     album_name: str,
@@ -651,6 +754,7 @@ def run_album_consistency(
     file_lock_fn=None,
     release_mbid=None,
     barcode: Optional[str] = None,
+    total_tracks: int = 0,
 ) -> Dict[str, Any]:
     """
     Picard-style album consistency: pick ONE MusicBrainz release for the album,
@@ -665,6 +769,9 @@ def run_album_consistency(
         file_lock_fn: Optional function(path) -> context manager for thread-safe writes
         release_mbid: Concrete user-selected edition; never reselected or replaced by siblings
         barcode: Optional commercial barcode (UPC/EAN) from source metadata
+        total_tracks: the album's track count. the files are only what this
+            batch downloaded: 3 late tracks scored a 2-track single above the
+            14-track album (#1618)
 
     Returns:
         {success, release_mbid, matched_tracks, total_files, tags_written, error}
@@ -680,6 +787,12 @@ def run_album_consistency(
 
     if not file_infos:
         result['error'] = 'No files provided'
+        return result
+
+    file_infos = [fi for fi in file_infos if not _native_tag_policy(fi.get('path'))[0]]
+    result['protected'] = result['total_files'] - len(file_infos)
+    if not file_infos:
+        result['error'] = 'Manual file tags or a pinned release protect these files'
         return result
 
     # Step 0 (#1000): ADOPT the existing album's tags when this album already has
@@ -703,12 +816,10 @@ def run_album_consistency(
                     audio = MutagenFile(path, easy=False)
                     if audio is None:
                         continue
-                    for tag_key, value in adopt_tags.items():
-                        _write_tag_to_file(audio, tag_key, value)
-                    if adopt_album:
-                        _write_standard_tag(audio, 'album', adopt_album)
-                    if adopt_artist:
-                        _write_standard_tag(audio, 'albumartist', adopt_artist)
+                    skip, protected = _native_tag_policy(path)
+                    if skip:
+                        continue
+                    _apply_adopted_tags(audio, adopt_tags, adopt_album, adopt_artist, protected)
                     _atomic_save(audio)
                     written += 1
             except Exception as e:
@@ -735,7 +846,8 @@ def run_album_consistency(
             result['error'] = 'Selected MusicBrainz release is unavailable; keeping existing tags'
             return result
     else:
-        release = _resolve_album_release(album_name, artist_name, len(file_infos), mb_service, barcode=barcode)
+        release = _resolve_album_release(album_name, artist_name, _album_track_count(total_tracks, file_infos),
+                                         mb_service, barcode=barcode)
     if not release:
         result['error'] = f'No MusicBrainz release found for "{album_name}"'
         return result
@@ -803,13 +915,16 @@ def run_album_consistency(
                 if audio is None:
                     continue
 
-                # Write album-level tags
+                skip, protected = _native_tag_policy(file_path)
+                if skip:
+                    continue
                 for tag_key, value in album_tags.items():
-                    _write_tag_to_file(audio, tag_key, value)
-
-                # Write standard album/albumartist tags
-                _write_standard_tag(audio, 'album', release_album_name)
-                _write_standard_tag(audio, 'albumartist', release_artist_name)
+                    if tag_key not in protected:
+                        _write_tag_to_file(audio, tag_key, value)
+                if 'ALBUM' not in protected:
+                    _write_standard_tag(audio, 'album', release_album_name)
+                if 'ALBUMARTIST' not in protected:
+                    _write_standard_tag(audio, 'albumartist', release_artist_name)
 
                 # Write per-track tag (release track ID) if matched
                 if mb_track and mb_track.get('id'):
