@@ -565,7 +565,30 @@ export function FindingsSurface({
 
       setBusyFix((current) => new Set(current).add(finding.id));
       try {
-        const result = await fixFinding(finding.id, fixAction);
+        let result = await fixFinding(finding.id, fixAction);
+        if (result.needs_confirm) {
+          // a library track has the same filename somewhere else. show it and
+          // let the user decide, instead of a dead end
+          const paths = result.library_paths ?? [];
+          const confirmed = await window.showConfirmDialog?.({
+            title: 'Same Filename In Library',
+            message: paths.length
+              ? `Your library already has a file with this name:\n\n${paths.join('\n')}\n\nIf it's the same song, this orphan is a leftover copy. Delete it from disk?`
+              : 'Your library already has a file with this name in another folder. If it is the same song, this orphan is a leftover copy. Delete it from disk?',
+            confirmText: 'Delete anyway',
+            destructive: true,
+          });
+          if (!confirmed) {
+            setBusyFix((current) => {
+              const next = new Set(current);
+              next.delete(finding.id);
+              return next;
+            });
+            refreshAll();
+            return;
+          }
+          result = await fixFinding(finding.id, 'delete_confirmed');
+        }
         toast(
           result.success ? result.message || 'Fixed successfully' : result.error || 'Fix failed',
           result.success ? 'success' : 'error',

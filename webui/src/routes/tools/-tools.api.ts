@@ -317,6 +317,9 @@ export interface FixResult {
   success?: boolean;
   message?: string;
   error?: string;
+  /** an orphan delete stopped because a library track shares its filename. */
+  needs_confirm?: boolean;
+  library_paths?: string[];
 }
 
 /**

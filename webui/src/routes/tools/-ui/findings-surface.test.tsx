@@ -924,6 +924,70 @@ describe('per-finding actions', () => {
     expect(onStatusChanged).toHaveBeenCalled();
   });
 
+  /** answers the first fix with `first`, every later one with `rest`. */
+  function fixAnswers(first: unknown, rest: unknown) {
+    let calls = 0;
+    const listing = page([finding({ id: 1 })]);
+    fetchMock.mockImplementation((url: string) => {
+      const body = String(url).endsWith('/1/fix')
+        ? calls++ === 0
+          ? first
+          : rest
+        : String(url).includes(FINDINGS)
+          ? listing
+          : {};
+      return Promise.resolve({ ok: true, status: 200, json: async () => body } as never);
+    });
+  }
+
+  const SAME_NAME = {
+    success: false,
+    needs_confirm: true,
+    library_paths: ['/music/Artist/Album (Deluxe)/01 - Intro.flac'],
+    error: 'A library track has the same filename in another folder.',
+  };
+
+  it('a same-filename orphan shows the library copy and deletes on yes', async () => {
+    // lake: both buttons refused these with no way past
+    fixAnswers(SAME_NAME, { success: true, message: 'Deleted orphan file from disk' });
+    await renderList();
+    await flush();
+
+    fireEvent.click(document.querySelector('.repair-finding-btn.fix') as HTMLElement);
+    await flush();
+    clickPrompt('_orphan-delete');
+    await flush();
+    await flush();
+
+    const ask = confirmSpy.mock.calls[0]?.[0] as { message: string; confirmText: string };
+    expect(ask.message).toContain('/music/Artist/Album (Deluxe)/01 - Intro.flac');
+    expect(ask.confirmText).toBe('Delete anyway');
+    const fixBodies = fetchMock.mock.calls
+      .filter((c) => String(c[0]).endsWith('/1/fix'))
+      .map((c) => JSON.parse((c[1] as RequestInit).body as string));
+    expect(fixBodies).toEqual([{ fix_action: 'delete' }, { fix_action: 'delete_confirmed' }]);
+    expect(toastSpy).toHaveBeenCalledWith('Deleted orphan file from disk', 'success');
+  });
+
+  it('a same-filename orphan is left alone when the user says no', async () => {
+    fixAnswers(SAME_NAME, { success: true });
+    confirmSpy.mockResolvedValue(false);
+    await renderList();
+    await flush();
+
+    fireEvent.click(document.querySelector('.repair-finding-btn.fix') as HTMLElement);
+    await flush();
+    clickPrompt('_orphan-delete');
+    await flush();
+    await flush();
+
+    expect(fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/1/fix'))).toHaveLength(1);
+    expect(toastSpy).not.toHaveBeenCalled();
+    expect(
+      (document.querySelector('.repair-finding-btn.fix') as HTMLButtonElement | null)?.disabled,
+    ).not.toBe(true);
+  });
+
   it('sends nothing when the prompt is cancelled', async () => {
     routes({ [FINDINGS]: page([finding({ id: 1 })]) });
     await renderList();

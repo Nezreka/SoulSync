@@ -3132,9 +3132,14 @@ class RepairWorker:
         The fix_action is passed via details['_fix_action']:
           'staging' — move file to the staging folder for import
           'delete'  — delete file from disk
+          'delete_confirmed' — delete, after the user saw the library track
+                               that shares its filename
         If no action specified, returns an error asking the user to choose.
         """
         fix_action = details.get('_fix_action', '')
+        confirmed = fix_action == 'delete_confirmed'
+        if confirmed:
+            fix_action = 'delete'
         if fix_action not in ('staging', 'delete'):
             return {'success': False, 'error': 'Please choose an action: move to staging or delete',
                     'needs_action': True}
@@ -3157,7 +3162,7 @@ class RepairWorker:
             # raised. Fail closed if the DB cannot be read: neither action may
             # move or delete a file whose current status is unknown.
             from core.repair_jobs.orphan_file_detector import (
-                is_tracked_path, known_file_suffixes,
+                is_tracked_path, known_file_suffixes, same_name_library_paths,
             )
             try:
                 suffixes = known_file_suffixes(self.db)
@@ -3169,10 +3174,19 @@ class RepairWorker:
             if is_tracked_path(resolved, suffixes):
                 return {'success': True, 'action': 'already_tracked',
                         'message': 'File is now tracked in the library; no file was changed'}
-            if is_tracked_path(resolved, suffixes, min_depth=1):
-                return {'success': False, 'error':
-                        'Another library track has the same filename, but its album path '
-                        'differs; verify this orphan manually before moving or deleting it'}
+            # a library track with the same filename in another album may be
+            # this song or a different one. staging keeps the file so it goes
+            # ahead. a delete shows the user that track and waits for a yes:
+            # refusing both with no way past left these stuck for good.
+            if fix_action == 'delete' and not confirmed and is_tracked_path(resolved, suffixes, min_depth=1):
+                try:
+                    library_paths = same_name_library_paths(self.db, resolved)
+                except Exception as e:
+                    logger.debug("same-name library lookup failed: %s", e)
+                    library_paths = []
+                return {'success': False, 'needs_confirm': True, 'library_paths': library_paths,
+                        'error': 'A library track has the same filename in another folder. '
+                                 'Check it is the same song before deleting this file.'}
 
             if fix_action == 'staging':
                 # Move to staging folder
