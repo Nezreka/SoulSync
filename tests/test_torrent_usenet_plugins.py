@@ -111,6 +111,263 @@ def test_parse_release_title_rejects_url_prefix() -> None:
     assert artist == ''
 
 
+@pytest.mark.parametrize('release,artist,title', [
+    ('MoTrip-Guten Morgen NSA-16BIT-44-KHZ-WEB-FLAC-2013-WALKMAN', 'MoTrip', 'Guten Morgen NSA'),
+    ('The Weeknd-Starboy-DELUXE EDITION-24BIT-WEB-FLAC-2023-RECTiFY', 'The Weeknd', 'Starboy-DELUXE EDITION'),
+    ('MoTrip-Guten_Morgen_NSA-16BIT-44-KHZ-WEB-FLAC-2013-WALKMAN', 'MoTrip', 'Guten Morgen NSA'),
+    ('Jay-Z - The Blueprint-WEB-FLAC-2001-GROUP', 'Jay-Z', 'The Blueprint'),
+    ('Artist-Song-Live-WEB-FLAC-2024-GROUP', 'Artist', 'Song-Live'),
+])
+def test_scene_release_projection_preserves_music_identity(release, artist, title):
+    """Both Prowlarr sources must expose music identity, not scene packaging."""
+    for plugin, protocol in [(TorrentDownloadPlugin(), 'torrent'), (UsenetDownloadPlugin(), 'usenet')]:
+        tracks, albums = plugin._project_results([
+            _make_torrent_result(title=release, protocol=protocol),
+        ])
+        assert tracks[0].artist == artist
+        assert tracks[0].title == title
+        assert albums[0].artist == artist
+        assert albums[0].album_title == title
+        assert tracks[0]._source_metadata['release_title'] == release
+        assert tracks[0].quality == 'flac'
+
+
+@pytest.mark.parametrize('release', ['Self-Titled', 'Artist-Title', 'Artist - WEB of Lies', 'Artist - MP3 Player'])
+def test_release_parser_does_not_invent_scene_metadata(release):
+    expected = ('Artist', release.split(' - ', 1)[1]) if ' - ' in release else ('', release)
+    assert _parse_release_title(release) == expected
+
+
+@pytest.mark.parametrize('protocol', ['torrent', 'usenet'])
+@pytest.mark.parametrize('release,artist,title', [
+    ('Jay-Z-The Blueprint-WEB-FLAC-2001-GROUP', 'Jay-Z', 'The Blueprint'),
+    ('G-Eazy-Lets Get Lost-16BIT-WEB-FLAC-2014-GROUP', 'G-Eazy', 'Lets Get Lost'),
+    ('Artist-Song-Live-WEB-FLAC-2024-GROUP', 'Artist', 'Song-Live'),
+])
+def test_scene_candidate_validation_uses_expected_artist_as_boundary(monkeypatch, protocol, release, artist, title):
+    from types import SimpleNamespace
+    from core.downloads import validation
+    from core.matching_engine import MusicMatchingEngine
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    plugin = TorrentDownloadPlugin() if protocol == 'torrent' else UsenetDownloadPlugin()
+    tracks, _ = plugin._project_results([_make_torrent_result(title=release, protocol=protocol)])
+    expected = SimpleNamespace(name=title, artists=[artist], duration_ms=180_000, album=None)
+
+    assert validation._score_streaming_candidates(tracks, expected) == tracks
+    assert tracks[0].artist == artist
+    assert tracks[0].title == title
+
+
+def test_scene_artist_hint_requires_evidence_in_actual_release():
+    release = 'Other Artist-Song-WEB-FLAC-2024-GROUP'
+    assert _parse_release_title(release, artist_hint='Wanted Artist') == ('Other Artist', 'Song')
+
+
+@pytest.mark.parametrize('release,expected', [
+    ('Adele-30-24BIT-44-1KHZ-WEB-FLAC-2021-OBZEN', ('Adele', '30')),
+    ('Daft_Punk-Random_Access_Memories-24BIT-96KHZ-WEB-FLAC-2013-GROUP', ('Daft Punk', 'Random Access Memories')),
+    ('Artist-Album-24BIT-48KHZ-WEB-FLAC-2020-GROUP', ('Artist', 'Album')),
+])
+def test_scene_sample_rate_spellings_stay_out_of_the_title(release, expected):
+    assert _parse_release_title(release) == expected
+
+
+@pytest.mark.parametrize('hint', [None, 'Linkin Park'])
+def test_scene_album_dash_is_not_the_artist_boundary(hint):
+    release = 'Linkin_Park-Hybrid_Theory_-_20th_Anniversary_Edition-WEB-FLAC-2020-GROUP'
+    assert _parse_release_title(release, artist_hint=hint) == (
+        'Linkin Park', 'Hybrid Theory - 20th Anniversary Edition')
+
+
+@pytest.mark.parametrize('protocol', ['torrent', 'usenet'])
+@pytest.mark.parametrize('release_name,album', [('Shared Song', None), ('Shared Album', 'Shared Album')])
+def test_release_artist_containment_does_not_accept_another_band(monkeypatch, protocol, release_name, album):
+    """An anonymized live cover release must fail even with an exact title."""
+    from types import SimpleNamespace
+    from core.downloads import validation
+    from core.matching_engine import MusicMatchingEngine
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    plugin = TorrentDownloadPlugin() if protocol == 'torrent' else UsenetDownloadPlugin()
+    release = f'Signal Duo Experience-{release_name}-16BIT-44-KHZ-WEB-FLAC-2022-GROUP'
+    tracks, _ = plugin._project_results([_make_torrent_result(title=release, protocol=protocol)])
+    expected = SimpleNamespace(name='Shared Song', artists=['Signal Duo'], duration_ms=180_000, album=album)
+    reasons = {}
+
+    assert validation._score_streaming_candidates(tracks, expected, reasons) == []
+    assert reasons[id(tracks[0])][1].code == 'artist_mismatch'
+
+
+@pytest.mark.parametrize('protocol', ['torrent', 'usenet'])
+@pytest.mark.parametrize('artist', ['Signal Duo', 'The Signal Duo', 'Signal Duo feat. Guest Singer', 'Guest Singer & Signal Duo'])
+def test_release_artist_gate_keeps_real_artist_and_featured_credits(monkeypatch, protocol, artist):
+    from types import SimpleNamespace
+    from core.downloads import validation
+    from core.matching_engine import MusicMatchingEngine
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    plugin = TorrentDownloadPlugin() if protocol == 'torrent' else UsenetDownloadPlugin()
+    release = f'{artist}-Shared Song-16BIT-44-KHZ-WEB-FLAC-2022-GROUP'
+    tracks, _ = plugin._project_results([_make_torrent_result(title=release, protocol=protocol)])
+    expected = SimpleNamespace(name='Shared Song', artists=['Signal Duo'], duration_ms=180_000, album=None)
+
+    assert validation._score_streaming_candidates(tracks, expected) == tracks
+
+
+@pytest.mark.parametrize('remove', [False, True])
+@pytest.mark.parametrize('clear_after_cancel', [False, True])
+def test_usenet_cancel_during_submission_cleans_up_late_job(monkeypatch, remove, clear_after_cancel):
+    """A remote ID arriving after cancel must not resurrect an orphan download."""
+    import core.download_plugins.usenet as module
+    plugin = UsenetDownloadPlugin()
+    plugin.active_downloads['dl'] = {'id': 'dl', 'state': 'Initializing', 'job_id': None}
+    removals, polls = [], []
+    stopped = [False]
+    plugin.set_shutdown_check(lambda: stopped[0])
+
+    class Adapter:
+        def is_configured(self): return True
+        async def add_nzb(self, url):
+            await plugin.cancel_download('dl', remove=remove)
+            if clear_after_cancel:
+                await plugin.clear_all_completed_downloads()
+            return 'late-job'
+        async def remove(self, job_id, delete_files=False):
+            removals.append((job_id, delete_files))
+            return True
+        async def get_status(self, job_id):
+            polls.append(job_id)
+            stopped[0] = True
+            return None
+
+    monkeypatch.setattr(module, 'get_active_usenet_adapter', lambda: Adapter())
+    monkeypatch.setattr(module, 'run_async', asyncio.run)
+    monkeypatch.setattr(module.time, 'sleep', lambda *_: None)
+    plugin._download_thread('dl', 'https://indexer.invalid/synthetic.nzb')
+
+    assert removals == [('late-job', remove)]
+    assert polls == []
+    if remove or clear_after_cancel:
+        assert 'dl' not in plugin.active_downloads
+    else:
+        assert plugin.active_downloads['dl']['state'] == 'Cancelled'
+
+
+def test_usenet_cancel_during_status_poll_cannot_restore_downloading(monkeypatch):
+    import core.download_plugins.usenet as module
+    plugin = UsenetDownloadPlugin()
+    plugin.active_downloads['dl'] = {'id': 'dl', 'state': 'Initializing', 'job_id': None}
+    stopped = [False]
+    plugin.set_shutdown_check(lambda: stopped[0])
+
+    class Adapter:
+        def is_configured(self): return True
+        async def add_nzb(self, url): return 'job'
+        async def remove(self, job_id, delete_files=False): return True
+        async def get_status(self, job_id):
+            await plugin.cancel_download('dl', remove=False)
+            stopped[0] = True
+            return UsenetStatus(id='job', name='Release', state='downloading', progress=0.25,
+                                size=100, downloaded=25, download_speed=1)
+
+    monkeypatch.setattr(module, 'get_active_usenet_adapter', lambda: Adapter())
+    monkeypatch.setattr(module, 'run_async', asyncio.run)
+    monkeypatch.setattr(module.time, 'sleep', lambda *_: None)
+    plugin._download_thread('dl', 'https://indexer.invalid/synthetic.nzb')
+    assert plugin.active_downloads['dl']['state'] == 'Cancelled'
+
+
+def test_usenet_submit_failure_after_cancel_preserves_cancelled_state(monkeypatch):
+    import core.download_plugins.usenet as module
+    plugin = UsenetDownloadPlugin()
+    plugin.active_downloads['dl'] = {'id': 'dl', 'state': 'Initializing', 'job_id': None}
+
+    class Adapter:
+        def is_configured(self): return True
+        async def add_nzb(self, url):
+            await plugin.cancel_download('dl', remove=False)
+            return None
+
+    monkeypatch.setattr(module, 'get_active_usenet_adapter', lambda: Adapter())
+    monkeypatch.setattr(module, 'run_async', asyncio.run)
+    plugin._download_thread('dl', 'https://indexer.invalid/synthetic.nzb')
+    assert plugin.active_downloads['dl']['state'] == 'Cancelled'
+
+
+def test_usenet_cancel_during_file_collection_cannot_restore_success(monkeypatch, tmp_path):
+    import core.download_plugins.usenet as module
+    plugin = UsenetDownloadPlugin()
+    plugin.active_downloads['dl'] = {'id': 'dl', 'state': 'InProgress, Downloading', 'job_id': 'job'}
+
+    class Adapter:
+        async def remove(self, job_id, delete_files=False): return True
+
+    def collect(path):
+        asyncio.run(plugin.cancel_download('dl', remove=False))
+        return [tmp_path / 'Song.flac']
+
+    monkeypatch.setattr(module, 'get_active_usenet_adapter', lambda: Adapter())
+    monkeypatch.setattr(module, 'collect_audio_after_extraction', collect)
+    plugin._finalize_download('dl', str(tmp_path))
+    assert plugin.active_downloads['dl']['state'] == 'Cancelled'
+
+
+@pytest.mark.parametrize('protocol', ['torrent', 'usenet'])
+def test_scene_artist_hint_does_not_override_explicit_artist_boundary(monkeypatch, protocol):
+    from types import SimpleNamespace
+    from core.downloads import validation
+    from core.matching_engine import MusicMatchingEngine
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    release = 'G-Eazy - Lets Get Lost-WEB-FLAC-2014-GROUP'
+    plugin = TorrentDownloadPlugin() if protocol == 'torrent' else UsenetDownloadPlugin()
+    tracks, _ = plugin._project_results([_make_torrent_result(title=release, protocol=protocol)])
+    expected = SimpleNamespace(name='Lets Get Lost', artists=['G'], duration_ms=180_000, album=None)
+
+    assert validation._score_streaming_candidates(tracks, expected) == []
+    assert tracks[0].artist == 'G-Eazy'
+
+
+@pytest.mark.parametrize('protocol', ['torrent', 'usenet'])
+@pytest.mark.parametrize('release,name,album', [
+    ('G-Eazy-Lets_Get_Lost-WEB-FLAC-2014-GROUP', 'Lets Get Lost', None),
+    ('G-Eazy-These_Things_Happen-WEB-FLAC-2014-GROUP', "Let's Get Lost", 'These Things Happen'),
+])
+def test_requested_title_marks_the_scene_boundary_of_a_longer_artist(monkeypatch, protocol, release, name, album):
+    from types import SimpleNamespace
+    from core.downloads import validation
+    from core.matching_engine import MusicMatchingEngine
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    plugin = TorrentDownloadPlugin() if protocol == 'torrent' else UsenetDownloadPlugin()
+    tracks, _ = plugin._project_results([_make_torrent_result(title=release, protocol=protocol)])
+    expected = SimpleNamespace(name=name, artists=['G'], duration_ms=180_000, album=album)
+
+    assert validation._score_streaming_candidates(tracks, expected) == []
+    assert tracks[0].artist == 'G-Eazy'
+
+
+@pytest.mark.parametrize('release,hints,expected', [
+    ('Jay-Z-The_Blueprint-WEB-FLAC-2001-GROUP', ('The Blueprint',), ('Jay-Z', 'The Blueprint')),
+    ('a-ha-Hunting_High_and_Low-WEB-FLAC-1985-GROUP', ('Take On Me', 'Hunting High and Low'), ('a-ha', 'Hunting High and Low')),
+    ('Artist-Song-Live-WEB-FLAC-2024-GROUP', ('Song',), ('Artist', 'Song-Live')),
+])
+def test_scene_title_hint_needs_the_name_to_end_with_it(release, hints, expected):
+    assert _parse_release_title(release, title_hints=hints) == expected
+
+
+@pytest.mark.parametrize('release,expected', [
+    ('Artist-Album-WEB-2023-GROUP', ('Artist', 'Album')),
+    ('Artist-Album-WEB-FLAC-2023-MOD_ACE', ('Artist', 'Album')),
+    ('Artist-Album-2CD-FLAC-2023-GROUP', ('Artist', 'Album')),
+    ('Artist-Single-CDS-FLAC-2023-GROUP', ('Artist', 'Single')),
+    ('Artist-Album-VLS-FLAC-2023-GROUP', ('Artist', 'Album')),
+])
+def test_more_scene_suffix_forms_stay_out_of_the_title(release, expected):
+    assert _parse_release_title(release) == expected
+
+
 def test_adapter_state_mapping_covers_complete_states() -> None:
     assert _adapter_state_to_display('downloading') == 'InProgress, Downloading'
     assert _adapter_state_to_display('seeding') == 'Completed, Succeeded'
@@ -209,6 +466,7 @@ def test_torrent_project_results_encodes_token_and_title_in_filename() -> None:
     assert _decode_candidate(get_candidate_store().resolve(token))[0] == 'https://x/y.torrent'
     assert get_candidate_store().resolve_with_metadata(token)[1] == {
         'categories': [3040],
+        'release_title': 'Danny Brown - Atrocity Exhibition [FLAC]',
     }
     assert display == 'Danny Brown - Atrocity Exhibition [FLAC]'
 
@@ -636,6 +894,7 @@ def test_usenet_project_encodes_token_in_filename() -> None:
     assert get_candidate_store().resolve(token) == 'https://x/y.nzb'
     assert get_candidate_store().resolve_with_metadata(token)[1] == {
         'categories': [3010],
+        'release_title': 'Some Artist - Some Album',
     }
     assert display == 'Some Artist - Some Album'
     # Artist + title should be parsed out, not auto-extracted from filename.
