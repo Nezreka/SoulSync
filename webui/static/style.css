@@ -72034,8 +72034,9 @@ body.max-performance #page-particles-canvas {
 .wl-orb:hover { transform: scale(1.1); }
 .wl-orb-group.expanded .wl-orb { transform: scale(1.05); }
 
-.wl-orb-glow { position: absolute; inset: -4px; border-radius: 50%; background: conic-gradient(from 0deg, hsla(var(--orb-hue),70%,55%,0.4), hsla(calc(var(--orb-hue)+60),70%,55%,0.2), hsla(var(--orb-hue),70%,55%,0.4)); animation: orbGlowSpin 8s linear infinite; z-index: 0; filter: blur(3px); }
-@keyframes orbGlowSpin { to { transform: rotate(360deg); } }
+.wl-orb-glow { position: absolute; inset: -4px; border-radius: 50%; background: conic-gradient(from 0deg, hsla(var(--orb-hue),70%,55%,0.4), hsla(calc(var(--orb-hue)+60),70%,55%,0.2), hsla(var(--orb-hue),70%,55%,0.4)); z-index: 0; filter: blur(3px); }
+/* the glow sits still. a blurred spin on every orb pinned the main thread on
+   big wishlists and the page flickered with raster seams (wishlist flicker report) */
 
 .wl-orb-img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; position: relative; z-index: 1; }
 .wl-orb-initials { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 800; color: hsla(var(--orb-hue),70%,75%,0.9); background: hsla(var(--orb-hue),40%,15%,0.9); border-radius: 50%; position: relative; z-index: 1; }
@@ -72067,9 +72068,10 @@ body.max-performance #page-particles-canvas {
 .wl-orb-group:not(.expanded):hover .wl-orb-tooltip { opacity: 1; transform: translateX(-50%) translateY(0); }
 .wl-orb-group.expanded .wl-orb-tooltip { display: none; }
 
-/* Enhancement 3: pulse for next-in-queue */
-.wl-orb.orb-pulse .wl-orb-glow { animation: orbGlowSpin 8s linear infinite, orbPulse 2.5s ease-in-out infinite; }
-@keyframes orbPulse { 0%,100% { filter: blur(3px) brightness(1); } 50% { filter: blur(5px) brightness(1.4); } }
+/* Enhancement 3: pulse for next-in-queue. opacity only, so the compositor
+   runs it without repainting the blur every frame */
+.wl-orb.orb-pulse .wl-orb-glow { animation: orbPulse 2.5s ease-in-out infinite; will-change: opacity; }
+@keyframes orbPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
 
 /* Enhancement 5: album art ring */
 .wl-orb-art-ring { position: absolute; inset: -16px; border-radius: 50%; z-index: 0; pointer-events: none; animation: artRingSpin 30s linear infinite; }
@@ -72080,29 +72082,13 @@ body.max-performance #page-particles-canvas {
 .wl-orb:hover .wl-art-ring-item { opacity: 0.85; }
 @keyframes artRingSpin { to { transform: rotate(360deg); } }
 
-/* ── Live processing state ── */
-.nebula-processing .wl-orb-group.orb-processing .wl-orb {
-    animation: processingOrbPulse 3s ease-in-out infinite !important;
-}
-@keyframes processingOrbPulse {
-    0%, 100% { transform: scale(1); filter: brightness(1); }
-    50% { transform: scale(1.03); filter: brightness(1.1); }
-}
-
+/* ── Live processing state ──
+   static on purpose. this used to pulse scale, filter and three box-shadows on
+   every orb at once, which stalled the page and flashed tile seams across the
+   grid while a run was going. the hero ring already says a run is live. */
 .nebula-processing .wl-orb-group.orb-processing .wl-orb-ring {
-    border-color: rgb(var(--accent-rgb)) !important;
-    border-width: 3px !important;
-    box-shadow: 0 0 20px rgba(var(--accent-rgb), 0.6), 0 0 40px rgba(var(--accent-rgb), 0.3), 0 0 60px rgba(var(--accent-rgb), 0.1) !important;
-    animation: processingRing 1.5s ease-in-out infinite !important;
-}
-@keyframes processingRing {
-    0%, 100% { box-shadow: 0 0 20px rgba(var(--accent-rgb), 0.6), 0 0 40px rgba(var(--accent-rgb), 0.3); }
-    50% { box-shadow: 0 0 30px rgba(var(--accent-rgb), 0.8), 0 0 50px rgba(var(--accent-rgb), 0.4), 0 0 70px rgba(var(--accent-rgb), 0.15); }
-}
-
-.nebula-processing .wl-orb-group.orb-processing .wl-orb-glow {
-    filter: blur(6px) brightness(1.8) !important;
-    opacity: 0.9 !important;
+    border-color: rgb(var(--accent-rgb));
+    border-width: 3px;
 }
 
 .nebula-processing .wl-orb-group.orb-processing .wl-orb-label {
@@ -72113,8 +72099,11 @@ body.max-performance #page-particles-canvas {
     color: rgba(var(--accent-rgb), 0.6);
 }
 
-/* Enhancement 7: staggered entry animation */
+/* Enhancement 7: staggered entry animation. once it has played the orb drops it
+   (wl-orb-entered), or a refetch that reorders orbs would replay it: moving a
+   node restarts its css animations, so moved orbs blinked out and back in */
 .wl-orb-group { animation: orbEntrance 0.5s ease backwards; }
+.wl-orb-group.wl-orb-entered { animation: none; }
 @keyframes orbEntrance { from { opacity: 0; transform: translateY(20px) scale(0.9); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
 .wl-orb-label { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.7); text-align: center; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; transition: color 0.15s; }
