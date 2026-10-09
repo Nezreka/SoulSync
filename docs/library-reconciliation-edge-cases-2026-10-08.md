@@ -11,6 +11,8 @@ This catalogue records the real-library cases used while designing and tuning th
 | Radiohead — *OK Computer*, “Lucky” | A nearby-duration song could consume track 11 while “Lucky,” whose duration differs by only 0.63 seconds, remained unmatched. | Compare titles before resolving similar durations and preserve global one-to-one assignment. |
 | ABBA — *Gold: Greatest Hits*, “Angeleyes” / “Angel Eyes” | AcoustID linked several MusicBrainz recording rows whose spelling differed but all supported the same release slot. | Collapse catalogue aliases that support one exact slot. Different MBIDs alone do not create a human decision. |
 | ABBA — *Gold: Greatest Hits*, “Take a Chance on Me” | Equal top-score AcoustID evidence also identifies a genuinely different recording. | Keep one explicit audio-assignment question and show the competing identity. |
+| Bastille — *Bad Blood X*, “Pompeii MMXXIII” | AcoustID linked the fingerprint to both “Apocalypse Now” and the correct recording. The correct MusicBrainz credit was “Bastille & Hans Zimmer,” while the release slot used album artist “Bastille.” | Treat a fuller collaboration credit as supporting the album artist. Exact slot title, filename, embedded title, and a 0.67 second duration delta resolve the unordered AcoustID link. |
+| Natasha Bedingfield — *Unwritten*, “Silent Movie” | Another correctly assigned file had a noisy AcoustID link to “Silent Movie,” making it look like a competing local copy. | Once the other file is more strongly owned by its own title, filename, duration, and release slot, do not let its secondary catalogue link create a duplicate decision. |
 | Chelsea Wolfe — *The Dark* | Pre-album single copies and album copies fit the same release slots. | Present one duplicate-copy decision per recording, including playlist use and recoverable keeper actions. |
 | Stone Sour — *Come What(ever) May* | One uncertain assignment, four absent bonus/acoustic tracks, numbering changes, title conventions, and safe ID repairs create a dense case. | Lead with the five album-level questions, keep missing tracks within album completeness, and show compact row details without repeating the same recommendation. |
 
@@ -90,6 +92,7 @@ Examples encountered: Snow Patrol’s *Up to Now* should remain partial; the sin
 - Mistagged wrong audio can create a false duplicate after retagging. AcoustID identity must be checked before metadata is rewritten.
 - Exact duplicates must show every local copy, quality/path evidence, and playlist membership before a keeper is selected.
 - An extra file paired with a missing release slot may be a different version, not disposable junk. Show the pair as one version conflict.
+- Queen — *The Platinum Collection*, “Who Wants to Live Forever” exposed the opposite case: every strong fingerprint identity named a different song. Mark the file as wrong audio and keep the genuinely absent release slot separate; matching text tags cannot reconnect them as alternate versions.
 - Deletion/quarantine remains recoverable and manual. Safe metadata bulk actions never include destructive work.
 - Previously encountered wrong-audio examples, composer/performance attribution errors, and the Southbound mismatch motivated keeping file identity above tags and folder names in the evidence hierarchy.
 
@@ -108,3 +111,5 @@ Examples encountered: Snow Patrol’s *Up to Now* should remain partial; the sin
 11. Headings describe the proposed outcome (“Use continuous numbering,” “Link MusicBrainz recording IDs”), not the planner's internal category or finding count.
 12. The default album view is the actionable plan. The complete track audit and technical evidence remain available as separate views so dense albums do not bury the controlling decision.
 13. Queue modes separate albums that need input, supported changes ready to apply, and recoverable file actions. Type filtering refines the selected mode instead of duplicating it.
+14. Release comparisons show available title, country, format, date, and disambiguation before asking the user to pin an edition. The Plan view keeps this comparison compact; the Evidence view owns the full file-by-file mapping.
+15. Exact proposed changes remain visible with the selected track. Raw tags, identifiers, and scoring diagnostics may remain collapsed.

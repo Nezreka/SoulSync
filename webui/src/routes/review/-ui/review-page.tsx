@@ -104,6 +104,7 @@ function findingHeading(finding: ReviewFinding): string {
       ? Object.keys(details.changes as Record<string, unknown>)
       : [];
   const expected = String(details.expected_title || finding.title.replace(/^Retag\s+/i, ''));
+  if (details.audio_conflict === 'different_recording') return finding.title;
   if (changes.length === 1 && changes[0] === 'filename') return `Rename file: ${expected}`;
   if (finding.finding_type === 'reconciliation_unresolved' && changes.length === 0) {
     return `Confirm assignment: ${expected.replace(/^Confirm:\s*/i, '')}`;
@@ -112,7 +113,9 @@ function findingHeading(finding: ReviewFinding): string {
   return finding.title;
 }
 
-function statusLabel(status: string) {
+function statusLabel(status: string, row?: AlbumAssignment) {
+  if (row?.audio_conflict === 'different_recording') return 'Wrong audio';
+  if (row?.relationship === 'version_conflict') return 'Compare versions';
   return (
     {
       confirmed: 'Confirmed',
@@ -175,32 +178,39 @@ function AssignmentRow({
   onSelect: (findingId: number) => void;
   selected: boolean;
 }) {
-  const position = `${row.current_disc_number || row.slot_disc_number || 1}.${
-    row.current_track_number ?? row.slot_track_number ?? '—'
+  const pairedVersion = row.relationship === 'version_conflict' && row.status === 'extra';
+  const currentPosition = `${row.current_disc_number || 1}.${row.current_track_number ?? '—'}`;
+  const releasePosition = `${row.counterpart_disc_number || row.slot_disc_number || 1}.${
+    row.counterpart_track_number ?? row.slot_track_number ?? '—'
   }`;
+  const position = pairedVersion
+    ? `${currentPosition} → ${releasePosition}`
+    : `${
+        row.current_disc_number || row.slot_disc_number || 1
+      }.${row.current_track_number ?? row.slot_track_number ?? '—'}`;
   const evidence = row.audio_title
     ? `${row.audio_title}${row.audio_score ? ` · ${Math.round(row.audio_score * 100)}%` : ''}`
     : row.confidence || '';
   const action =
-    row.relationship === 'version_conflict'
-      ? row.status === 'extra'
-        ? `Possible version of ${row.counterpart_title || 'a missing track'}`
-        : `Possible local version: ${row.counterpart_file || row.counterpart_title || ''}`
-      : row.action_state === 'preview'
-        ? row.preview_reason || 'Resolve the album question first'
-        : row.status === 'settled'
-          ? 'No pending action'
-          : row.changes && Object.keys(row.changes).length
-            ? Object.keys(row.changes)
-                .map((key) => key.replaceAll('_', ' '))
-                .join(', ')
-            : row.status === 'uncertain'
-              ? 'Confirm assignment'
-              : row.title_difference === 'flavor'
-                ? 'Display wording only'
-                : row.title_difference === 'version_detail'
-                  ? 'Version detail preserved'
-                  : 'No metadata edit';
+    row.audio_conflict === 'different_recording'
+      ? `Fingerprint identifies ${row.audio_title || 'a different recording'}`
+      : row.relationship === 'version_conflict'
+        ? 'Compare the local and release versions'
+        : row.action_state === 'preview'
+          ? row.preview_reason || 'Resolve the album question first'
+          : row.status === 'settled'
+            ? 'No pending action'
+            : row.changes && Object.keys(row.changes).length
+              ? Object.keys(row.changes)
+                  .map((key) => key.replaceAll('_', ' '))
+                  .join(', ')
+              : row.status === 'uncertain'
+                ? 'Confirm assignment'
+                : row.title_difference === 'flavor'
+                  ? 'Display wording only'
+                  : row.title_difference === 'version_detail'
+                    ? 'Version detail preserved'
+                    : 'No metadata edit';
   return (
     <button
       type="button"
@@ -212,7 +222,7 @@ function AssignmentRow({
       disabled={!row.finding_id}
     >
       <span className={styles.rowStatus}>
-        <i>{statusLabel(row.status)}</i>
+        <i>{statusLabel(row.status, row)}</i>
       </span>
       <span className={styles.rowPosition}>{position}</span>
       <span className={styles.trackComparison}>
@@ -222,9 +232,14 @@ function AssignmentRow({
         </span>
         <b aria-hidden="true">→</b>
         <span>
-          <strong>{row.slot_title || 'No release slot'}</strong>
+          <strong>
+            {(pairedVersion ? row.counterpart_title : row.slot_title) || 'No release slot'}
+          </strong>
           <small>
-            Release {row.slot_disc_number || 1}.{row.slot_track_number ?? '—'}
+            Release{' '}
+            {pairedVersion
+              ? releasePosition
+              : `${row.slot_disc_number || 1}.${row.slot_track_number ?? '—'}`}
           </small>
         </span>
       </span>
@@ -259,10 +274,34 @@ interface ReadyChangeGroup {
   valueSummary?: string;
 }
 
+function readyFieldGroup(field: string): { key: string; label: string } {
+  if (['artist', 'album_artist', 'library_track_artist', 'track_artist'].includes(field)) {
+    return { key: 'artist', label: 'Artist credits' };
+  }
+  if (field === 'filename') return { key: 'filename', label: 'Filenames' };
+  if (['library_recording_mbid', 'musicbrainz_recording_id'].includes(field)) {
+    return { key: 'recording_ids', label: 'Recording IDs' };
+  }
+  if (['title', 'library_title'].includes(field)) return { key: 'title', label: 'Track titles' };
+  if (['album', 'library_album_title'].includes(field)) {
+    return { key: 'album', label: 'Album title' };
+  }
+  if (
+    ['track_number', 'disc_number', 'library_track_number', 'library_disc_number'].includes(field)
+  ) {
+    return { key: 'numbering', label: 'Track numbering' };
+  }
+  return { key: field, label: changeFieldLabel(field) };
+}
+
 function groupReadyChanges(items: ReviewFinding[]): ReadyChangeGroup[] {
   const groups = new Map<
     string,
-    ReadyChangeGroup & { values: Array<{ old?: unknown; new?: unknown }> }
+    ReadyChangeGroup & {
+      values: Array<{ old?: unknown; new?: unknown }>;
+      findingIdSet: Set<number>;
+      rawFields: Set<string>;
+    }
   >();
   for (const item of items.filter((finding) => finding.review_tier === 'ready')) {
     const details = item.details && typeof item.details === 'object' ? item.details : {};
@@ -270,45 +309,60 @@ function groupReadyChanges(items: ReviewFinding[]): ReadyChangeGroup[] {
       details.changes && typeof details.changes === 'object' && !Array.isArray(details.changes)
         ? (details.changes as Record<string, { old?: unknown; new?: unknown }>)
         : {};
-    const fields = Object.keys(changes).sort();
-    const key = fields.join('|') || 'other';
-    const group = groups.get(key) || {
-      key,
-      label: fields.length ? fields.map(changeFieldLabel).join(' + ') : 'Other repair',
-      count: 0,
-      findingIds: [],
-      values: [],
-    };
-    group.count += 1;
-    group.findingIds.push(item.id);
-    if (fields.length === 1) group.values.push(changes[fields[0]] || {});
-    groups.set(key, group);
+    const fields = Object.keys(changes);
+    if (!fields.length) continue;
+    for (const field of fields) {
+      const semantic = readyFieldGroup(field);
+      const group = groups.get(semantic.key) || {
+        key: semantic.key,
+        label: semantic.label,
+        count: 0,
+        findingIds: [],
+        values: [],
+        findingIdSet: new Set<number>(),
+        rawFields: new Set<string>(),
+      };
+      group.findingIdSet.add(item.id);
+      group.rawFields.add(field);
+      group.values.push(changes[field] || {});
+      groups.set(semantic.key, group);
+    }
   }
-  return [...groups.values()].map(({ values, ...group }) => {
-    const fields = group.key.split('|');
+  return [...groups.values()].map(({ values, findingIdSet, rawFields, ...group }) => {
+    const findingIds = [...findingIdSet];
+    const count = findingIds.length;
+    const fields = [...rawFields];
     if (
-      fields.includes('track_artist') &&
+      group.key === 'artist' &&
+      fields.some((field) => ['track_artist', 'library_track_artist'].includes(field)) &&
       fields.every((field) => ['artist', 'library_track_artist', 'track_artist'].includes(field))
     ) {
       return {
         ...group,
+        count,
+        findingIds,
         label: 'Featured artist credits',
         valueSummary: 'Adding missing featured artists to metadata',
       };
     }
-    if (
-      fields.length > 0 &&
-      fields.every((field) =>
-        ['library_recording_mbid', 'musicbrainz_recording_id'].includes(field),
-      )
-    ) {
+    if (group.key === 'recording_ids') {
       return {
         ...group,
+        count,
+        findingIds,
         label: 'Recording IDs',
-        valueSummary: `Add MusicBrainz recording IDs to ${group.count} track${group.count === 1 ? '' : 's'}`,
+        valueSummary: `Add MusicBrainz recording IDs to ${count} track${count === 1 ? '' : 's'}`,
       };
     }
-    if (!values.length) return group;
+    if (group.key === 'filename') {
+      return {
+        ...group,
+        count,
+        findingIds,
+        valueSummary: `Rename ${count} file${count === 1 ? '' : 's'} to clean release titles`,
+      };
+    }
+    if (!values.length) return { ...group, count, findingIds };
     const first = values[0];
     const same = values.every(
       (value) =>
@@ -317,11 +371,38 @@ function groupReadyChanges(items: ReviewFinding[]): ReadyChangeGroup[] {
     );
     return {
       ...group,
+      count,
+      findingIds,
       valueSummary: same
         ? `${String(first.old ?? 'empty')} → ${String(first.new ?? 'empty')}`
-        : undefined,
+        : `Update ${count} track${count === 1 ? '' : 's'}`,
     };
   });
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function records(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value) ? value.map(record).filter((item) => Object.keys(item).length) : [];
+}
+
+function textValue(value: unknown): string {
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+}
+
+function candidateContext(candidate: Record<string, unknown>): string {
+  return [
+    textValue(candidate.country),
+    textValue(candidate.format),
+    textValue(candidate.date),
+    textValue(candidate.disambiguation),
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 function SelectedActionDetail({
@@ -405,24 +486,12 @@ function SelectedActionDetail({
           </div>
         </section>
       )}
-      {compact ? (
-        <details className={styles.rowEvidence}>
-          <summary>Evidence and exact changes</summary>
-          <ReconciliationEvidence
-            finding={finding}
-            busy={busy}
-            onPin={onPin}
-            onKeepCopy={duplicateChoice ? (trackId) => onAct('fix', trackId) : undefined}
-          />
-        </details>
-      ) : (
-        <ReconciliationEvidence
-          finding={finding}
-          busy={busy}
-          onPin={onPin}
-          onKeepCopy={duplicateChoice ? (trackId) => onAct('fix', trackId) : undefined}
-        />
-      )}
+      <ReconciliationEvidence
+        finding={finding}
+        busy={busy}
+        onPin={onPin}
+        onKeepCopy={duplicateChoice ? (trackId) => onAct('fix', trackId) : undefined}
+      />
       <div className={styles.actions}>
         {finding.finding_type === 'reconciliation_intent' ? (
           <>
@@ -652,7 +721,12 @@ export function ReviewPage() {
     (row) => !['confirmed', 'not_owned', 'settled'].includes(row.status),
   );
   const versionConflictAssignments = pendingAssignments
-    .filter((row) => row.relationship === 'version_conflict' && row.status !== 'change')
+    .filter(
+      (row) =>
+        row.relationship === 'version_conflict' &&
+        row.status !== 'change' &&
+        row.status !== 'missing',
+    )
     .sort((left, right) => {
       const relationship = (left.relationship_key || '').localeCompare(
         right.relationship_key || '',
@@ -698,6 +772,12 @@ export function ReviewPage() {
     : undefined;
   const primaryReadyDecision = readyDecisions.length === 1 ? readyDecisions[0] : undefined;
   const showDecisionBoard = reviewDecisions.length > 0;
+  const primaryCandidate = reviewCase?.album_plan?.candidates?.[0];
+  const mappedSlots =
+    primaryCandidate?.matched ?? assignments.filter((row) => row.slot_title).length;
+  const totalSlots = primaryCandidate?.total_slots ?? mappedSlots;
+  const settledSlots =
+    (reviewCase?.album_plan?.counts.confirmed || 0) + (reviewCase?.album_plan?.counts.settled || 0);
 
   const selectFinding = (findingId: number | null) => {
     setActiveId(findingId);
@@ -889,26 +969,27 @@ export function ReviewPage() {
             Apply and organize folder
           </button>
         )}
-        {!(plan.status === 'ready' && readyChangeGroups.length === 1 && assignments.length > 0) && (
-          <details className={styles.readyChanges}>
-            <summary>Review ready changes</summary>
-            <div className={styles.readyChangeGroups}>
-              {readyChangeGroups.map((group) => (
-                <button
-                  key={group.key}
-                  type="button"
-                  onClick={() => selectFinding(group.findingIds[0] ?? null)}
-                >
-                  <strong>{group.label}</strong>
-                  <span>
-                    {group.count} track{group.count === 1 ? '' : 's'}
-                    {group.valueSummary ? ` · ${group.valueSummary}` : ''}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </details>
-        )}
+      </div>
+    ) : null;
+
+  const readySummaryList =
+    readyChangeGroups.length > 1 ? (
+      <div className={styles.readySummaryList} aria-label="Ready change summary">
+        {readyChangeGroups.map((group) => (
+          <button
+            key={group.key}
+            type="button"
+            onClick={() => selectFinding(group.findingIds[0] ?? null)}
+          >
+            <span>
+              <strong>{group.label}</strong>
+              <small>{group.valueSummary}</small>
+            </span>
+            <b>
+              {group.count} track{group.count === 1 ? '' : 's'}
+            </b>
+          </button>
+        ))}
       </div>
     ) : null;
 
@@ -1204,8 +1285,7 @@ export function ReviewPage() {
                         {readyChangeGroups.length === 1
                           ? readyChangeGroups[0].valueSummary ||
                             `${readyChangeGroups[0].label} on ${readyChangeGroups[0].count} tracks`
-                          : primaryReadyDecision?.label ||
-                            `${plan.ready} supported changes are ready`}
+                          : `${readyChangeGroups.length} supported updates across ${plan.ready} track${plan.ready === 1 ? '' : 's'}`}
                       </strong>
                       <p>
                         {readyChangeGroups.length > 1
@@ -1218,6 +1298,7 @@ export function ReviewPage() {
                       <span data-tone="good">✓ {plan.ready} ready</span>
                     </div>
                   </div>
+                  {readySummaryList}
                   {readyActionControls}
                   {active &&
                     activeDecision?.risk === 'ready' &&
@@ -1313,16 +1394,67 @@ export function ReviewPage() {
                               aria-label="Release decision"
                             >
                               <div>
-                                <div className={styles.eyebrow}>Choose this first</div>
-                                <h4>{findingHeading(active)}</h4>
-                                <p>{active.description}</p>
+                                <div className={styles.eyebrow}>Release options</div>
+                                <h4>Compare the editions that fit this folder</h4>
+                                <p>
+                                  Choose using the edition details below. Open Evidence when you
+                                  need the file-by-file comparison.
+                                </p>
                               </div>
-                              <ReconciliationEvidence
-                                finding={active}
-                                busy={busy}
-                                onPin={(index) => void act(active, 'fix', String(index))}
-                              />
+                              <div className={styles.releaseChoiceList}>
+                                {records(record(active.details).candidates).map(
+                                  (candidate, candidateIndex) => {
+                                    const missing = Array.isArray(candidate.missing)
+                                      ? candidate.missing.length
+                                      : Number(candidate.missing || 0);
+                                    const extra = Array.isArray(candidate.extra)
+                                      ? candidate.extra.length
+                                      : Number(candidate.extra || 0);
+                                    const context = candidateContext(candidate);
+                                    return (
+                                      <article
+                                        key={`${textValue(candidate.source)}-${textValue(candidate.release_id)}-${candidateIndex}`}
+                                      >
+                                        <span className={styles.candidateRank}>
+                                          {candidateIndex + 1}
+                                        </span>
+                                        <div>
+                                          <strong>
+                                            {textValue(candidate.release_title) ||
+                                              `Candidate ${candidateIndex + 1}`}
+                                          </strong>
+                                          <small>
+                                            {textValue(candidate.source) || 'catalog'}{' '}
+                                            <ProviderReleaseId
+                                              source={textValue(candidate.source)}
+                                              releaseId={textValue(candidate.release_id)}
+                                            />
+                                          </small>
+                                          {context && <small>{context}</small>}
+                                        </div>
+                                        <small className={styles.releaseChoiceFit}>
+                                          {textValue(candidate.matched)}/
+                                          {textValue(candidate.total_slots) || '?'} assigned ·{' '}
+                                          {missing} missing · {extra} extra
+                                        </small>
+                                        <button
+                                          type="button"
+                                          disabled={busy}
+                                          onClick={() =>
+                                            void act(active, 'fix', String(candidateIndex))
+                                          }
+                                        >
+                                          Use this release
+                                        </button>
+                                      </article>
+                                    );
+                                  },
+                                )}
+                              </div>
                               <div className={styles.actions}>
+                                <button type="button" onClick={() => setAlbumView('evidence')}>
+                                  Compare full evidence
+                                </button>
                                 <button
                                   type="button"
                                   disabled={busy}
@@ -1339,6 +1471,64 @@ export function ReviewPage() {
                   </div>
                 </section>
               )}
+
+              {albumView === 'plan' &&
+                plan.status !== 'ready' &&
+                reviewCase.album_plan &&
+                !reviewDecisions.some((decision) => decision.category === 'release_conflicts') && (
+                  <section className={styles.planContext} aria-label="Album plan context">
+                    <div>
+                      <div className={styles.eyebrow}>Album context</div>
+                      <h4>What this decision affects</h4>
+                    </div>
+                    <dl>
+                      <div>
+                        <dt>Selected release</dt>
+                        <dd>
+                          {reviewCase.album_plan.source || 'Catalog'}{' '}
+                          <ProviderReleaseId
+                            source={reviewCase.album_plan.source}
+                            releaseId={reviewCase.album_plan.release_id}
+                          />
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Track coverage</dt>
+                        <dd>
+                          {mappedSlots} of {totalSlots || '?'} release slots assigned
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Already settled</dt>
+                        <dd>
+                          {settledSlots} track{settledSlots === 1 ? '' : 's'} need no decision
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Planned numbering</dt>
+                        <dd>
+                          {reviewCase.album_plan.numbering_mode === 'digital'
+                            ? 'One continuous album sequence'
+                            : 'Disc and track positions from the release'}
+                        </dd>
+                      </div>
+                    </dl>
+                    <div className={`${styles.actions} ${styles.planContextActions}`}>
+                      <button type="button" onClick={() => setAlbumView('tracks')}>
+                        Review track assignments
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAlbumView('evidence');
+                          setActiveId((current) => current ?? reviewCase.items[0]?.id ?? null);
+                        }}
+                      >
+                        View supporting evidence
+                      </button>
+                    </div>
+                  </section>
+                )}
 
               {albumView === 'plan' && plan.status !== 'ready' && plan.ready > 0 && (
                 <section
@@ -1358,6 +1548,7 @@ export function ReviewPage() {
                       <span data-tone="good">✓ {plan.ready} ready</span>
                     </div>
                   </div>
+                  {readySummaryList}
                   {readyActionControls}
                   {active &&
                     activeDecision?.risk === 'ready' &&
@@ -1545,31 +1736,32 @@ export function ReviewPage() {
                       </dd>
                     </div>
                   </dl>
-                  {(reviewCase.album_plan?.candidates?.length || 0) > 1 && (
-                    <details className={styles.albumCandidates}>
-                      <summary>
-                        Compare {reviewCase.album_plan?.candidates?.length} release candidates
-                      </summary>
-                      <div>
-                        {reviewCase.album_plan?.candidates?.map((candidate, index) => (
-                          <article key={`${candidate.source}-${candidate.release_id}`}>
-                            <b>#{index + 1}</b>
-                            <span>
-                              <strong>{candidate.source}</strong>
-                              <ProviderReleaseId
-                                source={candidate.source}
-                                releaseId={candidate.release_id}
-                              />
-                            </span>
-                            <small>
-                              {candidate.matched}/{candidate.total_slots} assigned ·{' '}
-                              {candidate.missing} missing · {candidate.extra} extra
-                            </small>
-                          </article>
-                        ))}
-                      </div>
-                    </details>
-                  )}
+                  {(reviewCase.album_plan?.candidates?.length || 0) > 1 &&
+                    active?.finding_type !== 'reconciliation_release' && (
+                      <details className={styles.albumCandidates}>
+                        <summary>
+                          Compare {reviewCase.album_plan?.candidates?.length} release candidates
+                        </summary>
+                        <div>
+                          {reviewCase.album_plan?.candidates?.map((candidate, index) => (
+                            <article key={`${candidate.source}-${candidate.release_id}`}>
+                              <b>#{index + 1}</b>
+                              <span>
+                                <strong>{candidate.source}</strong>
+                                <ProviderReleaseId
+                                  source={candidate.source}
+                                  releaseId={candidate.release_id}
+                                />
+                              </span>
+                              <small>
+                                {candidate.matched}/{candidate.total_slots} assigned ·{' '}
+                                {candidate.missing} missing · {candidate.extra} extra
+                              </small>
+                            </article>
+                          ))}
+                        </div>
+                      </details>
+                    )}
                   {reviewCase.items.length > 0 && (
                     <label className={styles.evidencePicker}>
                       Evidence for action

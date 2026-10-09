@@ -1,6 +1,8 @@
 """Library-shaped examples from the user's reconciliation investigations."""
 
-from core.library.reconciliation_plan import reconcile_folder, title_difference_kind
+from core.library.reconciliation_plan import (
+    audio_contradicts_local_title, reconcile_folder, title_difference_kind,
+)
 
 
 def _file(title, path, duration_ms, recording=None):
@@ -233,6 +235,76 @@ def test_unrelated_acoustid_link_does_not_override_complete_album_evidence():
     assert pair['confidence'] == 'clear'
     assert pair['duration_delta_ms'] == 1730
     assert pair['ambiguity_reasons'] == []
+
+
+def test_collaboration_credit_supports_exact_album_artist_slot():
+    files = [_file(
+        'Pompeii MMXXIII', '/album/14 - Pompeii MMXXIII.flac', 179330,
+        {'mbid': 'noise', 'title': 'Apocalypse Now',
+         'artist': 'Perturbator feat. Ulver', 'score': 1.0},
+    )]
+    files[0]['acoustid']['recordings'].append({
+        'mbid': 'pompeii', 'title': 'Pompeii MMXXIII',
+        'artist': 'Bastille & Hans Zimmer', 'score': 1.0,
+    })
+    slots = [{
+        'title': 'Pompeii MMXXIII', 'artist': 'Bastille',
+        'recording_mbid': 'pompeii', 'duration_ms': 180000,
+    }]
+
+    pair = reconcile_folder(files, slots)['pairs'][0]
+
+    assert pair['confidence'] == 'clear'
+    assert pair['ambiguity_reasons'] == []
+
+
+def test_file_strongly_owned_by_another_slot_is_not_a_competing_copy():
+    files = [
+        _file('Silent Movie', '/album/07 - Silent Movie.mp3', 220000,
+              {'mbid': 'silent', 'title': 'Silent Movie',
+               'artist': 'Natasha Bedingfield', 'score': 0.97}),
+        _file("If You're Gonna Jump", "/album/06 - If You're Gonna Jump.mp3", 220000,
+              {'mbid': 'jump', 'title': "If You're Gonna Jump",
+               'artist': 'Natasha Bedingfield', 'score': 0.97}),
+    ]
+    files[0]['acoustid']['recordings'].append(
+        {'mbid': 'jump', 'title': "If You're Gonna Jump",
+         'artist': 'Natasha Bedingfield', 'score': 0.97})
+    files[1]['acoustid']['recordings'].append(
+        {'mbid': 'silent', 'title': 'Silent Movie',
+         'artist': 'Natasha Bedingfield', 'score': 0.97})
+    slots = [
+        {'title': 'Silent Movie', 'artist': 'Natasha Bedingfield',
+         'recording_mbid': 'silent', 'duration_ms': 220250},
+        {'title': "If You're Gonna Jump", 'artist': 'Natasha Bedingfield',
+         'recording_mbid': 'jump', 'duration_ms': 220100},
+    ]
+
+    pairs = reconcile_folder(files, slots)['pairs']
+
+    assert all(pair['confidence'] == 'clear' for pair in pairs)
+    assert all('another local file fits this release track'
+               not in pair['ambiguity_reasons'] for pair in pairs)
+
+
+def test_strong_fingerprint_titles_can_identify_mislabeled_audio():
+    file = _file(
+        'Who Wants to Live Forever', '/album/26 - Who Wants to Live Forever.flac',
+        300000, {'mbid': 'teo', 'title': 'Teo Torriatte',
+                 'artist': 'Queen', 'score': 1.0})
+    file['acoustid']['recordings'].append(
+        {'mbid': 'rain', 'title': 'Here Comes the Rain Again',
+         'artist': 'Eurythmics', 'score': 1.0})
+
+    assert audio_contradicts_local_title(file) is True
+
+
+def test_fingerprint_without_a_recording_title_is_not_proof_of_wrong_audio():
+    file = _file(
+        'Who Wants to Live Forever', '/album/26 - Who Wants to Live Forever.flac',
+        300000, {'mbid': 'unknown', 'title': '', 'artist': 'Queen', 'score': 1.0})
+
+    assert audio_contradicts_local_title(file) is False
 
 
 def test_top_acoustid_aliases_for_one_release_slot_are_not_ambiguous():

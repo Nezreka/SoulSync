@@ -361,6 +361,8 @@ describe('library reconciliation review queue', () => {
     expect(screen.queryByRole('heading', { name: 'Track assignments' })).toBeNull();
     expect(screen.queryByLabelText('Album reconciliation plan')).toBeNull();
     expect(screen.getByText(/Renumber 1 track as one sequence/)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'What this decision affects' })).toBeTruthy();
+    expect(screen.getByText('2 of 3 release slots assigned')).toBeTruthy();
     expect(screen.queryByText('1 affected action')).toBeNull();
     expect(screen.getByRole('button', { name: 'Use continuous numbering' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Evidence' }));
@@ -375,6 +377,8 @@ describe('library reconciliation review queue', () => {
     const selectedRow = screen.getByRole('row', { name: /Hourglass/ });
     const selectedDetail = screen.getByLabelText('Selected action detail');
     expect(selectedRow.nextElementSibling).toBe(selectedDetail);
+    expect(screen.getByRole('heading', { name: 'Proposed changes' })).toBeTruthy();
+    expect(screen.queryByText('Evidence and exact changes')).toBeNull();
   });
 
   it('shows why the last scan stopped and can queue a rerun', async () => {
@@ -518,9 +522,7 @@ describe('library reconciliation review queue', () => {
     expect(await screen.findByText('Various Artists → Lamb of God')).toBeTruthy();
     expect(screen.getAllByText('✓ 1 ready').length).toBeGreaterThan(0);
     expect(screen.queryByRole('heading', { name: '1 question for this album' })).toBeNull();
-    fireEvent.click(screen.getByText('Review ready changes'));
-    expect(screen.getByText('Album artist')).toBeTruthy();
-    expect(screen.getByText('1 track · Various Artists → Lamb of God')).toBeTruthy();
+    expect(screen.queryByText('Review ready changes')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Apply 1 ready change' }));
     await waitFor(() => expect(screen.getByText('1 ready change applied.')).toBeTruthy());
   });

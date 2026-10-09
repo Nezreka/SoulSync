@@ -113,6 +113,28 @@ def test_candidate_evidence_displays_the_acoustid_recording_that_supports_the_sl
     assert pair['audio_recording_count'] == 1
 
 
+def test_candidate_evidence_keeps_release_context_for_human_comparison():
+    files = [{
+        'path': '/album/01.flac',
+        'tags': {'title': 'Song', 'duration_ms': 100000},
+        'acoustid': {'recordings': []},
+    }]
+    slots = [{'title': 'Song', 'track_number': 1, 'disc_number': 1}]
+    plan = {'pairs': [], 'missing_slots': [0], 'extra_files': [0]}
+
+    evidence = _candidate_evidence(
+        files, (0, 0, -1, 'musicbrainz', 'release-id', slots, plan),
+        {'name': 'Album', 'country': 'US', 'disambiguation': 'deluxe',
+         'date': '2024-01-02', 'media': [{'format': 'CD'}, {'format': 'CD'}]},
+    )
+
+    assert evidence['release_title'] == 'Album'
+    assert evidence['country'] == 'US'
+    assert evidence['disambiguation'] == 'deluxe'
+    assert evidence['date'] == '2024-01-02'
+    assert evidence['format'] == 'CD'
+
+
 def test_candidate_shape_sorts_numbered_and_unnumbered_missing_slots():
     slots = [
         {'title': 'Numbered', 'disc_number': 1, 'track_number': 2},

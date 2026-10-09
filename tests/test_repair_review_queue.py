@@ -399,6 +399,32 @@ def test_pending_version_extra_keeps_its_paired_missing_slot_visible():
     assert case['album_plan']['counts']['extra'] == 1
 
 
+def test_wrong_audio_is_not_reconnected_to_missing_slot_by_title():
+    db = _Database()
+    details = {'album_id': 10, 'profile_id': 1, 'album_title': 'Collection'}
+    extra_path = '/music/Album/26 - Who Wants to Live Forever.flac'
+    db.add(1, extra_path, {**details, 'audio_conflict': 'different_recording'},
+           job_id='library_reconciliation', kind='reconciliation_unresolved')
+    case_id = persist_album_plan(db, {**details, 'evidence_signature': 'evidence'}, {
+        'source': 'musicbrainz', 'release_id': 'release-id',
+        'assignments': [
+            {'status': 'missing', 'slot_title': 'Who Wants to Live Forever',
+             'slot_disc_number': 2, 'slot_track_number': 9},
+            {'status': 'extra', 'file_path': extra_path,
+             'file': '26 - Who Wants to Live Forever.flac',
+             'current_title': 'Who Wants to Live Forever',
+             'audio_conflict': 'different_recording'},
+        ],
+    })
+
+    case = get_case(db, case_id, job_id='library_reconciliation')
+    missing, extra = case['album_plan']['assignments']
+
+    assert 'relationship' not in missing
+    assert 'relationship' not in extra
+    assert extra['finding_id'] == 1
+
+
 def test_repeated_audio_conflicts_are_one_album_question():
     items = [
         {'id': 1, 'finding_type': 'reconciliation_unresolved', 'details': {}},

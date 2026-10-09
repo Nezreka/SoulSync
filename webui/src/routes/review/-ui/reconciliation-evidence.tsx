@@ -494,6 +494,26 @@ function ReleaseCandidates({
                       releaseId={label(candidate.release_id)}
                     />
                   </small>
+                  {Boolean(
+                    candidate.release_title ||
+                    candidate.country ||
+                    candidate.format ||
+                    candidate.date ||
+                    candidate.disambiguation,
+                  ) && (
+                    <span className={styles.releaseMetadata}>
+                      {Boolean(candidate.release_title) && <b>{label(candidate.release_title)}</b>}
+                      {[
+                        candidate.country,
+                        candidate.format,
+                        candidate.date,
+                        candidate.disambiguation,
+                      ]
+                        .map(label)
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </span>
+                  )}
                 </div>
               </header>
               {candidate.matched !== undefined && (

@@ -590,6 +590,11 @@ def get_case(db, case_id: str, *, status: str = 'pending',
             missing_rows = [row for row in assignments if row.get('status') == 'missing']
             used_missing: set[int] = set()
             for extra in (row for row in assignments if row.get('status') == 'extra'):
+                # A mislabeled file and the absent correctly named recording
+                # are two consequences of wrong audio, not alternate versions
+                # of one recording.  Do not reconnect them by title alone.
+                if extra.get('audio_conflict') == 'different_recording':
+                    continue
                 key = fold_title(str(extra.get('current_title') or ''))
                 match = next((row for row in missing_rows
                               if id(row) not in used_missing and key and

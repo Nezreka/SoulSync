@@ -24,8 +24,9 @@ from core.library.reconciliation_evidence import (
     ReconciliationEvidence, album_folders_audio_path_digest,
 )
 from core.library.reconciliation_plan import (
-    reconcile_folder, _title_score, display_title_compatible, file_version_markers,
-    semantic_title_key, title_difference_kind,
+    audio_contradicts_local_title, reconcile_folder, _title_score,
+    display_title_compatible, file_version_markers, semantic_title_key,
+    title_difference_kind,
 )
 from core.library.reconciliation_store import persist_album_plan, retire_unseen_plans
 from core.library.retag_planner import plan_track
@@ -664,7 +665,8 @@ def _display_album_title(files: list[dict], library_title: str,
     return release_title
 
 
-def _candidate_evidence(files: list[dict], scored: tuple) -> dict:
+def _candidate_evidence(files: list[dict], scored: tuple,
+                        release_meta: dict | None = None) -> dict:
     """Keep the actual file-to-slot comparison behind a release decision."""
     clear, matched, _extras, source, release_id, slots, plan = scored
     pairs = []
@@ -741,8 +743,24 @@ def _candidate_evidence(files: list[dict], scored: tuple) -> dict:
             'ambiguity_reasons': pair.get('ambiguity_reasons') or [],
             'playlists': list(file.get('playlists') or []),
         })
+    release_meta = release_meta or {}
+    media = release_meta.get('media') or []
+    formats = list(dict.fromkeys(
+        str(medium.get('format') or '').strip()
+        for medium in media if isinstance(medium, dict) and medium.get('format')
+    ))
+    if not formats and release_meta.get('format'):
+        raw_format = release_meta.get('format')
+        formats = ([str(value) for value in raw_format]
+                   if isinstance(raw_format, (list, tuple)) else [str(raw_format)])
     return {
         'source': source, 'release_id': release_id,
+        'release_title': release_meta.get('name') or release_meta.get('title') or '',
+        'country': release_meta.get('country') or '',
+        'disambiguation': release_meta.get('disambiguation') or '',
+        'format': ', '.join(value for value in formats if value),
+        'date': (release_meta.get('date') or release_meta.get('release_date') or
+                 release_meta.get('releaseDate') or ''),
         'matched': matched, 'clear': clear, 'total_slots': len(slots),
         'pairs': pairs,
         'missing': [slots[index]['title'] for index in plan['missing_slots']],
@@ -830,6 +848,8 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict) ->
             'audio_title': audio.get('title') or '',
             'audio_artist': audio.get('artist') or '',
             'audio_score': audio.get('score'),
+            'audio_conflict': ('different_recording'
+                               if audio_contradicts_local_title(file) else ''),
             'playlists': list(file.get('playlists') or []),
         })
     return assignments, sorted(categories)
@@ -1541,7 +1561,10 @@ class LibraryReconciliationJob(RepairJob):
                                 'artist_name': album.get('artist_name') or '',
                                 'album_folder': folder, 'file_count': 1,
                                 'checked_files': _checked_file_evidence(files),
-                                'candidates': [_candidate_evidence(files, row)
+                                'candidates': [_candidate_evidence(
+                                    files, row, _release_metadata(
+                                        row, release_meta_cache,
+                                        exact_musicbrainz_releases))
                                                for row in scored[:6]],
                                 'evidence_signature': _evidence_signature(
                                     files, [(row[3], row[4], row[0], row[1])
@@ -1627,7 +1650,10 @@ class LibraryReconciliationJob(RepairJob):
                         file_path=None, title=f'Choose release: {os.path.basename(folder)}',
                         description=description,
                         details={**choice_common,
-                                 'candidates': [_candidate_evidence(files, row)
+                                 'candidates': [_candidate_evidence(
+                                     files, row, _release_metadata(
+                                         row, release_meta_cache,
+                                         exact_musicbrainz_releases))
                                                 for row in scored[:6]]}):
                         result.findings_created += 1
                     cache.checkpoint()
@@ -1917,6 +1943,7 @@ class LibraryReconciliationJob(RepairJob):
                     duplicate_indexes = duplicate_groups.get(file_index) or []
                     duplicate_copies = [_duplicate_copy(files[index])
                                         for index in duplicate_indexes]
+                    different_recording = audio_contradicts_local_title(file)
                     identified = (audio.get('status') == 'ok' and
                                   float(best.get('score') or 0) >= 0.80 and
                                   not fingerprint_is_ambiguous(recordings) and
@@ -1934,7 +1961,9 @@ class LibraryReconciliationJob(RepairJob):
                                'playlists': list(file.get('playlists') or []),
                                'acoustid_title': best.get('title'),
                                'acoustid_artist': best.get('artist'),
-                               'acoustid_score': best.get('score')}
+                               'acoustid_score': best.get('score'),
+                               'audio_conflict': ('different_recording'
+                                                  if different_recording else '')}
                     if emit(
                         job_id=self.job_id,
                         finding_type=('reconciliation_duplicate' if duplicate_copies else
@@ -1946,11 +1975,15 @@ class LibraryReconciliationJob(RepairJob):
                         file_path=file['path'],
                         title=((f'Duplicate copies: {best.get("title") or file["tags"].get("title")}'
                                if duplicate_copies else
+                               f'Wrong audio: {file["tags"].get("title") or os.path.basename(file["path"])}'
+                               if different_recording else
                                f'Unassigned audio: {file["tags"].get("title") or os.path.basename(file["path"])}')),
                         description=('These files identify as the same release track; choose a keeper.'
                                      if duplicate_copies else
                                      'Another file also fits this release slot; choose a keeper.'
                                      if competing_paths else
+                                     'The fingerprint identifies different recordings than the file title.'
+                                     if different_recording else
                                      'Audio does not fit a slot on the selected release.'
                                      if identified else 'Audio identity could not be established.'),
                         details=details):

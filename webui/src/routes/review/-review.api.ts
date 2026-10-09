@@ -45,6 +45,7 @@ export interface AlbumAssignment {
   counterpart_file_path?: string;
   counterpart_track_number?: number | string | null;
   counterpart_disc_number?: number | string | null;
+  audio_conflict?: 'different_recording' | '';
   file_path?: string;
   file?: string;
   finding_id?: number;
@@ -91,6 +92,11 @@ export interface AlbumReconciliationPlan {
     missing: number;
     extra: number;
     continuous_numbering: boolean;
+    release_title?: string;
+    country?: string;
+    disambiguation?: string;
+    format?: string;
+    date?: string;
   }>;
 }
 
