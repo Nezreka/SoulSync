@@ -1253,15 +1253,17 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             raw_album_type = "compilation"
             album_type_display = "Compilation"
 
-        # On compilations (or when album artist differs), ensure $artist reflects the track artist
-        if (raw_album_type in ("compilation", "compile", "compilations") or is_explicit_comp):
-            if _artists:
-                _first_ta = _artists[0]
-                _track_artist_cand = _first_ta.get("name") if isinstance(_first_ta, dict) else str(_first_ta)
-                if _track_artist_cand:
-                    _artist_name = _track_artist_cand
-            elif track_info.get("artist"):
-                _artist_name = track_info["artist"]
+        # $artist is the track's artist, $albumartist the album's. only checking
+        # compilations named a label comp credited to its dj after the dj, while
+        # the tags said the real artist ("Vlad Jet - Blue Skies" by Framewerk)
+        if _artists:
+            _first_ta = _artists[0]
+            _track_artist_cand = _first_ta.get("name") if isinstance(_first_ta, dict) else str(_first_ta)
+            if _track_artist_cand:
+                _artist_name = _track_artist_cand
+        elif (raw_album_type in ("compilation", "compile", "compilations") or is_explicit_comp) \
+                and track_info.get("artist"):
+            _artist_name = track_info["artist"]
 
         template_context = {
             "artist": _artist_name,
