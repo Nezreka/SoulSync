@@ -150,6 +150,22 @@ function decisionInstruction(decision: ReviewDecision, numberingMode?: string): 
   }
 }
 
+function decisionCategoryLabel(category: string): string {
+  return (
+    {
+      release_conflicts: 'Release or edition',
+      album_completeness: 'Album completeness',
+      numbering: 'Numbering',
+      audio_conflicts: 'Audio assignment',
+      title_issues: 'Recording identity',
+      duplicates: 'Duplicate files',
+      extra_files: 'Unmatched files',
+      title_conventions: 'Title wording',
+      metadata: 'Metadata',
+    }[category] || category.replaceAll('_', ' ')
+  );
+}
+
 function AssignmentRow({
   row,
   onSelect,
@@ -1209,24 +1225,20 @@ export function ReviewPage() {
 
               {albumView === 'plan' && decisions.length > 0 && showDecisionBoard && (
                 <section className={styles.decisionBoard} aria-label="Album decisions">
-                  <div className={styles.sectionHeading}>
-                    <div>
-                      <div className={styles.eyebrow}>Resolve first</div>
-                      <h3>
-                        {reviewDecisions.length === 1
-                          ? 'One choice needs your input'
-                          : `${reviewDecisions.length} choices need your input`}
-                      </h3>
-                      {reviewDecisions.length > 1 && (
+                  {reviewDecisions.length > 1 && (
+                    <div className={styles.sectionHeading}>
+                      <div>
+                        <div className={styles.eyebrow}>Resolve in order</div>
+                        <h3>{reviewDecisions.length} choices need your input</h3>
                         <p>
                           Work from top to bottom. Earlier choices can update later track actions.
                         </p>
-                      )}
+                      </div>
+                      <span>
+                        {reviewActionCount} affected action{reviewActionCount === 1 ? '' : 's'}
+                      </span>
                     </div>
-                    <span>
-                      {reviewActionCount} affected action{reviewActionCount === 1 ? '' : 's'}
-                    </span>
-                  </div>
+                  )}
                   <div className={styles.decisionGrid}>
                     {reviewDecisions.map((decision, decisionIndex) => {
                       const selected = active ? decision.finding_ids.includes(active.id) : false;
@@ -1242,7 +1254,7 @@ export function ReviewPage() {
                                 {reviewDecisions.length > 1 ? decisionIndex + 1 : '!'}
                               </span>
                               <span>
-                                <small>{decision.label}</small>
+                                <small>{decisionCategoryLabel(decision.category)}</small>
                                 <strong>
                                   {decisionInstruction(
                                     decision,
@@ -1251,10 +1263,12 @@ export function ReviewPage() {
                                 </strong>
                                 {decision.summary && <small>{decision.summary}</small>}
                               </span>
-                              <b>
-                                {decision.action_count} action
-                                {decision.action_count === 1 ? '' : 's'}
-                              </b>
+                              {reviewDecisions.length > 1 && (
+                                <b>
+                                  {decision.action_count} action
+                                  {decision.action_count === 1 ? '' : 's'}
+                                </b>
+                              )}
                             </button>
                             {['numbering', 'title_conventions', 'metadata'].includes(
                               decision.category,

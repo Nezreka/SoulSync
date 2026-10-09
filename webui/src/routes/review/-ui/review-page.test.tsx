@@ -361,7 +361,7 @@ describe('library reconciliation review queue', () => {
     expect(screen.queryByRole('heading', { name: 'Track assignments' })).toBeNull();
     expect(screen.queryByLabelText('Album reconciliation plan')).toBeNull();
     expect(screen.getByText(/Renumber 1 track as one sequence/)).toBeTruthy();
-    expect(screen.getByText('1 affected action')).toBeTruthy();
+    expect(screen.queryByText('1 affected action')).toBeNull();
     expect(screen.getByRole('button', { name: 'Use continuous numbering' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Tracks/ }));
     expect(screen.getByRole('heading', { name: 'Track assignments' })).toBeTruthy();
@@ -631,7 +631,7 @@ describe('library reconciliation review queue', () => {
     expect(
       choices!.compareDocumentPosition(safeChanges) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    expect(screen.getByText('1 affected action')).toBeTruthy();
+    expect(screen.queryByText('1 affected action')).toBeNull();
     expect(screen.getAllByText('Album completeness').length).toBeGreaterThan(0);
     expect(screen.queryByText('2 questions for this album')).toBeNull();
   });
