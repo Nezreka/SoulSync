@@ -60,7 +60,10 @@ export function AudiobookPeopleRow({ results, roles, max = 6 }: AudiobookPeopleR
   useEffect(() => {
     let cancelled = false;
     void fetchFollowedAuthors().then((authors) => {
-      if (!cancelled) setWatched(new Set(authors.map((a) => a.name)));
+      if (!cancelled) {
+        // Only authors: a followed series can share its name with a person.
+        setWatched(new Set(authors.filter((a) => a.role === 'author').map((a) => a.name)));
+      }
     });
     return () => {
       cancelled = true;

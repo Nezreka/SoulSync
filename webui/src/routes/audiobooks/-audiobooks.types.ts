@@ -341,10 +341,13 @@ export interface AudiobookBlockedRelease {
   blocked_at: number;
 }
 
-/** An author being followed for new releases. */
+/** An author, narrator or series being followed for new releases. */
 export interface AudiobookFollowedAuthor {
   name: string;
+  /** `author`, `narrator` or `series`. Part of the follow's key. */
   role: string;
+  /** The Audible series ASIN, set only for a followed series. */
+  series_asin?: string;
   cover_url: string;
   /** Only books published after this get wishlisted. */
   since_date: string;

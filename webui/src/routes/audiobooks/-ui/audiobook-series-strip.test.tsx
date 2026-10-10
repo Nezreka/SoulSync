@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { AudiobookItem } from '../-audiobooks.types';
 
-import { AudiobookSeriesStrip, seriesOwnership } from './audiobook-series-strip';
+import { AudiobookSeriesStrip, seriesAsinFor, seriesOwnership } from './audiobook-series-strip';
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, className }: { children: React.ReactNode; className?: string }) => (
@@ -78,5 +78,32 @@ describe('AudiobookSeriesStrip', () => {
     );
     expect(screen.getByText('2 books in reading order')).toBeInTheDocument();
     expect(screen.queryByText('Owned')).toBeNull();
+  });
+});
+
+describe('seriesAsinFor', () => {
+  const entry = (title: string, asin?: string) =>
+    ({ title, asin, sequence: '1' }) as AudiobookItem['series'][number];
+
+  it('takes the ASIN of the series the strip is about, not the first listed', () => {
+    const lostMetal = { ...book('b1', 'The Lost Metal', '1') } as AudiobookItem;
+    lostMetal.series = [entry('Mistborn Saga', 'SAGA'), entry('Wax & Wayne', 'WAX')];
+
+    expect(seriesAsinFor([lostMetal], 'Wax & Wayne')).toBe('WAX');
+    expect(seriesAsinFor([lostMetal], 'Mistborn Saga')).toBe('SAGA');
+  });
+
+  it('looks past a book that does not carry an ASIN for it', () => {
+    const bare = { ...book('b1', 'One', '1') } as AudiobookItem;
+    bare.series = [entry('Zodiac Academy')];
+    const withAsin = { ...book('b2', 'Two', '2') } as AudiobookItem;
+    withAsin.series = [entry('Zodiac Academy', 'ZA')];
+
+    expect(seriesAsinFor([bare, withAsin], 'Zodiac Academy')).toBe('ZA');
+  });
+
+  it('is empty when nothing matches, so the scan falls back to the name', () => {
+    expect(seriesAsinFor([book('b1', 'One', '1')], 'Another Series')).toBe('');
+    expect(seriesAsinFor([], 'Zodiac Academy')).toBe('');
   });
 });
