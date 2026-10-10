@@ -11863,7 +11863,7 @@ class MusicDatabase:
                        names + scope_params)
         return cursor.fetchone() is not None
 
-    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None) -> Tuple[Optional[DatabaseTrack], float]:
+    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None, candidate_tracks_exhaustive: bool = False) -> Tuple[Optional[DatabaseTrack], float]:
         """
         Check if a track exists in the database with enhanced fuzzy matching and confidence scoring.
 
@@ -11873,6 +11873,13 @@ class MusicDatabase:
                               skipping the per-variation SQL loop. Intended for callers iterating
                               a discography that already fetched the artist's tracks once via
                               get_candidate_tracks_for_albums. None preserves original behavior.
+            candidate_tracks_exhaustive: when True, an EMPTY candidate_tracks list is the
+                              caller's assertion that the artist owns nothing in the library
+                              (the pre-fetch consulted the library and found zero rows) — the
+                              legacy variation loop is skipped for a fast miss. The
+                              album-aware fallback below still runs. Callers that pass []
+                              merely because a pool lookup came back empty (no information)
+                              must leave this False so the legacy path runs (#1621).
 
         Returns (track, confidence) tuple where confidence is 0.0-1.0
         """
@@ -11880,7 +11887,7 @@ class MusicDatabase:
             best_match = None
             best_confidence = 0.0
 
-            if candidate_tracks is not None:
+            if candidate_tracks:
                 # BATCHED PATH — score every pre-fetched track in-memory.
                 # _calculate_track_confidence already handles title normalization,
                 # so no need for the per-variation SQL widening.
@@ -11890,8 +11897,22 @@ class MusicDatabase:
                     if confidence > best_confidence:
                         best_confidence = confidence
                         best_match = track
+            elif candidate_tracks is not None and candidate_tracks_exhaustive:
+                # EXHAUSTIVE-EMPTY — the caller proved the artist has no library
+                # rows (discography pre-fetch found zero albums/tracks). Skip the
+                # legacy variation loop: scoring zero candidates in-memory is the
+                # fast "owns nothing" path those callers rely on (~15-30s/track
+                # otherwise). best_confidence stays 0.0 so the album-aware
+                # fallback below still runs — identical outcome to the old
+                # batched-against-zero-candidates behavior.
+                logger.debug(f"Enhanced track matching for '{title}' by '{artist}': exhaustive empty pool — skipping variation loop")
             else:
                 # LEGACY PATH — generate title variations and fire SQL per variation.
+                # None, or an empty list WITHOUT the exhaustive flag, means "no
+                # information" (e.g. the sync candidate pool found no rows), NOT
+                # "no match": fall through to the pre-#1289 per-variation SQL loop.
+                # (#1621: a 3,228-track Liked Songs sync matched 0 because []
+                # took the batched path and this loop never ran.)
                 title_variations = self._generate_track_title_variations(title)
                 artist_variations = self._get_artist_variations(artist)
 
@@ -12405,10 +12426,26 @@ class MusicDatabase:
 
     def get_artist_tracks_indexed(self, name: str, server_source: Optional[str] = None, limit: int = 10000) -> List[DatabaseTrack]:
         """Indexed two-step lookup: artist_id by exact name (then case-insensitive
-        fallback), then tracks via `artist_id IN (...)`. Avoids the function-in-WHERE
-        pattern in search_tracks that defeats the artists.name index. Returns []
-        when the artist isn't in the library — caller can decide to fall back to
-        the slower LIKE-based path for track_artist / diacritic recall."""
+        fallback), then tracks via `artist_id IN (...)` OR an exact
+        `tracks.track_artist_norm` credit (indexed). The credit arm covers
+        compilation/soundtrack tracks credited to a single per-track artist
+        name, where the artist may not even have an artist row of their own —
+        the #1621 gap where the pool came back [] and the batched matcher
+        scored zero candidates. It is exact equality on the full normalized
+        credit string, so split "feat." credits (e.g. "Calvin Harris feat.
+        Rihanna" for a query of "Rihanna") still resolve via the legacy
+        variation loop's track_credits check, not here. Avoids the function-in-WHERE pattern in search_tracks that
+        defeats the artists.name index. Returns [] when the artist isn't in the
+        library by any of these keys — caller can decide to fall back to the
+        slower LIKE-based path for diacritic/punctuation recall.
+
+        Measurement (#1621, Oct 10 2026): on compilation shapes the credit arm
+        adds only the credited rows (Nirvana 0->2, AC/DC guest appearance 3->4,
+        ~3-6ms per lookup, both arms indexed; "Various Artists" query shows no
+        blowup) and batched match outcomes are identical to the legacy path on
+        every measured shape — no false positives. Punctuation variants (ACDC)
+        and diacritics still resolve via the caller's search_tracks fallback /
+        the legacy variation loop; intentionally not folded in here."""
         if not name:
             return []
         try:
@@ -12422,20 +12459,33 @@ class MusicDatabase:
 
             # Step 2: case + accent insensitive fallback if exact missed, on the
             # indexed name_norm column (a LOWER(name) scan of artists before).
+            ready = self._norm_ready(cursor)
             if not artist_ids:
-                if self._norm_ready(cursor):
+                if ready:
                     cursor.execute("SELECT id FROM artists WHERE name_norm = ?",
                                    (self._normalize_for_comparison(name),))
                 else:
                     cursor.execute("SELECT id FROM artists WHERE LOWER(name) = LOWER(?)", (name,))
                 artist_ids = [r['id'] for r in cursor.fetchall()]
 
-            if not artist_ids:
+            where_parts: list = []
+            params: list = []
+            if artist_ids:
+                placeholders = ','.join('?' for _ in artist_ids)
+                where_parts.append(f"t.artist_id IN ({placeholders})")
+                params.extend(artist_ids)
+            if ready:
+                # Per-track credit arm (#1621): tracks.track_artist_norm is
+                # indexed, so this is one cheap equality lookup, not a scan.
+                credit_norm = self._normalize_for_comparison(name)
+                if credit_norm:
+                    where_parts.append("t.track_artist_norm = ?")
+                    params.append(credit_norm)
+
+            if not where_parts:
                 return []
 
-            placeholders = ','.join('?' for _ in artist_ids)
-            where = f"t.artist_id IN ({placeholders})"
-            params: list = list(artist_ids)
+            where = "(" + " OR ".join(where_parts) + ")"
             if server_source:
                 where += " AND t.server_source = ?"
                 params.append(server_source)
