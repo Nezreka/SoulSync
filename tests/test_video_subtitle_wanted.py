@@ -32,7 +32,9 @@ class FakeFS:
         return list(self.existing)
 
     def write_text(self, path, content):
-        self.texts[path] = content
+        # Normalize separators: on Windows os.path.join produces backslashes
+        # while the assertions use POSIX forward slashes.
+        self.texts[str(path).replace("\\", "/")] = content
 
 
 def _dl(**kw):
