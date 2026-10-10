@@ -121,6 +121,10 @@
     <!-- Sidebar weather: time/temp/condition line, forecast popover, particle
          scene. Additive — only #sidebar-weather-* selectors inside. -->
     <link rel="stylesheet" href="{{ url_for('static', filename='sidebar-weather.css', v=static_v) }}">
+    <!-- Global horizontal scrollbars: visible/grabbable webkit styling plus
+         the .hscroll-fade edge-fade utility. Linked last so these win
+         equal-specificity ties with component sheets. -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='scrollbars.css', v=static_v) }}">
     <style id="soulsync-initial-appearance">
         :root {
             --accent-rgb: {{ initial_accent_rgb }};
