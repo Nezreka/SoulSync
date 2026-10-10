@@ -141,7 +141,8 @@ def test_cycle_downloads_and_marks_have(db, tmp_path, monkeypatch):
     _patch_registry(monkeypatch, prov)
     fs = FakeFS()
     stats = worker.run_cycle(db, _settings(), fs)
-    assert stats == {"attempted": 1, "downloaded": 1, "missed": 0, "skipped": 0}
+    assert stats == {"attempted": 1, "downloaded": 1, "missed": 0, "skipped": 0,
+                     "upgraded": 0, "upgrade_checked": 0, "upgrade_skipped": 0}
     assert db.subtitle_have("download", dl_id, "en")
     assert fs.texts[os.path.join(str(tmp_path), "Movie.2024.1080p.WEB-GROUP.en.srt")] == "srt-data"
     assert db.subtitle_quota_used("scripted") == 1
@@ -275,3 +276,110 @@ def test_on_download_fires_per_successful_download(monkeypatch):
     assert text == "srt"
     # Only the SUCCESSFUL download() calls burn quota — the two Nones don't.
     assert burns == ["multi"]
+
+
+# ── Phase 3: per-item language override enforcement in the fetch path ──────
+
+def _movie_row(db, movie_id=42):
+    conn = db._get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO movies (id, server_source, server_id, title, tmdb_id) "
+            "VALUES (?, 'plex', 'srv1', 'M', 603)", (movie_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _run_worker(db, monkeypatch, provider):
+    _patch_registry(monkeypatch, provider)
+    return worker.run_cycle(db, _settings(), fs=FakeFS())
+
+
+def test_worker_deletes_row_outside_effective_languages(db, monkeypatch):
+    _movie_row(db)
+    db.subtitle_want("movie", 42, "en")          # residue from before the override
+    db.subtitle_override_set("movie", 42, ["es"])
+    provider = ScriptedProvider([_cand()], {"r1": "srt"})
+    stats = _run_worker(db, monkeypatch, provider)
+    assert provider.searches == 0                # never attempted
+    assert stats["skipped"] == 1
+    assert db.subtitle_get_for_video("movie", 42) == []   # deleted, not skipped-forever
+
+
+def test_worker_never_deletes_user_set_rows(db, monkeypatch):
+    # Explicit user picks are never residue-deleted, even when their language
+    # falls outside the effective set.
+    _movie_row(db)
+    db.subtitle_want("movie", 42, "fr", user_set=True)
+    db.subtitle_override_set("movie", 42, ["es"])
+    provider = ScriptedProvider([_cand()], {"r1": "srt"})
+    stats = _run_worker(db, monkeypatch, provider)
+    assert stats["skipped"] == 0
+    rows = db.subtitle_get_for_video("movie", 42)
+    assert len(rows) == 1 and rows[0]["user_set"] == 1
+
+
+def test_worker_never_skips_user_set_rows(db, monkeypatch):
+    _movie_row(db)
+    db.subtitle_want("movie", 42, "fr", user_set=True)   # explicit user pick
+    db.subtitle_override_set("movie", 42, ["es"])
+    provider = ScriptedProvider([_cand()], {"r1": "srt"})
+    stats = _run_worker(db, monkeypatch, provider)
+    # Not skipped: it runs past the override check. The movie has no
+    # media_files row so the file can't resolve → 'failed', not 'wanted'.
+    assert stats["skipped"] == 0
+    row = db.subtitle_get_for_video("movie", 42)[0]
+    assert row["status"] == "failed" and row["attempts"] == 1
+
+
+def test_worker_row_inside_effective_languages_is_attempted(db, monkeypatch):
+    _movie_row(db)
+    db.subtitle_want("movie", 42, "es")
+    db.subtitle_override_set("movie", 42, ["es"])
+    provider = ScriptedProvider([_cand()], {"r1": "srt"})
+    stats = _run_worker(db, monkeypatch, provider)
+    assert stats["skipped"] == 0
+    row = db.subtitle_get_for_video("movie", 42)[0]
+    assert row["status"] == "failed" and row["attempts"] == 1   # attempted, no file
+
+
+def test_cycle_skips_residue_delete_on_lookup_failure(db, tmp_path, monkeypatch):
+    # BLOCK 2: a transient override-lookup failure reads as UNKNOWN, not
+    # "global" — the retry pass must not delete still-wanted rows on a
+    # degraded lookup.
+    import json as _json
+    conn = db._get_connection()
+    try:
+        conn.execute("INSERT INTO shows (id, server_source, server_id, title, tmdb_id) "
+                     "VALUES (11, 'plex', 's11', 'Show', 222)")
+        conn.commit()
+    finally:
+        conn.close()
+    db.subtitle_override_set("show", 11, ["fr"])  # the override EXISTS …
+    path = _video_file(tmp_path)
+    dl_id = _dl(db, path, kind="show", media_source="tmdb", media_id="222",
+                search_ctx=_json.dumps({"season": 1, "episode": 2}))
+    db.subtitle_want("download", dl_id, "fr")     # … hook-created system row
+    def _boom(*a, **k):                           # … but the lookup fails
+        raise RuntimeError("db down")
+    monkeypatch.setattr(db, "subtitle_override_get", _boom)
+    prov = ScriptedProvider(candidates=[], texts={})
+    _patch_registry(monkeypatch, prov)
+    worker.run_cycle(db, _settings(subtitle_langs="en"), FakeFS())
+    rows = db.subtitle_get_for_video("download", dl_id)
+    assert [r["language"] for r in rows] == ["fr"]  # kept, not deleted
+
+
+def test_cycle_skips_corrupt_language_row(db, tmp_path, monkeypatch):
+    # N1: an explicit user pick with a corrupt code is kept (never delete
+    # user data) but never fetched — no srt_name, no filesystem write.
+    path = _video_file(tmp_path)
+    dl_id = _dl(db, path)
+    db.subtitle_want("download", dl_id, "../../evil", user_set=True)
+    prov = ScriptedProvider(candidates=[_cand(hash_match=True)], texts={"r1": "srt"})
+    _patch_registry(monkeypatch, prov)
+    worker.run_cycle(db, _settings(), FakeFS())
+    assert prov.searches == 0
+    rows = db.subtitle_get_for_video("download", dl_id)
+    assert [r["language"] for r in rows] == ["../../evil"]  # kept, unfetched

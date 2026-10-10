@@ -148,6 +148,42 @@ def _maybe_rekey(db, row: dict, file_path: str | None) -> dict:
     return row
 
 
+def _rekey_download_from_history(db, row: dict) -> dict | None:
+    """Re-key a download-keyed row via the permanent download history.
+
+    The download row itself may be gone (finished-download cleanup) while the
+    file was ingested before the lazy re-key ran — but
+    ``video_download_history`` still records the final placed path for the
+    transient download id. When that path resolves under a library root to a
+    ``media_files`` row, move the wanted rows onto the library row (the same
+    ``_maybe_rekey`` the retry pass uses).
+
+    Returns the updated row when it moved, else None. Never raises.
+    """
+    try:
+        if str(row.get("video_kind") or "") != "download":
+            return None
+        conn = db._get_connection()
+        try:
+            h = conn.execute(
+                "SELECT dest_path FROM video_download_history "
+                "WHERE download_id=? AND outcome='completed' "
+                "ORDER BY id DESC LIMIT 1",
+                (int(row.get("video_id")),)).fetchone()
+        finally:
+            conn.close()
+        dest = (h["dest_path"] if h else None) or None
+        if not dest:
+            return None
+        new_row = _maybe_rekey(db, row, str(dest))
+        if (str(new_row.get("video_kind") or ""),
+                new_row.get("video_id")) != ("download", row.get("video_id")):
+            return new_row
+        return None
+    except Exception:  # noqa: BLE001 - re-key is hygiene, never fatal
+        return None
+
+
 def quota_ok(db, provider_order, get_setting, quota_limit: int) -> bool:
     """True when at least one configured provider has daily quota left."""
     from .providers import get_providers
@@ -172,7 +208,8 @@ def quota_ok(db, provider_order, get_setting, quota_limit: int) -> bool:
 
 
 def run_cycle(db, settings, fs=None) -> dict:
-    """One worker cycle. Returns stats. Never raises.
+    """One worker cycle: retry wanted/failed rows, then run the Phase 3 upgrade
+    pass over 'have' rows. Returns stats. Never raises.
 
     ``settings`` is the normalized settings dict (needs ``download_subtitles``,
     ``subtitle_langs`` not needed here — rows carry their language).
@@ -194,7 +231,9 @@ def run_cycle(db, settings, fs=None) -> dict:
         except (TypeError, ValueError):
             quota_limit = DEFAULT_DAILY_QUOTA
 
-        from . import parse_provider_order, srt_name
+        from . import (parse_provider_order, srt_name,
+                       effective_subtitle_languages, SubtitleLookupError,
+                       valid_lang_code)
         from .providers import fetch_subtitle_detailed
         from .providers.base import SubtitleQuery
         from .scoring import opensubtitles_hash
@@ -261,6 +300,33 @@ def run_cycle(db, settings, fs=None) -> dict:
                 stats["missed"] += 1
                 continue
 
+            # Per-item language override: the import hook creates wanted rows
+            # for the effective languages, but a later override (or global
+            # subtitle_langs) change leaves residue rows for languages no
+            # longer wanted — delete those instead of burning quota retrying
+            # them (skipping would accumulate dead rows forever). The rows
+            # are system-created (user_set=0); explicit user picks
+            # (user_set=1) are never deleted.
+            #
+            # A transient override-lookup failure (SubtitleLookupError) means
+            # the effective set is UNKNOWN — never delete on a degraded
+            # lookup (mirrors the orphan check's None-means-unknown handling).
+            if not row.get("user_set"):
+                try:
+                    _eff = effective_subtitle_languages(db, video_kind, video_id,
+                                                        settings)
+                except SubtitleLookupError:
+                    _eff = None
+                if _eff is not None and \
+                        lang.lower() not in {str(x).lower() for x in _eff}:
+                    try:
+                        db.subtitle_delete_row(video_kind, video_id, lang,
+                                               hi=hi, forced=forced)
+                    except Exception:  # noqa: BLE001 - cleanup is hygiene
+                        pass
+                    stats["skipped"] += 1
+                    continue
+
             file_path, identity = _resolve_file(db, row)
             if not file_path or not os.path.exists(file_path):
                 db.subtitle_mark(video_kind, video_id, lang, "failed",
@@ -277,11 +343,21 @@ def run_cycle(db, settings, fs=None) -> dict:
             video_kind = str(row.get("video_kind") or video_kind)
             video_id = row.get("video_id", video_id)
 
+            # Filesystem boundary: a language code flows into the sidecar
+            # filename. Codes are filtered at parse time, but a corrupt row
+            # (legacy junk, or an explicit user pick with a bad code) must
+            # never reach srt_name — skip it. user_set=0 junk is deleted by
+            # the residue check above; explicit user picks are kept but never
+            # fetched under a corrupt code.
+            if not valid_lang_code(lang):
+                stats["skipped"] += 1
+                continue
+
             filename = os.path.basename(file_path)
             # Disk check BEFORE any network fetch: if the subtitle landed
             # between cycles (user drop, another process), mark 'have' without
             # burning provider quota on a download we don't need.
-            name = srt_name(file_path, lang)
+            name = srt_name(file_path, lang, hi=hi, forced=forced)
             folder = os.path.dirname(file_path)
             try:
                 if name.lower() in {str(n).lower()
@@ -327,6 +403,14 @@ def run_cycle(db, settings, fs=None) -> dict:
                                       provider=str(pid or ""),
                                       candidate_title=getattr(candidate, "title", None),
                                       score=score, hi=hi, forced=forced)
+                # Just evaluated: the fetch picked the best available candidate
+                # seconds ago, so an upgrade re-search right now is pure
+                # waste — start the upgrade re-check cooldown immediately.
+                try:
+                    db.subtitle_stamp_upgrade_check(video_kind, video_id, lang,
+                                                    hi=hi, forced=forced)
+                except Exception:  # noqa: BLE001 - the stamp is hygiene, never fatal
+                    pass
                 stats["downloaded"] += 1
             else:
                 db.subtitle_mark(video_kind, video_id, lang, "failed",
@@ -337,8 +421,274 @@ def run_cycle(db, settings, fs=None) -> dict:
                                       candidate_title=getattr(candidate, "title", None),
                                       score=score)
                 stats["missed"] += 1
+        # Phase 3 upgrade pass: same cycle, one settings load, one quota view,
+        # one daemon thread, one stats report. The retry pass runs first
+        # because a MISSING subtitle outranks a BETTER one.
+        try:
+            _up = run_upgrade_cycle(db, settings, fs=fs)
+        except Exception:  # noqa: BLE001 - run_upgrade_cycle never raises; belt and braces
+            _up = {}
+        stats["upgraded"] = int((_up or {}).get("upgraded") or 0)
+        stats["upgrade_checked"] = int((_up or {}).get("checked") or 0)
+        stats["upgrade_skipped"] = int((_up or {}).get("skipped") or 0)
     except Exception:  # noqa: BLE001 - the worker never takes down the process
         logger.exception("subtitle worker cycle failed")
+    return stats
+
+
+#: Hours between upgrade re-checks of the same wanted row. A row that can't
+#: beat the delta today is unlikely to beat it 30 minutes from now — without a
+#: cooldown the upgrade pass would burn a provider search per row per cycle.
+UPGRADE_COOLDOWN_HOURS = 24
+#: Fallback when the subtitle_upgrade_min_delta setting is missing/garbage.
+DEFAULT_UPGRADE_MIN_DELTA = 15.0
+
+
+def _default_fs():
+    import os as _os
+
+    class _RealFS:
+        @staticmethod
+        def list_dir(folder):
+            return _os.listdir(folder)
+
+        @staticmethod
+        def write_text(path, content):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+    return _RealFS()
+
+
+def _upgrade_min_delta(get_setting) -> float:
+    try:
+        return max(0.0, float(get_setting("subtitle_upgrade_min_delta",
+                                          DEFAULT_UPGRADE_MIN_DELTA)))
+    except (TypeError, ValueError):
+        return DEFAULT_UPGRADE_MIN_DELTA
+
+
+def run_upgrade_cycle(db, settings, fs=None) -> dict:
+    """One upgrade pass over 'have' wanted rows. Returns stats. Never raises.
+
+    For each ``subtitle_wanted`` row with status='have' AND user_set=0, the
+    current subtitle's score is read from ``subtitle_fetch_history`` (the
+    newest outcome='downloaded' row for that video×language×flags). When no
+    history score exists the row is SKIPPED — never upgrade blind, we can't
+    prove the new candidate is better than what the user has.
+
+    Otherwise the scored search re-runs; when the best candidate scores at
+    least ``current + subtitle_upgrade_min_delta`` (and clears the min-score
+    gate) it is downloaded, the sidecar is replaced, the fetch is logged to
+    history, and the row stays 'have'. user_set=1 rows (explicit user picks)
+    are never touched. Upgrades go through the same per-provider daily quota
+    gate and bump as normal fetches.
+
+    ``settings`` is the normalized settings dict; ``fs`` injects
+    ``list_dir``/``write_text`` (defaults to the real filesystem).
+    """
+    stats = {"checked": 0, "upgraded": 0, "skipped": 0}
+    try:
+        settings = settings or {}
+        if not settings.get("download_subtitles"):
+            return stats
+        try:
+            batch = max(1, int(settings.get("subtitle_worker_batch", DEFAULT_BATCH)))
+        except (TypeError, ValueError):
+            batch = DEFAULT_BATCH
+        try:
+            quota_limit = max(1, int(settings.get("subtitle_daily_quota",
+                                                  DEFAULT_DAILY_QUOTA)))
+        except (TypeError, ValueError):
+            quota_limit = DEFAULT_DAILY_QUOTA
+
+        from . import (parse_provider_order, srt_name,
+                       effective_subtitle_languages, SubtitleLookupError,
+                       valid_lang_code)
+        from .providers import rank_candidates
+        from .providers.base import SubtitleQuery
+        from .scoring import opensubtitles_hash
+
+        provider_order = parse_provider_order(settings.get("subtitle_provider_order"))
+        # Blob-first, top-level fallback — same as run_cycle: Phase 2/3 tuning
+        # knobs live in the organization blob, provider secrets top-level.
+        _top_get = getattr(db, "get_setting", None)
+        if not callable(_top_get):
+            _top_get = lambda k, d=None: d  # noqa: E731
+        _blob = settings or {}
+        def get_setting(k, d=None):  # noqa: E306
+            if k in _blob:
+                return _blob[k]
+            return _top_get(k, d)
+
+        delta = _upgrade_min_delta(get_setting)
+        if fs is None:
+            fs = _default_fs()
+        rows = db.subtitle_get_upgradable(batch, UPGRADE_COOLDOWN_HOURS)
+
+        def _stamp(r):
+            try:
+                db.subtitle_stamp_upgrade_check(
+                    r.get("video_kind"), r.get("video_id"), r.get("language"),
+                    hi=bool(r.get("hi")), forced=bool(r.get("forced")))
+            except Exception:  # noqa: BLE001 - the stamp is hygiene, never fatal
+                pass
+
+        for row in rows:
+            video_kind = str(row.get("video_kind") or "")
+            video_id = row.get("video_id")
+            lang = str(row.get("language") or "en")
+            hi = bool(row.get("hi"))
+            forced = bool(row.get("forced"))
+
+            # Orphan cleanup (parity with the retry pass): if the source row
+            # (download/library) is provably gone — not on transient DB
+            # errors (None) — drop the wanted rows instead of re-searching
+            # them every 24h.
+            try:
+                _exists = db.subtitle_source_exists(video_kind, video_id)
+            except Exception:  # noqa: BLE001
+                _exists = None
+            if _exists is False:
+                # "Download row gone" ≠ "video gone": finished-download cleanup
+                # can clear the row after ingest but before the lazy re-key
+                # ran. The permanent download history still records the final
+                # placed path — re-key onto the library row when it resolves,
+                # instead of deleting 'have' state (subtitle_delete_for_video
+                # deletes user_set rows too) as orphaned.
+                _rekeyed = _rekey_download_from_history(db, row)
+                if _rekeyed is not None:
+                    row = _rekeyed
+                    video_kind = str(row.get("video_kind") or video_kind)
+                    video_id = row.get("video_id", video_id)
+                else:
+                    try:
+                        db.subtitle_delete_for_video(video_kind, video_id)
+                        db.subtitle_log_fetch(video_kind, video_id, lang, "error",
+                                              provider="", hi=hi, forced=forced,
+                                              candidate_title="orphaned row cleaned up")
+                    except Exception:  # noqa: BLE001
+                        pass
+                    stats["skipped"] += 1
+                    continue
+
+            # Residue cleanup (parity with the retry pass): the language is
+            # no longer in the effective set — the override (or the global
+            # subtitle_langs) changed after this row was created. Delete the
+            # system-created row instead of burning a provider search on it
+            # every 24h. subtitle_get_upgradable only returns user_set=0
+            # rows, so explicit user picks never reach this check.
+            #
+            # A transient override-lookup failure (SubtitleLookupError) means
+            # the effective set is UNKNOWN — never delete on a degraded
+            # lookup (mirrors the orphan check's None-means-unknown handling).
+            if not row.get("user_set"):
+                try:
+                    _eff = effective_subtitle_languages(db, video_kind, video_id,
+                                                        settings)
+                except SubtitleLookupError:
+                    _eff = None
+                if _eff is not None and \
+                        lang.lower() not in {str(x).lower() for x in _eff}:
+                    try:
+                        db.subtitle_delete_row(video_kind, video_id, lang,
+                                               hi=hi, forced=forced)
+                    except Exception:  # noqa: BLE001 - cleanup is hygiene
+                        pass
+                    stats["skipped"] += 1
+                    continue
+
+            # The baseline: the current subtitle's score from fetch history.
+            try:
+                current = db.subtitle_latest_download_score(
+                    video_kind, video_id, lang, hi=hi, forced=forced)
+            except Exception:  # noqa: BLE001
+                current = None
+            if current is None:
+                _stamp(row)
+                stats["skipped"] += 1
+                continue
+
+            if not quota_ok(db, provider_order, get_setting, quota_limit):
+                logger.info("subtitle upgrade: daily quota exhausted, ending pass")
+                break
+            file_path, identity = _resolve_file(db, row)
+            if not file_path or not os.path.exists(file_path):
+                _stamp(row)
+                stats["skipped"] += 1
+                continue
+
+            filename = os.path.basename(file_path)
+            moviehash = opensubtitles_hash(file_path)
+            query = SubtitleQuery(identity=dict(identity), language=lang,
+                                  hi=hi, forced=forced,
+                                  filename=filename, moviehash=moviehash)
+            stats["checked"] += 1
+            try:
+                ranked = rank_candidates(query, provider_order, get_setting)
+            except Exception:  # noqa: BLE001 - ranking is best-effort
+                ranked = []
+            best_score = max((s for s, _p, _pr, _c in ranked), default=0.0)
+            if not ranked or best_score < current + delta:
+                # Nothing above the min-score gate, or not enough better —
+                # keep what we have. The cooldown stamp stops us re-searching
+                # this row every cycle.
+                _stamp(row)
+                stats["skipped"] += 1
+                continue
+
+            # Worth upgrading: download in rank order (provider priority, then
+            # score), but only candidates that clear current + delta. Every
+            # successful download burns quota exactly like a normal fetch.
+            # Filesystem boundary (see run_cycle): a corrupt language code
+            # must never reach the sidecar filename.
+            if not valid_lang_code(lang):
+                _stamp(row)
+                stats["skipped"] += 1
+                continue
+            name = srt_name(file_path, lang, hi=hi, forced=forced)
+            folder = os.path.dirname(file_path)
+            upgraded = False
+            for score, pid, provider, candidate in ranked:
+                if score < current + delta:
+                    continue
+                try:
+                    text = provider.download(candidate)
+                except Exception:  # noqa: BLE001
+                    continue
+                if not text:
+                    continue
+                try:
+                    db.subtitle_quota_bump(str(pid))
+                except Exception:  # noqa: BLE001 - quota is accounting, never fatal
+                    pass
+                try:
+                    fs.write_text(os.path.join(folder, name), text)
+                except Exception:  # noqa: BLE001
+                    logger.exception("subtitle upgrade: sidecar write failed for %s",
+                                     name)
+                    db.subtitle_log_fetch(video_kind, video_id, lang, "error",
+                                          provider=str(pid or ""), hi=hi, forced=forced)
+                    break
+                db.subtitle_mark(video_kind, video_id, lang, "have",
+                                 hi=hi, forced=forced)
+                db.subtitle_log_fetch(video_kind, video_id, lang, "downloaded",
+                                      provider=str(pid or ""),
+                                      candidate_title=getattr(candidate, "title", None),
+                                      score=score, hi=hi, forced=forced)
+                upgraded = True
+                break
+            _stamp(row)
+            if upgraded:
+                stats["upgraded"] += 1
+            else:
+                db.subtitle_log_fetch(video_kind, video_id, lang, "miss",
+                                      provider="", hi=hi, forced=forced,
+                                      candidate_title="upgrade candidates failed to download",
+                                      score=best_score)
+                stats["skipped"] += 1
+    except Exception:  # noqa: BLE001 - the worker never takes down the process
+        logger.exception("subtitle upgrade cycle failed")
     return stats
 
 
@@ -387,4 +737,5 @@ def ensure_started(db_provider) -> None:
                          daemon=True, name="subtitle-wanted-worker").start()
 
 
-__all__ = ["ensure_started", "run_cycle", "row_eligible", "backoff_hours", "quota_ok"]
+__all__ = ["ensure_started", "run_cycle", "run_upgrade_cycle", "row_eligible",
+           "backoff_hours", "quota_ok"]
