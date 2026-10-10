@@ -55,6 +55,10 @@ DEFAULTS = {
     "download_subtitles": True,    # on by default for new imports: fetches from the subtitle providers (external, rate-limited)
     "subtitle_langs": "en",
     "subtitle_provider_order": '["opensubtitles"]',   # JSON list string: provider fetch chain, most-preferred first
+    "subtitle_min_score": 24.0,      # candidate score gate: below this a subtitle is a miss, never downloaded
+    "subtitle_worker_interval_min": 30,  # wanted-loop retry cadence (minutes)
+    "subtitle_worker_batch": 10,     # max wanted rows attempted per worker cycle
+    "subtitle_daily_quota": 20,      # max subtitle DOWNLOADS per provider per day (UTC)
     # Recycle bin: deletes (upgrade-replaced copies, retention-cleaned YouTube
     # episodes, dismissed imports) move into an ss_recycle folder under the
     # file's library root instead of unlinking; purged after recycle_keep_days.
@@ -107,6 +111,19 @@ def normalize(raw: Any) -> dict:
             d["recycle_keep_days"] = max(1, min(365, int(raw.get("recycle_keep_days"))))
         except (TypeError, ValueError):
             pass
+    if "subtitle_min_score" in raw:
+        try:
+            d["subtitle_min_score"] = max(0.0, min(200.0, float(raw.get("subtitle_min_score"))))
+        except (TypeError, ValueError):
+            pass
+    for _key, _lo, _hi in (("subtitle_worker_interval_min", 5, 1440),
+                           ("subtitle_worker_batch", 1, 200),
+                           ("subtitle_daily_quota", 1, 1000)):
+        if _key in raw:
+            try:
+                d[_key] = max(_lo, min(_hi, int(raw.get(_key))))
+            except (TypeError, ValueError):
+                pass
     if "recycle_path" in raw:
         d["recycle_path"] = str(raw.get("recycle_path") or "").strip()
     if "min_free_disk_gb" in raw:

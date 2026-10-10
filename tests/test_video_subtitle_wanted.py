@@ -2,9 +2,9 @@
 
 DB layer: want/mark/get_wanted/get_for_video/have state transitions.
 Hook layer: core.video.download_monitor.write_subtitles_for with a stubbed
-fetch_subtitle — monkeypatched on the providers module (the hook does a
-function-level ``from ... import fetch_subtitle``, so the double is picked up
-at call time; the global provider registry is never mutated).
+fetch_subtitle_detailed — monkeypatched on the providers module (the hook does a
+function-level ``from ... import fetch_subtitle_detailed``, so the double is
+picked up at call time; the global provider registry is never mutated).
 """
 
 from __future__ import annotations
@@ -45,14 +45,22 @@ def _dl(**kw):
 
 
 def _stub_fetch(monkeypatch, results):
-    """results: lang -> srt text (None = miss). Returns (calls,)."""
+    """results: lang -> srt text (None = miss). Returns (calls,).
+
+    Stubs fetch_subtitle_detailed (the hook's call) with the 4-tuple contract:
+    (text, provider_id, candidate, score)."""
     calls = []
 
-    def fake(query, provider_order, get_setting):
+    def fake(query, provider_order, get_setting, on_download=None):
         calls.append((query, list(provider_order)))
-        return results.get(query.language)
+        text = results.get(query.language)
+        if text is None:
+            return None, None, None, 0.0
+        if callable(on_download):
+            on_download("stub")
+        return text, "stub", None, 100.0
 
-    monkeypatch.setattr("core.video.subtitles.providers.fetch_subtitle", fake)
+    monkeypatch.setattr("core.video.subtitles.providers.fetch_subtitle_detailed", fake)
     return calls
 
 
@@ -173,12 +181,12 @@ def test_episode_id_for_resolves_and_misses(db):
 def test_hook_creates_wanted_row_before_fetching(db, monkeypatch):
     seen = {}
 
-    def fake(query, provider_order, get_setting):
+    def fake(query, provider_order, get_setting, on_download=None):
         rows = db.subtitle_get_for_video("download", 7)
         seen["rows"] = [(r["language"], r["status"]) for r in rows]
-        return "1\n00:00:00,000 --> 00:00:01,000\nHi\n"
+        return "1\n00:00:00,000 --> 00:00:01,000\nHi\n", "stub", None, 100.0
 
-    monkeypatch.setattr("core.video.subtitles.providers.fetch_subtitle", fake)
+    monkeypatch.setattr("core.video.subtitles.providers.fetch_subtitle_detailed", fake)
     fs = FakeFS()
     write_subtitles_for(db, _dl(), "/lib/M (2020)/M (2020).mkv",
                         {"subtitle_langs": "en"}, fs)
@@ -216,11 +224,22 @@ def test_hook_marks_failed_on_miss(db, monkeypatch):
     assert [r["video_id"] for r in db.subtitle_get_wanted()] == [7]
 
 
+def test_hook_bumps_quota_on_successful_download(db, monkeypatch):
+    # Phase 2: the import hook records the download against the provider's
+    # daily quota so the worker's cap sees what the hook spent.
+    calls = _stub_fetch(monkeypatch, {"en": "srt-bytes"})
+    fs = FakeFS()
+    assert db.subtitle_quota_used("stub") == 0
+    write_subtitles_for(db, _dl(), "/lib/M (2020)/M (2020).mkv",
+                        {"subtitle_langs": "en"}, fs)
+    assert db.subtitle_quota_used("stub") == 1
+
+
 def test_hook_never_raises_when_fetch_explodes(db, monkeypatch):
-    def boom(query, provider_order, get_setting):
+    def boom(query, provider_order, get_setting, on_download=None):
         raise RuntimeError("provider exploded")
 
-    monkeypatch.setattr("core.video.subtitles.providers.fetch_subtitle", boom)
+    monkeypatch.setattr("core.video.subtitles.providers.fetch_subtitle_detailed", boom)
     fs = FakeFS()
     write_subtitles_for(db, _dl(), "/lib/M (2020)/M (2020).mkv",
                         {"subtitle_langs": "en"}, fs)   # must not raise
@@ -363,6 +382,50 @@ def test_download_subtitles_defaults_to_true_but_explicit_values_win():
     assert organization.normalize({})["download_subtitles"] is True
     assert organization.normalize({"download_subtitles": False})["download_subtitles"] is False
     assert organization.normalize({"download_subtitles": True})["download_subtitles"] is True
+
+
+
+
+def test_hook_threshold_tunable_via_settings_blob(db, monkeypatch):
+    # R2 MAJOR 1: subtitle_min_score lives in the organization blob — the hook
+    # must honor it, not just the top-level default.
+    calls = _stub_fetch(monkeypatch, {"en": "srt-bytes"})
+    fs = FakeFS()
+    # A weak candidate: with the default 24.0 it downloads; at 90.0 it must not.
+    weak_calls = []
+    def weak_fetch(query, provider_order, get_setting, on_download=None):
+        weak_calls.append(get_setting("subtitle_min_score", None))
+        return None, None, None, 0.0
+    monkeypatch.setattr("core.video.subtitles.providers.fetch_subtitle_detailed", weak_fetch)
+    write_subtitles_for(db, _dl(), "/lib/M (2020)/M (2020).mkv",
+                        {"subtitle_langs": "en", "subtitle_min_score": 90.0}, fs)
+    assert weak_calls == [90.0], "hook did not read the blob's subtitle_min_score"
+
+# ── Phase 2: pack episodes get per-episode durable rows ─────────────────────
+
+def test_pack_episode_child_row_gets_own_wanted_rows(db, monkeypatch):
+    # Phase 2: the pack importer calls write_subtitles_for AFTER _record_pack_episode
+    # with the child's own download id (pack_episode marker removed) — each
+    # episode gets its own ('download', <child_id>) row set.
+    calls = _stub_fetch(monkeypatch, {"en": None})  # miss → rows stay, marked failed
+    child_dl = {"id": 100, "kind": "show", "media_source": "tmdb", "media_id": "1396",
+                "search_ctx": json.dumps({"scope": "episode", "season": 1, "episode": 1})}
+    assert _wanted_video_key(db, child_dl) == ("download", 100)
+    fs = FakeFS()
+    write_subtitles_for(db, child_dl, "/lib/Show/Season 1/Show - S01E01.mkv",
+                        {"subtitle_langs": "en"}, fs)
+    rows = db.subtitle_get_for_video("download", 100)
+    assert len(rows) == 1 and rows[0]["language"] == "en"
+    # No provider configured in this test → no phantom attempt: the row stays
+    # 'wanted' (still retryable once a key exists).
+    assert rows[0]["status"] == "wanted"
+    # A sibling episode's child row is independent.
+    sib_dl = dict(child_dl, id=101,
+                  search_ctx=json.dumps({"scope": "episode", "season": 1, "episode": 2}))
+    write_subtitles_for(db, sib_dl, "/lib/Show/Season 1/Show - S01E02.mkv",
+                        {"subtitle_langs": "en"}, fs)
+    assert len(db.subtitle_get_for_video("download", 101)) == 1
+    assert len(db.subtitle_get_for_video("download", 100)) == 1  # untouched
 
 
 # ── review round 2 regressions ──────────────────────────────────────────────

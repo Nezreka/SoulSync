@@ -108,7 +108,8 @@ def opensubtitles_fetcher(api_key: Any) -> Callable | None:
     return fetch
 
 
-def _candidates_from_search(search_json: Any, lang: str, provider_id: str) -> list[SubtitleCandidate]:
+def _candidates_from_search(search_json: Any, lang: str, provider_id: str,
+                            hash_match: bool = False) -> list[SubtitleCandidate]:
     """Every matching-language subtitle in a /subtitles response as a candidate,
     most-downloaded first. Pure."""
     if not isinstance(search_json, dict):
@@ -124,13 +125,19 @@ def _candidates_from_search(search_json: Any, lang: str, provider_id: str) -> li
         if file_id is None:
             continue
         title = str(attrs.get("release") or (files[0].get("file_name") if files else "") or "")
-        ranked.append((attrs.get("download_count") or 0, SubtitleCandidate(
+        try:
+            dl_count = int(attrs.get("download_count") or 0)
+        except (TypeError, ValueError):
+            dl_count = 0
+        ranked.append((dl_count, SubtitleCandidate(
             provider_id=provider_id,
             language=want,
             hi=bool(attrs.get("hearing_impaired")),
             forced=bool(attrs.get("forced")),
             title=title,
             download_ref=file_id,
+            hash_match=bool(hash_match),
+            download_count=dl_count,
         )))
     ranked.sort(key=lambda pair: pair[0], reverse=True)
     return [candidate for _dl, candidate in ranked]
@@ -161,19 +168,45 @@ class OpenSubtitlesProvider(SubtitleProvider):
         if not self._api_key:
             return []
         identity = query.identity if isinstance(query.identity, dict) else {}
+        # Hash-first (Phase 2 scoring): a moviehash search proves the subtitle was
+        # timed for THIS exact release. Those candidates are marked hash_match and
+        # dominate scoring. The metadata search still runs for corroboration and
+        # for files too small to hash.
+        seen_refs = set()
+        merged: list[SubtitleCandidate] = []
+        moviehash = str(getattr(query, "moviehash", "") or "").strip().lower()
+        if moviehash:
+            try:
+                hash_cands = _candidates_from_search(
+                    self._search_api({"moviehash": moviehash, "languages": query.language}),
+                    query.language, self.id, hash_match=True)
+            except Exception:  # noqa: BLE001 - hash search is a bonus, never fatal
+                hash_cands = []
+            for c in hash_cands:
+                seen_refs.add(c.download_ref)
+            merged.extend(hash_cands)
         params = search_params(identity, query.language)
         if params is None:
-            return []
-        cands = _candidates_from_search(self._search_api(params), query.language, self.id)
+            cands = []
+        else:
+            cands = _candidates_from_search(self._search_api(params), query.language,
+                                            self.id, hash_match=False)
+        for c in cands:
+            if c.download_ref not in seen_refs:
+                seen_refs.add(c.download_ref)
+                merged.append(c)
         # Exact-flag matches are preferred; when nothing matches the query's
         # flags exactly, degrade (Bazarr-style) to the unfiltered list — still
         # most-downloaded-first — rather than returning a total miss. The old
         # pick_best_file had no flag filtering at all, so an only-HI 'en' sub
         # used to land as X.en.srt; dropping it now would turn a working fetch
         # into a 'failed' row Phase 2 retries forever.
+        # NOTE: the hi/forced degradation applies to the merged list; hash
+        # matches keep their hash_match flag through it (scoring, not filtering,
+        # decides).
         want_hi, want_forced = bool(query.hi), bool(query.forced)
-        exact = [c for c in cands if c.hi == want_hi and c.forced == want_forced]
-        return exact or cands
+        exact = [c for c in merged if c.hi == want_hi and c.forced == want_forced]
+        return exact or merged
 
     def download(self, candidate: SubtitleCandidate) -> str | None:
         if not self._api_key or candidate is None:
