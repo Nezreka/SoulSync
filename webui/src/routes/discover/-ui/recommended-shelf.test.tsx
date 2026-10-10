@@ -13,8 +13,9 @@ import { RecommendedShelf } from './recommended-shelf';
  * The two recommendation shelves.
  *
  * They are one card with two reason functions, so the cases that matter are the
- * ones where the two DIVERGE (copy, the View All that only one has) and the ones
+ * ones where the two DIVERGE (copy) and the ones
  * where a card's own data overrides the section's (source, image).
+ * Both shelves offer View All, opening the full-list modal for their artists.
  */
 
 afterEach(cleanup);
@@ -66,15 +67,16 @@ describe('the shelf', () => {
     expect(container.querySelector('#recommended-artists-section')).toBeNull();
   });
 
-  it('offers View All only where the vanilla has one', () => {
+  it('offers View All on both shelves', () => {
     const onViewAll = vi.fn();
     const { rerender } = render(<RecommendedShelf {...props({ onViewAll })} />);
     fireEvent.click(screen.getByText('View All'));
     expect(onViewAll).toHaveBeenCalled();
-    // The listening shelf has no View All in the markup, and inventing one
-    // would open a modal built for the other section's data.
-    rerender(<RecommendedShelf {...props({ kind: 'listening' })} />);
-    expect(screen.queryByText('View All')).toBeNull();
+    // The listening shelf gets the same View All, opening the modal for its
+    // own artists.
+    rerender(<RecommendedShelf {...props({ kind: 'listening', onViewAll })} />);
+    fireEvent.click(screen.getByText('View All'));
+    expect(onViewAll).toHaveBeenCalledTimes(2);
   });
 
   it('shows at most eighteen cards', () => {

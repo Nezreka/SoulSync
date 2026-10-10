@@ -39,7 +39,7 @@ export interface RecommendedShelfProps {
   images: Record<string, string>;
   buildDetailPath: (id: string, source: string | null) => string;
   onAddToWatchlist: (artistId: string, artistName: string, source?: string) => void;
-  /** Only the 'recommended' shelf has a View All; 'listening' does not. */
+  /** Opens the full-list modal for this shelf's artists. */
   onViewAll?: () => void;
 }
 
