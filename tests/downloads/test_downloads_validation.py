@@ -345,3 +345,207 @@ def test_failed_streaming_does_not_drop_soulseek_rows(monkeypatch):
     assert peer in result
     assert tidal not in result
     assert engine.slskd_usernames == [['alice']]
+
+
+# ---------------------------------------------------------------------------
+# Version-marker positions (#1640) + strict duration pre-check
+# ---------------------------------------------------------------------------
+
+
+def _deezer_expected(**over):
+    base = dict(duration_ms=214_000, name='Live Again', artists=('HALO',))
+    base.update(over)
+    return _Track(**base)
+
+
+def _deezer_candidate(**over):
+    base = dict(username='deezer_dl', duration=214_000,
+                title='Live Again', artist='HALO')
+    base.update(over)
+    return _Candidate(**base)
+
+
+def test_live_in_canonical_title_is_not_a_version_marker(monkeypatch):
+    """#1640: 'Live Again' is the canonical track title, not a request for a
+    live recording. The expected-side version flip must only fire for
+    version markers in qualifying positions (suffix/parenthetical), so a
+    correct original whose title merely formats the keyword differently
+    ('LiveAgain') is not rejected as version_conflict."""
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    expected = _deezer_expected()
+    correct = _deezer_candidate(title='LiveAgain')
+
+    result = get_valid_candidates([correct], expected, 'HALO Live Again')
+
+    assert result == [correct]
+
+
+def test_saturday_night_live_is_not_a_version_marker(monkeypatch):
+    """A keyword at the end of the canonical title with no separator is not
+    a version qualifier — 'Saturday Night Live' must not flip
+    expected_is_version either."""
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    expected = _deezer_expected(name='Saturday Night Live')
+    correct = _deezer_candidate(title='Saturday Night Live')
+
+    result = get_valid_candidates([correct], expected,
+                                  'Artist Saturday Night Live')
+
+    assert result == [correct]
+
+
+def test_parenthesized_live_still_marks_a_version(monkeypatch):
+    """'Song (Live)' IS a version request: non-live candidates must still be
+    rejected, and the live-marked one must pass."""
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    expected = _deezer_expected(name='Song (Live)', artists=('Band',))
+    live = _deezer_candidate(title='Song (Live)', artist='Band')
+    studio = _deezer_candidate(title='Song', artist='Band')
+
+    assert get_valid_candidates([live], expected, 'Band Song') == [live]
+    assert get_valid_candidates([studio], expected, 'Band Song') == []
+
+
+def test_dash_live_still_marks_a_version(monkeypatch):
+    """'Song - Live at Wembley' IS a version request: the dash-qualifier
+    keeps flipping expected_is_version."""
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    expected = _deezer_expected(name='Song \u2013 Live at Wembley',
+                                artists=('Band',))
+    live = _deezer_candidate(title='Song (Live at Wembley)', artist='Band')
+    studio = _deezer_candidate(title='Song', artist='Band')
+
+    assert get_valid_candidates([live], expected, 'Band Song') == [live]
+    assert get_valid_candidates([studio], expected, 'Band Song') == []
+
+
+def test_wrong_version_still_penalized_when_original_wanted(monkeypatch):
+    """Expecting the original 'Live Again' (canonical title): a candidate
+    carrying a real version marker the expected lacks ('Extended Mix')
+    is still a wrong version and must be rejected."""
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    expected = _deezer_expected()
+    extended = _deezer_candidate(title='Live Again (Extended Mix)')
+
+    assert get_valid_candidates([extended], expected, 'HALO Live Again') == []
+
+
+def test_live_recording_of_canonical_live_title_is_still_a_wrong_version(monkeypatch):
+    """Hostile-review hole: expecting the canonical original 'Live Again', a
+    candidate 'Live Again (Live)' is a genuinely different recording — the
+    qualifying marker must penalize it even though the expected title has
+    the word 'live' too. The plain 'Live Again' still passes."""
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    expected = _deezer_expected()
+    live_recording = _deezer_candidate(title='Live Again (Live)')
+    original = _deezer_candidate(title='Live Again')
+
+    assert get_valid_candidates([live_recording], expected, 'HALO Live Again') == []
+    assert get_valid_candidates([original], expected, 'HALO Live Again') == [original]
+
+
+def test_multiword_keyword_in_parens_still_marks_expected_version(monkeypatch):
+    """'Song (Sped Up)' IS a version request: the multi-word keyword in a
+    qualifying position flips expected_is_version; the unmarked candidate
+    is rejected and the marked one passes."""
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    expected = _deezer_expected(name='Song (Sped Up)', artists=('Band',))
+    sped = _deezer_candidate(title='Song (Sped Up)', artist='Band')
+    studio = _deezer_candidate(title='Song', artist='Band')
+
+    assert get_valid_candidates([sped], expected, 'Band Song') == [sped]
+    assert get_valid_candidates([studio], expected, 'Band Song') == []
+
+
+def test_nested_parens_live_still_marks_expected_version(monkeypatch):
+    """'Song (feat. X) (Live)' IS a version request even with an earlier
+    parenthetical group: the trailing (Live) group qualifies."""
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    expected = _deezer_expected(name='Song (feat. X) (Live)', artists=('Band',))
+    live = _deezer_candidate(title='Song (Live)', artist='Band')
+    studio = _deezer_candidate(title='Song', artist='Band')
+
+    assert get_valid_candidates([live], expected, 'Band Song') == [live]
+    assert get_valid_candidates([studio], expected, 'Band Song') == []
+
+
+def test_unparsed_artist_separator_does_not_create_a_version_marker(monkeypatch):
+    """Hostile-review BLOCK 2: SoundCloud keeps an unparsed 'HALO: ' artist
+    prefix in the title and ':' is a version separator — but the canonical
+    'live' is not a qualifier (same occurrence count as the expected title),
+    so the correct original must not be rejected. Base accepted this."""
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    expected = _deezer_expected()
+    correct = _deezer_candidate(username='soundcloud', title='HALO: Live Again')
+
+    result = get_valid_candidates([correct], expected, 'HALO Live Again')
+
+    assert result == [correct]
+
+
+def test_type_beat_chaff_still_penalized(monkeypatch):
+    """The raw word check's raison d'etre: 'Drake Type Beat' is never the
+    real 'Hotline Bling' — bare-suffix chaff that never qualifies as a
+    marker is still penalized when the expected title lacks the word."""
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    expected = _deezer_expected(name='Hotline Bling', artists=('Drake',),
+                                duration_ms=267_000)
+    chaff = _deezer_candidate(username='soundcloud', duration=200_000,
+                              title='Drake Type Beat', artist='Some Producer')
+
+    assert get_valid_candidates([chaff], expected, 'Drake Hotline Bling') == []
+
+
+def test_user_pinned_duration_tolerance_stays_symmetric(monkeypatch):
+    """A user-pinned post_processing.duration_tolerance_seconds is honoured
+    symmetrically (mirrors file_integrity): with 5s pinned, a candidate 7s
+    longer than catalog is rejected pre-download — no 15s longer-side
+    allowance."""
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    real_get = validation.config_manager.get
+
+    def _fake_get(key, default=None):
+        if key == 'post_processing.duration_tolerance_seconds':
+            return 5
+        return real_get(key, default)
+
+    monkeypatch.setattr(validation.config_manager, 'get', _fake_get)
+    expected = _deezer_expected()
+    longer = _deezer_candidate(duration=221_000)
+
+    assert get_valid_candidates([longer], expected, 'HALO Live Again') == []
+
+
+def test_strict_precheck_inherits_longer_version_allowance(monkeypatch):
+    """#1640 secondary: the strict pre-download check for deezer_dl used
+    3s/5s while post-download integrity grants 15s on the longer side
+    (_LONGER_VERSION_TOLERANCE_S, #937). A candidate 7s longer than the
+    catalog duration must pass the pre-check, matching what the import
+    would accept."""
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    expected = _deezer_expected()
+    longer = _deezer_candidate(duration=221_000)
+
+    result = get_valid_candidates([longer], expected, 'HALO Live Again')
+
+    assert result == [longer]
+
+
+def test_strict_precheck_still_rejects_shorter_candidates(monkeypatch):
+    """The longer-side allowance must not loosen the short side: a candidate
+    14s shorter than catalog is still rejected pre-download."""
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    expected = _deezer_expected()
+    shorter = _deezer_candidate(duration=200_000)
+
+    assert get_valid_candidates([shorter], expected, 'HALO Live Again') == []
+
+
+def test_strict_precheck_still_rejects_much_longer_candidates(monkeypatch):
+    """A candidate 96s longer (the 5:10 extended mix) is beyond even the
+    15s longer-version allowance — still rejected."""
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    expected = _deezer_expected()
+    extended = _deezer_candidate(duration=310_000)
+
+    assert get_valid_candidates([extended], expected, 'HALO Live Again') == []

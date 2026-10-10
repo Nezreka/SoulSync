@@ -292,6 +292,135 @@ def test_picker_without_album_name_unchanged():
 
 
 # ---------------------------------------------------------------------------
+# Identity gate: artist tokens + tribute/cover markers
+# ---------------------------------------------------------------------------
+
+
+def test_picker_rejects_tribute_album_for_original_wishlist_item():
+    """The tribute report: 'Animals Reimagined - A Tribute to Pink Floyd'
+    clears the title-relevance floor (it contains 'animals') and out-seeds
+    the real release, so on base it gets handed to the downloader. The
+    identity gate must drop it and pick the real 'Animals' instead."""
+    tribute = _Release(
+        title="Animals Reimagined \u2013 A Tribute to Pink Floyd [FLAC]",
+        size=400_000_000, seeders=5000)
+    real = _Release(
+        title="Pink Floyd \u2013 Animals (1977) [FLAC]",
+        size=380_000_000, seeders=10)
+    picked = pick_best_album_release(
+        [tribute, real], _flac_quality_guess,
+        album_name="Animals", artist_name="Pink Floyd")
+    assert picked is real
+
+
+def test_picker_drops_candidate_missing_all_artist_tokens():
+    """Requiring at least one artist token in the release title: the
+    hugely-seeded artist-less rip must lose to the quieter correctly-credited
+    one for a Pink Floyd 'Animals' wishlist item."""
+    no_artist = _Release(title="Animals (Remastered) [FLAC]",
+                         size=380_000_000, seeders=9000)
+    credited = _Release(title="Pink Floyd - Animals [FLAC]",
+                        size=380_000_000, seeders=5)
+    picked = pick_best_album_release(
+        [no_artist, credited], _flac_quality_guess,
+        album_name="Animals", artist_name="Pink Floyd")
+    assert picked is credited
+
+
+def test_picker_artist_gate_fail_open_without_artist_name():
+    """No artist info (old callers / unparseable) -> the gate must not engage:
+    the old popularity behavior is preserved."""
+    no_artist = _Release(title="Animals (Remastered) [FLAC]",
+                         size=380_000_000, seeders=9000)
+    credited = _Release(title="Pink Floyd - Animals [FLAC]",
+                        size=380_000_000, seeders=5)
+    picked = pick_best_album_release(
+        [no_artist, credited], _flac_quality_guess, album_name="Animals")
+    assert picked is no_artist
+
+
+def test_picker_artist_gate_fail_open_for_various_artists():
+    """VA placeholder is not an identity: 'Various Artists' wishlists must
+    not have every 'VA - ...' bundle refused (hostile-review BLOCK 1)."""
+    va = _Release(title="VA - Now Thats What I Call Music 115 [FLAC]",
+                  size=400_000_000, seeders=5000)
+    picked = pick_best_album_release(
+        [va], _flac_quality_guess,
+        album_name="Now That's What I Call Music! 115",
+        artist_name="Various Artists")
+    assert picked is va
+
+
+def test_picker_artist_gate_fail_open_for_unknown_artist():
+    unknown = _Release(title="VA - Now Thats What I Call Music 115 [FLAC]",
+                       size=400_000_000, seeders=5000)
+    picked = pick_best_album_release(
+        [unknown], _flac_quality_guess,
+        album_name="Now That's What I Call Music! 115",
+        artist_name="Unknown Artist")
+    assert picked is unknown
+
+
+def test_picker_returns_none_when_artist_gate_kills_everything():
+    """Every candidate fails the artist gate -> refuse the bundle (None) so
+    the caller falls back to per-track, rather than queueing a wrong-artist
+    release."""
+    wrong_artist = _Release(title="Some Other Band - Animals [FLAC]",
+                            size=380_000_000, seeders=9000)
+    assert pick_best_album_release(
+        [wrong_artist], _flac_quality_guess,
+        album_name="Animals", artist_name="Pink Floyd") is None
+
+
+def test_picker_allows_tribute_album_when_it_is_the_wishlist_item():
+    """A user who ACTUALLY wishlisted the tribute album must still get it —
+    the marker filter only fires when the wishlist item is an original."""
+    tribute = _Release(
+        title="Animals Reimagined \u2013 A Tribute to Pink Floyd [FLAC]",
+        size=400_000_000, seeders=5000)
+    picked = pick_best_album_release(
+        [tribute], _flac_quality_guess,
+        album_name="Animals Reimagined \u2013 A Tribute to Pink Floyd",
+        artist_name="Pink Floyd")
+    assert picked is tribute
+
+
+def test_picker_tribute_marker_does_not_fire_inside_other_words():
+    """Word-boundary: 'Undercover' contains 'cover' as a substring but is not
+    a cover marker — a legit release with it in the title must survive."""
+    release = _Release(title="Pink Floyd - Animals Undercover [FLAC]",
+                       size=380_000_000, seeders=5)
+    picked = pick_best_album_release(
+        [release], _flac_quality_guess,
+        album_name="Animals", artist_name="Pink Floyd")
+    assert picked is release
+
+
+def test_picker_tribute_marker_explained_by_artist_name():
+    """An artist literally named 'Cover Drive' must not have their own
+    releases filtered as cover albums."""
+    release = _Release(title="Cover Drive - Hoods Up [FLAC]",
+                       size=380_000_000, seeders=5)
+    picked = pick_best_album_release(
+        [release], _flac_quality_guess,
+        album_name="Hoods Up", artist_name="Cover Drive")
+    assert picked is release
+
+
+def test_picker_rejects_a_tribute_to_variant_too():
+    """'A Tribute To' phrasing (multi-word marker) is filtered like 'tribute'
+    alone."""
+    tribute = _Release(title="Pink Floyd - Animals A Tribute To [FLAC]",
+                       size=400_000_000, seeders=5000)
+    real = _Release(title="Pink Floyd - Animals [FLAC]",
+                    size=380_000_000, seeders=10)
+    picked = pick_best_album_release(
+        [tribute, real], _flac_quality_guess,
+        album_name="Animals", artist_name="Pink Floyd")
+    assert picked is real
+
+
+# ---------------------------------------------------------------------------
 # quality_score
 # ---------------------------------------------------------------------------
 
