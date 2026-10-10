@@ -324,11 +324,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # page, its tags, its history alike
         return _named_row_hidden()
 
+    def _resolve_merged_ids(kwargs):
+        """A merged release group or track answers under its survivor on
+        every route, so a page opened before a catalogue merge keeps working."""
+        named = [key for key in ("album_id", "track_id") if key in kwargs]
+        if named:
+            from core.library2.catalogue_identity import resolve_native_id
+            with closing(_conn()) as conn:
+                for key in named:
+                    kwargs[key] = request.view_args[key] = resolve_native_id(conn, key[:-3], kwargs[key])
+
     def _route(rule, **options):
         """``app.route`` for an endpoint that ``_guard`` answers first."""
         def register(view):
             @functools.wraps(view)
             def guarded(*args, **kwargs):
+                _resolve_merged_ids(kwargs)
                 return _guard() or view(*args, **kwargs)
             return app.route(rule, **options)(guarded)
         return register

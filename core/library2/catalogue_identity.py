@@ -38,14 +38,15 @@ def resolve_native_id(conn, kind, entity_id):
 
 
 def merged_entity_ids(conn, kind, entity_ids):
-    current = {resolve_native_id(conn, kind, i) for i in entity_ids}
-    if not current or not _exists(conn, "lib2_catalogue_redirects"):
-        return sorted(current)
-    marks = ",".join("?" for _ in current)
-    old = {int(r[0]) for r in conn.execute(
-        f"SELECT old_id FROM lib2_catalogue_redirects WHERE entity_type=? AND target_id IN ({marks})",
-        (kind, *sorted(current)))}
-    return sorted(current | old)
+    """Surviving ids plus every id merged into them, with one read."""
+    ids = {int(i) for i in entity_ids}
+    if not ids or not _exists(conn, "lib2_catalogue_redirects"):
+        return sorted(ids)
+    # record_redirect flattens chains, so one hop reaches the survivor.
+    redirects = dict(conn.execute("SELECT old_id,target_id FROM lib2_catalogue_redirects WHERE entity_type=?",
+                                  (kind,)).fetchall())
+    current = {redirects.get(i, i) for i in ids}
+    return sorted(current | {old for old, target in redirects.items() if target in current})
 
 
 def provider_alias(conn, kind, provider, provider_id, *, album_id=None, artist_ids=None):
@@ -67,9 +68,8 @@ def provider_alias(conn, kind, provider, provider_id, *, album_id=None, artist_i
         rows = [r for r in rows if (kind == "album" and int(r["primary_artist_id"]) in artist_ids)
                 or conn.execute(f"SELECT 1 FROM {credit_table} WHERE {kind}_id=? AND artist_id IN ({marks}) LIMIT 1",
                                 (r["id"], *sorted(artist_ids))).fetchone()]
-    if len(rows) > 1:
-        raise ValueError("Merged provider identity is ambiguous; select the release")
-    return int(rows[0]["id"]) if rows else None
+    # An ambiguous alias decides nothing; ordinary matching takes over.
+    return int(rows[0]["id"]) if len(rows) == 1 else None
 
 
 def record_redirect(conn, kind, old_id, target_id, provider_ids, payload, *, target_provider_ids=None):
@@ -136,49 +136,56 @@ def canonicalize_wishlist_identity(conn, data, source_info):
     return changed, info
 
 
+def wishlist_rows(conn, track_ids, *, key=None):
+    """Queue rows naming these native tracks (or holding ``key``), with the
+    track id they name as ``lib2_track_id``."""
+    named = "CAST(CASE WHEN json_valid(source_info) THEN json_extract(source_info,'$.lib2_track_id') END AS INTEGER)"
+    ids = [int(i) for i in track_ids]
+    return [dict(r) for r in conn.execute(
+        f"""SELECT *,{named} AS lib2_track_id FROM wishlist_tracks
+            WHERE {named} IN ({",".join("?" for _ in ids)}) OR spotify_track_id=? ORDER BY id""", (*ids, key))]
+
+
 def consolidate_merged_wishlist(conn, track_pairs, old_album_id, new_album_id):
     """Collapse confirmed equivalents per profile and retain original contexts."""
     from core.wishlist.identity import wishlist_row_key
     mapping = {s["id"]: t["id"] for s, t in track_pairs}
-    targets = set(mapping.values())
-    columns = {r[1] for r in conn.execute("PRAGMA table_info(wishlist_tracks)")}
-    groups = {}
-    for row in conn.execute("SELECT * FROM wishlist_tracks ORDER BY id").fetchall():
-        row = dict(row)
+
+    def entry(row, target):
         try:
-            info = json.loads(row.get("source_info") or "{}")
-            data = json.loads(row.get("spotify_data") or "{}")
+            info, data = json.loads(row.get("source_info") or "{}"), json.loads(row.get("spotify_data") or "{}")
         except (ValueError, TypeError):
-            continue
+            return None
         if not isinstance(info, dict) or not isinstance(data, dict):
-            continue
-        try:
-            tid = int(info.get("lib2_track_id"))
-        except (ValueError, TypeError):
-            continue
-        if tid not in mapping and tid not in targets:
-            continue
+            return None
         original = {"source_type": row.get("source_type"), "source_info": info,
                     "spotify_data": data, "wishlist_id": row["id"], "queue_state": dict(row)}
         data, info = canonicalize_wishlist_identity(conn, data, info)
-        info = {**info, "lib2_track_id": mapping.get(tid, tid), "lib2_album_id": new_album_id}
-        target = info["lib2_track_id"]
-        groups.setdefault((row.get("profile_id", 1), target), []).append((row, data, info, original))
-    for entries in groups.values():
+        # Both old aliases become one canonical row regardless of the user's
+        # ordinary allow-duplicates preference (which still applies elsewhere).
+        key = wishlist_row_key(data.get("id"), (data.get("album") or {}).get("id"), allow_duplicates=True) or data.get("id")
+        return row, data, {**info, "lib2_track_id": target, "lib2_album_id": new_album_id}, original, key
+
+    groups = {}
+    for row in wishlist_rows(conn, [*mapping, *mapping.values()]):
+        target = mapping.get(row["lib2_track_id"], row["lib2_track_id"])
+        if found := entry(row, target):
+            groups.setdefault((row["profile_id"], target), []).append(found)
+    for (profile_id, target), entries in groups.items():
+        # An unlinked row already holding a canonical key is the same request.
+        seen = {e[0]["id"] for e in entries}
+        for key in {e[4] for e in entries}:
+            for row in wishlist_rows(conn, [], key=key):
+                if row["profile_id"] == profile_id and row["id"] not in seen and (extra := entry(row, target)):
+                    entries.append(extra)
         if len({e[0].get("quality_profile_id") for e in entries}) > 1:
             raise ValueError("Conflicting wishlist quality profiles; resolve before merging.")
         # Approval determines whether a non-downloading profile may acquire
         # this request; preserve the approved row and its resolution timestamp.
         entries.sort(key=lambda e: (e[0].get("request_status") != "approved",
                                    e[0].get("source_type") != "manual", e[0]["id"]))
-        row, data, info, _ = entries[0]
-        contexts = [e[3] for e in entries]
-        info["merged_wishlist_sources"] = contexts
-        # Both old aliases become one canonical row regardless of the user's
-        # ordinary allow-duplicates preference (which still applies elsewhere).
-        track_id = data.get("id")
-        album_id = (data.get("album") or {}).get("id")
-        key = wishlist_row_key(track_id, album_id, allow_duplicates=True) or track_id
+        row, data, info, _, key = entries[0]
+        info["merged_wishlist_sources"] = [e[3] for e in entries]
         for duplicate, *_ in entries[1:]:
             conn.execute("DELETE FROM wishlist_tracks WHERE id=?", (duplicate["id"],))
         conn.execute("UPDATE wishlist_tracks SET spotify_track_id=?,spotify_data=?,source_info=? WHERE id=?",
@@ -205,8 +212,5 @@ def merged_wishlist_key(conn, key, profile_id):
         targets.add(int(row["id"]))
     if len(targets) != 1:
         return None
-    tid = targets.pop()
-    queued = conn.execute("""SELECT spotify_track_id FROM wishlist_tracks WHERE profile_id=?
-        AND CASE WHEN json_valid(source_info) THEN json_extract(source_info,'$.lib2_track_id') END=?
-        ORDER BY id LIMIT 1""", (profile_id, tid)).fetchone()
-    return queued[0] if queued else None
+    queued = [r for r in wishlist_rows(conn, targets) if r["profile_id"] == profile_id]
+    return queued[0]["spotify_track_id"] if queued else None

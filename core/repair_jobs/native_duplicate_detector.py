@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from core.library2.catalogue_duplicates import find_catalogue_duplicates, merge_catalogue_duplicate, dismissed_catalogue_review
+from core.library2.catalogue_duplicates import dismissed_catalogue_pairs, find_catalogue_duplicates, merge_catalogue_duplicate
 from core.library2.duplicate_review import DEFAULT_SETTINGS, find_duplicate_candidates
 from core.library2.maintenance_subjects import active_file_subjects
 from core.repair_jobs import register_job
@@ -72,42 +72,41 @@ class NativeDuplicateDetectorJob(RepairJob):
             # its namespace; native track/file IDs are never lookup keys.
             from core.library.playlist_membership import _active_server_and_client
             server, _ = _active_server_and_client()
+            # File reviews fingerprint their settings; catalogue options are not theirs.
+            file_settings = {k: v for k, v in settings.items() if k != "auto_merge_catalogue"}
+            stop = lambda: context.check_stop() or context.wait_if_paused()  # noqa: E731
             candidates = find_duplicate_candidates(
-                context.db, context.config_manager, settings=settings, scope=scope,
-                playlist_membership=membership, server_source=server,
-                check_stop=lambda: context.check_stop() or context.wait_if_paused(),
+                context.db, context.config_manager, settings=file_settings, scope=scope,
+                playlist_membership=membership, server_source=server, check_stop=stop,
             )
             if context.check_stop():
                 return result
-            release_candidates = find_catalogue_duplicates(
-                context.db, scope=context.scope,
-                check_stop=lambda: context.check_stop() or context.wait_if_paused())
+            release_candidates = find_catalogue_duplicates(context.db, scope=context.scope, check_stop=stop)
             reviewed_catalogue = len(release_candidates)
             merged_catalogue = False
             if settings.get("auto_merge_catalogue") is True:
-                while release_candidates:
-                    applied_one = False
-                    for candidate in release_candidates:
-                        if context.check_stop() or context.wait_if_paused():
-                            return result
-                        if (not candidate["auto_merge_eligible"]
-                                or dismissed_catalogue_review(context.db, candidate)):
-                            continue
-                        applied = merge_catalogue_duplicate(
-                            context.db, candidate, candidate["recommended_album_id"], automatic=True)
-                        if applied["success"]:
-                            result.auto_fixed += 1
-                            merged_catalogue = applied_one = True
-                            break
-                    if not applied_one:
-                        break
-                    # Each merge changes both snapshots and native IDs in a
-                    # larger group. Rebuild before applying or publishing again.
-                    release_candidates = find_catalogue_duplicates(
-                        context.db, scope=context.scope,
-                        check_stop=lambda: context.check_stop() or context.wait_if_paused())
+                def pair(candidate):
+                    return frozenset(a["id"] for a in candidate["albums"])
+                skip = dismissed_catalogue_pairs(context.db)
+                while candidate := next((c for c in release_candidates
+                                         if c["auto_merge_eligible"] and pair(c) not in skip), None):
+                    if stop():
+                        return result
+                    applied = merge_catalogue_duplicate(
+                        context.db, candidate, candidate["recommended_album_id"], automatic=True)
+                    if not applied["success"]:
+                        skip.add(pair(candidate))
+                        continue
+                    result.auto_fixed += 1
+                    merged_catalogue = True
+                    # A merge changes snapshots and IDs of its own group only:
+                    # rebuild that group before applying or publishing again.
+                    group = {i for c in release_candidates if pair(c) & pair(candidate) for i in pair(c)}
+                    release_candidates = [c for c in release_candidates if not pair(c) & group] + find_catalogue_duplicates(
+                        context.db, scope=context.scope, check_stop=stop,
+                        album_ids=sorted(group - {applied["merged_album_id"]}))
             for candidate in release_candidates:
-                if context.check_stop() or context.wait_if_paused():
+                if stop():
                     return result
                 keeper = next(a for a in candidate["albums"] if a["id"] == candidate["recommended_album_id"])
                 if context.create_finding:
@@ -124,9 +123,8 @@ class NativeDuplicateDetectorJob(RepairJob):
             result.scanned = total + reviewed_catalogue
             if merged_catalogue:
                 candidates = find_duplicate_candidates(
-                    context.db, context.config_manager, settings=settings, scope=scope,
-                    playlist_membership=membership, server_source=server,
-                    check_stop=lambda: context.check_stop() or context.wait_if_paused())
+                    context.db, context.config_manager, settings=file_settings, scope=scope,
+                    playlist_membership=membership, server_source=server, check_stop=stop)
             for candidate in candidates:
                 if context.check_stop() or context.wait_if_paused():
                     return result

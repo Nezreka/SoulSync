@@ -1588,6 +1588,10 @@ class RepairWorker:
                 logger.debug("Library-v2 finding annotation skipped: %s", e)
 
             fingerprint_payload = dict(enriched_details)
+            if finding_type == 'native_duplicate_releases' and enriched_details.get('pair_key'):
+                # One release pair is one decision; its catalogue rows change
+                # in the background and must not undo a dismissal.
+                fingerprint_payload = {'pair_key': enriched_details['pair_key']}
             if file_path and os.path.isfile(file_path):
                 try:
                     stat = os.stat(file_path)

@@ -13482,19 +13482,6 @@ class MusicDatabase:
                     )
                     return self._wishlist_outcome("satisfied", track_id, reason="manual library match")
 
-                # a profile that asks first and has a request quota: a NEW ask
-                # past the quota is refused (more tracks of an album already
-                # asked for this window are part of that ask, not new ones)
-                # (``request_approved``: an admin's add, not an ask -- the
-                # Library v2 mirror, see core/library2/mirror_outbox.py)
-                try:
-                    if not request_approved and self._music_request_quota_blocks(
-                            cursor, profile_id, spotify_track_data, source_type, track_id):
-                        logger.info("Skipping wishlist add — profile %s is at its request limit", profile_id)
-                        return self._wishlist_outcome("rejected", track_id, reason="request_limit")
-                except Exception as _quota_exc:  # noqa: BLE001 - a broken quota check never blocks an add
-                    logger.debug("request quota check skipped: %s", _quota_exc)
-
                 from core.library2.catalogue_identity import canonicalize_wishlist_identity
                 spotify_track_data, source_info = canonicalize_wishlist_identity(
                     conn, spotify_track_data, source_info)
@@ -13509,6 +13496,19 @@ class MusicDatabase:
                     if _mlm.get_match_for_track(self, profile_id, spotify_track_data):
                         return self._wishlist_outcome("satisfied", canonical_track_id, reason="manual library match")
                 track_id = canonical_track_id
+
+                # a profile that asks first and has a request quota: a NEW ask
+                # past the quota is refused (more tracks of an album already
+                # asked for this window are part of that ask, not new ones)
+                # (``request_approved``: an admin's add, not an ask -- the
+                # Library v2 mirror, see core/library2/mirror_outbox.py)
+                try:
+                    if not request_approved and self._music_request_quota_blocks(
+                            cursor, profile_id, spotify_track_data, source_type, track_id):
+                        logger.info("Skipping wishlist add — profile %s is at its request limit", profile_id)
+                        return self._wishlist_outcome("rejected", track_id, reason="request_limit")
+                except Exception as _quota_exc:  # noqa: BLE001 - a broken quota check never blocks an add
+                    logger.debug("request quota check skipped: %s", _quota_exc)
 
                 track_name = spotify_track_data.get('name', 'Unknown Track')
                 artists = spotify_track_data.get('artists', [])
@@ -13665,6 +13665,17 @@ class MusicDatabase:
                             existing = base_row
                             insert_track_id = track_id
 
+                if existing is None:
+                    # Another provider's key of a merged release refreshes
+                    # its one queued row; the row keeps its canonical payload.
+                    from core.library2.catalogue_identity import merged_wishlist_key
+                    merged_key = merged_wishlist_key(conn, insert_track_id, profile_id)
+                    if merged_key:
+                        existing = cursor.execute(
+                            "SELECT id, source_type, spotify_data FROM wishlist_tracks "
+                            "WHERE spotify_track_id=? AND profile_id=?", (merged_key, profile_id)).fetchone()
+                        insert_track_id, spotify_json = merged_key, existing['spotify_data']
+
                 if existing is not None:
                     previous_context = cursor.execute("SELECT source_info FROM wishlist_tracks WHERE id=?", (existing['id'],)).fetchone()
                     try:
@@ -13730,10 +13741,12 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                from core.library2.catalogue_identity import merged_wishlist_key
+                merged_key = merged_wishlist_key(conn, spotify_track_id, profile_id)
                 cursor.execute(
                     "DELETE FROM wishlist_tracks WHERE profile_id = ? AND "
-                    "(spotify_track_id = ? OR spotify_track_id LIKE ?)",
-                    (profile_id, spotify_track_id, f"{spotify_track_id}::%"))
+                    "(spotify_track_id IN (?, ?) OR spotify_track_id LIKE ?)",
+                    (profile_id, spotify_track_id, merged_key or spotify_track_id, f"{spotify_track_id}::%"))
                 conn.commit()
 
                 if cursor.rowcount > 0:
@@ -13791,6 +13804,8 @@ class MusicDatabase:
                             stored_album = ''
                         if stored_album in ('', album):
                             doomed.append(track)
+                from core.library2.catalogue_identity import merged_wishlist_key
+                doomed.append(merged_wishlist_key(conn, release_key, profile_id) or release_key)
                 marks = ",".join("?" for _ in doomed)
                 cursor.execute(
                     f"DELETE FROM wishlist_tracks WHERE profile_id=? "
@@ -24567,7 +24582,8 @@ class MusicDatabase:
         row_key = wishlist_key_from_payload(track_data) or str(track_id)
         cursor.execute("SELECT 1 FROM wishlist_tracks WHERE profile_id = ? AND spotify_track_id IN (?, ?) LIMIT 1",
                        (int(profile_id), str(track_id), row_key))
-        if cursor.fetchone():
+        from core.library2.catalogue_identity import merged_wishlist_key
+        if cursor.fetchone() or merged_wishlist_key(cursor.connection, row_key, int(profile_id)):
             return False      # a refresh of a row already asked for
         key = group_key({'spotify_track_id': row_key, 'spotify_data': track_data, 'source_type': source_type})
         asks = self.music_request_asks_since(cursor, profile_id, quota['days'])

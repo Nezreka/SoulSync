@@ -1275,8 +1275,11 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         ensure_maintenance_event_schema(cursor)
     except Exception as e:  # noqa: BLE001
         logger.error("maintenance-event schema failed (will retry next start): %s", e)
-    from core.library2.catalogue_identity import ensure_catalogue_identity_schema
-    ensure_catalogue_identity_schema(cursor)
+    try:
+        from core.library2.catalogue_identity import ensure_catalogue_identity_schema
+        ensure_catalogue_identity_schema(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("catalogue-identity schema failed (will retry next start): %s", e)
     # B5: persisted table/column/match-provider display preferences.
     try:
         from core.library2.ui_preferences import ensure_ui_preferences_schema

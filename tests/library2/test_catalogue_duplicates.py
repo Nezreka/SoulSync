@@ -538,3 +538,180 @@ def test_reimport_through_another_credited_artist_keeps_the_merged_release(libra
     assert merge_catalogue_duplicate(library[0], find_catalogue_duplicates(library[0])[0], albums[0])['success']
     with closing(library[0]._get_connection()) as conn:
         assert find_or_create_album(conn, other_artist, 'Ark', album_type='single', spotify_album_id='release-1', source='spotify') == albums[0]
+
+
+def findings_worker(library):
+    from core.repair_worker import RepairWorker
+    with closing(library[0]._get_connection()) as conn:
+        conn.execute("""CREATE TABLE repair_findings(id INTEGER PRIMARY KEY,job_id TEXT,finding_type TEXT,severity TEXT,
+            status TEXT DEFAULT 'pending',entity_type TEXT,entity_id TEXT,file_path TEXT,title TEXT,description TEXT,
+            details_json TEXT,user_action TEXT,resolved_at TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,last_error TEXT)""")
+        conn.commit()
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db, worker._config_manager = library[0], library[1]
+    return lambda candidate: worker._create_finding(job_id='native_duplicate_detector',
+        finding_type='native_duplicate_releases', severity='info', entity_type='album',
+        entity_id=f"lib2:{candidate['recommended_album_id']}", file_path=None, title='Ark',
+        description='Review', details=candidate)
+
+
+def wishlist_db(library, tmp_path):
+    from database.music_database import MusicDatabase
+    db = MusicDatabase(str(tmp_path / "wishlist.db"))
+    return (db, *library[1:]), db
+
+
+def test_background_churn_keeps_the_review_mergeable(library, tmp_path):
+    from core.library2.catalogue_duplicates import find_catalogue_duplicates, merge_catalogue_duplicate
+    fixture, db = wishlist_db(library, tmp_path)
+    _artist, albums, tracks = ark_pair(fixture)
+    with closing(db._get_connection()) as conn:
+        conn.execute("INSERT INTO wishlist_tracks(spotify_track_id,spotify_data,source_info,profile_id) VALUES('track-1',?,?,1)",
+                     (json.dumps({"id": "track-1", "album": {"id": "release-1"}}), json.dumps({"lib2_track_id": tracks[1]})))
+        conn.commit()
+    candidate = find_catalogue_duplicates(db)[0]
+    with closing(db._get_connection()) as conn:
+        conn.execute("UPDATE wishlist_tracks SET retry_count=3,last_attempted=CURRENT_TIMESTAMP")
+        conn.execute("UPDATE lib2_tracks SET play_count=4,updated_at='2026-10-11'")
+        conn.execute("UPDATE lib2_albums SET tracklist_attempts=2,updated_at='2026-10-11'")
+        conn.commit()
+    assert merge_catalogue_duplicate(db, candidate, albums[0])["success"]
+
+
+def test_dismissed_pair_stays_dismissed_after_background_changes(library):
+    from core.library2.catalogue_duplicates import find_catalogue_duplicates
+    _artist, _albums, tracks = ark_pair(library)
+    create = findings_worker(library)
+    assert create(find_catalogue_duplicates(library[0])[0])
+    with closing(library[0]._get_connection()) as conn:
+        conn.execute("UPDATE repair_findings SET status='dismissed'")
+        conn.execute("UPDATE lib2_tracks SET play_count=7,updated_at='2026-10-11'")
+        conn.commit()
+    assert not create(find_catalogue_duplicates(library[0])[0])
+
+
+def test_catalogue_option_stays_out_of_file_review_settings(library):
+    from tests.library2.test_native_duplicate_review import copy
+    copy(library, album="Single", fmt="mp3", bitrate=320)
+    copy(library, album="Album", fmt="flac", bitrate=0)
+    library[1].values['repair.jobs.native_duplicate_detector.settings'] = {'auto_merge_catalogue': True}
+    files = [f for f in scan(library)[1] if f['finding_type'] == 'native_duplicate_tracks']
+    assert files and 'auto_merge_catalogue' not in files[0]['details']['settings']
+
+
+def test_settled_downloads_and_waiting_requests_do_not_block(library, monkeypatch):
+    from core import runtime_state
+    from core.acquisition.requests import ensure_acquisition_requests_schema
+    from core.library2.catalogue_duplicates import merge_catalogue_duplicate
+    _artist, albums, tracks = ark_pair(library)
+    monkeypatch.setattr(runtime_state, "download_tasks", {"gone": {
+        "status": "not_found", "track_info": {"source_info": {"lib2_track_id": tracks[1]}}}})
+    with closing(library[0]._get_connection()) as conn:
+        ensure_acquisition_requests_schema(conn)
+        conn.execute("""INSERT INTO acquisition_requests(id,profile_id,scope,entity_id,quality_profile_id,idempotency_key,trigger,status)
+            VALUES('wait',1,'release_group',?,1,'wait','monitor','no_candidate')""", (albums[1],))
+        conn.commit()
+    details = scan(library)[1][0]["details"]
+    assert details["merge_eligible"]
+    assert merge_catalogue_duplicate(library[0], details, albums[0])["success"]
+    with closing(library[0]._get_connection()) as conn:
+        assert conn.execute("SELECT status FROM acquisition_requests WHERE id='wait'").fetchone()[0] == "cancelled"
+
+
+def test_survivor_keeps_its_unmonitor_and_its_own_release_identity(library):
+    from core.library2.catalogue_duplicates import merge_catalogue_duplicate
+    _artist, albums, _tracks = ark_pair(library)
+    with closing(library[0]._get_connection()) as conn:
+        conn.execute("UPDATE lib2_albums SET monitored=0 WHERE id=?", (albums[0],))
+        conn.execute("UPDATE lib2_albums SET external_ids='{\"deezer\":\"dz-1\",\"upc\":\"123\"}' WHERE id=?", (albums[1],))
+        conn.execute("INSERT INTO lib2_monitor_rules(entity_type,entity_id,profile_id,monitored,provenance) VALUES('album',?,1,0,'user_explicit')", (albums[0],))
+        conn.commit()
+    assert merge_catalogue_duplicate(library[0], scan(library)[1][0]["details"], albums[0])["success"]
+    with closing(library[0]._get_connection()) as conn:
+        assert tuple(conn.execute("SELECT monitored,external_ids FROM lib2_albums").fetchone())[0] == 0
+        assert "dz-1" not in (conn.execute("SELECT external_ids FROM lib2_albums").fetchone()[0] or "")
+        editions = dict(conn.execute("SELECT spotify_id,external_ids FROM lib2_release_editions").fetchall())
+        assert "dz-1" not in editions["release-0"] and "dz-1" in editions["release-1"]
+
+
+def test_other_provider_replay_and_removal_reach_the_merged_row(library, tmp_path):
+    from core.library2.catalogue_duplicates import find_catalogue_duplicates, merge_catalogue_duplicate
+    fixture, db = wishlist_db(library, tmp_path)
+    _artist, albums, tracks = ark_pair(fixture)
+    with closing(db._get_connection()) as conn:
+        conn.execute("UPDATE lib2_albums SET external_ids='{\"deezer\":\"dzalb\"}' WHERE id=?", (albums[1],))
+        conn.execute("UPDATE lib2_tracks SET external_ids='{\"deezer\":\"dz\"}' WHERE id=?", (tracks[1],))
+        conn.commit()
+    artists = [{"id": "artist", "name": "Star Party"}]
+    db.add_to_wishlist({"id": "track-0", "provider": "spotify", "name": "Ark", "artists": artists,
+                        "album": {"id": "release-0", "name": "Ark"}}, source_type="playlist",
+                       source_info={"lib2_track_id": tracks[0], "lib2_album_id": albums[0]})
+    assert merge_catalogue_duplicate(db, find_catalogue_duplicates(db)[0], albums[0])["success"]
+    db.add_to_wishlist({"id": "dz", "source": "deezer", "name": "Ark", "artists": artists,
+                        "album": {"id": "dzalb", "name": "Ark"}}, source_type="playlist", source_info={})
+    count = "SELECT COUNT(*) FROM wishlist_tracks"
+    with closing(db._get_connection()) as conn:
+        assert conn.execute(count).fetchone()[0] == 1
+    assert db.remove_from_wishlist("track-1")
+    with closing(db._get_connection()) as conn:
+        assert conn.execute(count).fetchone()[0] == 0
+
+
+def test_unlinked_row_under_the_canonical_key_joins_the_merge(library, tmp_path):
+    from core.library2.catalogue_duplicates import find_catalogue_duplicates, merge_catalogue_duplicate
+    fixture, db = wishlist_db(library, tmp_path)
+    _artist, albums, tracks = ark_pair(fixture)
+    with closing(db._get_connection()) as conn:
+        for key, info in (("track-0::release-0", {}), ("track-1::release-1", {"lib2_track_id": tracks[1]})):
+            track, album = key.split("::")
+            conn.execute("INSERT INTO wishlist_tracks(spotify_track_id,spotify_data,source_info,profile_id) VALUES(?,?,?,1)",
+                         (key, json.dumps({"id": track, "album": {"id": album}}), json.dumps(info)))
+        conn.commit()
+    assert merge_catalogue_duplicate(db, find_catalogue_duplicates(db)[0], albums[0])["success"]
+    with closing(db._get_connection()) as conn:
+        rows = conn.execute("SELECT spotify_track_id,source_info FROM wishlist_tracks").fetchall()
+        assert [r[0] for r in rows] == ["track-0::release-0"]
+        assert len(json.loads(rows[0][1])["merged_wishlist_sources"]) == 2
+
+
+def test_ambiguous_provider_alias_falls_back_to_ordinary_matching(library):
+    from core.library2.catalogue_identity import provider_alias
+    _artist, albums, _tracks = ark_pair(library)
+    with closing(library[0]._get_connection()) as conn:
+        conn.executemany("INSERT INTO lib2_catalogue_provider_aliases VALUES('album','spotify','shared',?)", [(a,) for a in albums])
+        assert provider_alias(conn, "album", "spotify", "shared") is None
+
+
+def test_merge_refreshes_the_survivors_other_pending_reviews(library):
+    from core.library2.catalogue_duplicates import find_catalogue_duplicates, merge_catalogue_duplicate
+    artist, albums, _tracks = ark_pair(library)
+    with closing(library[0]._get_connection()) as conn:
+        third = conn.execute("""INSERT INTO lib2_albums(primary_artist_id,title,album_type,spotify_id,track_count,expected_track_count,tracklist_status)
+            VALUES(?,'Ark','single','release-2',1,1,'ready')""", (artist,)).lastrowid
+        conn.execute("INSERT INTO lib2_tracks(album_id,title,spotify_id,isrc,track_number,disc_number,duration) VALUES(?,'Ark','track-2','CONFLICT',1,1,180800)", (third,))
+        conn.commit()
+    create = findings_worker(library)
+    candidates = find_catalogue_duplicates(library[0])
+    for candidate in candidates:
+        create(candidate)
+    pair = next(c for c in candidates if {a["id"] for a in c["albums"]} == set(albums))
+    assert merge_catalogue_duplicate(library[0], pair, albums[0])["success"]
+    with closing(library[0]._get_connection()) as conn:
+        pending = [json.loads(r[0])["snapshot"] for r in conn.execute("SELECT details_json FROM repair_findings WHERE status='pending'")]
+    assert pending == [c["snapshot"] for c in find_catalogue_duplicates(library[0])]
+
+
+def test_routes_answer_a_merged_id_with_its_survivor(library):
+    import pytest
+    flask = pytest.importorskip("flask")
+    from api.library_v2 import register_library_v2_routes
+    from core.library2.catalogue_duplicates import merge_catalogue_duplicate
+    _artist, albums, tracks = ark_pair(library)
+    assert merge_catalogue_duplicate(library[0], scan(library)[1][0]["details"], albums[0])["success"]
+    app = flask.Flask(__name__)
+    register_library_v2_routes(app, get_database=lambda: library[0], config_get=lambda key, default=None: default,
+                               config_manager=None, profile_id_getter=lambda: 1)
+    client = app.test_client()
+    assert client.get(f"/api/library/v2/albums/{albums[1]}").get_json()["album"]["id"] == albums[0]
+    assert client.get(f"/api/library/v2/tracks/{tracks[1]}").get_json()["track"]["id"] == tracks[0]

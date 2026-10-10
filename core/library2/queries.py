@@ -1322,8 +1322,6 @@ def _missing_track_placeholder(track_number: int, *, disc_number: int = 1,
 
 def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
     """Album/single detail: header + track table with per-track status."""
-    from core.library2.catalogue_identity import resolve_native_id
-    album_id = resolve_native_id(conn, "album", album_id)
     al = conn.execute("SELECT * FROM lib2_albums WHERE id = ?", (album_id,)).fetchone()
     if al is None:
         return None
@@ -1513,8 +1511,6 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
 
 def get_track(conn, track_id: int) -> Optional[Dict[str, Any]]:
     """Single-track detail incl. linked album + artists + file + status."""
-    from core.library2.catalogue_identity import resolve_native_id
-    track_id = resolve_native_id(conn, "track", track_id)
     t = conn.execute(
         f"""SELECT t.*, COALESCE(w.wanted, {monitored_sql("track", "t")}) AS effective_wanted
              FROM lib2_tracks t
